@@ -255,7 +255,10 @@ def _finalize(ot: _OpenTrade, status: str) -> TradeOutput:
 
     hold_mins: int | None = None
     if closed_at is not None:
-        delta = closed_at - ot.opened_at
+        # Normalize both to naive (SQLite strips tzinfo on read-back)
+        ca = closed_at.replace(tzinfo=None) if closed_at.tzinfo else closed_at
+        oa = ot.opened_at.replace(tzinfo=None) if ot.opened_at.tzinfo else ot.opened_at
+        delta = ca - oa
         hold_mins = int(delta.total_seconds() / 60)
 
     return TradeOutput(
