@@ -5,7 +5,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import get_session
 from app.engine.reconstructor import FillInput, reconstruct
-from app.models import Fill, Trade, TradeFill
+from app.models import Fill, Trade, TradeFill, TradeTag
 
 router = APIRouter()
 
@@ -13,6 +13,7 @@ router = APIRouter()
 @router.post("")
 async def post_rebuild(session: Session = Depends(get_session)):
     # 1. Wipe derived tables
+    session.exec(delete(TradeTag))
     session.exec(delete(TradeFill))
     session.exec(delete(Trade))
     session.commit()
@@ -28,6 +29,7 @@ async def post_rebuild(session: Session = Depends(get_session)):
             id=f.id,
             account_id=f.account_id,
             ticker=f.ticker,
+            instrument_type=f.instrument_type,
             side=f.side,
             contracts=f.contracts,
             price=f.price,
@@ -46,6 +48,7 @@ async def post_rebuild(session: Session = Depends(get_session)):
             id=t.id,
             account_id=t.account_id,
             ticker=t.ticker,
+            instrument_type=t.instrument_type,
             option_type=t.option_type,
             strike=t.strike,
             expiration=t.expiration,
@@ -72,4 +75,8 @@ async def post_rebuild(session: Session = Depends(get_session)):
         ))
 
     session.commit()
-    return {"status": "ok", "trades_rebuilt": len(result.trades)}
+    return {
+        "status": "ok",
+        "trades_rebuilt": len(result.trades),
+        "anomalies": result.anomalies,
+    }

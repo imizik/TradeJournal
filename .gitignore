@@ -13,11 +13,17 @@ env/
 out/
 dist/
 build/
+*.log
+*.out
+*.err
+*-dev.out
+*-dev.err
 *.egg-info/
 *.egg
 
 # Data
 backend/data/
+backend/Robinhood/
 
 # IDE / misc
 .idea/
@@ -26,6 +32,8 @@ backend/data/
 *.swo
 .env
 .env.local
+backend/credentials.json
+backend/token.json
 .DS_Store
 
 # Claude Code internal
