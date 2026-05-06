@@ -1,33 +1,5 @@
-import { api, Account, Trade } from "@/lib/api";
-
-function pnlColor(val: number | null | undefined) {
-  if (val == null) return "text-muted-foreground";
-  return val >= 0 ? "text-emerald-400" : "text-red-400";
-}
-
-function fmt$(val: number | null | undefined) {
-  if (val == null) return "—";
-  return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
-}
-
-function fmtPct(val: number | null | undefined) {
-  if (val == null) return "—";
-  return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
-}
-
-function StatusBadge({ status }: { status: Trade["status"] }) {
-  const cls =
-    status === "open"
-      ? "bg-blue-900/40 text-blue-300"
-      : status === "expired"
-      ? "bg-muted text-muted-foreground"
-      : "bg-muted text-foreground/70";
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>
-      {status}
-    </span>
-  );
-}
+import { api, Account } from "@/lib/api";
+import TradesTable from "@/components/TradesTable";
 
 export default async function TradesPage({
   searchParams,
@@ -99,75 +71,9 @@ export default async function TradesPage({
         </FilterGroup>
       </div>
 
-      <div className="rounded-lg border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-muted text-xs text-muted-foreground uppercase">
-            <tr>
-              <Th>Ticker</Th>
-              <Th>Account</Th>
-              <Th>Strike</Th>
-              <Th>Type</Th>
-              <Th>Expiry</Th>
-              <Th>Contracts</Th>
-              <Th>Entry</Th>
-              <Th>Exit</Th>
-              <Th>P&L</Th>
-              <Th>P&L %</Th>
-              <Th>Hold</Th>
-              <Th>Bucket</Th>
-              <Th>Status</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {trades.length === 0 && (
-              <tr>
-                <td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">
-                  No trades found.
-                </td>
-              </tr>
-            )}
-            {trades.map((t) => (
-              <tr key={t.id} className="hover:bg-muted/50">
-                <Td>
-                  <a href={`/trades/${t.id}`} className="font-semibold hover:underline">
-                    {t.ticker}
-                  </a>
-                </Td>
-                <Td>
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                    accountMap[t.account_id]?.type === "roth_ira"
-                      ? "bg-purple-900/40 text-purple-300"
-                      : "bg-sky-900/40 text-sky-300"
-                  }`}>
-                    {accountMap[t.account_id]?.name ?? "—"}
-                  </span>
-                </Td>
-                <Td>{t.strike != null ? `$${t.strike}` : <span className="text-muted-foreground/40">—</span>}</Td>
-                <Td>{t.option_type ?? <span className="text-muted-foreground/40">—</span>}</Td>
-                <Td>{t.expiration ?? <span className="text-muted-foreground/40">—</span>}</Td>
-                <Td>{t.contracts}</Td>
-                <Td>${t.avg_entry_premium}</Td>
-                <Td>{t.avg_exit_premium != null ? `$${t.avg_exit_premium}` : "—"}</Td>
-                <Td><span className={pnlColor(t.realized_pnl)}>{fmt$(t.realized_pnl)}</span></Td>
-                <Td><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
-                <Td>{t.hold_duration_mins != null ? `${Math.round(t.hold_duration_mins)}m` : "—"}</Td>
-                <Td>{t.entry_time_bucket ?? "—"}</Td>
-                <Td><StatusBadge status={t.status} /></Td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <TradesTable trades={trades} accountMap={accountMap} />
     </div>
   );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-2 text-left font-medium">{children}</th>;
-}
-
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3">{children}</td>;
 }
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {

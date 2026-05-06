@@ -1,5 +1,7 @@
+"use client";
+
+import { use, useEffect, useState } from "react";
 import { api, Fill, Trade } from "@/lib/api";
-import { notFound } from "next/navigation";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -36,16 +38,41 @@ function tradeTitle(trade: Trade) {
   return `${trade.ticker} $${trade.strike} ${trade.option_type} | ${trade.expiration}`;
 }
 
-export default async function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  let trade: Trade;
-  let fills: Fill[];
+export default function TradeDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+  const [trade, setTrade] = useState<Trade | null>(null);
+  const [fills, setFills] = useState<Fill[] | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
-  try {
-    [trade, fills] = await Promise.all([api.trade(id), api.tradeFills(id)]);
-  } catch {
-    notFound();
+  useEffect(() => {
+    Promise.all([api.trade(id), api.tradeFills(id)])
+      .then(([t, f]) => {
+        setTrade(t);
+        setFills(f);
+      })
+      .catch(() => {
+        setTrade(null);
+        setFills(null);
+      });
+  }, [id]);
+
+  if (!trade || !fills) {
+    return <div className="text-center text-muted-foreground">Loading...</div>;
   }
+
+  const handleReviewClick = async () => {
+    setReviewLoading(true);
+    setReviewError(null);
+    try {
+      const updated = await api.reviewTrade(id);
+      setTrade(updated);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Failed to generate review");
+    } finally {
+      setReviewLoading(false);
+    }
+  };
 
   const statusColor =
     trade.status === "open"
@@ -105,42 +132,83 @@ export default async function TradeDetailPage({ params }: { params: Promise<{ id
           </p>
         </div>
         <div className="space-y-2">
-          {fills.map((fill) => (
-            <a
-              key={fill.id}
-              href={`/fills/${fill.id}?returnTo=${encodeURIComponent(returnTo)}`}
-              className="flex items-center gap-4 rounded-md bg-muted px-4 py-3 text-sm transition-colors hover:bg-muted/80"
-            >
-              <span
-                className={`w-20 rounded px-2 py-0.5 text-center text-xs font-semibold ${
-                  isEntryFill(fill) ? "bg-blue-900/40 text-blue-300" : "bg-orange-900/40 text-orange-300"
-                }`}
+          {fills.map((fill) => {
+            const chips: { label: string; value: string }[] = [];
+            if (fill.underlying_price_at_fill != null) chips.push({ label: "Underlying", value: `$${fill.underlying_price_at_fill.toFixed(2)}` });
+            if (fill.vwap_at_fill != null) chips.push({ label: "VWAP", value: `$${fill.vwap_at_fill.toFixed(2)}` });
+            if (fill.iv_at_fill != null) chips.push({ label: "IV", value: `${(fill.iv_at_fill * 100).toFixed(1)}%` });
+            if (fill.delta_at_fill != null) chips.push({ label: "Δ", value: fill.delta_at_fill.toFixed(2) });
+            if (fill.gamma_at_fill != null) chips.push({ label: "Γ", value: fill.gamma_at_fill.toFixed(4) });
+            if (fill.theta_at_fill != null) chips.push({ label: "Θ", value: fill.theta_at_fill.toFixed(4) });
+            if (fill.vega_at_fill != null) chips.push({ label: "V", value: fill.vega_at_fill.toFixed(4) });
+            if (fill.rsi_14_at_fill != null) chips.push({ label: "RSI", value: fill.rsi_14_at_fill.toFixed(1) });
+            if (fill.macd_at_fill != null) chips.push({ label: "MACD", value: fill.macd_at_fill.toFixed(3) });
+            if (fill.macd_signal_at_fill != null) chips.push({ label: "Sig", value: fill.macd_signal_at_fill.toFixed(3) });
+            if (fill.ema_9h_at_fill != null) chips.push({ label: "EMA9h", value: `$${fill.ema_9h_at_fill.toFixed(2)}` });
+            if (fill.ema_9_at_fill != null) chips.push({ label: "EMA9d", value: `$${fill.ema_9_at_fill.toFixed(2)}` });
+            if (fill.ema_20_at_fill != null) chips.push({ label: "EMA20d", value: `$${fill.ema_20_at_fill.toFixed(2)}` });
+            if (fill.sma_20_at_fill != null) chips.push({ label: "SMA20d", value: `$${fill.sma_20_at_fill.toFixed(2)}` });
+            if (fill.sma_50_at_fill != null) chips.push({ label: "SMA50d", value: `$${fill.sma_50_at_fill.toFixed(2)}` });
+            return (
+              <a
+                key={fill.id}
+                href={`/fills/${fill.id}?returnTo=${encodeURIComponent(returnTo)}`}
+                className="block rounded-md bg-muted px-4 py-3 text-sm transition-colors hover:bg-muted/80"
               >
-                {isEntryFill(fill) ? "ENTRY" : "EXIT"}
-              </span>
-              <span className="text-xs text-muted-foreground">{new Date(fill.executed_at).toLocaleString()}</span>
-              <span className="font-medium">{fill.contracts}x @ ${fill.price}</span>
-              <span className="text-muted-foreground">${(fill.contracts * fill.price).toFixed(2)} total</span>
-              {fill.iv_at_fill != null && (
-                <span className="text-xs text-muted-foreground">IV {(fill.iv_at_fill * 100).toFixed(1)}%</span>
-              )}
-              {fill.delta_at_fill != null && (
-                <span className="text-xs text-muted-foreground">Delta {fill.delta_at_fill.toFixed(2)}</span>
-              )}
-              <span className="ml-auto text-xs font-medium text-foreground/80">Edit fill</span>
-            </a>
-          ))}
+                <div className="flex items-center gap-4">
+                  <span
+                    className={`w-20 shrink-0 rounded px-2 py-0.5 text-center text-xs font-semibold ${
+                      isEntryFill(fill) ? "bg-blue-900/40 text-blue-300" : "bg-orange-900/40 text-orange-300"
+                    }`}
+                  >
+                    {isEntryFill(fill) ? "ENTRY" : "EXIT"}
+                  </span>
+                  <span className="text-xs text-muted-foreground">{new Date(fill.executed_at).toLocaleString()}</span>
+                  <span className="font-medium">{fill.contracts}x @ ${fill.price}</span>
+                  <span className="text-muted-foreground">${(fill.contracts * fill.price).toFixed(2)} total</span>
+                  <span className="ml-auto text-xs font-medium text-foreground/80">Edit fill</span>
+                </div>
+                {chips.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {chips.map(({ label, value }) => (
+                      <span key={label} className="rounded bg-background/60 px-1.5 py-0.5 text-xs text-muted-foreground">
+                        <span className="text-foreground/50">{label}</span> {value}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </a>
+            );
+          })}
         </div>
       </div>
 
       <div className="rounded-lg border bg-card p-5">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">AI Review</h2>
+          {(trade.ai_review || reviewLoading) && (
+            <button
+              onClick={handleReviewClick}
+              disabled={reviewLoading}
+              className="text-xs font-medium text-blue-400 hover:text-blue-300 disabled:text-muted-foreground"
+            >
+              {reviewLoading ? "Generating..." : "Regenerate"}
+            </button>
+          )}
         </div>
+        {reviewError && <p className="mb-2 text-sm text-red-400">{reviewError}</p>}
         {trade.ai_review ? (
           <AiReview raw={trade.ai_review} />
+        ) : reviewLoading ? (
+          <p className="text-sm text-muted-foreground">Generating review...</p>
         ) : (
-          <p className="text-sm text-muted-foreground">No review yet. AI review coming in a future step.</p>
+          <button
+            onClick={handleReviewClick}
+            disabled={reviewLoading}
+            className="rounded bg-blue-900/40 px-3 py-2 text-sm font-medium text-blue-300 hover:bg-blue-900/60 disabled:bg-muted disabled:text-muted-foreground"
+          >
+            Generate Review
+          </button>
         )}
       </div>
     </div>
@@ -152,6 +220,11 @@ function AiReview({ raw }: { raw: string }) {
     const review = JSON.parse(raw);
     return (
       <div className="space-y-3 text-sm">
+        {review.strategy && (
+          <div className="rounded bg-blue-900/30 px-3 py-2">
+            <span className="text-xs font-medium text-blue-300">{review.strategy}</span>
+          </div>
+        )}
         {review.flags?.length > 0 && (
           <div className="flex flex-wrap gap-2">
             {review.flags.map((flag: string) => (

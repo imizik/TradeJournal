@@ -57,7 +57,8 @@ _ACCOUNT_TYPE_MAP = {
 OPTION_SUBJECT = "Option order executed"
 OPTION_PARTIAL_SUBJECT = "Option order partially executed"
 STOCK_SUBJECT = "Your order has been executed"
-OPTION_SUBJECTS = (OPTION_SUBJECT, OPTION_PARTIAL_SUBJECT)
+OPTION_SUBJECTS = (OPTION_SUBJECT,)  # Skip partial-fill emails — they report cumulative
+# counts that duplicate the complete-fill email. See scripts/find_phantoms.py.
 
 _OPT_PARTIAL_FILLED_RE = re.compile(
     r"So far,\s*([\d,]+)\s+of\s+[\d,]+\s+contracts?\s+were filled",

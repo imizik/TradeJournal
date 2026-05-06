@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Column, Numeric
+from sqlalchemy import Column, Numeric, Text
 from sqlmodel import Field, Relationship, SQLModel
 
 DECIMAL_18_6 = Numeric(18, 6)
@@ -34,11 +34,27 @@ class Fill(SQLModel, table=True):
     strike: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
     expiration: Optional[date] = None
 
+    # Source email (populated on Gmail import, NULL for manual fills)
+    email_subject: Optional[str] = None
+    email_body_text: Optional[str] = None
+
     # Enriched after parse - all nullable, never block a fill save
     iv_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
     delta_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
     iv_rank_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
     underlying_price_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    gamma_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    theta_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    vega_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    sma_20_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    ema_20_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    rsi_14_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    macd_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    macd_signal_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    vwap_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    ema_9_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    sma_50_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    ema_9h_at_fill: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
 
     account: Optional[Account] = Relationship(back_populates="fills")
     trade_fills: list["TradeFill"] = Relationship(back_populates="fill")
@@ -71,6 +87,17 @@ class Trade(SQLModel, table=True):
     account: Optional[Account] = Relationship(back_populates="trades")
     trade_fills: list["TradeFill"] = Relationship(back_populates="trade")
     trade_tags: list["TradeTag"] = Relationship(back_populates="trade")
+
+
+class DailyReviewRecord(SQLModel, table=True):
+    __tablename__ = "dailyreview"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    day: date = Field(index=True, unique=True)
+    review_json: str = Field(sa_column=Column(Text, nullable=False))
+    trade_count: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class TradeFill(SQLModel, table=True):

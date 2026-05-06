@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, FileText, BarChart2, Activity } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart2, Activity, ClipboardList } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/fills", label: "Fills", icon: Activity },

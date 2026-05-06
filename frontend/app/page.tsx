@@ -1,5 +1,6 @@
-import { api, Account, Fill, Trade } from "@/lib/api";
+import { api, Account, Fill, Trade, PositionQuote } from "@/lib/api";
 import DashboardActions from "@/components/DashboardActions";
+import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -11,30 +12,9 @@ function fmt$(val: number | null | undefined) {
   return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
 }
 
-function fmtMoney(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `$${val.toFixed(2)}`;
-}
-
 function fmtPct(val: number | null | undefined) {
   if (val == null) return "-";
   return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
-}
-
-function fmtQty(val: number | null | undefined) {
-  if (val == null) return "-";
-  const rounded = Number(val.toFixed(6));
-  return String(rounded);
-}
-
-function fmtDateShort(val: string | null | undefined) {
-  if (!val) return "-";
-  return new Date(val).toLocaleDateString();
-}
-
-function fmtOptionType(val: string | null | undefined) {
-  if (!val) return <span className="text-muted-foreground/40">-</span>;
-  return val.toUpperCase();
 }
 
 function isEntryFill(fill: Fill) {
@@ -51,26 +31,11 @@ function buildOpenPositionMeta(trade: Trade, fills: Fill[]) {
   return {
     openedQty,
     exitedQty,
-    qtyLeft: qtyLeft || trade.contracts,
+    qtyLeft,
     capitalLeft,
     realizedSoFar: trade.realized_pnl,
     lastActivityAt: fills.at(-1)?.executed_at ?? trade.opened_at,
   };
-}
-
-function StatusBadge({ status }: { status: Trade["status"] }) {
-  const cls =
-    status === "open"
-      ? "bg-blue-900/40 text-blue-300"
-      : status === "expired"
-        ? "bg-muted text-muted-foreground"
-        : "bg-muted text-foreground/70";
-
-  return (
-    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${cls}`}>
-      {status}
-    </span>
-  );
 }
 
 export default async function DashboardPage({
@@ -129,14 +94,79 @@ export default async function DashboardPage({
   });
 
   const openTrades = trades.filter((trade) => trade.status === "open");
-  const openTradeFillEntries = await Promise.all(
-    openTrades.map(async (trade) => [trade.id, await api.tradeFills(trade.id)] as const),
-  );
+
+  // Build position quote requests for option positions
+  const optionPositions = openTrades
+    .filter((t) => t.instrument_type === "option" && t.expiration && t.strike != null && t.option_type)
+    .map((t) => ({
+      ticker: t.ticker,
+      expiration: t.expiration!,
+      strike: t.strike!,
+      option_type: t.option_type!,
+    }));
+
+  // Stock tickers that aren't covered by option positions
+  const stockTickers = [...new Set(
+    openTrades.filter((t) => t.instrument_type === "stock").map((t) => t.ticker)
+  )];
+
+  const [openTradeFillEntries, optionQuotes, stockPrices] = await Promise.all([
+    Promise.all(
+      openTrades.map(async (trade) => [trade.id, await api.tradeFills(trade.id)] as const),
+    ),
+    optionPositions.length > 0
+      ? api.positionQuotes(optionPositions)
+      : Promise.resolve([] as PositionQuote[]),
+    stockTickers.length > 0
+      ? api.stockQuotes(stockTickers)
+      : Promise.resolve({} as Record<string, number | null>),
+  ]);
+
+  // Build a quotes map keyed by trade id
+  const quotesByTradeId: Record<string, PositionQuote> = {};
+  // Map option quotes back to trades
+  let optIdx = 0;
+  for (const trade of openTrades) {
+    if (trade.instrument_type === "option" && trade.expiration && trade.strike != null && trade.option_type) {
+      if (optIdx < optionQuotes.length) {
+        quotesByTradeId[trade.id] = optionQuotes[optIdx];
+        optIdx++;
+      }
+    } else if (trade.instrument_type === "stock") {
+      quotesByTradeId[trade.id] = {
+        ticker: trade.ticker,
+        underlying_price: stockPrices[trade.ticker] ?? null,
+        option_last_price: null,
+        option_bid: null,
+        option_ask: null,
+        option_mid: null,
+        option_iv: null,
+      };
+    }
+  }
+
   const openTradeFills = Object.fromEntries(openTradeFillEntries);
-  const openPositionRows = openTrades.map((trade) => ({
-    trade,
-    meta: buildOpenPositionMeta(trade, openTradeFills[trade.id] ?? []),
-  }));
+  const openPositionRows = openTrades
+    .map((trade) => ({
+      trade,
+      meta: buildOpenPositionMeta(trade, openTradeFills[trade.id] ?? []),
+    }))
+    .filter(({ meta }) => meta.qtyLeft > 0);
+
+  // Sum unrealized P&L across all open positions that have a live quote
+  const totalUnrealizedPnl = openPositionRows.reduce<number | null>((sum, { trade, meta }) => {
+    const quote = quotesByTradeId[trade.id];
+    if (!quote) return sum;
+    const rawMark =
+      trade.instrument_type === "stock"
+        ? quote.underlying_price
+        : (quote.option_mid ?? quote.option_last_price);
+    if (rawMark == null) return sum;
+    const markPerContract = trade.instrument_type === "option" ? rawMark * 100 : rawMark;
+    const pnl = (markPerContract - trade.avg_entry_premium) * meta.qtyLeft;
+    return (sum ?? 0) + pnl;
+  }, null);
+
   const recentClosed = trades.filter((trade) => trade.status !== "open").slice(0, 10);
 
   return (
@@ -171,9 +201,21 @@ export default async function DashboardPage({
         </FilterGroup>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
         <StatCard label="Today's P&L" value={fmt$(stats.today_pnl)} valueClass={pnlColor(stats.today_pnl)} />
-        <StatCard label="Total P&L" value={fmt$(stats.total_pnl)} valueClass={pnlColor(stats.total_pnl)} />
+        {(() => {
+          const totalPnl =
+            totalUnrealizedPnl != null ? stats.total_pnl + totalUnrealizedPnl : stats.total_pnl;
+          return (
+            <StatCard label="Total P&L" value={fmt$(totalPnl)} valueClass={pnlColor(totalPnl)} />
+          );
+        })()}
+        <StatCard label="Realized P&L" value={fmt$(stats.total_pnl)} valueClass={pnlColor(stats.total_pnl)} />
+        <StatCard
+          label="Unrealized P&L"
+          value={totalUnrealizedPnl != null ? fmt$(totalUnrealizedPnl) : "-"}
+          valueClass={pnlColor(totalUnrealizedPnl)}
+        />
         <StatCard label="Win Rate" value={`${((stats.win_rate ?? 0) * 100).toFixed(1)}%`} />
         <StatCard label="Open Positions" value={String(stats.open_trades)} />
       </div>
@@ -198,69 +240,7 @@ export default async function DashboardPage({
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-lg border bg-card">
-            <table className="w-full min-w-[1100px] text-sm">
-              <thead className="bg-muted text-xs uppercase text-muted-foreground">
-                <tr>
-                  <Th>Ticker</Th>
-                  <Th>Account</Th>
-                  <Th>Instrument</Th>
-                  <Th>Strike</Th>
-                  <Th>Type</Th>
-                  <Th>Expiry</Th>
-                  <Th>Qty Left</Th>
-                  <Th>Avg Cost</Th>
-                  <Th>Cost Left</Th>
-                  <Th>Realized</Th>
-                  <Th>Opened</Th>
-                  <Th>Last Activity</Th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {openPositionRows.map(({ trade, meta }) => (
-                  <tr key={trade.id} className="hover:bg-muted/50">
-                    <Td>
-                      <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
-                        {trade.ticker}
-                      </a>
-                    </Td>
-                    <Td>
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                          accountMap[trade.account_id]?.type === "roth_ira"
-                            ? "bg-purple-900/40 text-purple-300"
-                            : "bg-sky-900/40 text-sky-300"
-                        }`}
-                      >
-                        {accountMap[trade.account_id]?.name ?? "-"}
-                      </span>
-                    </Td>
-                    <Td>
-                      <span className="capitalize">{trade.instrument_type}</span>
-                    </Td>
-                    <Td>{trade.strike != null ? fmtMoney(trade.strike) : <span className="text-muted-foreground/40">-</span>}</Td>
-                    <Td>{fmtOptionType(trade.option_type)}</Td>
-                    <Td>{trade.expiration ? fmtDateShort(trade.expiration) : <span className="text-muted-foreground/40">-</span>}</Td>
-                    <Td>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{fmtQty(meta.qtyLeft)}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {`opened ${fmtQty(meta.openedQty)}${meta.exitedQty > 0 ? ` | trimmed ${fmtQty(meta.exitedQty)}` : ""}`}
-                        </span>
-                      </div>
-                    </Td>
-                    <Td>{fmtMoney(trade.avg_entry_premium)}</Td>
-                    <Td>{fmtMoney(meta.capitalLeft)}</Td>
-                    <Td>
-                      <span className={pnlColor(meta.realizedSoFar)}>{fmt$(meta.realizedSoFar)}</span>
-                    </Td>
-                    <Td>{fmtDateShort(trade.opened_at)}</Td>
-                    <Td>{fmtDateShort(meta.lastActivityAt)}</Td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <OpenPositionsTable rows={openPositionRows} accountMap={accountMap} quotes={quotesByTradeId} />
         </section>
       )}
 
@@ -268,67 +248,7 @@ export default async function DashboardPage({
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Recent Closed
         </h2>
-        <div className="overflow-hidden rounded-lg border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-muted text-xs uppercase text-muted-foreground">
-              <tr>
-                <Th>Ticker</Th>
-                <Th>Account</Th>
-                <Th>Instrument</Th>
-                <Th>Strike</Th>
-                <Th>Type</Th>
-                <Th>Expiry</Th>
-                <Th>P&amp;L</Th>
-                <Th>P&amp;L %</Th>
-                <Th>Hold</Th>
-                <Th>Status</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {recentClosed.length === 0 && (
-                <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">
-                    No closed trades yet.
-                  </td>
-                </tr>
-              )}
-              {recentClosed.map((trade) => (
-                <tr key={trade.id} className="hover:bg-muted/50">
-                  <Td>
-                    <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
-                      {trade.ticker}
-                    </a>
-                  </Td>
-                  <Td>
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                        accountMap[trade.account_id]?.type === "roth_ira"
-                          ? "bg-purple-900/40 text-purple-300"
-                          : "bg-sky-900/40 text-sky-300"
-                      }`}
-                    >
-                      {accountMap[trade.account_id]?.name ?? "-"}
-                    </span>
-                  </Td>
-                  <Td>{trade.instrument_type}</Td>
-                  <Td>{trade.strike != null ? `$${trade.strike}` : <span className="text-muted-foreground/40">-</span>}</Td>
-                  <Td>{trade.option_type ?? <span className="text-muted-foreground/40">-</span>}</Td>
-                  <Td>{trade.expiration ?? <span className="text-muted-foreground/40">-</span>}</Td>
-                  <Td>
-                    <span className={pnlColor(trade.realized_pnl)}>{fmt$(trade.realized_pnl)}</span>
-                  </Td>
-                  <Td>
-                    <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
-                  </Td>
-                  <Td>{trade.hold_duration_mins ? `${Math.round(trade.hold_duration_mins)}m` : "-"}</Td>
-                  <Td>
-                    <StatusBadge status={trade.status} />
-                  </Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <RecentClosedTable trades={recentClosed} accountMap={accountMap} />
       </section>
     </div>
   );
@@ -349,14 +269,6 @@ function StatCard({
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
     </div>
   );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-2 text-left font-medium">{children}</th>;
-}
-
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3">{children}</td>;
 }
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {

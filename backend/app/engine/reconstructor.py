@@ -137,7 +137,8 @@ def reconstruct(fills: list[FillInput], today: date | None = None) -> Reconstruc
 
     for key, ot in list(open_trades.items()):
         if ot.instrument_type == "option" and ot.expiration and ot.expiration < today:
-            ot.realized_pnl = -_total_entry_cost(ot)
+            # Do NOT overwrite ot.realized_pnl here — _finalize handles it,
+            # and ot.realized_pnl may already have partial-exit PnL from FIFO.
             completed.append(ot)
             del open_trades[key]
 
@@ -240,8 +241,15 @@ def _finalize(ot: _OpenTrade, status: str) -> TradeOutput:
     if status == "expired":
         expired_worthless = True
         closed_at = datetime(ot.expiration.year, ot.expiration.month, ot.expiration.day, _CLOSE_HOUR, 0, 0, tzinfo=ET)
-        realized_pnl = -total_paid
-        pnl_pct = Decimal("-1")
+        if ot.total_exit_contracts > _ZERO:
+            # Partially exited before expiration: ot.realized_pnl holds FIFO pnl from exits.
+            # Remaining lots (still in ot.lots) expired worthless — add that loss.
+            remaining_cost = sum(lot.contracts * lot.price for lot in ot.lots)
+            realized_pnl = ot.realized_pnl - remaining_cost
+        else:
+            # Nothing was sold — full position expired worthless.
+            realized_pnl = -total_paid
+        pnl_pct = realized_pnl / total_paid if total_paid else Decimal("-1")
 
     hold_mins: int | None = None
     if closed_at is not None:

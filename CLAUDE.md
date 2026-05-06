@@ -1,528 +1,244 @@
-# Trading Journal — Claude Code Context
+# Trade Journal Context
 
-## Who this is for
-Isaac. Personal tool only. No auth, no multi-user, no deployment. Just works on localhost.
+## Product
 
-## What this does
-Ingests Robinhood options trade confirmation emails → parses fills → reconstructs
-trades using FIFO logic → surfaces performance stats + behavioral patterns via AI.
+Personal localhost trade journal and reconciliation tool for Robinhood trading history.
 
----
+Current scope is broader than the original MVP notes:
 
-## MVP Scope (build only this)
-- **One account:** Roth IRA (•••8267). Taxable is post-MVP.
-- **Options only:** Stocks are post-MVP.
-- **No auth:** Single user, localhost, no login needed.
-- **Core loop:** Email → Fill → Trade → Stats → AI Review.
-
----
+- Stocks and options are both supported.
+- Multiple account types exist in the data model.
+- The current dataset is centered on Roth IRA `8267` and Individual `1113`.
+- There is no auth and no multi-user model.
+- The repo is optimized for local analysis, repair, and rebuild workflows.
 
 ## Stack
 
-| Layer | Tech | Notes |
-|---|---|---|
-| Frontend | Next.js 14 (App Router) | Already scaffolded |
-| Styling | Tailwind CSS | Minimal, data-dense. No component library. |
-| Data fetching | TanStack Query | Client-side cache + background refresh |
-| Backend | FastAPI | Already scaffolded with stub routes |
-| ORM | SQLModel | Pydantic + SQLAlchemy unified. Use this, not raw SQLAlchemy. |
-| Database | SQLite | File at `backend/data/trade_journal.db`. No server. Gitignored. |
-| Email | imaplib + APScheduler | Polls Gmail inside FastAPI process |
-| Market data | Alpha Vantage + yfinance | IV enrichment. See enrichment section. |
-| AI | Anthropic SDK (claude-sonnet-4-6) | Trade review + pattern detection |
-| Migrations | Alembic | Already configured at `backend/alembic/` |
-| Testing | pytest | Critical for FIFO reconstructor |
+- Frontend: Next.js 16, React 19, App Router, Tailwind
+- Backend: FastAPI, SQLModel, Alembic, SQLite
+- Market data: `yfinance`, Polygon.io (free tier, API key in `backend/.env`)
+- Email ingest: Gmail API
+- Tests: `pytest`
 
-### Running locally
+Database file:
+
+- `backend/data/trade_journal.db`
+
+Manual fill backup file:
+
+- `backend/data/manual_fills.json`
+
+Generated reports:
+
+- `backend/reports/`
+
+## Core Data Model
+
+The important mental model is:
+
+- `fill` rows are the source records that came from Gmail or manual entry.
+- `trade` and `tradefill` rows are derived from the full fill history through FIFO reconstruction.
+- Rebuilding trades is normal and expected.
+
+Important field semantics:
+
+- `contracts` is the quantity field for both options and stocks.
+- Stock quantities may be fractional.
+- Option `price` is premium per contract in dollars.
+- Stock `price` is per share.
+- `raw_email_id` is the dedupe key for imported fills and uses `manual:` prefixes for manual fills.
+
+The app currently allows editing fills to correct history, then rebuilding derived trades from scratch. So the conceptual rule is still "fills drive truth", but correction currently happens by updating bad fills rather than only appending compensating rows.
+
+## What Already Exists
+
+### Backend
+
+- SQLModel schema for accounts, fills, trades, tags, and trade-fill junctions
+- Alembic migrations through `b7e3a9f2c841`
+- FIFO reconstructor that handles:
+  - options and stocks
+  - scale-ins
+  - partial exits
+  - expired worthless options
+  - separate account isolation
+  - fractional stock shares
+  - anomaly reporting for orphaned and over-closed exits
+- Gmail poller using the Gmail API
+- Robinhood email parser for:
+  - option execution emails
+  - stock execution emails
+- FastAPI routes for:
+  - `/health`
+  - `/accounts`
+  - `/fills`
+  - `/trades`
+  - `/stats`
+  - `/rebuild`
+- Manual fill create and edit flows
+- Manual fill backup and restore logic
+- Full resync flow that clears imported fills, restores manual fills, re-imports Gmail, and rebuilds trades
+- Reconciliation and CSV comparison scripts under `backend/scripts/`
+
+### Frontend
+
+- Dashboard with summary cards
+- Dashboard action bar for:
+  - email sync
+  - rebuild all
+  - resync all
+  - jump to manual fills
+- Open positions view built from trade data plus fill timelines
+- Recent closed trades table
+- Trades page with filters and sortable table
+- Trade detail page with:
+  - trade summary
+  - fill timeline
+  - edit-fill links
+  - placeholder AI review rendering
+- Fills page with:
+  - fill history
+  - manual fill form
+  - edit-fill links
+- Fill edit page
+- Analytics page with ticker, time-bucket, tag, and behavioral-flag breakdowns
+
+## Active Working Tree Changes
+
+These are present in the repo right now but are not all committed yet:
+
+- Quote support is being added:
+  - `backend/app/engine/quotes.py`
+  - `backend/app/routers/quotes.py`
+  - dashboard pricing of open positions
+- Open positions and closed trades table logic has been extracted into reusable components:
+  - `frontend/components/DashboardTables.tsx`
+  - `frontend/components/TradesTable.tsx`
+- Roth account normalization is being tightened so blank-last4 Roth fills are merged into canonical Roth `8267` on startup
+- Partial-fill Robinhood option emails are being intentionally skipped to avoid cumulative duplicate fills
+- Expired options with partial exits now preserve realized FIFO PnL on the exited portion and only write off the remaining open lots
+- AI trade review is wired: `POST /trades/{id}/review` calls `backend/app/ai/reviewer.py` (Claude claude-sonnet-4-6), writes structured JSON to `trade.ai_review`, rendered in trade detail page with Generate/Regenerate button
+- Fill enrichment pipeline is live: `backend/app/engine/enricher.py` fetches Polygon data and computes Black-Scholes greeks. New fill columns: `underlying_price_at_fill`, `vwap_at_fill`, `iv_at_fill`, `delta_at_fill`, `gamma_at_fill`, `theta_at_fill`, `vega_at_fill`, `sma_20_at_fill`, `sma_50_at_fill`, `ema_9_at_fill`, `ema_20_at_fill`, `ema_9h_at_fill`, `rsi_14_at_fill`, `macd_at_fill`, `macd_signal_at_fill`. Polygon responses cached to `backend/data/polygon_cache/`. Backfill script: `backend/scripts/backfill_greeks.py`. Auto-enrichment runs after each Gmail import. API key in `backend/.env` as `POLYGON_API_KEY`.
+- **Frontend UI for enriched fill data is NOT YET BUILT.** The backend returns all fields; the frontend needs to display them in: trade detail fill timeline, fill detail/edit page, and fills list table.
+
+If behavior looks inconsistent between tests and code, check whether the file is part of this active working tree set before assuming the committed history is wrong.
+
+## Key Files
+
+Highest-leverage backend files:
+
+- `backend/app/engine/reconstructor.py`
+- `backend/app/engine/email_parser.py`
+- `backend/app/engine/gmail_poller.py`
+- `backend/app/engine/enricher.py`
+- `backend/app/ai/reviewer.py`
+- `backend/app/routers/fills.py`
+- `backend/app/routers/trades.py`
+- `backend/app/routers/stats.py`
+- `backend/app/main.py`
+- `backend/app/models.py`
+
+Highest-leverage frontend files:
+
+- `frontend/app/page.tsx`
+- `frontend/app/trades/page.tsx`
+- `frontend/app/trades/[id]/page.tsx`
+- `frontend/app/fills/page.tsx`
+- `frontend/app/fills/[id]/page.tsx`
+- `frontend/components/ManualFillForm.tsx`
+- `frontend/lib/api.ts`
+
+Important analysis scripts:
+
+- `backend/scripts/generate_reconciliation_report.py`
+- `backend/scripts/csv_reconstruct.py`
+- `backend/scripts/find_phantoms.py`
+- `backend/scripts/rebuild_trades.py`
+
+Scratch comparison scripts also exist in `backend/compare_fills*.py`. Treat them as ad hoc analysis utilities, not stable app code.
+
+## API Summary
+
+Stable current routes:
+
+- `GET /health`
+- `GET /accounts`
+- `GET /fills`
+- `POST /fills`
+- `POST /fills/import`
+- `POST /fills/resync-all`
+- `GET /fills/{id}`
+- `PUT /fills/{id}`
+- `GET /trades`
+- `GET /trades/{id}`
+- `GET /trades/{id}/fills`
+- `POST /trades/{id}/tags`
+- `POST /trades/{id}/review`
+- `GET /stats`
+- `POST /rebuild`
+
+Working-tree routes being added:
+
+- `GET /quotes`
+- `POST /quotes/positions`
+
+## Run Locally
+
+Backend:
+
 ```bash
-# Backend
-cd backend && uvicorn app.main:app --reload   # :8000
-
-# Frontend
-cd frontend && npm run dev                     # :3000
+cd backend
+pip install -e .
+alembic upgrade head
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
 ```
 
----
+Frontend:
 
-## Project structure
-
-What currently exists on disk (as of 2026-03-27):
-
-```
-/
-├── frontend/
-│   ├── app/
-│   │   ├── layout.tsx                # Root layout + Nav
-│   │   ├── page.tsx                  # Dashboard stub
-│   │   ├── accounts/page.tsx         # Accounts stub
-│   │   ├── fills/page.tsx            # Fills stub
-│   │   └── trades/page.tsx           # Trade list stub
-│   ├── components/
-│   │   ├── Nav.tsx                   # Top nav component
-│   │   └── ui/button.tsx
-│   └── lib/
-│       └── utils.ts
-│
-├── backend/
-│   ├── app/
-│   │   ├── main.py                   # FastAPI app entry point
-│   │   ├── database.py               # SQLite engine, session factory
-│   │   ├── models.py                 # All SQLModel classes (single file — see note below)
-│   │   └── routers/
-│   │       ├── accounts.py           # /accounts — stub
-│   │       ├── fills.py              # /fills — stub
-│   │       ├── trades.py             # /trades — stub
-│   │       ├── stats.py              # /stats — stub
-│   │       ├── rebuild.py            # /rebuild — stub
-│   │       └── health.py             # /health
-│   └── alembic/                      # Already configured; add migrations as schema evolves
-│
-├── CLAUDE.md                         # This file
-└── .env                              # See env vars section
+```bash
+cd frontend
+npm install
+npm run dev
 ```
 
-Still needs to be created:
-```
-backend/app/engine/
-    reconstructor.py     # FIFO logic — most critical
-    email_parser.py      # Robinhood email → ParsedFill
-    enricher.py          # IV/delta via Black-Scholes + Alpha Vantage
-backend/app/ai/
-    reviewer.py          # Anthropic SDK trade review
-backend/tests/
-    test_reconstructor.py
+## Testing
 
-frontend/app/
-    trades/[id]/page.tsx
-    analytics/page.tsx
-frontend/lib/
-    api.ts               # Typed fetch wrapper → FastAPI
+Backend tests:
+
+```bash
+cd backend
+pytest
 ```
 
-**Note on `models.py`:** The current file has a generic schema (integer IDs, generic `Fill` with `symbol`/`side`/`qty`, generic `Trade`). This must be **replaced** with the options-specific schema defined in the Database schema section below before any further backend work. The `Email` and `Note` models can be dropped — email traceability is handled via `raw_email_id` on `Fill`.
+Current note:
 
----
+- `fastapi.testclient` requires `httpx`, and local test collection currently fails if `httpx` is not installed in the Python environment.
 
-## Environment variables (.env)
-```
-# Gmail
-GMAIL_ADDRESS=isaac@gmail.com
-GMAIL_APP_PASSWORD=xxxx-xxxx-xxxx-xxxx   # Google App Password, not regular password
+## Reconciliation Workflow
 
-# Alpha Vantage
-ALPHA_VANTAGE_API_KEY=your_key_here      # Free tier: 25 req/day
+This repo now includes a real reconciliation workflow, not just journaling UI.
 
-# Anthropic
-ANTHROPIC_API_KEY=your_key_here
+- Use `backend/scripts/generate_reconciliation_report.py` to produce markdown reports in `backend/reports/`
+- Use `backend/scripts/csv_reconstruct.py` to compare DB-derived FIFO results against Robinhood CSV ground truth
+- Use `backend/scripts/find_phantoms.py` when investigating duplicate cumulative partial-fill emails
 
-# App
-DATABASE_URL=sqlite:///./data/trade_journal.db
-POLL_INTERVAL_MINUTES=5
-```
+The report work is centered on understanding:
 
----
+- differences between dashboard realized PnL and broker-level reality
+- missing basis from orphaned stock sells
+- Roth account consolidation issues
+- CSV-vs-DB mismatch families such as symbol drift, date drift, quantity mismatch, and rounding
 
-## Database schema (SQLModel)
+## Guardrails For Future Work
 
-### Account
-```python
-id: uuid, name: str, type: str ("roth_ira"), last4: str ("8267")
-```
-MVP: seed one row on startup. Don't build account management UI.
-
-### Fill (append-only — NEVER update or delete rows)
-```python
-id: uuid
-account_id: uuid FK
-ticker: str                  # underlying only — "SNDK" not "SNDK250327P00620000"
-side: str                    # "buy_to_open" | "sell_to_close" | "buy_to_close" | "sell_to_open"
-contracts: int               # number of contracts
-price: float                 # per-contract premium in dollars (already ×1, not per-share)
-executed_at: datetime        # tz-aware America/New_York — critical for 0DTE
-option_type: str             # "call" | "put"
-strike: float
-expiration: date
-raw_email_id: str            # IMAP UID for traceability back to source email
-
-# Enriched after parse (all nullable — never block a fill on missing market data)
-iv_at_fill: float | None
-delta_at_fill: float | None
-iv_rank_at_fill: float | None   # 0.0–1.0
-underlying_price_at_fill: float | None
-
-# Computed properties (not stored, derived)
-# dte_at_fill → (expiration - executed_at.date()).days
-# total_premium → price * contracts   (actual cash in/out)
-# entry_time_bucket → "open" (9:30-10) | "mid" (10-3) | "close" (3-4)
-```
-
-### Trade (derived — always safe to delete + rebuild from fills)
-```python
-id: uuid
-account_id: uuid FK
-ticker: str
-option_type: str             # "call" | "put"
-strike: float
-expiration: date
-contracts: int               # max position size during trade
-avg_entry_premium: float     # per contract
-avg_exit_premium: float | None
-total_premium_paid: float    # avg_entry × contracts (cash at risk)
-realized_pnl: float | None
-pnl_pct: float | None        # % gain/loss on premium — more useful than $ for options
-hold_duration_mins: int | None
-entry_time_bucket: str | None  # "open" | "mid" | "close"
-expired_worthless: bool
-roll_group_id: uuid | None   # links rolled positions (close+open share this)
-opened_at: datetime
-closed_at: datetime | None
-status: str                  # "open" | "closed" | "expired"
-ai_review: str | None        # raw JSON from reviewer.py
-```
-
-### TradeTag
-```python
-trade_id: uuid FK, tag_id: uuid FK
-```
-
-### Tag
-```python
-id: uuid, name: str, source: str  # "manual" | "auto" | "ai"
-```
-Example tags: `lotto`, `swing`, `scalp`, `revenge`, `oversize`
-
-### TradeFill (junction)
-```python
-trade_id: uuid FK, fill_id: uuid FK, role: str  # "entry" | "exit"
-```
-This is what powers the fill timeline in the trade detail view.
-
----
-
-## Core mental model — NEVER violate this
-
-```
-Fills = raw truth     → append-only, never modified
-Trades = derived      → always reconstructable, safe to delete
-```
-
-`POST /rebuild` must:
-1. Delete all rows in `trades` and `trade_fills`
-2. Re-run reconstructor over all fills ordered by `executed_at` ASC
-3. Be fully deterministic — same fills always produce same trades
-
----
-
-## API routes
-
-```
-GET  /health
-
-GET  /accounts
-
-GET  /fills                         # all fills, newest first
-POST /fills                         # manual fill entry
-POST /fills/import                  # trigger email poll now
-
-GET  /trades                        # ?status=open|closed|all  ?ticker=NVDA
-GET  /trades/{id}
-GET  /trades/{id}/fills             # fill timeline for trade detail view
-POST /trades/{id}/tags              # add tag
-POST /trades/{id}/review            # trigger AI review, store result
-
-POST /rebuild                       # delete trades → recompute from fills
-
-GET  /stats                         # see stats section
-```
-
----
-
-## FIFO Reconstructor (`backend/app/engine/reconstructor.py`)
-
-**Most critical file. Build + test this before wiring to DB.**
-
-### Algorithm
-```
-Input:  all fills for an account, ordered by executed_at ASC
-Output: list of Trade objects + TradeFill junction rows
-
-State:  position_queue: dict[contract_key → deque[lot]]
-        where contract_key = (ticker, option_type, strike, expiration)
-        and lot = {contracts: int, price: float, fill_id: uuid, opened_at: datetime}
-
-For each fill:
-  key = (ticker, option_type, strike, expiration)
-
-  if side in ("buy_to_open", "sell_to_open"):
-    push lot onto position_queue[key]
-    if no open trade for this key → create new Trade (status=open)
-    link fill to trade via TradeFill(role="entry")
-
-  if side in ("sell_to_close", "buy_to_close"):
-    pop from front of position_queue[key] (FIFO)
-    handle partial lots (split if needed)
-    compute realized_pnl for closed portion
-    link fill to trade via TradeFill(role="exit")
-    if queue empty → close trade, set status, compute hold_duration_mins
-
-After all fills:
-  any remaining lots in queue → trade status = "open"
-```
-
-### Key cases to handle + test
-```python
-# 1. Simple round trip
-buy_to_open(2 contracts) → sell_to_close(2 contracts)
-# Expected: 1 closed trade, pnl = (exit - entry) * 2
-
-# 2. Partial exit
-buy_to_open(4) → sell_to_close(2) → sell_to_close(2)
-# Expected: 1 trade, 2 exit fills, pnl accumulates across exits
-
-# 3. Scale in
-buy_to_open(2) → buy_to_open(2) → sell_to_close(4)
-# Expected: 1 trade, avg_entry = weighted average of both buys
-
-# 4. 0DTE expired worthless
-buy_to_open(1) → [no closing fill, expiration == executed_at.date()]
-# Expected: trade status="expired", expired_worthless=True, pnl = -total_premium
-
-# 5. Same ticker different strikes = separate trades
-buy_to_open(NVDA 500c 3/28) and buy_to_open(NVDA 510c 3/28)
-# Expected: 2 separate trades, keyed by (ticker, type, strike, expiration)
-```
-
-### Expired worthless detection
-Run after processing all fills. For any open trade where `expiration < today`:
-```python
-trade.status = "expired"
-trade.expired_worthless = True
-trade.realized_pnl = -trade.total_premium_paid
-trade.closed_at = datetime(expiration, 16, 0, tzinfo=ET)  # 4pm ET
-```
-
----
-
-## Email parser (`backend/app/engine/email_parser.py`)
-
-**Not yet written. Build after reconstructor + models.**
-
-Key behaviors:
-- Filters by subject line first — only processes "Option order executed" emails
-- Skips cancellations, replacements, order confirmations at subject level
-- Returns `ParsedFill` dataclass (not a DB model — convert in the router)
-- `side` is inferred: buy→buy_to_open, sell→sell_to_close (heuristic, reconstructor can correct)
-- `raw_email_id` = IMAP UID for traceability
-- iv/delta/iv_rank fields are None — enricher fills these in
-
-Test against real Robinhood emails including:
-- "Option order executed" → should parse correctly
-- "GOOG order replaced" → should be ignored
-
----
-
-## IV Enrichment (`backend/app/engine/enricher.py`)
-
-Runs after email parsing, before saving fills to DB.
-All enrichment fields are nullable — NEVER fail a fill save because enrichment failed.
-
-### Strategy
-```
-1. underlying_price_at_fill
-   → yfinance: ticker.history(date) → Close price on fill date
-   → Good enough (EOD, not intraday — acceptable for behavioral analysis)
-
-2. iv_at_fill
-   → Back-calculate using Black-Scholes from:
-     - market_price = fill.price (already have from email)
-     - S = underlying_price_at_fill
-     - K = fill.strike
-     - T = fill.dte_at_fill / 365
-     - r = 0.045  (update quarterly)
-   → Use scipy.optimize.brentq to solve for sigma
-   → Falls back to None if brentq fails (deep ITM/OTM edge cases)
-
-3. delta_at_fill
-   → Black-Scholes delta formula once IV is known
-   → calls: N(d1),  puts: N(d1) - 1
-
-4. iv_rank_at_fill
-   → Alpha Vantage: fetch 52-week daily IV history for underlying
-   → iv_rank = (iv_at_fill - iv_52w_low) / (iv_52w_high - iv_52w_low)
-   → Cache Alpha Vantage responses (25 req/day free limit)
-   → If AV quota exceeded: skip gracefully, set None
-```
-
-### Alpha Vantage rate limit handling
-```python
-# Cache responses in SQLite (simple kv table) to avoid hitting 25/day limit
-# Key: f"av_iv_history_{ticker}_{date.today()}"  — refresh daily
-# On 429 or empty response: log warning, return None, continue
-```
-
----
-
-## AI Review (`backend/app/ai/reviewer.py`)
-
-Model: `claude-sonnet-4-6`
-Trigger: `POST /trades/{id}/review` — on-demand, result stored in DB.
-
-### What to pass in the prompt
-```python
-context = {
-    "trade": {
-        "ticker": trade.ticker,
-        "option_type": trade.option_type,
-        "strike": trade.strike,
-        "expiration": str(trade.expiration),
-        "contracts": trade.contracts,
-        "avg_entry_premium": trade.avg_entry_premium,
-        "avg_exit_premium": trade.avg_exit_premium,
-        "total_premium_paid": trade.total_premium_paid,
-        "realized_pnl": trade.realized_pnl,
-        "pnl_pct": trade.pnl_pct,
-        "hold_duration_mins": trade.hold_duration_mins,
-        "entry_time_bucket": trade.entry_time_bucket,
-        "expired_worthless": trade.expired_worthless,
-        "tags": [t.name for t in trade.tags],
-    },
-    "fills": [
-        {
-            "side": f.side,
-            "contracts": f.contracts,
-            "price": f.price,
-            "executed_at": str(f.executed_at),
-            "iv_at_fill": f.iv_at_fill,
-            "delta_at_fill": f.delta_at_fill,
-            "iv_rank_at_fill": f.iv_rank_at_fill,
-            "dte_at_fill": f.dte_at_fill,
-        }
-        for f in trade.fills
-    ],
-    # Recent context (last 5 closed trades before this one)
-    "recent_trades": [ ... ]
-}
-```
-
-### Behavioral flags to detect
-```
-1. bad_iv_entry      → iv_rank_at_fill > 0.7 on a buy_to_open
-2. held_loser        → hold_duration_mins > 60 AND pnl_pct < -0.5
-3. early_exit        → pnl_pct > 0 AND pnl_pct < 0.2 AND dte_at_fill > 2
-4. oversize          → total_premium_paid > $500 (adjust threshold to Isaac's account)
-5. revenge_trade     → this trade opened within 15 mins of previous trade closing at loss
-```
-
-### Response format
-Ask Claude to return structured JSON:
-```json
-{
-  "flags": ["bad_iv_entry", "held_loser"],
-  "summary": "2-3 sentence plain english summary of what happened",
-  "entry_quality": "good | neutral | poor",
-  "exit_quality": "good | neutral | poor",
-  "suggestions": ["specific actionable suggestion 1", "suggestion 2"]
-}
-```
-Store raw JSON in `trade.ai_review` (text column). Parse on frontend.
-
----
-
-## Stats endpoint (`GET /stats`)
-
-```python
-{
-  # Overall
-  "total_trades": int,
-  "open_trades": int,
-  "win_rate": float,           # closed profitable / total closed
-  "total_pnl": float,
-  "total_premium_risked": float,
-
-  # Averages
-  "avg_win_pct": float,        # avg pnl_pct on winners
-  "avg_loss_pct": float,       # avg pnl_pct on losers
-  "avg_hold_mins": float,
-
-  # Breakdowns
-  "by_tag": { "lotto": {...}, "swing": {...} },
-  "by_ticker": { "NVDA": {...}, "TSLA": {...} },
-  "by_time_bucket": { "open": {...}, "mid": {...}, "close": {...} },
-  "expired_worthless_rate": float,
-
-  # Behavioral (counts, not judgments)
-  "revenge_trade_count": int,
-  "oversize_count": int,
-  "bad_iv_entry_count": int,
-}
-```
-
----
-
-## Frontend pages
-
-### Dashboard (`/`)
-- Today's PnL (sum realized_pnl where closed_at = today)
-- Open positions list (status=open trades)
-- Last 10 closed trades with PnL
-- Win rate + total PnL for the month
-
-### Trade list (`/trades`)
-- Sortable table: ticker | type | strike | expiry | entry | exit | PnL% | tag | status
-- Filter by: status, ticker, tag, date range
-- Click row → trade detail
-
-### Trade detail (`/trades/[id]`)
-- Fill timeline (ordered by executed_at, role labeled entry/exit)
-- Trade summary card (all fields)
-- AI review section (trigger button + display result)
-- Manual tag input
-
-### Analytics (`/analytics`)
-- Win rate over time (chart)
-- PnL by tag (bar)
-- Entry time bucket breakdown
-- Behavioral flag counts
-
----
-
-## Build order (follow this)
-
-```
-✅ FastAPI app scaffolded (main.py, database.py, stub routers)
-✅ Alembic configured
-✅ Frontend scaffolded (layout, nav, stub pages)
-
-TODO — in order:
-1. Replace models.py with options-specific schema (Account, Fill, Trade, TradeFill, Tag, TradeTag)
-2. Alembic migration for new schema
-3. engine/reconstructor.py + tests/test_reconstructor.py  ← pure logic, no DB, most critical
-4. Wire routers/fills.py + routers/trades.py to real DB
-5. POST /rebuild — wire reconstructor to DB
-6. engine/enricher.py — IV enrichment, nullable fields
-7. engine/email_parser.py — Robinhood email → ParsedFill; wire into /fills/import
-8. routers/stats.py — GET /stats
-9. Frontend: lib/api.ts → dashboard → trade list → trades/[id] → analytics
-10. ai/reviewer.py + POST /trades/{id}/review  ← AI layer last
-```
-
----
-
-## Coding conventions
-
-- **SQLModel only** — never raw SQLAlchemy, never raw SQL unless unavoidable
-- **Async FastAPI** — use `async def` for all route handlers
-- **Never fail a fill save** — enrichment errors are logged and skipped, not raised
-- **Never modify fills** — if a fill is wrong, add a new correcting fill, don't edit
-- **Type everything** — Pydantic models for all request/response bodies
-- **Rebuild must be idempotent** — calling it 10 times produces the same result as calling it once
-- **Enrichment is best-effort** — nullable fields stay null rather than blocking the pipeline
-
-## What NOT to build in MVP
-- Auth / login
-- Taxable account support
-- Stock trade tracking
-- CSV export
-- Chart overlays (price chart at entry/exit)
-- Automated AI tagging
-- Real-time price tracking
+- Start with the reconstructor and fill history whenever PnL looks wrong.
+- Do not assume the app is options-only or Roth-only anymore.
+- Treat quotes and reconciliation tooling as first-class parts of the project now.
+- Be careful with account identity; Roth fills with blank `last4` are part of the active cleanup story.
+- If a change touches fill import or email parsing, check the downstream impact on rebuilds and reconciliation scripts.
+- If a change touches the UI tables, prefer reusing the extracted table components instead of duplicating table logic.
+- Fill enrichment fields are all nullable — always guard with null checks before displaying or passing to AI.
+- Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
+- Backend port is 8080 (Windows zombie socket on 8000).
+- Polygon cache lives at `backend/data/polygon_cache/`. Delete a cache file to force a re-fetch for that ticker/date.
+- Update `CLAUDE.md` and `AGENTS.md` together when project scope changes materially.

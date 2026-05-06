@@ -17,6 +17,18 @@ export type Fill = {
   delta_at_fill: number | null;
   iv_rank_at_fill: number | null;
   underlying_price_at_fill: number | null;
+  vwap_at_fill: number | null;
+  gamma_at_fill: number | null;
+  theta_at_fill: number | null;
+  vega_at_fill: number | null;
+  sma_20_at_fill: number | null;
+  sma_50_at_fill: number | null;
+  ema_9_at_fill: number | null;
+  ema_20_at_fill: number | null;
+  ema_9h_at_fill: number | null;
+  rsi_14_at_fill: number | null;
+  macd_at_fill: number | null;
+  macd_signal_at_fill: number | null;
 };
 
 export type Account = {
@@ -67,6 +79,16 @@ export type Stats = {
   behavioral_flags: Record<string, number>;
 };
 
+export type PositionQuote = {
+  ticker: string;
+  underlying_price: number | null;
+  option_last_price: number | null;
+  option_bid: number | null;
+  option_ask: number | null;
+  option_mid: number | null;
+  option_iv: number | null;
+};
+
 export type FillWriteInput = {
   account_id: string;
   ticker: string;
@@ -78,6 +100,38 @@ export type FillWriteInput = {
   option_type?: "call" | "put";
   strike?: number;
   expiration?: string;
+};
+
+export type DailyReview = {
+  summary: string;
+  day_grade: string;
+  key_takeaways: string[];
+  best_trade: {
+    trade_id: string | null;
+    ticker: string | null;
+    reason: string;
+  };
+  worst_trade: {
+    trade_id: string | null;
+    ticker: string | null;
+    reason: string;
+  };
+  patterns: string[];
+  next_session_rules: string[];
+};
+
+export type DailyReviewResponse = {
+  day: string;
+  review: DailyReview;
+  generated_at: string | null;
+  trade_count: number;
+};
+
+export type DailyReviewIndexItem = {
+  day: string;
+  trade_count: number;
+  saved: boolean;
+  generated_at: string | null;
 };
 
 async function get<T>(path: string): Promise<T> {
@@ -136,6 +190,16 @@ export const api = {
   createFill: (body: FillWriteInput) => post<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>("/fills", body),
   updateFill: (id: string, body: FillWriteInput) => put<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>(`/fills/${id}`, body),
   importFills: () => post<{ saved: number; skipped: number }>("/fills/import"),
+  enrichMissing: (range: "day" | "week" | "month" | "all") => post<{ started: boolean; total_missing: number }>(`/fills/enrich?range=${range}`),
+  enrichStatus: () => get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/fills/enrich/status"),
   resyncAll: () => post<{ status: string; saved: number; skipped: number; trades_rebuilt: number; anomalies: string[] }>("/fills/resync-all"),
   rebuild: () => post<{ status: string; trades_rebuilt: number; anomalies: string[] }>("/rebuild"),
+  reviewTrade: (id: string) => post<Trade>(`/trades/${id}/review`),
+  dailyReviews: () => get<DailyReviewIndexItem[]>("/daily-review"),
+  dailyReview: (day: string) => get<DailyReviewResponse | null>(`/daily-review/${day}`),
+  reviewDay: (body: { day: string; trade_ids: string[] }) =>
+    post<DailyReviewResponse>("/daily-review", body),
+  positionQuotes: (positions: { ticker: string; expiration: string; strike: number; option_type: string }[]) =>
+    post<PositionQuote[]>("/quotes/positions", { positions }),
+  stockQuotes: (tickers: string[]) => get<Record<string, number | null>>(`/quotes?tickers=${tickers.join(",")}`),
 };

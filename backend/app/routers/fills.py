@@ -1,5 +1,6 @@
 import json
 import logging
+import threading
 import time
 import uuid
 from datetime import date, datetime, timedelta
@@ -23,6 +24,20 @@ log = logging.getLogger(__name__)
 router = APIRouter()
 ET = ZoneInfo("America/New_York")
 
+# ---------------------------------------------------------------------------
+# Background enrichment state
+# ---------------------------------------------------------------------------
+
+_enrich_state: dict = {
+    "running": False,
+    "done": 0,
+    "total": 0,
+    "current": "",
+    "enriched": 0,
+    "error": None,
+}
+_enrich_lock = threading.Lock()
+
 _ACCOUNT_NAMES = {
     "roth_ira": "Roth IRA",
     "individual": "Individual",
@@ -34,13 +49,17 @@ _STOCK_SIDES = {"buy", "sell"}
 
 def _get_or_create_account(session: Session, last4: str, account_type: str) -> Account:
     """Look up account by last4, creating it if it doesn't exist yet."""
-    account = session.exec(select(Account).where(Account.last4 == last4)).first()
+    normalized_last4 = last4.strip()
+    if account_type == "roth_ira" and not normalized_last4:
+        normalized_last4 = "8267"
+
+    account = session.exec(select(Account).where(Account.last4 == normalized_last4)).first()
     if not account:
         account = Account(
             id=uuid.uuid4(),
             name=_ACCOUNT_NAMES.get(account_type, account_type.replace("_", " ").title()),
             type=account_type,
-            last4=last4,
+            last4=normalized_last4,
         )
         session.add(account)
         session.flush()
@@ -201,6 +220,18 @@ def _import_fills_from_gmail(session: Session) -> dict[str, int]:
 
     session.commit()
     log.info("Import complete: saved=%d elapsed=%.1fs", saved, time.monotonic() - t0)
+
+    # Enrich new fills with underlying price, greeks, and indicators
+    if saved > 0:
+        try:
+            from app.engine.enricher import enrich_fills
+            new_fills = session.exec(
+                select(Fill).where(Fill.underlying_price_at_fill == None)  # noqa: E711
+            ).all()
+            enrich_fills(list(new_fills), session)
+        except Exception as exc:
+            log.warning("Enrichment failed (non-fatal): %s", exc)
+
     log.info("END /fills/import")
     return {"saved": saved, "skipped": len(parsed_fills) - saved}
 
@@ -354,11 +385,86 @@ async def create_fill(body: FillCreate, session: Session = Depends(get_session))
     session.commit()
     session.refresh(fill)
     backup_manual_fills(session)
+
+    try:
+        from app.engine.enricher import enrich_fills
+        enrich_fills([fill], session)
+    except Exception as exc:
+        log.warning("Enrichment failed (non-fatal): %s", exc)
+
     return {
         "fill": fill,
         "trades_rebuilt": trades_rebuilt,
         "anomalies": anomalies,
     }
+
+
+def _run_enrich_background(fill_ids: list) -> None:
+    """Run enrichment in a background thread with progress tracking."""
+    from app.database import engine
+    from app.engine.enricher import enrich_fills
+
+    with _enrich_lock:
+        _enrich_state["running"] = True
+        _enrich_state["done"] = 0
+        _enrich_state["total"] = len(fill_ids)
+        _enrich_state["current"] = ""
+        _enrich_state["enriched"] = 0
+        _enrich_state["error"] = None
+
+    def on_progress(done: int, ticker: str) -> None:
+        with _enrich_lock:
+            _enrich_state["done"] = done
+            _enrich_state["current"] = ticker
+
+    try:
+        with Session(engine) as bg_session:
+            fills = bg_session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
+            enriched = enrich_fills(list(fills), bg_session, on_progress=on_progress)
+            with _enrich_lock:
+                _enrich_state["enriched"] = enriched
+    except Exception as exc:
+        log.exception("Background enrichment failed")
+        with _enrich_lock:
+            _enrich_state["error"] = str(exc)
+    finally:
+        with _enrich_lock:
+            _enrich_state["running"] = False
+
+
+@router.get("/enrich/status")
+async def enrich_status():
+    """Return the current enrichment job progress."""
+    with _enrich_lock:
+        return dict(_enrich_state)
+
+
+@router.post("/enrich")
+async def enrich_missing(range: str = "week", session: Session = Depends(get_session)):
+    """Start background enrichment for fills missing underlying price data. range: day|week|month|all"""
+    with _enrich_lock:
+        if _enrich_state["running"]:
+            raise HTTPException(status_code=409, detail="Enrichment already running")
+
+    cutoff: datetime | None = None
+    if range == "day":
+        cutoff = datetime.utcnow() - timedelta(days=1)
+    elif range == "week":
+        cutoff = datetime.utcnow() - timedelta(weeks=1)
+    elif range == "month":
+        cutoff = datetime.utcnow() - timedelta(days=30)
+
+    query = select(Fill.id).where(Fill.underlying_price_at_fill == None)  # noqa: E711
+    if cutoff is not None:
+        query = query.where(Fill.executed_at >= cutoff)
+
+    fill_ids = session.exec(query).all()
+    if not fill_ids:
+        return {"started": False, "total_missing": 0}
+
+    t = threading.Thread(target=_run_enrich_background, args=(fill_ids,), daemon=True)
+    t.start()
+    return {"started": True, "total_missing": len(fill_ids)}
 
 
 @router.post("/import")
@@ -427,6 +533,13 @@ async def update_fill(fill_id: uuid.UUID, body: FillCreate, session: Session = D
 
     session.commit()
     session.refresh(fill)
+
+    try:
+        from app.engine.enricher import enrich_fills
+        enrich_fills([fill], session)
+    except Exception as exc:
+        log.warning("Enrichment failed (non-fatal): %s", exc)
+
     return {
         "fill": fill,
         "trades_rebuilt": trades_rebuilt,

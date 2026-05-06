@@ -1,0 +1,184 @@
+# Reconciliation Report
+
+Generated: `2026-04-18 19:38:16`
+Database: `backend\data\trade_journal.db`
+
+## Headline
+
+| Metric | Amount | Notes |
+| --- | --- | --- |
+| Dashboard total_pnl | $1,761.92 | Closed + expired realized P&L only, matching /stats |
+| All realized P&L including open trades | $1,864.83 | Adds realized P&L already locked in on still-open positions |
+| Realized P&L hidden inside open trades | $102.91 | Currently excluded from dashboard because those trades are still open |
+| Open trade basis | $3,561.85 | Current open positions are all stocks; mark-to-market is not in the DB |
+
+## Coverage By Account
+
+| Account | Non-manual fills | Non-manual range | Manual fills | Closed/expired P&L | All realized | Open realized | Open trades | Open basis |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Individual 1113 | 50 | 2025-12-12 to 2026-04-17 | 0 | $-821.50 | $-821.50 | $0.00 | 0 | $0.00 |
+| Roth IRA 8267 | 3335 | 2025-07-10 to 2026-04-17 | 3 | $2,583.42 | $2,686.33 | $102.91 | 9 | $3,561.85 |
+
+## Requested Robinhood CSV Comparison
+
+| Field | Value |
+| --- | --- |
+| Path | backend\Robinhood\ROTH jul2023 to april 2026.csv |
+| Account scope | Combined Roth IRA |
+| DB accounts combined | Roth IRA 8267 |
+| CSV date range | 2025-07-10 to 2026-04-17 |
+| Rows with dates | 3842 |
+| Executable trade rows | 3755 |
+| Ignored non-trade rows | ACATI: 13, CDIV: 7, CFIR: 1, MTCH: 3, OEXP: 27, SLIP: 36 |
+| DB fill rows in overlap | 3335 |
+| CSV normalized fill keys | 2404 |
+| DB normalized fill keys | 2404 |
+| Exact-match keys | 2373 |
+| Mismatch keys | 35 |
+| Closed/expired P&L through CSV max date | $2,583.42 |
+| Closed/expired trades after CSV max date | 0 trade(s), $0.00 |
+| Verdict | Near match. Most keys line up, but residual discrepancies remain and are bucketed below. |
+
+### Mismatch Buckets
+
+| Bucket | Count | Example key |
+| --- | --- | --- |
+| symbol drift / ticker remap | 6 | 2025-07-30 SPLG stock sell stock |
+| date/key drift | 2 | 2026-03-24 KDK stock buy stock |
+| quantity mismatch / over-close | 6 | 2025-07-25 COIN option sell_to_close put 375.00 exp 2025-07-25 |
+| penny rounding differences | 10 | 2025-09-04 CRCL option sell_to_close put 105.00 exp 2025-09-12 |
+| material stock notional differences | 10 | 2025-09-26 CNC stock buy stock |
+| material option notional differences | 1 | 2025-12-24 NVDA option buy_to_open call 187.50 exp 2025-12-26 |
+
+### Mismatch Examples
+
+- `2025-07-25 COIN option sell_to_close put 375.00 exp 2025-07-25 | quantity mismatch / over-close | csv qty=3 db qty=5 csv notional=45 db notional=75`
+- `2025-07-30 SPLG stock sell stock | symbol drift / ticker remap | csv qty=0 db qty=4.01176 csv notional=0 db notional=299.959295`
+- `2025-07-30 SPYM stock sell stock | symbol drift / ticker remap | csv qty=4.01176 db qty=0 csv notional=299.959295 db notional=0`
+- `2025-08-20 SPLG stock sell stock | symbol drift / ticker remap | csv qty=0 db qty=2.66524 csv notional=0 db notional=199.972957`
+- `2025-08-20 SPYM stock sell stock | symbol drift / ticker remap | csv qty=2.66524 db qty=0 csv notional=199.972957 db notional=0`
+- `2025-08-21 SPLG stock sell stock | symbol drift / ticker remap | csv qty=0 db qty=2.67111 csv notional=0 db notional=200.012717`
+- `2025-08-21 SPYM stock sell stock | symbol drift / ticker remap | csv qty=2.67111 db qty=0 csv notional=200.012717 db notional=0`
+- `2025-09-04 CRCL option sell_to_close put 105.00 exp 2025-09-12 | penny rounding differences | csv qty=3 db qty=3 csv notional=392 db notional=392.01`
+- `2025-09-04 CRWD option sell_to_close call 435.00 exp 2025-09-12 | penny rounding differences | csv qty=3 db qty=3 csv notional=511 db notional=510.99`
+- `2025-09-17 FMST stock buy stock | penny rounding differences | csv qty=34.018063 db qty=34.018063 csv notional=100.023105 db notional=100.013105`
+
+## Discrepancy Buckets
+
+| Bucket | Count | Amount | Why it matters |
+| --- | --- | --- | --- |
+| Orphaned or over-closed stock sells | 13 | $8,036.87 | These sales have no matching opening buy in the DB, so their true realized P&L cannot be computed |
+| Option close anomalies | 4 | $758.00 | These option closes are orphaned or over-sized, so the realized P&L is only partially represented |
+| Total anomalies | 17 | - | Any anomaly weakens broker-vs-app reconciliation until the missing source fills are backfilled |
+
+### Anomaly Breakdown
+
+| Instrument | Side | Kind | Count | Gross notional |
+| --- | --- | --- | --- | --- |
+| option | sell_to_close | orphaned | 1 | $78.00 |
+| option | sell_to_close | over_close | 3 | $680.00 |
+| stock | sell | orphaned | 13 | $8,036.87 |
+
+### Unmatched Stock Sales
+
+| Date | Account | Ticker | Shares | Price | Gross proceeds |
+| --- | --- | --- | --- | --- | --- |
+| 2025-07-29 | Roth IRA 8267 | FMET | 3.000000 | $35.24 | $105.72 |
+| 2025-07-30 | Roth IRA 8267 | HIMS | 1.000000 | $64.99 | $64.99 |
+| 2025-07-30 | Roth IRA 8267 | SPLG | 4.011760 | $74.77 | $299.96 |
+| 2025-07-30 | Roth IRA 8267 | VTI | 0.319550 | $312.93 | $100.00 |
+| 2025-08-12 | Roth IRA 8267 | VUZI | 44.000000 | $2.14 | $94.16 |
+| 2025-08-20 | Roth IRA 8267 | VTI | 1.913570 | $313.54 | $599.98 |
+| 2025-08-20 | Roth IRA 8267 | SPLG | 2.665240 | $75.03 | $199.97 |
+| 2025-08-21 | Roth IRA 8267 | SPLG | 2.671110 | $74.88 | $200.01 |
+| 2025-10-31 | Roth IRA 8267 | SPYM | 14.651890 | $80.46 | $1,178.89 |
+| 2025-11-05 | Roth IRA 8267 | VTI | 12.000000 | $331.89 | $3,982.68 |
+| 2025-11-05 | Roth IRA 8267 | VTI | 0.766880 | $331.83 | $254.47 |
+| 2025-12-23 | Roth IRA 8267 | PANW | 2.000000 | $187.90 | $375.80 |
+| 2026-02-03 | Roth IRA 8267 | FBTC | 9.000000 | $64.47 | $580.23 |
+
+### Option Close Anomalies
+
+| Date | Account | Ticker | Contracts | Price | Contract | Issue |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2025-07-16 | Roth IRA 8267 | SOUN | 3.000000 | $26.00 | call 14.00 exp 2025-08-01 | Orphaned close |
+| 2025-07-25 | Roth IRA 8267 | COIN | 3.000000 | $15.00 | put 375.00 exp 2025-07-25 | Over-close |
+| 2025-11-07 | Roth IRA 8267 | LMND | 3.000000 | $20.00 | put 68.00 exp 2025-11-07 | Over-close |
+| 2026-04-17 | Roth IRA 8267 | SPY | 5.000000 | $115.00 | put 710.00 exp 2026-04-17 | Over-close |
+
+## Monthly Closed/Expired Realized P&L
+
+| Month | Individual 1113 | Roth IRA 8267 | Total |
+| --- | --- | --- | --- |
+| 2025-07 | $0.00 | $-1,426.28 | $-1,426.28 |
+| 2025-08 | $0.00 | $-312.00 | $-312.00 |
+| 2025-09 | $0.00 | $3,087.00 | $3,087.00 |
+| 2025-10 | $0.00 | $563.06 | $563.06 |
+| 2025-11 | $0.00 | $1,272.61 | $1,272.61 |
+| 2025-12 | $86.00 | $-200.63 | $-114.63 |
+| 2026-01 | $-118.00 | $-1,051.18 | $-1,169.18 |
+| 2026-02 | $-234.00 | $773.24 | $539.24 |
+| 2026-03 | $-478.50 | $5.00 | $-473.50 |
+| 2026-04 | $-77.00 | $-127.40 | $-204.40 |
+
+## Monthly Net Trade Cash Flow
+
+| Month | Individual 1113 | Roth IRA 8267 | Total |
+| --- | --- | --- | --- |
+| 2025-07 | $0.00 | $-1,252.65 | $-1,252.65 |
+| 2025-08 | $0.00 | $165.13 | $165.13 |
+| 2025-09 | $0.00 | $2,145.95 | $2,145.95 |
+| 2025-10 | $0.00 | $23.57 | $23.57 |
+| 2025-11 | $0.00 | $5,384.32 | $5,384.32 |
+| 2025-12 | $86.00 | $334.51 | $420.51 |
+| 2026-01 | $-118.00 | $203.74 | $85.74 |
+| 2026-02 | $-234.00 | $-376.53 | $-610.53 |
+| 2026-03 | $-478.50 | $526.75 | $48.25 |
+| 2026-04 | $-77.00 | $2,199.83 | $2,122.83 |
+
+Net trade cash flow is not the same thing as realized P&L. It is useful here because it shows months with large cash exits or entries even when the reconstructor cannot fully match basis.
+
+## Largest Contributors
+
+### Biggest Winners
+
+| Account | Ticker | Type | Closed/expired P&L | Trades |
+| --- | --- | --- | --- | --- |
+| Roth IRA 8267 | LLY | option | $5,625.00 | 41 |
+| Roth IRA 8267 | SPY | option | $3,699.01 | 162 |
+| Roth IRA 8267 | CAT | option | $1,530.00 | 23 |
+| Roth IRA 8267 | GS | option | $1,323.00 | 13 |
+| Roth IRA 8267 | GLD | option | $1,064.00 | 21 |
+| Roth IRA 8267 | BIDU | option | $883.00 | 3 |
+| Roth IRA 8267 | AAPL | option | $865.00 | 24 |
+| Roth IRA 8267 | META | option | $855.00 | 24 |
+| Individual 1113 | GLD | option | $788.00 | 3 |
+| Roth IRA 8267 | NFLX | option | $630.00 | 20 |
+
+### Biggest Losers
+
+| Account | Ticker | Type | Closed/expired P&L | Trades |
+| --- | --- | --- | --- | --- |
+| Roth IRA 8267 | SLV | option | $-1,972.00 | 16 |
+| Roth IRA 8267 | CVNA | option | $-1,657.00 | 68 |
+| Roth IRA 8267 | COST | option | $-1,194.00 | 4 |
+| Roth IRA 8267 | SNDK | option | $-1,187.99 | 29 |
+| Roth IRA 8267 | MSFT | option | $-1,121.00 | 38 |
+| Roth IRA 8267 | NVDA | option | $-1,042.04 | 35 |
+| Roth IRA 8267 | TSLA | option | $-932.00 | 28 |
+| Individual 1113 | SPY | option | $-865.00 | 10 |
+| Roth IRA 8267 | PLTR | option | $-715.00 | 28 |
+| Roth IRA 8267 | MSTR | option | $-674.00 | 16 |
+
+## Takeaways
+
+- The dashboard number is not a broker-equity number. It is realized P&L on trades that the reconstructor considers closed or expired.
+- Unrealized stock P&L is definitely missing, but the larger reconciliation blocker is missing basis on orphaned stock sells.
+- The Roth CSV compares materially better when both `roth_ira` accounts are treated as one logical account.
+- Combined Roth still has residual discrepancy buckets: quantity mismatches, symbol drift, date drift, and small rounding deltas.
+
+## Suggested Next Steps
+
+1. Backfill or normalize the remaining Roth mismatch families before treating the CSV as a broker-perfect reconciliation source.
+2. Decide whether the blank-last4 Roth account should be merged or relabeled now that the Roth CSV clearly spans both DB accounts.
+3. Keep using the fill-level comparison rather than dashboard P&L when validating broker CSV imports.

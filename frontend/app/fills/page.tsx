@@ -56,7 +56,7 @@ export default async function FillsPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
+            <table className="w-full min-w-[1280px] text-sm">
               <thead className="bg-muted text-xs uppercase text-muted-foreground">
                 <tr>
                   <Th>Executed</Th>
@@ -66,48 +66,53 @@ export default async function FillsPage() {
                   <Th>Side</Th>
                   <Th>Qty</Th>
                   <Th>Price</Th>
+                  <Th>Underlying</Th>
+                  <Th>IV</Th>
+                  <Th>Delta</Th>
+                  <Th>RSI</Th>
                   <Th>Source</Th>
-                  <Th>Edit</Th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {fills.map((fill) => (
-                  <tr key={fill.id} className="hover:bg-muted/50">
-                    <Td>{fmtDateTime(fill.executed_at)}</Td>
-                    <Td>{accountMap[fill.account_id]?.name ?? "-"}</Td>
-                    <Td>
-                      <div className="flex flex-col">
-                        <span className="font-semibold">{fill.ticker}</span>
-                        <span className="text-xs text-muted-foreground">{detailLabel(fill)}</span>
-                      </div>
-                    </Td>
-                    <Td>
-                      <span className="capitalize">{fill.instrument_type}</span>
-                    </Td>
-                    <Td>{fill.side}</Td>
-                    <Td>{fmtQty(fill)}</Td>
-                    <Td>{fmtPrice(fill)}</Td>
-                    <Td>
-                      <span
-                        className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                          sourceLabel(fill) === "Manual"
-                            ? "bg-amber-900/30 text-amber-300"
-                            : "bg-sky-900/30 text-sky-300"
-                        }`}
-                      >
-                        {sourceLabel(fill)}
-                      </span>
-                    </Td>
-                    <Td>
-                      <a
-                        href={`/fills/${fill.id}?returnTo=${encodeURIComponent("/fills")}`}
-                        className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
-                      >
-                        Edit fill
-                      </a>
-                    </Td>
-                  </tr>
-                ))}
+                {fills.map((fill) => {
+                  const href = `/fills/${fill.id}?returnTo=${encodeURIComponent("/fills")}`;
+                  return (
+                    <tr key={fill.id} className="relative hover:bg-muted/50">
+                      <Td>
+                        <a href={href} className="absolute inset-0" aria-label={`View fill ${fill.id}`} />
+                        {fmtDateTime(fill.executed_at)}
+                      </Td>
+                      <Td>{accountMap[fill.account_id]?.name ?? "-"}</Td>
+                      <Td>
+                        <div className="flex flex-col">
+                          <span className="font-semibold">{fill.ticker}</span>
+                          <span className="text-xs text-muted-foreground">{detailLabel(fill)}</span>
+                        </div>
+                      </Td>
+                      <Td>
+                        <span className="capitalize">{fill.instrument_type}</span>
+                      </Td>
+                      <Td>{fill.side}</Td>
+                      <Td>{fmtQty(fill)}</Td>
+                      <Td>{fmtPrice(fill)}</Td>
+                      <Td>{fill.underlying_price_at_fill != null ? `$${fill.underlying_price_at_fill.toFixed(2)}` : "-"}</Td>
+                      <Td>{fill.iv_at_fill != null ? `${(fill.iv_at_fill * 100).toFixed(1)}%` : "-"}</Td>
+                      <Td>{fill.delta_at_fill != null ? fill.delta_at_fill.toFixed(2) : "-"}</Td>
+                      <Td>{fill.rsi_14_at_fill != null ? fill.rsi_14_at_fill.toFixed(1) : "-"}</Td>
+                      <Td>
+                        <span
+                          className={`relative z-10 rounded px-1.5 py-0.5 text-xs font-medium ${
+                            sourceLabel(fill) === "Manual"
+                              ? "bg-amber-900/30 text-amber-300"
+                              : "bg-sky-900/30 text-sky-300"
+                          }`}
+                        >
+                          {sourceLabel(fill)}
+                        </span>
+                      </Td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

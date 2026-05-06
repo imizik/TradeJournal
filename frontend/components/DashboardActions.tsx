@@ -1,17 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 
 type Status = "idle" | "loading" | "done" | "error";
+type EnrichRange = "day" | "week" | "month" | "all";
 
 export default function DashboardActions() {
   const [syncStatus, setSyncStatus] = useState<Status>("idle");
   const [rebuildStatus, setRebuildStatus] = useState<Status>("idle");
   const [resyncStatus, setResyncStatus] = useState<Status>("idle");
+  const [enrichStatus, setEnrichStatus] = useState<Status>("idle");
+  const [enrichRange, setEnrichRange] = useState<EnrichRange>("week");
+  const [enrichProgress, setEnrichProgress] = useState<{ done: number; total: number; current: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const busy = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading";
+  const busy = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading" || enrichStatus === "loading";
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
 
   async function handleSync() {
     setSyncStatus("loading");
@@ -44,6 +53,55 @@ export default function DashboardActions() {
     }
   }
 
+  function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await api.enrichStatus();
+        setEnrichProgress({ done: s.done, total: s.total, current: s.current });
+        if (!s.running) {
+          clearInterval(pollRef.current!);
+          pollRef.current = null;
+          if (s.error) {
+            setMsg(`Enrich failed: ${s.error}`);
+            setEnrichStatus("error");
+          } else {
+            setMsg(`Enriched ${s.enriched} of ${s.total} fill(s).`);
+            setEnrichStatus("done");
+          }
+          setEnrichProgress(null);
+          setTimeout(() => setEnrichStatus("idle"), 4000);
+        }
+      } catch {
+        clearInterval(pollRef.current!);
+        pollRef.current = null;
+        setEnrichStatus("error");
+        setEnrichProgress(null);
+      }
+    }, 2000);
+  }
+
+  async function handleEnrich() {
+    setEnrichStatus("loading");
+    setEnrichProgress(null);
+    setMsg(null);
+    try {
+      const r = await api.enrichMissing(enrichRange);
+      if (!r.started) {
+        setMsg("No fills missing enrichment data.");
+        setEnrichStatus("done");
+        setTimeout(() => setEnrichStatus("idle"), 3000);
+        return;
+      }
+      setEnrichProgress({ done: 0, total: r.total_missing, current: "" });
+      startPolling();
+    } catch (e) {
+      setMsg(`Enrich failed: ${(e as Error).message}`);
+      setEnrichStatus("error");
+      setTimeout(() => setEnrichStatus("idle"), 4000);
+    }
+  }
+
   async function handleResyncAll() {
     const confirmed = window.confirm(
       "Resync all will delete every imported fill and rebuilt trade, then re-import everything from Gmail from scratch. Continue?",
@@ -70,11 +128,43 @@ export default function DashboardActions() {
     <div className="flex items-center gap-2">
       {msg && <span className="mr-1 text-xs text-muted-foreground">{msg}</span>}
       <a
+        href="/daily"
+        className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+      >
+        Daily Review
+      </a>
+      <a
         href="/fills"
         className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
       >
         Manual Fill
       </a>
+      <div className="flex items-center rounded border border-border">
+        <select
+          value={enrichRange}
+          onChange={(e) => setEnrichRange(e.target.value as EnrichRange)}
+          disabled={busy}
+          className="rounded-l bg-transparent px-2 py-1.5 text-xs text-muted-foreground focus:outline-none disabled:opacity-50"
+        >
+          <option value="day">1d</option>
+          <option value="week">1w</option>
+          <option value="month">1mo</option>
+          <option value="all">All</option>
+        </select>
+        <button
+          onClick={handleEnrich}
+          disabled={busy}
+          className="rounded-r border-l border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+        >
+          {enrichStatus === "loading"
+            ? enrichProgress && enrichProgress.total > 0
+              ? `${enrichProgress.done}/${enrichProgress.total}${enrichProgress.current ? ` ${enrichProgress.current}` : ""}`
+              : "Starting..."
+            : enrichStatus === "done"
+              ? "Done"
+              : "Enrich Missing"}
+        </button>
+      </div>
       <button
         onClick={handleSync}
         disabled={busy}
