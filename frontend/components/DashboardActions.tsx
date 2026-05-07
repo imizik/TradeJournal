@@ -19,8 +19,23 @@ export default function DashboardActions() {
   const busy = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading" || enrichStatus === "loading";
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const gmailAuth = params.get("gmail_auth");
+    if (gmailAuth === "success") {
+      setMsg("Gmail connected. Run Sync Emails again.");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (gmailAuth === "error") {
+      setMsg("Gmail connection was cancelled or failed.");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     return () => { if (pollRef.current) clearInterval(pollRef.current); };
   }, []);
+
+  async function connectGmail() {
+    const { auth_url } = await api.startGmailAuth();
+    window.location.assign(auth_url);
+  }
 
   async function handleSync() {
     setSyncStatus("loading");
@@ -30,7 +45,13 @@ export default function DashboardActions() {
       setMsg(`Synced: ${r.saved} new fill(s), ${r.skipped} skipped.`);
       setSyncStatus("done");
     } catch (e) {
-      setMsg(`Sync failed: ${(e as Error).message}`);
+      const message = (e as Error).message;
+      if (message.includes("Gmail authorization is required")) {
+        setMsg("Opening Gmail authorization...");
+        await connectGmail();
+        return;
+      }
+      setMsg(`Sync failed: ${message}`);
       setSyncStatus("error");
     } finally {
       setTimeout(() => setSyncStatus("idle"), 3000);

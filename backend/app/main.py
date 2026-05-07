@@ -9,7 +9,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Account, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth
 from app.routers.fills import (
     _clear_derived_trade_data,
     _persist_rebuild,
@@ -80,6 +80,7 @@ app.add_middleware(
 )
 
 app.include_router(health.router, tags=["health"])
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 app.include_router(fills.router, prefix="/fills", tags=["fills"])
 app.include_router(trades.router, prefix="/trades", tags=["trades"])

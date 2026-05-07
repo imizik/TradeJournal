@@ -190,6 +190,7 @@ export const api = {
   createFill: (body: FillWriteInput) => post<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>("/fills", body),
   updateFill: (id: string, body: FillWriteInput) => put<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>(`/fills/${id}`, body),
   importFills: () => post<{ saved: number; skipped: number }>("/fills/import"),
+  startGmailAuth: () => get<{ auth_url: string }>("/auth/gmail/start"),
   enrichMissing: (range: "day" | "week" | "month" | "all") => post<{ started: boolean; total_missing: number }>(`/fills/enrich?range=${range}`),
   enrichStatus: () => get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/fills/enrich/status"),
   resyncAll: () => post<{ status: string; saved: number; skipped: number; trades_rebuilt: number; anomalies: string[] }>("/fills/resync-all"),

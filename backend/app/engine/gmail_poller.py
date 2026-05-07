@@ -10,6 +10,8 @@ Entrypoint: poll_new_fills() -> list[ParsedFill]
 
 import base64
 import logging
+import os
+import secrets
 from pathlib import Path
 
 from app.engine.email_parser import (
@@ -28,10 +30,18 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 CREDENTIALS_FILE = _BACKEND_DIR / "credentials.json"
 TOKEN_FILE = _BACKEND_DIR / "token.json"
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
+GMAIL_OAUTH_CALLBACK_PATH = "/auth/gmail/callback"
+GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"
+_OAUTH_STATES: set[str] = set()
 
 
 class GmailPollingError(RuntimeError):
     """Raised when Gmail polling cannot be started or completed safely."""
+
+
+class GmailAuthRequired(GmailPollingError):
+    """Raised when Gmail needs an interactive OAuth login."""
 
 
 def _is_invalid_grant_error(exc: Exception) -> bool:
@@ -39,11 +49,50 @@ def _is_invalid_grant_error(exc: Exception) -> bool:
     return "invalid_grant" in text or "token has been expired or revoked" in text
 
 
-def _run_oauth_flow(installed_app_flow):
+def _build_oauth_flow(installed_app_flow):
     if not CREDENTIALS_FILE.exists():
         raise GmailPollingError(f"Missing Gmail credentials file: {CREDENTIALS_FILE}")
     flow = installed_app_flow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-    return flow.run_local_server(port=0)
+    flow.redirect_uri = GMAIL_OAUTH_CALLBACK_URL
+    return flow
+
+
+def begin_gmail_oauth() -> str:
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError as exc:
+        raise GmailPollingError(
+            "Gmail import dependencies are not installed. Install the Google API packages for the backend before syncing emails."
+        ) from exc
+
+    flow = _build_oauth_flow(InstalledAppFlow)
+    state = secrets.token_urlsafe(24)
+    _OAUTH_STATES.add(state)
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent",
+        state=state,
+    )
+    return auth_url
+
+
+def finish_gmail_oauth(code: str, state: str) -> None:
+    if state not in _OAUTH_STATES:
+        raise GmailPollingError("Invalid Gmail OAuth state. Start Gmail authorization again.")
+    _OAUTH_STATES.discard(state)
+
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError as exc:
+        raise GmailPollingError(
+            "Gmail import dependencies are not installed. Install the Google API packages for the backend before syncing emails."
+        ) from exc
+
+    flow = _build_oauth_flow(InstalledAppFlow)
+    flow.fetch_token(code=code)
+    TOKEN_FILE.write_text(flow.credentials.to_json())
+    log.info("Saved Gmail OAuth token")
 
 
 def _get_service():
@@ -51,7 +100,6 @@ def _get_service():
     try:
         from google.auth.transport.requests import Request
         from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
     except ImportError as exc:
         raise GmailPollingError(
@@ -72,10 +120,10 @@ def _get_service():
                 except Exception as exc:
                     if not _is_invalid_grant_error(exc):
                         raise
-                    log.warning("Gmail token expired or revoked; starting a fresh OAuth login")
-                    creds = _run_oauth_flow(InstalledAppFlow)
+                    log.warning("Gmail token expired or revoked; Gmail authorization is required")
+                    raise GmailAuthRequired("Gmail authorization is required. Connect Gmail from the app, then retry sync.") from exc
             else:
-                creds = _run_oauth_flow(InstalledAppFlow)
+                raise GmailAuthRequired("Gmail authorization is required. Connect Gmail from the app, then retry sync.")
 
             TOKEN_FILE.write_text(creds.to_json())
 
