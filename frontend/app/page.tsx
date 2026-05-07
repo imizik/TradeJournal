@@ -110,10 +110,10 @@ export default async function DashboardPage({
     openTrades.filter((t) => t.instrument_type === "stock").map((t) => t.ticker)
   )];
 
-  const [openTradeFillEntries, optionQuotes, stockPrices] = await Promise.all([
-    Promise.all(
-      openTrades.map(async (trade) => [trade.id, await api.tradeFills(trade.id)] as const),
-    ),
+  const [bulkFills, optionQuotes, stockPrices] = await Promise.all([
+    openTrades.length > 0
+      ? api.bulkTradeFills(openTrades.map((t) => t.id))
+      : Promise.resolve({} as Record<string, Fill[]>),
     optionPositions.length > 0
       ? api.positionQuotes(optionPositions)
       : Promise.resolve([] as PositionQuote[]),
@@ -122,9 +122,10 @@ export default async function DashboardPage({
       : Promise.resolve({} as Record<string, number | null>),
   ]);
 
+  const openTradeFills = bulkFills;
+
   // Build a quotes map keyed by trade id
   const quotesByTradeId: Record<string, PositionQuote> = {};
-  // Map option quotes back to trades
   let optIdx = 0;
   for (const trade of openTrades) {
     if (trade.instrument_type === "option" && trade.expiration && trade.strike != null && trade.option_type) {
@@ -144,8 +145,6 @@ export default async function DashboardPage({
       };
     }
   }
-
-  const openTradeFills = Object.fromEntries(openTradeFillEntries);
   const openPositionRows = openTrades
     .map((trade) => ({
       trade,

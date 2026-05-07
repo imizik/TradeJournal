@@ -42,7 +42,14 @@ export default function DashboardActions() {
     setMsg(null);
     try {
       const r = await api.importFills();
-      setMsg(`Synced: ${r.saved} new fill(s), ${r.skipped} skipped.`);
+      if (r.enrich_started) {
+        setMsg(`Synced: ${r.saved} new fill(s), ${r.skipped} skipped. Enriching ${r.enrich_total} fill(s)...`);
+        setEnrichProgress({ done: 0, total: r.enrich_total, current: "" });
+        setEnrichStatus("loading");
+        startPolling();
+      } else {
+        setMsg(`Synced: ${r.saved} new fill(s), ${r.skipped} skipped.`);
+      }
       setSyncStatus("done");
     } catch (e) {
       const message = (e as Error).message;

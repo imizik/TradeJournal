@@ -221,19 +221,27 @@ def _import_fills_from_gmail(session: Session) -> dict[str, int]:
     session.commit()
     log.info("Import complete: saved=%d elapsed=%.1fs", saved, time.monotonic() - t0)
 
-    # Enrich new fills with underlying price, greeks, and indicators
+    # Kick off enrichment in the background so the import response returns immediately
+    enrich_started = False
+    enrich_total = 0
     if saved > 0:
-        try:
-            from app.engine.enricher import enrich_fills
-            new_fills = session.exec(
-                select(Fill).where(Fill.underlying_price_at_fill == None)  # noqa: E711
+        unenriched_ids = [
+            fill_id
+            for fill_id in session.exec(
+                select(Fill.id).where(Fill.underlying_price_at_fill == None)  # noqa: E711
             ).all()
-            enrich_fills(list(new_fills), session)
-        except Exception as exc:
-            log.warning("Enrichment failed (non-fatal): %s", exc)
+        ]
+        if unenriched_ids:
+            with _enrich_lock:
+                already_running = _enrich_state["running"]
+            if not already_running:
+                t = threading.Thread(target=_run_enrich_background, args=(unenriched_ids,), daemon=True)
+                t.start()
+                enrich_started = True
+                enrich_total = len(unenriched_ids)
 
     log.info("END /fills/import")
-    return {"saved": saved, "skipped": len(parsed_fills) - saved}
+    return {"saved": saved, "skipped": len(parsed_fills) - saved, "enrich_started": enrich_started, "enrich_total": enrich_total}
 
 
 def _persist_rebuild(session: Session, anomalies_label: str) -> tuple[int, list[str]]:
