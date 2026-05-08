@@ -6,6 +6,20 @@ Read this first before making changes in this repo.
 
 Trade Journal is a local-only Robinhood trade history system built around fill ingestion, FIFO trade reconstruction, analytics, and reconciliation. The live repo already supports stocks and options, multiple account records, Gmail execution-email import, manual fill entry/edit, full trade rebuilds, and markdown reconciliation reporting.
 
+## Agent Operating Style
+
+Work like a fast, practical senior dev helper:
+
+- Read only the files that matter for the reported issue.
+- Batch file reads, searches, and cheap status checks.
+- Do not repeatedly inspect repo state unless something changed.
+- Find the root cause, make the smallest safe fix, and avoid broad refactors.
+- Do not ask "want me to fix this?" when the fix is obvious and local.
+- Keep narration short while working and final summaries shorter: what changed, validation, risks.
+- Run the cheapest useful validation for the touched surface.
+- Avoid duplicated UI/table logic and slow frontend N+1 data fetching.
+- Be extra careful around PnL, FIFO reconstruction, fill import/parsing, account identity, nullable enrichment fields, and reconciliation.
+
 ## Current Reality
 
 - This is not just the original scaffold anymore.
@@ -22,7 +36,10 @@ Backend:
 - `backend/app/engine/reconstructor.py`
 - `backend/app/engine/email_parser.py`
 - `backend/app/engine/gmail_poller.py`
+- `backend/app/engine/enricher.py`
+- `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
+- `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
@@ -30,6 +47,9 @@ Backend:
 Frontend:
 
 - `frontend/lib/api.ts`
+- `frontend/components/DashboardActions.tsx`
+- `frontend/components/DashboardTables.tsx`
+- `frontend/components/TradesTable.tsx`
 - `frontend/components/ManualFillForm.tsx`
 - `frontend/app/page.tsx`
 - `frontend/app/trades/page.tsx`
@@ -53,10 +73,12 @@ Analysis scripts:
 - Stock `price` is dollars per share.
 - `raw_email_id` is the dedupe key for imported fills.
 - Manual fills use `manual:` source IDs and are backed up to `backend/data/manual_fills.json`.
+- Enrichment fields are nullable and must be guarded before display, calculations, or AI prompts.
 
 ## Main User Flows
 
 - Gmail import: `POST /fills/import`
+- Gmail OAuth start/callback: `GET /auth/gmail/start`, `GET /auth/gmail/callback`
 - Manual fill create: `POST /fills`
 - Manual fill edit: `PUT /fills/{id}`
 - Rebuild everything from fills: `POST /rebuild`
@@ -70,6 +92,8 @@ These exist in the repo right now and may still be in flux:
 
 - Quote endpoints and dashboard mark pricing via `yfinance`
 - Reusable dashboard/trades table components
+- Gmail OAuth can be started from the app instead of copying a terminal URL
+- Fill enrichment fields and background enrichment status/actions
 - Startup merge of blank-last4 Roth data into canonical `8267`
 - New fill columns for source email subject and body
 - Skipping cumulative partial-fill option emails to avoid phantom duplicates
@@ -87,6 +111,8 @@ pip install -e .
 alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Use port `8080` only when `8000` is occupied, and set `NEXT_PUBLIC_API_URL`/`BACKEND_PUBLIC_URL` consistently if changing ports.
 
 Frontend:
 
@@ -111,6 +137,7 @@ Known environment note:
 
 - PnL mismatch: inspect `reconstructor.py`, then fill ordering, then account identity
 - Import mismatch: inspect `email_parser.py`, `gmail_poller.py`, and `fills.py`
+- Gmail OAuth mismatch: inspect `auth.py`, `gmail_poller.py`, Google redirect URIs, and `BACKEND_PUBLIC_URL`
 - Manual fill issue: inspect `ManualFillForm.tsx`, `frontend/lib/api.ts`, and `backend/app/routers/fills.py`
 - Dashboard numbers vs broker numbers: inspect reconciliation scripts and generated reports, not just `/stats`
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
-from app.models import Account, Fill, Trade, TradeFill
+from app.models import Account, Fill, FillMarketContext, Trade, TradeFill
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
@@ -76,6 +76,15 @@ def _assemble_daily_context(
         for tf in trade_fills:
             trade_fill_roles.setdefault(str(tf.trade_id), {})[str(tf.fill_id)] = tf.role
 
+    # Fetch Alpaca context for all fills in one batch
+    all_fill_ids = [fill.id for fills in fills_by_trade_id.values() for fill in fills]
+    alpaca_context_map: dict[str, FillMarketContext] = {}
+    if all_fill_ids:
+        ctx_rows = session.exec(
+            select(FillMarketContext).where(FillMarketContext.fill_id.in_(all_fill_ids))
+        ).all()
+        alpaca_context_map = {str(row.fill_id): row for row in ctx_rows}
+
     trade_context = []
     for trade in trades:
         opened_today = trade.opened_at.date() == review_day if trade.opened_at else False
@@ -117,7 +126,7 @@ def _assemble_daily_context(
                 "opened_at": trade.opened_at.isoformat() if trade.opened_at else None,
                 "closed_at": trade.closed_at.isoformat() if trade.closed_at else None,
                 "status": trade.status,
-                "fills": [_fill_context(fill, fill_roles.get(str(fill.id))) for fill in fills],
+                "fills": [_fill_context(fill, fill_roles.get(str(fill.id)), alpaca_context_map.get(str(fill.id))) for fill in fills],
             }
         )
 
@@ -134,6 +143,30 @@ def _assemble_daily_context(
         and trade.closed_at.date() == review_day
     ])
 
+    # Aggregate behavioral flags across all entry fills
+    entry_contexts = [
+        alpaca_context_map[str(fill.id)]
+        for fills in fills_by_trade_id.values()
+        for fill in fills
+        if fill.side in {"buy_to_open", "sell_to_open", "buy"} and str(fill.id) in alpaca_context_map
+    ]
+    total_entries = len(entry_contexts)
+
+    def _flag_count(attr: str) -> int:
+        return sum(1 for ctx in entry_contexts if getattr(ctx, attr) == 1)
+
+    behavioral_flags = {
+        "total_entry_fills_with_context": total_entries,
+        "chase_entry_count": _flag_count("is_chase_entry"),
+        "trend_aligned_count": _flag_count("is_trend_aligned"),
+        "late_move_count": _flag_count("is_late_move"),
+        "vwap_reclaim_count": _flag_count("is_vwap_reclaim"),
+        "or_breakout_count": _flag_count("is_opening_range_breakout"),
+        "premarket_breakout_count": _flag_count("is_premarket_breakout"),
+        "near_resistance_count": _flag_count("is_near_resistance_on_call_entry"),
+        "near_support_count": _flag_count("is_near_support_on_put_entry"),
+    } if entry_contexts else None
+
     return {
         "day": day,
         "summary_stats": {
@@ -147,13 +180,14 @@ def _assemble_daily_context(
             "win_rate": round(len(winners) / len(closed), 4) if closed else None,
             "premium_risked": round(sum(float(trade.total_premium_paid or 0) for trade in trades), 2),
             "tickers": sorted({trade.ticker for trade in trades}),
+            "behavioral_flags": behavioral_flags,
         },
         "trades": trade_context,
     }
 
 
-def _fill_context(fill: Fill, role: str | None) -> dict:
-    return {
+def _fill_context(fill: Fill, role: str | None, alpaca: FillMarketContext | None = None) -> dict:
+    base = {
         "id": str(fill.id),
         "role": role,
         "executed_at": fill.executed_at.isoformat() if fill.executed_at else None,
@@ -176,6 +210,33 @@ def _fill_context(fill: Fill, role: str | None) -> dict:
         "macd_at_fill": _float_or_none(fill.macd_at_fill),
         "macd_signal_at_fill": _float_or_none(fill.macd_signal_at_fill),
     }
+    if alpaca is not None:
+        base["alpaca_context"] = {
+            # Computed percentages — most actionable for coaching
+            "entry_vs_vwap_pct": _float_or_none(alpaca.entry_vs_vwap_pct),
+            "entry_vs_ema9_pct": _float_or_none(alpaca.entry_vs_ema9_pct),
+            "entry_rsi_14": _float_or_none(alpaca.entry_rsi_14),
+            "entry_atr_14": _float_or_none(alpaca.entry_atr_14),
+            "entry_macd_histogram": _float_or_none(alpaca.entry_macd_histogram),
+            "entry_gap_pct": _float_or_none(alpaca.entry_gap_pct),
+            "simple_relative_volume": _float_or_none(alpaca.simple_relative_volume),
+            "entry_day_range_used_pct": _float_or_none(alpaca.entry_day_range_used_pct),
+            "entry_distance_from_day_high_pct": _float_or_none(alpaca.entry_distance_from_day_high_pct),
+            "entry_distance_from_day_low_pct": _float_or_none(alpaca.entry_distance_from_day_low_pct),
+            "entry_time_bucket": alpaca.entry_time_bucket,
+            "dte_bucket": alpaca.dte_bucket,
+            # Behavioral flags (1=yes, 0=no, null=no data)
+            "is_chase_entry": alpaca.is_chase_entry,
+            "is_trend_aligned": alpaca.is_trend_aligned,
+            "is_late_move": alpaca.is_late_move,
+            "is_vwap_reclaim": alpaca.is_vwap_reclaim,
+            "is_opening_range_breakout": alpaca.is_opening_range_breakout,
+            "is_premarket_breakout": alpaca.is_premarket_breakout,
+            "is_near_resistance_on_call_entry": alpaca.is_near_resistance_on_call_entry,
+            "is_near_support_on_put_entry": alpaca.is_near_support_on_put_entry,
+            "is_overnight": alpaca.is_overnight,
+        }
+    return base
 
 
 def _float_or_none(value: object) -> float | None:
@@ -208,8 +269,44 @@ _SYSTEM_PROMPT = """You are an expert trading coach reviewing one trading day fr
 
 You will receive JSON with summary_stats and a list of stock/option trades. A trade is included when it opened or
 closed on the review day. Use activity_today/opened_today/closed_today to separate entry decisions from exit decisions.
-Fills may include underlying price, VWAP, IV, greeks, moving averages, RSI, and MACD. These fields are nullable; only
-use enriched data when present.
+
+## Fill enrichment data
+
+Each fill may contain two enrichment layers — all fields are nullable; only reference them when present.
+
+**Polygon layer** (on the fill itself): underlying_price_at_fill, vwap_at_fill, iv_at_fill, delta/gamma/theta/vega,
+moving averages (sma_20, sma_50, ema_9, ema_20, ema_9h), rsi_14, macd, macd_signal.
+
+**Alpaca layer** (in alpaca_context sub-object):
+- entry_vs_vwap_pct: how far above/below VWAP at entry (positive = above VWAP = buying strength or chasing)
+- entry_vs_ema9_pct: distance from 9-period EMA (large positive means extended)
+- entry_rsi_14: RSI at entry time (>70 overbought, <30 oversold)
+- entry_atr_14: daily ATR for volatility context
+- entry_macd_histogram: momentum direction at entry
+- entry_gap_pct: today's open vs prior close
+- simple_relative_volume: RVOL vs 20-day average (>1.5 = elevated, >2.0 = strong)
+- entry_day_range_used_pct: how much of the day's range was consumed at entry time (>80% = late in the move)
+- entry_distance_from_day_high_pct / entry_distance_from_day_low_pct: proximity to day extremes
+- entry_time_bucket / dte_bucket: time of day and days-to-expiry buckets
+
+**Behavioral flags** (1=yes, 0=no, null=no data):
+- is_chase_entry: entered significantly above VWAP on a buy, or below VWAP on a short
+- is_trend_aligned: entry direction matches daily trend (price above EMA-9 on call, below on put)
+- is_late_move: entered after >70% of the day's range was already consumed
+- is_vwap_reclaim: price was below VWAP but reclaimed it near entry
+- is_opening_range_breakout: price broke above/below the 5- or 15-minute opening range
+- is_premarket_breakout: price broke above premarket highs
+- is_near_resistance_on_call_entry: call entry near a known resistance level (day high, OR high, PM high)
+- is_near_support_on_put_entry: put entry near a known support level
+- is_overnight: position held overnight
+
+## summary_stats.behavioral_flags
+
+The summary_stats object includes aggregated flag counts across all entry fills that have Alpaca context.
+Cross-reference these with P&L outcomes. For example: if chase_entry_count is high and the day was a net loser,
+that is a key coaching point. If trend_aligned_count is high and winners outperformed, note the confirmation.
+
+## Instructions
 
 Return only valid JSON with this exact shape. Do not wrap it in markdown. Do not include any text before or after the JSON:
 
@@ -227,10 +324,11 @@ Return only valid JSON with this exact shape. Do not wrap it in markdown. Do not
     "ticker": "<ticker or null>",
     "reason": "<why this was weakest>"
   },
-  "patterns": ["<behavioral or execution pattern>", "<pattern>"],
-  "next_session_rules": ["<specific rule for next session>", "<rule>", "<rule>"]
+  "patterns": ["<behavioral or execution pattern observed across multiple trades>", "<pattern>"],
+  "next_session_rules": ["<specific, actionable rule for next session>", "<rule>", "<rule>"]
 }
 
-Focus on execution quality, risk sizing, repeated behavior, timing, and whether trades were held or exited well.
-Be specific and concise. Do not invent market data that is not in the JSON.
+Focus on execution quality, risk sizing, repeated behavioral patterns, timing, and whether trades were held or exited well.
+When behavioral flags are present, explicitly call out patterns — e.g. repeated chase entries, late moves, or entries near
+resistance. Be specific and concise. Do not invent market data that is not in the JSON.
 """

@@ -15,7 +15,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import get_session
 from app.engine.reconstructor import FillInput, reconstruct
-from app.models import Account, Fill, Trade, TradeFill, TradeTag
+from app.models import Account, Fill, Trade, TradeFill, TradeTag, TradePathMetrics
 
 MANUAL_FILLS_BACKUP = Path(__file__).parent.parent.parent / "data" / "manual_fills.json"
 
@@ -67,6 +67,7 @@ def _get_or_create_account(session: Session, last4: str, account_type: str) -> A
 
 
 def _clear_derived_trade_data(session: Session) -> None:
+    session.exec(delete(TradePathMetrics))
     session.exec(delete(TradeTag))
     session.exec(delete(TradeFill))
     session.exec(delete(Trade))

@@ -125,3 +125,102 @@ class TradeTag(SQLModel, table=True):
 
     trade: Optional[Trade] = Relationship(back_populates="trade_tags")
     tag: Optional[Tag] = Relationship(back_populates="trade_tags")
+
+
+class FillMarketContext(SQLModel, table=True):
+    """Alpaca-derived market context for a single fill. One row per fill."""
+    __tablename__ = "fill_market_context"
+
+    fill_id: uuid.UUID = Field(primary_key=True, foreign_key="fill.id")
+    data_source: str                        # alpaca_iex | alpaca_sip
+    fetched_at: datetime
+
+    # Underlying price at fill time (from minute bars)
+    entry_underlying_price: Optional[float] = None
+    entry_vwap: Optional[float] = None      # cumulative RTH VWAP at fill time
+    entry_vs_vwap_pct: Optional[float] = None
+    entry_volume: Optional[int] = None      # volume of the fill's minute bar
+    cumulative_volume_at_entry: Optional[int] = None
+    avg_daily_volume_20: Optional[float] = None
+    simple_relative_volume: Optional[float] = None
+
+    # Daily indicators (from daily bars, locally computed)
+    entry_sma_20: Optional[float] = None
+    entry_sma_50: Optional[float] = None
+    entry_ema_9: Optional[float] = None
+    entry_ema_20: Optional[float] = None
+    entry_rsi_14: Optional[float] = None
+    entry_macd: Optional[float] = None
+    entry_macd_signal: Optional[float] = None
+    entry_macd_histogram: Optional[float] = None
+    entry_atr_14: Optional[float] = None
+    entry_vs_ema9_pct: Optional[float] = None
+    entry_vs_ema20_pct: Optional[float] = None
+
+    # Intraday structure (from minute bars)
+    entry_day_high_so_far: Optional[float] = None
+    entry_day_low_so_far: Optional[float] = None
+    entry_day_range_used_pct: Optional[float] = None
+    entry_distance_from_day_high_pct: Optional[float] = None
+    entry_distance_from_day_low_pct: Optional[float] = None
+    premarket_high: Optional[float] = None
+    premarket_low: Optional[float] = None
+    entry_distance_from_premarket_high_pct: Optional[float] = None
+    entry_distance_from_premarket_low_pct: Optional[float] = None
+    opening_range_5m_high: Optional[float] = None
+    opening_range_5m_low: Optional[float] = None
+    opening_range_15m_high: Optional[float] = None
+    opening_range_15m_low: Optional[float] = None
+    entry_distance_from_or5_high_pct: Optional[float] = None
+    entry_distance_from_or5_low_pct: Optional[float] = None
+    entry_distance_from_or15_high_pct: Optional[float] = None
+    entry_distance_from_or15_low_pct: Optional[float] = None
+    previous_day_high: Optional[float] = None
+    previous_day_low: Optional[float] = None
+    previous_day_close: Optional[float] = None
+    entry_distance_from_prev_high_pct: Optional[float] = None
+    entry_distance_from_prev_low_pct: Optional[float] = None
+    entry_gap_pct: Optional[float] = None
+
+    # Behavioral flags: 0/1 int (None = could not compute)
+    is_chase_entry: Optional[int] = None
+    is_trend_aligned: Optional[int] = None
+    is_late_move: Optional[int] = None
+    is_vwap_reclaim: Optional[int] = None
+    is_opening_range_breakout: Optional[int] = None
+    is_premarket_breakout: Optional[int] = None
+    is_near_resistance_on_call_entry: Optional[int] = None
+    is_near_support_on_put_entry: Optional[int] = None
+    is_overnight: Optional[int] = None
+    entry_time_bucket: Optional[str] = None   # premarket|open|mid|close|afterhours
+    dte_bucket: Optional[str] = None          # 0dte|1-3dte|4-7dte|8-21dte|22+dte
+
+
+class TradePathMetrics(SQLModel, table=True):
+    """Underlying and option path metrics for a closed trade. One row per trade."""
+    __tablename__ = "trade_path_metrics"
+
+    trade_id: uuid.UUID = Field(primary_key=True, foreign_key="trade.id")
+    data_source: str
+    fetched_at: datetime
+
+    hold_duration_bucket: Optional[str] = None  # scalp|intraday|swing|multi-day
+    exit_time_bucket: Optional[str] = None       # premarket|open|mid|close|afterhours
+
+    # Underlying path (Phase 1/3)
+    underlying_mfe_pct: Optional[float] = None
+    underlying_mae_pct: Optional[float] = None
+    time_to_underlying_mfe_minutes: Optional[int] = None
+    time_to_underlying_mae_minutes: Optional[int] = None
+    underlying_exit_efficiency: Optional[float] = None
+    underlying_giveback_pct: Optional[float] = None
+    moved_in_favor_first: Optional[int] = None   # 1 if MFE reached before MAE
+
+    # Option path (Phase 3 — all nullable until then)
+    option_mfe_pct: Optional[float] = None
+    option_mae_pct: Optional[float] = None
+    option_max_price_seen: Optional[float] = None
+    option_min_price_seen: Optional[float] = None
+    time_to_option_mfe_minutes: Optional[int] = None
+    option_exit_efficiency: Optional[float] = None
+    option_giveback_pct: Optional[float] = None

@@ -17,6 +17,7 @@ import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import yfinance as yf
 
@@ -37,6 +38,7 @@ CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "polygon_ca
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 RISK_FREE_RATE = 0.05  # ~current fed funds rate
+ET = ZoneInfo("America/New_York")
 
 
 # ---------------------------------------------------------------------------
@@ -88,7 +90,7 @@ def _polygon_get(path: str, params: dict) -> dict:
             time.sleep(wait)
             continue
         if resp.status_code == 403:
-            log.warning("403 from Polygon for %s — ticker not covered by free tier, skipping", path)
+            log.warning("403 from Polygon for %s - API key is not entitled to this endpoint/data window, skipping", path)
             return {}
         if resp.status_code == 429:
             wait = 30 * (attempt + 1)
@@ -112,6 +114,12 @@ def _polygon_get(path: str, params: dict) -> dict:
 
 def fetch_minute_bars(ticker: str, day: date) -> dict[str, dict]:
     """Return {HH:MM -> {close, vwap}} for a ticker on a given trading day."""
+    # Polygon's free Stock aggregates are end-of-day recency. Same-day minute
+    # bars can 403 until Polygon has finalized/published the session.
+    if day >= datetime.now(ET).date():
+        log.info("Skipping Polygon minute bars for %s %s until end-of-day data is available", ticker, day)
+        return {}
+
     date_str = day.strftime("%Y-%m-%d")
     data = _polygon_get(
         f"/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}",

@@ -12,6 +12,22 @@ Current scope is broader than the original MVP notes:
 - There is no auth and no multi-user model.
 - The repo is optimized for local analysis, repair, and rebuild workflows.
 
+## Agent Operating Style
+
+Default behavior for coding agents in this repo:
+
+- Read only what matters for the task; use `CLAUDE.md`/`AGENTS.md` to orient quickly.
+- Batch searches, file reads, and cheap checks instead of issuing many tiny commands.
+- Avoid repeated `git status`, broad tree walks, or unrelated spelunking.
+- Find root cause first, then make the smallest safe fix directly.
+- Do not ask obvious follow-ups when the requested fix is local and low-risk.
+- Keep progress narration minimal; do not explain routine shell/file operations.
+- Prefer cheap targeted validation over full test suites unless the blast radius requires more.
+- Avoid unrelated refactors, formatting churn, and duplicated UI/table logic.
+- Final summaries should be brief: changed files/behavior, validation run, remaining risk.
+
+Highest-risk areas require extra care: PnL math, FIFO reconstruction, Gmail/email parsing, fill dedupe, account identity, reconciliation outputs, nullable enrichment fields, and frontend data-fetch patterns that can create N+1 calls.
+
 ## Stack
 
 - Frontend: Next.js 16, React 19, App Router, Tailwind
@@ -65,6 +81,9 @@ The app currently allows editing fills to correct history, then rebuilding deriv
   - fractional stock shares
   - anomaly reporting for orphaned and over-closed exits
 - Gmail poller using the Gmail API
+- In-app Gmail OAuth flow:
+  - `GET /auth/gmail/start` returns a Google auth URL
+  - `GET /auth/gmail/callback` saves `backend/token.json`
 - Robinhood email parser for:
   - option execution emails
   - stock execution emails
@@ -85,6 +104,7 @@ The app currently allows editing fills to correct history, then rebuilding deriv
 - Dashboard with summary cards
 - Dashboard action bar for:
   - email sync
+  - in-browser Gmail authorization when needed
   - rebuild all
   - resync all
   - jump to manual fills
@@ -111,6 +131,7 @@ These are present in the repo right now but are not all committed yet:
   - `backend/app/engine/quotes.py`
   - `backend/app/routers/quotes.py`
   - dashboard pricing of open positions
+- Gmail OAuth no longer depends on copying a terminal URL. The frontend can call `/auth/gmail/start`, redirect to Google, and return through `/auth/gmail/callback`.
 - Open positions and closed trades table logic has been extracted into reusable components:
   - `frontend/components/DashboardTables.tsx`
   - `frontend/components/TradesTable.tsx`
@@ -132,6 +153,7 @@ Highest-leverage backend files:
 - `backend/app/engine/gmail_poller.py`
 - `backend/app/engine/enricher.py`
 - `backend/app/ai/reviewer.py`
+- `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
@@ -145,6 +167,9 @@ Highest-leverage frontend files:
 - `frontend/app/trades/[id]/page.tsx`
 - `frontend/app/fills/page.tsx`
 - `frontend/app/fills/[id]/page.tsx`
+- `frontend/components/DashboardActions.tsx`
+- `frontend/components/DashboardTables.tsx`
+- `frontend/components/TradesTable.tsx`
 - `frontend/components/ManualFillForm.tsx`
 - `frontend/lib/api.ts`
 
@@ -162,6 +187,8 @@ Scratch comparison scripts also exist in `backend/compare_fills*.py`. Treat them
 Stable current routes:
 
 - `GET /health`
+- `GET /auth/gmail/start`
+- `GET /auth/gmail/callback`
 - `GET /accounts`
 - `GET /fills`
 - `POST /fills`
@@ -177,8 +204,6 @@ Stable current routes:
 - `GET /stats`
 - `POST /rebuild`
 
-Working-tree routes being added:
-
 - `GET /quotes`
 - `POST /quotes/positions`
 
@@ -190,8 +215,10 @@ Backend:
 cd backend
 pip install -e .
 alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8080
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Use port `8080` only when `8000` is occupied, and set `NEXT_PUBLIC_API_URL`/`BACKEND_PUBLIC_URL` consistently if changing ports.
 
 Frontend:
 
@@ -237,8 +264,9 @@ The report work is centered on understanding:
 - Be careful with account identity; Roth fills with blank `last4` are part of the active cleanup story.
 - If a change touches fill import or email parsing, check the downstream impact on rebuilds and reconciliation scripts.
 - If a change touches the UI tables, prefer reusing the extracted table components instead of duplicating table logic.
+- Avoid frontend N+1 calls; batch data loading or extend shared API responses when practical.
 - Fill enrichment fields are all nullable — always guard with null checks before displaying or passing to AI.
 - Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
-- Backend port is 8080 (Windows zombie socket on 8000).
+- Backend port is usually 8000. Use 8080 only when 8000 is occupied, and keep OAuth/API URLs in sync.
 - Polygon cache lives at `backend/data/polygon_cache/`. Delete a cache file to force a re-fetch for that ticker/date.
 - Update `CLAUDE.md` and `AGENTS.md` together when project scope changes materially.

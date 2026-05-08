@@ -13,10 +13,17 @@ export default function DashboardActions() {
   const [enrichStatus, setEnrichStatus] = useState<Status>("idle");
   const [enrichRange, setEnrichRange] = useState<EnrichRange>("week");
   const [enrichProgress, setEnrichProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [alpacaEnrichStatus, setAlpacaEnrichStatus] = useState<Status>("idle");
+  const [alpacaEnrichProgress, setAlpacaEnrichProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [alpacaForce, setAlpacaForce] = useState(false);
+  const [pathStatus, setPathStatus] = useState<Status>("idle");
+  const [pathProgress, setPathProgress] = useState<{ done: number; total: number; current: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alpacaPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pathPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const busy = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading" || enrichStatus === "loading";
+  const busy = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading" || enrichStatus === "loading" || alpacaEnrichStatus === "loading" || pathStatus === "loading";
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -29,7 +36,36 @@ export default function DashboardActions() {
       window.history.replaceState({}, "", window.location.pathname);
     }
 
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    // Reconnect to any in-progress enrichment after tab switch or remount
+    api.enrichStatus().then((s) => {
+      if (s.running) {
+        setEnrichStatus("loading");
+        setEnrichProgress({ done: s.done, total: s.total, current: s.current });
+        startPolling();
+      }
+    }).catch(() => {});
+
+    api.alpacaEnrichStatus().then((s) => {
+      if (s.running) {
+        setAlpacaEnrichStatus("loading");
+        setAlpacaEnrichProgress({ done: s.done, total: s.total, current: s.current });
+        startAlpacaPolling();
+      }
+    }).catch(() => {});
+
+    api.tradePathStatus().then((s) => {
+      if (s.running) {
+        setPathStatus("loading");
+        setPathProgress({ done: s.done, total: s.total, current: s.current });
+        startPathPolling();
+      }
+    }).catch(() => {});
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+      if (alpacaPollRef.current) clearInterval(alpacaPollRef.current);
+      if (pathPollRef.current) clearInterval(pathPollRef.current);
+    };
   }, []);
 
   async function connectGmail() {
@@ -107,6 +143,104 @@ export default function DashboardActions() {
         setEnrichProgress(null);
       }
     }, 2000);
+  }
+
+  function startAlpacaPolling() {
+    if (alpacaPollRef.current) clearInterval(alpacaPollRef.current);
+    alpacaPollRef.current = setInterval(async () => {
+      try {
+        const s = await api.alpacaEnrichStatus();
+        setAlpacaEnrichProgress({ done: s.done, total: s.total, current: s.current });
+        if (!s.running) {
+          clearInterval(alpacaPollRef.current!);
+          alpacaPollRef.current = null;
+          if (s.error) {
+            setMsg(`Alpaca enrich failed: ${s.error}`);
+            setAlpacaEnrichStatus("error");
+          } else {
+            setMsg(`Alpaca: enriched ${s.enriched} of ${s.total} fill(s).`);
+            setAlpacaEnrichStatus("done");
+          }
+          setAlpacaEnrichProgress(null);
+          setTimeout(() => setAlpacaEnrichStatus("idle"), 4000);
+        }
+      } catch {
+        clearInterval(alpacaPollRef.current!);
+        alpacaPollRef.current = null;
+        setAlpacaEnrichStatus("error");
+        setAlpacaEnrichProgress(null);
+      }
+    }, 2000);
+  }
+
+  async function handleAlpacaEnrich() {
+    setAlpacaEnrichStatus("loading");
+    setAlpacaEnrichProgress(null);
+    setMsg(null);
+    try {
+      const r = await api.alpacaEnrichMissing(enrichRange, alpacaForce);
+      if (!r.started) {
+        setMsg("No fills missing Alpaca context.");
+        setAlpacaEnrichStatus("done");
+        setTimeout(() => setAlpacaEnrichStatus("idle"), 3000);
+        return;
+      }
+      setAlpacaEnrichProgress({ done: 0, total: r.total_missing, current: "" });
+      startAlpacaPolling();
+    } catch (e) {
+      setMsg(`Alpaca enrich failed: ${(e as Error).message}`);
+      setAlpacaEnrichStatus("error");
+      setTimeout(() => setAlpacaEnrichStatus("idle"), 4000);
+    }
+  }
+
+  function startPathPolling() {
+    if (pathPollRef.current) clearInterval(pathPollRef.current);
+    pathPollRef.current = setInterval(async () => {
+      try {
+        const s = await api.tradePathStatus();
+        setPathProgress({ done: s.done, total: s.total, current: s.current });
+        if (!s.running) {
+          clearInterval(pathPollRef.current!);
+          pathPollRef.current = null;
+          if (s.error) {
+            setMsg(`Path metrics failed: ${s.error}`);
+            setPathStatus("error");
+          } else {
+            setMsg(`Path metrics: computed ${s.enriched} of ${s.total} trade(s).`);
+            setPathStatus("done");
+          }
+          setPathProgress(null);
+          setTimeout(() => setPathStatus("idle"), 4000);
+        }
+      } catch {
+        clearInterval(pathPollRef.current!);
+        pathPollRef.current = null;
+        setPathStatus("error");
+        setPathProgress(null);
+      }
+    }, 2000);
+  }
+
+  async function handleComputePath() {
+    setPathStatus("loading");
+    setPathProgress(null);
+    setMsg(null);
+    try {
+      const r = await api.computeTradePaths(enrichRange);
+      if (!r.started) {
+        setMsg("No closed trades missing path metrics.");
+        setPathStatus("done");
+        setTimeout(() => setPathStatus("idle"), 3000);
+        return;
+      }
+      setPathProgress({ done: 0, total: r.total_missing, current: "" });
+      startPathPolling();
+    } catch (e) {
+      setMsg(`Path metrics failed: ${(e as Error).message}`);
+      setPathStatus("error");
+      setTimeout(() => setPathStatus("idle"), 4000);
+    }
   }
 
   async function handleEnrich() {
@@ -193,6 +327,44 @@ export default function DashboardActions() {
               : "Enrich Missing"}
         </button>
       </div>
+      <div className="flex items-center rounded border border-violet-800/50">
+        <button
+          onClick={handleAlpacaEnrich}
+          disabled={busy}
+          className="rounded-l bg-violet-900/30 px-3 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-900/50 disabled:opacity-50"
+        >
+          {alpacaEnrichStatus === "loading"
+            ? alpacaEnrichProgress && alpacaEnrichProgress.total > 0
+              ? `Alpaca ${alpacaEnrichProgress.done}/${alpacaEnrichProgress.total}${alpacaEnrichProgress.current ? ` ${alpacaEnrichProgress.current}` : ""}`
+              : "Alpaca Starting..."
+            : alpacaEnrichStatus === "done"
+              ? "Alpaca Done"
+              : "Alpaca Context"}
+        </button>
+        <label className="flex cursor-pointer items-center gap-1 border-l border-violet-800/50 px-2 py-1.5 text-xs text-violet-400 hover:text-violet-300">
+          <input
+            type="checkbox"
+            checked={alpacaForce}
+            onChange={(e) => setAlpacaForce(e.target.checked)}
+            disabled={busy}
+            className="accent-violet-500 disabled:opacity-50"
+          />
+          All
+        </label>
+      </div>
+      <button
+        onClick={handleComputePath}
+        disabled={busy}
+        className="rounded border border-teal-800/50 bg-teal-900/30 px-3 py-1.5 text-xs font-medium text-teal-300 transition-colors hover:bg-teal-900/50 disabled:opacity-50"
+      >
+        {pathStatus === "loading"
+          ? pathProgress && pathProgress.total > 0
+            ? `Path ${pathProgress.done}/${pathProgress.total}${pathProgress.current ? ` ${pathProgress.current}` : ""}`
+            : "Path Starting..."
+          : pathStatus === "done"
+            ? "Path Done"
+            : "Path Metrics"}
+      </button>
       <button
         onClick={handleSync}
         disabled={busy}

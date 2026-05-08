@@ -1,5 +1,5 @@
 import DailyAiPanel from "@/components/DailyAiPanel";
-import { api, Account, Fill, PositionQuote, Trade } from "@/lib/api";
+import { api, Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
 
 type TradeWithFills = {
   trade: Trade;
@@ -176,6 +176,12 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
   ]);
 
   const fillsByTradeId = Object.fromEntries(tradeFillEntries);
+
+  // Fetch Alpaca context for all fills in one batch
+  const allFillIds = Object.values(fillsByTradeId).flat().map((f) => f.id);
+  const alpacaContexts: Record<string, FillMarketContext> = allFillIds.length
+    ? await api.bulkFillMarketContext(allFillIds).catch(() => ({}))
+    : {};
   const rows: TradeWithFills[] = selectedTrades.map((trade) => ({
     trade,
     fills: fillsByTradeId[trade.id] ?? [],
@@ -227,6 +233,28 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
   const sameDayTrades = selectedTrades.filter((trade) => tradeActivityForDay(trade, selectedDay) === "same_day");
   const openedOnlyTrades = selectedTrades.filter((trade) => tradeActivityForDay(trade, selectedDay) === "opened");
   const closedOnlyTrades = selectedTrades.filter((trade) => tradeActivityForDay(trade, selectedDay) === "closed");
+
+  // Aggregate behavioral flags across entry fills for the Session Behavior card
+  const entryFillContexts = Object.values(fillsByTradeId)
+    .flat()
+    .filter(isEntryFill)
+    .map((f) => alpacaContexts[f.id])
+    .filter(Boolean) as FillMarketContext[];
+
+  const flagCount = (key: keyof FillMarketContext) =>
+    entryFillContexts.filter((ctx) => ctx[key] === 1).length;
+
+  const sessionBehavior = entryFillContexts.length > 0 ? {
+    total: entryFillContexts.length,
+    chase: flagCount("is_chase_entry"),
+    trendAligned: flagCount("is_trend_aligned"),
+    lateMove: flagCount("is_late_move"),
+    vwapReclaim: flagCount("is_vwap_reclaim"),
+    orBreakout: flagCount("is_opening_range_breakout"),
+    pmBreakout: flagCount("is_premarket_breakout"),
+    nearResistance: flagCount("is_near_resistance_on_call_entry"),
+    nearSupport: flagCount("is_near_support_on_put_entry"),
+  } : null;
 
   const tickerSummary = [...new Set(selectedTrades.map((trade) => trade.ticker))].map((ticker) => {
     const tickerTrades = selectedTrades.filter((trade) => trade.ticker === ticker);
@@ -329,6 +357,29 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
             <ActivityList title="Opened Today" trades={openedOnlyTrades} selectedDay={selectedDay} />
             <ActivityList title="Closed From Prior Days" trades={closedOnlyTrades} selectedDay={selectedDay} />
           </section>
+
+          {sessionBehavior && (
+            <section className="rounded-lg border bg-card p-5">
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Session Behavior
+                </h2>
+                <span className="text-xs text-muted-foreground">
+                  {sessionBehavior.total} entry fill{sessionBehavior.total !== 1 ? "s" : ""} with context
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <BehaviorChip label="Chase" count={sessionBehavior.chase} total={sessionBehavior.total} warn />
+                <BehaviorChip label="Trend Aligned" count={sessionBehavior.trendAligned} total={sessionBehavior.total} good />
+                <BehaviorChip label="Late Move" count={sessionBehavior.lateMove} total={sessionBehavior.total} warn />
+                <BehaviorChip label="VWAP Reclaim" count={sessionBehavior.vwapReclaim} total={sessionBehavior.total} good />
+                <BehaviorChip label="OR Breakout" count={sessionBehavior.orBreakout} total={sessionBehavior.total} good />
+                <BehaviorChip label="PM Breakout" count={sessionBehavior.pmBreakout} total={sessionBehavior.total} good />
+                <BehaviorChip label="Near Resistance" count={sessionBehavior.nearResistance} total={sessionBehavior.total} warn />
+                <BehaviorChip label="Near Support" count={sessionBehavior.nearSupport} total={sessionBehavior.total} good />
+              </div>
+            </section>
+          )}
 
           <section className="overflow-x-auto rounded-lg border bg-card">
             <div className="border-b px-5 py-4">
@@ -451,6 +502,9 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                 <div className="divide-y divide-border">
                   {fills.map((fill) => {
                     const chips = buildFillChips(fill);
+                    const ctx = alpacaContexts[fill.id] ?? null;
+                    const alpacaChips = buildAlpacaChips(ctx);
+                    const activeFlags = ctx ? buildActiveFlags(ctx) : [];
                     return (
                       <a
                         key={fill.id}
@@ -472,12 +526,26 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
                           <span className="text-muted-foreground">
                             {fmtMoney(fill.contracts * fill.price)} notional
                           </span>
+                          {activeFlags.map((flag) => (
+                            <span key={flag.label} className={`rounded px-1.5 py-0.5 text-xs font-medium ${flag.cls}`}>
+                              {flag.label}
+                            </span>
+                          ))}
                         </div>
                         {chips.length > 0 && (
                           <div className="mt-3 flex flex-wrap gap-1.5">
                             {chips.map((chip) => (
                               <span key={`${fill.id}-${chip.label}`} className="rounded bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
                                 <span className="text-foreground/60">{chip.label}</span> {chip.value}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {alpacaChips.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1.5">
+                            {alpacaChips.map((chip) => (
+                              <span key={`${fill.id}-alpaca-${chip.label}`} className="rounded bg-violet-900/20 px-1.5 py-0.5 text-xs text-muted-foreground">
+                                <span className="text-violet-400/70">{chip.label}</span> {chip.value}
                               </span>
                             ))}
                           </div>
@@ -579,4 +647,64 @@ function Th({ children }: { children: React.ReactNode }) {
 
 function Td({ children }: { children: React.ReactNode }) {
   return <td className="px-4 py-3 align-top">{children}</td>;
+}
+
+function buildAlpacaChips(ctx: FillMarketContext | null): { label: string; value: string }[] {
+  if (!ctx) return [];
+  const chips: { label: string; value: string }[] = [];
+  if (ctx.entry_vs_vwap_pct != null) {
+    const v = ctx.entry_vs_vwap_pct;
+    chips.push({ label: "vs VWAP", value: `${v >= 0 ? "+" : ""}${v.toFixed(2)}%` });
+  }
+  if (ctx.simple_relative_volume != null) chips.push({ label: "RVOL", value: ctx.simple_relative_volume.toFixed(2) + "x" });
+  if (ctx.entry_rsi_14 != null) chips.push({ label: "RSI", value: ctx.entry_rsi_14.toFixed(1) });
+  if (ctx.entry_gap_pct != null) {
+    const v = ctx.entry_gap_pct;
+    chips.push({ label: "Gap", value: `${v >= 0 ? "+" : ""}${v.toFixed(2)}%` });
+  }
+  if (ctx.entry_day_range_used_pct != null) chips.push({ label: "Range used", value: `${ctx.entry_day_range_used_pct.toFixed(1)}%` });
+  return chips;
+}
+
+function buildActiveFlags(ctx: FillMarketContext): { label: string; cls: string }[] {
+  const flags: { label: string; cls: string }[] = [];
+  if (ctx.is_chase_entry === 1) flags.push({ label: "Chase", cls: "bg-red-900/40 text-red-300" });
+  if (ctx.is_late_move === 1) flags.push({ label: "Late Move", cls: "bg-red-900/40 text-red-300" });
+  if (ctx.is_near_resistance_on_call_entry === 1) flags.push({ label: "Near Resistance", cls: "bg-amber-900/40 text-amber-300" });
+  if (ctx.is_near_support_on_put_entry === 1) flags.push({ label: "Near Support", cls: "bg-amber-900/40 text-amber-300" });
+  if (ctx.is_trend_aligned === 1) flags.push({ label: "Trend Aligned", cls: "bg-emerald-900/40 text-emerald-300" });
+  if (ctx.is_vwap_reclaim === 1) flags.push({ label: "VWAP Reclaim", cls: "bg-emerald-900/40 text-emerald-300" });
+  if (ctx.is_opening_range_breakout === 1) flags.push({ label: "OR Breakout", cls: "bg-emerald-900/40 text-emerald-300" });
+  if (ctx.is_premarket_breakout === 1) flags.push({ label: "PM Breakout", cls: "bg-emerald-900/40 text-emerald-300" });
+  if (ctx.is_overnight === 1) flags.push({ label: "Overnight", cls: "bg-muted text-muted-foreground" });
+  return flags;
+}
+
+function BehaviorChip({
+  label,
+  count,
+  total,
+  warn = false,
+  good = false,
+}: {
+  label: string;
+  count: number;
+  total: number;
+  warn?: boolean;
+  good?: boolean;
+}) {
+  const active = count > 0;
+  const cls = active
+    ? warn
+      ? "border-red-800/50 bg-red-900/20 text-red-300"
+      : good
+        ? "border-emerald-800/50 bg-emerald-900/20 text-emerald-300"
+        : "border-border bg-muted text-foreground"
+    : "border-border bg-transparent text-muted-foreground/50";
+  return (
+    <span className={`rounded border px-2.5 py-1 text-xs font-medium ${cls}`}>
+      {label}
+      {active && <span className="ml-1.5 font-bold">{count}/{total}</span>}
+    </span>
+  );
 }

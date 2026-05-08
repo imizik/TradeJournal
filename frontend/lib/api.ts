@@ -134,6 +134,82 @@ export type DailyReviewIndexItem = {
   generated_at: string | null;
 };
 
+export type FillMarketContext = {
+  fill_id: string;
+  data_source: string;
+  fetched_at: string;
+  // Underlying price
+  entry_underlying_price: number | null;
+  entry_vwap: number | null;
+  entry_vs_vwap_pct: number | null;
+  entry_volume: number | null;
+  cumulative_volume_at_entry: number | null;
+  avg_daily_volume_20: number | null;
+  simple_relative_volume: number | null;
+  // Daily indicators
+  entry_sma_20: number | null;
+  entry_sma_50: number | null;
+  entry_ema_9: number | null;
+  entry_ema_20: number | null;
+  entry_rsi_14: number | null;
+  entry_macd: number | null;
+  entry_macd_signal: number | null;
+  entry_macd_histogram: number | null;
+  entry_atr_14: number | null;
+  entry_vs_ema9_pct: number | null;
+  entry_vs_ema20_pct: number | null;
+  // Intraday structure
+  entry_day_high_so_far: number | null;
+  entry_day_low_so_far: number | null;
+  entry_day_range_used_pct: number | null;
+  entry_distance_from_day_high_pct: number | null;
+  entry_distance_from_day_low_pct: number | null;
+  premarket_high: number | null;
+  premarket_low: number | null;
+  opening_range_5m_high: number | null;
+  opening_range_5m_low: number | null;
+  opening_range_15m_high: number | null;
+  opening_range_15m_low: number | null;
+  previous_day_high: number | null;
+  previous_day_low: number | null;
+  previous_day_close: number | null;
+  entry_gap_pct: number | null;
+  // Flags
+  is_chase_entry: number | null;
+  is_trend_aligned: number | null;
+  is_late_move: number | null;
+  is_vwap_reclaim: number | null;
+  is_opening_range_breakout: number | null;
+  is_premarket_breakout: number | null;
+  is_near_resistance_on_call_entry: number | null;
+  is_near_support_on_put_entry: number | null;
+  is_overnight: number | null;
+  entry_time_bucket: string | null;
+  dte_bucket: string | null;
+};
+
+export type TradePathMetrics = {
+  trade_id: string;
+  data_source: string;
+  fetched_at: string;
+  hold_duration_bucket: string | null;
+  exit_time_bucket: string | null;
+  underlying_mfe_pct: number | null;
+  underlying_mae_pct: number | null;
+  time_to_underlying_mfe_minutes: number | null;
+  time_to_underlying_mae_minutes: number | null;
+  underlying_exit_efficiency: number | null;
+  underlying_giveback_pct: number | null;
+  moved_in_favor_first: number | null;
+  option_mfe_pct: number | null;
+  option_mae_pct: number | null;
+  option_max_price_seen: number | null;
+  option_min_price_seen: number | null;
+  time_to_option_mfe_minutes: number | null;
+  option_exit_efficiency: number | null;
+  option_giveback_pct: number | null;
+};
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, { cache: "no-store" });
   if (!res.ok) throw await buildApiError(path, res);
@@ -204,4 +280,16 @@ export const api = {
   positionQuotes: (positions: { ticker: string; expiration: string; strike: number; option_type: string }[]) =>
     post<PositionQuote[]>("/quotes/positions", { positions }),
   stockQuotes: (tickers: string[]) => get<Record<string, number | null>>(`/quotes?tickers=${tickers.join(",")}`),
+  fillMarketContext: (fillId: string) => get<FillMarketContext>(`/market-context/fill/${fillId}`),
+  bulkFillMarketContext: (fillIds: string[]) =>
+    get<Record<string, FillMarketContext>>(`/market-context/fills/bulk?ids=${fillIds.join(",")}`),
+  alpacaEnrichMissing: (range: "day" | "week" | "month" | "all", force?: boolean) =>
+    post<{ started: boolean; total_missing: number }>(`/market-context/enrich?range=${range}${force ? "&force=true" : ""}`),
+  alpacaEnrichStatus: () =>
+    get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/market-context/enrich/status"),
+  tradePathMetrics: (tradeId: string) => get<TradePathMetrics>(`/market-context/trade/${tradeId}`),
+  computeTradePaths: (range: "day" | "week" | "month" | "all", force?: boolean) =>
+    post<{ started: boolean; total_missing: number }>(`/market-context/trade-path/compute?range=${range}${force ? "&force=true" : ""}`),
+  tradePathStatus: () =>
+    get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/market-context/trade-path/status"),
 };

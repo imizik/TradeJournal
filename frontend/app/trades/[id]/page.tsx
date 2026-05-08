@@ -1,7 +1,9 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import { api, Fill, Trade } from "@/lib/api";
+import { api, Fill, FillMarketContext, Trade, TradePathMetrics } from "@/lib/api";
+import AlpacaContextSection from "@/components/AlpacaContextSection";
+import TradePathSection from "@/components/TradePathSection";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -42,6 +44,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params);
   const [trade, setTrade] = useState<Trade | null>(null);
   const [fills, setFills] = useState<Fill[] | null>(null);
+  const [alpacaContexts, setAlpacaContexts] = useState<Record<string, FillMarketContext>>({});
+  const [pathMetrics, setPathMetrics] = useState<TradePathMetrics | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
 
@@ -50,6 +54,15 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
       .then(([t, f]) => {
         setTrade(t);
         setFills(f);
+        // Fetch Alpaca context for all fills in one batch call
+        if (f.length > 0) {
+          api.bulkFillMarketContext(f.map((fill) => fill.id))
+            .then(setAlpacaContexts)
+            .catch(() => {});
+        }
+        api.tradePathMetrics(id)
+          .then(setPathMetrics)
+          .catch(() => {});
       })
       .catch(() => {
         setTrade(null);
@@ -182,6 +195,12 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
           })}
         </div>
       </div>
+
+      {fills && Object.keys(alpacaContexts).length > 0 && (
+        <AlpacaContextSection fills={fills} contexts={alpacaContexts} />
+      )}
+
+      {pathMetrics && <TradePathSection metrics={pathMetrics} />}
 
       <div className="rounded-lg border bg-card p-5">
         <div className="mb-3 flex items-center justify-between">
