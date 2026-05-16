@@ -8,72 +8,30 @@ GET  /market-context/fills/bulk      FillMarketContext for multiple fills
 GET  /market-context/trade/{trade_id} TradePathMetrics for one trade
 """
 
-import threading
 import uuid
-from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
-from app.database import get_session, engine
-from app.models import Fill, FillMarketContext, Trade, TradePathMetrics
+from app.database import get_session
+from app.engine.jobs import (
+    JOB_ALPACA_ENRICH,
+    JOB_TRADE_PATH,
+    create_alpaca_enrichment_job,
+    create_trade_path_job,
+    job_status,
+    latest_job,
+    run_job,
+    running_job,
+)
+from app.models import Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 router = APIRouter()
 
-# ---------------------------------------------------------------------------
-# Background enrichment state (separate from Polygon enrichment in fills.py)
-# ---------------------------------------------------------------------------
+def _start_job_thread(job_id: uuid.UUID) -> None:
+    import threading
 
-_state: dict = {
-    "running": False,
-    "done": 0,
-    "total": 0,
-    "current": "",
-    "enriched": 0,
-    "error": None,
-}
-_lock = threading.Lock()
-
-_path_state: dict = {
-    "running": False,
-    "done": 0,
-    "total": 0,
-    "current": "",
-    "enriched": 0,
-    "error": None,
-}
-_path_lock = threading.Lock()
-
-
-def _run_background(fill_ids: list, force: bool = False) -> None:
-    from app.engine.alpaca_enricher import enrich_fills_alpaca
-
-    with _lock:
-        _state["running"] = True
-        _state["done"] = 0
-        _state["total"] = len(fill_ids)
-        _state["current"] = ""
-        _state["enriched"] = 0
-        _state["error"] = None
-
-    def on_progress(done: int, label: str) -> None:
-        with _lock:
-            _state["done"] = done
-            _state["current"] = label
-
-    try:
-        with Session(engine) as session:
-            fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
-            enriched = enrich_fills_alpaca(list(fills), session, on_progress=on_progress, force=force)
-            with _lock:
-                _state["enriched"] = enriched
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception("Background Alpaca enrichment failed")
-        with _lock:
-            _state["error"] = str(exc)
-    finally:
-        with _lock:
-            _state["running"] = False
+    t = threading.Thread(target=run_job, args=(job_id,), daemon=True)
+    t.start()
 
 
 # ---------------------------------------------------------------------------
@@ -81,9 +39,8 @@ def _run_background(fill_ids: list, force: bool = False) -> None:
 # ---------------------------------------------------------------------------
 
 @router.get("/enrich/status")
-async def enrich_status():
-    with _lock:
-        return dict(_state)
+async def enrich_status(session: Session = Depends(get_session)):
+    return job_status(latest_job(session, JOB_ALPACA_ENRICH))
 
 
 @router.post("/enrich")
@@ -97,35 +54,15 @@ async def enrich_missing(
     range: day | week | month | all
     force: re-enrich fills that already have a context row
     """
-    with _lock:
-        if _state["running"]:
-            raise HTTPException(status_code=409, detail="Alpaca enrichment already running")
+    if running_job(session, JOB_ALPACA_ENRICH):
+        raise HTTPException(status_code=409, detail="Alpaca enrichment already running")
 
-    cutoff: datetime | None = None
-    if range == "day":
-        cutoff = datetime.utcnow() - timedelta(days=1)
-    elif range == "week":
-        cutoff = datetime.utcnow() - timedelta(weeks=1)
-    elif range == "month":
-        cutoff = datetime.utcnow() - timedelta(days=30)
-
-    # When not forcing, only queue fills without existing context
-    if not force:
-        existing_fill_ids = set(session.exec(select(FillMarketContext.fill_id)).all())
-        query = select(Fill.id).where(Fill.id.notin_(existing_fill_ids))
-    else:
-        query = select(Fill.id)
-
-    if cutoff is not None:
-        query = query.where(Fill.executed_at >= cutoff)
-
-    fill_ids = session.exec(query).all()
-    if not fill_ids:
+    job = create_alpaca_enrichment_job(session, range_value=range, force=force)
+    if not job.total:
         return {"started": False, "total_missing": 0}
 
-    t = threading.Thread(target=_run_background, args=(fill_ids, force), daemon=True)
-    t.start()
-    return {"started": True, "total_missing": len(fill_ids)}
+    _start_job_thread(job.id)
+    return {"started": True, "total_missing": job.total, "job_id": str(job.id)}
 
 
 @router.get("/fill/{fill_id}", response_model=FillMarketContext)
@@ -160,46 +97,73 @@ async def get_trade_path(trade_id: uuid.UUID, session: Session = Depends(get_ses
     return metrics
 
 
-# ---------------------------------------------------------------------------
-# Trade path metrics background job
-# ---------------------------------------------------------------------------
-
-def _run_path_background(trade_ids: list, force: bool = False) -> None:
-    from app.engine.trade_path import compute_path_metrics_for_trades
-
-    with _path_lock:
-        _path_state["running"] = True
-        _path_state["done"] = 0
-        _path_state["total"] = len(trade_ids)
-        _path_state["current"] = ""
-        _path_state["enriched"] = 0
-        _path_state["error"] = None
-
-    def on_progress(done: int, label: str) -> None:
-        with _path_lock:
-            _path_state["done"] = done
-            _path_state["current"] = label
-
-    try:
-        with Session(engine) as session:
-            trades = session.exec(select(Trade).where(Trade.id.in_(trade_ids))).all()
-            enriched = compute_path_metrics_for_trades(list(trades), session, on_progress=on_progress, force=force)
-            with _path_lock:
-                _path_state["enriched"] = enriched
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).exception("Background trade path computation failed")
-        with _path_lock:
-            _path_state["error"] = str(exc)
-    finally:
-        with _path_lock:
-            _path_state["running"] = False
-
-
 @router.get("/trade-path/status")
-async def trade_path_status():
-    with _path_lock:
-        return dict(_path_state)
+async def trade_path_status(session: Session = Depends(get_session)):
+    return job_status(latest_job(session, JOB_TRADE_PATH))
+
+
+@router.get("/coverage")
+async def get_coverage(session: Session = Depends(get_session)):
+    """
+    Returns enrichment coverage counts for fills and closed trades.
+    Cheap — three COUNT queries.
+    """
+    from sqlalchemy import func
+
+    total_fills = session.exec(select(func.count(Fill.id))).one()
+    poly_enriched = session.exec(
+        select(func.count(Fill.id)).where(Fill.underlying_price_at_fill.isnot(None))
+    ).one()
+    alpaca_enriched = session.exec(
+        select(func.count(FillMarketContext.fill_id))
+    ).one()
+    total_closed = session.exec(
+        select(func.count(Trade.id)).where(Trade.status.in_(["closed", "expired"]))
+    ).one()
+    path_done = session.exec(
+        select(func.count(TradePathMetrics.trade_id))
+    ).one()
+
+    return {
+        "fills": {
+            "total": total_fills,
+            "polygon_enriched": poly_enriched,
+            "polygon_missing": max(0, total_fills - poly_enriched),
+            "alpaca_enriched": alpaca_enriched,
+            "alpaca_missing": max(0, total_fills - alpaca_enriched),
+        },
+        "trades": {
+            "total_closed": total_closed,
+            "path_metrics_done": path_done,
+            "path_metrics_missing": max(0, total_closed - path_done),
+        },
+    }
+
+
+@router.get("/audit/{trade_id}")
+async def get_trade_audit(trade_id: uuid.UUID, session: Session = Depends(get_session)):
+    """
+    Synchronously re-derives all computed values for a single trade from cached bar data.
+    Returns a structured audit report for UI display.
+    """
+    from app.engine.auditor import compute_audit
+
+    trade = session.get(Trade, trade_id)
+    if not trade:
+        raise HTTPException(status_code=404, detail="Trade not found")
+
+    tfs = session.exec(select(TradeFill).where(TradeFill.trade_id == trade.id)).all()
+    fill_ids = [tf.fill_id for tf in tfs]
+    fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
+
+    ctx_rows = session.exec(
+        select(FillMarketContext).where(FillMarketContext.fill_id.in_(fill_ids))
+    ).all()
+    ctx_by_fill = {str(r.fill_id): r for r in ctx_rows}
+
+    path = session.get(TradePathMetrics, trade.id)
+
+    return compute_audit(trade, list(fills), ctx_by_fill, path)
 
 
 @router.post("/trade-path/compute")
@@ -208,29 +172,12 @@ async def compute_trade_paths(
     force: bool = False,
     session: Session = Depends(get_session),
 ):
-    with _path_lock:
-        if _path_state["running"]:
-            raise HTTPException(status_code=409, detail="Trade path computation already running")
+    if running_job(session, JOB_TRADE_PATH):
+        raise HTTPException(status_code=409, detail="Trade path computation already running")
 
-    cutoff: datetime | None = None
-    if range == "day":
-        cutoff = datetime.utcnow() - timedelta(days=1)
-    elif range == "week":
-        cutoff = datetime.utcnow() - timedelta(weeks=1)
-    elif range == "month":
-        cutoff = datetime.utcnow() - timedelta(days=30)
-
-    query = select(Trade.id).where(Trade.status.in_(["closed", "expired"]))
-    if cutoff:
-        query = query.where(Trade.opened_at >= cutoff)
-    if not force:
-        existing = set(session.exec(select(TradePathMetrics.trade_id)).all())
-        query = query.where(Trade.id.notin_(existing))
-
-    trade_ids = session.exec(query).all()
-    if not trade_ids:
+    job = create_trade_path_job(session, range_value=range, force=force)
+    if not job.total:
         return {"started": False, "total_missing": 0}
 
-    t = threading.Thread(target=_run_path_background, args=(trade_ids, force), daemon=True)
-    t.start()
-    return {"started": True, "total_missing": len(trade_ids)}
+    _start_job_thread(job.id)
+    return {"started": True, "total_missing": job.total, "job_id": str(job.id)}

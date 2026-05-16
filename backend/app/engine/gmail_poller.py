@@ -9,9 +9,11 @@ Entrypoint: poll_new_fills() -> list[ParsedFill]
 """
 
 import base64
+import json
 import logging
 import os
 import secrets
+import time
 from pathlib import Path
 
 from app.engine.email_parser import (
@@ -30,10 +32,11 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 CREDENTIALS_FILE = _BACKEND_DIR / "credentials.json"
 TOKEN_FILE = _BACKEND_DIR / "token.json"
-BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://127.0.0.1:8000").rstrip("/")
+OAUTH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_oauth_states.json"
+BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 GMAIL_OAUTH_CALLBACK_PATH = "/auth/gmail/callback"
-GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"
-_OAUTH_STATES: set[str] = set()
+DEFAULT_GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"
+OAUTH_STATE_TTL_SECONDS = 15 * 60
 
 
 class GmailPollingError(RuntimeError):
@@ -49,15 +52,48 @@ def _is_invalid_grant_error(exc: Exception) -> bool:
     return "invalid_grant" in text or "token has been expired or revoked" in text
 
 
-def _build_oauth_flow(installed_app_flow):
+def _build_oauth_flow(installed_app_flow, redirect_uri: str):
     if not CREDENTIALS_FILE.exists():
         raise GmailPollingError(f"Missing Gmail credentials file: {CREDENTIALS_FILE}")
     flow = installed_app_flow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-    flow.redirect_uri = GMAIL_OAUTH_CALLBACK_URL
+    flow.redirect_uri = redirect_uri
     return flow
 
 
-def begin_gmail_oauth() -> str:
+def _load_oauth_states() -> dict[str, dict[str, object]]:
+    if not OAUTH_STATE_FILE.exists():
+        return {}
+    try:
+        raw = json.loads(OAUTH_STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+
+    now = time.time()
+    states: dict[str, dict[str, object]] = {}
+    for state, value in raw.items():
+        if not isinstance(state, str) or not isinstance(value, dict):
+            continue
+        redirect_uri = value.get("redirect_uri")
+        code_verifier = value.get("code_verifier")
+        created_at = value.get("created_at")
+        if not isinstance(redirect_uri, str) or not isinstance(created_at, (int, float)):
+            continue
+        if now - float(created_at) <= OAUTH_STATE_TTL_SECONDS:
+            state_data: dict[str, object] = {"redirect_uri": redirect_uri, "created_at": float(created_at)}
+            if isinstance(code_verifier, str):
+                state_data["code_verifier"] = code_verifier
+            states[state] = state_data
+    return states
+
+
+def _save_oauth_states(states: dict[str, dict[str, object]]) -> None:
+    OAUTH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    OAUTH_STATE_FILE.write_text(json.dumps(states))
+
+
+def begin_gmail_oauth(callback_base_url: str | None = None) -> str:
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
     except ImportError as exc:
@@ -65,22 +101,37 @@ def begin_gmail_oauth() -> str:
             "Gmail import dependencies are not installed. Install the Google API packages for the backend before syncing emails."
         ) from exc
 
-    flow = _build_oauth_flow(InstalledAppFlow)
+    if callback_base_url:
+        redirect_uri = f"{callback_base_url.rstrip('/')}{GMAIL_OAUTH_CALLBACK_PATH}"
+    else:
+        redirect_uri = DEFAULT_GMAIL_OAUTH_CALLBACK_URL
+
+    flow = _build_oauth_flow(InstalledAppFlow, redirect_uri)
     state = secrets.token_urlsafe(24)
-    _OAUTH_STATES.add(state)
     auth_url, _ = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
         prompt="consent",
         state=state,
     )
+
+    state_data: dict[str, object] = {"redirect_uri": redirect_uri, "created_at": time.time()}
+    code_verifier = getattr(flow, "code_verifier", None)
+    if isinstance(code_verifier, str):
+        state_data["code_verifier"] = code_verifier
+    states = _load_oauth_states()
+    states[state] = state_data
+    _save_oauth_states(states)
     return auth_url
 
 
 def finish_gmail_oauth(code: str, state: str) -> None:
-    if state not in _OAUTH_STATES:
+    states = _load_oauth_states()
+    state_data = states.pop(state, None)
+    _save_oauth_states(states)
+    redirect_uri = state_data.get("redirect_uri") if state_data else None
+    if not redirect_uri:
         raise GmailPollingError("Invalid Gmail OAuth state. Start Gmail authorization again.")
-    _OAUTH_STATES.discard(state)
 
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
@@ -89,8 +140,15 @@ def finish_gmail_oauth(code: str, state: str) -> None:
             "Gmail import dependencies are not installed. Install the Google API packages for the backend before syncing emails."
         ) from exc
 
-    flow = _build_oauth_flow(InstalledAppFlow)
-    flow.fetch_token(code=code)
+    flow = _build_oauth_flow(InstalledAppFlow, redirect_uri)
+    code_verifier = state_data.get("code_verifier") if state_data else None
+    if isinstance(code_verifier, str):
+        flow.code_verifier = code_verifier
+    try:
+        flow.fetch_token(code=code)
+    except Exception as exc:
+        log.warning("Unable to finish Gmail authorization", exc_info=exc)
+        raise GmailPollingError(f"Unable to finish Gmail authorization: {exc}") from exc
     TOKEN_FILE.write_text(flow.credentials.to_json())
     log.info("Saved Gmail OAuth token")
 

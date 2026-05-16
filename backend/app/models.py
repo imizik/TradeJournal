@@ -100,6 +100,25 @@ class DailyReviewRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class JobRun(SQLModel, table=True):
+    """Durable status for import, enrichment, and path computation jobs."""
+    __tablename__ = "job_run"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    job_type: str = Field(index=True)
+    status: str = Field(default="queued", index=True)  # queued|running|succeeded|failed
+    params_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    total: int = 0
+    done: int = 0
+    current: Optional[str] = None
+    enriched: int = 0
+    error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class TradeFill(SQLModel, table=True):
     __tablename__ = "tradefill"
     trade_id: uuid.UUID = Field(primary_key=True, foreign_key="trade.id")

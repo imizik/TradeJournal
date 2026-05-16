@@ -4,6 +4,7 @@ import { use, useEffect, useState } from "react";
 import { api, Fill, FillMarketContext, Trade, TradePathMetrics } from "@/lib/api";
 import AlpacaContextSection from "@/components/AlpacaContextSection";
 import TradePathSection from "@/components/TradePathSection";
+import AuditPanel from "@/components/AuditPanel";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -98,7 +99,9 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
   const returnTo = `/trades?ticker=${encodeURIComponent(trade.ticker)}`;
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="flex gap-6 items-start">
+    {/* Left column — main content */}
+    <div className="flex-1 min-w-0 space-y-6">
       <div className="flex items-center gap-3">
         <a href="/trades" className="text-sm text-muted-foreground hover:text-foreground">
           Back to Trades
@@ -230,6 +233,12 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
           </button>
         )}
       </div>
+    </div>
+
+    {/* Right column — sticky audit panel */}
+    <div className="sticky top-6 self-start">
+      <AuditPanel tradeId={id} />
+    </div>
     </div>
   );
 }

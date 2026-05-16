@@ -1,19 +1,27 @@
 import os
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
 
 from app.engine.gmail_poller import GmailPollingError, begin_gmail_oauth, finish_gmail_oauth
 
 router = APIRouter()
 
-FRONTEND_PUBLIC_URL = os.getenv("FRONTEND_PUBLIC_URL", "http://127.0.0.1:3000").rstrip("/")
+FRONTEND_PUBLIC_URL = os.getenv("FRONTEND_PUBLIC_URL", "http://localhost:3000").rstrip("/")
 
 
 @router.get("/gmail/start")
-async def start_gmail_auth():
+async def start_gmail_auth(request: Request):
     try:
-        return {"auth_url": begin_gmail_oauth()}
+        return {"auth_url": begin_gmail_oauth(str(request.base_url))}
+    except GmailPollingError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@router.get("/gmail/start/browser")
+async def start_gmail_auth_browser(request: Request):
+    try:
+        return RedirectResponse(begin_gmail_oauth(str(request.base_url)))
     except GmailPollingError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -31,7 +39,7 @@ async def gmail_auth_callback(
 
     try:
         finish_gmail_oauth(code=code, state=state)
-    except GmailPollingError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except GmailPollingError:
+        return RedirectResponse(f"{FRONTEND_PUBLIC_URL}/?gmail_auth=error")
 
     return RedirectResponse(f"{FRONTEND_PUBLIC_URL}/?gmail_auth=success")

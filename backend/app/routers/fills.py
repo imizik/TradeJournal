@@ -14,6 +14,14 @@ from sqlalchemy import not_
 from sqlmodel import Session, delete, select
 
 from app.database import get_session
+from app.engine.jobs import (
+    JOB_POLYGON_ENRICH,
+    create_polygon_enrichment_job,
+    job_status,
+    latest_job,
+    run_job,
+    running_job,
+)
 from app.engine.reconstructor import FillInput, reconstruct
 from app.models import Account, Fill, Trade, TradeFill, TradeTag, TradePathMetrics
 
@@ -23,20 +31,6 @@ log = logging.getLogger(__name__)
 
 router = APIRouter()
 ET = ZoneInfo("America/New_York")
-
-# ---------------------------------------------------------------------------
-# Background enrichment state
-# ---------------------------------------------------------------------------
-
-_enrich_state: dict = {
-    "running": False,
-    "done": 0,
-    "total": 0,
-    "current": "",
-    "enriched": 0,
-    "error": None,
-}
-_enrich_lock = threading.Lock()
 
 _ACCOUNT_NAMES = {
     "roth_ira": "Roth IRA",
@@ -222,27 +216,27 @@ def _import_fills_from_gmail(session: Session) -> dict[str, int]:
     session.commit()
     log.info("Import complete: saved=%d elapsed=%.1fs", saved, time.monotonic() - t0)
 
-    # Kick off enrichment in the background so the import response returns immediately
+    # Kick off durable enrichment work in the background so the import response returns immediately.
     enrich_started = False
     enrich_total = 0
+    enrich_job_id = None
     if saved > 0:
-        unenriched_ids = [
-            fill_id
-            for fill_id in session.exec(
-                select(Fill.id).where(Fill.underlying_price_at_fill == None)  # noqa: E711
-            ).all()
-        ]
-        if unenriched_ids:
-            with _enrich_lock:
-                already_running = _enrich_state["running"]
-            if not already_running:
-                t = threading.Thread(target=_run_enrich_background, args=(unenriched_ids,), daemon=True)
-                t.start()
+        if not running_job(session, JOB_POLYGON_ENRICH):
+            job = create_polygon_enrichment_job(session, range_value="all")
+            if job.total:
+                _start_job_thread(job.id)
                 enrich_started = True
-                enrich_total = len(unenriched_ids)
+                enrich_total = job.total
+                enrich_job_id = str(job.id)
 
     log.info("END /fills/import")
-    return {"saved": saved, "skipped": len(parsed_fills) - saved, "enrich_started": enrich_started, "enrich_total": enrich_total}
+    return {
+        "saved": saved,
+        "skipped": len(parsed_fills) - saved,
+        "enrich_started": enrich_started,
+        "enrich_total": enrich_total,
+        "enrich_job_id": enrich_job_id,
+    }
 
 
 def _persist_rebuild(session: Session, anomalies_label: str) -> tuple[int, list[str]]:
@@ -408,72 +402,29 @@ async def create_fill(body: FillCreate, session: Session = Depends(get_session))
     }
 
 
-def _run_enrich_background(fill_ids: list) -> None:
-    """Run enrichment in a background thread with progress tracking."""
-    from app.database import engine
-    from app.engine.enricher import enrich_fills
-
-    with _enrich_lock:
-        _enrich_state["running"] = True
-        _enrich_state["done"] = 0
-        _enrich_state["total"] = len(fill_ids)
-        _enrich_state["current"] = ""
-        _enrich_state["enriched"] = 0
-        _enrich_state["error"] = None
-
-    def on_progress(done: int, ticker: str) -> None:
-        with _enrich_lock:
-            _enrich_state["done"] = done
-            _enrich_state["current"] = ticker
-
-    try:
-        with Session(engine) as bg_session:
-            fills = bg_session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
-            enriched = enrich_fills(list(fills), bg_session, on_progress=on_progress)
-            with _enrich_lock:
-                _enrich_state["enriched"] = enriched
-    except Exception as exc:
-        log.exception("Background enrichment failed")
-        with _enrich_lock:
-            _enrich_state["error"] = str(exc)
-    finally:
-        with _enrich_lock:
-            _enrich_state["running"] = False
+def _start_job_thread(job_id: uuid.UUID) -> None:
+    t = threading.Thread(target=run_job, args=(job_id,), daemon=True)
+    t.start()
 
 
 @router.get("/enrich/status")
-async def enrich_status():
+async def enrich_status(session: Session = Depends(get_session)):
     """Return the current enrichment job progress."""
-    with _enrich_lock:
-        return dict(_enrich_state)
+    return job_status(latest_job(session, JOB_POLYGON_ENRICH))
 
 
 @router.post("/enrich")
-async def enrich_missing(range: str = "week", session: Session = Depends(get_session)):
+async def enrich_missing(range: str = "week", force: bool = False, session: Session = Depends(get_session)):
     """Start background enrichment for fills missing underlying price data. range: day|week|month|all"""
-    with _enrich_lock:
-        if _enrich_state["running"]:
-            raise HTTPException(status_code=409, detail="Enrichment already running")
+    if running_job(session, JOB_POLYGON_ENRICH):
+        raise HTTPException(status_code=409, detail="Enrichment already running")
 
-    cutoff: datetime | None = None
-    if range == "day":
-        cutoff = datetime.utcnow() - timedelta(days=1)
-    elif range == "week":
-        cutoff = datetime.utcnow() - timedelta(weeks=1)
-    elif range == "month":
-        cutoff = datetime.utcnow() - timedelta(days=30)
-
-    query = select(Fill.id).where(Fill.underlying_price_at_fill == None)  # noqa: E711
-    if cutoff is not None:
-        query = query.where(Fill.executed_at >= cutoff)
-
-    fill_ids = session.exec(query).all()
-    if not fill_ids:
+    job = create_polygon_enrichment_job(session, range_value=range, force=force)
+    if not job.total:
         return {"started": False, "total_missing": 0}
 
-    t = threading.Thread(target=_run_enrich_background, args=(fill_ids,), daemon=True)
-    t.start()
-    return {"started": True, "total_missing": len(fill_ids)}
+    _start_job_thread(job.id)
+    return {"started": True, "total_missing": job.total, "job_id": str(job.id)}
 
 
 @router.post("/import")

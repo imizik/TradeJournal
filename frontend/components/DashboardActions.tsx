@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api } from "@/lib/api";
+import { API, api } from "@/lib/api";
 
 type Status = "idle" | "loading" | "done" | "error";
 type EnrichRange = "day" | "week" | "month" | "all";
@@ -23,7 +23,14 @@ export default function DashboardActions() {
   const alpacaPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pathPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  const busy = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading" || enrichStatus === "loading" || alpacaEnrichStatus === "loading" || pathStatus === "loading";
+  // Data-modifying ops block each other (sync/rebuild/resync touch fills+trades)
+  const dataModifying = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading";
+  // Enrichment jobs are independent — each only blocks itself
+  const enrichBusy = enrichStatus === "loading";
+  const alpacaBusy = alpacaEnrichStatus === "loading";
+  const pathBusy = pathStatus === "loading";
+  // Resync needs everything quiet since it wipes and rebuilds
+  const busy = dataModifying;
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -69,6 +76,8 @@ export default function DashboardActions() {
   }, []);
 
   async function connectGmail() {
+    setSyncStatus("loading");
+    setMsg("Opening Gmail authorization...");
     const { auth_url } = await api.startGmailAuth();
     window.location.assign(auth_url);
   }
@@ -90,8 +99,12 @@ export default function DashboardActions() {
     } catch (e) {
       const message = (e as Error).message;
       if (message.includes("Gmail authorization is required")) {
-        setMsg("Opening Gmail authorization...");
-        await connectGmail();
+        try {
+          await connectGmail();
+        } catch (authError) {
+          setMsg(`Could not open Gmail authorization: ${(authError as Error).message}`);
+          setSyncStatus("error");
+        }
         return;
       }
       setMsg(`Sync failed: ${message}`);
@@ -305,7 +318,7 @@ export default function DashboardActions() {
         <select
           value={enrichRange}
           onChange={(e) => setEnrichRange(e.target.value as EnrichRange)}
-          disabled={busy}
+          disabled={dataModifying || enrichBusy}
           className="rounded-l bg-transparent px-2 py-1.5 text-xs text-muted-foreground focus:outline-none disabled:opacity-50"
         >
           <option value="day">1d</option>
@@ -315,7 +328,7 @@ export default function DashboardActions() {
         </select>
         <button
           onClick={handleEnrich}
-          disabled={busy}
+          disabled={dataModifying || enrichBusy}
           className="rounded-r border-l border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
         >
           {enrichStatus === "loading"
@@ -330,7 +343,7 @@ export default function DashboardActions() {
       <div className="flex items-center rounded border border-violet-800/50">
         <button
           onClick={handleAlpacaEnrich}
-          disabled={busy}
+          disabled={dataModifying || alpacaBusy}
           className="rounded-l bg-violet-900/30 px-3 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-900/50 disabled:opacity-50"
         >
           {alpacaEnrichStatus === "loading"
@@ -346,7 +359,7 @@ export default function DashboardActions() {
             type="checkbox"
             checked={alpacaForce}
             onChange={(e) => setAlpacaForce(e.target.checked)}
-            disabled={busy}
+            disabled={dataModifying || alpacaBusy}
             className="accent-violet-500 disabled:opacity-50"
           />
           All
@@ -354,7 +367,7 @@ export default function DashboardActions() {
       </div>
       <button
         onClick={handleComputePath}
-        disabled={busy}
+        disabled={dataModifying || pathBusy}
         className="rounded border border-teal-800/50 bg-teal-900/30 px-3 py-1.5 text-xs font-medium text-teal-300 transition-colors hover:bg-teal-900/50 disabled:opacity-50"
       >
         {pathStatus === "loading"
@@ -372,6 +385,12 @@ export default function DashboardActions() {
       >
         {syncStatus === "loading" ? "Syncing..." : syncStatus === "done" ? "Synced OK" : "Sync Emails"}
       </button>
+      <a
+        href={`${API}/auth/gmail/start/browser`}
+        className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+      >
+        Connect Gmail
+      </a>
       <button
         onClick={handleRebuild}
         disabled={busy}
@@ -381,7 +400,7 @@ export default function DashboardActions() {
       </button>
       <button
         onClick={handleResyncAll}
-        disabled={busy}
+        disabled={busy || enrichBusy || alpacaBusy || pathBusy}
         className="rounded bg-rose-900/40 px-3 py-1.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-900/60 disabled:opacity-50"
       >
         {resyncStatus === "loading" ? "Resyncing..." : resyncStatus === "done" ? "Resynced OK" : "Resync All"}

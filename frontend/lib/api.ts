@@ -1,4 +1,4 @@
-export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 export type Fill = {
   id: string;
@@ -210,6 +210,121 @@ export type TradePathMetrics = {
   option_giveback_pct: number | null;
 };
 
+export type CoverageStats = {
+  fills: {
+    total: number;
+    polygon_enriched: number;
+    polygon_missing: number;
+    alpaca_enriched: number;
+    alpaca_missing: number;
+  };
+  trades: {
+    total_closed: number;
+    path_metrics_done: number;
+    path_metrics_missing: number;
+  };
+};
+
+export type JobStatus = {
+  running: boolean;
+  done: number;
+  total: number;
+  current: string;
+  enriched: number;
+  error: string | null;
+};
+
+export type AuditFillBar = {
+  timestamp_utc: string;
+  timestamp_et: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  bar_vwap: number | null;
+  bars_back: number;
+};
+
+export type AuditFill = {
+  fill_id: string;
+  is_entry: boolean;
+  side: string;
+  executed_at_et: string;
+  contracts: number;
+  price: number;
+  cache_file: string | null;
+  cache_exists: boolean;
+  total_bars_in_file: number;
+  rth_bars_to_fill: number;
+  pm_bars: number;
+  or5_bars: number;
+  raw_bar: AuditFillBar | null;
+  bars_back: number | null;
+  formulas: Record<string, string>;
+  structure: {
+    day_high_bar_et: string | null;
+    day_low_bar_et: string | null;
+    pm_high: number | null;
+    pm_low: number | null;
+    or5_high: number | null;
+    or5_low: number | null;
+    or15_high: number | null;
+    or15_low: number | null;
+  };
+  stored: Record<string, number | null>;
+  recomputed: Record<string, number | null>;
+  discrepancies: string[];
+};
+
+export type AuditPath = {
+  window_bars: number;
+  window_start_et: string;
+  window_end_et: string;
+  entry_underlying_used?: number;
+  bullish?: boolean;
+  mfe_pct_recomputed?: number;
+  mae_pct_recomputed?: number;
+  mfe_bar_et?: string | null;
+  mfe_bar_high?: number | null;
+  mfe_bar_low?: number | null;
+  mae_bar_et?: string | null;
+  mae_bar_high?: number | null;
+  mae_bar_low?: number | null;
+  error?: string;
+  stored: Record<string, number | null>;
+};
+
+export type AuditIndicators = {
+  cache_file?: string;
+  total_daily_bars_available?: number;
+  earliest_bar?: string;
+  latest_bar?: string;
+  sma_20_bars_needed?: number;
+  sma_50_bars_needed?: number;
+  rsi_14_window?: number;
+  warmup_note?: string;
+  rsi_formula?: string;
+  ema_formula?: string;
+  error?: string;
+};
+
+export type TradeAudit = {
+  trade_id: string;
+  ticker: string;
+  instrument_type: string;
+  option_type: string | null;
+  strike: number | null;
+  expiration: string | null;
+  direction: "bullish" | "bearish" | null;
+  opened_at_et: string;
+  closed_at_et: string | null;
+  status: string;
+  fills: AuditFill[];
+  path: AuditPath | null;
+  indicators: AuditIndicators | null;
+};
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, { cache: "no-store" });
   if (!res.ok) throw await buildApiError(path, res);
@@ -269,7 +384,7 @@ export const api = {
   importFills: () => post<{ saved: number; skipped: number; enrich_started: boolean; enrich_total: number }>("/fills/import"),
   startGmailAuth: () => get<{ auth_url: string }>("/auth/gmail/start"),
   enrichMissing: (range: "day" | "week" | "month" | "all") => post<{ started: boolean; total_missing: number }>(`/fills/enrich?range=${range}`),
-  enrichStatus: () => get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/fills/enrich/status"),
+  enrichStatus: () => get<JobStatus>("/fills/enrich/status"),
   resyncAll: () => post<{ status: string; saved: number; skipped: number; trades_rebuilt: number; anomalies: string[] }>("/fills/resync-all"),
   rebuild: () => post<{ status: string; trades_rebuilt: number; anomalies: string[] }>("/rebuild"),
   reviewTrade: (id: string) => post<Trade>(`/trades/${id}/review`),
@@ -285,11 +400,11 @@ export const api = {
     get<Record<string, FillMarketContext>>(`/market-context/fills/bulk?ids=${fillIds.join(",")}`),
   alpacaEnrichMissing: (range: "day" | "week" | "month" | "all", force?: boolean) =>
     post<{ started: boolean; total_missing: number }>(`/market-context/enrich?range=${range}${force ? "&force=true" : ""}`),
-  alpacaEnrichStatus: () =>
-    get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/market-context/enrich/status"),
+  alpacaEnrichStatus: () => get<JobStatus>("/market-context/enrich/status"),
   tradePathMetrics: (tradeId: string) => get<TradePathMetrics>(`/market-context/trade/${tradeId}`),
   computeTradePaths: (range: "day" | "week" | "month" | "all", force?: boolean) =>
     post<{ started: boolean; total_missing: number }>(`/market-context/trade-path/compute?range=${range}${force ? "&force=true" : ""}`),
-  tradePathStatus: () =>
-    get<{ running: boolean; done: number; total: number; current: string; enriched: number; error: string | null }>("/market-context/trade-path/status"),
+  tradePathStatus: () => get<JobStatus>("/market-context/trade-path/status"),
+  auditTrade: (tradeId: string) => get<TradeAudit>(`/market-context/audit/${tradeId}`),
+  coverage: () => get<CoverageStats>("/market-context/coverage"),
 };
