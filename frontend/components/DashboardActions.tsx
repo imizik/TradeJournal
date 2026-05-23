@@ -1,410 +1,591 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { API, api } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  Clock3,
+  Database,
+  History,
+  Loader2,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Settings2,
+  X,
+} from "lucide-react";
+import { api, SyncJob, SyncRun, SyncSummary } from "@/lib/api";
 
-type Status = "idle" | "loading" | "done" | "error";
 type EnrichRange = "day" | "week" | "month" | "all";
+type Tab = "jobs" | "history" | "advanced";
+
+const ENRICHMENT_JOBS = new Set(["polygon_enrich", "alpaca_enrich", "trade_path"]);
+
+function fmtRelative(value: string | null | undefined) {
+  if (!value) return "Never synced";
+  const diff = Date.now() - new Date(value).getTime();
+  if (diff < 60_000) return "Synced just now";
+  if (diff < 3_600_000) return `Synced ${Math.max(1, Math.round(diff / 60_000))}m ago`;
+  if (diff < 86_400_000) return `Synced ${Math.round(diff / 3_600_000)}h ago`;
+  return `Synced ${Math.round(diff / 86_400_000)}d ago`;
+}
+
+function fmtTime(value: string | null | undefined) {
+  if (!value) return "-";
+  return new Date(value).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function fmtDuration(seconds: number | null) {
+  if (seconds == null) return "-";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  return `${Math.round(seconds / 60)}m`;
+}
+
+function statusClass(status: string) {
+  if (status === "running" || status === "queued") return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  if (status === "succeeded") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
+  if (status === "failed") return "border-red-500/30 bg-red-500/10 text-red-300";
+  return "border-border bg-secondary text-muted-foreground";
+}
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${statusClass(status)}`}>
+      {status === "succeeded" ? "success" : status}
+    </span>
+  );
+}
+
+function SyncStatusIndicator({ summary }: { summary: SyncSummary | null }) {
+  if (!summary) {
+    return (
+      <span className="hidden items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs text-muted-foreground sm:inline-flex">
+        <Clock3 className="h-3.5 w-3.5" />
+        Checking sync
+      </span>
+    );
+  }
+
+  if (summary.errors_count > 0 && !summary.running) {
+    return (
+      <span className="hidden items-center gap-1.5 rounded border border-red-500/30 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-300 sm:inline-flex">
+        <AlertCircle className="h-3.5 w-3.5" />
+        {summary.errors_count} sync error{summary.errors_count === 1 ? "" : "s"}
+      </span>
+    );
+  }
+
+  if (summary.running && summary.active_job) {
+    const job = summary.active_job;
+    const progress = job.total > 0 ? ` ${job.done}/${job.total}` : "";
+    return (
+      <span className="hidden max-w-[320px] items-center gap-1.5 rounded border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-300 sm:inline-flex">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span className="truncate">Sync running: {job.label}{progress}</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="hidden items-center gap-1.5 rounded border border-border px-2.5 py-1.5 text-xs text-muted-foreground sm:inline-flex">
+      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+      {fmtRelative(summary.last_success_at)}
+    </span>
+  );
+}
 
 export default function DashboardActions() {
-  const [syncStatus, setSyncStatus] = useState<Status>("idle");
-  const [rebuildStatus, setRebuildStatus] = useState<Status>("idle");
-  const [resyncStatus, setResyncStatus] = useState<Status>("idle");
-  const [enrichStatus, setEnrichStatus] = useState<Status>("idle");
-  const [enrichRange, setEnrichRange] = useState<EnrichRange>("week");
-  const [enrichProgress, setEnrichProgress] = useState<{ done: number; total: number; current: string } | null>(null);
-  const [alpacaEnrichStatus, setAlpacaEnrichStatus] = useState<Status>("idle");
-  const [alpacaEnrichProgress, setAlpacaEnrichProgress] = useState<{ done: number; total: number; current: string } | null>(null);
-  const [alpacaForce, setAlpacaForce] = useState(false);
-  const [pathStatus, setPathStatus] = useState<Status>("idle");
-  const [pathProgress, setPathProgress] = useState<{ done: number; total: number; current: string } | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [summary, setSummary] = useState<SyncSummary | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const alpacaPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pathPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Data-modifying ops block each other (sync/rebuild/resync touch fills+trades)
-  const dataModifying = syncStatus === "loading" || rebuildStatus === "loading" || resyncStatus === "loading";
-  // Enrichment jobs are independent — each only blocks itself
-  const enrichBusy = enrichStatus === "loading";
-  const alpacaBusy = alpacaEnrichStatus === "loading";
-  const pathBusy = pathStatus === "loading";
-  // Resync needs everything quiet since it wipes and rebuilds
-  const busy = dataModifying;
+  async function refreshSummary() {
+    try {
+      setSummary(await api.syncSummary());
+    } catch {
+      // Keep the toolbar quiet if the backend is still booting.
+    }
+  }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const gmailAuth = params.get("gmail_auth");
-    if (gmailAuth === "success") {
-      setMsg("Gmail connected. Run Sync Emails again.");
-      window.history.replaceState({}, "", window.location.pathname);
-    } else if (gmailAuth === "error") {
-      setMsg("Gmail connection was cancelled or failed.");
-      window.history.replaceState({}, "", window.location.pathname);
+    refreshSummary();
+    pollRef.current = setInterval(refreshSummary, summary?.running ? 2000 : 5000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [summary?.running]);
+
+  return (
+    <div className="flex items-center gap-2">
+      <SyncStatusIndicator summary={summary} />
+      <button
+        onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-2 rounded bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90"
+      >
+        <RefreshCw className="h-3.5 w-3.5" />
+        Sync / Update Data
+      </button>
+      <SyncCenterDrawer open={open} onClose={() => setOpen(false)} onSummaryChange={setSummary} />
+    </div>
+  );
+}
+
+function SyncCenterDrawer({
+  open,
+  onClose,
+  onSummaryChange,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSummaryChange: (summary: SyncSummary) => void;
+}) {
+  const [tab, setTab] = useState<Tab>("jobs");
+  const [jobs, setJobs] = useState<SyncJob[]>([]);
+  const [runs, setRuns] = useState<SyncRun[]>([]);
+  const [summary, setSummary] = useState<SyncSummary | null>(null);
+  const [range, setRange] = useState<EnrichRange>("week");
+  const [forceAll, setForceAll] = useState(false);
+  const [details, setDetails] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const running = useMemo(() => jobs.some((job) => job.running) || Boolean(summary?.running), [jobs, summary]);
+
+  async function refresh() {
+    const [nextSummary, nextJobs] = await Promise.all([api.syncSummary(), api.syncJobs()]);
+    setSummary(nextSummary);
+    setJobs(nextJobs);
+    onSummaryChange(nextSummary);
+    if (tab === "history") {
+      setRuns(await api.syncRuns());
+    }
+  }
+
+  useEffect(() => {
+    if (!open) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = null;
+      return;
     }
 
-    // Reconnect to any in-progress enrichment after tab switch or remount
-    api.enrichStatus().then((s) => {
-      if (s.running) {
-        setEnrichStatus("loading");
-        setEnrichProgress({ done: s.done, total: s.total, current: s.current });
-        startPolling();
-      }
-    }).catch(() => {});
-
-    api.alpacaEnrichStatus().then((s) => {
-      if (s.running) {
-        setAlpacaEnrichStatus("loading");
-        setAlpacaEnrichProgress({ done: s.done, total: s.total, current: s.current });
-        startAlpacaPolling();
-      }
-    }).catch(() => {});
-
-    api.tradePathStatus().then((s) => {
-      if (s.running) {
-        setPathStatus("loading");
-        setPathProgress({ done: s.done, total: s.total, current: s.current });
-        startPathPolling();
-      }
-    }).catch(() => {});
+    refresh().catch((e) => setMessage((e as Error).message));
+    pollRef.current = setInterval(() => {
+      refresh().catch(() => {});
+    }, running ? 2000 : 4000);
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
-      if (alpacaPollRef.current) clearInterval(alpacaPollRef.current);
-      if (pathPollRef.current) clearInterval(pathPollRef.current);
+      pollRef.current = null;
     };
-  }, []);
+  }, [open, tab, running]);
+
+  async function runPipeline() {
+    setBusyAction("pipeline");
+    setMessage(null);
+    try {
+      await api.runSyncPipeline();
+      setMessage("Full sync pipeline queued.");
+      await refresh();
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
 
   async function connectGmail() {
-    setSyncStatus("loading");
-    setMsg("Opening Gmail authorization...");
-    const { auth_url } = await api.startGmailAuth();
-    window.location.assign(auth_url);
+    setBusyAction("gmail_auth");
+    setMessage("Opening Gmail authorization...");
+    try {
+      const { auth_url } = await api.startGmailAuth();
+      window.location.assign(auth_url);
+    } catch (e) {
+      setMessage((e as Error).message);
+      setBusyAction(null);
+    }
   }
 
-  async function handleSync() {
-    setSyncStatus("loading");
-    setMsg(null);
+  async function runJob(job: SyncJob) {
+    setBusyAction(job.job_type);
+    setMessage(null);
     try {
-      const r = await api.importFills();
-      if (r.enrich_started) {
-        setMsg(`Synced: ${r.saved} new fill(s), ${r.skipped} skipped. Enriching ${r.enrich_total} fill(s)...`);
-        setEnrichProgress({ done: 0, total: r.enrich_total, current: "" });
-        setEnrichStatus("loading");
-        startPolling();
+      const effectiveRange = forceAll && job.job_type === "alpaca_enrich" ? "all" : range;
+      await api.runSyncJob(job.job_type, effectiveRange, forceAll && ENRICHMENT_JOBS.has(job.job_type));
+      setMessage(`${job.label} queued.`);
+      await refresh();
+    } catch (e) {
+      setMessage((e as Error).message);
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function runAdvanced(kind: "rebuild" | "resync") {
+    const text =
+      kind === "rebuild"
+        ? "Rebuild All will delete derived trade rows and recreate FIFO trades from existing fills. Continue?"
+        : "Resync All will delete imported fills, keep manual fills, re-import from Gmail, and rebuild trades. Continue?";
+    if (!window.confirm(text)) return;
+
+    setBusyAction(kind);
+    setMessage(null);
+    try {
+      if (kind === "rebuild") {
+        await api.advancedRebuildAll();
       } else {
-        setMsg(`Synced: ${r.saved} new fill(s), ${r.skipped} skipped.`);
+        await api.advancedResyncAll();
       }
-      setSyncStatus("done");
+      setMessage(kind === "rebuild" ? "Advanced rebuild queued." : "Advanced resync queued.");
+      await refresh();
     } catch (e) {
-      const message = (e as Error).message;
-      if (message.includes("Gmail authorization is required")) {
-        try {
-          await connectGmail();
-        } catch (authError) {
-          setMsg(`Could not open Gmail authorization: ${(authError as Error).message}`);
-          setSyncStatus("error");
-        }
-        return;
-      }
-      setMsg(`Sync failed: ${message}`);
-      setSyncStatus("error");
+      setMessage((e as Error).message);
     } finally {
-      setTimeout(() => setSyncStatus("idle"), 3000);
-    }
-  }
-
-  async function handleRebuild() {
-    setRebuildStatus("loading");
-    setMsg(null);
-    try {
-      const r = await api.rebuild();
-      setMsg(`Rebuilt ${r.trades_rebuilt} trade(s).`);
-      setRebuildStatus("done");
-      window.location.reload();
-    } catch (e) {
-      setMsg(`Rebuild failed: ${(e as Error).message}`);
-      setRebuildStatus("error");
-    } finally {
-      setTimeout(() => setRebuildStatus("idle"), 3000);
-    }
-  }
-
-  function startPolling() {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const s = await api.enrichStatus();
-        setEnrichProgress({ done: s.done, total: s.total, current: s.current });
-        if (!s.running) {
-          clearInterval(pollRef.current!);
-          pollRef.current = null;
-          if (s.error) {
-            setMsg(`Enrich failed: ${s.error}`);
-            setEnrichStatus("error");
-          } else {
-            setMsg(`Enriched ${s.enriched} of ${s.total} fill(s).`);
-            setEnrichStatus("done");
-          }
-          setEnrichProgress(null);
-          setTimeout(() => setEnrichStatus("idle"), 4000);
-        }
-      } catch {
-        clearInterval(pollRef.current!);
-        pollRef.current = null;
-        setEnrichStatus("error");
-        setEnrichProgress(null);
-      }
-    }, 2000);
-  }
-
-  function startAlpacaPolling() {
-    if (alpacaPollRef.current) clearInterval(alpacaPollRef.current);
-    alpacaPollRef.current = setInterval(async () => {
-      try {
-        const s = await api.alpacaEnrichStatus();
-        setAlpacaEnrichProgress({ done: s.done, total: s.total, current: s.current });
-        if (!s.running) {
-          clearInterval(alpacaPollRef.current!);
-          alpacaPollRef.current = null;
-          if (s.error) {
-            setMsg(`Alpaca enrich failed: ${s.error}`);
-            setAlpacaEnrichStatus("error");
-          } else {
-            setMsg(`Alpaca: enriched ${s.enriched} of ${s.total} fill(s).`);
-            setAlpacaEnrichStatus("done");
-          }
-          setAlpacaEnrichProgress(null);
-          setTimeout(() => setAlpacaEnrichStatus("idle"), 4000);
-        }
-      } catch {
-        clearInterval(alpacaPollRef.current!);
-        alpacaPollRef.current = null;
-        setAlpacaEnrichStatus("error");
-        setAlpacaEnrichProgress(null);
-      }
-    }, 2000);
-  }
-
-  async function handleAlpacaEnrich() {
-    setAlpacaEnrichStatus("loading");
-    setAlpacaEnrichProgress(null);
-    setMsg(null);
-    try {
-      const r = await api.alpacaEnrichMissing(enrichRange, alpacaForce);
-      if (!r.started) {
-        setMsg("No fills missing Alpaca context.");
-        setAlpacaEnrichStatus("done");
-        setTimeout(() => setAlpacaEnrichStatus("idle"), 3000);
-        return;
-      }
-      setAlpacaEnrichProgress({ done: 0, total: r.total_missing, current: "" });
-      startAlpacaPolling();
-    } catch (e) {
-      setMsg(`Alpaca enrich failed: ${(e as Error).message}`);
-      setAlpacaEnrichStatus("error");
-      setTimeout(() => setAlpacaEnrichStatus("idle"), 4000);
-    }
-  }
-
-  function startPathPolling() {
-    if (pathPollRef.current) clearInterval(pathPollRef.current);
-    pathPollRef.current = setInterval(async () => {
-      try {
-        const s = await api.tradePathStatus();
-        setPathProgress({ done: s.done, total: s.total, current: s.current });
-        if (!s.running) {
-          clearInterval(pathPollRef.current!);
-          pathPollRef.current = null;
-          if (s.error) {
-            setMsg(`Path metrics failed: ${s.error}`);
-            setPathStatus("error");
-          } else {
-            setMsg(`Path metrics: computed ${s.enriched} of ${s.total} trade(s).`);
-            setPathStatus("done");
-          }
-          setPathProgress(null);
-          setTimeout(() => setPathStatus("idle"), 4000);
-        }
-      } catch {
-        clearInterval(pathPollRef.current!);
-        pathPollRef.current = null;
-        setPathStatus("error");
-        setPathProgress(null);
-      }
-    }, 2000);
-  }
-
-  async function handleComputePath() {
-    setPathStatus("loading");
-    setPathProgress(null);
-    setMsg(null);
-    try {
-      const r = await api.computeTradePaths(enrichRange);
-      if (!r.started) {
-        setMsg("No closed trades missing path metrics.");
-        setPathStatus("done");
-        setTimeout(() => setPathStatus("idle"), 3000);
-        return;
-      }
-      setPathProgress({ done: 0, total: r.total_missing, current: "" });
-      startPathPolling();
-    } catch (e) {
-      setMsg(`Path metrics failed: ${(e as Error).message}`);
-      setPathStatus("error");
-      setTimeout(() => setPathStatus("idle"), 4000);
-    }
-  }
-
-  async function handleEnrich() {
-    setEnrichStatus("loading");
-    setEnrichProgress(null);
-    setMsg(null);
-    try {
-      const r = await api.enrichMissing(enrichRange);
-      if (!r.started) {
-        setMsg("No fills missing enrichment data.");
-        setEnrichStatus("done");
-        setTimeout(() => setEnrichStatus("idle"), 3000);
-        return;
-      }
-      setEnrichProgress({ done: 0, total: r.total_missing, current: "" });
-      startPolling();
-    } catch (e) {
-      setMsg(`Enrich failed: ${(e as Error).message}`);
-      setEnrichStatus("error");
-      setTimeout(() => setEnrichStatus("idle"), 4000);
-    }
-  }
-
-  async function handleResyncAll() {
-    const confirmed = window.confirm(
-      "Resync all will delete every imported fill and rebuilt trade, then re-import everything from Gmail from scratch. Continue?",
-    );
-    if (!confirmed) return;
-
-    setResyncStatus("loading");
-    setMsg(null);
-    try {
-      const r = await api.resyncAll();
-      const anomalySuffix = r.anomalies.length ? ` ${r.anomalies.length} anomaly/anomalies logged.` : "";
-      setMsg(`Resynced from scratch: ${r.saved} fill(s) imported, ${r.trades_rebuilt} trade(s) rebuilt.${anomalySuffix}`);
-      setResyncStatus("done");
-      window.location.reload();
-    } catch (e) {
-      setMsg(`Resync failed: ${(e as Error).message}`);
-      setResyncStatus("error");
-    } finally {
-      setTimeout(() => setResyncStatus("idle"), 3000);
+      setBusyAction(null);
     }
   }
 
   return (
-    <div className="flex items-center gap-2">
-      {msg && <span className="mr-1 text-xs text-muted-foreground">{msg}</span>}
-      <a
-        href="/daily"
-        className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
+    <>
+      <div
+        className={`fixed inset-0 z-40 bg-black/50 backdrop-blur-sm transition-opacity ${
+          open ? "opacity-100" : "pointer-events-none opacity-0"
+        }`}
+        onClick={onClose}
+      />
+      <aside
+        className={`fixed right-0 top-0 z-50 flex h-screen w-full max-w-3xl flex-col border-l border-border bg-background shadow-2xl transition-transform duration-200 ${
+          open ? "translate-x-0" : "translate-x-full"
+        }`}
       >
-        Daily Review
-      </a>
-      <a
-        href="/fills"
-        className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
-      >
-        Manual Fill
-      </a>
-      <div className="flex items-center rounded border border-border">
-        <select
-          value={enrichRange}
-          onChange={(e) => setEnrichRange(e.target.value as EnrichRange)}
-          disabled={dataModifying || enrichBusy}
-          className="rounded-l bg-transparent px-2 py-1.5 text-xs text-muted-foreground focus:outline-none disabled:opacity-50"
-        >
-          <option value="day">1d</option>
-          <option value="week">1w</option>
-          <option value="month">1mo</option>
-          <option value="all">All</option>
-        </select>
+        <header className="border-b border-border px-5 py-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Database className="h-4 w-4 text-muted-foreground" />
+                <h2 className="text-base font-semibold text-foreground">Data Sync Center</h2>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Run the full pipeline or manage each sync and enrichment job separately.
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              aria-label="Close Sync Center"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <SyncStatusIndicator summary={summary} />
+            <button
+              onClick={runPipeline}
+              disabled={!!busyAction || !!running}
+              className="inline-flex items-center gap-2 rounded bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-emerald-950 transition-colors hover:bg-emerald-400 disabled:opacity-50"
+            >
+              {busyAction === "pipeline" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              Sync Everything
+            </button>
+          </div>
+
+          {message && (
+            <div className="mt-3 rounded border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+              {message}
+            </div>
+          )}
+        </header>
+
+        <div className="flex border-b border-border px-5">
+          <TabButton active={tab === "jobs"} onClick={() => setTab("jobs")} icon={<RefreshCw className="h-3.5 w-3.5" />}>
+            Jobs
+          </TabButton>
+          <TabButton active={tab === "history"} onClick={() => setTab("history")} icon={<History className="h-3.5 w-3.5" />}>
+            History
+          </TabButton>
+          <TabButton active={tab === "advanced"} onClick={() => setTab("advanced")} icon={<Settings2 className="h-3.5 w-3.5" />}>
+            Advanced
+          </TabButton>
+        </div>
+
+        <main className="flex-1 overflow-y-auto px-5 py-5">
+          {tab === "jobs" && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-card p-3">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  Range
+                  <span className="relative">
+                    <select
+                      value={range}
+                      onChange={(e) => setRange(e.target.value as EnrichRange)}
+                      className="appearance-none rounded border border-border bg-background py-1 pl-2 pr-7 text-xs text-foreground focus:outline-none"
+                    >
+                      <option value="day">1d</option>
+                      <option value="week">1w</option>
+                      <option value="month">1mo</option>
+                      <option value="all">All</option>
+                    </select>
+                    <ChevronDown className="pointer-events-none absolute right-1.5 top-1.5 h-3 w-3 text-muted-foreground" />
+                  </span>
+                </label>
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={forceAll}
+                    onChange={(e) => setForceAll(e.target.checked)}
+                    className="accent-emerald-500"
+                  />
+                  Force re-run existing enrichment
+                </label>
+                <button
+                  onClick={connectGmail}
+                  disabled={!!busyAction}
+                  className="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground disabled:opacity-50"
+                >
+                  {busyAction === "gmail_auth" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Connect Gmail
+                </button>
+              </div>
+
+              <div className="grid gap-3">
+                {jobs.map((job) => (
+                  <SyncJobRow
+                    key={job.job_type}
+                    job={job}
+                    busy={busyAction === job.job_type}
+                    disabled={!!busyAction || (running && !job.running)}
+                    detailsOpen={details === job.job_type}
+                    onDetails={() => setDetails(details === job.job_type ? null : job.job_type)}
+                    onRun={() => runJob(job)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "history" && (
+            <SyncHistory runs={runs} onRefresh={async () => setRuns(await api.syncRuns())} />
+          )}
+
+          {tab === "advanced" && (
+            <AdvancedSyncActions
+              disabled={!!busyAction || !!running}
+              busyAction={busyAction}
+              onRun={runAdvanced}
+            />
+          )}
+        </main>
+      </aside>
+    </>
+  );
+}
+
+function TabButton({
+  active,
+  onClick,
+  icon,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-xs font-medium transition-colors ${
+        active
+          ? "border-foreground text-foreground"
+          : "border-transparent text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function SyncJobRow({
+  job,
+  busy,
+  disabled,
+  detailsOpen,
+  onDetails,
+  onRun,
+}: {
+  job: SyncJob;
+  busy: boolean;
+  disabled: boolean;
+  detailsOpen: boolean;
+  onDetails: () => void;
+  onRun: () => void;
+}) {
+  const pct = job.total > 0 ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+
+  return (
+    <section className="rounded-lg border border-border bg-card p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={job.status} />
+            <h3 className="text-sm font-semibold text-foreground">{job.label}</h3>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">{job.description}</p>
+          <p className="mt-2 truncate text-xs text-muted-foreground/80">
+            {job.message ?? "Idle. No recent message."}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={onDetails}
+            className="rounded border border-border px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+          >
+            Details
+          </button>
+          <button
+            onClick={onRun}
+            disabled={disabled || job.running}
+            className="inline-flex min-w-16 items-center justify-center gap-1.5 rounded bg-secondary px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
+          >
+            {busy || job.running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+            {job.status === "failed" ? "Retry" : "Run"}
+          </button>
+        </div>
+      </div>
+
+      {(job.running || job.total > 0) && (
+        <div className="mt-3">
+          <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
+            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.max(job.running ? 4 : 0, pct)}%` }} />
+          </div>
+          <div className="mt-1 flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
+            <span>{job.done.toLocaleString()} / {job.total.toLocaleString()}</span>
+            <span>{job.items_processed.toLocaleString()} processed - {job.errors_count} errors</span>
+          </div>
+        </div>
+      )}
+
+      {detailsOpen && (
+        <div className="mt-3 grid gap-2 rounded border border-border bg-background p-3 text-xs text-muted-foreground sm:grid-cols-2">
+          <Detail label="Last run" value={fmtTime(job.last_run_at)} />
+          <Detail label="Started" value={fmtTime(job.started_at)} />
+          <Detail label="Finished" value={fmtTime(job.finished_at)} />
+          <Detail label="Latest error" value={job.error_summary ?? "-"} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/60">{label}</p>
+      <p className="mt-0.5 break-words text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function SyncHistory({ runs, onRefresh }: { runs: SyncRun[]; onRefresh: () => void }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-foreground">Sync History</h3>
         <button
-          onClick={handleEnrich}
-          disabled={dataModifying || enrichBusy}
-          className="rounded-r border-l border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary disabled:opacity-50"
+          onClick={onRefresh}
+          className="inline-flex items-center gap-1.5 rounded border border-border px-2.5 py-1 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
         >
-          {enrichStatus === "loading"
-            ? enrichProgress && enrichProgress.total > 0
-              ? `${enrichProgress.done}/${enrichProgress.total}${enrichProgress.current ? ` ${enrichProgress.current}` : ""}`
-              : "Starting..."
-            : enrichStatus === "done"
-              ? "Done"
-              : "Enrich Missing"}
+          <RefreshCw className="h-3.5 w-3.5" />
+          Refresh
         </button>
       </div>
-      <div className="flex items-center rounded border border-violet-800/50">
-        <button
-          onClick={handleAlpacaEnrich}
-          disabled={dataModifying || alpacaBusy}
-          className="rounded-l bg-violet-900/30 px-3 py-1.5 text-xs font-medium text-violet-300 transition-colors hover:bg-violet-900/50 disabled:opacity-50"
-        >
-          {alpacaEnrichStatus === "loading"
-            ? alpacaEnrichProgress && alpacaEnrichProgress.total > 0
-              ? `Alpaca ${alpacaEnrichProgress.done}/${alpacaEnrichProgress.total}${alpacaEnrichProgress.current ? ` ${alpacaEnrichProgress.current}` : ""}`
-              : "Alpaca Starting..."
-            : alpacaEnrichStatus === "done"
-              ? "Alpaca Done"
-              : "Alpaca Context"}
-        </button>
-        <label className="flex cursor-pointer items-center gap-1 border-l border-violet-800/50 px-2 py-1.5 text-xs text-violet-400 hover:text-violet-300">
-          <input
-            type="checkbox"
-            checked={alpacaForce}
-            onChange={(e) => setAlpacaForce(e.target.checked)}
-            disabled={dataModifying || alpacaBusy}
-            className="accent-violet-500 disabled:opacity-50"
-          />
-          All
-        </label>
+      <div className="overflow-hidden rounded-lg border border-border">
+        <table className="w-full text-left text-xs">
+          <thead className="bg-secondary text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-medium">Timestamp</th>
+              <th className="px-3 py-2 font-medium">Job</th>
+              <th className="px-3 py-2 font-medium">Duration</th>
+              <th className="px-3 py-2 font-medium">Status</th>
+              <th className="px-3 py-2 font-medium">Items</th>
+              <th className="px-3 py-2 font-medium">Errors</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border bg-card">
+            {runs.map((run) => (
+              <tr key={run.id}>
+                <td className="px-3 py-2 text-muted-foreground">{fmtTime(run.started_at ?? run.created_at)}</td>
+                <td className="px-3 py-2 text-foreground">{run.label}</td>
+                <td className="px-3 py-2 text-muted-foreground">{fmtDuration(run.duration_seconds)}</td>
+                <td className="px-3 py-2"><StatusBadge status={run.status} /></td>
+                <td className="px-3 py-2 tabular-nums text-muted-foreground">{run.items_processed.toLocaleString()}</td>
+                <td className="px-3 py-2 text-muted-foreground">{run.error_summary ?? run.errors_count}</td>
+              </tr>
+            ))}
+            {runs.length === 0 && (
+              <tr>
+                <td className="px-3 py-6 text-center text-muted-foreground" colSpan={6}>
+                  No sync history yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
-      <button
-        onClick={handleComputePath}
-        disabled={dataModifying || pathBusy}
-        className="rounded border border-teal-800/50 bg-teal-900/30 px-3 py-1.5 text-xs font-medium text-teal-300 transition-colors hover:bg-teal-900/50 disabled:opacity-50"
-      >
-        {pathStatus === "loading"
-          ? pathProgress && pathProgress.total > 0
-            ? `Path ${pathProgress.done}/${pathProgress.total}${pathProgress.current ? ` ${pathProgress.current}` : ""}`
-            : "Path Starting..."
-          : pathStatus === "done"
-            ? "Path Done"
-            : "Path Metrics"}
-      </button>
-      <button
-        onClick={handleSync}
-        disabled={busy}
-        className="rounded bg-secondary px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
-      >
-        {syncStatus === "loading" ? "Syncing..." : syncStatus === "done" ? "Synced OK" : "Sync Emails"}
-      </button>
-      <a
-        href={`${API}/auth/gmail/start/browser`}
-        className="rounded border border-border px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-secondary"
-      >
-        Connect Gmail
-      </a>
-      <button
-        onClick={handleRebuild}
-        disabled={busy}
-        className="rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
-      >
-        {rebuildStatus === "loading" ? "Rebuilding..." : rebuildStatus === "done" ? "Done" : "Rebuild All"}
-      </button>
-      <button
-        onClick={handleResyncAll}
-        disabled={busy || enrichBusy || alpacaBusy || pathBusy}
-        className="rounded bg-rose-900/40 px-3 py-1.5 text-xs font-medium text-rose-300 transition-colors hover:bg-rose-900/60 disabled:opacity-50"
-      >
-        {resyncStatus === "loading" ? "Resyncing..." : resyncStatus === "done" ? "Resynced OK" : "Resync All"}
-      </button>
+    </div>
+  );
+}
+
+function AdvancedSyncActions({
+  disabled,
+  busyAction,
+  onRun,
+}: {
+  disabled: boolean;
+  busyAction: string | null;
+  onRun: (kind: "rebuild" | "resync") => void;
+}) {
+  return (
+    <div className="space-y-3">
+      <section className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+        <h3 className="text-sm font-semibold text-amber-200">Rebuild All</h3>
+        <p className="mt-1 text-xs leading-relaxed text-amber-100/80">
+          Deletes derived trade, trade-fill, tag, and path rows, then reconstructs trades from the current fill history.
+          Fill rows are preserved.
+        </p>
+        <button
+          onClick={() => onRun("rebuild")}
+          disabled={disabled}
+          className="mt-3 inline-flex items-center gap-2 rounded border border-amber-400/40 px-3 py-1.5 text-xs font-medium text-amber-100 hover:bg-amber-400/10 disabled:opacity-50"
+        >
+          {busyAction === "rebuild" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+          Run Rebuild All
+        </button>
+      </section>
+
+      <section className="rounded-lg border border-red-500/30 bg-red-500/10 p-4">
+        <h3 className="text-sm font-semibold text-red-200">Resync All</h3>
+        <p className="mt-1 text-xs leading-relaxed text-red-100/80">
+          Deletes imported Gmail fills, keeps manual fills, re-imports execution emails from Gmail, and rebuilds derived trades.
+          Use this only when import history needs repair.
+        </p>
+        <button
+          onClick={() => onRun("resync")}
+          disabled={disabled}
+          className="mt-3 inline-flex items-center gap-2 rounded border border-red-400/40 px-3 py-1.5 text-xs font-medium text-red-100 hover:bg-red-400/10 disabled:opacity-50"
+        >
+          {busyAction === "resync" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <AlertCircle className="h-3.5 w-3.5" />}
+          Run Resync All
+        </button>
+      </section>
     </div>
   );
 }

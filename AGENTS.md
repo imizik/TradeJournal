@@ -4,7 +4,7 @@ Read this first before making changes in this repo.
 
 ## Project In One Paragraph
 
-Trade Journal is a local-only Robinhood trade history system built around fill ingestion, FIFO trade reconstruction, analytics, and reconciliation. The live repo already supports stocks and options, multiple account records, Gmail execution-email import, manual fill entry/edit, full trade rebuilds, and markdown reconciliation reporting.
+Trade Journal is a local-first Robinhood trade history system built around fill ingestion, FIFO trade reconstruction, analytics, enrichment, and reconciliation. The live repo already supports stocks and options, multiple account records, Gmail execution-email import, manual fill entry/edit, full trade rebuilds, durable enrichment jobs, and markdown reconciliation reporting.
 
 ## Agent Operating Style
 
@@ -37,10 +37,14 @@ Backend:
 - `backend/app/engine/email_parser.py`
 - `backend/app/engine/gmail_poller.py`
 - `backend/app/engine/enricher.py`
+- `backend/app/engine/alpaca.py`
+- `backend/app/engine/alpaca_enricher.py`
+- `backend/app/engine/jobs.py`
 - `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
+- `backend/app/routers/market_context.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
 
@@ -62,6 +66,7 @@ Analysis scripts:
 - `backend/scripts/generate_reconciliation_report.py`
 - `backend/scripts/csv_reconstruct.py`
 - `backend/scripts/find_phantoms.py`
+- `backend/scripts/migrate_sqlite_to_postgres.py`
 
 ## Core Invariants
 
@@ -74,6 +79,8 @@ Analysis scripts:
 - `raw_email_id` is the dedupe key for imported fills.
 - Manual fills use `manual:` source IDs and are backed up to `backend/data/manual_fills.json`.
 - Enrichment fields are nullable and must be guarded before display, calculations, or AI prompts.
+- `job_run` rows are durable status records for import/enrichment/path jobs; do not rely on process-local progress state.
+- Alpaca context is fill-level context in `fill_market_context`; trade-level path metrics are separate rows in `trade_path_metrics`.
 
 ## Main User Flows
 
@@ -85,6 +92,10 @@ Analysis scripts:
 - Full resync from Gmail plus manual-fill restore: `POST /fills/resync-all`
 - View analytics and breakdowns: `GET /stats`
 - Review per-trade history via trade detail and fill timeline pages
+- Polygon enrichment: `POST /fills/enrich`
+- Alpaca fill context enrichment: `POST /market-context/enrich`
+- Trade path metrics: `POST /market-context/trade-path/compute`
+- Enrichment coverage: `GET /market-context/coverage`
 
 ## Active Working Tree Features
 
@@ -93,7 +104,10 @@ These exist in the repo right now and may still be in flux:
 - Quote endpoints and dashboard mark pricing via `yfinance`
 - Reusable dashboard/trades table components
 - Gmail OAuth can be started from the app instead of copying a terminal URL
-- Fill enrichment fields and background enrichment status/actions
+- Fill enrichment fields and durable job-backed enrichment status/actions
+- Configurable `DATABASE_URL`; SQLite remains the local default, Postgres/Neon is supported for migration/deploy
+- Durable job runner CLI for historical enrichment and future Cloud Run Jobs
+- Alpaca context and trade-path metrics with cache-aware daily/minute bar handling
 - Startup merge of blank-last4 Roth data into canonical `8267`
 - New fill columns for source email subject and body
 - Skipping cumulative partial-fill option emails to avoid phantom duplicates
@@ -132,6 +146,24 @@ pytest
 Known environment note:
 
 - Backend test collection currently needs `httpx` available because `fastapi.testclient` depends on it.
+- The checked-in backend venv may not have `pytest`; use `python -m compileall app scripts` and targeted `TestClient` smoke checks when pytest is unavailable.
+
+Durable local jobs:
+
+```bash
+cd backend
+python -m app.jobs.run --type polygon_enrich --range all
+python -m app.jobs.run --type alpaca_enrich --range all --force
+python -m app.jobs.run --type trade_path --range all
+```
+
+SQLite-to-Postgres/Neon migration:
+
+```bash
+cd backend
+DATABASE_URL="postgresql+psycopg://USER:PASSWORD@HOST/dbname?sslmode=require" alembic upgrade head
+python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
+```
 
 ## What To Check First When Something Looks Wrong
 
@@ -140,6 +172,8 @@ Known environment note:
 - Gmail OAuth mismatch: inspect `auth.py`, `gmail_poller.py`, Google redirect URIs, and `BACKEND_PUBLIC_URL`
 - Manual fill issue: inspect `ManualFillForm.tsx`, `frontend/lib/api.ts`, and `backend/app/routers/fills.py`
 - Dashboard numbers vs broker numbers: inspect reconciliation scripts and generated reports, not just `/stats`
+- Enrichment job issue: inspect `backend/app/engine/jobs.py`, `job_run`, and the relevant enricher before changing UI polling
+- Missing Alpaca daily indicators on recent trades: inspect `backend/app/engine/alpaca.py` daily cache coverage and the ticker's `backend/data/alpaca_cache/stocks/1Day/<feed>/` file
 
 ## Reconciliation Notes
 
@@ -153,4 +187,6 @@ Known environment note:
 - Prefer changing the shared table components instead of duplicating UI table logic
 - Treat account normalization carefully; blank Roth `last4` values are part of an active cleanup path
 - Any change to fill import or parsing can affect rebuilds, analytics, and reconciliation outputs
+- Any change to enrichment affects local historical backfills, Cloud Run job readiness, and nullable UI fields
+- For SQLite, keep long enrichment transactions short enough that `job_run` progress updates do not lock the DB
 - When scope changes materially, update both `AGENTS.md` and `CLAUDE.md`

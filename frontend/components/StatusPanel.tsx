@@ -26,6 +26,18 @@ const JOB_COLORS: Record<keyof Jobs, { bar: string; dot: string }> = {
   path:    { bar: "bg-teal-500", dot: "bg-teal-400" },
 };
 
+const JOB_RATE: Record<keyof Jobs, string> = {
+  polygon: "3 req/min · ~20s/call",
+  alpaca:  "60 req/min · ~1s/call",
+  path:    "no API limit",
+};
+
+function fmtEta(secs: number): string {
+  if (secs < 60) return `~${Math.round(secs)}s left`;
+  if (secs < 3600) return `~${Math.round(secs / 60)}m left`;
+  return `~${(secs / 3600).toFixed(1)}h left`;
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -43,7 +55,20 @@ function ProgressBar({ pct, color }: { pct: number; color: string }) {
 
 function ActiveJobRow({ jobKey, job }: { jobKey: keyof Jobs; job: JobStatus }) {
   const { bar, dot } = JOB_COLORS[jobKey];
-  const pct = job.total > 0 ? (job.done / job.total) * 100 : 0;
+  const isSetup = job.done === 0 && !!job.current;
+  const pct = isSetup ? 0 : job.total > 0 ? (job.done / job.total) * 100 : 0;
+
+  // ETA — only meaningful once progress has started
+  let eta: string | null = null;
+  if (!isSetup && job.started_at && job.done > 0 && job.done < job.total) {
+    const elapsedSecs = (Date.now() - new Date(job.started_at).getTime()) / 1000;
+    if (elapsedSecs > 3) {
+      const rate = job.done / elapsedSecs; // fills per second
+      const remainingSecs = (job.total - job.done) / rate;
+      eta = fmtEta(remainingSecs);
+    }
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -54,14 +79,16 @@ function ActiveJobRow({ jobKey, job }: { jobKey: keyof Jobs; job: JobStatus }) {
           </span>
           <span className="text-sm font-medium text-foreground">{JOB_LABELS[jobKey]}</span>
         </div>
-        <span className="text-xs tabular-nums text-muted-foreground">
-          {job.done} / {job.total}
-        </span>
+        <div className="flex items-center gap-2 text-xs tabular-nums text-muted-foreground">
+          {!isSetup && <span>{job.done.toLocaleString()} / {job.total.toLocaleString()}</span>}
+          {eta && <span className="text-muted-foreground/60">{eta}</span>}
+        </div>
       </div>
       <ProgressBar pct={pct} color={bar} />
       {job.current && (
         <p className="truncate text-xs text-muted-foreground/60">{job.current}</p>
       )}
+      <p className="text-[10px] text-muted-foreground/40">{JOB_RATE[jobKey]}</p>
     </div>
   );
 }

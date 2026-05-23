@@ -203,9 +203,11 @@ class FillMarketContext(SQLModel, table=True):
 
     # Behavioral flags: 0/1 int (None = could not compute)
     is_chase_entry: Optional[int] = None
+    chase_score: Optional[float] = None       # 0-100 continuous chase intensity
     is_trend_aligned: Optional[int] = None
     is_late_move: Optional[int] = None
-    is_vwap_reclaim: Optional[int] = None
+    is_above_vwap: Optional[int] = None       # price on correct side of VWAP at entry
+    is_vwap_reclaim: Optional[int] = None     # true reclaim: prev bar below, entry bar above
     is_opening_range_breakout: Optional[int] = None
     is_premarket_breakout: Optional[int] = None
     is_near_resistance_on_call_entry: Optional[int] = None
@@ -213,6 +215,15 @@ class FillMarketContext(SQLModel, table=True):
     is_overnight: Optional[int] = None
     entry_time_bucket: Optional[str] = None   # premarket|open|mid|close|afterhours
     dte_bucket: Optional[str] = None          # 0dte|1-3dte|4-7dte|8-21dte|22+dte
+    setup_quality_score: Optional[float] = None  # 0-100 aggregate setup quality
+
+    # Relative volume (time-adjusted, uses cached minute bars only)
+    rvol_time_adjusted: Optional[float] = None
+
+    # Option moneyness at entry
+    moneyness_pct: Optional[float] = None     # (underlying - strike) / strike * 100 for calls, inverted for puts
+    is_itm: Optional[int] = None              # 1 if in the money at entry
+    is_otm: Optional[int] = None              # 1 if out of the money at entry
 
 
 class TradePathMetrics(SQLModel, table=True):
@@ -234,6 +245,12 @@ class TradePathMetrics(SQLModel, table=True):
     underlying_exit_efficiency: Optional[float] = None
     underlying_giveback_pct: Optional[float] = None
     moved_in_favor_first: Optional[int] = None   # 1 if MFE reached before MAE
+
+    # Post-exit continuation: how much did price move after exit?
+    post_exit_mfe_15m: Optional[float] = None    # max favorable % move in 15m after exit
+    post_exit_mfe_30m: Optional[float] = None    # max favorable % move in 30m after exit
+    post_exit_mfe_60m: Optional[float] = None    # max favorable % move in 60m after exit
+    time_to_post_exit_high_minutes: Optional[int] = None  # mins to the post-exit extreme
 
     # Option path (Phase 3 — all nullable until then)
     option_mfe_pct: Optional[float] = None

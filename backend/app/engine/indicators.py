@@ -151,6 +151,11 @@ def analyze_minute_bars(bars: list[dict], fill_dt: datetime) -> dict:
     entry_price = float(fill_bar["close"])
     entry_volume = int(fill_bar.get("volume", 0)) if not _nan(fill_bar.get("volume")) else None
 
+    # Previous bar close (needed for true VWAP reclaim check)
+    prev_bar_close: Optional[float] = None
+    if len(bars_to_fill) >= 2:
+        prev_bar_close = _f(float(bars_to_fill.iloc[-2]["close"]))
+
     fill_date = fill_dt_et.date()
 
     # Session boundary timestamps (UTC)
@@ -220,6 +225,7 @@ def analyze_minute_bars(bars: list[dict], fill_dt: datetime) -> dict:
         "entry_distance_from_or5_low_pct": _pct_diff(entry_price, or5_low),
         "entry_distance_from_or15_high_pct": _pct_diff(entry_price, or15_high),
         "entry_distance_from_or15_low_pct": _pct_diff(entry_price, or15_low),
+        "prev_bar_close": prev_bar_close,
     }
 
 
@@ -249,7 +255,7 @@ def compute_avg_daily_volume(bars: list[dict], fill_date: date, window: int = 20
 def compute_rvol(
     intraday: dict, adv: Optional[float], executed_at: datetime
 ) -> Optional[float]:
-    """Approximate relative volume at fill time vs expected fraction of ADV."""
+    """Simple RVOL: cumulative vol / (ADV × fraction of day elapsed). Linear — use as fallback only."""
     cum_vol = intraday.get("cumulative_volume_at_entry")
     if cum_vol is None or adv is None or adv == 0:
         return None
@@ -264,6 +270,59 @@ def compute_rvol(
     return round(cum_vol / expected, 4) if expected > 0 else None
 
 
+def compute_rvol_time_adjusted(
+    ticker: str,
+    fill_date: date,
+    fill_dt: datetime,
+    daily_bars: list[dict],
+) -> Optional[float]:
+    """
+    Time-adjusted RVOL: compare today's cumulative RTH volume at fill time
+    against the historical average cumulative volume at the same minute of day
+    over the past 20 trading days (cache-only — no extra API calls).
+
+    Returns None if fewer than 5 cached historical days are available.
+    """
+    from app.engine.alpaca import fetch_minute_bars_for_date
+
+    fill_dt_et = fill_dt.replace(tzinfo=ET)
+    fill_mins = fill_dt_et.hour * 60 + fill_dt_et.minute
+    market_open_mins = 9 * 60 + 30
+    if fill_mins < market_open_mins:
+        return None
+    mins_since_open = fill_mins - market_open_mins
+
+    def _cum_vol(d: date) -> Optional[float]:
+        bars = fetch_minute_bars_for_date([ticker], d, cache_only=True).get(ticker, [])
+        if not bars:
+            return None
+        df = bars_to_df(bars)
+        if df.empty:
+            return None
+        rth_open = pd.Timestamp(
+            datetime(d.year, d.month, d.day, 9, 30, tzinfo=ET)
+        ).tz_convert("UTC")
+        target = rth_open + pd.Timedelta(minutes=mins_since_open)
+        seg = df[(df.index >= rth_open) & (df.index <= target)]
+        return float(seg["volume"].sum()) if not seg.empty else None
+
+    today_cum = _cum_vol(fill_date)
+    if today_cum is None:
+        return None
+
+    prev_dates = sorted(
+        [_bar_date(b) for b in daily_bars if _bar_date(b) < fill_date],
+        reverse=True,
+    )[:20]
+
+    hist = [v for d in prev_dates if (v := _cum_vol(d)) is not None]
+    if len(hist) < 5:
+        return None
+
+    avg = sum(hist) / len(hist)
+    return round(today_cum / avg, 4) if avg > 0 else None
+
+
 # ---------------------------------------------------------------------------
 # Derived flags
 # ---------------------------------------------------------------------------
@@ -272,10 +331,11 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
     """
     Compute deterministic behavioral flags from fill metadata + context.
     fill: a Fill model instance.
-    Returns a dict of flag fields (int 0/1 or None, plus string bucket fields).
+    Returns a dict of flag fields (int 0/1 or None, plus score and bucket fields).
     """
     entry_price = intraday.get("entry_underlying_price")
     vwap = intraday.get("entry_vwap")
+    prev_bar_close = intraday.get("prev_bar_close")
     rsi = daily_indic.get("rsi_14")
     ema9 = daily_indic.get("ema_9")
     ema20 = daily_indic.get("ema_20")
@@ -294,16 +354,61 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
     is_long = fill.side in ("buy_to_open", "buy")
     is_short = fill.side in ("sell_to_open", "sell")
 
-    # Chase entry: RSI extended, price far above VWAP, or day range nearly exhausted
-    is_chase = 0
-    if rsi is not None and rsi > 70:
-        is_chase = 1
-    if vs_vwap is not None and vs_vwap > 2.0:
-        is_chase = 1
-    if day_range_used is not None and day_range_used > 80:
-        is_chase = 1
+    # ---- is_above_vwap: price on the correct side of VWAP at entry ----
+    # (replaces the old mislabeled is_vwap_reclaim logic)
+    is_above_vwap: Optional[int] = None
+    if vwap and entry_price:
+        if is_long:
+            is_above_vwap = 1 if entry_price > vwap else 0
+        elif is_short:
+            is_above_vwap = 1 if entry_price < vwap else 0
 
-    # Trend aligned: price vs EMA stack + MACD histogram direction
+    # ---- is_vwap_reclaim: true reclaim — prev bar on wrong side, entry bar on right side ----
+    is_vwap_reclaim = 0
+    if vwap and entry_price and prev_bar_close is not None:
+        if is_long and prev_bar_close < vwap and entry_price > vwap:
+            is_vwap_reclaim = 1
+        elif is_short and prev_bar_close > vwap and entry_price < vwap:
+            is_vwap_reclaim = 1
+
+    # ---- chase_score 0-100: continuous score replacing binary is_chase ----
+    # Components: RSI stretch, VWAP extension, day range exhaustion
+    chase_score = 0
+    chase_parts = 0
+
+    if rsi is not None:
+        # RSI: 0 pts at 50, 25 pts at 70, 40 pts at 80+
+        if is_long:
+            rsi_pts = max(0.0, min(40.0, (rsi - 50) * 2.0)) if rsi > 50 else 0.0
+        else:
+            rsi_pts = max(0.0, min(40.0, (50 - rsi) * 2.0)) if rsi < 50 else 0.0
+        chase_score += rsi_pts
+        chase_parts += 1
+
+    if vs_vwap is not None:
+        # VWAP extension: 0 pts at 0%, 30 pts at 3%+
+        if is_long:
+            vwap_pts = max(0.0, min(30.0, vs_vwap * 10.0)) if vs_vwap > 0 else 0.0
+        else:
+            vwap_pts = max(0.0, min(30.0, -vs_vwap * 10.0)) if vs_vwap < 0 else 0.0
+        chase_score += vwap_pts
+        chase_parts += 1
+
+    if day_range_used is not None:
+        # Day range: 0 pts below 60%, 30 pts at 95%+
+        if is_long:
+            range_pts = max(0.0, min(30.0, (day_range_used - 60.0) * (30.0 / 35.0))) if day_range_used > 60 else 0.0
+        else:
+            # For shorts, low day_range_used (near LOD) is the chase
+            range_pts = max(0.0, min(30.0, (40.0 - day_range_used) * (30.0 / 35.0))) if day_range_used < 40 else 0.0
+        chase_score += range_pts
+        chase_parts += 1
+
+    chase_score = round(min(100.0, chase_score), 1) if chase_parts > 0 else 0.0
+    # Derive binary flag from score
+    is_chase = 1 if chase_score >= 40 else 0
+
+    # ---- Trend aligned: price vs EMA stack + MACD histogram direction ----
     is_trend: Optional[int] = None
     if entry_price and ema9 and ema20 and macd_hist is not None:
         if is_long:
@@ -311,22 +416,14 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         elif is_short:
             is_trend = 1 if (entry_price < ema9 and ema9 < ema20 and macd_hist < 0) else 0
 
-    # Late move: entering near day high on long, near day low on short
+    # ---- Late move: entering near day high on long, near day low on short ----
     is_late = 0
     if is_long and dist_day_high is not None and dist_day_high > -0.5:
         is_late = 1
     if is_short and dist_day_low is not None and dist_day_low < 0.5:
         is_late = 1
 
-    # VWAP reclaim (simplified): price is above VWAP on a long entry
-    is_vwap_reclaim = 0
-    if vwap and entry_price:
-        if is_long and entry_price > vwap:
-            is_vwap_reclaim = 1
-        elif is_short and entry_price < vwap:
-            is_vwap_reclaim = 1
-
-    # Opening range breakout
+    # ---- Opening range breakout ----
     is_or_break = 0
     if or5_high and or5_low and entry_price:
         if is_long and entry_price > or5_high:
@@ -334,7 +431,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         elif is_short and entry_price < or5_low:
             is_or_break = 1
 
-    # Premarket breakout
+    # ---- Premarket breakout ----
     is_pm_break = 0
     if pm_high and pm_low and entry_price:
         if is_long and entry_price > pm_high:
@@ -342,7 +439,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         elif is_short and entry_price < pm_low:
             is_pm_break = 1
 
-    # Near resistance (call entry near HOD or prev-day high)
+    # ---- Near resistance (call entry near HOD or prev-day high) ----
     is_near_res = 0
     if is_long:
         if dist_day_high is not None and dist_day_high > -0.5:
@@ -350,7 +447,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         elif dist_prev_high is not None and dist_prev_high > -0.5:
             is_near_res = 1
 
-    # Near support (put entry near LOD or prev-day low)
+    # ---- Near support (put entry near LOD or prev-day low) ----
     is_near_sup = 0
     if is_short:
         if dist_day_low is not None and dist_day_low < 0.5:
@@ -358,11 +455,11 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         elif dist_prev_low is not None and dist_prev_low < 0.5:
             is_near_sup = 1
 
-    # Overnight: fill outside RTH 09:30–16:00 ET
+    # ---- Overnight: fill outside RTH 09:30–16:00 ET ----
     fill_mins = fill.executed_at.hour * 60 + fill.executed_at.minute
     is_overnight = 1 if fill_mins < 9 * 60 + 30 or fill_mins >= 16 * 60 else 0
 
-    # Entry time bucket
+    # ---- Entry time bucket ----
     if fill_mins < 9 * 60 + 30:
         entry_time_bucket = "premarket"
     elif fill_mins < 10 * 60:
@@ -374,7 +471,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
     else:
         entry_time_bucket = "afterhours"
 
-    # DTE bucket (options only)
+    # ---- DTE bucket (options only) ----
     dte_bucket: Optional[str] = None
     if fill.expiration and fill.executed_at:
         dte = (fill.expiration - fill.executed_at.date()).days
@@ -389,10 +486,27 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         else:
             dte_bucket = "22+dte"
 
+    # ---- Setup quality score 0-100 (positive signals minus negative signals) ----
+    setup_quality_score = compute_setup_score(
+        is_trend_aligned=is_trend,
+        is_above_vwap=is_above_vwap,
+        is_vwap_reclaim=is_vwap_reclaim,
+        is_or_break=is_or_break,
+        is_pm_break=is_pm_break,
+        chase_score=chase_score,
+        is_late=is_late,
+        is_near_res=is_near_res if is_long else None,
+        is_near_sup=is_near_sup if is_short else None,
+        rsi=rsi,
+        macd_hist=macd_hist,
+    )
+
     return {
         "is_chase_entry": is_chase,
+        "chase_score": chase_score,
         "is_trend_aligned": is_trend,
         "is_late_move": is_late,
+        "is_above_vwap": is_above_vwap,
         "is_vwap_reclaim": is_vwap_reclaim,
         "is_opening_range_breakout": is_or_break,
         "is_premarket_breakout": is_pm_break,
@@ -401,7 +515,97 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         "is_overnight": is_overnight,
         "entry_time_bucket": entry_time_bucket,
         "dte_bucket": dte_bucket,
+        "setup_quality_score": setup_quality_score,
     }
+
+
+def compute_setup_score(
+    *,
+    is_trend_aligned: Optional[int],
+    is_above_vwap: Optional[int],
+    is_vwap_reclaim: int,
+    is_or_break: int,
+    is_pm_break: int,
+    chase_score: float,
+    is_late: int,
+    is_near_res: Optional[int],
+    is_near_sup: Optional[int],
+    rsi: Optional[float],
+    macd_hist: Optional[float],
+) -> Optional[float]:
+    """
+    Aggregate setup quality score 0–100.
+    Positive signals add points; negative conditions subtract them.
+    Returns None when insufficient data to compute a meaningful score.
+
+    Weights:
+      +25  trend aligned (EMA stack + MACD)
+      +20  VWAP reclaim (true cross)
+      +15  above VWAP (weaker — just on right side)
+      +15  opening range breakout
+      +10  premarket breakout
+      +10  MACD histogram positive (long) / negative (short)
+      +5   RSI in healthy range (40–65 for longs, 35–60 for shorts)
+      -----
+       -25  chase_score ≥ 60 (major penalty)
+       -15  chase_score 40–59 (moderate penalty)
+       -10  late move
+       -10  near resistance (for longs) / near support (for shorts)
+
+    Returns None if no positive signal data is available at all.
+    """
+    score = 50.0  # start at neutral
+    data_points = 0
+
+    if is_trend_aligned is not None:
+        data_points += 1
+        score += 25 if is_trend_aligned else -5
+
+    if is_vwap_reclaim:
+        data_points += 1
+        score += 20
+
+    if is_above_vwap is not None:
+        data_points += 1
+        score += 15 if is_above_vwap else -5
+
+    if is_or_break:
+        data_points += 1
+        score += 15
+
+    if is_pm_break:
+        data_points += 1
+        score += 10
+
+    if macd_hist is not None:
+        data_points += 1
+        score += 10 if macd_hist > 0 else -5
+
+    if rsi is not None:
+        data_points += 1
+        # RSI in healthy range is a mild positive
+        healthy = 40 <= rsi <= 65
+        score += 5 if healthy else 0
+
+    # Negative conditions
+    if chase_score >= 60:
+        score -= 25
+    elif chase_score >= 40:
+        score -= 15
+
+    if is_late:
+        score -= 10
+
+    if is_near_res:
+        score -= 10
+
+    if is_near_sup:
+        score -= 10
+
+    if data_points == 0:
+        return None
+
+    return round(max(0.0, min(100.0, score)), 1)
 
 
 # ---------------------------------------------------------------------------

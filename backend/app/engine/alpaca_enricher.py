@@ -18,6 +18,7 @@ from sqlmodel import Session, select
 
 from app.engine.alpaca import (
     ALPACA_DATA_FEED,
+    _latest_completed_daily_bar_date,
     alpaca_configured,
     fetch_daily_bars,
     fetch_minute_bars_for_date,
@@ -28,6 +29,7 @@ from app.engine.indicators import (
     compute_daily_indicators,
     compute_flags,
     compute_rvol,
+    compute_rvol_time_adjusted,
     get_previous_day_data,
     _pct_diff,
 )
@@ -83,9 +85,13 @@ def enrich_fills_alpaca(
     )
 
     # --- 1. Daily bars (batched, cached per ticker) ---
+    if on_progress:
+        on_progress(0, f"Fetching history: {len(tickers)} ticker(s)…")
     daily_bars = fetch_daily_bars(tickers, daily_start, daily_end)
 
     # --- 2. Daily indicators per ticker ---
+    if on_progress:
+        on_progress(0, "Computing indicators…")
     daily_indicators: dict[str, dict[str, dict]] = {}
     for ticker, bars in daily_bars.items():
         daily_indicators[ticker] = compute_daily_indicators(bars)
@@ -96,13 +102,14 @@ def enrich_fills_alpaca(
         by_date[f.executed_at.date()].append(f)
 
     enriched = 0
+    fills_done = 0
     total_dates = len(by_date)
 
     for date_idx, (trade_date, date_fills) in enumerate(sorted(by_date.items())):
         label = f"{trade_date} ({date_idx + 1}/{total_dates})"
         log.info("Alpaca enriching %s — %d fill(s)", label, len(date_fills))
         if on_progress:
-            on_progress(date_idx + 1, str(trade_date))
+            on_progress(fills_done, str(trade_date))
 
         date_tickers = list({f.ticker for f in date_fills})
 
@@ -121,7 +128,12 @@ def enrich_fills_alpaca(
             except Exception as e:
                 log.warning("Failed to build context for fill %s: %s", fill.id, e)
 
-    session.commit()
+        # Commit each trade date so SQLite does not hold a write lock across
+        # the entire historical enrichment run. Postgres handles the longer
+        # transaction, but local SQLite is the default development database.
+        session.commit()
+        fills_done += len(date_fills)
+
     log.info("Alpaca enrichment complete: %d fills enriched", enriched)
     return enriched
 
@@ -145,8 +157,12 @@ def _build_context(
     bars = minute_bars.get(ticker, [])
     intraday = analyze_minute_bars(bars, fill_dt) if bars else {}
 
-    # Daily indicators for the fill's date
+    # Daily indicators for the fill's date. During the current session, today's
+    # final daily candle does not exist yet, so use the latest completed day.
     daily_indic = daily_indicators.get(ticker, {}).get(day_str, {})
+    latest_completed_daily = _latest_completed_daily_bar_date()
+    if not daily_indic and fill_date > latest_completed_daily:
+        daily_indic = daily_indicators.get(ticker, {}).get(latest_completed_daily.isoformat(), {})
 
     # Previous day OHLC from daily bars
     prev = get_previous_day_data(daily_bars.get(ticker, []), fill_date)
@@ -171,6 +187,7 @@ def _build_context(
 
     # Relative volume
     rvol = compute_rvol(intraday, adv, fill_dt)
+    rvol_ta = compute_rvol_time_adjusted(ticker, fill_date, fill_dt, daily_bars.get(ticker, []))
 
     # Flags (need prev fields added to intraday dict for flag computation)
     intraday_with_prev = {
@@ -179,6 +196,20 @@ def _build_context(
         "entry_distance_from_prev_low_pct": dist_prev_low,
     }
     flags = compute_flags(fill, intraday_with_prev, daily_indic)
+
+    # Option moneyness at entry
+    moneyness_pct: Optional[float] = None
+    is_itm: Optional[int] = None
+    is_otm: Optional[int] = None
+    if fill.instrument_type == "option" and fill.strike is not None and entry_price is not None:
+        strike = float(fill.strike)
+        if fill.option_type == "call":
+            moneyness_pct = round((entry_price - strike) / strike * 100, 4)
+        elif fill.option_type == "put":
+            moneyness_pct = round((strike - entry_price) / strike * 100, 4)
+        if moneyness_pct is not None:
+            is_itm = 1 if moneyness_pct > 0 else 0
+            is_otm = 1 if moneyness_pct < 0 else 0
 
     return FillMarketContext(
         fill_id=fill.id,
@@ -192,6 +223,7 @@ def _build_context(
         cumulative_volume_at_entry=intraday.get("cumulative_volume_at_entry"),
         avg_daily_volume_20=adv,
         simple_relative_volume=rvol,
+        rvol_time_adjusted=rvol_ta,
         # Daily indicators
         entry_sma_20=daily_indic.get("sma_20"),
         entry_sma_50=daily_indic.get("sma_50"),
@@ -230,8 +262,10 @@ def _build_context(
         entry_gap_pct=entry_gap_pct,
         # Flags
         is_chase_entry=flags.get("is_chase_entry"),
+        chase_score=flags.get("chase_score"),
         is_trend_aligned=flags.get("is_trend_aligned"),
         is_late_move=flags.get("is_late_move"),
+        is_above_vwap=flags.get("is_above_vwap"),
         is_vwap_reclaim=flags.get("is_vwap_reclaim"),
         is_opening_range_breakout=flags.get("is_opening_range_breakout"),
         is_premarket_breakout=flags.get("is_premarket_breakout"),
@@ -240,4 +274,9 @@ def _build_context(
         is_overnight=flags.get("is_overnight"),
         entry_time_bucket=flags.get("entry_time_bucket"),
         dte_bucket=flags.get("dte_bucket"),
+        setup_quality_score=flags.get("setup_quality_score"),
+        # Option moneyness
+        moneyness_pct=moneyness_pct,
+        is_itm=is_itm,
+        is_otm=is_otm,
     )

@@ -76,7 +76,8 @@ def compute_path_metrics_for_trades(
         except Exception as e:
             log.warning("Failed path metrics for trade %s: %s", trade.id, e)
 
-    session.commit()
+        session.commit()
+
     log.info("Trade path metrics: computed %d/%d trades", processed, len(closed))
     return processed
 
@@ -118,16 +119,18 @@ def _compute(
     opened_utc = opened_et.astimezone(UTC)
     closed_utc = closed_et.astimezone(UTC)
 
+    # Fetch bars for the trade window + 60m of post-exit
+    post_exit_end = closed_et + timedelta(hours=1)
     all_bars: list[dict] = []
-    for day in _date_range(trade.opened_at.date(), trade.closed_at.date()):
+    for day in _date_range(trade.opened_at.date(), post_exit_end.date()):
         day_bars = fetch_minute_bars_for_date([trade.ticker], day).get(trade.ticker, [])
         all_bars.extend(day_bars)
 
     if not all_bars:
         return None
 
-    df = bars_to_df(all_bars)
-    df = df[(df.index >= opened_utc) & (df.index <= closed_utc)]
+    full_df = bars_to_df(all_bars)
+    df = full_df[(full_df.index >= opened_utc) & (full_df.index <= closed_utc)]
     if df.empty:
         return None
 
@@ -191,6 +194,11 @@ def _compute(
         else:
             exit_time_bucket = "afterhours"
 
+    # Post-exit continuation: how much did price move in favor after exit?
+    post_15m, post_30m, post_60m, time_to_post_high = _compute_post_exit(
+        full_df, closed_utc, entry_price, bullish
+    )
+
     return TradePathMetrics(
         trade_id=trade.id,
         data_source=f"alpaca_{ALPACA_DATA_FEED}",
@@ -204,12 +212,64 @@ def _compute(
         underlying_exit_efficiency=exit_efficiency,
         underlying_giveback_pct=giveback_pct,
         moved_in_favor_first=moved_in_favor_first,
+        post_exit_mfe_15m=post_15m,
+        post_exit_mfe_30m=post_30m,
+        post_exit_mfe_60m=post_60m,
+        time_to_post_exit_high_minutes=time_to_post_high,
     )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _compute_post_exit(
+    full_df,
+    closed_utc,
+    entry_price: float,
+    bullish: bool,
+) -> tuple[Optional[float], Optional[float], Optional[float], Optional[int]]:
+    """
+    Compute how much price moved in the favorable direction after the exit.
+    Uses bars strictly after closed_utc, up to 60 minutes.
+    Returns (post_15m_mfe, post_30m_mfe, post_60m_mfe, time_to_extreme_minutes).
+    """
+    windows = [15, 30, 60]
+    results: list[Optional[float]] = []
+    time_to_extreme: Optional[int] = None
+
+    # Determine RTH close for the exit day — don't look past 16:00 ET
+    exit_et = closed_utc.astimezone(ET)
+    rth_close = exit_et.replace(hour=16, minute=0, second=0, microsecond=0)
+    rth_close_utc = rth_close.astimezone(UTC)
+    cap = min(closed_utc + timedelta(hours=1), rth_close_utc)
+
+    post_df = full_df[(full_df.index > closed_utc) & (full_df.index <= cap)]
+    if post_df.empty:
+        return None, None, None, None
+
+    for w in windows:
+        end = closed_utc + timedelta(minutes=w)
+        seg = post_df[post_df.index <= end]
+        if seg.empty:
+            results.append(None)
+            continue
+        if bullish:
+            mfe = float((seg["high"].max() - entry_price) / entry_price * 100)
+        else:
+            mfe = float((entry_price - seg["low"].min()) / entry_price * 100)
+        results.append(_f(mfe))
+
+    # Time to the post-exit extreme within 60m
+    if bullish:
+        extreme_idx = post_df["high"].idxmax()
+    else:
+        extreme_idx = post_df["low"].idxmin()
+    if extreme_idx is not None:
+        time_to_extreme = int((extreme_idx - closed_utc).total_seconds() / 60)
+
+    return results[0], results[1], results[2], time_to_extreme
+
 
 def _is_bullish(trade: Trade, entry_fill: Fill) -> bool:
     if trade.instrument_type == "stock":

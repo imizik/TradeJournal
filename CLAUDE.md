@@ -2,7 +2,7 @@
 
 ## Product
 
-Personal localhost trade journal and reconciliation tool for Robinhood trading history.
+Personal local-first trade journal and reconciliation tool for Robinhood trading history.
 
 Current scope is broader than the original MVP notes:
 
@@ -10,7 +10,7 @@ Current scope is broader than the original MVP notes:
 - Multiple account types exist in the data model.
 - The current dataset is centered on Roth IRA `8267` and Individual `1113`.
 - There is no auth and no multi-user model.
-- The repo is optimized for local analysis, repair, and rebuild workflows.
+- The repo is optimized for local analysis, repair, rebuild workflows, and eventual low-cost deployment.
 
 ## Agent Operating Style
 
@@ -31,14 +31,19 @@ Highest-risk areas require extra care: PnL math, FIFO reconstruction, Gmail/emai
 ## Stack
 
 - Frontend: Next.js 16, React 19, App Router, Tailwind
-- Backend: FastAPI, SQLModel, Alembic, SQLite
-- Market data: `yfinance`, Polygon.io (free tier, API key in `backend/.env`)
+- Backend: FastAPI, SQLModel, Alembic, SQLite by default, Postgres via `DATABASE_URL`
+- Market data: `yfinance`, Polygon.io, Alpaca
 - Email ingest: Gmail API
 - Tests: `pytest`
 
 Database file:
 
 - `backend/data/trade_journal.db`
+
+Cloud/deploy-ready DB config:
+
+- `DATABASE_URL` overrides the local SQLite default.
+- Neon/Postgres URLs should use the `postgresql+psycopg://...` SQLAlchemy driver form.
 
 Manual fill backup file:
 
@@ -66,12 +71,19 @@ Important field semantics:
 
 The app currently allows editing fills to correct history, then rebuilding derived trades from scratch. So the conceptual rule is still "fills drive truth", but correction currently happens by updating bad fills rather than only appending compensating rows.
 
+Durable background work:
+
+- `job_run` records durable state for enrichment/path jobs.
+- API status endpoints should read `job_run`, not process-local dictionaries.
+- Local routes may still start convenience background threads, but the execution path must also work through `python -m app.jobs.run`.
+- Cloud Run Jobs can use the same container/image and call the CLI entrypoint later.
+
 ## What Already Exists
 
 ### Backend
 
 - SQLModel schema for accounts, fills, trades, tags, and trade-fill junctions
-- Alembic migrations through `b7e3a9f2c841`
+- Alembic migrations through `9d1e2f3a4b5c`
 - FIFO reconstructor that handles:
   - options and stocks
   - scale-ins
@@ -97,6 +109,11 @@ The app currently allows editing fills to correct history, then rebuilding deriv
 - Manual fill create and edit flows
 - Manual fill backup and restore logic
 - Full resync flow that clears imported fills, restores manual fills, re-imports Gmail, and rebuilds trades
+- Durable job runner for Polygon enrichment, Alpaca fill context, and trade path metrics:
+  - `backend/app/engine/jobs.py`
+  - `backend/app/jobs/run.py`
+- SQLite-to-Postgres copy script:
+  - `backend/scripts/migrate_sqlite_to_postgres.py`
 - Reconciliation and CSV comparison scripts under `backend/scripts/`
 
 ### Frontend
@@ -139,8 +156,16 @@ These are present in the repo right now but are not all committed yet:
 - Partial-fill Robinhood option emails are being intentionally skipped to avoid cumulative duplicate fills
 - Expired options with partial exits now preserve realized FIFO PnL on the exited portion and only write off the remaining open lots
 - AI trade review is wired: `POST /trades/{id}/review` calls `backend/app/ai/reviewer.py` (Claude claude-sonnet-4-6), writes structured JSON to `trade.ai_review`, rendered in trade detail page with Generate/Regenerate button
-- Fill enrichment pipeline is live: `backend/app/engine/enricher.py` fetches Polygon data and computes Black-Scholes greeks. New fill columns: `underlying_price_at_fill`, `vwap_at_fill`, `iv_at_fill`, `delta_at_fill`, `gamma_at_fill`, `theta_at_fill`, `vega_at_fill`, `sma_20_at_fill`, `sma_50_at_fill`, `ema_9_at_fill`, `ema_20_at_fill`, `ema_9h_at_fill`, `rsi_14_at_fill`, `macd_at_fill`, `macd_signal_at_fill`. Polygon responses cached to `backend/data/polygon_cache/`. Backfill script: `backend/scripts/backfill_greeks.py`. Auto-enrichment runs after each Gmail import. API key in `backend/.env` as `POLYGON_API_KEY`.
-- **Frontend UI for enriched fill data is NOT YET BUILT.** The backend returns all fields; the frontend needs to display them in: trade detail fill timeline, fill detail/edit page, and fills list table.
+- Fill enrichment pipeline is live:
+  - `backend/app/engine/enricher.py` fetches Polygon data and computes Black-Scholes greeks.
+  - `backend/app/engine/alpaca_enricher.py` computes Alpaca-derived fill market context in `fill_market_context`.
+  - `backend/app/engine/trade_path.py` computes trade-level path metrics in `trade_path_metrics`.
+  - `backend/app/engine/jobs.py` wraps long enrichment/path work in durable `job_run` rows.
+  - Polygon responses cache to `backend/data/polygon_cache/`.
+  - Alpaca bars cache to `backend/data/alpaca_cache/`.
+  - Alpaca daily cache validity must cover the requested date range, not just be young by file age.
+  - Local SQLite enrichers commit incrementally to avoid locking `job_run` progress updates.
+- Trade detail UI displays Alpaca context and audit/path panels. Enrichment fields remain nullable and should display as missing when unavailable.
 
 If behavior looks inconsistent between tests and code, check whether the file is part of this active working tree set before assuming the committed history is wrong.
 
@@ -152,11 +177,16 @@ Highest-leverage backend files:
 - `backend/app/engine/email_parser.py`
 - `backend/app/engine/gmail_poller.py`
 - `backend/app/engine/enricher.py`
+- `backend/app/engine/alpaca.py`
+- `backend/app/engine/alpaca_enricher.py`
+- `backend/app/engine/jobs.py`
+- `backend/app/engine/trade_path.py`
 - `backend/app/ai/reviewer.py`
 - `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
+- `backend/app/routers/market_context.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
 
@@ -179,6 +209,7 @@ Important analysis scripts:
 - `backend/scripts/csv_reconstruct.py`
 - `backend/scripts/find_phantoms.py`
 - `backend/scripts/rebuild_trades.py`
+- `backend/scripts/migrate_sqlite_to_postgres.py`
 
 Scratch comparison scripts also exist in `backend/compare_fills*.py`. Treat them as ad hoc analysis utilities, not stable app code.
 
@@ -203,9 +234,19 @@ Stable current routes:
 - `POST /trades/{id}/review`
 - `GET /stats`
 - `POST /rebuild`
-
 - `GET /quotes`
 - `POST /quotes/positions`
+- `POST /fills/enrich`
+- `GET /fills/enrich/status`
+- `POST /market-context/enrich`
+- `GET /market-context/enrich/status`
+- `GET /market-context/coverage`
+- `GET /market-context/fill/{fill_id}`
+- `GET /market-context/fills/bulk`
+- `GET /market-context/trade/{trade_id}`
+- `POST /market-context/trade-path/compute`
+- `GET /market-context/trade-path/status`
+- `GET /market-context/audit/{trade_id}`
 
 ## Run Locally
 
@@ -228,6 +269,23 @@ npm install
 npm run dev
 ```
 
+Durable local enrichment/path jobs:
+
+```bash
+cd backend
+python -m app.jobs.run --type polygon_enrich --range all
+python -m app.jobs.run --type alpaca_enrich --range all --force
+python -m app.jobs.run --type trade_path --range all
+```
+
+SQLite-to-Postgres/Neon migration:
+
+```bash
+cd backend
+DATABASE_URL="postgresql+psycopg://USER:PASSWORD@HOST/dbname?sslmode=require" alembic upgrade head
+python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
+```
+
 ## Testing
 
 Backend tests:
@@ -240,6 +298,9 @@ pytest
 Current note:
 
 - `fastapi.testclient` requires `httpx`, and local test collection currently fails if `httpx` is not installed in the Python environment.
+- The checked-in backend venv may not have `pytest`; when it is unavailable, run `python -m compileall app scripts` plus targeted `TestClient` smoke checks.
+- Next 16 no longer supports `next lint` the same way; `npm run lint` may fail until the script is updated.
+- `npm run build` may fail in a network-restricted environment because `next/font` tries to fetch Google Fonts.
 
 ## Reconciliation Workflow
 
@@ -266,7 +327,12 @@ The report work is centered on understanding:
 - If a change touches the UI tables, prefer reusing the extracted table components instead of duplicating table logic.
 - Avoid frontend N+1 calls; batch data loading or extend shared API responses when practical.
 - Fill enrichment fields are all nullable — always guard with null checks before displaying or passing to AI.
+- Alpaca context is fill-level. Trade path metrics are separate and require the Path Metrics job.
+- The dashboard Alpaca "All history" control should send `range=all&force=true`; `force` alone only reprocesses the currently selected range.
+- If recent trades have underlying/VWAP but missing RSI/EMA/MACD/ATR, inspect stale Alpaca daily cache coverage before changing indicator math.
 - Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
 - Backend port is usually 8000. Use 8080 only when 8000 is occupied, and keep OAuth/API URLs in sync.
 - Polygon cache lives at `backend/data/polygon_cache/`. Delete a cache file to force a re-fetch for that ticker/date.
+- Alpaca cache lives at `backend/data/alpaca_cache/`. Daily cache files must be refreshed when they do not cover the requested date range.
+- For SQLite, avoid long write transactions in historical jobs; progress updates to `job_run` can otherwise hit `database is locked`.
 - Update `CLAUDE.md` and `AGENTS.md` together when project scope changes materially.

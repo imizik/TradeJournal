@@ -37,7 +37,7 @@ POLYGON_API_KEY = os.environ.get("POLYGON_API_KEY", "")
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "polygon_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-RISK_FREE_RATE = 0.05  # ~current fed funds rate
+RISK_FREE_RATE = float(os.environ.get("RISK_FREE_RATE", "0.0372"))  # override via .env
 ET = ZoneInfo("America/New_York")
 
 
@@ -57,7 +57,7 @@ class _RateLimiter:
         self._last = time.monotonic()
 
 
-_limiter = _RateLimiter(calls_per_minute=3.0)
+_limiter = _RateLimiter(calls_per_minute=4.5)
 
 
 # ---------------------------------------------------------------------------
@@ -292,7 +292,9 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
     macd_signal_cache: dict[str, dict[str, float]] = {}
     ema_9h_cache: dict[str, dict[str, float]] = {}
 
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
+        if on_progress:
+            on_progress(0, f"Indicators: {ticker} ({i + 1}/{len(tickers)})")
         try:
             sma_20_cache[ticker] = fetch_indicator_series(ticker, "sma", window=20)
             sma_50_cache[ticker] = fetch_indicator_series(ticker, "sma", window=50)
@@ -316,12 +318,13 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
         by_ticker_date[(fill.ticker, day_str)].append(fill)
 
     enriched = 0
+    fills_done = 0
     total_groups = len(by_ticker_date)
 
     for i, ((ticker, day_str), day_fills) in enumerate(by_ticker_date.items()):
         log.info("Enriching %s %s (%d/%d)", ticker, day_str, i + 1, total_groups)
         if on_progress:
-            on_progress(i + 1, ticker)
+            on_progress(fills_done, ticker)
         day = date.fromisoformat(day_str)
 
         try:
@@ -377,6 +380,8 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
             session.add(fill)
             enriched += 1
 
-    session.commit()
+        session.commit()
+        fills_done += len(day_fills)
+
     log.info("Enriched %d fills", enriched)
     return enriched

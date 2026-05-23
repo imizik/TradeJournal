@@ -150,6 +150,61 @@ def _daily_cache_valid(path: Path) -> bool:
     return age_days < DAILY_CACHE_TTL_DAYS
 
 
+def _bar_et_date(bar: dict) -> Optional[date]:
+    ts = bar.get("t")
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(str(ts).replace("Z", "+00:00")).astimezone(ET).date()
+    except ValueError:
+        return None
+
+
+def _previous_weekday(day: date) -> date:
+    current = day - timedelta(days=1)
+    while current.weekday() >= 5:
+        current -= timedelta(days=1)
+    return current
+
+
+def _latest_completed_daily_bar_date(now_et: datetime | None = None) -> date:
+    """Return the latest date for which a final daily bar should exist."""
+    now_et = now_et or datetime.now(ET)
+    today = now_et.date()
+    today_close_et = now_et.replace(hour=16, minute=30, second=0, microsecond=0)
+
+    if today.weekday() >= 5:
+        return _previous_weekday(today)
+    if now_et < today_close_et:
+        return _previous_weekday(today)
+    return today
+
+
+def _latest_required_daily_bar_date(end: date) -> date:
+    requested = min(end, _latest_completed_daily_bar_date())
+    while requested.weekday() >= 5:
+        requested -= timedelta(days=1)
+    return requested
+
+
+def _daily_cache_covers(path: Path, end: date) -> bool:
+    if not _daily_cache_valid(path):
+        return False
+    try:
+        bars = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not bars:
+        return False
+
+    last_date = max((d for d in (_bar_et_date(bar) for bar in bars) if d is not None), default=None)
+    if last_date is None:
+        return False
+
+    requested_latest_complete = _latest_required_daily_bar_date(end)
+    return last_date >= requested_latest_complete
+
+
 # ---------------------------------------------------------------------------
 # Public fetch functions
 # ---------------------------------------------------------------------------
@@ -165,7 +220,7 @@ def fetch_daily_bars(tickers: list[str], start: date, end: date) -> dict[str, li
 
     for ticker in tickers:
         cp = _daily_cache_path(ticker)
-        if _daily_cache_valid(cp):
+        if _daily_cache_covers(cp, end):
             result[ticker] = json.loads(cp.read_text())
         else:
             missing.append(ticker)
@@ -201,7 +256,7 @@ def fetch_daily_bars(tickers: list[str], start: date, end: date) -> dict[str, li
     return result
 
 
-def fetch_minute_bars_for_date(tickers: list[str], day: date) -> dict[str, list]:
+def fetch_minute_bars_for_date(tickers: list[str], day: date, cache_only: bool = False) -> dict[str, list]:
     """
     Fetch 1-minute bars for multiple tickers on a single trading date (04:00–20:00 ET).
     Returns {ticker: [bar_dict]}. Results are cached per ticker/date.
@@ -219,6 +274,9 @@ def fetch_minute_bars_for_date(tickers: list[str], day: date) -> dict[str, list]
 
     if not missing:
         return result
+
+    if cache_only:
+        return result  # caller only wants what's already on disk
 
     if day > datetime.now(ET).date():
         log.info("Skipping minute bar fetch for %s — future date", day)

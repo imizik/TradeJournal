@@ -1,9 +1,11 @@
 import json
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.database import engine
@@ -93,16 +95,32 @@ def _cutoff(range_value: str | None) -> datetime | None:
     return None
 
 
-def _set_job(job_id: uuid.UUID, **values: Any) -> None:
-    with Session(engine) as session:
-        job = session.get(JobRun, job_id)
-        if not job:
+def _is_sqlite_locked(exc: OperationalError) -> bool:
+    return "database is locked" in str(exc).lower()
+
+
+def _set_job(job_id: uuid.UUID, *, ignore_locked: bool = False, attempts: int = 5, **values: Any) -> None:
+    for attempt in range(attempts):
+        try:
+            with Session(engine) as session:
+                job = session.get(JobRun, job_id)
+                if not job:
+                    return
+                for key, value in values.items():
+                    setattr(job, key, value)
+                job.updated_at = datetime.utcnow()
+                session.add(job)
+                session.commit()
             return
-        for key, value in values.items():
-            setattr(job, key, value)
-        job.updated_at = datetime.utcnow()
-        session.add(job)
-        session.commit()
+        except OperationalError as exc:
+            if not _is_sqlite_locked(exc):
+                raise
+            if ignore_locked:
+                log.debug("Skipped locked job progress update for %s", job_id)
+                return
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.25 * (attempt + 1))
 
 
 def _start_job(job_id: uuid.UUID) -> JobRun:
@@ -120,10 +138,12 @@ def _start_job(job_id: uuid.UUID) -> JobRun:
         return job
 
 
-def _finish_job(job_id: uuid.UUID, enriched: int) -> None:
+def _finish_job(job_id: uuid.UUID, enriched: int, total: int) -> None:
     _set_job(
         job_id,
         status="succeeded",
+        done=total,
+        current=None,
         enriched=enriched,
         finished_at=datetime.utcnow(),
     )
@@ -152,8 +172,15 @@ def _polygon_fill_ids(session: Session, range_value: str, force: bool) -> list[u
 def _alpaca_fill_ids(session: Session, range_value: str, force: bool) -> list[uuid.UUID]:
     query = select(Fill.id)
     if not force:
-        existing_fill_ids = set(session.exec(select(FillMarketContext.fill_id)).all())
-        query = query.where(Fill.id.notin_(existing_fill_ids))
+        complete_context_fill_ids = set(
+            session.exec(
+                select(FillMarketContext.fill_id)
+                .where(FillMarketContext.entry_rsi_14 != None)  # noqa: E711
+                .where(FillMarketContext.entry_ema_9 != None)  # noqa: E711
+                .where(FillMarketContext.entry_ema_20 != None)  # noqa: E711
+            ).all()
+        )
+        query = query.where(Fill.id.notin_(complete_context_fill_ids))
     cutoff = _cutoff(range_value)
     if cutoff is not None:
         query = query.where(Fill.executed_at >= cutoff)
@@ -212,7 +239,7 @@ def run_job(job_id: uuid.UUID) -> int:
             enriched = run_trade_path_job(job)
         else:
             raise ValueError(f"Unsupported job type: {job.job_type}")
-        _finish_job(job.id, enriched)
+        _finish_job(job.id, enriched, job.total)
         return enriched
     except Exception as exc:
         _fail_job(job.id, exc)
@@ -228,7 +255,7 @@ def run_polygon_enrichment_job(job: JobRun) -> int:
         return 0
 
     def on_progress(done: int, label: str) -> None:
-        _set_job(job.id, done=done, current=label)
+        _set_job(job.id, ignore_locked=True, done=done, current=label)
 
     with Session(engine) as session:
         fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
@@ -246,12 +273,14 @@ def run_alpaca_enrichment_job(job: JobRun) -> int:
         return 0
 
     def on_progress(done: int, label: str) -> None:
-        _set_job(job.id, done=done, current=label)
+        _set_job(job.id, ignore_locked=True, done=done, current=label)
 
     with Session(engine) as session:
         fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
         _set_job(job.id, total=len(fills))
-        return enrich_fills_alpaca(list(fills), session, on_progress=on_progress, force=force)
+        # The job's fill_ids are already filtered to missing/incomplete rows.
+        # Process that explicit set even when the row has a partial context.
+        return enrich_fills_alpaca(list(fills), session, on_progress=on_progress, force=True)
 
 
 def run_trade_path_job(job: JobRun) -> int:
@@ -264,7 +293,7 @@ def run_trade_path_job(job: JobRun) -> int:
         return 0
 
     def on_progress(done: int, label: str) -> None:
-        _set_job(job.id, done=done, current=label)
+        _set_job(job.id, ignore_locked=True, done=done, current=label)
 
     with Session(engine) as session:
         trades = session.exec(select(Trade).where(Trade.id.in_(trade_ids))).all()

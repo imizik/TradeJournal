@@ -9,7 +9,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Account, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync
 from app.routers.fills import (
     _clear_derived_trade_data,
     _persist_rebuild,
@@ -55,9 +55,33 @@ def _seed_and_normalize_roth_account() -> None:
         backup_manual_fills(session)
 
 
+def _cleanup_orphaned_jobs() -> None:
+    """Mark any running/queued jobs as failed — they were orphaned by a restart."""
+    from datetime import datetime
+    with Session(engine) as session:
+        from app.models import JobRun
+        from sqlmodel import select as sel
+        stuck = session.exec(
+            sel(JobRun).where(JobRun.status.in_(["running", "queued"]))
+        ).all()
+        for job in stuck:
+            job.status = "failed"
+            job.error = "Orphaned: server restarted while job was running"
+            job.finished_at = datetime.utcnow()
+            job.updated_at = datetime.utcnow()
+            session.add(job)
+        if stuck:
+            session.commit()
+            import logging
+            logging.getLogger(__name__).warning(
+                "Marked %d orphaned job(s) as failed on startup", len(stuck)
+            )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     create_db_and_tables()
+    _cleanup_orphaned_jobs()
     _seed_and_normalize_roth_account()
     with Session(engine) as session:
         restored = restore_manual_fills_from_backup(session)
@@ -89,3 +113,4 @@ app.include_router(rebuild.router, prefix="/rebuild", tags=["rebuild"])
 app.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
+app.include_router(sync.router, prefix="/sync", tags=["sync"])

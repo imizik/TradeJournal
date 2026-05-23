@@ -156,7 +156,7 @@ def _normalize_executed_at(executed_at: datetime) -> datetime:
     return executed_at.astimezone(ET).replace(tzinfo=None)
 
 
-def _import_fills_from_gmail(session: Session) -> dict[str, int]:
+def _import_fills_from_gmail(session: Session, *, start_enrichment: bool = True) -> dict[str, int]:
     from app.engine.gmail_poller import GmailPollingError, poll_new_fills
 
     t0 = time.monotonic()
@@ -220,7 +220,7 @@ def _import_fills_from_gmail(session: Session) -> dict[str, int]:
     enrich_started = False
     enrich_total = 0
     enrich_job_id = None
-    if saved > 0:
+    if saved > 0 and start_enrichment:
         if not running_job(session, JOB_POLYGON_ENRICH):
             job = create_polygon_enrichment_job(session, range_value="all")
             if job.total:

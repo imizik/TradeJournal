@@ -176,8 +176,10 @@ export type FillMarketContext = {
   entry_gap_pct: number | null;
   // Flags
   is_chase_entry: number | null;
+  chase_score: number | null;
   is_trend_aligned: number | null;
   is_late_move: number | null;
+  is_above_vwap: number | null;
   is_vwap_reclaim: number | null;
   is_opening_range_breakout: number | null;
   is_premarket_breakout: number | null;
@@ -186,6 +188,13 @@ export type FillMarketContext = {
   is_overnight: number | null;
   entry_time_bucket: string | null;
   dte_bucket: string | null;
+  setup_quality_score: number | null;
+  // RVOL (time-adjusted)
+  rvol_time_adjusted: number | null;
+  // Option moneyness
+  moneyness_pct: number | null;
+  is_itm: number | null;
+  is_otm: number | null;
 };
 
 export type TradePathMetrics = {
@@ -201,6 +210,10 @@ export type TradePathMetrics = {
   underlying_exit_efficiency: number | null;
   underlying_giveback_pct: number | null;
   moved_in_favor_first: number | null;
+  post_exit_mfe_15m: number | null;
+  post_exit_mfe_30m: number | null;
+  post_exit_mfe_60m: number | null;
+  time_to_post_exit_high_minutes: number | null;
   option_mfe_pct: number | null;
   option_mae_pct: number | null;
   option_max_price_seen: number | null;
@@ -232,6 +245,52 @@ export type JobStatus = {
   current: string;
   enriched: number;
   error: string | null;
+  job_id?: string | null;
+  status?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+};
+
+export type SyncJob = {
+  job_type: string;
+  label: string;
+  description: string;
+  advanced: boolean;
+  status: "idle" | "queued" | "running" | "succeeded" | "failed" | "skipped";
+  running: boolean;
+  done: number;
+  total: number;
+  items_processed: number;
+  errors_count: number;
+  message: string | null;
+  error_summary: string | null;
+  job_id: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  last_run_at: string | null;
+};
+
+export type SyncSummary = {
+  running: boolean;
+  active_job: SyncJob | null;
+  last_success_at: string | null;
+  errors_count: number;
+};
+
+export type SyncRun = {
+  id: string;
+  job_type: string;
+  label: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  items_processed: number;
+  errors_count: number;
+  error_summary: string | null;
+  message: string | null;
 };
 
 export type AuditFillBar = {
@@ -407,4 +466,12 @@ export const api = {
   tradePathStatus: () => get<JobStatus>("/market-context/trade-path/status"),
   auditTrade: (tradeId: string) => get<TradeAudit>(`/market-context/audit/${tradeId}`),
   coverage: () => get<CoverageStats>("/market-context/coverage"),
+  syncSummary: () => get<SyncSummary>("/sync/summary"),
+  syncJobs: () => get<SyncJob[]>("/sync/jobs"),
+  syncRuns: () => get<SyncRun[]>("/sync/runs"),
+  runSyncPipeline: () => post<{ pipeline_run_id: string }>("/sync/pipeline/run"),
+  runSyncJob: (jobType: string, range: "day" | "week" | "month" | "all" = "week", force = false) =>
+    post<{ run_id: string; started: boolean; total: number }>(`/sync/jobs/${jobType}/run?range=${range}${force ? "&force=true" : ""}`),
+  advancedRebuildAll: () => post<{ run_id: string }>("/sync/advanced/rebuild-all"),
+  advancedResyncAll: () => post<{ run_id: string }>("/sync/advanced/resync-all"),
 };
