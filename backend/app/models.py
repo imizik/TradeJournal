@@ -15,6 +15,12 @@ class Account(SQLModel, table=True):
     type: str   # "roth_ira"
     last4: str = Field(index=True, unique=True)  # "8267"
 
+    # Broker linkage (additive; nullable). Populated for non-Robinhood ingest
+    # paths such as Webull where account identity is an opaque broker id, not
+    # a 4-digit suffix. Robinhood fills leave these NULL.
+    broker: Optional[str] = Field(default=None, index=True)              # "robinhood" | "webull" | ...
+    broker_account_id: Optional[str] = Field(default=None, index=True)   # raw broker account id
+
     fills: list["Fill"] = Relationship(back_populates="account")
     trades: list["Trade"] = Relationship(back_populates="account")
 
@@ -260,3 +266,33 @@ class TradePathMetrics(SQLModel, table=True):
     time_to_option_mfe_minutes: Optional[int] = None
     option_exit_efficiency: Optional[float] = None
     option_giveback_pct: Optional[float] = None
+
+
+class WebullRawEvent(SQLModel, table=True):
+    """
+    Raw Webull trade-event payload, stored before any normalization attempt.
+
+    The envelope `id` from Webull is the natural idempotency key — repeated
+    deliveries hit the primary key and are short-circuited. Normalization
+    (Fill creation) only runs after the raw save succeeds.
+    """
+    __tablename__ = "webull_raw_event"
+
+    event_id: str = Field(primary_key=True)                    # envelope "id"
+    event_type: str = Field(index=True)                        # "TRADE" | other
+    scene_type: Optional[str] = Field(default=None, index=True)  # "FILLED" | "FINAL_FILLED" | other
+    order_status: Optional[str] = None                         # e.g. "PARTIAL_FILLED"
+    account_id: Optional[str] = Field(default=None, index=True)
+    client_order_id: Optional[str] = Field(default=None, index=True)
+    symbol: Optional[str] = None
+    category: Optional[str] = None                             # "US_STOCK" | "US_OPTION" | ...
+    received_at: datetime = Field(default_factory=datetime.utcnow, index=True)
+    filled_time: Optional[datetime] = None
+    payload_json: str = Field(sa_column=Column(Text, nullable=False))
+
+    # Set True once we've routed the event (either normalized into a Fill,
+    # or explicitly decided it does not need to become a Fill).
+    normalized: bool = Field(default=False, index=True)
+    fill_id: Optional[uuid.UUID] = Field(default=None, foreign_key="fill.id")
+    normalize_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    normalize_reason: Optional[str] = None                     # "fill" | "non_trade" | "non_execution" | "duplicate" | "error"

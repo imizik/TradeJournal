@@ -127,6 +127,17 @@ def reconstruct(fills: list[FillInput], today: date | None = None) -> Reconstruc
     anomalies: list[str] = []
 
     for fill in sorted(fills, key=lambda f: _sort_dt(f.executed_at)):
+        # Guard: option fills missing required metadata cannot be grouped into
+        # a contract key safely (would collapse all such fills into one bucket
+        # and produce bogus trades). Skip them with an anomaly — the Fill row
+        # is still saved upstream; we just don't reconstruct a Trade for it.
+        if fill.instrument_type == "option" and (
+            fill.option_type is None or fill.strike is None or fill.expiration is None
+        ):
+            anomalies.append(
+                f"Skipped option fill {fill.id} ({fill.ticker}): missing option_type/strike/expiration"
+            )
+            continue
         key = _make_key(fill)
         if fill.side in _OPEN_SIDES:
             _handle_open(fill, key, open_trades)

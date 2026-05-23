@@ -9,9 +9,11 @@ from app.engine.jobs import (
     JOB_ALPACA_ENRICH,
     JOB_POLYGON_ENRICH,
     JOB_TRADE_PATH,
+    JOB_WEBULL_LISTENER,
     create_alpaca_enrichment_job,
     create_polygon_enrichment_job,
     create_trade_path_job,
+    create_webull_listener_job,
     run_job,
 )
 
@@ -21,7 +23,7 @@ def main() -> None:
     parser.add_argument("--job-id", help="Run an existing job_run row by UUID")
     parser.add_argument(
         "--type",
-        choices=[JOB_POLYGON_ENRICH, JOB_ALPACA_ENRICH, JOB_TRADE_PATH],
+        choices=[JOB_POLYGON_ENRICH, JOB_ALPACA_ENRICH, JOB_TRADE_PATH, JOB_WEBULL_LISTENER],
         help="Create and run a new job of this type",
     )
     parser.add_argument("--range", default="week", choices=["day", "week", "month", "all"])
@@ -40,6 +42,8 @@ def main() -> None:
                 job = create_polygon_enrichment_job(session, range_value=args.range, force=args.force)
             elif args.type == JOB_ALPACA_ENRICH:
                 job = create_alpaca_enrichment_job(session, range_value=args.range, force=args.force)
+            elif args.type == JOB_WEBULL_LISTENER:
+                job = create_webull_listener_job(session)
             else:
                 job = create_trade_path_job(session, range_value=args.range, force=args.force)
             job_id = job.id

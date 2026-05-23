@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 JOB_POLYGON_ENRICH = "polygon_enrich"
 JOB_ALPACA_ENRICH = "alpaca_enrich"
 JOB_TRADE_PATH = "trade_path"
+JOB_WEBULL_LISTENER = "webull_listener"
 
 
 def create_job(session: Session, job_type: str, params: dict[str, Any] | None = None, total: int = 0) -> JobRun:
@@ -237,6 +238,12 @@ def run_job(job_id: uuid.UUID) -> int:
             enriched = run_alpaca_enrichment_job(job)
         elif job.job_type == JOB_TRADE_PATH:
             enriched = run_trade_path_job(job)
+        elif job.job_type == JOB_WEBULL_LISTENER:
+            # The listener manages its own lifecycle (status, started_at,
+            # finished_at) via engine.webull_listener. Skip the generic
+            # _finish_job() call so we don't overwrite its terminal state.
+            from app.engine.webull_listener import run_listener
+            return run_listener(job.id)
         else:
             raise ValueError(f"Unsupported job type: {job.job_type}")
         _finish_job(job.id, enriched, job.total)
@@ -244,6 +251,22 @@ def run_job(job_id: uuid.UUID) -> int:
     except Exception as exc:
         _fail_job(job.id, exc)
         raise
+
+
+def create_webull_listener_job(session: Session) -> JobRun:
+    """Create a JobRun row for the Webull listener. total=0 (open-ended)."""
+    job = JobRun(
+        id=uuid.uuid4(),
+        job_type=JOB_WEBULL_LISTENER,
+        status="queued",
+        params_json=json.dumps({}),
+        total=0,
+        updated_at=datetime.utcnow(),
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    return job
 
 
 def run_polygon_enrichment_job(job: JobRun) -> int:

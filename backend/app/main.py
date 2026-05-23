@@ -9,7 +9,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Account, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull
 from app.routers.fills import (
     _clear_derived_trade_data,
     _persist_rebuild,
@@ -114,3 +114,4 @@ app.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])
+app.include_router(webull.router, prefix="/webull", tags=["webull"])
