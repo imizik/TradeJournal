@@ -266,3 +266,34 @@ def test_event_missing_id_is_rejected(session: Session) -> None:
     assert result.reason == "missing_event_id"
     assert session.exec(select(WebullRawEvent)).all() == []
     assert session.exec(select(Fill)).all() == []
+
+
+# ---------------------------------------------------------------------------
+# 8. Local account resolver (used by HTTP route, CLI, and autostart hook)
+# ---------------------------------------------------------------------------
+
+def test_resolve_local_webull_accounts_returns_only_webull_with_id(session: Session) -> None:
+    """Helper used by /events/start, the CLI, and the autostart hook."""
+    from app.engine.webull import resolve_local_webull_accounts
+
+    # Empty DB
+    assert resolve_local_webull_accounts(session) == []
+
+    # Ingest two distinct events => two Webull accounts auto-created
+    ingest_event(_stock_event(event_id="r1", account_id="ACCT_ONE"), session)
+    ingest_event(_stock_event(event_id="r2", account_id="ACCT_TWO"), session)
+
+    # Add an unrelated non-Webull Account that should NOT show up
+    import uuid as _uuid
+    session.add(Account(
+        id=_uuid.uuid4(),
+        name="Roth IRA",
+        type="roth_ira",
+        last4="8267",
+        broker=None,
+        broker_account_id=None,
+    ))
+    session.commit()
+
+    result = resolve_local_webull_accounts(session)
+    assert sorted(result) == ["ACCT_ONE", "ACCT_TWO"]

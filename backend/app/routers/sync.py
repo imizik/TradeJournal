@@ -13,6 +13,7 @@ from app.engine.jobs import (
     JOB_ALPACA_ENRICH,
     JOB_POLYGON_ENRICH,
     JOB_TRADE_PATH,
+    JOB_WEBULL_LISTENER,
     create_alpaca_enrichment_job,
     create_job,
     create_polygon_enrichment_job,
@@ -68,10 +69,19 @@ def _run_thread(target: Callable[[], None]) -> None:
     thread.start()
 
 
+# Job types that the Sync Center treats as "blocking syncs". Excludes
+# long-running listeners (e.g. webull_listener) which are persistent
+# background workers, not finite sync jobs — they should NOT block the
+# user from running sync/enrichment work, and they should NOT be shown
+# in the "Sync running: ..." banner.
+_LISTENER_JOB_TYPES = {JOB_WEBULL_LISTENER}
+
+
 def _active_job(session: Session) -> JobRun | None:
     return session.exec(
         select(JobRun)
         .where(JobRun.status.in_(["queued", "running"]))
+        .where(JobRun.job_type.notin_(_LISTENER_JOB_TYPES))
         .order_by(JobRun.updated_at.desc())
     ).first()
 

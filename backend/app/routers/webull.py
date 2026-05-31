@@ -26,6 +26,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException
+from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -38,6 +39,7 @@ from app.engine.jobs import (
 )
 from app.engine.webull import (
     WEBULL_ALLOW_TEST_INGEST,
+    resolve_local_webull_accounts,
     WebullClientError,
     get_order_detail_remote,
     health_check,
@@ -149,8 +151,15 @@ def _spawn_listener_thread(job_id: uuid.UUID) -> None:
     thread.start()
 
 
+class _StartEventsRequest(BaseModel):
+    accounts: list[str] | None = None  # Webull broker_account_id list to subscribe
+
+
 @router.post("/events/start")
-def webull_events_start(session: Session = Depends(get_session)) -> dict[str, Any]:
+def webull_events_start(
+    body: _StartEventsRequest | None = Body(default=None),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
     if not webull_configured():
         raise HTTPException(status_code=400, detail="Webull credentials are not configured")
 
@@ -162,10 +171,18 @@ def webull_events_start(session: Session = Depends(get_session)) -> dict[str, An
             "status": job_status(existing),
         }
 
-    job = create_webull_listener_job(session)
+    # Resolve account list: explicit body > all local Webull accounts.
+    accounts: list[str] = list(body.accounts) if (body and body.accounts) else resolve_local_webull_accounts(session)
+    if not accounts:
+        raise HTTPException(
+            status_code=400,
+            detail="No Webull accounts to subscribe to. Provide {'accounts': [...]} or seed an Account row first.",
+        )
+
+    job = create_webull_listener_job(session, accounts=accounts)
     _spawn_listener_thread(job.id)
-    log.info("Webull listener started (job_id=%s)", job.id)
-    return {"started": True, "status": job_status(job)}
+    log.info("Webull listener started (job_id=%s, accounts=%d)", job.id, len(accounts))
+    return {"started": True, "accounts": accounts, "status": job_status(job)}
 
 
 @router.post("/events/stop")

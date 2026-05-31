@@ -52,10 +52,20 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-import httpx
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
+from app.engine.webull_client import (
+    WEBULL_APP_KEY,
+    WEBULL_APP_SECRET,
+    WEBULL_ENVIRONMENT,
+    WEBULL_REGION_ID,
+    WebullClientError,
+    WebullHttpClient,
+    resolve_base_url,
+    webull_configured,
+    _sanitize,
+)
 from app.models import Account, Fill, WebullRawEvent
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
@@ -65,19 +75,11 @@ log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 
-WEBULL_APP_KEY = os.environ.get("WEBULL_APP_KEY", "")
-WEBULL_APP_SECRET = os.environ.get("WEBULL_APP_SECRET", "")
-WEBULL_API_BASE = os.environ.get("WEBULL_API_BASE", "https://api.webull.com").rstrip("/")
-WEBULL_REGION = os.environ.get("WEBULL_REGION", "us")
 WEBULL_ALLOW_TEST_INGEST = os.environ.get("WEBULL_ALLOW_TEST_INGEST", "true").lower() in ("1", "true", "yes")
 
 _FILL_SCENE_TYPES = {"FILLED", "FINAL_FILLED"}
 _STOCK_CATEGORIES = {"US_STOCK", "STOCK"}
 _OPTION_CATEGORIES = {"US_OPTION", "OPTION"}
-
-
-def webull_configured() -> bool:
-    return bool(WEBULL_APP_KEY and WEBULL_APP_SECRET)
 
 
 # ---------------------------------------------------------------------------
@@ -105,83 +107,130 @@ class IngestResult:
 
 
 # ---------------------------------------------------------------------------
-# HTTP client (thin)
+# Remote HTTP wrappers (delegating to WebullHttpClient)
 # ---------------------------------------------------------------------------
+#
+# All three of these talk to the production or UAT Webull OpenAPI through
+# the signed client in webull_client.py. Read-only. No live trading.
+#
+# Endpoint paths and rate limits are documented:
+#   /openapi/account/list           — accounts list
+#   /openapi/trade/order/history    — last 7 days of orders   (2/2s)
+#   /openapi/trade/order/detail     — single order details    (2/2s)
 
-class WebullClientError(RuntimeError):
-    """Raised on Webull API errors. Sanitized — never includes secrets."""
+ACCOUNTS_PATH = "/openapi/account/list"
+ORDER_HISTORY_PATH = "/openapi/trade/order/history"
+ORDER_DETAIL_PATH = "/openapi/trade/order/detail"
 
 
-def _client() -> httpx.Client:
-    if not webull_configured():
-        raise WebullClientError("Webull credentials are not configured")
-    headers = {
-        "x-app-key": WEBULL_APP_KEY,
-        # NOTE: Webull's real auth is signature-based; this header layout is a
-        # placeholder. The signing implementation lives behind a TODO until we
-        # wire the official SDK or hand-rolled signer.
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-    return httpx.Client(base_url=WEBULL_API_BASE, headers=headers, timeout=15.0)
+def _client() -> WebullHttpClient:
+    return WebullHttpClient()
+
+
+def resolve_local_webull_accounts(session: Session) -> list[str]:
+    """
+    Return the broker_account_id for every local Account where broker='webull'.
+
+    Shared by the HTTP route /events/start, the CLI worker, and the lifespan
+    auto-start hook so they all resolve accounts identically. Synthetic
+    placeholder accounts (no broker_account_id set) are excluded.
+    """
+    rows = session.exec(
+        select(Account.broker_account_id)
+        .where(Account.broker == "webull")
+        .where(Account.broker_account_id != None)  # noqa: E711
+    ).all()
+    return [a for a in rows if a]
 
 
 def health_check() -> dict[str, Any]:
     """
-    Best-effort health check. Returns whether keys are configured and whether
-    a trivial probe to the API base succeeds. Never returns secret material.
+    Real signed probe against /openapi/account/list. Returns config + reachability
+    without leaking any secret material. A 2xx or a Webull-level error code both
+    prove we reached and were recognized by the API; only network failures or
+    auth rejections set auth_ok=False.
     """
     info: dict[str, Any] = {
         "configured": webull_configured(),
-        "base_url": WEBULL_API_BASE,
-        "region": WEBULL_REGION,
+        "region": WEBULL_REGION_ID,
+        "environment": WEBULL_ENVIRONMENT,
         "auth_ok": None,
         "error": None,
     }
+    # Also surface the events-api host so HTTP/gRPC environment mismatches
+    # are visible up-front. A 'PERMISSION_DENIED: app key invalid' on the
+    # gRPC stream usually means the events host belongs to a different
+    # environment than the HTTP base URL.
+    try:
+        from app.engine.webull_events import resolve_event_host
+        info["events_host"] = resolve_event_host()
+    except Exception as exc:
+        info["events_host"] = None
+        info["events_host_error"] = _sanitize(str(exc))
+
     if not webull_configured():
+        info["base_url"] = None
         info["error"] = "WEBULL_APP_KEY / WEBULL_APP_SECRET not set"
         return info
+
     try:
-        with _client() as client:
-            # Webull-specific probe endpoint to be confirmed; using a benign GET
-            # against the base. A 401/403 still proves we reached the API.
-            resp = client.get("/")
-            info["auth_ok"] = resp.status_code < 500
-            info["status_code"] = resp.status_code
-    except httpx.HTTPError as exc:
+        client = _client()
+        info["base_url"] = client.describe()["base_url"]
+        # Probe the accounts endpoint. If keys are wrong or the env is misconfigured,
+        # this raises a sanitized WebullClientError.
+        data = client.get(ACCOUNTS_PATH)
+        info["auth_ok"] = True
+        # Avoid dumping potentially sensitive account info into the health endpoint.
+        if isinstance(data, list):
+            info["account_count"] = len(data)
+        elif isinstance(data, dict):
+            info["account_count"] = len(data.get("accounts") or data.get("list") or [])
+    except WebullClientError as exc:
         info["auth_ok"] = False
-        info["error"] = _sanitize_error(exc)
+        info["error"] = _sanitize(str(exc))
     return info
 
 
 def list_accounts_remote() -> list[dict[str, Any]]:
-    """
-    Fetch the list of Webull accounts visible to the API key.
-
-    TODO: replace the path below with the official Webull endpoint once the
-    SDK/spec is wired. Until then this raises WebullClientError on a non-2xx.
-    """
-    raise WebullClientError("Webull accounts endpoint not yet wired — see TODO in engine/webull.py")
+    """GET /openapi/account/list — accounts visible to the API key."""
+    data = _client().get(ACCOUNTS_PATH)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        # Some Webull responses wrap the list under a key like 'accounts' or 'list'.
+        for key in ("accounts", "list", "items"):
+            inner = data.get(key)
+            if isinstance(inner, list):
+                return inner
+        return [data]
+    return []
 
 
 def list_recent_orders_remote(account_id: str, limit: int = 50) -> list[dict[str, Any]]:
-    """TODO: implement once order-history endpoint is confirmed."""
-    raise WebullClientError("Webull order history endpoint not yet wired — see TODO in engine/webull.py")
+    """
+    GET /openapi/trade/order/history — last 7 days of orders for one account.
+    Rate limit: 2 requests per 2 seconds. Callers should not spin.
+    """
+    query = {"account_id": account_id, "page_size": int(limit)}
+    data = _client().get(ORDER_HISTORY_PATH, query=query)
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("orders", "list", "items", "records"):
+            inner = data.get(key)
+            if isinstance(inner, list):
+                return inner
+        return [data]
+    return []
 
 
 def get_order_detail_remote(account_id: str, order_id: str) -> dict[str, Any]:
-    """TODO: implement once order-detail endpoint is confirmed."""
-    raise WebullClientError("Webull order detail endpoint not yet wired — see TODO in engine/webull.py")
-
-
-def _sanitize_error(exc: Exception) -> str:
-    """Strip anything that might contain secrets from the exception message."""
-    msg = str(exc)
-    if WEBULL_APP_KEY and WEBULL_APP_KEY in msg:
-        msg = msg.replace(WEBULL_APP_KEY, "<redacted>")
-    if WEBULL_APP_SECRET and WEBULL_APP_SECRET in msg:
-        msg = msg.replace(WEBULL_APP_SECRET, "<redacted>")
-    return msg
+    """GET /openapi/trade/order/detail — full detail for a single order."""
+    query = {"account_id": account_id, "order_id": order_id}
+    data = _client().get(ORDER_DETAIL_PATH, query=query)
+    if isinstance(data, dict):
+        return data
+    return {"raw": data}
 
 
 # ---------------------------------------------------------------------------

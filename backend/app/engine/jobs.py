@@ -253,13 +253,27 @@ def run_job(job_id: uuid.UUID) -> int:
         raise
 
 
-def create_webull_listener_job(session: Session) -> JobRun:
-    """Create a JobRun row for the Webull listener. total=0 (open-ended)."""
+def create_webull_listener_job(
+    session: Session,
+    *,
+    accounts: list[str] | None = None,
+) -> JobRun:
+    """
+    Create a JobRun row for the Webull listener. total=0 (open-ended).
+
+    Args:
+      accounts: Webull broker account ids to subscribe to. At least one is
+        required for the live streaming subscriber; tests that inject a
+        polling pull_fn can omit it.
+    """
+    params: dict[str, Any] = {}
+    if accounts:
+        params["accounts"] = list(accounts)
     job = JobRun(
         id=uuid.uuid4(),
         job_type=JOB_WEBULL_LISTENER,
         status="queued",
-        params_json=json.dumps({}),
+        params_json=json.dumps(params),
         total=0,
         updated_at=datetime.utcnow(),
     )

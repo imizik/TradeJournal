@@ -28,6 +28,11 @@ def main() -> None:
     )
     parser.add_argument("--range", default="week", choices=["day", "week", "month", "all"])
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--accounts",
+        help="Comma-separated Webull broker_account_id values for --type webull_listener. "
+             "If omitted, all local Webull accounts are used.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
@@ -43,7 +48,17 @@ def main() -> None:
             elif args.type == JOB_ALPACA_ENRICH:
                 job = create_alpaca_enrichment_job(session, range_value=args.range, force=args.force)
             elif args.type == JOB_WEBULL_LISTENER:
-                job = create_webull_listener_job(session)
+                from app.engine.webull import resolve_local_webull_accounts
+                if args.accounts:
+                    accounts = [a.strip() for a in args.accounts.split(",") if a.strip()]
+                else:
+                    accounts = resolve_local_webull_accounts(session)
+                if not accounts:
+                    parser.error(
+                        "No Webull accounts to subscribe to. Pass --accounts <id[,id,...]> "
+                        "or seed an Account row with broker='webull' first."
+                    )
+                job = create_webull_listener_job(session, accounts=accounts)
             else:
                 job = create_trade_path_job(session, range_value=args.range, force=args.force)
             job_id = job.id
