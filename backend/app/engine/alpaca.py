@@ -8,6 +8,7 @@ Cache layout:
   backend/data/alpaca_cache/stocks/1Day/{feed}/{ticker}.json
   backend/data/alpaca_cache/stocks/1Min/{feed}/{ticker}/{date}.json
   backend/data/alpaca_cache/stocks/1Hour/{feed}/{ticker}.json
+  backend/data/alpaca_cache/options/{timeframe}/{symbol}/{start}_{end}.json
 
 Daily bar cache is considered stale after 30 days (split/dividend adjustments
 can change retroactively). Minute and hourly bar caches never expire.
@@ -132,6 +133,16 @@ def _minute_cache_path(ticker: str, day: date) -> Path:
 
 def _hourly_cache_path(ticker: str) -> Path:
     p = CACHE_DIR / "stocks" / "1Hour" / ALPACA_DATA_FEED / f"{ticker}.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _option_bars_cache_path(symbol: str, timeframe: str, start: date | datetime, end: date | datetime) -> Path:
+    safe_symbol = "".join(ch for ch in symbol.upper() if ch.isalnum())
+    safe_timeframe = "".join(ch for ch in timeframe if ch.isalnum())
+    start_key = start.isoformat().replace(":", "").replace("+", "")
+    end_key = end.isoformat().replace(":", "").replace("+", "")
+    p = CACHE_DIR / "options" / safe_timeframe / safe_symbol / f"{start_key}_{end_key}.json"
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -309,6 +320,118 @@ def fetch_minute_bars_for_date(tickers: list[str], day: date, cache_only: bool =
             if ticker not in result:
                 result[ticker] = []
 
+    return result
+
+
+def fetch_option_bars(
+    symbols: list[str],
+    timeframe: str,
+    start: date | datetime,
+    end: date | datetime,
+) -> dict[str, list]:
+    """
+    Fetch historical option OHLC bars for option contract symbols.
+
+    Results are cached by exact symbol/timeframe/start/end window. The API accepts
+    up to 100 symbols per request, but the response limit is across all symbols,
+    so pagination is always followed.
+    """
+    normalized = []
+    seen = set()
+    for symbol in symbols:
+        value = symbol.strip().upper()
+        if value and value not in seen:
+            normalized.append(value)
+            seen.add(value)
+
+    result: dict[str, list] = {}
+    missing: list[str] = []
+    for symbol in normalized:
+        cp = _option_bars_cache_path(symbol, timeframe, start, end)
+        if cp.exists():
+            result[symbol] = json.loads(cp.read_text())
+        else:
+            missing.append(symbol)
+
+    if missing:
+        log.info("Fetching option %s bars for %d contract(s)", timeframe, len(missing))
+
+    for i in range(0, len(missing), 100):
+        batch = missing[i : i + 100]
+        bars = _fetch_all_pages(
+            "/v1beta1/options/bars",
+            {
+                "symbols": ",".join(batch),
+                "timeframe": timeframe,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "limit": 10000,
+                "sort": "asc",
+            },
+        )
+        for symbol in batch:
+            symbol_bars = bars.get(symbol, [])
+            # Do not cache empty option responses. A 403 entitlement miss also
+            # returns no bars via _alpaca_get(), and caching that would hide
+            # data after the key/feed is fixed.
+            if symbol_bars:
+                cp = _option_bars_cache_path(symbol, timeframe, start, end)
+                cp.write_text(json.dumps(symbol_bars))
+            result[symbol] = symbol_bars
+
+    for symbol in normalized:
+        result.setdefault(symbol, [])
+
+    return result
+
+
+def fetch_snapshots(tickers: list[str]) -> dict[str, dict]:
+    """
+    Fetch current snapshots (latest trade, today's daily bar, prev daily bar,
+    latest minute bar) for many tickers in one call. Never cached — this is
+    the live "right now" path used by market report generation.
+    Returns {ticker: snapshot_dict}; tickers Alpaca has no data for are absent.
+    """
+    result: dict[str, dict] = {}
+    for i in range(0, len(tickers), 100):
+        batch = tickers[i : i + 100]
+        data = _alpaca_get(
+            "/v2/stocks/snapshots",
+            {"symbols": ",".join(batch), "feed": ALPACA_DATA_FEED},
+        )
+        for ticker, snap in data.items():
+            if isinstance(snap, dict):
+                result[ticker] = snap
+    return result
+
+
+def fetch_minute_bars_live(tickers: list[str], day: date) -> dict[str, list]:
+    """
+    Fetch 1-minute bars for the given date (04:00–20:00 ET) WITHOUT touching
+    the persistent minute cache. The persistent cache never expires, so caching
+    a partial intraday day would poison enrichment runs — this path is for
+    live report generation only.
+    """
+    result: dict[str, list] = {}
+    start_dt = datetime(day.year, day.month, day.day, 4, 0, 0, tzinfo=ET)
+    end_dt = datetime(day.year, day.month, day.day, 20, 0, 0, tzinfo=ET)
+
+    for i in range(0, len(tickers), 50):
+        batch = tickers[i : i + 50]
+        bars = _fetch_all_pages(
+            "/v2/stocks/bars",
+            {
+                "symbols": ",".join(batch),
+                "timeframe": "1Min",
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat(),
+                "adjustment": "raw",
+                "feed": ALPACA_DATA_FEED,
+                "limit": 10000,
+            },
+        )
+        for ticker in batch:
+            result[ticker] = bars.get(ticker, [])
     return result
 
 

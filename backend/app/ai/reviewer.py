@@ -8,7 +8,7 @@ from anthropic import Anthropic
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
-from app.models import Fill, Trade, TradeFill, TradeTag, Tag
+from app.models import Fill, Trade, TradeFill, TradePathMetrics, TradeTag, Tag
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
@@ -158,6 +158,13 @@ def _assemble_context(
             "behavioral_flags": stats.get("behavioral_flags", {}),
         }
 
+    path_metrics = None
+    if session and trade.id:
+        try:
+            path_metrics = session.get(TradePathMetrics, trade.id)
+        except Exception:
+            path_metrics = None
+
     return {
         "trade": {
             "id": str(trade.id),
@@ -179,12 +186,44 @@ def _assemble_context(
             "closed_at": trade.closed_at.isoformat() if trade.closed_at else None,
             "status": trade.status,
             "tags": tags,
+            "path_metrics": _path_context(path_metrics),
         },
         "fills": fills_data,
         "companion_trades": companion_data,
         "ticker_stats": ticker_stats,
         "trader_context": by_ticker_stats,
     }
+
+
+def _path_context(path: TradePathMetrics | None) -> dict | None:
+    if path is None:
+        return None
+    return {
+        "data_source": path.data_source,
+        "hold_duration_bucket": path.hold_duration_bucket,
+        "exit_time_bucket": path.exit_time_bucket,
+        "underlying_mfe_pct": _float_or_none(path.underlying_mfe_pct),
+        "underlying_mae_pct": _float_or_none(path.underlying_mae_pct),
+        "underlying_exit_efficiency": _float_or_none(path.underlying_exit_efficiency),
+        "underlying_giveback_pct": _float_or_none(path.underlying_giveback_pct),
+        "moved_in_favor_first": path.moved_in_favor_first,
+        "option_mfe_pct": _float_or_none(path.option_mfe_pct),
+        "option_mae_pct": _float_or_none(path.option_mae_pct),
+        "option_max_price_seen": _float_or_none(path.option_max_price_seen),
+        "option_min_price_seen": _float_or_none(path.option_min_price_seen),
+        "time_to_option_mfe_minutes": path.time_to_option_mfe_minutes,
+        "option_exit_efficiency": _float_or_none(path.option_exit_efficiency),
+        "option_giveback_pct": _float_or_none(path.option_giveback_pct),
+        "option_peak_unrealized_pnl": _float_or_none(path.option_peak_unrealized_pnl),
+        "option_worst_unrealized_pnl": _float_or_none(path.option_worst_unrealized_pnl),
+        "option_giveback_from_peak": _float_or_none(path.option_giveback_from_peak),
+    }
+
+
+def _float_or_none(value: object) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def _parse_json_response(text: str) -> dict:
@@ -215,6 +254,8 @@ You will receive a JSON object with:
 - companion_trades: Other trades opened ~5 minutes before/after this one (may indicate multi-leg strategies)
 - ticker_stats: This ticker's historical performance (win rate, avg P&L %)
 - trader_context: Overall trading stats and prior behavioral flags observed
+- trade.path_metrics: Precomputed path metrics when available, including option peak open P&L, worst open P&L,
+  giveback from peak, option MFE/MAE, and exit efficiency
 
 **Output only a JSON object with these fields. Do not wrap it in markdown. Do not include any text before or after the JSON:**
 
@@ -256,4 +297,5 @@ You will receive a JSON object with:
 - "Terrible" — against the trend, reversed immediately
 
 Prioritize actionable insights. If the trade was a winner, note what worked. If it lost, identify the teachable moment. Reference IV, delta, underlying price, and hold time when available.
+When trade.path_metrics are present, distinguish trades that never worked from trades that worked and then reversed. A small realized loss after a large positive option_peak_unrealized_pnl is an exit/risk-management issue.
 """

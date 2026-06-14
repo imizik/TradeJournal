@@ -20,6 +20,7 @@ dependencies = [
     "psycopg[binary]>=3.1.18",
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
+    "mcp>=1.2.0",
 ]
 
 [build-system]

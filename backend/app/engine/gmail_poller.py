@@ -33,6 +33,7 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 CREDENTIALS_FILE = _BACKEND_DIR / "credentials.json"
 TOKEN_FILE = _BACKEND_DIR / "token.json"
 OAUTH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_oauth_states.json"
+GMAIL_WATCH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_watch_state.json"
 BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 GMAIL_OAUTH_CALLBACK_PATH = "/auth/gmail/callback"
 DEFAULT_GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"
@@ -45,6 +46,21 @@ class GmailPollingError(RuntimeError):
 
 class GmailAuthRequired(GmailPollingError):
     """Raised when Gmail needs an interactive OAuth login."""
+
+
+def _save_gmail_watch_state(state: dict[str, object]) -> None:
+    GMAIL_WATCH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    GMAIL_WATCH_STATE_FILE.write_text(json.dumps(state, indent=2))
+
+
+def gmail_watch_state() -> dict[str, object] | None:
+    if not GMAIL_WATCH_STATE_FILE.exists():
+        return None
+    try:
+        raw = json.loads(GMAIL_WATCH_STATE_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return raw if isinstance(raw, dict) else None
 
 
 def _is_invalid_grant_error(exc: Exception) -> bool:
@@ -243,6 +259,48 @@ def _fetch_all_message_ids(service, query: str) -> list[str]:
         if not page_token:
             break
     return ids
+
+
+def register_gmail_watch(
+    *,
+    topic_name: str | None = None,
+    label_ids: list[str] | None = None,
+) -> dict[str, object]:
+    """
+    Register/renew Gmail push notifications via Google Pub/Sub.
+
+    Gmail sends only mailbox-change metadata to Pub/Sub. The webhook should
+    still call the existing importer so fill parsing and dedupe stay in one
+    place.
+    """
+    service = _get_service()
+    topic = (topic_name or os.getenv("GMAIL_PUBSUB_TOPIC") or "").strip()
+    if not topic:
+        raise GmailPollingError("GMAIL_PUBSUB_TOPIC is required to register a Gmail watch.")
+
+    if label_ids is None:
+        raw_labels = os.getenv("GMAIL_WATCH_LABEL_IDS", "INBOX")
+        label_ids = [value.strip() for value in raw_labels.split(",") if value.strip()]
+
+    body: dict[str, object] = {"topicName": topic}
+    if label_ids:
+        body["labelIds"] = label_ids
+        body["labelFilterBehavior"] = "INCLUDE"
+
+    try:
+        result = service.users().watch(userId="me", body=body).execute()
+    except Exception as exc:
+        raise GmailPollingError(f"Unable to register Gmail watch: {exc}") from exc
+
+    state = {
+        "topic_name": topic,
+        "label_ids": label_ids,
+        "history_id": result.get("historyId"),
+        "expiration": result.get("expiration"),
+        "registered_at": int(time.time()),
+    }
+    _save_gmail_watch_state(state)
+    return state
 
 
 def poll_new_fills(

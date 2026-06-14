@@ -221,6 +221,9 @@ export type TradePathMetrics = {
   time_to_option_mfe_minutes: number | null;
   option_exit_efficiency: number | null;
   option_giveback_pct: number | null;
+  option_peak_unrealized_pnl: number | null;
+  option_worst_unrealized_pnl: number | null;
+  option_giveback_from_peak: number | null;
 };
 
 export type CoverageStats = {

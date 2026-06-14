@@ -40,6 +40,8 @@ Backend:
 - `backend/app/engine/alpaca.py`
 - `backend/app/engine/alpaca_enricher.py`
 - `backend/app/engine/jobs.py`
+- `backend/app/engine/packets.py` (premarket/postmarket market reports; universe in `backend/data/universe.json`)
+- `backend/mcp_server.py` (read-only MCP stdio server for Claude Desktop; httpx adapter over localhost:8000)
 - `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`

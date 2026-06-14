@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
-from app.models import Account, Fill, FillMarketContext, Trade, TradeFill
+from app.models import Account, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
@@ -85,6 +85,13 @@ def _assemble_daily_context(
         ).all()
         alpaca_context_map = {str(row.fill_id): row for row in ctx_rows}
 
+    path_metrics_map: dict[str, TradePathMetrics] = {}
+    if trade_ids:
+        path_rows = session.exec(
+            select(TradePathMetrics).where(TradePathMetrics.trade_id.in_(trade_ids))
+        ).all()
+        path_metrics_map = {str(row.trade_id): row for row in path_rows}
+
     trade_context = []
     for trade in trades:
         opened_today = trade.opened_at.date() == review_day if trade.opened_at else False
@@ -126,6 +133,7 @@ def _assemble_daily_context(
                 "opened_at": trade.opened_at.isoformat() if trade.opened_at else None,
                 "closed_at": trade.closed_at.isoformat() if trade.closed_at else None,
                 "status": trade.status,
+                "path_metrics": _path_context(path_metrics_map.get(str(trade.id))),
                 "fills": [_fill_context(fill, fill_roles.get(str(fill.id)), alpaca_context_map.get(str(fill.id))) for fill in fills],
             }
         )
@@ -239,6 +247,31 @@ def _fill_context(fill: Fill, role: str | None, alpaca: FillMarketContext | None
     return base
 
 
+def _path_context(path: TradePathMetrics | None) -> dict | None:
+    if path is None:
+        return None
+    return {
+        "data_source": path.data_source,
+        "hold_duration_bucket": path.hold_duration_bucket,
+        "exit_time_bucket": path.exit_time_bucket,
+        "underlying_mfe_pct": _float_or_none(path.underlying_mfe_pct),
+        "underlying_mae_pct": _float_or_none(path.underlying_mae_pct),
+        "underlying_exit_efficiency": _float_or_none(path.underlying_exit_efficiency),
+        "underlying_giveback_pct": _float_or_none(path.underlying_giveback_pct),
+        "moved_in_favor_first": path.moved_in_favor_first,
+        "option_mfe_pct": _float_or_none(path.option_mfe_pct),
+        "option_mae_pct": _float_or_none(path.option_mae_pct),
+        "option_max_price_seen": _float_or_none(path.option_max_price_seen),
+        "option_min_price_seen": _float_or_none(path.option_min_price_seen),
+        "time_to_option_mfe_minutes": path.time_to_option_mfe_minutes,
+        "option_exit_efficiency": _float_or_none(path.option_exit_efficiency),
+        "option_giveback_pct": _float_or_none(path.option_giveback_pct),
+        "option_peak_unrealized_pnl": _float_or_none(path.option_peak_unrealized_pnl),
+        "option_worst_unrealized_pnl": _float_or_none(path.option_worst_unrealized_pnl),
+        "option_giveback_from_peak": _float_or_none(path.option_giveback_from_peak),
+    }
+
+
 def _float_or_none(value: object) -> float | None:
     if value is None:
         return None
@@ -300,6 +333,21 @@ moving averages (sma_20, sma_50, ema_9, ema_20, ema_9h), rsi_14, macd, macd_sign
 - is_near_support_on_put_entry: put entry near a known support level
 - is_overnight: position held overnight
 
+## Trade path metrics
+
+Each trade may include path_metrics. These are precomputed summaries, not raw bars:
+- underlying_mfe_pct / underlying_mae_pct: best and worst underlying move while the trade was open
+- underlying_exit_efficiency / underlying_giveback_pct: how much favorable underlying move was captured or given back
+- option_mfe_pct / option_mae_pct: best and worst option contract move while the trade was open
+- option_peak_unrealized_pnl: maximum open P&L seen during the trade
+- option_worst_unrealized_pnl: worst open P&L seen during the trade
+- option_giveback_from_peak: dollars surrendered from peak open P&L to realized P&L
+- option_exit_efficiency: realized P&L divided by peak open P&L
+
+Use path_metrics to distinguish trades that were never working from trades that worked and then reversed.
+A small realized loss after a large positive option_peak_unrealized_pnl is an exit/risk-management issue, not the same
+as a trade that immediately failed.
+
 ## summary_stats.behavioral_flags
 
 The summary_stats object includes aggregated flag counts across all entry fills that have Alpaca context.
@@ -331,4 +379,5 @@ Return only valid JSON with this exact shape. Do not wrap it in markdown. Do not
 Focus on execution quality, risk sizing, repeated behavioral patterns, timing, and whether trades were held or exited well.
 When behavioral flags are present, explicitly call out patterns — e.g. repeated chase entries, late moves, or entries near
 resistance. Be specific and concise. Do not invent market data that is not in the JSON.
+When path_metrics are present, account for peak open P&L, giveback, and exit efficiency.
 """

@@ -12,6 +12,16 @@ function fmtAbs(val: number | null | undefined, decimals = 2, suffix = "%") {
   return `${Math.abs(val).toFixed(decimals)}${suffix}`;
 }
 
+function fmtMoney(val: number | null | undefined) {
+  if (val == null) return "-";
+  return `${val >= 0 ? "+" : "-"}$${Math.abs(val).toFixed(0)}`;
+}
+
+function fmtPrice(val: number | null | undefined) {
+  if (val == null) return "-";
+  return `$${val.toFixed(0)}`;
+}
+
 function fmtMins(val: number | null | undefined) {
   if (val == null) return "-";
   if (val < 60) return `${val}m`;
@@ -53,6 +63,10 @@ export default function TradePathSection({ metrics }: Props) {
   const mae = metrics.underlying_mae_pct;
   const eff = metrics.underlying_exit_efficiency;
   const giveback = metrics.underlying_giveback_pct;
+  const hasOptionPath =
+    metrics.option_mfe_pct != null ||
+    metrics.option_peak_unrealized_pnl != null ||
+    metrics.option_max_price_seen != null;
 
   // Visual bar: shows MAE zone (red), captured zone (green), giveback zone (amber)
   // Normalized to MFE as 100%
@@ -152,6 +166,50 @@ export default function TradePathSection({ metrics }: Props) {
           <Row label="Exit Bucket" value={metrics.exit_time_bucket ?? "-"} />
         </div>
       </div>
+
+      {hasOptionPath && (
+        <div className="border-t border-border pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Option Path
+            </h3>
+            <span className="rounded bg-amber-900/40 px-1.5 py-0.5 text-xs font-medium text-amber-300">
+              Contract
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-x-8">
+            <div>
+              <Row
+                label="Peak Open P&L"
+                value={fmtMoney(metrics.option_peak_unrealized_pnl)}
+                valueClass={mfeColor(metrics.option_peak_unrealized_pnl)}
+              />
+              <Row
+                label="Worst Open P&L"
+                value={fmtMoney(metrics.option_worst_unrealized_pnl)}
+                valueClass={maeColor(metrics.option_worst_unrealized_pnl != null ? Math.abs(Math.min(metrics.option_worst_unrealized_pnl, 0)) : null)}
+              />
+              <Row
+                label="Giveback From Peak"
+                value={fmtMoney(metrics.option_giveback_from_peak)}
+                valueClass={metrics.option_giveback_from_peak != null && metrics.option_giveback_from_peak > 0 ? "text-amber-400" : "text-foreground"}
+              />
+              <Row
+                label="Peak Capture"
+                value={metrics.option_exit_efficiency != null ? `${metrics.option_exit_efficiency.toFixed(1)}%` : "-"}
+                valueClass={effColor(metrics.option_exit_efficiency)}
+              />
+            </div>
+            <div>
+              <Row label="Option MFE" value={fmtAbs(metrics.option_mfe_pct)} valueClass={mfeColor(metrics.option_mfe_pct)} />
+              <Row label="Option MAE" value={fmtAbs(metrics.option_mae_pct)} valueClass={maeColor(metrics.option_mae_pct)} />
+              <Row label="High Seen" value={fmtPrice(metrics.option_max_price_seen)} />
+              <Row label="Low Seen" value={fmtPrice(metrics.option_min_price_seen)} />
+              <Row label="Time to Peak" value={fmtMins(metrics.time_to_option_mfe_minutes)} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

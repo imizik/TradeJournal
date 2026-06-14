@@ -33,6 +33,7 @@ JOB_FILL_CHECK = "fill_import_check"
 JOB_TRADE_REBUILD = "trade_rebuild"
 JOB_DAILY_REVIEW = "daily_review"
 JOB_FULL_PIPELINE = "full_pipeline"
+JOB_GMAIL_PUSH = "gmail_push"
 JOB_RESYNC_ALL = "resync_all"
 
 JOB_CONFIG: list[dict[str, Any]] = [
@@ -43,6 +44,7 @@ JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_ALPACA_ENRICH, "label": "Alpaca context enrichment", "description": "Fetch fill-level market context and cached bars.", "advanced": False},
     {"job_type": JOB_TRADE_PATH, "label": "Path metrics calculation", "description": "Compute closed-trade MFE, MAE, and exit efficiency.", "advanced": False},
     {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False},
+    {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False},
 ]
 
 _sync_lock = threading.Lock()
@@ -276,6 +278,102 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         _sync_lock.release()
 
 
+def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
+    if not _sync_lock.acquire(blocking=False):
+        _set_job(job_id, status="failed", error="Another sync pipeline is already running", finished_at=_now())
+        return
+    try:
+        _set_job(job_id, status="running", started_at=_now(), done=0, total=5, current="Importing Gmail fills")
+        with Session(engine) as session:
+            import_result = _import_fills_from_gmail(session, start_enrichment=False)
+
+        saved = int(import_result["saved"])
+        skipped = int(import_result["skipped"])
+        processed = saved + skipped
+        if saved <= 0:
+            _set_job(
+                job_id,
+                status="succeeded",
+                done=5,
+                total=5,
+                enriched=processed,
+                current=f"Gmail push processed; no new fills saved ({skipped} skipped).",
+                finished_at=_now(),
+            )
+            return
+
+        _set_job(job_id, done=1, current=f"Rebuilding trades after {saved} new fill(s)")
+        with Session(engine) as session:
+            _clear_derived_trade_data(session)
+            rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/sync/gmail-push")
+            session.commit()
+        processed += rebuilt
+
+        _set_job(job_id, done=2, current="Running market enrichment")
+        polygon = _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
+        alpaca = _run_existing_enrichment(JOB_ALPACA_ENRICH, "all", False)
+        if polygon.total:
+            processed += _wait_for_job(polygon.id).enriched
+        if alpaca.total:
+            processed += _wait_for_job(alpaca.id).enriched
+
+        _set_job(job_id, done=4, current="Calculating trade path metrics")
+        path = _run_existing_enrichment(JOB_TRADE_PATH, "all", False)
+        if path.total:
+            processed += _wait_for_job(path.id).enriched
+
+        message = f"Gmail push imported {saved} fill(s), rebuilt {rebuilt} trade(s), and refreshed enrichment."
+        if anomalies:
+            message += f" {len(anomalies)} anomaly/anomalies logged."
+        _set_job(
+            job_id,
+            status="succeeded",
+            done=5,
+            total=5,
+            enriched=processed,
+            current=message,
+            finished_at=_now(),
+        )
+    except Exception as exc:
+        _set_job(job_id, status="failed", error=str(exc), current=str(exc), finished_at=_now())
+    finally:
+        _sync_lock.release()
+
+
+def queue_gmail_push_pipeline(
+    session: Session,
+    *,
+    history_id: str | None = None,
+    email_address: str | None = None,
+) -> tuple[JobRun, bool]:
+    active = _active_job(session)
+    if active:
+        job = create_job(
+            session,
+            JOB_GMAIL_PUSH,
+            {"history_id": history_id, "email_address": email_address, "skipped_for_active_job": str(active.id)},
+            total=0,
+        )
+        job.current = f"Skipped because {active.job_type} is already active."
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        return job, False
+
+    job = create_job(
+        session,
+        JOB_GMAIL_PUSH,
+        {"history_id": history_id, "email_address": email_address},
+        total=5,
+    )
+    job.current = "Queued from Gmail Pub/Sub push"
+    session.add(job)
+    session.commit()
+    session.refresh(job)
+    _run_thread(lambda: _run_gmail_push_pipeline(job.id))
+    return job, True
+
+
 @router.get("/summary")
 async def sync_summary(session: Session = Depends(get_session)):
     active = _active_job(session)
@@ -307,6 +405,7 @@ async def list_sync_runs(limit: int = 50, session: Session = Depends(get_session
     runs = session.exec(select(JobRun).order_by(JobRun.created_at.desc()).limit(limit)).all()
     labels = {config["job_type"]: config["label"] for config in JOB_CONFIG}
     labels[JOB_FULL_PIPELINE] = "Full sync pipeline"
+    labels[JOB_GMAIL_PUSH] = "Gmail push ingest"
     labels[JOB_RESYNC_ALL] = "Resync all"
     return [
         {

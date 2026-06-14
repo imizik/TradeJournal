@@ -266,6 +266,9 @@ class TradePathMetrics(SQLModel, table=True):
     time_to_option_mfe_minutes: Optional[int] = None
     option_exit_efficiency: Optional[float] = None
     option_giveback_pct: Optional[float] = None
+    option_peak_unrealized_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    option_worst_unrealized_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    option_giveback_from_peak: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
 
 
 class WebullRawEvent(SQLModel, table=True):

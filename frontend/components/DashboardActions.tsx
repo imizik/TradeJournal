@@ -115,7 +115,7 @@ export default function DashboardActions() {
 
   useEffect(() => {
     refreshSummary();
-    pollRef.current = setInterval(refreshSummary, summary?.running ? 2000 : 5000);
+    pollRef.current = setInterval(refreshSummary, summary?.running ? 2000 : 15000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
@@ -178,7 +178,7 @@ function SyncCenterDrawer({
     refresh().catch((e) => setMessage((e as Error).message));
     pollRef.current = setInterval(() => {
       refresh().catch(() => {});
-    }, running ? 2000 : 4000);
+    }, running ? 2000 : 10000);
 
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -342,7 +342,7 @@ function SyncCenterDrawer({
                     onChange={(e) => setForceAll(e.target.checked)}
                     className="accent-emerald-500"
                   />
-                  Force re-run existing enrichment
+                  Force re-run existing enrichment/path metrics
                 </label>
                 <button
                   onClick={connectGmail}

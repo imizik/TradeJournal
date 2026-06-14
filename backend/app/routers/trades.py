@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,6 +16,8 @@ router = APIRouter()
 async def get_trades(
     status: str | None = None,
     ticker: str | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
     session: Session = Depends(get_session),
 ):
     query = select(Trade)
@@ -23,6 +25,10 @@ async def get_trades(
         query = query.where(Trade.status == status)
     if ticker:
         query = query.where(Trade.ticker == ticker.upper())
+    if start_date:
+        query = query.where(Trade.opened_at >= datetime.combine(start_date, datetime.min.time()))
+    if end_date:
+        query = query.where(Trade.opened_at < datetime.combine(end_date + timedelta(days=1), datetime.min.time()))
     query = query.order_by(Trade.opened_at.desc())
     return session.exec(query).all()
 

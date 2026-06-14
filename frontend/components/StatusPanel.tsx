@@ -170,7 +170,7 @@ export default function StatusPanel({ open, onClose }: Props) {
     }
     fetchJobs();
     fetchCoverage();
-    pollRef.current = setInterval(fetchJobs, 2000);
+    pollRef.current = setInterval(fetchJobs, 5000);
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
@@ -336,7 +336,7 @@ export function useAnyJobRunning(): boolean {
       setRunning(results.some((r) => r.status === "fulfilled" && r.value.running));
     }
     check();
-    const id = setInterval(check, 3000);
+    const id = setInterval(check, 10000);
     return () => { mounted = false; clearInterval(id); };
   }, []);
 

@@ -144,6 +144,13 @@ Durable background work:
 
 These are present in the repo right now but are not all committed yet:
 
+- Market report ("packet") + MCP layer for Claude chat:
+  - `backend/app/engine/packets.py` builds deterministic premarket/postmarket market reports (indexes detail with VWAP/ORB/premarket/AH, sector rotation, macro gauges incl. ^VIX/^TNX via yfinance, bucketed high-beta universe with `rs_vs_spy`, leaders/laggards, raw Alpaca news).
+  - Symbol universe is hand-editable in `backend/data/universe.json` (bucketed execution watchlist — not the market).
+  - `backend/app/engine/news.py` wraps Alpaca `/v1beta1/news`; no relevance filtering in Python — Claude triages headlines.
+  - `backend/mcp_server.py` is a stdio FastMCP server for Claude Desktop with read-only tools (`get_market_report`, `get_news`, `get_trades`, `get_stats`); thin httpx adapter over `localhost:8000`, holds no API keys, logs calls to `backend/data/mcp_log/*.jsonl`.
+  - `backend/prompts/market_report.md` is the Claude-side analysis prompt (regime rules, 13-section output) — judgment lives there, not in backend code.
+  - Live "today" market data must use `fetch_snapshots`/`fetch_minute_bars_live` (never cached); the persistent minute cache never expires and must not be written with partial intraday data.
 - Quote support is being added:
   - `backend/app/engine/quotes.py`
   - `backend/app/routers/quotes.py`
@@ -236,6 +243,8 @@ Stable current routes:
 - `POST /rebuild`
 - `GET /quotes`
 - `POST /quotes/positions`
+- `GET /packets/report?type=premarket|postmarket`
+- `GET /packets/news`
 - `POST /fills/enrich`
 - `GET /fills/enrich/status`
 - `POST /market-context/enrich`

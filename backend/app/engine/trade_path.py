@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from app.engine.alpaca import ALPACA_DATA_FEED, fetch_minute_bars_for_date
+from app.engine.alpaca import ALPACA_DATA_FEED, fetch_minute_bars_for_date, fetch_option_bars
 from app.engine.indicators import bars_to_df, _f
 from app.models import Fill, FillMarketContext, Trade, TradePathMetrics
 
@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
+MAX_PATH_WINDOW_DAYS = 10
 
 
 def compute_path_metrics_for_trades(
@@ -99,6 +100,7 @@ def _compute(
 
     entry_fill = min(entry_fills, key=lambda f: f.executed_at)
     entry_ctx = ctx_by_fill.get(str(entry_fill.id))
+    option_path = _compute_option_path(trade, entry_fill)
 
     # Entry underlying price: prefer Alpaca context, then Polygon fill enrichment, then stock price
     entry_price = (
@@ -109,6 +111,10 @@ def _compute(
         else None
     )
     if not entry_price:
+        if option_path:
+            metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
+            _apply_option_path(metrics, option_path)
+            return metrics
         return None
 
     bullish = _is_bullish(trade, entry_fill)
@@ -119,19 +125,42 @@ def _compute(
     opened_utc = opened_et.astimezone(UTC)
     closed_utc = closed_et.astimezone(UTC)
 
-    # Fetch bars for the trade window + 60m of post-exit
+    # Path metrics use minute bars. Multi-month/year positions can require
+    # thousands of per-day cache/API checks, so mark them as skipped instead.
     post_exit_end = closed_et + timedelta(hours=1)
+    window_days = (post_exit_end.date() - trade.opened_at.date()).days + 1
+    if window_days > MAX_PATH_WINDOW_DAYS:
+        log.info(
+            "Skipping path metrics for %s trade %s: %d-day window exceeds %d-day cap",
+            trade.ticker,
+            trade.id,
+            window_days,
+            MAX_PATH_WINDOW_DAYS,
+        )
+        metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_skipped_long_window")
+        _apply_option_path(metrics, option_path)
+        return metrics
+
+    # Fetch bars for the trade window + 60m of post-exit
     all_bars: list[dict] = []
     for day in _date_range(trade.opened_at.date(), post_exit_end.date()):
         day_bars = fetch_minute_bars_for_date([trade.ticker], day).get(trade.ticker, [])
         all_bars.extend(day_bars)
 
     if not all_bars:
+        if option_path:
+            metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
+            _apply_option_path(metrics, option_path)
+            return metrics
         return None
 
     full_df = bars_to_df(all_bars)
     df = full_df[(full_df.index >= opened_utc) & (full_df.index <= closed_utc)]
     if df.empty:
+        if option_path:
+            metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
+            _apply_option_path(metrics, option_path)
+            return metrics
         return None
 
     # MFE / MAE as % of entry underlying price
@@ -168,43 +197,17 @@ def _compute(
             exit_efficiency = _f(realized / mfe_pct * 100)
             giveback_pct = _f(mfe_pct - realized)
 
-    # Buckets
-    hold_mins = trade.hold_duration_mins or 0
-    if hold_mins < 15:
-        hold_bucket = "scalp"
-    elif hold_mins < 360:
-        hold_bucket = "intraday"
-    elif hold_mins < 1440:
-        hold_bucket = "swing"
-    else:
-        hold_bucket = "multi-day"
-
-    exit_time_bucket = None
-    if exit_fills:
-        last_exit = max(exit_fills, key=lambda f: f.executed_at)
-        m = last_exit.executed_at.hour * 60 + last_exit.executed_at.minute
-        if m < 9 * 60 + 30:
-            exit_time_bucket = "premarket"
-        elif m < 10 * 60:
-            exit_time_bucket = "open"
-        elif m < 14 * 60:
-            exit_time_bucket = "mid"
-        elif m < 16 * 60:
-            exit_time_bucket = "close"
-        else:
-            exit_time_bucket = "afterhours"
-
     # Post-exit continuation: how much did price move in favor after exit?
     post_15m, post_30m, post_60m, time_to_post_high = _compute_post_exit(
         full_df, closed_utc, entry_price, bullish
     )
 
-    return TradePathMetrics(
+    metrics = TradePathMetrics(
         trade_id=trade.id,
         data_source=f"alpaca_{ALPACA_DATA_FEED}",
         fetched_at=datetime.utcnow(),
-        hold_duration_bucket=hold_bucket,
-        exit_time_bucket=exit_time_bucket,
+        hold_duration_bucket=_hold_bucket(trade),
+        exit_time_bucket=_exit_time_bucket(exit_fills),
         underlying_mfe_pct=mfe_pct,
         underlying_mae_pct=mae_pct,
         time_to_underlying_mfe_minutes=time_to_mfe,
@@ -217,11 +220,146 @@ def _compute(
         post_exit_mfe_60m=post_60m,
         time_to_post_exit_high_minutes=time_to_post_high,
     )
+    _apply_option_path(metrics, option_path)
+    return metrics
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _base_metrics(trade: Trade, exit_fills: list[Fill], data_source: str) -> TradePathMetrics:
+    return TradePathMetrics(
+        trade_id=trade.id,
+        data_source=data_source,
+        fetched_at=datetime.utcnow(),
+        hold_duration_bucket=_hold_bucket(trade),
+        exit_time_bucket=_exit_time_bucket(exit_fills),
+    )
+
+
+def _hold_bucket(trade: Trade) -> str:
+    hold_mins = trade.hold_duration_mins or 0
+    if hold_mins < 15:
+        return "scalp"
+    if hold_mins < 360:
+        return "intraday"
+    if hold_mins < 1440:
+        return "swing"
+    return "multi-day"
+
+
+def _exit_time_bucket(exit_fills: list[Fill]) -> Optional[str]:
+    if not exit_fills:
+        return None
+    last_exit = max(exit_fills, key=lambda f: f.executed_at)
+    minutes = last_exit.executed_at.hour * 60 + last_exit.executed_at.minute
+    if minutes < 9 * 60 + 30:
+        return "premarket"
+    if minutes < 10 * 60:
+        return "open"
+    if minutes < 14 * 60:
+        return "mid"
+    if minutes < 16 * 60:
+        return "close"
+    return "afterhours"
+
+
+def _compute_option_path(trade: Trade, entry_fill: Fill) -> dict | None:
+    if trade.instrument_type != "option" or not trade.expiration or trade.strike is None or not trade.option_type:
+        return None
+
+    symbol = _option_contract_symbol(trade.ticker, trade.expiration, trade.option_type, float(trade.strike))
+    if not symbol:
+        return None
+
+    opened_et = trade.opened_at.replace(tzinfo=ET)
+    closed_et = trade.closed_at.replace(tzinfo=ET)
+    same_day = opened_et.date() == closed_et.date()
+    timeframe = "1Min" if same_day else "1Day"
+    start = opened_et if same_day else opened_et.date()
+    end = closed_et if same_day else closed_et.date()
+
+    bars = fetch_option_bars([symbol], timeframe, start, end).get(symbol, [])
+    if not bars:
+        return None
+
+    df = bars_to_df(bars)
+    if df.empty:
+        return None
+    if same_day:
+        opened_utc = opened_et.astimezone(UTC)
+        closed_utc = closed_et.astimezone(UTC)
+        df = df[(df.index >= opened_utc) & (df.index <= closed_utc)]
+        if df.empty:
+            return None
+
+    entry_price = float(trade.avg_entry_premium)
+    if entry_price <= 0:
+        return None
+
+    max_price = float(df["high"].max()) * 100
+    min_price = float(df["low"].min()) * 100
+    contracts = float(trade.contracts or 0)
+    long_option = entry_fill.side == "buy_to_open"
+
+    if long_option:
+        peak_unrealized = (max_price - entry_price) * contracts
+        worst_unrealized = (min_price - entry_price) * contracts
+        option_mfe_pct = (max_price - entry_price) / entry_price * 100
+        option_mae_pct = (entry_price - min_price) / entry_price * 100
+        extreme_idx = df["high"].idxmax()
+    else:
+        peak_unrealized = (entry_price - min_price) * contracts
+        worst_unrealized = (entry_price - max_price) * contracts
+        option_mfe_pct = (entry_price - min_price) / entry_price * 100
+        option_mae_pct = (max_price - entry_price) / entry_price * 100
+        extreme_idx = df["low"].idxmin()
+
+    realized = float(trade.realized_pnl or 0)
+    exit_efficiency = None
+    giveback_from_peak = None
+    giveback_pct = None
+    if peak_unrealized > 0:
+        exit_efficiency = realized / peak_unrealized * 100
+        giveback_from_peak = peak_unrealized - realized
+        giveback_pct = giveback_from_peak / peak_unrealized * 100
+
+    time_to_mfe = None
+    if same_day and extreme_idx is not None:
+        time_to_mfe = int((extreme_idx - opened_et.astimezone(UTC)).total_seconds() / 60)
+
+    return {
+        "option_mfe_pct": _f(option_mfe_pct),
+        "option_mae_pct": _f(option_mae_pct),
+        "option_max_price_seen": _f(max_price),
+        "option_min_price_seen": _f(min_price),
+        "time_to_option_mfe_minutes": time_to_mfe,
+        "option_exit_efficiency": _f(exit_efficiency),
+        "option_giveback_pct": _f(giveback_pct),
+        "option_peak_unrealized_pnl": _f(peak_unrealized),
+        "option_worst_unrealized_pnl": _f(worst_unrealized),
+        "option_giveback_from_peak": _f(giveback_from_peak),
+    }
+
+
+def _apply_option_path(metrics: TradePathMetrics, option_path: dict | None) -> None:
+    if not option_path:
+        return
+    for key, value in option_path.items():
+        setattr(metrics, key, value)
+
+
+def _option_contract_symbol(ticker: str, expiration: date, option_type: str, strike: float) -> str | None:
+    root = "".join(ch for ch in ticker.upper() if ch.isalnum())
+    if not root:
+        return None
+    side = "C" if option_type.lower() == "call" else "P" if option_type.lower() == "put" else None
+    if side is None:
+        return None
+    strike_part = f"{int(round(strike * 1000)):08d}"
+    return f"{root}{expiration:%y%m%d}{side}{strike_part}"
+
 
 def _compute_post_exit(
     full_df,

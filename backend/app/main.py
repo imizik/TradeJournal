@@ -1,6 +1,7 @@
 import logging
 import os
 import threading
+import time
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning, module="google")
 
@@ -12,7 +13,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Account, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets
 from app.routers.fills import (
     _clear_derived_trade_data,
     _persist_rebuild,
@@ -147,6 +148,36 @@ def _maybe_autostart_webull_listener() -> None:
     )
 
 
+def _maybe_autostart_gmail_watch() -> None:
+    """
+    Optionally register and renew the Gmail Pub/Sub watch while the API runs.
+
+    Gmail watches expire, so production-ish local setups can set
+    GMAIL_WATCH_AUTOSTART=true instead of manually renewing /gmail/watch.
+    """
+    if os.environ.get("GMAIL_WATCH_AUTOSTART", "false").lower() not in ("1", "true", "yes"):
+        return
+
+    def runner() -> None:
+        interval = int(os.environ.get("GMAIL_WATCH_RENEW_SECONDS", str(24 * 60 * 60)))
+        while True:
+            try:
+                from app.engine.gmail_poller import register_gmail_watch
+
+                state = register_gmail_watch()
+                _log.info(
+                    "Gmail watch registered/renewed (history_id=%s, expiration=%s)",
+                    state.get("history_id"),
+                    state.get("expiration"),
+                )
+            except Exception:
+                _log.warning("Gmail watch registration/renewal failed", exc_info=True)
+            time.sleep(max(60, interval))
+
+    thread = threading.Thread(target=runner, daemon=True, name="gmail-watch-renewer")
+    thread.start()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     create_db_and_tables()
@@ -157,6 +188,7 @@ async def lifespan(_app: FastAPI):
         if restored:
             session.commit()
     _maybe_autostart_webull_listener()
+    _maybe_autostart_gmail_watch()
     yield
 
 
@@ -185,3 +217,5 @@ app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-rev
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])
 app.include_router(webull.router, prefix="/webull", tags=["webull"])
+app.include_router(gmail_push.router, prefix="/gmail", tags=["gmail"])
+app.include_router(packets.router, prefix="/packets", tags=["packets"])
