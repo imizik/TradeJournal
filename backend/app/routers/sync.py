@@ -241,10 +241,13 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
                 processed += child.enriched if child else 0
 
         _set_job(pipeline_id, done=3, total=7, current="Running market enrichment")
-        polygon = _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
+        # Polygon's free tier is rate-limited to ~5 req/min, so a full enrich can
+        # take many minutes. Launch it but do NOT block the pipeline on it — it
+        # runs in its own thread and the UI polls /fills/enrich/status. Path
+        # metrics use Alpaca's underlying price as the primary source (Polygon is
+        # only a fallback), so we still wait for Alpaca before computing them.
+        _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
         alpaca = _run_existing_enrichment(JOB_ALPACA_ENRICH, "all", False)
-        if polygon.total:
-            _wait_for_job(polygon.id)
         if alpaca.total:
             _wait_for_job(alpaca.id)
 
@@ -310,10 +313,10 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
         processed += rebuilt
 
         _set_job(job_id, done=2, current="Running market enrichment")
-        polygon = _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
+        # Polygon runs in the background (rate-limited, slow); don't block the
+        # push pipeline on it. Its progress is visible via /fills/enrich/status.
+        _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
         alpaca = _run_existing_enrichment(JOB_ALPACA_ENRICH, "all", False)
-        if polygon.total:
-            processed += _wait_for_job(polygon.id).enriched
         if alpaca.total:
             processed += _wait_for_job(alpaca.id).enriched
 

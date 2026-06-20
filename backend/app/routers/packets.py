@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Query
 
 from app.engine.alpaca import ET
+from app.engine.analyzer import build_ticker_analysis
 from app.engine.news import fetch_news
 from app.engine.packets import build_market_report
 
@@ -17,6 +18,21 @@ async def market_report(type: str = Query(..., pattern="^(premarket|postmarket)$
     """
     try:
         return build_market_report(type)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/analyze")
+async def analyze(symbol: str = Query(..., description="Any ticker, traded or not")):
+    """Live single-ticker analysis packet for any symbol, as of the latest data.
+
+    Returns a short-term (intraday: VWAP, opening range, premarket, day
+    structure) and long-term (daily: SMA/EMA/RSI/MACD/ATR, 52-week range,
+    trailing returns) block plus recent daily and minute bars. Pure data — the
+    caller forms the view. Independent of the journal; works on untraded tickers.
+    """
+    try:
+        return build_ticker_analysis(symbol)
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

@@ -35,12 +35,15 @@ log = logging.getLogger("trade-journal-mcp")
 mcp = FastMCP("trade-journal")
 
 
-def _get(path: str, params: dict | None = None, timeout: float = 120.0) -> dict | list:
+def _get(path: str, params: dict | None = None, timeout: float = 120.0,
+         allow_404: bool = False):
     started = time.monotonic()
     error = None
     response_bytes = None
     try:
         resp = httpx.get(f"{API_BASE}{path}", params=params, timeout=timeout)
+        if allow_404 and resp.status_code == 404:
+            return None
         resp.raise_for_status()
         response_bytes = len(resp.content)
         result = resp.json()
@@ -130,6 +133,175 @@ def get_stats() -> dict:
     """Fetch aggregate journal stats: P/L, win rate, today's P/L, breakdowns
     by ticker / tag / time bucket, and behavioral flag counts (read-only)."""
     return _get("/stats")
+
+
+@mcp.tool()
+def analyze_ticker(symbol: str) -> dict:
+    """Live, on-demand analysis of ANY ticker (traded or not) as of the latest
+    data — independent of the user's journal.
+
+    Returns:
+    - `current`: latest price, % change vs prev close, today's O/H/L/volume.
+    - `short_term`: intraday read — VWAP and distance from it, opening range
+      (5m/15m), premarket levels, day high/low and where price sits in the range.
+      Falls back to the last completed session when the market is closed.
+    - `long_term`: daily/investment read — SMA 20/50/200 and % distance from
+      each, EMA 9/20, RSI-14, ATR-14, MACD, 52-week high/low and distance, and
+      1/3/6-month returns.
+    - `recent_daily_bars` / `recent_minute_bars`: the last ~30 of each for your
+      own checks.
+
+    Use this for "analyze APLD / any ticker right now" — size it up as a short-to-
+    mid-term trade AND as a longer-term investment. This returns data only; you
+    form the verdict. Note: the free Alpaca feed is IEX (thinner than full SIP),
+    so treat pre/post-market and illiquid names as approximate.
+    """
+    return _get("/packets/analyze", {"symbol": symbol}, timeout=60.0)
+
+
+@mcp.tool()
+def get_trade_detail(trade_id: str) -> dict:
+    """Full end-to-end bundle for a single trade (read-only).
+
+    Combines the trade record, its fills (each with the Alpaca market context
+    inlined as `market_context`), and path metrics (MFE/MAE, exit efficiency,
+    giveback, post-exit continuation). Use this to analyze one trade in depth.
+    `path_metrics` is null if the Path Metrics job has not run for this trade.
+
+    trade_id: a trade UUID (from get_trades / get_trade_path_metrics).
+    """
+    trade = _get(f"/trades/{trade_id}")
+    fills = _get(f"/trades/{trade_id}/fills") or []
+    fill_ids = [f["id"] for f in fills]
+    ctx_map = _get("/market-context/fills/bulk", {"ids": ",".join(fill_ids)}) if fill_ids else {}
+    for f in fills:
+        f["market_context"] = ctx_map.get(f["id"])
+    path = _get(f"/market-context/trade/{trade_id}", allow_404=True)
+    return {"trade": trade, "fills": fills, "path_metrics": path}
+
+
+@mcp.tool()
+def get_coverage() -> dict:
+    """Enrichment coverage counts (read-only): how many fills have Polygon vs
+    Alpaca context, and how many closed/expired trades have path metrics.
+    Use this first to know whether data is complete before drawing conclusions.
+    """
+    return _get("/market-context/coverage")
+
+
+@mcp.tool()
+def get_trade_audit(trade_id: str) -> dict:
+    """Re-derive a trade's computed values from cached bar data and compare them
+    against what's stored — for sanity-checking whether the data looks correct
+    (read-only).
+
+    Returns per-fill audit records (the recorded underlying price vs the actual
+    minute bar at fill time, with nearby bars), a path-metrics audit, and an
+    indicator lookback. Use this when a number looks off or to confirm that the
+    underlying price / VWAP / indicators are consistent with surrounding bars.
+
+    trade_id: a trade UUID.
+    """
+    return _get(f"/market-context/audit/{trade_id}")
+
+
+@mcp.tool()
+def get_trade_path_metrics(start_date: str | None = None, end_date: str | None = None,
+                           status: str | None = "closed", ticker: str | None = None) -> list:
+    """Path metrics across many trades for aggregate analysis (read-only).
+
+    Each row joins a trade's id/ticker/status/open-close/P-L/instrument with its
+    full path metrics: MFE, MAE, time-to-MFE/MAE, exit efficiency, giveback,
+    post-exit continuation (15/30/60m), and hold/exit buckets. `path` is null for
+    trades without computed metrics.
+
+    Use this to compare MFE / exit efficiency / giveback across a day, a ticker,
+    or the whole journal. Dates are YYYY-MM-DD and filter by trade open date;
+    status is open|closed|expired (defaults to closed). Omit all args for every
+    closed trade — scope by date (e.g. yesterday) to keep the payload small.
+    """
+    params = {k: v for k, v in {
+        "start_date": start_date, "end_date": end_date,
+        "status": status, "ticker": ticker,
+    }.items() if v}
+    trades = _get("/trades", params) or []
+    by_id = {t["id"]: t for t in trades}
+    if not by_id:
+        return []
+    paths = _get("/market-context/trade-path/bulk", {"ids": ",".join(by_id)})
+    return [
+        {
+            "trade_id": tid,
+            "ticker": t.get("ticker"),
+            "status": t.get("status"),
+            "instrument_type": t.get("instrument_type"),
+            "opened_at": t.get("opened_at"),
+            "closed_at": t.get("closed_at"),
+            "realized_pnl": t.get("realized_pnl"),
+            "path": paths.get(tid),
+        }
+        for tid, t in by_id.items()
+    ]
+
+
+@mcp.tool()
+def get_fill_contexts(start_date: str | None = None, end_date: str | None = None,
+                      status: str | None = None, ticker: str | None = None) -> list:
+    """Entry/exit market context across many fills for aggregate analysis (read-only).
+
+    Anchored to trades matching the filters. Each row carries the fill's side,
+    time, and price; both the Polygon (`underlying_price_at_fill`) and Alpaca
+    (`entry_underlying_price`) underlying prices side by side for cross-checking;
+    VWAP and distance-from-VWAP; RSI/EMA; relative volume; and behavioral flags
+    (above VWAP, chase, late move, trend aligned).
+
+    Use this to study VWAP/entry quality across trades or a day, and to spot when
+    the two underlying-price sources disagree. Dates YYYY-MM-DD (filter by trade
+    open date); status open|closed|expired.
+    """
+    params = {k: v for k, v in {
+        "start_date": start_date, "end_date": end_date,
+        "status": status, "ticker": ticker,
+    }.items() if v}
+    trades = _get("/trades", params) or []
+    trade_ids = [t["id"] for t in trades]
+    if not trade_ids:
+        return []
+    fills_by_trade = _get("/trades/fills/bulk", {"ids": ",".join(trade_ids)}) or {}
+
+    rows: list = []
+    fill_to_trade: dict = {}
+    all_fills: list = []
+    for tid, flist in fills_by_trade.items():
+        for f in flist:
+            fill_to_trade[f["id"]] = tid
+            all_fills.append(f)
+    fill_ids = [f["id"] for f in all_fills]
+    ctx_map = _get("/market-context/fills/bulk", {"ids": ",".join(fill_ids)}) if fill_ids else {}
+
+    for f in all_fills:
+        c = ctx_map.get(f["id"]) or {}
+        rows.append({
+            "fill_id": f["id"],
+            "trade_id": fill_to_trade[f["id"]],
+            "ticker": f.get("ticker"),
+            "side": f.get("side"),
+            "executed_at": f.get("executed_at"),
+            "price": f.get("price"),
+            "underlying_price_at_fill": f.get("underlying_price_at_fill"),
+            "entry_underlying_price": c.get("entry_underlying_price"),
+            "entry_vwap": c.get("entry_vwap"),
+            "entry_vs_vwap_pct": c.get("entry_vs_vwap_pct"),
+            "entry_rsi_14": c.get("entry_rsi_14"),
+            "entry_ema_9": c.get("entry_ema_9"),
+            "entry_ema_20": c.get("entry_ema_20"),
+            "rvol_time_adjusted": c.get("rvol_time_adjusted"),
+            "is_above_vwap": c.get("is_above_vwap"),
+            "is_chase_entry": c.get("is_chase_entry"),
+            "is_late_move": c.get("is_late_move"),
+            "is_trend_aligned": c.get("is_trend_aligned"),
+        })
+    return rows
 
 
 if __name__ == "__main__":

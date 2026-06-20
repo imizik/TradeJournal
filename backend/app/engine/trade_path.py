@@ -10,6 +10,7 @@ Option-specific path (option_mfe_pct etc.) is left for Phase 5.
 """
 
 import logging
+from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -64,13 +65,21 @@ def compute_path_metrics_for_trades(
     ctx_rows = session.exec(select(FillMarketContext).where(FillMarketContext.fill_id.in_(fill_ids))).all() if fill_ids else []
     ctx_by_fill = {str(row.fill_id): row for row in ctx_rows}
 
+    # Pre-fetch every minute-bar (ticker, day) the trades will need, batched by
+    # day. fetch_minute_bars_for_date() takes up to 50 tickers per call and
+    # caches per ticker/date, so this collapses what used to be one serial
+    # single-ticker call per trade-day into a handful of batched calls. The
+    # per-trade loop below then reads only from this in-memory store, so
+    # "compute path metrics" never silently turns into hundreds of API fetches.
+    bar_store = _prefetch_minute_bars(closed, on_progress)
+
     processed = 0
     for i, trade in enumerate(closed):
         if on_progress:
             on_progress(i + 1, trade.ticker)
         fills = fills_by_trade.get(trade.id, [])
         try:
-            metrics = _compute(trade, fills, ctx_by_fill)
+            metrics = _compute(trade, fills, ctx_by_fill, bar_store)
             if metrics:
                 session.merge(metrics)
                 processed += 1
@@ -84,6 +93,47 @@ def compute_path_metrics_for_trades(
 
 
 # ---------------------------------------------------------------------------
+# Minute-bar prefetch
+# ---------------------------------------------------------------------------
+
+def _window_days(trade: Trade) -> list[date]:
+    """Days a trade's underlying path needs, or [] if outside the window cap."""
+    if not (trade.opened_at and trade.closed_at):
+        return []
+    post_exit_end = trade.closed_at.replace(tzinfo=ET) + timedelta(hours=1)
+    window_days = (post_exit_end.date() - trade.opened_at.date()).days + 1
+    if window_days > MAX_PATH_WINDOW_DAYS:
+        return []
+    return _date_range(trade.opened_at.date(), post_exit_end.date())
+
+
+def _prefetch_minute_bars(trades: list[Trade], on_progress=None) -> dict[tuple[str, str], list]:
+    """
+    Batch-fetch minute bars for every (ticker, day) the trades will need,
+    grouped by day so each network call covers up to 50 tickers at once.
+    Returns {(ticker, day_iso): [bar_dict]} for the per-trade loop to read.
+    """
+    by_day: dict[date, set[str]] = defaultdict(set)
+    for trade in trades:
+        for day in _window_days(trade):
+            by_day[day].add(trade.ticker)
+
+    bar_store: dict[tuple[str, str], list] = {}
+    total_days = len(by_day)
+    for idx, (day, tickers) in enumerate(sorted(by_day.items())):
+        if on_progress:
+            on_progress(0, f"Loading bars {day} ({idx + 1}/{total_days})")
+        try:
+            fetched = fetch_minute_bars_for_date(sorted(tickers), day)
+        except Exception as e:
+            log.warning("Prefetch failed for %s: %s", day, e)
+            fetched = {}
+        for ticker, bars in fetched.items():
+            bar_store[(ticker, day.isoformat())] = bars
+    return bar_store
+
+
+# ---------------------------------------------------------------------------
 # Per-trade computation
 # ---------------------------------------------------------------------------
 
@@ -91,6 +141,7 @@ def _compute(
     trade: Trade,
     fills: list[Fill],
     ctx_by_fill: dict[str, FillMarketContext],
+    bar_store: dict[tuple[str, str], list],
 ) -> Optional[TradePathMetrics]:
     entry_fills = [f for f in fills if f.side in ("buy_to_open", "sell_to_open", "buy")]
     exit_fills = [f for f in fills if f not in entry_fills]
@@ -141,10 +192,16 @@ def _compute(
         _apply_option_path(metrics, option_path)
         return metrics
 
-    # Fetch bars for the trade window + 60m of post-exit
+    # Bars for the trade window + 60m of post-exit. Read from the prefetched
+    # in-memory store; fall back to the on-disk cache only (never the network)
+    # for any day the prefetch did not cover.
     all_bars: list[dict] = []
     for day in _date_range(trade.opened_at.date(), post_exit_end.date()):
-        day_bars = fetch_minute_bars_for_date([trade.ticker], day).get(trade.ticker, [])
+        key = (trade.ticker, day.isoformat())
+        day_bars = bar_store.get(key)
+        if day_bars is None:
+            day_bars = fetch_minute_bars_for_date([trade.ticker], day, cache_only=True).get(trade.ticker, [])
+            bar_store[key] = day_bars
         all_bars.extend(day_bars)
 
     if not all_bars:

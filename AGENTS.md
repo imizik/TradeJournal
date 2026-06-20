@@ -6,6 +6,8 @@ Read this first before making changes in this repo.
 
 Trade Journal is a local-first Robinhood trade history system built around fill ingestion, FIFO trade reconstruction, analytics, enrichment, and reconciliation. The live repo already supports stocks and options, multiple account records, Gmail execution-email import, manual fill entry/edit, full trade rebuilds, durable enrichment jobs, and markdown reconciliation reporting.
 
+Current scope also includes Webull read/listen/import plumbing, a Sync Center, Gmail Pub/Sub push ingest, AI trade/day review, market packets for Claude Desktop, quotes, fill-level Alpaca context, and trade-level path metrics.
+
 ## Agent Operating Style
 
 Work like a fast, practical senior dev helper:
@@ -40,13 +42,24 @@ Backend:
 - `backend/app/engine/alpaca.py`
 - `backend/app/engine/alpaca_enricher.py`
 - `backend/app/engine/jobs.py`
+- `backend/app/engine/trade_path.py`
+- `backend/app/engine/webull.py`
+- `backend/app/engine/webull_client.py`
+- `backend/app/engine/webull_events.py`
+- `backend/app/engine/webull_listener.py`
 - `backend/app/engine/packets.py` (premarket/postmarket market reports; universe in `backend/data/universe.json`)
-- `backend/mcp_server.py` (read-only MCP stdio server for Claude Desktop; httpx adapter over localhost:8000)
+- `backend/mcp_server.py` (read-only MCP stdio server for Claude Desktop; market packet + trade-analysis tools over localhost:8000)
+- `backend/app/ai/reviewer.py`
+- `backend/app/ai/daily_reviewer.py`
 - `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
 - `backend/app/routers/market_context.py`
+- `backend/app/routers/sync.py`
+- `backend/app/routers/daily_review.py`
+- `backend/app/routers/gmail_push.py`
+- `backend/app/routers/webull.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
 
@@ -60,6 +73,8 @@ Frontend:
 - `frontend/app/page.tsx`
 - `frontend/app/trades/page.tsx`
 - `frontend/app/trades/[id]/page.tsx`
+- `frontend/app/daily/page.tsx`
+- `frontend/app/daily/[day]/page.tsx`
 - `frontend/app/fills/page.tsx`
 - `frontend/app/fills/[id]/page.tsx`
 
@@ -83,17 +98,26 @@ Analysis scripts:
 - Enrichment fields are nullable and must be guarded before display, calculations, or AI prompts.
 - `job_run` rows are durable status records for import/enrichment/path jobs; do not rely on process-local progress state.
 - Alpaca context is fill-level context in `fill_market_context`; trade-level path metrics are separate rows in `trade_path_metrics`.
+- Webull raw events are stored first in `webull_raw_event`; normalized fills use `webull:` source IDs.
+- AI review output is stored as JSON on `trade.ai_review` or in `dailyreview.review_json`.
 
 ## Main User Flows
 
 - Gmail import: `POST /fills/import`
-- Gmail OAuth start/callback: `GET /auth/gmail/start`, `GET /auth/gmail/callback`
+- Gmail OAuth start/callback: `GET /auth/gmail/start`, `GET /auth/gmail/start/browser`, `GET /auth/gmail/callback`
 - Manual fill create: `POST /fills`
 - Manual fill edit: `PUT /fills/{id}`
 - Rebuild everything from fills: `POST /rebuild`
 - Full resync from Gmail plus manual-fill restore: `POST /fills/resync-all`
+- Sync Center: `GET /sync/summary`, `GET /sync/jobs`, `GET /sync/runs`, `POST /sync/pipeline/run`, `POST /sync/jobs/{job_type}/run`
+- Gmail Pub/Sub watch/push: `POST /gmail/watch`, `GET /gmail/watch/status`, `POST /gmail/push`
+- Webull listener/test ingest: `POST /webull/events/start`, `POST /webull/events/stop`, `POST /webull/events/test-ingest`
 - View analytics and breakdowns: `GET /stats`
 - Review per-trade history via trade detail and fill timeline pages
+- AI trade review: `POST /trades/{id}/review`
+- Daily review: `GET /daily-review`, `POST /daily-review`
+- Quotes: `GET /quotes`, `POST /quotes/positions`
+- Market packets: `GET /packets/report`, `GET /packets/news`
 - Polygon enrichment: `POST /fills/enrich`
 - Alpaca fill context enrichment: `POST /market-context/enrich`
 - Trade path metrics: `POST /market-context/trade-path/compute`
@@ -104,12 +128,17 @@ Analysis scripts:
 These exist in the repo right now and may still be in flux:
 
 - Quote endpoints and dashboard mark pricing via `yfinance`
+- Webull OpenAPI read/listen/import endpoints and durable listener job
+- Sync Center routes and dashboard controls for pipeline/job history
+- Daily AI review pages and trade-level AI review actions
 - Reusable dashboard/trades table components
 - Gmail OAuth can be started from the app instead of copying a terminal URL
 - Fill enrichment fields and durable job-backed enrichment status/actions
 - Configurable `DATABASE_URL`; SQLite remains the local default, Postgres/Neon is supported for migration/deploy
 - Durable job runner CLI for historical enrichment and future Cloud Run Jobs
 - Alpaca context and trade-path metrics with cache-aware daily/minute bar handling
+- Backend startup may auto-renew Gmail watches and auto-start Webull listeners when the relevant env flags are enabled
+- Trade-path computation now batch-prefetches minute bars by day and falls back to cache-only reads for uncovered days to avoid per-trade API fetch loops
 - Startup merge of blank-last4 Roth data into canonical `8267`
 - New fill columns for source email subject and body
 - Skipping cumulative partial-fill option emails to avoid phantom duplicates
@@ -128,13 +157,26 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Use port `8080` only when `8000` is occupied, and set `NEXT_PUBLIC_API_URL`/`BACKEND_PUBLIC_URL` consistently if changing ports.
+Use port `8080` only when `8000` is occupied. If you do, keep `NEXT_PUBLIC_API_URL`, `BACKEND_PUBLIC_URL`, and `FRONTEND_PUBLIC_URL` consistent with the actual frontend/backend ports and public callback URLs.
+
+Repo-specific local dev note:
+
+- `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
+- `startdev.ps1` intentionally launches the backend on `8080` and points the frontend there.
+- `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:
 
 ```bash
 cd frontend
 npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+```
+
+PowerShell:
+
+```powershell
+$env:NEXT_PUBLIC_API_URL="http://localhost:8000"
 npm run dev
 ```
 
@@ -149,6 +191,8 @@ Known environment note:
 
 - Backend test collection currently needs `httpx` available because `fastapi.testclient` depends on it.
 - The checked-in backend venv may not have `pytest`; use `python -m compileall app scripts` and targeted `TestClient` smoke checks when pytest is unavailable.
+- `npm run lint` may still fail because the frontend is on Next 16 while `frontend/package.json` still uses `next lint`.
+- `npm run build` may fail in network-restricted environments because `next/font` fetches Google Fonts.
 
 Durable local jobs:
 
@@ -157,6 +201,7 @@ cd backend
 python -m app.jobs.run --type polygon_enrich --range all
 python -m app.jobs.run --type alpaca_enrich --range all --force
 python -m app.jobs.run --type trade_path --range all
+python -m app.jobs.run --type webull_listener --accounts WEBULL_ACCOUNT_ID
 ```
 
 SQLite-to-Postgres/Neon migration:
@@ -171,11 +216,15 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
 
 - PnL mismatch: inspect `reconstructor.py`, then fill ordering, then account identity
 - Import mismatch: inspect `email_parser.py`, `gmail_poller.py`, and `fills.py`
-- Gmail OAuth mismatch: inspect `auth.py`, `gmail_poller.py`, Google redirect URIs, and `BACKEND_PUBLIC_URL`
+- Gmail OAuth mismatch: inspect `auth.py`, `gmail_poller.py`, Google redirect URIs, `BACKEND_PUBLIC_URL`, and `FRONTEND_PUBLIC_URL`
 - Manual fill issue: inspect `ManualFillForm.tsx`, `frontend/lib/api.ts`, and `backend/app/routers/fills.py`
 - Dashboard numbers vs broker numbers: inspect reconciliation scripts and generated reports, not just `/stats`
 - Enrichment job issue: inspect `backend/app/engine/jobs.py`, `job_run`, and the relevant enricher before changing UI polling
 - Missing Alpaca daily indicators on recent trades: inspect `backend/app/engine/alpaca.py` daily cache coverage and the ticker's `backend/data/alpaca_cache/stocks/1Day/<feed>/` file
+- Sync Center issue: inspect `backend/app/routers/sync.py`, `job_run`, and `frontend/components/DashboardActions.tsx`
+- Webull issue: inspect `backend/app/engine/webull*.py`, `backend/app/routers/webull.py`, and `backend/app/engine/webull_proto/NOTICE`
+- AI review issue: inspect `backend/app/ai/reviewer.py`, `backend/app/ai/daily_reviewer.py`, and nullable enrichment/path fields before changing prompts
+- MCP/Claude Desktop issue: inspect `backend/mcp_server.py`, the bulk `/trades/*` and `/market-context/*` routes, `backend/data/mcp_log/*.jsonl`, and whether the backend is reachable on `localhost:8000`
 
 ## Reconciliation Notes
 
@@ -191,4 +240,7 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
 - Any change to fill import or parsing can affect rebuilds, analytics, and reconciliation outputs
 - Any change to enrichment affects local historical backfills, Cloud Run job readiness, and nullable UI fields
 - For SQLite, keep long enrichment transactions short enough that `job_run` progress updates do not lock the DB
+- For trade-path work, preserve the batched minute-bar prefetch and cache-only fallback; do not reintroduce one-network-call-per-trade/day behavior
+- Sync Center treats `webull_listener` as a persistent listener, not a blocking finite sync job or "sync running" banner source
+- Sync pipeline and Gmail push intentionally do not wait for slow Polygon completion; check `/fills/enrich/status` separately before assuming market enrichment is fully done
 - When scope changes materially, update both `AGENTS.md` and `CLAUDE.md`

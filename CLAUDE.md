@@ -11,6 +11,7 @@ Current scope is broader than the original MVP notes:
 - The current dataset is centered on Roth IRA `8267` and Individual `1113`.
 - There is no auth and no multi-user model.
 - The repo is optimized for local analysis, repair, rebuild workflows, and eventual low-cost deployment.
+- Current scope also includes Webull read/listen/import plumbing, Gmail Pub/Sub push ingest, a Sync Center, AI trade/day review, market packets for Claude Desktop, live quotes, Alpaca fill context, and trade path metrics.
 
 ## Agent Operating Style
 
@@ -83,7 +84,7 @@ Durable background work:
 ### Backend
 
 - SQLModel schema for accounts, fills, trades, tags, and trade-fill junctions
-- Alembic migrations through `9d1e2f3a4b5c`
+- Alembic migrations through `d6e7f8a9b0c1`
 - FIFO reconstructor that handles:
   - options and stocks
   - scale-ins
@@ -95,6 +96,7 @@ Durable background work:
 - Gmail poller using the Gmail API
 - In-app Gmail OAuth flow:
   - `GET /auth/gmail/start` returns a Google auth URL
+  - `GET /auth/gmail/start/browser` redirects straight to Google from the backend
   - `GET /auth/gmail/callback` saves `backend/token.json`
 - Robinhood email parser for:
   - option execution emails
@@ -112,6 +114,19 @@ Durable background work:
 - Durable job runner for Polygon enrichment, Alpaca fill context, and trade path metrics:
   - `backend/app/engine/jobs.py`
   - `backend/app/jobs/run.py`
+- Sync Center routes for job summaries, history, pipeline runs, and advanced rebuild/resync:
+  - `backend/app/routers/sync.py`
+- Gmail Pub/Sub push watch/webhook:
+  - `backend/app/routers/gmail_push.py`
+- Webull read/listen/import plumbing:
+  - `backend/app/engine/webull.py`
+  - `backend/app/engine/webull_client.py`
+  - `backend/app/engine/webull_events.py`
+  - `backend/app/engine/webull_listener.py`
+  - `backend/app/routers/webull.py`
+- AI review:
+  - `backend/app/ai/reviewer.py`
+  - `backend/app/ai/daily_reviewer.py`
 - SQLite-to-Postgres copy script:
   - `backend/scripts/migrate_sqlite_to_postgres.py`
 - Reconciliation and CSV comparison scripts under `backend/scripts/`
@@ -132,24 +147,26 @@ Durable background work:
   - trade summary
   - fill timeline
   - edit-fill links
-  - placeholder AI review rendering
+  - Generate/Regenerate AI review
+  - Alpaca context, path metrics, and audit panels
 - Fills page with:
   - fill history
   - manual fill form
   - edit-fill links
 - Fill edit page
 - Analytics page with ticker, time-bucket, tag, and behavioral-flag breakdowns
+- Daily review index/detail pages
 
-## Active Working Tree Changes
+## Current Capabilities And In-Flux Areas
 
-These are present in the repo right now but are not all committed yet:
+These are present in the repo right now and may still be in flux:
 
 - Market report ("packet") + MCP layer for Claude chat:
   - `backend/app/engine/packets.py` builds deterministic premarket/postmarket market reports (indexes detail with VWAP/ORB/premarket/AH, sector rotation, macro gauges incl. ^VIX/^TNX via yfinance, bucketed high-beta universe with `rs_vs_spy`, leaders/laggards, raw Alpaca news).
-  - Symbol universe is hand-editable in `backend/data/universe.json` (bucketed execution watchlist — not the market).
-  - `backend/app/engine/news.py` wraps Alpaca `/v1beta1/news`; no relevance filtering in Python — Claude triages headlines.
-  - `backend/mcp_server.py` is a stdio FastMCP server for Claude Desktop with read-only tools (`get_market_report`, `get_news`, `get_trades`, `get_stats`); thin httpx adapter over `localhost:8000`, holds no API keys, logs calls to `backend/data/mcp_log/*.jsonl`.
-  - `backend/prompts/market_report.md` is the Claude-side analysis prompt (regime rules, 13-section output) — judgment lives there, not in backend code.
+  - Symbol universe is hand-editable in `backend/data/universe.json` (bucketed execution watchlist, not the market).
+  - `backend/app/engine/news.py` wraps Alpaca `/v1beta1/news`; no relevance filtering in Python, so Claude triages headlines.
+  - `backend/mcp_server.py` is a stdio FastMCP server for Claude Desktop with read-only tools for market packets plus journal analysis (`get_market_report`, `get_news`, `get_trades`, `get_stats`, `get_trade_detail`, `get_coverage`, `get_trade_audit`, `get_trade_path_metrics`, `get_fill_contexts`); thin httpx adapter over `localhost:8000`, holds no API keys, logs calls to `backend/data/mcp_log/*.jsonl`.
+  - `backend/prompts/market_report.md` is the Claude-side analysis prompt (regime rules, 13-section output); judgment lives there, not in backend code.
   - Live "today" market data must use `fetch_snapshots`/`fetch_minute_bars_live` (never cached); the persistent minute cache never expires and must not be written with partial intraday data.
 - Quote support is being added:
   - `backend/app/engine/quotes.py`
@@ -162,7 +179,12 @@ These are present in the repo right now but are not all committed yet:
 - Roth account normalization is being tightened so blank-last4 Roth fills are merged into canonical Roth `8267` on startup
 - Partial-fill Robinhood option emails are being intentionally skipped to avoid cumulative duplicate fills
 - Expired options with partial exits now preserve realized FIFO PnL on the exited portion and only write off the remaining open lots
-- AI trade review is wired: `POST /trades/{id}/review` calls `backend/app/ai/reviewer.py` (Claude claude-sonnet-4-6), writes structured JSON to `trade.ai_review`, rendered in trade detail page with Generate/Regenerate button
+- AI trade review is wired: `POST /trades/{id}/review` calls `backend/app/ai/reviewer.py`, defaults to `ANTHROPIC_MODEL` or `claude-opus-4-7`, writes structured JSON to `trade.ai_review`, and renders in trade detail with a Generate/Regenerate button.
+- Daily AI review is wired through `/daily-review`, `backend/app/ai/daily_reviewer.py`, and the `dailyreview` table.
+- Sync Center is wired through `/sync/*` and dashboard controls. It queues finite `job_run` rows for Gmail sync, fill check, trade rebuild, enrichment, path metrics, daily review, full pipeline, and advanced rebuild/resync.
+- Gmail Pub/Sub push ingest is wired through `/gmail/watch`, `/gmail/watch/status`, and `/gmail/push`; push events queue `gmail_push` pipeline work.
+- Webull support is wired for signed read endpoints, gRPC event listening, raw event persistence, and normalized fill ingest. No live trading endpoints are implemented.
+- App startup may also auto-renew Gmail Pub/Sub watches (`GMAIL_WATCH_AUTOSTART`) and auto-start Webull listeners (`WEBULL_LISTENER_AUTOSTART` or `WEBULL_LISTENER_ACCOUNTS`) after orphaned jobs are cleaned up.
 - Fill enrichment pipeline is live:
   - `backend/app/engine/enricher.py` fetches Polygon data and computes Black-Scholes greeks.
   - `backend/app/engine/alpaca_enricher.py` computes Alpaca-derived fill market context in `fill_market_context`.
@@ -188,12 +210,21 @@ Highest-leverage backend files:
 - `backend/app/engine/alpaca_enricher.py`
 - `backend/app/engine/jobs.py`
 - `backend/app/engine/trade_path.py`
+- `backend/app/engine/webull.py`
+- `backend/app/engine/webull_client.py`
+- `backend/app/engine/webull_events.py`
+- `backend/app/engine/webull_listener.py`
 - `backend/app/ai/reviewer.py`
+- `backend/app/ai/daily_reviewer.py`
 - `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
 - `backend/app/routers/market_context.py`
+- `backend/app/routers/sync.py`
+- `backend/app/routers/daily_review.py`
+- `backend/app/routers/gmail_push.py`
+- `backend/app/routers/webull.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
 
@@ -202,6 +233,8 @@ Highest-leverage frontend files:
 - `frontend/app/page.tsx`
 - `frontend/app/trades/page.tsx`
 - `frontend/app/trades/[id]/page.tsx`
+- `frontend/app/daily/page.tsx`
+- `frontend/app/daily/[day]/page.tsx`
 - `frontend/app/fills/page.tsx`
 - `frontend/app/fills/[id]/page.tsx`
 - `frontend/components/DashboardActions.tsx`
@@ -226,6 +259,7 @@ Stable current routes:
 
 - `GET /health`
 - `GET /auth/gmail/start`
+- `GET /auth/gmail/start/browser`
 - `GET /auth/gmail/callback`
 - `GET /accounts`
 - `GET /fills`
@@ -235,6 +269,7 @@ Stable current routes:
 - `GET /fills/{id}`
 - `PUT /fills/{id}`
 - `GET /trades`
+- `GET /trades/fills/bulk`
 - `GET /trades/{id}`
 - `GET /trades/{id}/fills`
 - `POST /trades/{id}/tags`
@@ -253,9 +288,31 @@ Stable current routes:
 - `GET /market-context/fill/{fill_id}`
 - `GET /market-context/fills/bulk`
 - `GET /market-context/trade/{trade_id}`
+- `GET /market-context/trade-path/bulk`
 - `POST /market-context/trade-path/compute`
 - `GET /market-context/trade-path/status`
 - `GET /market-context/audit/{trade_id}`
+- `GET /daily-review`
+- `GET /daily-review/{day}`
+- `POST /daily-review`
+- `GET /sync/summary`
+- `GET /sync/jobs`
+- `GET /sync/runs`
+- `POST /sync/pipeline/run`
+- `POST /sync/jobs/{job_type}/run`
+- `POST /sync/advanced/rebuild-all`
+- `POST /sync/advanced/resync-all`
+- `POST /gmail/watch`
+- `GET /gmail/watch/status`
+- `POST /gmail/push`
+- `GET /webull/health`
+- `GET /webull/accounts`
+- `GET /webull/orders/recent`
+- `GET /webull/orders/{order_id}`
+- `POST /webull/events/test-ingest`
+- `POST /webull/events/start`
+- `POST /webull/events/stop`
+- `GET /webull/events/status`
 
 ## Run Locally
 
@@ -268,13 +325,26 @@ alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Use port `8080` only when `8000` is occupied, and set `NEXT_PUBLIC_API_URL`/`BACKEND_PUBLIC_URL` consistently if changing ports.
+Use port `8080` only when `8000` is occupied. If you do, keep `NEXT_PUBLIC_API_URL`, `BACKEND_PUBLIC_URL`, and `FRONTEND_PUBLIC_URL` consistent with the actual frontend/backend ports and public callback URLs.
+
+Repo-specific local dev note:
+
+- `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
+- `startdev.ps1` intentionally launches the backend on `8080` and points the frontend there.
+- `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:
 
 ```bash
 cd frontend
 npm install
+NEXT_PUBLIC_API_URL=http://localhost:8000 npm run dev
+```
+
+PowerShell:
+
+```powershell
+$env:NEXT_PUBLIC_API_URL="http://localhost:8000"
 npm run dev
 ```
 
@@ -285,6 +355,7 @@ cd backend
 python -m app.jobs.run --type polygon_enrich --range all
 python -m app.jobs.run --type alpaca_enrich --range all --force
 python -m app.jobs.run --type trade_path --range all
+python -m app.jobs.run --type webull_listener --accounts WEBULL_ACCOUNT_ID
 ```
 
 SQLite-to-Postgres/Neon migration:
@@ -335,8 +406,9 @@ The report work is centered on understanding:
 - If a change touches fill import or email parsing, check the downstream impact on rebuilds and reconciliation scripts.
 - If a change touches the UI tables, prefer reusing the extracted table components instead of duplicating table logic.
 - Avoid frontend N+1 calls; batch data loading or extend shared API responses when practical.
-- Fill enrichment fields are all nullable — always guard with null checks before displaying or passing to AI.
+- Fill enrichment fields are all nullable; always guard with null checks before displaying or passing to AI.
 - Alpaca context is fill-level. Trade path metrics are separate and require the Path Metrics job.
+- Trade path metrics now prefetch minute bars batched by day, then fall back to cache-only per-day reads; preserve that shape and avoid reintroducing per-trade/day network fetch loops.
 - The dashboard Alpaca "All history" control should send `range=all&force=true`; `force` alone only reprocesses the currently selected range.
 - If recent trades have underlying/VWAP but missing RSI/EMA/MACD/ATR, inspect stale Alpaca daily cache coverage before changing indicator math.
 - Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
@@ -345,3 +417,6 @@ The report work is centered on understanding:
 - Alpaca cache lives at `backend/data/alpaca_cache/`. Daily cache files must be refreshed when they do not cover the requested date range.
 - For SQLite, avoid long write transactions in historical jobs; progress updates to `job_run` can otherwise hit `database is locked`.
 - Update `CLAUDE.md` and `AGENTS.md` together when project scope changes materially.
+- Webull raw events are persisted before normalization. Preserve idempotency on `webull_raw_event.event_id` and `Fill.raw_email_id = webull:{event_id}`.
+- Sync Center should treat `webull_listener` as a persistent listener, not a blocking finite sync job.
+- Sync pipeline success does not imply Polygon enrichment finished; full pipeline and Gmail push intentionally launch Polygon in the background and only wait for Alpaca/path work.

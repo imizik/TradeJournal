@@ -97,6 +97,22 @@ async def get_trade_path(trade_id: uuid.UUID, session: Session = Depends(get_ses
     return metrics
 
 
+@router.get("/trade-path/bulk", response_model=dict[str, TradePathMetrics])
+async def get_bulk_trade_paths(ids: str, session: Session = Depends(get_session)):
+    """
+    Return TradePathMetrics for multiple trades in one query.
+    ids: comma-separated trade UUIDs.
+    Returns {trade_id_str: TradePathMetrics} — trades without metrics are omitted.
+    """
+    trade_ids = [uuid.UUID(i.strip()) for i in ids.split(",") if i.strip()]
+    if not trade_ids:
+        return {}
+    rows = session.exec(
+        select(TradePathMetrics).where(TradePathMetrics.trade_id.in_(trade_ids))
+    ).all()
+    return {str(row.trade_id): row for row in rows}
+
+
 @router.get("/trade-path/status")
 async def trade_path_status(session: Session = Depends(get_session)):
     return job_status(latest_job(session, JOB_TRADE_PATH))
