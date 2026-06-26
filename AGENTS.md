@@ -110,8 +110,9 @@ Analysis scripts:
 - Rebuild everything from fills: `POST /rebuild`
 - Full resync from Gmail plus manual-fill restore: `POST /fills/resync-all`
 - Sync Center: `GET /sync/summary`, `GET /sync/jobs`, `GET /sync/runs`, `POST /sync/pipeline/run`, `POST /sync/jobs/{job_type}/run`
+- Sync Center advanced rebuild/resync: `POST /sync/advanced/rebuild-all`, `POST /sync/advanced/resync-all`
 - Gmail Pub/Sub watch/push: `POST /gmail/watch`, `GET /gmail/watch/status`, `POST /gmail/push`
-- Webull listener/test ingest: `POST /webull/events/start`, `POST /webull/events/stop`, `POST /webull/events/test-ingest`
+- Webull listener/test ingest/status: `POST /webull/events/start`, `POST /webull/events/stop`, `POST /webull/events/test-ingest`, `GET /webull/events/status`
 - View analytics and breakdowns: `GET /stats`
 - Review per-trade history via trade detail and fill timeline pages
 - AI trade review: `POST /trades/{id}/review`
@@ -241,6 +242,8 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
 - Any change to enrichment affects local historical backfills, Cloud Run job readiness, and nullable UI fields
 - For SQLite, keep long enrichment transactions short enough that `job_run` progress updates do not lock the DB
 - For trade-path work, preserve the batched minute-bar prefetch and cache-only fallback; do not reintroduce one-network-call-per-trade/day behavior
+- Incremental rebuilds go through `_rebuild_trades()` (fills.py), which reuses `trade_path_metrics` whose `inputs_fingerprint` still matches the rebuilt trade and drops dirty/orphaned rows for the path job to recompute; do not revert incremental rebuilds to a blanket `delete(TradePathMetrics)`. Only destructive resync (re-imports fills with new ids) clears all metrics.
+- Daily review is not part of "Sync Everything" or Gmail push; it is generated only from the daily page or the standalone `daily_review` Sync Center job. Do not re-add it to the pipelines.
 - Sync Center treats `webull_listener` as a persistent listener, not a blocking finite sync job or "sync running" banner source
 - Sync pipeline and Gmail push intentionally do not wait for slow Polygon completion; check `/fills/enrich/status` separately before assuming market enrichment is fully done
 - When scope changes materially, update both `AGENTS.md` and `CLAUDE.md`

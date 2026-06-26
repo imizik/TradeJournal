@@ -298,6 +298,82 @@ def _persist_rebuild(session: Session, anomalies_label: str) -> tuple[int, list[
     return len(result.trades), result.anomalies
 
 
+def _current_trade_fingerprints(session: Session) -> dict[uuid.UUID, str]:
+    """Fingerprint every current trade by its status + fills (one bulk read)."""
+    from app.engine.trade_path import trade_inputs_fingerprint
+
+    trades = {t.id: t for t in session.exec(select(Trade)).all()}
+    if not trades:
+        return {}
+    trade_fills = session.exec(select(TradeFill)).all()
+    fill_ids = [tf.fill_id for tf in trade_fills]
+    fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all() if fill_ids else []
+    fill_by_id = {f.id: f for f in fills}
+    fills_by_trade: dict[uuid.UUID, list[Fill]] = {}
+    for tf in trade_fills:
+        fill = fill_by_id.get(tf.fill_id)
+        if fill is not None:
+            fills_by_trade.setdefault(tf.trade_id, []).append(fill)
+    return {
+        trade_id: trade_inputs_fingerprint(trade, fills_by_trade.get(trade_id, []))
+        for trade_id, trade in trades.items()
+    }
+
+
+def _rebuild_trades(
+    session: Session,
+    anomalies_label: str,
+    *,
+    preserve_path_metrics: bool = True,
+) -> tuple[int, list[str]]:
+    """Clear and rebuild derived trades, reusing still-valid path metrics.
+
+    Path metrics are expensive (minute-bar reads per trade), so a normal rebuild
+    should not throw them all away. Trade ids are stable across rebuilds, so a
+    metrics row stays valid as long as its trade's inputs (status + fills) are
+    unchanged. We snapshot existing rows, do the normal full clear + rebuild,
+    then re-insert only the rows whose stored fingerprint still matches the
+    rebuilt trade. Dirty or orphaned rows are simply not re-inserted, so the
+    trade-path job recomputes exactly those.
+
+    Snapshot-and-reinsert (rather than keeping rows in place) keeps this
+    foreign-key safe: TradePathMetrics references Trade, so the rows cannot
+    survive the Trade delete on Postgres.
+
+    preserve_path_metrics=False is the destructive path (e.g. a resync that
+    re-imports fills with brand-new ids, which invalidates every row anyway).
+    """
+    saved_metrics: list[dict] = []
+    if preserve_path_metrics:
+        columns = list(TradePathMetrics.__table__.columns.keys())
+        rows = session.exec(select(TradePathMetrics)).all()
+        saved_metrics = [{col: getattr(row, col) for col in columns} for row in rows]
+        # Detach the old instances so re-inserting the same primary keys after
+        # the bulk delete does not collide in the identity map.
+        for row in rows:
+            session.expunge(row)
+
+    _clear_derived_trade_data(session)
+    rebuilt, anomalies = _persist_rebuild(session, anomalies_label=anomalies_label)
+
+    if preserve_path_metrics and saved_metrics:
+        session.flush()
+        current = _current_trade_fingerprints(session)
+        restored = 0
+        for row in saved_metrics:
+            trade_id = row.get("trade_id")
+            fingerprint = row.get("inputs_fingerprint")
+            if trade_id in current and fingerprint and fingerprint == current[trade_id]:
+                session.add(TradePathMetrics(**row))
+                restored += 1
+        log.info(
+            "%s: reused %d/%d trade path metric row(s) across rebuild",
+            anomalies_label, restored, len(saved_metrics),
+        )
+
+    return rebuilt, anomalies
+
+
 class FillCreate(BaseModel):
     account_id: uuid.UUID
     ticker: str
@@ -382,8 +458,7 @@ async def create_fill(body: FillCreate, session: Session = Depends(get_session))
     session.add(fill)
     session.flush()
 
-    _clear_derived_trade_data(session)
-    trades_rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/fills manual")
+    trades_rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/fills manual")
 
     session.commit()
     session.refresh(fill)
@@ -488,8 +563,7 @@ async def update_fill(fill_id: uuid.UUID, body: FillCreate, session: Session = D
     session.add(fill)
     session.flush()
 
-    _clear_derived_trade_data(session)
-    trades_rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/fills update")
+    trades_rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/fills update")
 
     session.commit()
     session.refresh(fill)

@@ -24,7 +24,12 @@ from app.engine.jobs import (
     running_job,
 )
 from app.models import Fill, JobRun, Trade
-from app.routers.fills import _clear_derived_trade_data, _import_fills_from_gmail, _persist_rebuild
+from app.routers.fills import (
+    _clear_derived_trade_data,
+    _import_fills_from_gmail,
+    _persist_rebuild,
+    _rebuild_trades,
+)
 
 router = APIRouter()
 
@@ -150,8 +155,7 @@ def _run_fill_check(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
 
 
 def _run_trade_rebuild(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
-    _clear_derived_trade_data(session)
-    rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/sync/rebuild")
+    rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/rebuild")
     session.commit()
     suffix = f" {len(anomalies)} anomaly/anomalies logged." if anomalies else ""
     return rebuilt, f"Rebuilt {rebuilt} trade(s).{suffix}"
@@ -230,7 +234,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         ]
         processed = 0
         for index, (job_type, fn) in enumerate(steps, start=1):
-            _set_job(pipeline_id, done=index - 1, total=7, current=f"Running {job_type}")
+            _set_job(pipeline_id, done=index - 1, total=6, current=f"Running {job_type}")
             with Session(engine) as session:
                 child = _create_run(session, job_type, f"Pipeline step {index}")
             _run_simple_job(child.id, fn)
@@ -240,7 +244,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
                     raise RuntimeError(child.error or f"{job_type} failed")
                 processed += child.enriched if child else 0
 
-        _set_job(pipeline_id, done=3, total=7, current="Running market enrichment")
+        _set_job(pipeline_id, done=3, total=6, current="Running market enrichment")
         # Polygon's free tier is rate-limited to ~5 req/min, so a full enrich can
         # take many minutes. Launch it but do NOT block the pipeline on it — it
         # runs in its own thread and the UI polls /fills/enrich/status. Path
@@ -251,26 +255,19 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         if alpaca.total:
             _wait_for_job(alpaca.id)
 
-        _set_job(pipeline_id, done=5, total=7, current="Calculating path metrics")
+        _set_job(pipeline_id, done=5, total=6, current="Calculating path metrics")
         path = _run_existing_enrichment(JOB_TRADE_PATH, "all", False)
         if path.total:
             _wait_for_job(path.id)
 
-        _set_job(pipeline_id, done=6, total=7, current="Generating daily review")
-        with Session(engine) as session:
-            review = _create_run(session, JOB_DAILY_REVIEW, "Pipeline final step")
-        _run_simple_job(review.id, _run_daily_review)
-        with Session(engine) as session:
-            review = session.get(JobRun, review.id)
-            if review and review.status == "failed":
-                raise RuntimeError(review.error or "Daily review failed")
-            processed += review.enriched if review else 0
-
+        # Daily review is intentionally NOT part of "Sync Everything". It is only
+        # generated on explicit request: from the daily page, or by running the
+        # "Daily review generation" job by itself in the Sync Center.
         _set_job(
             pipeline_id,
             status="succeeded",
-            done=7,
-            total=7,
+            done=6,
+            total=6,
             enriched=processed,
             current="Full sync pipeline completed",
             finished_at=_now(),
@@ -307,8 +304,7 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
 
         _set_job(job_id, done=1, current=f"Rebuilding trades after {saved} new fill(s)")
         with Session(engine) as session:
-            _clear_derived_trade_data(session)
-            rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/sync/gmail-push")
+            rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/gmail-push")
             session.commit()
         processed += rebuilt
 
@@ -438,7 +434,7 @@ async def run_sync_pipeline(session: Session = Depends(get_session)):
     if _active_job(session):
         raise HTTPException(status_code=409, detail="A sync or enrichment job is already running")
     job = _create_run(session, JOB_FULL_PIPELINE, "Queued full sync pipeline")
-    job.total = 7
+    job.total = 6
     session.add(job)
     session.commit()
     _run_thread(lambda: _run_pipeline(job.id))

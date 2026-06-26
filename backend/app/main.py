@@ -15,8 +15,7 @@ from app.database import create_db_and_tables, engine
 from app.models import Account, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets
 from app.routers.fills import (
-    _clear_derived_trade_data,
-    _persist_rebuild,
+    _rebuild_trades,
     backup_manual_fills,
     restore_manual_fills_from_backup,
 )
@@ -54,8 +53,7 @@ def _seed_and_normalize_roth_account() -> None:
             session.exec(delete(Account).where(Account.id.in_(blank_account_ids)))
 
         if moved_fill_count:
-            _clear_derived_trade_data(session)
-            _persist_rebuild(session, anomalies_label="/startup roth merge")
+            _rebuild_trades(session, anomalies_label="/startup roth merge")
 
         session.commit()
         backup_manual_fills(session)

@@ -84,7 +84,7 @@ Durable background work:
 ### Backend
 
 - SQLModel schema for accounts, fills, trades, tags, and trade-fill junctions
-- Alembic migrations through `d6e7f8a9b0c1`
+- Alembic migrations through `c7d8e9f0a1b2`
 - FIFO reconstructor that handles:
   - options and stocks
   - scale-ins
@@ -182,6 +182,7 @@ These are present in the repo right now and may still be in flux:
 - AI trade review is wired: `POST /trades/{id}/review` calls `backend/app/ai/reviewer.py`, defaults to `ANTHROPIC_MODEL` or `claude-opus-4-7`, writes structured JSON to `trade.ai_review`, and renders in trade detail with a Generate/Regenerate button.
 - Daily AI review is wired through `/daily-review`, `backend/app/ai/daily_reviewer.py`, and the `dailyreview` table.
 - Sync Center is wired through `/sync/*` and dashboard controls. It queues finite `job_run` rows for Gmail sync, fill check, trade rebuild, enrichment, path metrics, daily review, full pipeline, and advanced rebuild/resync.
+- The full Sync Everything pipeline stops after Gmail sync, fill check, rebuild, Polygon, Alpaca, and trade-path work. Daily review remains a standalone explicit action from the daily page or the `daily_review` Sync Center job.
 - Gmail Pub/Sub push ingest is wired through `/gmail/watch`, `/gmail/watch/status`, and `/gmail/push`; push events queue `gmail_push` pipeline work.
 - Webull support is wired for signed read endpoints, gRPC event listening, raw event persistence, and normalized fill ingest. No live trading endpoints are implemented.
 - App startup may also auto-renew Gmail Pub/Sub watches (`GMAIL_WATCH_AUTOSTART`) and auto-start Webull listeners (`WEBULL_LISTENER_AUTOSTART` or `WEBULL_LISTENER_ACCOUNTS`) after orphaned jobs are cleaned up.
@@ -409,6 +410,7 @@ The report work is centered on understanding:
 - Fill enrichment fields are all nullable; always guard with null checks before displaying or passing to AI.
 - Alpaca context is fill-level. Trade path metrics are separate and require the Path Metrics job.
 - Trade path metrics now prefetch minute bars batched by day, then fall back to cache-only per-day reads; preserve that shape and avoid reintroducing per-trade/day network fetch loops.
+- Normal rebuilds reuse trade path metrics instead of recomputing all of them. `_rebuild_trades()` in `backend/app/routers/fills.py` snapshots `trade_path_metrics`, does the full clear+rebuild, then re-inserts only rows whose `inputs_fingerprint` (status + fills hash; see `trade_inputs_fingerprint` in `trade_path.py`) still matches the rebuilt trade. Dirty/orphaned rows are dropped so the path job recomputes just those. Use `_rebuild_trades(..., preserve_path_metrics=True)` for incremental rebuilds; only the destructive resync paths (which re-import fills with new ids) should call `_clear_derived_trade_data` + `_persist_rebuild` directly.
 - The dashboard Alpaca "All history" control should send `range=all&force=true`; `force` alone only reprocesses the currently selected range.
 - If recent trades have underlying/VWAP but missing RSI/EMA/MACD/ATR, inspect stale Alpaca daily cache coverage before changing indicator math.
 - Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
@@ -420,3 +422,4 @@ The report work is centered on understanding:
 - Webull raw events are persisted before normalization. Preserve idempotency on `webull_raw_event.event_id` and `Fill.raw_email_id = webull:{event_id}`.
 - Sync Center should treat `webull_listener` as a persistent listener, not a blocking finite sync job.
 - Sync pipeline success does not imply Polygon enrichment finished; full pipeline and Gmail push intentionally launch Polygon in the background and only wait for Alpaca/path work.
+- Daily review is intentionally NOT part of "Sync Everything" (`_run_pipeline`) or the Gmail push pipeline. It is generated only on explicit request: from the daily page, or by running the standalone `daily_review` job in the Sync Center. Do not re-add it to the pipelines.

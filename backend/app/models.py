@@ -270,6 +270,11 @@ class TradePathMetrics(SQLModel, table=True):
     option_worst_unrealized_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
     option_giveback_from_peak: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
 
+    # Hash of the trade's inputs (status + fills) when these metrics were
+    # computed. A rebuild reuses this row only when the rebuilt trade's
+    # fingerprint still matches; otherwise the row is dropped and recomputed.
+    inputs_fingerprint: Optional[str] = Field(default=None, index=True)
+
 
 class WebullRawEvent(SQLModel, table=True):
     """

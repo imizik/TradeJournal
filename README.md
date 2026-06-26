@@ -134,8 +134,10 @@ Frontend validation notes:
 
 - `backend/mcp_server.py` is a read-only FastMCP adapter over the local API. It now exposes market packet tools plus journal-analysis tools such as trade detail, coverage, audit, path-metrics, and fill-context fetches.
 - `backend/app/engine/trade_path.py` now prefetches minute bars batched by day and uses cache-only fallback reads for misses. Preserve that pattern if you touch path-metric performance.
+- Normal rebuilds now preserve reusable `trade_path_metrics` rows. `_rebuild_trades()` snapshots existing metrics, rebuilds derived trades, and restores only rows whose `inputs_fingerprint` still matches the rebuilt trade; destructive resync paths should still clear everything.
 - Sync Center treats `webull_listener` as a persistent background listener, not a blocking finite sync job.
 - Sync Center pipelines intentionally do not wait for slow Polygon enrich completion. A succeeded pipeline may still have Polygon work running; check `GET /fills/enrich/status` separately.
+- Daily review is intentionally separate from "Sync Everything" and Gmail push. Generate it from the daily page or the standalone `daily_review` Sync Center job.
 
 ## Postgres/Neon Migration
 

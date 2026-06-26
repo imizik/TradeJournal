@@ -9,6 +9,7 @@ Underlying path is computed for all instrument types.
 Option-specific path (option_mfe_pct etc.) is left for Phase 5.
 """
 
+import hashlib
 import logging
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -26,6 +27,23 @@ log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 MAX_PATH_WINDOW_DAYS = 10
+
+
+def trade_inputs_fingerprint(trade: Trade, fills: list[Fill]) -> str:
+    """Stable hash of a trade's status plus the fills that compose it.
+
+    Trade ids are stable across rebuilds (the id is the first entry fill's id),
+    but a trade's fills can change while the id stays the same (scale-in, a new
+    exit, an edited fill price). That invalidates any previously computed path
+    metrics. Rebuilds compare this fingerprint to decide whether an existing
+    TradePathMetrics row can be reused or must be recomputed.
+    """
+    parts = sorted(
+        "{}|{}|{}|{}|{}".format(f.id, f.side, f.contracts, f.price, f.executed_at.isoformat())
+        for f in fills
+    )
+    blob = "{}::{}".format(trade.status, "||".join(parts))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
 def compute_path_metrics_for_trades(
@@ -81,6 +99,7 @@ def compute_path_metrics_for_trades(
         try:
             metrics = _compute(trade, fills, ctx_by_fill, bar_store)
             if metrics:
+                metrics.inputs_fingerprint = trade_inputs_fingerprint(trade, fills)
                 session.merge(metrics)
                 processed += 1
         except Exception as e:
