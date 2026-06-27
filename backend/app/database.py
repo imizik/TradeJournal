@@ -2,8 +2,17 @@ import os
 from collections.abc import Generator
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
+
+# Load .env before reading DATABASE_URL. database.py is imported first by
+# app.main (before any module that calls load_dotenv), so without this the
+# DATABASE_URL set in backend/.env is ignored and the app silently falls back
+# to SQLite. load_dotenv does not override already-exported env vars.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(_BACKEND_DIR / ".env")
+load_dotenv(_BACKEND_DIR.parent / ".env")
 
 db_path = Path(__file__).parent.parent / "data" / "trade_journal.db"
 db_path.parent.mkdir(parents=True, exist_ok=True)
