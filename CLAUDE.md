@@ -210,21 +210,25 @@ Highest-leverage backend files:
 - `backend/app/engine/alpaca.py`
 - `backend/app/engine/alpaca_enricher.py`
 - `backend/app/engine/jobs.py`
+- `backend/app/engine/quotes.py`
 - `backend/app/engine/trade_path.py`
 - `backend/app/engine/webull.py`
 - `backend/app/engine/webull_client.py`
 - `backend/app/engine/webull_events.py`
 - `backend/app/engine/webull_listener.py`
+- `backend/app/engine/packets.py`
 - `backend/app/ai/reviewer.py`
 - `backend/app/ai/daily_reviewer.py`
 - `backend/app/routers/auth.py`
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
+- `backend/app/routers/quotes.py`
 - `backend/app/routers/market_context.py`
 - `backend/app/routers/sync.py`
 - `backend/app/routers/daily_review.py`
 - `backend/app/routers/gmail_push.py`
+- `backend/app/routers/packets.py`
 - `backend/app/routers/webull.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
@@ -330,8 +334,10 @@ Use port `8080` only when `8000` is occupied. If you do, keep `NEXT_PUBLIC_API_U
 
 Repo-specific local dev note:
 
+- Backend config now loads `.env` before DB init from `backend/.env` first, then repo-root `.env`; exported env vars still win. This matters for `DATABASE_URL`, autostart flags, API keys, and OAuth/public URL config.
 - `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
 - `startdev.ps1` intentionally launches the backend on `8080` and points the frontend there.
+- `startdev.sh` is the macOS/Linux equivalent; it also assumes backend config comes from `.env` instead of exporting `DATABASE_URL` inline.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:

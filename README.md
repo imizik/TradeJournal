@@ -31,7 +31,9 @@ The frontend dev server runs on `http://localhost:3000` by default. The frontend
 
 Repo helper note:
 
+- Backend config now loads `.env` before DB init from `backend/.env` first, then repo-root `.env`; exported env vars still win. This is where `DATABASE_URL`, API keys, autostart flags, and public callback URLs should usually live.
 - `startdev.ps1` intentionally starts the backend on `8080` and points the frontend there.
+- `startdev.sh` is the macOS/Linux equivalent and relies on the same `.env` loading behavior instead of exporting `DATABASE_URL` inline.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API=http://localhost:8080` if you want the MCP tools to talk to a backend started by `startdev.ps1`.
 
 ## Core Model

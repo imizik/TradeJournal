@@ -42,6 +42,7 @@ Backend:
 - `backend/app/engine/alpaca.py`
 - `backend/app/engine/alpaca_enricher.py`
 - `backend/app/engine/jobs.py`
+- `backend/app/engine/quotes.py`
 - `backend/app/engine/trade_path.py`
 - `backend/app/engine/webull.py`
 - `backend/app/engine/webull_client.py`
@@ -55,10 +56,12 @@ Backend:
 - `backend/app/routers/fills.py`
 - `backend/app/routers/trades.py`
 - `backend/app/routers/stats.py`
+- `backend/app/routers/quotes.py`
 - `backend/app/routers/market_context.py`
 - `backend/app/routers/sync.py`
 - `backend/app/routers/daily_review.py`
 - `backend/app/routers/gmail_push.py`
+- `backend/app/routers/packets.py`
 - `backend/app/routers/webull.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
@@ -162,8 +165,10 @@ Use port `8080` only when `8000` is occupied. If you do, keep `NEXT_PUBLIC_API_U
 
 Repo-specific local dev note:
 
+- Backend config now loads `.env` before DB init from `backend/.env` first, then repo-root `.env`; exported env vars still win. This matters for `DATABASE_URL`, autostart flags, API keys, and OAuth/public URL config.
 - `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
 - `startdev.ps1` intentionally launches the backend on `8080` and points the frontend there.
+- `startdev.sh` is the macOS/Linux equivalent; it also assumes backend config comes from `.env` instead of exporting `DATABASE_URL` inline.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:
@@ -220,6 +225,7 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
 - Gmail OAuth mismatch: inspect `auth.py`, `gmail_poller.py`, Google redirect URIs, `BACKEND_PUBLIC_URL`, and `FRONTEND_PUBLIC_URL`
 - Manual fill issue: inspect `ManualFillForm.tsx`, `frontend/lib/api.ts`, and `backend/app/routers/fills.py`
 - Dashboard numbers vs broker numbers: inspect reconciliation scripts and generated reports, not just `/stats`
+- Quote/dashboard mark issue: inspect `backend/app/engine/quotes.py`, `backend/app/routers/quotes.py`, and dashboard consumers before changing table math
 - Enrichment job issue: inspect `backend/app/engine/jobs.py`, `job_run`, and the relevant enricher before changing UI polling
 - Missing Alpaca daily indicators on recent trades: inspect `backend/app/engine/alpaca.py` daily cache coverage and the ticker's `backend/data/alpaca_cache/stocks/1Day/<feed>/` file
 - Sync Center issue: inspect `backend/app/routers/sync.py`, `job_run`, and `frontend/components/DashboardActions.tsx`
