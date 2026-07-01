@@ -20,7 +20,7 @@ export default function RootLayout({
       <body className={inter.className} suppressHydrationWarning>
         <div className="flex min-h-screen">
           <Nav />
-          <main className="flex-1 p-6">{children}</main>
+          <main className="min-w-0 flex-1 p-6">{children}</main>
         </div>
       </body>
     </html>

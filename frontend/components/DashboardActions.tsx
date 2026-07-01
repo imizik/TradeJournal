@@ -325,6 +325,7 @@ function SyncCenterDrawer({
                     <select
                       value={range}
                       onChange={(e) => setRange(e.target.value as EnrichRange)}
+                      suppressHydrationWarning
                       className="appearance-none rounded border border-border bg-background py-1 pl-2 pr-7 text-xs text-foreground focus:outline-none"
                     >
                       <option value="day">1d</option>

@@ -38,6 +38,7 @@ function buildOpenPositionMeta(trade: Trade, fills: Fill[]) {
   };
 }
 
+// Main dashboard route.
 export default async function DashboardPage({
   searchParams,
 }: {

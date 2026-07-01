@@ -16,13 +16,35 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_PORT="${BACKEND_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-3000}"
-PYTHON="${PYTHON:-python3}"
+
+# Python: honor an explicit $PYTHON, else prefer the project venv (so uvicorn is
+# available without activating it), else fall back to system python3.
+if [[ -z "${PYTHON:-}" ]]; then
+  if [[ -x "$ROOT/backend/.venv/bin/python" ]]; then
+    PYTHON="$ROOT/backend/.venv/bin/python"
+  else
+    PYTHON="python3"
+  fi
+fi
+
+# Node: this setup keeps Node outside the default PATH. If npm isn't already on
+# PATH, find it in the usual install locations and prepend it.
+if ! command -v npm >/dev/null 2>&1; then
+  for d in "$HOME/.local/node/bin" "$HOME/.volta/bin" "/opt/homebrew/bin" "/usr/local/bin"; do
+    if [[ -x "$d/npm" ]]; then PATH="$d:$PATH"; break; fi
+  done
+  export PATH
+fi
 
 # --- Preflight --------------------------------------------------------------
 [[ -f "$ROOT/backend/.env" ]] || \
   echo "WARNING: backend/.env not found — backend will fall back to local SQLite."
 [[ -d "$ROOT/frontend/node_modules" ]] || \
   echo "WARNING: frontend/node_modules missing — run 'npm install' in frontend/ first."
+command -v npm >/dev/null 2>&1 || \
+  echo "WARNING: npm not found on PATH — frontend will not start. Add your Node bin dir to PATH."
+"$PYTHON" -c "import uvicorn" >/dev/null 2>&1 || \
+  echo "WARNING: uvicorn not importable by '$PYTHON' — backend will not start. Check backend/.venv."
 
 # --- Clean shutdown ---------------------------------------------------------
 pids=()
