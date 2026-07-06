@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div ref="{{ rootRef }}" style="--ac:#f5a623;--rp:6px;height:100vh;display:flex;flex-direction:column;background:#070809;color:#c9ced8;font-family:'IBM Plex Sans',system-ui,sans-serif;font-size:13px;overflow:hidden">
+  <helmet>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+      html,body{margin:0;padding:0;background:#070809}
+      *{box-sizing:border-box}
+      ::-webkit-scrollbar{height:10px;width:10px}
+      ::-webkit-scrollbar-thumb{background:#262b34;border:2px solid #0a0c10}
+      ::-webkit-scrollbar-track{background:#0a0c10}
+      textarea{resize:vertical}
+      textarea::placeholder,input::placeholder{color:#454b55}
+      select option{background:#0c0e12;color:#cdd2db}
+      button{font-family:inherit}
+    </style>
+  </helmet>
+
+  <!-- ============ TOP BAR ============ -->
+  <div style="display:flex;align-items:center;gap:14px;height:42px;padding:0 14px;background:#0b0d11;border-bottom:1px solid #1c2129;flex:0 0 auto">
+    <div style="font-family:'IBM Plex Mono',monospace;font-weight:600;letter-spacing:.5px;color:var(--ac);font-size:13px;white-space:nowrap">▰ AI BUILDOUT <span style="color:#3a3f48">//</span> COCKPIT</div>
+    <div style="display:flex;gap:2px;background:#070809;border:1px solid #1c2129;border-radius:5px;padding:2px">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="7">
+        <button onClick="{{ onTab }}" data-v="{{ t.v }}" style="{{ t.style }}">{{ t.label }}</button>
+      </sc-for>
+    </div>
+    <div style="flex:1"></div>
+    <div style="display:flex;gap:6px">
+      <sc-for list="{{ counters }}" as="c" hint-placeholder-count="5">
+        <div title="{{ c.label }}" style="display:flex;align-items:center;gap:5px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:#7c828c">
+          <span style="width:7px;height:7px;border-radius:2px;background:{{ c.color }}"></span><span style="color:#c2c7d0;font-weight:600">{{ c.count }}</span>{{ c.short }}
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- ============ MACRO SIGNPOSTS ============ -->
+  <div style="display:flex;align-items:stretch;background:#0a0c10;border-bottom:1px solid #1c2129;flex:0 0 auto">
+    <div style="display:flex;align-items:center;padding:0 12px;border-right:1px solid #161a20;font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#6b7280;writing-mode:horizontal-tb;white-space:nowrap">MACRO<br>SIGNPOSTS</div>
+    <sc-for list="{{ signposts }}" as="s" hint-placeholder-count="5">
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;border-right:1px solid #161a20;padding:5px 11px;min-width:0;gap:3px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+          <span style="font-size:10px;letter-spacing:.2px;color:#8a909c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.label }}</span>
+          <button onClick="{{ onSignCycle }}" data-id="{{ s.id }}" style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.5px;color:#070809;background:{{ s.color }};border:none;border-radius:3px;padding:2px 7px;cursor:pointer;flex:0 0 auto">{{ s.level }}</button>
+        </div>
+        <input value="{{ s.notes }}" onChange="{{ onSignNote }}" data-id="{{ s.id }}" placeholder="note…" style="background:transparent;border:none;border-bottom:1px solid #1a1f27;font-size:10px;color:#aeb4be;padding:1px 0;outline:none;width:100%;font-family:'IBM Plex Mono',monospace">
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- ============ BODY ============ -->
+  <div style="flex:1;display:flex;min-height:0">
+    <!-- SIDEBAR -->
+    <div style="width:266px;flex:0 0 266px;background:#0a0c10;border-right:1px solid #1c2129;overflow:auto">
+      <div style="padding:11px 13px 6px">
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.5px;color:#c2c7d0;font-weight:600">THE AI BUILDOUT STACK</div>
+        <div style="font-size:10px;color:#5b616c;margin-top:2px;font-family:'IBM Plex Mono',monospace">revenue ▲&nbsp; · &nbsp;raw inputs ▼</div>
+      </div>
+      <sc-for list="{{ layers }}" as="l" hint-placeholder-count="29">
+        <sc-if value="{{ l.groupLabel }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:10px 13px 3px;font-family:'IBM Plex Mono',monospace;font-size:9px;letter-spacing:.7px;color:#454b55;text-transform:uppercase">{{ l.groupLabel }}</div>
+        </sc-if>
+        <button onClick="{{ onSelectLayer }}" data-id="{{ l.id }}" style="{{ l.rowStyle }}">
+          <span style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#4b515c;width:17px;text-align:right;flex:0 0 auto">{{ l.num }}</span>
+          <span style="width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:{{ l.monColor }}"></span>
+          <span style="{{ l.nameStyle }}">{{ l.name }}</span>
+          <sc-if value="{{ l.isStub }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:7.5px;color:#5b616c;border:1px solid #2a2f38;border-radius:3px;padding:1px 3px;flex:0 0 auto">STUB</span></sc-if>
+        </button>
+      </sc-for>
+      <div style="height:20px"></div>
+    </div>
+
+    <!-- MAIN -->
+    <div style="flex:1;overflow:auto;min-width:0">
+
+      <!-- ===== STACK / LAYER CARD ===== -->
+      <sc-if value="{{ isStack }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:18px 20px;max-width:1120px">
+          <div style="display:flex;align-items:flex-start;gap:13px;margin-bottom:16px">
+            <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#5b616c;border:1px solid #2a2f38;border-radius:4px;padding:3px 7px;margin-top:4px;flex:0 0 auto">{{ L.num }}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:21px;font-weight:600;color:#e8ebf0;letter-spacing:-.2px">{{ L.name }}</div>
+              <div style="display:flex;align-items:center;gap:9px;margin-top:7px;flex-wrap:wrap">
+                <span style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.4px;color:#6b7280">MONETIZES VIA</span>
+                <select value="{{ L.mon }}" onChange="{{ onLayerEdit }}" data-f="mon" style="appearance:none;font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.4px;color:#070809;background:{{ L.monColor }};border:none;border-radius:4px;padding:3px 9px;cursor:pointer">
+                  <option value="scarcity">SCARCITY PRICING</option>
+                  <option value="licensing">LICENSING / ROYALTY</option>
+                  <option value="capex">CAPEX-FINANCED</option>
+                </select>
+                <sc-if value="{{ L.isStub }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#f5c451;border:1px solid #4a431f;background:#1c1808;border-radius:4px;padding:2px 7px">SKELETON — NEEDS RESEARCH</span></sc-if>
+              </div>
+            </div>
+            <sc-if value="{{ L.clusterId }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ onOpenMoat }}" data-c="{{ L.clusterId }}" style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ac);background:#13161b;border:1px solid #2a2f38;border-radius:5px;padding:8px 11px;cursor:pointer;white-space:nowrap;flex:0 0 auto;margin-top:2px">◧ Moat comparison →</button>
+            </sc-if>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+            <div style="grid-column:1 / -1;background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#6b7280;text-transform:uppercase;margin-bottom:6px">What this layer does</div>
+              <textarea value="{{ L.what }}" onChange="{{ onLayerEdit }}" data-f="what" placeholder="—" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12.5px;line-height:1.5;padding:7px 9px;min-height:52px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea>
+            </div>
+            <div style="background:#0c0e12;border:1px solid #1a3326;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#37d399;text-transform:uppercase;margin-bottom:6px">▲ Why it could make money</div>
+              <textarea value="{{ L.whyMoney }}" onChange="{{ onLayerEdit }}" data-f="whyMoney" placeholder="—" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12.5px;line-height:1.5;padding:7px 9px;min-height:72px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea>
+            </div>
+            <div style="background:#0c0e12;border:1px solid #331f1f;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#ff6b6b;text-transform:uppercase;margin-bottom:6px">▼ Why it could fail</div>
+              <textarea value="{{ L.whyFail }}" onChange="{{ onLayerEdit }}" data-f="whyFail" placeholder="—" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12.5px;line-height:1.5;padding:7px 9px;min-height:72px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea>
+            </div>
+            <div style="grid-column:1 / -1;background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:var(--ac);text-transform:uppercase;margin-bottom:6px">◆ Key bottleneck / demand driver</div>
+              <textarea value="{{ L.bottleneck }}" onChange="{{ onLayerEdit }}" data-f="bottleneck" placeholder="—" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12.5px;line-height:1.5;padding:7px 9px;min-height:52px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea>
+            </div>
+            <div style="background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#6b7280;text-transform:uppercase;margin-bottom:6px">Key metrics to watch</div>
+              <textarea value="{{ L.metrics }}" onChange="{{ onLayerEdit }}" data-f="metrics" placeholder="one per line…" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12px;line-height:1.55;padding:7px 9px;min-height:84px;outline:none;font-family:'IBM Plex Mono',monospace"></textarea>
+            </div>
+            <div style="background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#6b7280;text-transform:uppercase;margin-bottom:6px">Red flags</div>
+              <textarea value="{{ L.redFlags }}" onChange="{{ onLayerEdit }}" data-f="redFlags" placeholder="one per line…" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12px;line-height:1.55;padding:7px 9px;min-height:84px;outline:none;font-family:'IBM Plex Mono',monospace"></textarea>
+            </div>
+          </div>
+
+          <div style="margin-top:11px;display:grid;grid-template-columns:1fr 1fr;gap:11px">
+            <div style="background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#6b7280;text-transform:uppercase;margin-bottom:8px">Large-cap quality anchors</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <sc-for list="{{ L.anchors }}" as="a" hint-placeholder-count="2">
+                  <button onClick="{{ onOpenTicker }}" data-t="{{ a.ticker }}" style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dfe3ea;background:#11141a;border:1px solid #232932;border-left:2px solid {{ a.monColor }};border-radius:4px;padding:4px 8px;cursor:pointer">{{ a.ticker }}<span style="color:#5b616c;font-size:8.5px;letter-spacing:.3px">{{ a.typeLabel }}</span></button>
+                </sc-for>
+                <sc-if value="{{ L.noAnchors }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#454b55">— none tagged yet —</span></sc-if>
+              </div>
+            </div>
+            <div style="background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px">
+              <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:#6b7280;text-transform:uppercase;margin-bottom:8px">Small / mid-cap candidates</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <sc-for list="{{ L.candidates }}" as="a" hint-placeholder-count="3">
+                  <button onClick="{{ onOpenTicker }}" data-t="{{ a.ticker }}" style="display:inline-flex;align-items:center;gap:6px;font-family:'IBM Plex Mono',monospace;font-size:11px;color:#dfe3ea;background:#11141a;border:1px solid #232932;border-left:2px solid {{ a.monColor }};border-radius:4px;padding:4px 8px;cursor:pointer">{{ a.ticker }}<span style="color:#5b616c;font-size:8.5px;letter-spacing:.3px">{{ a.typeLabel }}</span></button>
+                </sc-for>
+                <sc-if value="{{ L.noCandidates }}" hint-placeholder-val="{{ false }}"><span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#454b55">— none tagged yet —</span></sc-if>
+              </div>
+            </div>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#454b55;margin-top:10px">tip: click any ticker to open its deep-dive · re-tag a company's layer / cap in the Watchlist</div>
+        </div>
+      </sc-if>
+
+      <!-- ===== WATCHLIST ===== -->
+      <sc-if value="{{ isWatchlist }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:12px 14px">
+          <div style="display:flex;flex-wrap:wrap;gap:7px;align-items:center;margin-bottom:10px">
+            <input value="{{ watchFilters.q }}" onChange="{{ onFilter }}" data-f="q" placeholder="⌕ ticker / name" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#dfe3ea;font-size:11.5px;padding:5px 9px;outline:none;width:160px;font-family:'IBM Plex Mono',monospace">
+            <select value="{{ watchFilters.layer }}" onChange="{{ onFilter }}" data-f="layer" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#aeb4be;font-size:11px;padding:5px 7px;outline:none;font-family:'IBM Plex Mono',monospace">
+              <option value="">layer · all</option>
+              <sc-for list="{{ layerOptions }}" as="o" hint-placeholder-count="3"><option value="{{ o.id }}">{{ o.name }}</option></sc-for>
+            </select>
+            <select value="{{ watchFilters.mon }}" onChange="{{ onFilter }}" data-f="mon" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#aeb4be;font-size:11px;padding:5px 7px;outline:none;font-family:'IBM Plex Mono',monospace">
+              <option value="">monet · all</option><option value="scarcity">scarcity</option><option value="licensing">licensing</option><option value="capex">capex-financed</option>
+            </select>
+            <select value="{{ watchFilters.type }}" onChange="{{ onFilter }}" data-f="type" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#aeb4be;font-size:11px;padding:5px 7px;outline:none;font-family:'IBM Plex Mono',monospace">
+              <option value="">type · all</option><option value="core">core compounder</option><option value="picks">picks &amp; shovels</option><option value="cyclical">cyclical</option><option value="moonshot">moonshot</option><option value="hype">hype risk</option>
+            </select>
+            <select value="{{ watchFilters.cap }}" onChange="{{ onFilter }}" data-f="cap" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#aeb4be;font-size:11px;padding:5px 7px;outline:none;font-family:'IBM Plex Mono',monospace">
+              <option value="">cap · all</option><option value="mega">mega</option><option value="large">large</option><option value="mid">mid</option><option value="small">small</option><option value="micro">micro</option>
+            </select>
+            <select value="{{ watchFilters.status }}" onChange="{{ onFilter }}" data-f="status" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#aeb4be;font-size:11px;padding:5px 7px;outline:none;font-family:'IBM Plex Mono',monospace">
+              <option value="">status · all</option><option value="Untouched">Untouched</option><option value="Researching">Researching</option><option value="Watchlist">Watchlist</option><option value="Position">Position</option><option value="Passed">Passed</option>
+            </select>
+            <select value="{{ watchFilters.prio }}" onChange="{{ onFilter }}" data-f="prio" style="background:#0c0e12;border:1px solid #232932;border-radius:4px;color:#aeb4be;font-size:11px;padding:5px 7px;outline:none;font-family:'IBM Plex Mono',monospace">
+              <option value="">prio · all</option><option value="A">A</option><option value="B">B</option><option value="C">C</option>
+            </select>
+            <button onClick="{{ onClearFilters }}" style="background:#13161b;border:1px solid #232932;border-radius:4px;color:#7c828c;font-size:11px;padding:5px 9px;cursor:pointer;font-family:'IBM Plex Mono',monospace">clear</button>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#6b7280;margin-left:auto">{{ watchCount }} / {{ totalCount }} names · click ✛ to pin</span>
+          </div>
+          {{ watchlistNode }}
+        </div>
+      </sc-if>
+
+      <!-- ===== MOAT LAB ===== -->
+      <sc-if value="{{ isMoat }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:16px 18px">
+          <div style="font-size:18px;font-weight:600;color:#e8ebf0;margin-bottom:3px">Moat &amp; Differentiation Lab</div>
+          <div style="font-size:12px;color:#7c828c;margin-bottom:13px">What actually differs between companies that get lumped together.</div>
+          <div style="display:flex;flex-wrap:wrap;gap:7px;margin-bottom:16px">
+            <sc-for list="{{ clusters }}" as="c" hint-placeholder-count="3">
+              <button onClick="{{ onSetCluster }}" data-c="{{ c.id }}" style="{{ c.style }}">{{ c.label }}</button>
+            </sc-for>
+          </div>
+          <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.4px;color:var(--ac);margin-bottom:11px">{{ moatTitle }}</div>
+          <div style="display:flex;gap:11px;overflow-x:auto;padding-bottom:10px;align-items:stretch">
+            <sc-for list="{{ moatList }}" as="m" hint-placeholder-count="5">
+              <div style="flex:0 0 278px;width:278px;background:#0c0e12;border:1px solid #1c2129;border-top:2px solid {{ m.typeColor }};border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:9px">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                  <button onClick="{{ onOpenTicker }}" data-t="{{ m.ticker }}" style="font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#e8ebf0;background:none;border:none;padding:0;cursor:pointer">{{ m.ticker }}</button>
+                  <span style="font-family:'IBM Plex Mono',monospace;font-size:8px;font-weight:600;letter-spacing:.4px;color:{{ m.typeColor }};border:1px solid {{ m.typeColor }};border-radius:3px;padding:2px 5px">{{ m.typeLabel }}</span>
+                </div>
+                <div><div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.4px;color:#6b7280;margin-bottom:3px">MAKES / SELLS</div><textarea value="{{ m.makes }}" onChange="{{ onMoatEdit }}" data-t="{{ m.ticker }}" data-f="makes" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:11.5px;line-height:1.45;padding:6px 8px;min-height:48px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea></div>
+                <div><div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.4px;color:#6b7280;margin-bottom:3px">SPECIFIC MOAT</div><textarea value="{{ m.moat }}" onChange="{{ onMoatEdit }}" data-t="{{ m.ticker }}" data-f="moat" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:11.5px;line-height:1.45;padding:6px 8px;min-height:48px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea></div>
+                <div><div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.4px;color:var(--ac);margin-bottom:3px">DIFFERENT BECAUSE</div><textarea value="{{ m.different }}" onChange="{{ onMoatEdit }}" data-t="{{ m.ticker }}" data-f="different" style="width:100%;background:#090b0f;border:1px solid #2a2615;border-radius:4px;color:#e3e0c8;font-size:11.5px;line-height:1.45;padding:6px 8px;min-height:54px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea></div>
+                <div><div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;letter-spacing:.4px;color:#6b7280;margin-bottom:3px">VALUE-CHAIN SEAT</div><input value="{{ m.valueChain }}" onChange="{{ onMoatEdit }}" data-t="{{ m.ticker }}" data-f="valueChain" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:11.5px;padding:5px 8px;outline:none;font-family:'IBM Plex Mono',monospace"></input></div>
+                <div style="display:flex;gap:6px">
+                  <div style="flex:1"><div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;color:#37d399;margin-bottom:3px">BULL</div><textarea value="{{ m.bull }}" onChange="{{ onMoatEdit }}" data-t="{{ m.ticker }}" data-f="bull" style="width:100%;background:#090b0f;border:1px solid #1a3326;border-radius:4px;color:#cdd2db;font-size:11px;line-height:1.4;padding:5px 7px;min-height:50px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea></div>
+                  <div style="flex:1"><div style="font-family:'IBM Plex Mono',monospace;font-size:8.5px;color:#ff6b6b;margin-bottom:3px">BEAR</div><textarea value="{{ m.bear }}" onChange="{{ onMoatEdit }}" data-t="{{ m.ticker }}" data-f="bear" style="width:100%;background:#090b0f;border:1px solid #331f1f;border-radius:4px;color:#cdd2db;font-size:11px;line-height:1.4;padding:5px 7px;min-height:50px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CONVICTION ===== -->
+      <sc-if value="{{ isConviction }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:16px 20px">
+          <div style="font-size:18px;font-weight:600;color:#e8ebf0;margin-bottom:3px">Conviction View</div>
+          <div style="font-size:12px;color:#7c828c;margin-bottom:14px">Auto-surfaced: every name scored ★4–5 or business quality ≥ 8, across all layers.</div>
+          {{ convictionNode }}
+        </div>
+      </sc-if>
+
+      <!-- ===== SHORTLIST ===== -->
+      <sc-if value="{{ isShortlist }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:16px 20px">
+          <div style="font-size:18px;font-weight:600;color:#e8ebf0;margin-bottom:3px">Top-10 Shortlist &amp; Pipeline</div>
+          <div style="font-size:12px;color:#7c828c;margin-bottom:14px">Pin names from anywhere (✛). Status pipeline below.</div>
+          {{ shortlistNode }}
+        </div>
+      </sc-if>
+
+      <!-- ===== CHECKLIST ===== -->
+      <sc-if value="{{ isChecklist }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:16px 20px;max-width:880px">
+          <div style="font-size:18px;font-weight:600;color:#e8ebf0;margin-bottom:3px">Bear-Case Checklist</div>
+          <div style="font-size:12px;color:#7c828c;margin-bottom:16px">Run this <b style="color:#c9ced8">before</b> averaging down on any name. Discipline over emotion — do not average into a broken story.</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <sc-for list="{{ checklist }}" as="ck" hint-placeholder-count="8">
+              <div style="display:flex;align-items:flex-start;gap:11px;background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:11px 13px">
+                <button onClick="{{ onCheckToggle }}" data-id="{{ ck.id }}" style="{{ ck.boxStyle }}">{{ ck.mark }}</button>
+                <div style="flex:1;min-width:0">
+                  <div style="{{ ck.textStyle }}">{{ ck.text }}</div>
+                  <input value="{{ ck.notes }}" onChange="{{ onCheckNote }}" data-id="{{ ck.id }}" placeholder="notes for this name…" style="width:100%;background:transparent;border:none;border-bottom:1px solid #1a1f27;font-size:11.5px;color:#aeb4be;padding:4px 0 2px;outline:none;margin-top:6px;font-family:'IBM Plex Mono',monospace">
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== DEEP DIVE ===== -->
+      <sc-if value="{{ isDeepdive }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:16px 20px;max-width:1120px">
+          <div style="display:flex;align-items:center;gap:11px;flex-wrap:wrap;margin-bottom:15px">
+            <select value="{{ deepTicker }}" onChange="{{ onSetDeep }}" style="appearance:none;font-family:'IBM Plex Mono',monospace;font-size:15px;font-weight:600;color:#e8ebf0;background:#13161b;border:1px solid #2a2f38;border-radius:5px;padding:6px 12px;cursor:pointer;outline:none">
+              <sc-for list="{{ companyOptions }}" as="o" hint-placeholder-count="5"><option value="{{ o.ticker }}">{{ o.label }}</option></sc-for>
+            </select>
+            <div style="font-size:16px;font-weight:600;color:#c9ced8">{{ deepCompany.name }}</div>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.4px;color:#070809;background:{{ deepCompany.monColor }};border-radius:4px;padding:3px 8px">{{ deepCompany.monLabel }}</span>
+            <span style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.4px;color:{{ deepCompany.typeColor }};border:1px solid {{ deepCompany.typeColor }};border-radius:4px;padding:2px 7px">{{ deepCompany.typeLabel }}</span>
+            <div style="display:flex;gap:1px">
+              <sc-for list="{{ deepStars }}" as="st" hint-placeholder-count="5"><button onClick="{{ onDeepStars }}" data-n="{{ st.n }}" style="background:none;border:none;cursor:pointer;font-size:16px;line-height:1;padding:0 1px;color:{{ st.color }}">★</button></sc-for>
+            </div>
+            <select value="{{ deepCompany.status }}" onChange="{{ onDeepStatus }}" style="font-family:'IBM Plex Mono',monospace;font-size:10.5px;color:{{ deepCompany.statusColor }};background:#0c0e12;border:1px solid #232932;border-radius:4px;padding:4px 8px;outline:none">
+              <option value="Untouched">Untouched</option><option value="Researching">Researching</option><option value="Watchlist">Watchlist</option><option value="Position">Position</option><option value="Passed">Passed</option>
+            </select>
+            <button onClick="{{ onDeepPin }}" style="{{ deepCompany.pinStyle }}">{{ deepCompany.pinLabel }}</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px">
+            <sc-for list="{{ deepFields }}" as="f" hint-placeholder-count="12">
+              <div style="{{ f.wrapStyle }}">
+                <div style="font-family:'IBM Plex Mono',monospace;font-size:9.5px;letter-spacing:.5px;color:{{ f.labelColor }};text-transform:uppercase;margin-bottom:6px">{{ f.label }}</div>
+                <textarea value="{{ f.value }}" onChange="{{ onDeepEdit }}" data-f="{{ f.key }}" placeholder="—" style="width:100%;background:#090b0f;border:1px solid #1a1f27;border-radius:4px;color:#cdd2db;font-size:12.5px;line-height:1.5;padding:7px 9px;min-height:64px;outline:none;font-family:'IBM Plex Sans',sans-serif"></textarea>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;accent&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;#f5a623&quot;,&quot;#37d399&quot;,&quot;#5b9dff&quot;,&quot;#e8ebf0&quot;],&quot;default&quot;:&quot;#f5a623&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;density&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;comfortable&quot;,&quot;compact&quot;],&quot;default&quot;:&quot;comfortable&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  MON_COLOR = { scarcity:'#37d399', licensing:'#5b9dff', capex:'#ff6b6b' };
+  MON_LABEL = { scarcity:'SCARCITY', licensing:'LICENSE', capex:'CAPEX-FIN' };
+  TYPE_COLOR = { core:'#37d399', picks:'#5b9dff', cyclical:'#c08bff', moonshot:'#f5a623', hype:'#ff6b6b' };
+  TYPE_LABEL = { core:'CORE', picks:'PICKS', cyclical:'CYCLE', moonshot:'MOON', hype:'HYPE' };
+  TYPE_FULL = { core:'CORE COMPOUNDER', picks:'PICKS & SHOVELS', cyclical:'CYCLICAL', moonshot:'MOONSHOT', hype:'HYPE RISK' };
+  SIGNAL = { G:'#37d399', A:'#f5c451', R:'#ff6b6b' };
+  STATUS_COLOR = { Untouched:'#6b7280', Researching:'#f5c451', Watchlist:'#5b9dff', Position:'#37d399', Passed:'#ff6b6b' };
+  LAYER_CLUSTER = { gpus:'semis', 'custom-silicon':'semis', memory:'semis', networking:'networking', optical:'networking', 'power-gen':'power', grid:'power' };
+  KEY = 'aibc_state_v2';
+
+  constructor(props){
+    super(props);
+    this.state = this.loadState();
+  }
+
+  componentDidMount(){ this.applyTheme(); }
+  componentDidUpdate(){ this.applyTheme(); }
+  applyTheme(){
+    if(!this.rootEl) return;
+    this.rootEl.style.setProperty('--ac', this.props.accent || '#f5a623');
+    this.rootEl.style.setProperty('--rp', (this.props.density==='compact') ? '3px' : '6px');
+  }
+
+  // ---------- persistence ----------
+  loadState(){
+    const def = this.buildDefaults();
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(this.KEY) || '{}'); } catch(e){}
+    return this.dmerge(def, saved);
+  }
+  dmerge(d, s){
+    if(Array.isArray(d)){
+      if(!Array.isArray(s)) return d;
+      const key = (d[0] && typeof d[0]==='object') ? (('ticker' in d[0]) ? 'ticker' : ('id' in d[0]) ? 'id' : null) : null;
+      if(key){
+        const sm = {}; s.forEach(x=>{ if(x && x[key]!=null) sm[x[key]] = x; });
+        const out = d.map(x => sm[x[key]] ? this.dmerge(x, sm[x[key]]) : x);
+        const dk = new Set(d.map(x=>x[key]));
+        s.forEach(x=>{ if(x && x[key]!=null && !dk.has(x[key])) out.push(x); });
+        return out;
+      }
+      return s;
+    }
+    if(d && typeof d==='object'){
+      if(!s || typeof s!=='object' || Array.isArray(s)) return d;
+      const out = {...d};
+      Object.keys(s).forEach(k=>{ out[k] = (k in d) ? this.dmerge(d[k], s[k]) : s[k]; });
+      return out;
+    }
+    return s===undefined ? d : s;
+  }
+  persist(){ try { localStorage.setItem(this.KEY, JSON.stringify(this.state)); } catch(e){} }
+  commit(updater){ this.setState(updater, ()=>this.persist()); }
+
+  // ---------- defaults ----------
+  buildDefaults(){
+    const LD = this.layerDefs();
+    const layers = {}; const order = [];
+    LD.forEach(l=>{ layers[l.id] = l; order.push(l.id); });
+    const companies = {};
+    this.baseCompanies().forEach(r=>{
+      const [ticker,name,layer,cap,mon,type] = r;
+      companies[ticker] = { ticker,name,layer,cap,mon,type,
+        q:0,ai:0,up:0,bsRisk:0,valRisk:0,ccRisk:0,cxRisk:0,
+        rev:'',gm:'',fcf:'',thesis:'',bear:'',buy:'',sell:'',
+        prio:'C',status:'Untouched',stars:0,short:false };
+    });
+    const RICH = this.richData();
+    Object.keys(RICH).forEach(t=>{ if(companies[t]) Object.assign(companies[t], RICH[t]); });
+    const prePin = ['NVDA','CEG','AIP','CRDO','ANET'];
+    prePin.forEach(t=>{ if(companies[t]) companies[t].short = true; });
+    return {
+      view:'stack', activeLayer:'gpus', moatCluster:'semis', deepDiveTicker:'AIP',
+      order, layers, companies,
+      moat: this.moatDefs(),
+      deepDives: { AIP: this.aipDeepDive() },
+      signposts: this.signpostDefs(),
+      checklist: this.checklistDefs(),
+      shortlistOrder: prePin.slice(),
+      watchFilters: { q:'', layer:'', mon:'', type:'', cap:'', status:'', prio:'' },
+      watchSort: { col:'', dir:1 }
+    };
+  }
+
+  layerDefs(){
+    const F = (id,name,group,mon,what,whyMoney,whyFail,bottleneck,metrics,redFlags)=>({id,name,group,mon,what,whyMoney:whyMoney||'',whyFail:whyFail||'',bottleneck:bottleneck||'',metrics:metrics||'',redFlags:redFlags||''});
+    return [
+      F('ai-apps','AI apps / monetization','Demand & platforms','licensing','Software that turns model capability into recurring revenue — the demand signal at the top of the stack.'),
+      F('model-labs','Model labs / AI platforms','Demand & platforms','scarcity','Frontier model developers and AI platforms — the buyers driving compute demand (most are private: OpenAI, Anthropic, xAI).'),
+      F('hyperscalers','Hyperscalers / cloud capex','Demand & platforms','capex','Cloud platforms financing the buildout on balance sheet and renting it back as capacity.'),
+      F('neoclouds','Neoclouds / AI cloud capacity','Cloud capacity','capex','Pure-play GPU clouds renting accelerated capacity — high growth, heavily debt- and lease-financed.'),
+      F('gpus','GPUs / accelerators','Compute & silicon','scarcity',
+        'Merchant accelerators — GPUs and AI training/inference chips sold to anyone building compute. The horsepower the whole buildout is measured in.',
+        'Every token trained or served runs on this silicon. Pricing power while demand outruns supply; full-stack players capture software and networking margin on top of the die.',
+        'Merchant silicon is a target: hyperscalers design around you with ASICs, a model-efficiency breakthrough cuts compute intensity, or an overbuild leaves a glut of last-gen parts. Margins this high invite attack.',
+        'Leading-edge wafer + CoWoS packaging + HBM allocation. Whoever controls the software ecosystem (CUDA) controls switching costs.',
+        'Data-center revenue YoY\nGross margin — sustained above 70%?\nSupply / purchase commitments\nSoftware + networking attach rate\nHyperscaler ASIC share shift',
+        'Gross-margin compression\nLast-gen channel / inventory build\nHyperscaler in-house silicon ramps\nTop-4 customer concentration'),
+      F('custom-silicon','Custom silicon / ASICs','Compute & silicon','licensing','ASIC arms dealers that help hyperscalers design their own accelerators — paid on design wins, not merchant chips.'),
+      F('semi-ip','Semiconductor IP / chiplets / NoC','Compute & silicon','licensing','Licensable IP — CPU/NPU cores, chiplet and network-on-chip interconnect — earning royalty per chip shipped.'),
+      F('eda','EDA / chip design software','Compute & silicon','licensing','The software chips are designed in — a duopoly that taxes every tape-out and AI-design flow.'),
+      F('foundries','Foundries','Compute & silicon','scarcity','Leading-edge manufacturing — the physical scarcity gate for every advanced chip.'),
+      F('packaging','Advanced packaging','Compute & silicon','scarcity','Advanced packaging (CoWoS, HBM stacking) — the current binding constraint on GPU supply.'),
+      F('memory','HBM / DRAM / NAND / storage','Compute & silicon','scarcity','HBM/DRAM/NAND — bandwidth-starved AI turns memory into the new tight oligopoly.'),
+      F('networking','Networking / Ethernet / InfiniBand','Connectivity','scarcity',
+        'The fabric that lashes thousands of accelerators into one machine — switches, NICs, retimers, and the Ethernet-vs-InfiniBand standards war for the AI back-end.',
+        'Scale-up and scale-out clusters need exponentially more interconnect per GPU. Owning the switch silicon, the retimer, or the reference design earns content that grows faster than GPU units.',
+        'Standards risk (proprietary fabrics lose to open Ethernet, or the reverse), in-house switch silicon at hyperscalers, and being a single-product supplier a merchant vendor designs out.',
+        'Bandwidth per rack and signal integrity at 224G; copper reach limits forcing optical. Design-win lock-in at the cluster-architecture level.',
+        'AI back-end port share\nContent $/GPU trend\nNamed-hyperscaler design wins\n800G to 1.6T transition timing',
+        'Customer in-sourcing of switching\nSingle-customer concentration\nLumpy hyperscaler order timing'),
+      F('optical','Optical interconnect / silicon photonics','Connectivity','scarcity','Optical transceivers and silicon photonics — moving data between racks at the speed of light as copper runs out of reach.'),
+      F('cxl','CXL / memory pooling','Connectivity','licensing','Memory pooling and disaggregation fabric — early, optionality-rich, IP-led.'),
+      F('servers','Servers / racks / ODMs','Data-center','capex','ODMs and system integrators that bolt GPUs, memory and networking into finished racks.'),
+      F('dc-realestate','Data-center real estate / colocation','Data-center','scarcity','Colocation and wholesale landlords leasing powered shells — long-dated, contracted, increasingly power-gated.'),
+      F('power-gen','Power generation','Power & thermal','scarcity',
+        'The electrons. Independent power producers, nuclear fleets and turbine OEMs supplying the gigawatts data centers now compete with the grid for.',
+        'AI demand turns power from a commodity into a scarce, contracted asset. Behind-the-meter and PPA deals with hyperscalers lock in long-dated, premium-priced cash flows.',
+        'Interconnection queues and permitting stall delivery; rate-case and regulatory risk; a demand air-pocket if AI capex pauses re-exposes merchant capacity to low power prices.',
+        'Firm 24/7 carbon-free power near fiber and water. Interconnection timelines (3-5 yrs) and turbine/transformer lead times are the real gate.',
+        'Contracted PPA capacity (GW) and tenor\nPower-price realization\nData-center pipeline (MW)\nInterconnection queue position\nLeverage / cost of debt',
+        'Merchant exposure if AI demand slips\nRising leverage to fund builds\nRegulatory pushback on co-location'),
+      F('grid','Grid / transmission / transformers / switchgear','Power & thermal','scarcity','Transmission, transformers and switchgear — the supply-constrained plumbing between generation and the rack.'),
+      F('ups','UPS / backup power / batteries','Power & thermal','scarcity','UPS, backup generation and battery systems keeping racks alive through transients and outages.'),
+      F('cooling','Cooling / thermal management','Power & thermal','scarcity','Liquid and thermal management — rising power density is making air cooling obsolete.'),
+      F('construction','Construction / engineering / infra services','Build & equipment','scarcity','EPC and infrastructure services that actually build the data centers, substations and transmission.'),
+      F('materials','Raw materials / specialty chemicals','Build & equipment','scarcity','Copper, rare earths and specialty inputs — the raw-material long tail of the buildout.'),
+      F('semi-equip','Semiconductor equipment / test / metrology','Build & equipment','scarcity','The tools that make the chips — deposition, etch, litho, test and metrology oligopolies.'),
+      F('ai-data','AI data / labeling / synthetic data','Software & data','licensing','Training-data sourcing, labeling and synthetic data — fuel for the models.'),
+      F('observability','Observability / security / AI ops','Software & data','licensing','Monitoring, security and AI-ops — recurring software riding workload growth.'),
+      F('databases','Databases / data platforms','Software & data','licensing','Data platforms and analytics where AI workloads actually live and query.'),
+      F('edge','Edge AI / devices','Frontier','licensing','On-device and edge inference silicon — AI beyond the data center.'),
+      F('robotics','Robotics / autonomy','Frontier','scarcity','Physical AI — autonomy, surgical and industrial robotics; long-dated moonshots.'),
+      F('financing','Financing / private infrastructure capital','Capital','capex','Private capital and infra funds underwriting the capex — fee-rich but exposed if the cycle rolls over.')
+    ];
+  }
+
+  baseCompanies(){
+    return [
+      ['NVDA','NVIDIA','gpus','mega','scarcity','core'],['AMD','Advanced Micro Devices','gpus','large','scarcity','core'],['INTC','Intel','gpus','large','scarcity','cyclical'],['CBRS','Cerebras Systems','gpus','mid','scarcity','moonshot'],
+      ['AVGO','Broadcom','custom-silicon','mega','licensing','core'],['MRVL','Marvell Technology','custom-silicon','large','licensing','picks'],
+      ['AIP','Arteris','semi-ip','small','licensing','picks'],['ARM','Arm Holdings','semi-ip','large','licensing','core'],['CEVA','Ceva','semi-ip','micro','licensing','picks'],['RMBS','Rambus','semi-ip','small','licensing','picks'],
+      ['SNPS','Synopsys','eda','large','licensing','core'],['CDNS','Cadence Design','eda','large','licensing','core'],
+      ['TSM','TSMC','foundries','mega','scarcity','core'],
+      ['AMKR','Amkor Technology','packaging','mid','scarcity','cyclical'],
+      ['MU','Micron Technology','memory','large','scarcity','cyclical'],['WDC','Western Digital','memory','mid','scarcity','cyclical'],['STX','Seagate Technology','memory','mid','scarcity','cyclical'],['SNDK','Sandisk','memory','small','scarcity','cyclical'],
+      ['ANET','Arista Networks','networking','large','scarcity','core'],['CRDO','Credo Technology','networking','small','scarcity','picks'],['ALAB','Astera Labs','networking','large','licensing','picks'],
+      ['COHR','Coherent','optical','mid','scarcity','picks'],['LITE','Lumentum','optical','mid','scarcity','picks'],['AAOI','Applied Optoelectronics','optical','micro','scarcity','hype'],['POET','POET Technologies','optical','micro','scarcity','moonshot'],
+      ['DLR','Digital Realty','dc-realestate','large','scarcity','core'],['EQIX','Equinix','dc-realestate','large','scarcity','core'],
+      ['CEG','Constellation Energy','power-gen','large','scarcity','core'],['VST','Vistra','power-gen','large','scarcity','cyclical'],['NRG','NRG Energy','power-gen','mid','scarcity','cyclical'],['TLN','Talen Energy','power-gen','mid','scarcity','moonshot'],['OKLO','Oklo','power-gen','small','capex','moonshot'],['SMR','NuScale Power','power-gen','small','capex','moonshot'],
+      ['ETN','Eaton','grid','large','scarcity','core'],['GEV','GE Vernova','grid','large','scarcity','picks'],['POWL','Powell Industries','grid','small','scarcity','picks'],['HUBB','Hubbell','grid','large','scarcity','core'],['ATKR','Atkore','grid','small','scarcity','cyclical'],
+      ['NVT','nVent Electric','ups','mid','scarcity','picks'],
+      ['VRT','Vertiv Holdings','cooling','large','scarcity','core'],['MOD','Modine Manufacturing','cooling','small','scarcity','picks'],
+      ['PWR','Quanta Services','construction','large','scarcity','core'],['MTZ','MasTec','construction','mid','scarcity','picks'],['EME','EMCOR Group','construction','large','scarcity','core'],
+      ['FCX','Freeport-McMoRan','materials','large','scarcity','cyclical'],['MP','MP Materials','materials','mid','scarcity','moonshot'],
+      ['AMAT','Applied Materials','semi-equip','large','scarcity','core'],['LRCX','Lam Research','semi-equip','large','scarcity','core'],['KLAC','KLA Corporation','semi-equip','large','scarcity','core'],['ASML','ASML Holding','semi-equip','mega','scarcity','core'],['TER','Teradyne','semi-equip','mid','scarcity','picks'],['CAMT','Camtek','semi-equip','small','scarcity','picks'],['ONTO','Onto Innovation','semi-equip','small','scarcity','picks'],['COHU','Cohu','semi-equip','small','scarcity','cyclical'],['AEHR','Aehr Test Systems','semi-equip','micro','scarcity','moonshot'],['ACMR','ACM Research','semi-equip','small','scarcity','picks'],
+      ['INOD','Innodata','ai-data','small','licensing','hype'],
+      ['DDOG','Datadog','observability','large','licensing','core'],['NET','Cloudflare','observability','large','licensing','core'],['CRWD','CrowdStrike','observability','large','licensing','core'],['PANW','Palo Alto Networks','observability','large','licensing','core'],['ESTC','Elastic','observability','mid','licensing','picks'],
+      ['SNOW','Snowflake','databases','large','licensing','core'],['MDB','MongoDB','databases','mid','licensing','picks'],['PLTR','Palantir','databases','large','licensing','core'],
+      ['QCOM','Qualcomm','edge','large','licensing','core'],['AMBA','Ambarella','edge','small','licensing','moonshot'],['NXPI','NXP Semiconductors','edge','large','scarcity','cyclical'],['ON','ON Semiconductor','edge','mid','scarcity','cyclical'],
+      ['TSLA','Tesla','robotics','mega','scarcity','moonshot'],['ISRG','Intuitive Surgical','robotics','large','scarcity','core'],['CGNX','Cognex','robotics','mid','scarcity','picks'],['MBLY','Mobileye','robotics','mid','licensing','moonshot'],['OUST','Ouster','robotics','micro','scarcity','moonshot'],
+      ['MSFT','Microsoft','hyperscalers','mega','capex','core'],['AMZN','Amazon','hyperscalers','mega','capex','core'],
+      ['GOOGL','Alphabet','model-labs','mega','scarcity','core'],['META','Meta Platforms','model-labs','mega','scarcity','core'],
+      ['NBIS','Nebius Group','neoclouds','mid','capex','moonshot'],['CRWV','CoreWeave','neoclouds','large','capex','moonshot'],['IREN','IREN','neoclouds','mid','capex','moonshot'],['CORZ','Core Scientific','neoclouds','mid','capex','cyclical'],['CIFR','Cipher Mining','neoclouds','small','capex','moonshot'],['WULF','TeraWulf','neoclouds','small','capex','moonshot'],['APLD','Applied Digital','neoclouds','small','capex','moonshot'],['DUOT','Duos Technologies','neoclouds','micro','capex','hype'],
+      ['BX','Blackstone','financing','large','capex','core'],['BAM','Brookfield Asset Mgmt','financing','large','capex','core'],['KKR','KKR & Co','financing','large','capex','core'],['APO','Apollo Global Mgmt','financing','large','capex','core'],['ARES','Ares Management','financing','mid','capex','core']
+    ];
+  }
+
+  richData(){
+    return {
+      NVDA:{q:9,ai:10,up:7,bsRisk:2,valRisk:7,ccRisk:6,cxRisk:2,rev:'+55%',gm:'75%',fcf:'Strong +',thesis:'Owns the AI compute standard — CUDA + NVLink networking lock-in compounds.',bear:'Best-in-class margins invite ASIC and competitive attack; cyclical air-pocket if capex pauses.',buy:'Multiple compression on a demand scare while platform share stays intact.',sell:'Sustained gross-margin erosion plus hyperscaler ASIC share gains.',prio:'A',status:'Watchlist',stars:5},
+      AMD:{q:7,ai:9,up:8,bsRisk:3,valRisk:7,ccRisk:4,cxRisk:3,rev:'+25%',gm:'50%',fcf:'Improving',thesis:'Only credible second-source accelerator; MI ramp plus EPYC server share.',bear:'Software gap versus CUDA; gross-margin dilution from GPU mix.',buy:'MI design-win traction at a named hyperscaler at a reset valuation.',sell:'MI roadmap slips or share fails to materialize.',prio:'A',status:'Researching',stars:4},
+      INTC:{q:4,ai:6,up:8,bsRisk:6,valRisk:5,ccRisk:3,cxRisk:9,rev:'flat',gm:'35%',fcf:'Negative',thesis:'Deep-value IDM turnaround; 18A and external-foundry optionality.',bear:'Cash-burning fab capex; losing share in both CPU and accelerators.',buy:'Credible external foundry customer plus 18A yield proof.',sell:'18A slips again or a dilutive capital raise.',prio:'B',status:'Researching',stars:2},
+      MRVL:{q:7,ai:9,up:8,bsRisk:3,valRisk:6,ccRisk:7,cxRisk:3,rev:'+20%',gm:'60%',fcf:'Positive',thesis:'Arms dealer to hyperscaler custom silicon plus optical and DSP content.',bear:'Program timing is lumpy; concentrated in a few mega-customers.',buy:'New custom-silicon program win disclosed.',sell:'A key program lost to in-house or a rival.',prio:'A',status:'Watchlist',stars:4},
+      MU:{q:6,ai:8,up:7,bsRisk:4,valRisk:4,ccRisk:3,cxRisk:7,rev:'+40%',gm:'40%',fcf:'Cyclical',thesis:'HBM scarcity plus a disciplined three-player oligopoly drive the up-cycle.',bear:'Memory is cyclical; NAND oversupply and high capex intensity.',buy:'Early-cycle with HBM sold out and DRAM tightening.',sell:'Inventory build and pricing roll-over.',prio:'B',status:'Watchlist',stars:3},
+      ANET:{q:8,ai:9,up:6,bsRisk:1,valRisk:7,ccRisk:8,cxRisk:2,rev:'+25%',gm:'64%',fcf:'Strong',thesis:'Open Ethernet wins the AI back-end; EOS software and single-binary share.',bear:'Two-customer concentration; hyperscaler in-sourcing risk.',buy:'Back-end Ethernet share gains plus a new cloud title.',sell:'A major customer in-sources switching silicon.',prio:'A',status:'Watchlist',stars:4},
+      CRDO:{q:6,ai:9,up:9,bsRisk:2,valRisk:8,ccRisk:9,cxRisk:2,rev:'+100%',gm:'65%',fcf:'Turning +',thesis:'AEC plus retimer content explodes through the 1.6T transition.',bear:'Extreme customer concentration; small-cap volatility.',buy:'Customer diversification plus a sustained AEC ramp.',sell:'Anchor customer slows or designs the part out.',prio:'A',status:'Researching',stars:4},
+      ALAB:{q:6,ai:9,up:8,bsRisk:2,valRisk:9,ccRisk:8,cxRisk:2,rev:'+90%',gm:'75%',fcf:'Positive',thesis:'Scale-up PCIe and CXL fabric content per GPU keeps rising.',bear:'Rich valuation; single-product concentration.',buy:'CXL fabric adoption inflects beyond retimers.',sell:'Retimer competition compresses pricing.',prio:'B',status:'Researching',stars:3},
+      CEG:{q:8,ai:8,up:7,bsRisk:4,valRisk:6,ccRisk:4,cxRisk:5,rev:'contracted',gm:'n/a',fcf:'Strong',thesis:'Tightest 24/7 carbon-free supply; premium nuclear PPAs.',bear:'Co-location regulatory ruling risk; multiple already re-rated.',buy:'New hyperscaler PPA signed at premium pricing.',sell:'Adverse FERC or interconnection precedent.',prio:'A',status:'Watchlist',stars:4},
+      VST:{q:7,ai:7,up:8,bsRisk:5,valRisk:5,ccRisk:3,cxRisk:5,rev:'merchant',gm:'n/a',fcf:'Strong',thesis:'Dispatchable fleet levered to tightening power prices in load-growth grids.',bear:'Merchant exposure cuts both ways; commodity-linked.',buy:'Reserve margins tighten and a data-center PPA is signed.',sell:'A demand air-pocket softens power prices.',prio:'B',status:'Watchlist',stars:3},
+      TLN:{q:6,ai:7,up:9,bsRisk:6,valRisk:6,ccRisk:6,cxRisk:5,rev:'ramping',gm:'n/a',fcf:'Improving',thesis:'First-mover on behind-the-meter nuclear data-center deals.',bear:'Concentrated assets; regulatory precedent risk.',buy:'A co-location deal cleared by regulators.',sell:'Regulators block behind-the-meter co-location.',prio:'B',status:'Researching',stars:3},
+      OKLO:{q:3,ai:6,up:10,bsRisk:7,valRisk:9,ccRisk:4,cxRisk:9,rev:'pre-rev',gm:'n/a',fcf:'Negative',thesis:'Venture option on scarce firm SMR power post-2030.',bear:'No revenue, ongoing dilution, decade-long timelines.',buy:'Firm orders plus an NRC licensing milestone.',sell:'Timeline slips or another dilutive raise.',prio:'C',status:'Researching',stars:2},
+      GEV:{q:7,ai:7,up:7,bsRisk:3,valRisk:7,ccRisk:3,cxRisk:3,rev:'+15%',gm:'expanding',fcf:'Improving',thesis:'Gas-turbine and grid super-cycle backlog; arms dealer to all generators.',bear:'Cyclical capital equipment; margin-execution risk.',buy:'Backlog plus margin inflection at a reset price.',sell:'Order cancellations or a margin miss.',prio:'B',status:'Watchlist',stars:3},
+      AIP:{q:6,ai:8,up:9,bsRisk:3,valRisk:7,ccRisk:4,cxRisk:2,rev:'+ACV',gm:'90%',fcf:'Breakeven',thesis:'Royalty inflection on sticky network-on-chip IP; chiplet content growth.',bear:'Design-win timing risk; small-cap dilution risk.',buy:'Royalty revenue inflects and marquee design wins reach production.',sell:'ACV stalls or royalties under-deliver.',prio:'A',status:'Watchlist',stars:4}
+    };
+  }
+
+  moatDefs(){
+    const M = (ticker,type,makes,moat,different,valueChain,bull,bear)=>({ticker,type,makes,moat,different,valueChain,bull,bear});
+    return {
+      semis: { title:'SEMICONDUCTORS — WHAT ACTUALLY DIFFERS', items:[
+        M('NVDA','core','GPUs + CUDA software + networking (Mellanox / NVLink).','Full-stack ecosystem lock-in — hardware, software and interconnect as one platform.','The only one selling the whole platform, not just silicon.','Merchant accelerator + systems','Owns the AI compute standard; software moat compounds.','70%+ margins invite ASIC and competitive attack; cyclical air-pocket.'),
+        M('AMD','core','GPUs (MI-series) + EPYC server CPUs.','x86 plus price/performance as the credible #2.','Competes on both CPU and GPU but has a far weaker software stack than NVDA.','Merchant accelerator + CPU','Only credible second source; MI ramp + EPYC share gains.','Software gap vs CUDA; gross-margin dilution from GPU mix.'),
+        M('INTC','cyclical','Designs AND manufactures (IDM); CPUs + foundry turnaround.','Manufacturing scale + x86 legacy — currently eroding.','Owns its fabs but is behind in AI accelerators.','IDM (design + foundry)','Foundry + 18A optionality; deep-value turnaround.','Cash-burning fab capex; losing share on both ends.'),
+        M('MRVL','picks','Custom ASIC (helps hyperscalers build their own chips) + optical / DSP / interconnect.','Custom-silicon design wins + electro-optics breadth.','A picks-and-shovels arms dealer, not a merchant-chip seller.','Custom silicon + connectivity','Levered to hyperscaler in-house silicon and optical content.','Program-timing lumpiness; customer concentration.'),
+        M('MU','cyclical','Memory — DRAM / HBM / NAND.','Three-player oligopoly + HBM technology tightness.','The only commodity-cyclical here — levered to memory pricing, not compute demand.','Commodity memory','HBM scarcity + disciplined oligopoly = up-cycle pricing.','Memory is cyclical; NAND oversupply, capex intensity.')
+      ]},
+      networking: { title:'INTERCONNECT & NETWORKING — WHAT ACTUALLY DIFFERS', items:[
+        M('ANET','core','High-performance Ethernet data-center switches + EOS software.','EOS software + share of hyperscaler back-end on a single binary.','The merchant-switch incumbent betting on open Ethernet for AI.','Switch systems','Ethernet wins the AI back-end; deep hyperscaler share.','Customer in-sourcing; two-customer concentration.'),
+        M('CRDO','picks','Active Electrical Cables + SerDes / retimer chiplets.','Connectivity IP at 224G; AEC design wins.','Sells the retimer / cable layer, not the switch — content that grows with reach limits.','Interconnect components','AEC adoption + 1.6T transition; explosive content growth.','Hyper-concentrated customer base; small-cap volatility.'),
+        M('ALAB','picks','Connectivity ASICs — PCIe / CXL retimers, gearboxes, smart fabric.','Aries retimer share + early CXL fabric positioning.','Owns the scale-up PCIe/CXL fabric niche, distinct from Ethernet switching.','Fabric / connectivity silicon','Scale-up fabric content per GPU rises; CXL optionality.','Rich valuation; single-product concentration.'),
+        M('MRVL','picks','Custom ASIC + optical DSP + switch silicon.','Custom silicon + electro-optics breadth.','Spans custom compute AND connectivity — the diversified arms dealer.','Custom silicon + connectivity','Multiple AI content vectors; optical + custom.','Program lumpiness; depends on a few mega-customers.')
+      ]},
+      power: { title:'POWER & UTILITIES — WHAT ACTUALLY DIFFERS', items:[
+        M('CEG','core','Largest US nuclear fleet — firm carbon-free baseload.','Irreplaceable existing nuclear capacity + hyperscaler PPAs.','A pure nuclear-scarcity play; can sign 24/7 CFE deals others cannot.','Generation (nuclear IPP)','Nuclear PPAs at premium prices; tightest 24/7 CFE supply.','Co-location regulatory ruling risk; valuation re-rated.'),
+        M('VST','cyclical','Diversified IPP — gas + nuclear + retail.','Dispatchable fleet in load-growth grids (ERCOT / PJM).','Gas-heavy merchant levered to power-price spikes, not just PPAs.','Generation (merchant IPP)','Tight reserve margins lift merchant power prices.','Merchant exposure cuts both ways; commodity-linked.'),
+        M('TLN','moonshot','Nuclear + gas generation (post-restructuring).','Susquehanna nuclear + early direct data-center deal.','Smaller, deal-driven nuclear play with direct DC co-location.','Generation (IPP)','First-mover behind-the-meter nuclear DC deals.','Concentrated assets; regulatory-precedent risk.'),
+        M('OKLO','moonshot','Pre-revenue advanced / SMR nuclear developer.','Design + NRC pathway optionality (no product yet).','A venture-stage option on future SMR power, not current cash flow.','Future generation (developer)','If SMRs work, scarce firm power at scale post-2030.','No revenue, dilution, decade-long timelines.'),
+        M('GEV','picks','Turbines, grid equipment, nuclear services (OEM).','Installed base + gas-turbine + grid backlog.','Sells the equipment to everyone — picks-and-shovels to all generators.','Equipment OEM + grid','Gas-turbine + grid super-cycle backlog.','Cyclical capital equipment; execution / margin risk.')
+      ]}
+    };
+  }
+
+  aipDeepDive(){
+    return {
+      businessDesc:'Arteris licenses network-on-chip (NoC) interconnect IP and SoC integration software. Its fabric is the on-chip road system that moves data between CPU, GPU/NPU, memory and I/O blocks inside a complex chip.',
+      moat:'Sticky design-time IP: once a NoC is architected into a chip it stays for the life of that program and its derivatives. Per-chip royalties stack on top of license ACV; deep integration and a hard-to-replicate IP library raise switching costs.',
+      revGrowth:'Annual contract value (ACV) growing double digits. Royalty revenue lags design wins by two to three years and is set to inflect as won designs reach volume production.',
+      margins:'IP-licensing model with very high gross margin. Opex-heavy on R&D and sales, so operating leverage arrives as ACV scales.',
+      fcfPath:'Approaching FCF breakeven. The royalty ramp is the path to durable free cash flow as cumulative design wins ship.',
+      custQuality:'Broad customer base across AI, data-center, automotive and chiplet designers, with a rising royalty footprint as designs reach production.',
+      aiExposure:'AI and chiplet complexity explode the number of on-chip connections. More accelerators, more HBM and more chiplets means more NoC content per design; UCIe and die-to-die interconnect are direct beneficiaries.',
+      valRisk:'Small-cap valued on forward ACV and royalty growth. Sensitive to design-win cadence and market risk-appetite; the multiple is volatile.',
+      bull:'Royalty inflection plus chiplet and NoC content growth turns a sticky IP base into compounding, capital-light licensing revenue that survives an overbuild.',
+      bear:'Design-win timing slips, royalties under-deliver, or a larger IP vendor (or in-house NoC) compresses pricing. Small-cap liquidity and dilution add risk.',
+      prove:'Accelerating ACV, royalty revenue inflecting upward, marquee AI and data-center design wins reaching production, and a clean march to positive FCF.',
+      breakThesis:'Stalling ACV, repeated royalty disappointments, key customers moving in-house or to a rival NoC, or persistent cash burn forcing dilution.'
+    };
+  }
+
+  emptyDeep(){ return {businessDesc:'',moat:'',revGrowth:'',margins:'',fcfPath:'',custQuality:'',aiExposure:'',valRisk:'',bull:'',bear:'',prove:'',breakThesis:''}; }
+
+  signpostDefs(){
+    return [
+      {id:'capexrev',label:'Hyperscaler capex / revenue',level:'G',notes:''},
+      {id:'meminv',label:'Memory inventory weeks',level:'G',notes:''},
+      {id:'oraclecds',label:'Oracle CDS spreads',level:'A',notes:'Watching — widened recently'},
+      {id:'rpocapex',label:'RPO-to-capex ratio',level:'G',notes:''},
+      {id:'capexdown',label:'Any hyperscaler guiding capex DOWN?',level:'G',notes:'No — all still guiding up'}
+    ];
+  }
+  checklistDefs(){
+    return [
+      {id:'c1',text:'Is the original thesis still intact, or did the story actually change?',checked:false,notes:''},
+      {id:'c2',text:'Has the underlying bottleneck loosened (supply caught up, scarcity gone)?',checked:false,notes:''},
+      {id:'c3',text:'Is the decline driven by dilution or debt — not just sentiment?',checked:false,notes:''},
+      {id:'c4',text:'Did a key customer or design win leave?',checked:false,notes:''},
+      {id:'c5',text:'Is the monetization tag still valid (scarcity / licensing vs capex-financed)?',checked:false,notes:''},
+      {id:'c6',text:'Am I adding because of analysis — or because it is red?',checked:false,notes:''},
+      {id:'c7',text:'Would I buy this today at this price if I held none?',checked:false,notes:''},
+      {id:'c8',text:'Is position sizing still within my risk limit after averaging down?',checked:false,notes:''}
+    ];
+  }
+
+  // ---------- handlers ----------
+  onTab = (e)=>{ const v=e.currentTarget.dataset.v; this.commit(()=>({view:v})); };
+  onSelectLayer = (e)=>{ const id=e.currentTarget.dataset.id; this.commit(()=>({view:'stack',activeLayer:id})); };
+  onOpenTicker = (e)=>{ const t=e.currentTarget.dataset.t; this.commit(()=>({view:'deepdive',deepDiveTicker:t})); };
+  onOpenMoat = (e)=>{ const c=e.currentTarget.dataset.c; this.commit(()=>({view:'moat',moatCluster:c})); };
+  onSetCluster = (e)=>{ const c=e.currentTarget.dataset.c; const cl=this.state.moat[c]; if(cl) this.commit(()=>({moatCluster:c})); };
+
+  onLayerEdit = (e)=>{ const f=e.target.dataset.f, v=e.target.value, id=this.state.activeLayer;
+    this.commit(s=>({layers:{...s.layers,[id]:{...s.layers[id],[f]:v}}})); };
+  onMoatEdit = (e)=>{ const t=e.target.dataset.t, f=e.target.dataset.f, v=e.target.value, c=this.state.moatCluster;
+    this.commit(s=>{ const cl=s.moat[c]; const items=cl.items.map(it=> it.ticker===t ? {...it,[f]:v} : it); return {moat:{...s.moat,[c]:{...cl,items}}}; }); };
+  onDeepEdit = (e)=>{ const f=e.target.dataset.f, v=e.target.value, t=this.state.deepDiveTicker;
+    this.commit(s=>{ const cur=s.deepDives[t]||this.emptyDeep(); return {deepDives:{...s.deepDives,[t]:{...cur,[f]:v}}}; }); };
+  onSetDeep = (e)=>{ const t=e.target.value; this.commit(()=>({deepDiveTicker:t})); };
+
+  onSignCycle = (e)=>{ const id=e.currentTarget.dataset.id; const nx={G:'A',A:'R',R:'G'};
+    this.commit(s=>({signposts:s.signposts.map(x=> x.id===id ? {...x,level:nx[x.level]} : x)})); };
+  onSignNote = (e)=>{ const id=e.target.dataset.id, v=e.target.value;
+    this.commit(s=>({signposts:s.signposts.map(x=> x.id===id ? {...x,notes:v} : x)})); };
+  onCheckToggle = (e)=>{ const id=e.currentTarget.dataset.id;
+    this.commit(s=>({checklist:s.checklist.map(x=> x.id===id ? {...x,checked:!x.checked} : x)})); };
+  onCheckNote = (e)=>{ const id=e.target.dataset.id, v=e.target.value;
+    this.commit(s=>({checklist:s.checklist.map(x=> x.id===id ? {...x,notes:v} : x)})); };
+
+  onFilter = (e)=>{ const f=e.target.dataset.f, v=e.target.value;
+    this.commit(s=>({watchFilters:{...s.watchFilters,[f]:v}})); };
+  onClearFilters = ()=>{ this.commit(()=>({watchFilters:{q:'',layer:'',mon:'',type:'',cap:'',status:'',prio:''}})); };
+
+  setCompany = (t,f,v)=>{ this.commit(s=>({companies:{...s.companies,[t]:{...s.companies[t],[f]:v}}})); };
+  setCompanyText = (t,f,v)=>{ if(this.state.companies[t]){ this.state.companies[t][f]=v; this.persist(); } };
+  toggleShort = (t)=>{ this.commit(s=>{ const c=s.companies[t]; if(!c) return {}; const now=!c.short; let order=s.shortlistOrder.filter(x=>x!==t);
+    if(now){ if(order.length>=10) return {}; order=[...order,t]; }
+    return { companies:{...s.companies,[t]:{...c,short:now}}, shortlistOrder:order }; }); };
+  moveShort = (t,dir)=>{ this.commit(s=>{ const o=[...s.shortlistOrder]; const i=o.indexOf(t); const j=i+dir; if(i<0||j<0||j>=o.length) return {}; [o[i],o[j]]=[o[j],o[i]]; return {shortlistOrder:o}; }); };
+  onDeepStars = (e)=>{ const n=+e.currentTarget.dataset.n; const t=this.state.deepDiveTicker; const cur=this.state.companies[t]; this.setCompany(t,'stars', cur && cur.stars===n ? 0 : n); };
+  onDeepStatus = (e)=>{ this.setCompany(this.state.deepDiveTicker,'status',e.target.value); };
+  onDeepPin = ()=>{ this.toggleShort(this.state.deepDiveTicker); };
+  setSort = (col)=>{ this.commit(s=>{ const cur=s.watchSort; const dir = cur.col===col ? -cur.dir : 1; return {watchSort:{col,dir}}; }); };
+  rootRef = (el)=>{ this.rootEl=el; };
+
+  // ---------- color helpers ----------
+  qcol(v){ v=+v||0; return v>=8?'#37d399':v>=6?'#86c98f':v>=4?'#c9b96a':v>0?'#7c828c':'#3a3f48'; }
+  rcol(v){ v=+v||0; return v>=9?'#ff6b6b':v>=7?'#ff9d4d':v>=4?'#f5c451':v>0?'#5f8f78':'#3a3f48'; }
+
+  // ---------- watchlist ----------
+  filteredCompanies(){
+    const S=this.state; const f=S.watchFilters;
+    let rows=Object.values(S.companies).filter(c=>{
+      if(f.layer && c.layer!==f.layer) return false;
+      if(f.mon && c.mon!==f.mon) return false;
+      if(f.type && c.type!==f.type) return false;
+      if(f.cap && c.cap!==f.cap) return false;
+      if(f.status && c.status!==f.status) return false;
+      if(f.prio && c.prio!==f.prio) return false;
+      if(f.q){ const t=f.q.toLowerCase(); if(!((c.ticker||'').toLowerCase().includes(t)||(c.name||'').toLowerCase().includes(t))) return false; }
+      return true;
+    });
+    const so=S.watchSort;
+    if(so.col){ const num=['q','ai','up','bsRisk','valRisk','ccRisk','cxRisk'].includes(so.col);
+      rows.sort((a,b)=>{ let x=a[so.col],y=b[so.col]; if(num){x=+x||0;y=+y||0;} else {x=(x||'').toString().toLowerCase();y=(y||'').toString().toLowerCase();} return x<y?-1*so.dir:x>y?1*so.dir:0; });
+    }
+    return rows;
+  }
+
+  makeWatchlist(){
+    const h=React.createElement, S=this.state;
+    const layerName={}; S.order.forEach(id=>layerName[id]=S.layers[id].name);
+    const COLS=[
+      {k:'name',label:'Company',type:'text',w:142},
+      {k:'layer',label:'Layer',type:'layer',w:160},
+      {k:'cap',label:'Cap',type:'sel',opts:['mega','large','mid','small','micro'],w:74},
+      {k:'mon',label:'Monet.',type:'mon',opts:['scarcity','licensing','capex'],w:100},
+      {k:'type',label:'Type',type:'type',opts:['core','picks','cyclical','moonshot','hype'],w:92},
+      {k:'q',label:'Qual',type:'num',w:50,kind:'q'},
+      {k:'ai',label:'AI',type:'num',w:46,kind:'q'},
+      {k:'up',label:'Upside',type:'num',w:56,kind:'q'},
+      {k:'bsRisk',label:'BS rk',type:'num',w:52,kind:'r'},
+      {k:'valRisk',label:'Val rk',type:'num',w:52,kind:'r'},
+      {k:'ccRisk',label:'Cust rk',type:'num',w:56,kind:'r'},
+      {k:'cxRisk',label:'Capx rk',type:'num',w:58,kind:'r'},
+      {k:'rev',label:'Rev gr',type:'text',w:76},
+      {k:'gm',label:'GM',type:'text',w:62},
+      {k:'fcf',label:'FCF',type:'text',w:84},
+      {k:'thesis',label:'Main thesis',type:'text',w:240},
+      {k:'bear',label:'Main bear case',type:'text',w:240},
+      {k:'buy',label:'Would make me BUY',type:'text',w:210},
+      {k:'sell',label:'Would make me SELL',type:'text',w:210},
+      {k:'prio',label:'Prio',type:'sel',opts:['A','B','C'],w:54},
+      {k:'status',label:'Status',type:'statsel',opts:['Untouched','Researching','Watchlist','Position','Passed'],w:118}
+    ];
+    const th=(c)=>{ const sortable=['name','q','ai','up','bsRisk','valRisk','ccRisk','cxRisk'].includes(c.k);
+      const arrow = S.watchSort.col===c.k ? (S.watchSort.dir>0?' ▲':' ▼') : '';
+      return h('th',{key:c.k,onClick:sortable?()=>this.setSort(c.k):null,style:{position:'sticky',top:0,zIndex:2,background:'#0e1116',borderBottom:'1px solid #232932',borderRight:'1px solid #161a20',color:'#8a909c',fontFamily:"'IBM Plex Mono',monospace",fontSize:'9px',letterSpacing:'.3px',fontWeight:600,textTransform:'uppercase',textAlign:'left',padding:'7px 7px',width:c.w,minWidth:c.w,maxWidth:c.w,cursor:sortable?'pointer':'default',whiteSpace:'nowrap'}}, c.label+arrow); };
+    const inp={width:'100%',background:'transparent',border:'none',color:'#cdd2db',fontSize:'11px',padding:'2px 0',outline:'none',fontFamily:"'IBM Plex Sans',sans-serif"};
+    const monp={width:'100%',background:'transparent',border:'none',fontFamily:"'IBM Plex Mono',monospace",fontSize:'10px',fontWeight:600,padding:'2px 0',outline:'none',cursor:'pointer'};
+
+    const cell=(c,col)=>{
+      const td=(child,extra)=>h('td',{key:col.k,style:{borderBottom:'1px solid #14181d',borderRight:'1px solid #11151a',padding:'3px 7px',width:col.w,minWidth:col.w,maxWidth:col.w,verticalAlign:'top',...(extra||{})}},child);
+      if(col.type==='text') return td(h('textarea',{defaultValue:c[col.k]||'',rows:1,onChange:e=>this.setCompanyText(c.ticker,col.k,e.target.value),style:{...inp,resize:'none',lineHeight:1.35,minHeight:'18px',fontFamily:(col.k==='rev'||col.k==='gm'||col.k==='fcf')?"'IBM Plex Mono',monospace":"'IBM Plex Sans',sans-serif"}}));
+      if(col.type==='layer') return td(h('select',{value:c.layer,onChange:e=>this.setCompany(c.ticker,'layer',e.target.value),style:{...monp,fontFamily:"'IBM Plex Sans',sans-serif",fontSize:'10px',color:'#9aa0aa'}}, S.order.map(id=>h('option',{key:id,value:id},layerName[id]))));
+      if(col.type==='num'){ const col2=col.kind==='r'?this.rcol(c[col.k]):this.qcol(c[col.k]);
+        return td(h('input',{type:'number',min:0,max:10,value:c[col.k]||0,onChange:e=>this.setCompany(c.ticker,col.k,Math.max(0,Math.min(10,+e.target.value||0))),style:{width:'100%',background:'transparent',border:'none',color:col2,fontFamily:"'IBM Plex Mono',monospace",fontSize:'12px',fontWeight:600,padding:'2px 0',outline:'none',textAlign:'center'}}),{textAlign:'center'}); }
+      if(col.type==='mon') return td(h('select',{value:c.mon,onChange:e=>this.setCompany(c.ticker,'mon',e.target.value),style:{...monp,color:this.MON_COLOR[c.mon]}}, col.opts.map(o=>h('option',{key:o,value:o},this.MON_LABEL[o]))));
+      if(col.type==='type') return td(h('select',{value:c.type,onChange:e=>this.setCompany(c.ticker,'type',e.target.value),style:{...monp,color:this.TYPE_COLOR[c.type]}}, col.opts.map(o=>h('option',{key:o,value:o},this.TYPE_LABEL[o]))));
+      if(col.type==='statsel') return td(h('select',{value:c.status,onChange:e=>this.setCompany(c.ticker,'status',e.target.value),style:{...monp,fontSize:'10px',color:this.STATUS_COLOR[c.status]}}, col.opts.map(o=>h('option',{key:o,value:o},o))));
+      if(col.type==='sel') return td(h('select',{value:c[col.k],onChange:e=>this.setCompany(c.ticker,col.k,e.target.value),style:{...monp,color:'#aeb4be'}}, col.opts.map(o=>h('option',{key:o,value:o},o))));
+      return td(null);
+    };
+
+    const rows=this.filteredCompanies();
+    const body=rows.map(c=>{
+      const pin=h('td',{key:'pin',style:{position:'sticky',left:0,zIndex:1,background:'#0a0c10',borderBottom:'1px solid #14181d',borderRight:'1px solid #1c2129',padding:'3px 6px',textAlign:'center',width:30,minWidth:30}},
+        h('button',{onClick:()=>this.toggleShort(c.ticker),title:c.short?'unpin':'pin to shortlist',style:{background:'none',border:'none',cursor:'pointer',color:c.short?'var(--ac)':'#3a3f48',fontSize:'13px',lineHeight:1,padding:0}}, c.short?'✚':'✛'));
+      const tk=h('td',{key:'tk',style:{position:'sticky',left:30,zIndex:1,background:'#0a0c10',borderBottom:'1px solid #14181d',borderRight:'1px solid #1c2129',padding:'3px 8px',width:66,minWidth:66}},
+        h('button',{onClick:()=>this.commit(()=>({view:'deepdive',deepDiveTicker:c.ticker})),style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'11.5px',fontWeight:600,color:'#e8ebf0',background:'none',border:'none',padding:0,cursor:'pointer'}}, c.ticker));
+      return h('tr',{key:c.ticker}, [pin,tk,...COLS.map(col=>cell(c,col))]);
+    });
+    const header=h('tr',{}, [
+      h('th',{key:'pin',style:{position:'sticky',left:0,top:0,zIndex:3,background:'#0e1116',borderBottom:'1px solid #232932',borderRight:'1px solid #1c2129',width:30,minWidth:30}}),
+      h('th',{key:'tk',style:{position:'sticky',left:30,top:0,zIndex:3,background:'#0e1116',borderBottom:'1px solid #232932',borderRight:'1px solid #1c2129',color:'#8a909c',fontFamily:"'IBM Plex Mono',monospace",fontSize:'9px',letterSpacing:'.3px',fontWeight:600,textAlign:'left',padding:'7px 8px',width:66,minWidth:66,cursor:'pointer'},onClick:()=>this.setSort('ticker')},'Ticker'),
+      ...COLS.map(c=>th(c))
+    ]);
+    return h('div',{style:{border:'1px solid #1c2129',borderRadius:'6px',overflow:'auto',maxHeight:'calc(100vh - 168px)'}},
+      h('table',{style:{borderCollapse:'separate',borderSpacing:0,width:'max-content',fontSize:'11px'}},
+        h('thead',{},header), h('tbody',{},body)));
+  }
+
+  makeConviction(){
+    const h=React.createElement, S=this.state;
+    const names=Object.values(S.companies).filter(c=>c.stars>=4||c.q>=8);
+    const byLayer={};
+    names.forEach(c=>{ (byLayer[c.layer]=byLayer[c.layer]||[]).push(c); });
+    const order=S.order.filter(id=>byLayer[id]);
+    if(!order.length) return h('div',{style:{color:'#6b7280',fontFamily:"'IBM Plex Mono',monospace",fontSize:'12px'}},'No names yet — score ★4+ or quality ≥8 to surface them here.');
+    return h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:'11px'}},
+      order.map(id=>{ const arr=byLayer[id].sort((a,b)=>(b.stars-a.stars)||(b.q-a.q));
+        return h('div',{key:id,style:{background:'#0c0e12',border:'1px solid #1c2129',borderRadius:'6px',padding:'12px'}},[
+          h('div',{key:'h',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'9.5px',letterSpacing:'.4px',color:'#6b7280',textTransform:'uppercase',marginBottom:'9px'}},S.layers[id].name),
+          ...arr.map(c=>h('div',{key:c.ticker,onClick:()=>this.commit(()=>({view:'deepdive',deepDiveTicker:c.ticker})),style:{display:'flex',alignItems:'flex-start',gap:'9px',padding:'7px 0',borderTop:'1px solid #14181d',cursor:'pointer'}},[
+            h('div',{key:'a',style:{flex:'0 0 auto',width:'58px'}},[
+              h('div',{key:'t',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'12px',fontWeight:600,color:'#e8ebf0'}},c.ticker),
+              h('div',{key:'s',style:{fontSize:'10px',color:'var(--ac)',letterSpacing:'1px'}},'★'.repeat(c.stars)||'·')
+            ]),
+            h('div',{key:'b',style:{flex:1,minWidth:0}},[
+              h('div',{key:'tags',style:{display:'flex',gap:'6px',marginBottom:'2px'}},[
+                h('span',{key:'m',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'8px',fontWeight:600,color:this.MON_COLOR[c.mon]}},this.MON_LABEL[c.mon]),
+                h('span',{key:'q',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'8px',color:this.qcol(c.q)}},'Q'+c.q)
+              ]),
+              h('div',{key:'th',style:{fontSize:'11px',color:'#aeb4be',lineHeight:1.4}},c.thesis||'—')
+            ])
+          ]))
+        ]);
+      }));
+  }
+
+  makeShortlist(){
+    const h=React.createElement, S=this.state;
+    const pinned=S.shortlistOrder.map(t=>S.companies[t]).filter(Boolean);
+    const list=pinned.length? h('div',{style:{display:'flex',flexDirection:'column',gap:'7px',maxWidth:'720px'}},
+      pinned.map((c,i)=>h('div',{key:c.ticker,style:{display:'flex',alignItems:'center',gap:'11px',background:'#0c0e12',border:'1px solid #1c2129',borderLeft:'3px solid var(--ac)',borderRadius:'6px',padding:'9px 12px'}},[
+        h('div',{key:'r',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'15px',fontWeight:600,color:'var(--ac)',width:'26px'}},(i+1)),
+        h('button',{key:'t',onClick:()=>this.commit(()=>({view:'deepdive',deepDiveTicker:c.ticker})),style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'14px',fontWeight:600,color:'#e8ebf0',background:'none',border:'none',cursor:'pointer',width:'66px',textAlign:'left'}},c.ticker),
+        h('div',{key:'n',style:{flex:1,minWidth:0,fontSize:'12px',color:'#aeb4be',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},c.name),
+        h('span',{key:'m',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'8.5px',fontWeight:600,color:'#070809',background:this.MON_COLOR[c.mon],borderRadius:'3px',padding:'2px 6px'}},this.MON_LABEL[c.mon]),
+        h('span',{key:'ty',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'8.5px',fontWeight:600,color:this.TYPE_COLOR[c.type],border:'1px solid '+this.TYPE_COLOR[c.type],borderRadius:'3px',padding:'1px 6px'}},this.TYPE_LABEL[c.type]),
+        h('span',{key:'st',style:{fontSize:'10px',color:'var(--ac)',letterSpacing:'1px',width:'58px'}},'★'.repeat(c.stars)),
+        h('div',{key:'mv',style:{display:'flex',gap:'2px'}},[
+          h('button',{key:'u',onClick:()=>this.moveShort(c.ticker,-1),style:{background:'#13161b',border:'1px solid #232932',borderRadius:'3px',color:'#7c828c',cursor:'pointer',fontSize:'10px',padding:'1px 5px'}},'▲'),
+          h('button',{key:'d',onClick:()=>this.moveShort(c.ticker,1),style:{background:'#13161b',border:'1px solid #232932',borderRadius:'3px',color:'#7c828c',cursor:'pointer',fontSize:'10px',padding:'1px 5px'}},'▼')
+        ]),
+        h('button',{key:'x',onClick:()=>this.toggleShort(c.ticker),style:{background:'none',border:'none',color:'#ff6b6b',cursor:'pointer',fontSize:'13px'}},'✕')
+      ])))
+      : h('div',{style:{color:'#6b7280',fontFamily:"'IBM Plex Mono',monospace",fontSize:'12px'}},'Shortlist empty — pin names with ✛ from the watchlist or a deep-dive.');
+
+    const counts={Untouched:0,Researching:0,Watchlist:0,Position:0,Passed:0};
+    Object.values(S.companies).forEach(c=>{ counts[c.status]=(counts[c.status]||0)+1; });
+    const total=Object.values(S.companies).length;
+    const pipe=h('div',{style:{marginTop:'24px'}},[
+      h('div',{key:'h',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'9.5px',letterSpacing:'.5px',color:'#6b7280',textTransform:'uppercase',marginBottom:'9px'}},'Status pipeline · '+total+' names'),
+      h('div',{key:'b',style:{display:'flex',gap:'9px',flexWrap:'wrap'}},
+        ['Untouched','Researching','Watchlist','Position','Passed'].map(st=>h('button',{key:st,onClick:()=>this.commit(()=>({view:'watchlist',watchFilters:{...S.watchFilters,status:st}})),style:{flex:'1 1 150px',background:'#0c0e12',border:'1px solid #1c2129',borderTop:'2px solid '+this.STATUS_COLOR[st],borderRadius:'6px',padding:'12px',textAlign:'left',cursor:'pointer'}},[
+          h('div',{key:'n',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'24px',fontWeight:600,color:this.STATUS_COLOR[st]}},counts[st]),
+          h('div',{key:'l',style:{fontFamily:"'IBM Plex Mono',monospace",fontSize:'10px',color:'#8a909c',marginTop:'2px'}},st)
+        ])))
+    ]);
+    return h('div',{},[h('div',{key:'sl'},list),pipe]);
+  }
+
+  // ---------- render ----------
+  renderVals(){
+    const S=this.state;
+    const accent=this.props.accent||'#f5a623';
+    const pad = this.props.density==='compact' ? '3px' : '6px';
+    const TABS=[['stack','STACK'],['watchlist','WATCHLIST'],['moat','MOAT LAB'],['conviction','CONVICTION'],['shortlist','SHORTLIST'],['checklist','CHECKLIST'],['deepdive','DEEP-DIVE']];
+    const tabs=TABS.map(([v,label])=>{ const on=S.view===v;
+      return {v,label,style:`font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.4px;border:none;border-radius:4px;padding:5px 9px;cursor:pointer;white-space:nowrap;background:${on?'var(--ac)':'transparent'};color:${on?'#070809':'#8a909c'}`}; });
+
+    const counts={Untouched:0,Researching:0,Watchlist:0,Position:0,Passed:0};
+    Object.values(S.companies).forEach(c=>{ counts[c.status]=(counts[c.status]||0)+1; });
+    const counters=[['Researching','RES'],['Watchlist','WL'],['Position','POS'],['Passed','PASS']].map(([st,short])=>({label:st,short,count:counts[st],color:this.STATUS_COLOR[st]}));
+
+    const signposts=S.signposts.map(s=>({id:s.id,label:s.label,level:s.level,color:this.SIGNAL[s.level],notes:s.notes}));
+
+    // sidebar layers
+    let prevGroup=null;
+    const layers=S.order.map((id,i)=>{ const l=S.layers[id]; const active=S.activeLayer===id && S.view==='stack';
+      const groupLabel = l.group!==prevGroup ? l.group : ''; prevGroup=l.group;
+      const isStub=!l.whyMoney;
+      const rowStyle=`display:flex;align-items:center;gap:9px;width:100%;text-align:left;border:none;cursor:pointer;padding:${pad} 13px;background:${active?'#14181e':'transparent'};border-left:2px solid ${active?'var(--ac)':'transparent'}`;
+      const nameStyle=`flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:${active?'var(--ac)':'#aeb4be'};font-weight:${active?600:400}`;
+      return {id,num:(i+1<10?'0':'')+(i+1),name:l.name,monColor:this.MON_COLOR[l.mon],groupLabel,isStub,rowStyle,nameStyle}; });
+
+    // active layer card
+    const al=S.layers[S.activeLayer];
+    const inLayer=Object.values(S.companies).filter(c=>c.layer===S.activeLayer);
+    const chip=(c)=>({ticker:c.ticker,monColor:this.MON_COLOR[c.mon],typeLabel:this.TYPE_LABEL[c.type]});
+    const anchors=inLayer.filter(c=>c.cap==='mega'||c.cap==='large').map(chip);
+    const candidates=inLayer.filter(c=>c.cap!=='mega'&&c.cap!=='large').map(chip);
+    const L={...al,num:(S.order.indexOf(S.activeLayer)+1<10?'0':'')+(S.order.indexOf(S.activeLayer)+1),
+      monColor:this.MON_COLOR[al.mon],isStub:!al.whyMoney,clusterId:this.LAYER_CLUSTER[S.activeLayer]||'',
+      anchors,candidates,noAnchors:anchors.length===0,noCandidates:candidates.length===0};
+
+    // moat
+    const clusterOrder=['semis','networking','power'];
+    const clusters=clusterOrder.map(id=>{ const on=S.moatCluster===id; const labels={semis:'Semiconductors',networking:'Interconnect',power:'Power & utilities'};
+      return {id,label:labels[id],style:`font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.3px;border-radius:5px;padding:7px 13px;cursor:pointer;border:1px solid ${on?'var(--ac)':'#2a2f38'};background:${on?'#1d1a0e':'#0c0e12'};color:${on?'var(--ac)':'#9aa0aa'}`}; });
+    const cl=S.moat[S.moatCluster]||S.moat.semis;
+    const moatTitle=cl.title;
+    const moatList=cl.items.map(m=>({...m,typeColor:this.TYPE_COLOR[m.type],typeLabel:this.TYPE_FULL[m.type]}));
+
+    // deep dive
+    const dt=S.deepDiveTicker; const dc=S.companies[dt]||{name:dt,mon:'scarcity',type:'core',status:'Untouched',stars:0,short:false};
+    const deep=S.deepDives[dt]||this.emptyDeep();
+    const companyOptions=Object.values(S.companies).sort((a,b)=>a.ticker<b.ticker?-1:1).map(c=>({ticker:c.ticker,label:c.ticker+' · '+c.name}));
+    const deepStars=[1,2,3,4,5].map(n=>({n,color:n<=(dc.stars||0)?'var(--ac)':'#3a3f48'}));
+    const deepCompany={name:dc.name,monColor:this.MON_COLOR[dc.mon],monLabel:this.MON_LABEL[dc.mon],typeColor:this.TYPE_COLOR[dc.type],typeLabel:this.TYPE_FULL[dc.type],status:dc.status,statusColor:this.STATUS_COLOR[dc.status],
+      pinLabel:dc.short?'✚ pinned':'✛ pin to shortlist',
+      pinStyle:`font-family:'IBM Plex Mono',monospace;font-size:10.5px;border-radius:4px;padding:5px 10px;cursor:pointer;border:1px solid ${dc.short?'var(--ac)':'#2a2f38'};background:${dc.short?'#1d1a0e':'#0c0e12'};color:${dc.short?'var(--ac)':'#9aa0aa'}`};
+    const DF=[['businessDesc','Business description','#6b7280',true],['moat','Moat / differentiation','#6b7280',false],['revGrowth','Revenue growth','#6b7280',false],['margins','Margins','#6b7280',false],['fcfPath','FCF path','#6b7280',false],['custQuality','Customer / design-win quality','#6b7280',false],['aiExposure','AI / data-center exposure','#5b9dff',true],['valRisk','Valuation risk','#f5c451',false],['bull','Bull case','#37d399',false],['bear','Bear case','#ff6b6b',false],['prove','What would PROVE the thesis','#37d399',false],['breakThesis','What would BREAK the thesis','#ff6b6b',false]];
+    const deepFields=DF.map(([key,label,labelColor,full])=>({key,label,labelColor,value:deep[key]||'',wrapStyle:`background:#0c0e12;border:1px solid #1c2129;border-radius:6px;padding:12px${full?';grid-column:1 / -1':''}`}));
+
+    // checklist
+    const checklist=S.checklist.map(ck=>({id:ck.id,text:ck.text,notes:ck.notes,mark:ck.checked?'✓':'',
+      boxStyle:`flex:0 0 auto;width:20px;height:20px;border-radius:4px;cursor:pointer;font-size:12px;line-height:1;margin-top:1px;border:1px solid ${ck.checked?'#37d399':'#2a2f38'};background:${ck.checked?'#37d399':'#090b0f'};color:#070809;font-weight:700`,
+      textStyle:`font-size:13px;line-height:1.4;color:${ck.checked?'#6b7280':'#cdd2db'};text-decoration:${ck.checked?'line-through':'none'}`}));
+
+    const v=S.view;
+    return {
+      rootRef:this.rootRef,
+      tabs, onTab:this.onTab, counters,
+      signposts, onSignCycle:this.onSignCycle, onSignNote:this.onSignNote,
+      layers, onSelectLayer:this.onSelectLayer,
+      isStack:v==='stack', isWatchlist:v==='watchlist', isMoat:v==='moat', isConviction:v==='conviction', isShortlist:v==='shortlist', isChecklist:v==='checklist', isDeepdive:v==='deepdive',
+      L, onLayerEdit:this.onLayerEdit, onOpenMoat:this.onOpenMoat, onOpenTicker:this.onOpenTicker,
+      watchFilters:S.watchFilters, onFilter:this.onFilter, onClearFilters:this.onClearFilters,
+      layerOptions:S.order.map(id=>({id,name:S.layers[id].name})),
+      watchlistNode: v==='watchlist'? this.makeWatchlist() : null,
+      watchCount:this.filteredCompanies().length, totalCount:Object.values(S.companies).length,
+      clusters, onSetCluster:this.onSetCluster, moatTitle, moatList, onMoatEdit:this.onMoatEdit,
+      convictionNode: v==='conviction'? this.makeConviction() : null,
+      shortlistNode: v==='shortlist'? this.makeShortlist() : null,
+      deepTicker:dt, companyOptions, onSetDeep:this.onSetDeep, deepCompany, deepStars, deepFields,
+      onDeepEdit:this.onDeepEdit, onDeepStars:this.onDeepStars, onDeepStatus:this.onDeepStatus, onDeepPin:this.onDeepPin,
+      checklist, onCheckToggle:this.onCheckToggle, onCheckNote:this.onCheckNote
+    };
+  }
+}
+</script>
+</body>
+</html>

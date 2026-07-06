@@ -1,0 +1,207 @@
+{
+  "layers": {
+    "ai-apps": {
+      "whyMoney": "Recurring software revenue with AI attach pricing on top; the layer where model capability converts into seats, usage and workflow lock-in.",
+      "whyFail": "Foundation models commoditize thin wrappers; incumbents bundle AI for free; token costs eat gross margin if pricing is per-seat while costs are per-use.",
+      "bottleneck": "Distribution and proprietary data/workflow context — not model access, which everyone has.",
+      "metrics": "AI product ARR / attach rate\nNet revenue retention\nGross margin trend vs inference cost\nSeat growth vs usage growth",
+      "redFlags": "AI features given away without pricing\nGM compression from token costs\nChurn to platform-native AI"
+    },
+    "model-labs": {
+      "whyMoney": "Frontier capability rents: whoever owns the best model taxes every downstream app; consumer subscriptions and enterprise API usage scale with capability.",
+      "whyFail": "Training costs compound faster than revenue; open-weights models cap pricing; capability converges and the moat collapses to distribution.",
+      "bottleneck": "Compute access and unique data; talent concentration in a handful of teams.",
+      "metrics": "API + subscription revenue run-rate\nCompute commitments vs funding\nCapability benchmark gaps vs open weights\nEnterprise seat expansion",
+      "redFlags": "Open-weights parity on frontier tasks\nTraining run economics deteriorating\nKey research team departures"
+    },
+    "hyperscalers": {
+      "whyMoney": "They rent the buildout back to everyone: AI capex becomes contracted cloud revenue with multi-year visibility, and in-house silicon fattens margins over time.",
+      "whyFail": "Depreciation wave from GPU fleets outruns AI revenue; a capex pause exposes overbuild; regulators cap the OpenAI/Anthropic equity-compute loops.",
+      "bottleneck": "Power and land for new regions; GPU allocation; the ROI debate between capex and free cash flow.",
+      "metrics": "Cloud AI revenue growth vs total capex\nRPO / backlog growth\nCapex-to-revenue ratio trend\nIn-house silicon mix",
+      "redFlags": "Any hyperscaler guiding capex down\nAI revenue disclosures going vague\nDepreciation schedule shortening"
+    },
+    "neoclouds": {
+      "whyFail": "Leveraged GPU depreciation bets: if utilization or renewal pricing slips, debt service eats the equity; hyperscalers can undercut at will.",
+      "bottleneck": "Powered shells and GPU allocation today; refinancing terms tomorrow. Contract quality (tenor, counterparty, take-or-pay) is everything.",
+      "metrics": "Contracted backlog and tenor\nCustomer concentration\nCost of debt / lease structure\nUtilization and renewal pricing\nPower secured (MW) vs deployed",
+      "redFlags": "Anchor-tenant renegotiation\nFinancing spreads widening\nMerchant (uncontracted) capacity growing\nGPU resale values falling"
+    },
+    "custom-silicon": {
+      "whyMoney": "Design-win annuities: every hyperscaler wants its own accelerator, and the ASIC partner collects NRE plus per-unit royalties without merchant inventory risk.",
+      "whyFail": "Programs are lumpy and cancellable; customers eventually in-source; the merchant GPU stays good enough and the ASIC never ramps.",
+      "bottleneck": "SerDes/interconnect IP and advanced-node design talent; packaging slots at TSMC.",
+      "metrics": "Named program count and ramp timing\nASIC revenue growth vs GPU market\nContent per accelerator\nNext-gen program renewals",
+      "redFlags": "A flagship program cancelled or in-sourced\nCompeting ASIC vendor winning sockets\nNRE-heavy mix without unit follow-through"
+    },
+    "semi-ip": {
+      "whyMoney": "Royalty per chip with near-zero marginal cost: chiplets and AI SoC complexity multiply the licensable blocks per design; revenue lags design wins then compounds.",
+      "whyFail": "Royalty rates get squeezed by big customers; RISC-V and in-house IP erode the base; small players stay sub-scale forever.",
+      "bottleneck": "Standard ownership (interconnect, die-to-die) and switching costs baked in at architecture time.",
+      "metrics": "ACV growth\nRoyalty revenue vs license mix\nDesign wins reaching production\nRoyalty per chip trend",
+      "redFlags": "Royalty renegotiations downward\nRISC-V displacement wins\nACV stall with rising opex"
+    },
+    "eda": {
+      "whyMoney": "A duopoly toll booth on every chip design ever taped out; AI design complexity raises tool intensity and AI-assisted flows add a new pricing layer.",
+      "whyFail": "China export bans remove a large market; design-start recessions; open-source or AI-native challengers eventually attack the flow.",
+      "bottleneck": "Engineer trust and flow lock-in; hardware emulation capacity for AI-scale verification.",
+      "metrics": "Backlog growth\nHardware/emulation demand\nChina revenue exposure\nAI flow attach pricing",
+      "redFlags": "Bookings deceleration\nChina restrictions broadening\nCustomer consolidation squeezing pricing"
+    },
+    "foundries": {
+      "whyMoney": "Physical scarcity: only one or two fabs on earth can print leading-edge AI silicon, and pricing power compounds each node while customers have no alternative.",
+      "whyFail": "Geopolitical tail risk on Taiwan; a capex arms race into a demand air pocket; a rival finally executing at 2nm.",
+      "bottleneck": "EUV tool allocation, advanced packaging capacity, and fab construction timelines (3-4 years).",
+      "metrics": "Leading-edge utilization and pricing\nAI revenue share and growth\nCoWoS/packaging capacity ramp\nOverseas fab yield parity",
+      "redFlags": "Cross-strait escalation\nN2 yield or schedule slip\nCustomer dual-sourcing at scale"
+    },
+    "packaging": {
+      "whyMoney": "The current binding constraint on GPU supply: CoWoS-class capacity is sold out years forward, and every HBM stack and chiplet design adds packaging content.",
+      "whyFail": "Capacity catches up and scarcity pricing evaporates; the technology shifts (panel-level, glass) and strands existing tools.",
+      "bottleneck": "Interposer capacity, HBM stacking yield, and precision bonding equipment lead times.",
+      "metrics": "CoWoS-equivalent capacity vs bookings\nPackaging content per accelerator\nYield on advanced stacks\nNew entrant capacity announcements",
+      "redFlags": "Packaging capacity glut forming\nTechnology transition stranding tools\nGPU vendor insourcing packaging"
+    },
+    "memory": {
+      "whyMoney": "AI turned bandwidth into the scarce input: HBM is sold out on long-term agreements at premium margins, and a three-player oligopoly is finally behaving rationally.",
+      "whyFail": "Memory is still a commodity cycle — an overbuild or AI demand pause brings back brutal ASP declines; NAND stays structurally oversupplied.",
+      "bottleneck": "HBM stacking capacity and yield; TSV throughput; qualification slots at NVDA/AMD.",
+      "metrics": "HBM sold-out horizon and pricing\nDRAM/NAND spot vs contract\nInventory weeks at customers\nCapex discipline across the big three",
+      "redFlags": "HBM qualification loss\nInventory build at hyperscalers\nCapex race resuming\nNAND dumping spreading to DRAM"
+    },
+    "optical": {
+      "whyMoney": "Copper runs out of reach as speeds hit 224G+: every rack-to-rack link goes optical, transceiver content per GPU keeps climbing, and 1.6T is the next leg.",
+      "whyFail": "Brutal China-based price competition; co-packaged optics resets the value chain; hyperscalers qualify cheaper second sources fast.",
+      "bottleneck": "Indium-phosphide capacity, laser yield, and hyperscaler qualification cycles.",
+      "metrics": "800G/1.6T shipment mix\nGross margin trend\nDesign wins per hyperscaler\nCPO adoption timeline",
+      "redFlags": "ASP erosion accelerating\nCPO leapfrogging pluggables\nShare loss to Chinese vendors"
+    },
+    "cxl": {
+      "whyMoney": "If memory pooling standardizes, the fabric layer earns IP and silicon content on every disaggregated server — early, optionality-rich, licensing-led.",
+      "whyFail": "CXL adoption keeps slipping; NVLink-style proprietary fabrics win instead; the market stays niche for a decade.",
+      "bottleneck": "Ecosystem readiness — CPUs, OS support, and hyperscaler willingness to re-architect memory.",
+      "metrics": "CXL attach on new server platforms\nPooling deployments at scale\nFabric silicon design wins",
+      "redFlags": "Standard fragmentation\nHyperscalers passing on pooling\nProprietary fabric lock-in expanding"
+    },
+    "servers": {
+      "whyMoney": "Someone has to bolt the racks together: AI server ASPs are 10-20x traditional, and integration complexity (liquid cooling, NVLink domains) adds real value-add margin.",
+      "whyFail": "It is still contract manufacturing — margins are thin, customers are concentrated, and hyperscalers can shift orders overnight.",
+      "bottleneck": "GPU allocation, liquid-cooling integration capability, and rack-scale validation capacity.",
+      "metrics": "AI server revenue and backlog\nGross margin per rack trend\nCustomer concentration\nLiquid-cooled mix",
+      "redFlags": "Margin compression on flagship programs\nOrder shifts between ODMs\nInventory build of GPU systems"
+    },
+    "dc-realestate": {
+      "whyMoney": "Powered land is the new scarcity: whoever controls energized shells near fiber can sign decade-long leases at rising rates with investment-grade tenants.",
+      "whyFail": "Rates gap out against long-duration leases; hyperscalers self-build; a capex pause leaves speculative shells empty.",
+      "bottleneck": "Grid interconnection queues (3-5 years) and utility power allocations — not land or capital.",
+      "metrics": "Leasing volume and pre-lease rates\nRe-leasing spreads\nPower banked (MW) vs contracted\nDevelopment yield vs cost of capital",
+      "redFlags": "Speculative vacancy rising\nRe-leasing spreads compressing\nTenant credit deterioration"
+    },
+    "grid": {
+      "whyMoney": "Transformers, switchgear and HV equipment have multi-year lead times and no spare capacity — data-center demand meets a grid already needing replacement.",
+      "whyFail": "Capacity additions eventually catch up; utility procurement cycles slow; a demand pause strands expanded factories.",
+      "bottleneck": "Transformer manufacturing capacity and grain-oriented electrical steel; skilled electrical labor.",
+      "metrics": "Backlog and book-to-bill\nLead time trends\nPrice realization\nUtility capex budgets",
+      "redFlags": "Lead times normalizing fast\nOrder cancellations\nCapacity expansions outrunning demand"
+    },
+    "ups": {
+      "whyMoney": "Every AI megawatt needs backup and conditioning; UPS and battery content scales with density, and lithium systems refresh the installed base.",
+      "whyFail": "Component commoditization; Chinese battery-backed entrants; hyperscalers redesigning around centralized DC power architectures.",
+      "bottleneck": "Power-electronics supply and installation labor more than technology.",
+      "metrics": "DC segment order growth\nBacklog conversion\nContent per MW trend",
+      "redFlags": "Architecture shifts cutting UPS content\nPrice competition from Asia\nOrder push-outs"
+    },
+    "cooling": {
+      "whyMoney": "Rack power density is making air cooling physically impossible — liquid transition re-prices the entire thermal stack, with content per rack up 5-10x.",
+      "whyFail": "Liquid cooling commoditizes fast (it is plumbing at scale); GPU vendors standardize reference designs that squeeze differentiation.",
+      "bottleneck": "Cold-plate and CDU manufacturing capacity; facility retrofit engineering talent.",
+      "metrics": "Liquid-cooling orders and mix\nContent per rack trend\nReference-design wins\nService attach",
+      "redFlags": "Commoditization pressure on CDUs\nOEM in-sourcing thermal\nOrder lumpiness masking share loss"
+    },
+    "construction": {
+      "whyMoney": "The buildout is ultimately a construction project: whoever can deliver substations, shells and fit-outs on schedule owns a decade of backlog at improving margins.",
+      "whyFail": "Skilled-labor inflation eats fixed-price contracts; a capex pause empties the pipeline; execution stumbles on mega-projects.",
+      "bottleneck": "Electricians and craft labor — the least elastic input in the entire stack.",
+      "metrics": "Backlog / RPO growth\nMargin on new bookings\nLabor availability and wage trends\nProject mix shift toward DC/power",
+      "redFlags": "Fixed-price mega-project overruns\nBacklog growth stalling\nLabor cost spiral"
+    },
+    "materials": {
+      "whyMoney": "Copper, rare earths and specialty inputs are the long tail nobody can substitute: grid plus DC demand meets decade-long mine development timelines.",
+      "whyFail": "Commodity beta dominates — a macro downturn swamps the AI demand signal entirely; substitution and thrifting at high prices.",
+      "bottleneck": "Permitting and mine development timelines (7-10 years); refining concentrated in China.",
+      "metrics": "Copper deficit projections vs price\nDC/grid share of demand growth\nInventory levels\nSupply disruptions",
+      "redFlags": "Demand destruction at high prices\nChina growth rolling over\nNew supply arriving early"
+    },
+    "semi-equip": {
+      "whyMoney": "Every new fab and node transition buys the same oligopoly tools: litho, etch, deposition and metrology margins compound through cycles, with services annuities on top.",
+      "whyFail": "WFE is cyclical and China pull-forward reverses; export controls chop a third of the market; a node delay pauses everything.",
+      "bottleneck": "EUV availability, subsystem supply chains, and China policy.",
+      "metrics": "WFE guidance revisions\nLeading-edge vs memory mix\nChina revenue share\nServices growth\nBacklog cover",
+      "redFlags": "China revenue cliff\nMemory capex freeze extending\nLeading-edge push-outs"
+    },
+    "ai-data": {
+      "whyMoney": "Models are hungry and the web is exhausted: labeling, curation, and synthetic data pipelines get paid per token of training fuel, with RLHF expertise scarce.",
+      "whyFail": "Synthetic data and self-play cut the human-labeling market; labs in-source; it is a services business wearing a software multiple.",
+      "bottleneck": "Expert-labeler supply for frontier domains (code, math, science) — commodity labeling is already commoditized.",
+      "metrics": "Revenue per customer and concentration\nGross margin (services vs platform)\nFrontier-lab relationships\nSynthetic data mix",
+      "redFlags": "Anchor customer in-sourcing\nPricing per task collapsing\nLab consolidation shrinking buyers"
+    },
+    "observability": {
+      "whyMoney": "Every AI workload ships with monitoring, security and cost-management attach: usage-based models ride inference growth without touching model risk.",
+      "whyFail": "AI-native challengers rebundle the stack; usage optimization cycles; hyperscalers give away good-enough tooling.",
+      "bottleneck": "Enterprise trust and data gravity — switching an observability stack is a multi-year project.",
+      "metrics": "Net revenue retention\nAI-cohort revenue disclosure\nPlatform module attach\nUsage vs committed contracts",
+      "redFlags": "NRR erosion\nAI features cannibalizing paid SKUs\nSeat-based pricing breaking down"
+    },
+    "databases": {
+      "whyMoney": "AI apps need governed, queryable data with vector search bolted in: the platforms holding enterprise data tax every RAG pipeline built on top.",
+      "whyFail": "Postgres eats everything from below; hyperscaler-native services bundle; consumption models cut both ways in downturns.",
+      "bottleneck": "Data gravity and governance requirements — the data is already in someone's platform.",
+      "metrics": "Consumption growth and NRR\nAI workload attach\nCompetitive win rates vs Databricks/Postgres\nMargin trajectory",
+      "redFlags": "Consumption optimization waves\nOpen-source parity\nAI workloads landing elsewhere"
+    },
+    "edge": {
+      "whyMoney": "Inference moves on-device for latency, privacy and cost: NPU content raises silicon value per phone, PC, car and camera — licensing and chip vendors both win.",
+      "whyFail": "Killer on-device AI apps keep not arriving; cloud inference gets too cheap; content gains get competed away in mature markets.",
+      "bottleneck": "Power-efficient NPU design and the software toolchains that make heterogeneous compute usable.",
+      "metrics": "NPU content per device trend\nAI-PC / AI-phone mix\nAuto design-win pipeline\nRoyalty per unit",
+      "redFlags": "AI features failing to drive upgrades\nContent pricing competed away\nAuto programs slipping"
+    },
+    "robotics": {
+      "whyMoney": "Embodied AI is the next compute sink: if foundation models crack manipulation, robots become the largest silicon and sensor market ever created.",
+      "whyFail": "The demo-to-deployment gap stays wide for another decade; unit economics never close against human labor; capital dries up.",
+      "bottleneck": "Training data for the physical world; reliability at 99.99%; cost-down of actuators and sensors.",
+      "metrics": "Deployed units generating revenue\nCost per robot trend\nTask reliability benchmarks\nBacklog from real customers",
+      "redFlags": "Pilot purgatory (demos, no deployments)\nCash burn without unit economics\nHumanoid hype outrunning capability"
+    },
+    "financing": {
+      "whyMoney": "Someone must fund a multi-trillion-dollar buildout: private credit and infra funds collect fees and spreads on data-center debt, GPUs and power deals.",
+      "whyFail": "They are the leverage in the system — if AI cash flows disappoint, the credit losses land here first; spread compression as everyone piles in.",
+      "bottleneck": "Deal quality: underwriting GPU collateral and merchant power is genuinely new territory.",
+      "metrics": "Fee-related earnings growth\nInfra/credit fundraising\nDC-related deployment volume\nRealized spreads and default rates",
+      "redFlags": "GPU-collateralized loan losses\nSpread compression\nFundraising slowdown\nMark-downs on infra books"
+    }
+  },
+  "moat": {
+    "neoclouds": {
+      "title": "NEOCLOUDS — WHAT ACTUALLY DIFFERS",
+      "items": [
+        {"ticker": "CRWV", "type": "moonshot", "makes": "GPU cloud at hyperscale — the largest independent NVIDIA fleet, contracted to Microsoft/OpenAI.", "moat": "Scale, NVIDIA relationship (allocation + investment), and multi-year take-or-pay backlog.", "different": "The only neocloud operating at genuine hyperscale with anchor contracts to match.", "valueChain": "Contracted GPU capacity", "bull": "Backlog converts and diversifies; refinancing keeps working; becomes the fourth cloud.", "bear": "Leverage + customer concentration + GPU depreciation is a fragile tripod."},
+        {"ticker": "NBIS", "type": "moonshot", "makes": "Full-stack AI cloud (ex-Yandex) plus data services and edge bets.", "moat": "Real engineering culture and owned software stack, not just racks; strong cash position from the Yandex unwind.", "different": "Builds like a tech company, not a datacenter REIT — software differentiation.", "valueChain": "AI cloud + services", "bull": "Microsoft-scale deals repeat; capacity milestones land; software margin on top of compute.", "bear": "Sub-scale vs giants; must keep raising to keep building."},
+        {"ticker": "IREN", "type": "moonshot", "makes": "Owned renewable-powered sites converting from BTC mining to AI cloud.", "moat": "Cheap owned power and land bank with grid connections already secured.", "different": "Power-first: owns the electrons rather than renting them.", "valueChain": "Power + GPU hosting", "bull": "Conversion economics beat building new; AI contracts fill capacity at software-like ROIC.", "bear": "Two-business identity crisis; GPU financing risk on a miner balance sheet."},
+        {"ticker": "APLD", "type": "moonshot", "makes": "Purpose-built AI campuses (Ellendale) leased to neoclouds/hyperscalers.", "moat": "Speed to energized capacity in a power-short market; Macquarie capital partnership.", "different": "The landlord model — builds and leases shells rather than operating GPUs.", "valueChain": "DC development + leasing", "bull": "Ellendale leases up fully financed; repeatable campus playbook.", "bear": "Highest leverage in the group; single-project, single-tenant concentration."},
+        {"ticker": "CORZ", "type": "cyclical", "makes": "Post-bankruptcy HPC hosting; large CoreWeave colocation contracts.", "moat": "Existing energized sites — scarce, immediately monetizable capacity.", "different": "Restructured balance sheet renting to the neocloud rather than competing with it.", "valueChain": "Colocation for GPU tenants", "bull": "Contract expansions and strategic interest keep re-rating the asset base.", "bear": "One tenant is most of the story; power costs and renewal terms can turn."}
+      ]
+    },
+    "semi-equip": {
+      "title": "SEMI EQUIPMENT — WHAT ACTUALLY DIFFERS",
+      "items": [
+        {"ticker": "ASML", "type": "core", "makes": "Lithography — EUV and High-NA; the only maker of leading-edge litho on earth.", "moat": "A literal monopoly with a 20-year technology lead and an irreplaceable supplier network (Zeiss).", "different": "No competitor exists; every leading-edge roadmap routes through it.", "valueChain": "Litho monopoly", "bull": "High-NA extends the monopoly a decade; 2026-27 order inflection on N2/18A.", "bear": "Order lumpiness, China DUV cliff, and customer capex discipline."},
+        {"ticker": "AMAT", "type": "core", "makes": "Broadest portfolio: deposition, etch, implant, CMP, metrology, packaging.", "moat": "Breadth + scale — sells into every fab regardless of which node or memory type wins.", "different": "The diversified index of WFE; least single-technology risk.", "valueChain": "Broadline WFE", "bull": "GAA + backside power + packaging inflections all expand its served market.", "bear": "China exposure and memory cyclicality still swing the P&L."},
+        {"ticker": "LRCX", "type": "core", "makes": "Etch and deposition; dominant in high-aspect-ratio NAND and HBM TSV etch.", "moat": "Process-of-record lock-in at memory makers; services annuity on the installed base.", "different": "The most memory-levered of the majors — highest torque to a memory recovery.", "valueChain": "Etch/dep + services", "bull": "NAND recovery plus HBM capacity buildout double-hits its sweet spot.", "bear": "Memory capex discipline caps the upcycle; China restrictions bite."},
+        {"ticker": "KLAC", "type": "core", "makes": "Process control — inspection and metrology; the yield police of every fab.", "moat": "Near-monopoly in optical inspection; highest margins in WFE; data moat from every wafer inspected.", "different": "Sells certainty, not throughput — spend rises as nodes get harder regardless of unit growth.", "valueChain": "Process control", "bull": "Inspection intensity rises every node; packaging metrology is a new leg.", "bear": "Largest China mix among majors; leading-edge delays hit hardest."},
+        {"ticker": "CAMT", "type": "picks", "makes": "Inspection and metrology for advanced packaging — HBM stacks and chiplets.", "moat": "Focused leadership in a niche the majors under-served until it exploded.", "different": "A pure small-cap play on packaging inspection, not front-end WFE.", "valueChain": "Packaging inspection", "bull": "HBM4 and chiplet complexity multiply inspection steps per device.", "bear": "KLA/Onto push into the niche; lumpy orders from few customers."}
+      ]
+    }
+  }
+}

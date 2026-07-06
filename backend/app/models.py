@@ -106,6 +106,24 @@ class DailyReviewRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ResearchWorkspace(SQLModel, table=True):
+    """Durable editable state for a research module (e.g. the AI Buildout
+    cockpit). Single-user, local-first: the whole workspace is one JSON blob
+    plus a monotonically increasing ``revision`` used for optimistic-concurrency
+    checks on save. ``schema_version`` tracks the seed shape so newer seed
+    defaults can be deep-merged into saved data without clobbering user edits."""
+
+    __tablename__ = "research_workspace"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    slug: str = Field(index=True, unique=True)          # "ai-buildout"
+    schema_version: int = Field(default=1)
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = Field(default=0)                    # bumped on every save
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class JobRun(SQLModel, table=True):
     """Durable status for import, enrichment, and path computation jobs."""
     __tablename__ = "job_run"

@@ -342,6 +342,7 @@ function SyncCenterDrawer({
                     checked={forceAll}
                     onChange={(e) => setForceAll(e.target.checked)}
                     className="accent-emerald-500"
+                    suppressHydrationWarning
                   />
                   Force re-run existing enrichment/path metrics
                 </label>
