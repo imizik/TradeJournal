@@ -189,12 +189,15 @@ These are present in the repo right now and may still be in flux:
 - Fill enrichment pipeline is live:
   - `backend/app/engine/enricher.py` fetches Polygon data and computes Black-Scholes greeks.
   - `backend/app/engine/alpaca_enricher.py` computes Alpaca-derived fill market context in `fill_market_context`.
-  - `backend/app/engine/trade_path.py` computes trade-level path metrics in `trade_path_metrics`.
+  - `backend/app/engine/behavior.py` computes trader-state sequence metrics (entries/PnL/loss streak so far today, minutes since last exit, open-position count, re-entry-after-loss) from the journal's own history; written onto `fill_market_context` during Alpaca enrichment.
+  - `backend/app/engine/trade_path.py` computes trade-level path metrics in `trade_path_metrics`, including ATR-normalized MFE/MAE multiples and first-order greeks PnL attribution for options (`attr_delta/gamma/theta/vega/residual_pnl`, `entry_iv`/`exit_iv`).
+  - "At fill" daily indicators (both the Polygon fields on `fill` and the Alpaca fields on `fill_market_context`) intentionally use the last completed daily bar strictly BEFORE the fill date; the fill day's own daily value is computed on that day's close and would leak the future. Same for hourly EMA-9 (prior completed hour). Do not "fix" this back.
+  - Polygon minute/hour bar keys use real America/New_York conversion (zoneinfo). Fills enriched before this fix during EST months have underlying/VWAP/greeks from one hour early; a forced re-enrich corrects them from cache.
   - `backend/app/engine/jobs.py` wraps long enrichment/path work in durable `job_run` rows.
   - Polygon responses cache to `backend/data/polygon_cache/`.
   - Alpaca bars cache to `backend/data/alpaca_cache/`.
   - Alpaca daily cache validity must cover the requested date range, not just be young by file age.
-  - Local SQLite enrichers commit incrementally to avoid locking `job_run` progress updates.
+  - Enrichers/path metrics commit in batches (~10 groups / 25 trades) and `job_run` progress writes are throttled to ~2s via `_throttled_progress` in `jobs.py` — per-item commits/updates were a SQLite-era pattern that costs a network round trip each on hosted Postgres. SQLite stays safe because its write lock is only taken at commit.
 - Trade detail UI displays Alpaca context and audit/path panels. Enrichment fields remain nullable and should display as missing when unavailable.
 
 If behavior looks inconsistent between tests and code, check whether the file is part of this active working tree set before assuming the committed history is wrong.
@@ -414,18 +417,23 @@ The report work is centered on understanding:
 - If a change touches the UI tables, prefer reusing the extracted table components instead of duplicating table logic.
 - Avoid frontend N+1 calls; batch data loading or extend shared API responses when practical.
 - Fill enrichment fields are all nullable; always guard with null checks before displaying or passing to AI.
+- `fill.email_subject`/`email_body_text` are legacy write-only payloads. Every multi-row `select(Fill)` must pass `.options(*FILL_LIGHT)` (from `app.models`), and fill-returning endpoints must respond with `FillOut`, never raw `Fill` — FastAPI dumps all model fields, which would lazy-load one email body per row (metered egress on Neon). `GET /fills` takes `limit` (default 2000) and `offset`.
+- Frontend status/summary polls skip hidden tabs and idle at 30–60s; keep new polling loops on that pattern.
 - Alpaca context is fill-level. Trade path metrics are separate and require the Path Metrics job.
+- Greeks PnL attribution lives on `trade_path_metrics` and depends on Polygon-enriched entry/exit fill greeks; when backfilling, run Polygon enrichment before the path job. Attribution fields are options-only and all nullable.
+- Sequence metrics on `fill_market_context` are derived from `trade` rows, so trades must be rebuilt before Alpaca enrichment runs (the sync pipeline already orders it this way).
 - Trade path metrics now prefetch minute bars batched by day, then fall back to cache-only per-day reads; preserve that shape and avoid reintroducing per-trade/day network fetch loops.
 - Normal rebuilds reuse trade path metrics instead of recomputing all of them. `_rebuild_trades()` in `backend/app/routers/fills.py` snapshots `trade_path_metrics`, does the full clear+rebuild, then re-inserts only rows whose `inputs_fingerprint` (status + fills hash; see `trade_inputs_fingerprint` in `trade_path.py`) still matches the rebuilt trade. Dirty/orphaned rows are dropped so the path job recomputes just those. Use `_rebuild_trades(..., preserve_path_metrics=True)` for incremental rebuilds; only the destructive resync paths (which re-import fills with new ids) should call `_clear_derived_trade_data` + `_persist_rebuild` directly.
 - The dashboard Alpaca "All history" control should send `range=all&force=true`; `force` alone only reprocesses the currently selected range.
 - If recent trades have underlying/VWAP but missing RSI/EMA/MACD/ATR, inspect stale Alpaca daily cache coverage before changing indicator math.
 - Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
 - Backend port is usually 8000. Use 8080 only when 8000 is occupied, and keep OAuth/API URLs in sync.
-- Polygon cache lives at `backend/data/polygon_cache/`. Delete a cache file to force a re-fetch for that ticker/date.
+- Polygon cache lives at `backend/data/polygon_cache/`. Delete a cache file to force a re-fetch for that ticker/date. Empty responses are also cached as `{"_empty_cached_at": ts}` markers (1 year for finalized history, 7 days for indicator series) so dead tickers/days stop burning the rate limit every sync; deleting the marker file forces a retry.
 - Alpaca cache lives at `backend/data/alpaca_cache/`. Daily cache files must be refreshed when they do not cover the requested date range.
 - For SQLite, avoid long write transactions in historical jobs; progress updates to `job_run` can otherwise hit `database is locked`.
 - Update `CLAUDE.md` and `AGENTS.md` together when project scope changes materially.
 - Webull raw events are persisted before normalization. Preserve idempotency on `webull_raw_event.event_id` and `Fill.raw_email_id = webull:{event_id}`.
 - Sync Center should treat `webull_listener` as a persistent listener, not a blocking finite sync job.
 - Sync pipeline success does not imply Polygon enrichment finished; full pipeline and Gmail push intentionally launch Polygon in the background and only wait for Alpaca/path work.
+- The full pipeline skips the trade rebuild step when Gmail sync saves 0 new fills (fill edits rebuild inline in their endpoint; manual rebuild stays available in the Sync Center). Enrichment steps still run and self-select missing work.
 - Daily review is intentionally NOT part of "Sync Everything" (`_run_pipeline`) or the Gmail push pipeline. It is generated only on explicit request: from the daily page, or by running the standalone `daily_review` job in the Sync Center. Do not re-add it to the pipelines.

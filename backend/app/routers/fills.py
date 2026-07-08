@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import not_
 from sqlmodel import Session, delete, select
@@ -23,7 +23,7 @@ from app.engine.jobs import (
     running_job,
 )
 from app.engine.reconstructor import FillInput, reconstruct
-from app.models import Account, Fill, Trade, TradeFill, TradeTag, TradePathMetrics
+from app.models import Account, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
 
 MANUAL_FILLS_BACKUP = Path(__file__).parent.parent.parent / "data" / "manual_fills.json"
 
@@ -70,7 +70,7 @@ def _clear_derived_trade_data(session: Session) -> None:
 
 def backup_manual_fills(session: Session) -> None:
     """Serialize all manual fills to data/manual_fills.json for crash/delete recovery."""
-    fills = session.exec(select(Fill).where(Fill.raw_email_id.like("manual:%"))).all()
+    fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.raw_email_id.like("manual:%"))).all()
     data = [
         {
             "id": str(f.id),
@@ -165,7 +165,7 @@ def _import_fills_from_gmail(session: Session, *, start_enrichment: bool = True)
     known_ids: set[str] = {raw_id for raw_id in session.exec(select(Fill.raw_email_id)).all() if raw_id}
     log.info("Loaded %d known email IDs", len(known_ids))
 
-    latest_fill = session.exec(select(Fill).order_by(Fill.executed_at.desc())).first()
+    latest_fill = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at.desc())).first()
     since_date: str | None = None
     if latest_fill and latest_fill.executed_at:
         d = latest_fill.executed_at.date() - timedelta(days=1)
@@ -240,7 +240,7 @@ def _import_fills_from_gmail(session: Session, *, start_enrichment: bool = True)
 
 
 def _persist_rebuild(session: Session, anomalies_label: str) -> tuple[int, list[str]]:
-    fills = session.exec(select(Fill).order_by(Fill.executed_at)).all()
+    fills = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at)).all()
     if not fills:
         return 0, []
 
@@ -307,7 +307,7 @@ def _current_trade_fingerprints(session: Session) -> dict[uuid.UUID, str]:
         return {}
     trade_fills = session.exec(select(TradeFill)).all()
     fill_ids = [tf.fill_id for tf in trade_fills]
-    fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all() if fill_ids else []
+    fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all() if fill_ids else []
     fill_by_id = {f.id: f for f in fills}
     fills_by_trade: dict[uuid.UUID, list[Fill]] = {}
     for tf in trade_fills:
@@ -437,9 +437,20 @@ def _validated_fill_values(body: FillCreate, session: Session) -> dict[str, obje
     }
 
 
-@router.get("", response_model=list[Fill])
-async def get_fills(session: Session = Depends(get_session)):
-    return session.exec(select(Fill).order_by(Fill.executed_at.desc())).all()
+@router.get("", response_model=list[FillOut])
+async def get_fills(
+    limit: int = Query(default=2000, ge=1, le=20000),
+    offset: int = Query(default=0, ge=0),
+    session: Session = Depends(get_session),
+):
+    rows = session.exec(
+        select(Fill)
+        .options(*FILL_LIGHT)
+        .order_by(Fill.executed_at.desc())
+        .offset(offset)
+        .limit(limit)
+    ).all()
+    return [FillOut.model_validate(r) for r in rows]
 
 
 @router.post("", response_model=FillCreateResponse)
@@ -542,12 +553,12 @@ async def resync_all(session: Session = Depends(get_session)):
     }
 
 
-@router.get("/{fill_id}", response_model=Fill)
+@router.get("/{fill_id}", response_model=FillOut)
 async def get_fill(fill_id: uuid.UUID, session: Session = Depends(get_session)):
-    fill = session.get(Fill, fill_id)
+    fill = session.get(Fill, fill_id, options=list(FILL_LIGHT))
     if not fill:
         raise HTTPException(status_code=404, detail="Fill not found")
-    return fill
+    return FillOut.model_validate(fill)
 
 
 @router.put("/{fill_id}", response_model=FillCreateResponse)

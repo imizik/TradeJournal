@@ -39,6 +39,7 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 RISK_FREE_RATE = float(os.environ.get("RISK_FREE_RATE", "0.0372"))  # override via .env
 ET = ZoneInfo("America/New_York")
+UTC_TZ = ZoneInfo("UTC")
 
 
 # ---------------------------------------------------------------------------
@@ -69,12 +70,25 @@ def _cache_path(key: str) -> Path:
     return CACHE_DIR / f"{safe}.json"
 
 
-def _polygon_get(path: str, params: dict) -> dict:
-    """GET from Polygon, caching by (path + sorted params). Retries on 429."""
+def _polygon_get(path: str, params: dict, empty_ttl: float | None = None) -> dict:
+    """GET from Polygon, caching by (path + sorted params). Retries on 429.
+
+    empty_ttl: if set, empty responses are cached as a timestamp marker for
+    that many seconds, so permanently data-less requests (delisted tickers,
+    days Polygon has no bars for) stop burning the ~13s/call rate-limit budget
+    on every sync. If None, empty responses are never cached (recent data may
+    still be published later).
+    """
     cache_key = path + "_" + "_".join(f"{k}={v}" for k, v in sorted(params.items()))
     cp = _cache_path(cache_key)
     if cp.exists():
-        return json.loads(cp.read_text())
+        data = json.loads(cp.read_text())
+        empty_at = data.get("_empty_cached_at")
+        if empty_at is None:
+            return data
+        if empty_ttl is not None and time.time() - float(empty_at) < empty_ttl:
+            return {}
+        # Stale empty marker (or caller now disallows empty caching) — refetch.
 
     url = f"https://api.polygon.io{path}"
     req_params = {**params, "apiKey": POLYGON_API_KEY}
@@ -99,7 +113,6 @@ def _polygon_get(path: str, params: dict) -> dict:
             continue
         resp.raise_for_status()
         data = resp.json()
-        # Only cache non-empty responses so today's missing bars get retried next sync
         results = data.get("results")
         has_data = (
             (isinstance(results, list) and len(results) > 0)
@@ -107,9 +120,18 @@ def _polygon_get(path: str, params: dict) -> dict:
         )
         if has_data:
             cp.write_text(json.dumps(data))
+        elif empty_ttl is not None:
+            cp.write_text(json.dumps({"_empty_cached_at": time.time()}))
         return data
 
     raise RuntimeError(f"Polygon request failed after 5 retries: {path}")
+
+
+# Empty-response cache lifetimes. Finalized history that came back empty will
+# never appear (delisted ticker, no coverage there) — cache that for a year.
+# Indicator series have no date in their cache key, so retry weekly.
+_EMPTY_TTL_FINAL = 365 * 86400.0
+_EMPTY_TTL_SERIES = 7 * 86400.0
 
 
 def fetch_minute_bars(ticker: str, day: date) -> dict[str, dict]:
@@ -121,16 +143,18 @@ def fetch_minute_bars(ticker: str, day: date) -> dict[str, dict]:
         return {}
 
     date_str = day.strftime("%Y-%m-%d")
+    # Sessions more than a few days old are finalized: an empty response there
+    # is permanent, so cache the emptiness instead of retrying every sync.
+    empty_ttl = _EMPTY_TTL_FINAL if day < datetime.now(ET).date() - timedelta(days=3) else None
     data = _polygon_get(
         f"/v2/aggs/ticker/{ticker}/range/1/minute/{date_str}/{date_str}",
         {"adjusted": "true", "sort": "asc", "limit": 1000},
+        empty_ttl=empty_ttl,
     )
     bars: dict[str, dict] = {}
     for bar in data.get("results", []):
-        dt = datetime.utcfromtimestamp(bar["t"] / 1000)
-        # EDT = UTC-4, EST = UTC-5; approximate with -4 (covers DST/non-DST close enough)
-        et_hour = (dt.hour - 4) % 24
-        key = f"{et_hour:02d}:{dt.minute:02d}"
+        dt = datetime.fromtimestamp(bar["t"] / 1000, tz=UTC_TZ).astimezone(ET)
+        key = f"{dt.hour:02d}:{dt.minute:02d}"
         bars[key] = {"close": bar["c"], "vwap": bar.get("vw")}
     return bars
 
@@ -146,13 +170,12 @@ def fetch_hourly_indicator_series(ticker: str, indicator: str, **kwargs) -> dict
         "limit": 5000,
         **kwargs,
     }
-    data = _polygon_get(f"/v1/indicators/{indicator}/{ticker}", params)
+    data = _polygon_get(f"/v1/indicators/{indicator}/{ticker}", params, empty_ttl=_EMPTY_TTL_SERIES)
 
     result: dict[str, float] = {}
     for entry in data.get("results", {}).get("values", []):
-        dt = datetime.utcfromtimestamp(entry["timestamp"] / 1000)
-        et_hour = (dt.hour - 4) % 24
-        key = f"{dt.strftime('%Y-%m-%d')} {et_hour:02d}"
+        dt = datetime.fromtimestamp(entry["timestamp"] / 1000, tz=UTC_TZ).astimezone(ET)
+        key = f"{dt.strftime('%Y-%m-%d')} {dt.hour:02d}"
         result[key] = entry["value"]
     return result
 
@@ -168,11 +191,11 @@ def fetch_indicator_series(ticker: str, indicator: str, **kwargs) -> dict[str, f
         "limit": 5000,
         **kwargs,
     }
-    data = _polygon_get(f"/v1/indicators/{indicator}/{ticker}", params)
+    data = _polygon_get(f"/v1/indicators/{indicator}/{ticker}", params, empty_ttl=_EMPTY_TTL_SERIES)
 
     result: dict[str, float] = {}
     for entry in data.get("results", {}).get("values", []):
-        dt_str = datetime.utcfromtimestamp(entry["timestamp"] / 1000).strftime("%Y-%m-%d")
+        dt_str = datetime.fromtimestamp(entry["timestamp"] / 1000, tz=UTC_TZ).astimezone(ET).strftime("%Y-%m-%d")
         result[dt_str] = entry["value"]
     return result
 
@@ -187,12 +210,12 @@ def fetch_macd_series(ticker: str) -> tuple[dict[str, float], dict[str, float]]:
         "signal_window": 9,
         "limit": 5000,
     }
-    data = _polygon_get(f"/v1/indicators/macd/{ticker}", params)
+    data = _polygon_get(f"/v1/indicators/macd/{ticker}", params, empty_ttl=_EMPTY_TTL_SERIES)
 
     macd: dict[str, float] = {}
     signal: dict[str, float] = {}
     for entry in data.get("results", {}).get("values", []):
-        dt_str = datetime.utcfromtimestamp(entry["timestamp"] / 1000).strftime("%Y-%m-%d")
+        dt_str = datetime.fromtimestamp(entry["timestamp"] / 1000, tz=UTC_TZ).astimezone(ET).strftime("%Y-%m-%d")
         macd[dt_str] = entry["value"]
         signal[dt_str] = entry["signal"]
     return macd, signal
@@ -258,6 +281,17 @@ def _time_to_expiry(executed_at: datetime, expiration: date) -> float:
 # ---------------------------------------------------------------------------
 # Main enrichment logic
 # ---------------------------------------------------------------------------
+
+def _prior_value(series: dict[str, float], day_str: str) -> Optional[float]:
+    """Latest series value strictly before ``day_str``.
+
+    Daily indicator values are computed on that day's close, which does not
+    exist yet at fill time — using the fill day's own value would leak the
+    future into "at fill" fields. The last completed day is the honest value.
+    """
+    prior = [k for k in series if k < day_str]
+    return series[max(prior)] if prior else None
+
 
 def _find_bar(bars: dict[str, dict], executed_at: datetime) -> Optional[dict]:
     """Find the closest minute bar dict at or before the fill time."""
@@ -364,24 +398,32 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
                     fill.theta_at_fill = greeks.get("theta")
                     fill.vega_at_fill = greeks.get("vega")
 
-            # Daily indicators
-            fill.sma_20_at_fill = sma_20_cache.get(ticker, {}).get(day_str)
-            fill.sma_50_at_fill = sma_50_cache.get(ticker, {}).get(day_str)
-            fill.ema_9_at_fill = ema_9_cache.get(ticker, {}).get(day_str)
-            fill.ema_20_at_fill = ema_20_cache.get(ticker, {}).get(day_str)
-            fill.rsi_14_at_fill = rsi_cache.get(ticker, {}).get(day_str)
-            fill.macd_at_fill = macd_cache.get(ticker, {}).get(day_str)
-            fill.macd_signal_at_fill = macd_signal_cache.get(ticker, {}).get(day_str)
+            # Daily indicators: last completed day before the fill (the fill
+            # day's own value is computed on its close — look-ahead at fill time)
+            fill.sma_20_at_fill = _prior_value(sma_20_cache.get(ticker, {}), day_str)
+            fill.sma_50_at_fill = _prior_value(sma_50_cache.get(ticker, {}), day_str)
+            fill.ema_9_at_fill = _prior_value(ema_9_cache.get(ticker, {}), day_str)
+            fill.ema_20_at_fill = _prior_value(ema_20_cache.get(ticker, {}), day_str)
+            fill.rsi_14_at_fill = _prior_value(rsi_cache.get(ticker, {}), day_str)
+            fill.macd_at_fill = _prior_value(macd_cache.get(ticker, {}), day_str)
+            fill.macd_signal_at_fill = _prior_value(macd_signal_cache.get(ticker, {}), day_str)
 
-            # Hourly EMA-9: key is "YYYY-MM-DD HH" in ET
-            hour_key = f"{day_str} {fill.executed_at.hour:02d}"
+            # Hourly EMA-9: last completed hour bar (the fill's own hour bar
+            # closes after the fill), key "YYYY-MM-DD HH" in ET
+            prior_hour = fill.executed_at - timedelta(hours=1)
+            hour_key = f"{prior_hour.strftime('%Y-%m-%d')} {prior_hour.hour:02d}"
             fill.ema_9h_at_fill = ema_9h_cache.get(ticker, {}).get(hour_key)
 
             session.add(fill)
             enriched += 1
 
-        session.commit()
+        # Batch commits: one per (ticker, day) group is a network round trip
+        # per group on hosted Postgres. SQLite only takes its write lock at
+        # commit time, so batching is safe there too.
+        if (i + 1) % 10 == 0:
+            session.commit()
         fills_done += len(day_fills)
 
+    session.commit()
     log.info("Enriched %d fills", enriched)
     return enriched

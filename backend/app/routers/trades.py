@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import Fill, Tag, Trade, TradeFill, TradeTag
+from app.models import FILL_LIGHT, Fill, FillOut, Tag, Trade, TradeFill, TradeTag
 
 router = APIRouter()
 
@@ -41,7 +41,7 @@ async def get_trade(trade_id: uuid.UUID, session: Session = Depends(get_session)
     return trade
 
 
-@router.get("/fills/bulk", response_model=dict[str, list[Fill]])
+@router.get("/fills/bulk", response_model=dict[str, list[FillOut]])
 async def get_bulk_trade_fills(ids: str, session: Session = Depends(get_session)):
     """Return fills for multiple trades in two queries. ids is a comma-separated list of trade UUIDs."""
     trade_ids = [uuid.UUID(i.strip()) for i in ids.split(",") if i.strip()]
@@ -56,18 +56,18 @@ async def get_bulk_trade_fills(ids: str, session: Session = Depends(get_session)
     fill_ids = list(fill_id_to_trade_id.keys())
 
     fills = session.exec(
-        select(Fill).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)
+        select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)
     ).all() if fill_ids else []
 
-    result: dict[str, list[Fill]] = {str(tid): [] for tid in trade_ids}
+    result: dict[str, list[FillOut]] = {str(tid): [] for tid in trade_ids}
     for fill in fills:
         tid = str(fill_id_to_trade_id[fill.id])
-        result[tid].append(fill)
+        result[tid].append(FillOut.model_validate(fill))
 
     return result
 
 
-@router.get("/{trade_id}/fills", response_model=list[Fill])
+@router.get("/{trade_id}/fills", response_model=list[FillOut])
 async def get_trade_fills(trade_id: uuid.UUID, session: Session = Depends(get_session)):
     trade = session.get(Trade, trade_id)
     if not trade:
@@ -79,9 +79,9 @@ async def get_trade_fills(trade_id: uuid.UUID, session: Session = Depends(get_se
     fill_ids = [tf.fill_id for tf in trade_fills]
 
     fills = session.exec(
-        select(Fill).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)
+        select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)
     ).all()
-    return fills
+    return [FillOut.model_validate(f) for f in fills]
 
 
 class TagBody(BaseModel):
@@ -127,7 +127,7 @@ async def review_trade(trade_id: uuid.UUID, session: Session = Depends(get_sessi
     ).all()
     fill_ids = [tf.fill_id for tf in trade_fills]
     fills = session.exec(
-        select(Fill).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)
+        select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)
     ).all()
 
     # Find companion trades (same ticker, opened within 5 min of this trade)

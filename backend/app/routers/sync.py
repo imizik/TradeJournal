@@ -227,22 +227,40 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         return
     try:
         _set_job(pipeline_id, status="running", started_at=_now(), current="Starting full sync pipeline")
-        steps: list[tuple[str, Callable[[Session, uuid.UUID], tuple[int, str]]]] = [
-            (JOB_GMAIL_SYNC, _run_gmail_sync),
-            (JOB_FILL_CHECK, _run_fill_check),
-            (JOB_TRADE_REBUILD, _run_trade_rebuild),
-        ]
+
+        import_result: dict[str, int] = {}
+
+        def _gmail_step(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
+            result = _import_fills_from_gmail(session, start_enrichment=False)
+            import_result["saved"] = int(result["saved"])
+            import_result["skipped"] = int(result["skipped"])
+            done = import_result["saved"] + import_result["skipped"]
+            return done, f"Imported {result['saved']} new fill(s), skipped {result['skipped']}."
+
         processed = 0
-        for index, (job_type, fn) in enumerate(steps, start=1):
+
+        def _run_step(index: int, job_type: str, fn: Callable[[Session, uuid.UUID], tuple[int, str]]) -> None:
+            nonlocal processed
             _set_job(pipeline_id, done=index - 1, total=6, current=f"Running {job_type}")
             with Session(engine) as session:
                 child = _create_run(session, job_type, f"Pipeline step {index}")
             _run_simple_job(child.id, fn)
             with Session(engine) as session:
-                child = session.get(JobRun, child.id)
-                if child and child.status == "failed":
-                    raise RuntimeError(child.error or f"{job_type} failed")
-                processed += child.enriched if child else 0
+                row = session.get(JobRun, child.id)
+                if row and row.status == "failed":
+                    raise RuntimeError(row.error or f"{job_type} failed")
+                processed += row.enriched if row else 0
+
+        _run_step(1, JOB_GMAIL_SYNC, _gmail_step)
+        _run_step(2, JOB_FILL_CHECK, _run_fill_check)
+        if import_result.get("saved", 0) > 0:
+            _run_step(3, JOB_TRADE_REBUILD, _run_trade_rebuild)
+        # No new fills → derived trades already match the fill history, so the
+        # full clear+rebuild is skipped. Fill edits rebuild inline in their own
+        # endpoint, and the Sync Center still offers rebuild as a manual job.
+        # Enrichment steps below always run: they self-select missing work
+        # (e.g. yesterday's fills whose bars only became available today) and
+        # no-op instantly when there is nothing to do.
 
         _set_job(pipeline_id, done=3, total=6, current="Running market enrichment")
         # Polygon's free tier is rate-limited to ~5 req/min, so a full enrich can

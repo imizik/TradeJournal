@@ -18,7 +18,6 @@ from sqlmodel import Session, select
 
 from app.engine.alpaca import (
     ALPACA_DATA_FEED,
-    _latest_completed_daily_bar_date,
     alpaca_configured,
     fetch_daily_bars,
     fetch_minute_bars_for_date,
@@ -33,6 +32,7 @@ from app.engine.indicators import (
     get_previous_day_data,
     _pct_diff,
 )
+from app.engine.behavior import SequenceState
 from app.models import Fill, FillMarketContext
 
 log = logging.getLogger(__name__)
@@ -96,6 +96,9 @@ def enrich_fills_alpaca(
     for ticker, bars in daily_bars.items():
         daily_indicators[ticker] = compute_daily_indicators(bars)
 
+    # --- 2b. Trader-state sequence metrics (journal-derived, no API) ---
+    sequence = SequenceState(session)
+
     # --- 3. Group fills by date for minute bar batching ---
     by_date: dict[date, list[Fill]] = defaultdict(list)
     for f in fills_with_time:
@@ -123,6 +126,8 @@ def enrich_fills_alpaca(
         for fill in date_fills:
             try:
                 ctx = _build_context(fill, daily_bars, daily_indicators, minute_bars)
+                for key, value in sequence.compute(fill).items():
+                    setattr(ctx, key, value)
                 session.merge(ctx)
                 enriched += 1
             except Exception as e:
@@ -157,12 +162,13 @@ def _build_context(
     bars = minute_bars.get(ticker, [])
     intraday = analyze_minute_bars(bars, fill_dt) if bars else {}
 
-    # Daily indicators for the fill's date. During the current session, today's
-    # final daily candle does not exist yet, so use the latest completed day.
-    daily_indic = daily_indicators.get(ticker, {}).get(day_str, {})
-    latest_completed_daily = _latest_completed_daily_bar_date()
-    if not daily_indic and fill_date > latest_completed_daily:
-        daily_indic = daily_indicators.get(ticker, {}).get(latest_completed_daily.isoformat(), {})
+    # Daily indicators: latest completed day strictly before the fill date.
+    # The fill day's own indicator row is computed on that day's close, which
+    # does not exist yet at fill time — using it would leak the future into
+    # "at entry" fields (and made backfilled values differ from live ones).
+    indic_by_date = daily_indicators.get(ticker, {})
+    prior_days = [k for k in indic_by_date if k < day_str]
+    daily_indic = indic_by_date[max(prior_days)] if prior_days else {}
 
     # Previous day OHLC from daily bars
     prev = get_previous_day_data(daily_bars.get(ticker, []), fill_date)

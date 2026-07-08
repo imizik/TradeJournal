@@ -20,7 +20,7 @@ from sqlmodel import Session, select
 
 from app.engine.alpaca import ALPACA_DATA_FEED, fetch_minute_bars_for_date, fetch_option_bars
 from app.engine.indicators import bars_to_df, _f
-from app.models import Fill, FillMarketContext, Trade, TradePathMetrics
+from app.models import FILL_LIGHT, Fill, FillMarketContext, Trade, TradePathMetrics
 
 log = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def compute_path_metrics_for_trades(
     trade_ids = [t.id for t in closed]
     trade_fills = session.exec(select(TradeFill).where(TradeFill.trade_id.in_(trade_ids))).all()
     fill_ids = [tf.fill_id for tf in trade_fills]
-    fills_list = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all() if fill_ids else []
+    fills_list = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all() if fill_ids else []
     fills_by_id = {f.id: f for f in fills_list}
 
     fills_by_trade: dict = {}
@@ -105,7 +105,14 @@ def compute_path_metrics_for_trades(
         except Exception as e:
             log.warning("Failed path metrics for trade %s: %s", trade.id, e)
 
-        session.commit()
+        # Commit in batches: one commit per trade is a full network round trip
+        # on hosted Postgres (minutes of pure latency across a big run). The
+        # write lock on SQLite is only taken at commit, so batching is safe
+        # there too.
+        if (i + 1) % 25 == 0:
+            session.commit()
+
+    session.commit()
 
     log.info("Trade path metrics: computed %d/%d trades", processed, len(closed))
     return processed
@@ -184,6 +191,7 @@ def _compute(
         if option_path:
             metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
             _apply_option_path(metrics, option_path)
+            _apply_attribution(metrics, trade, entry_fill, exit_fills)
             return metrics
         return None
 
@@ -209,6 +217,7 @@ def _compute(
         )
         metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_skipped_long_window")
         _apply_option_path(metrics, option_path)
+        _apply_attribution(metrics, trade, entry_fill, exit_fills)
         return metrics
 
     # Bars for the trade window + 60m of post-exit. Read from the prefetched
@@ -227,6 +236,7 @@ def _compute(
         if option_path:
             metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
             _apply_option_path(metrics, option_path)
+            _apply_attribution(metrics, trade, entry_fill, exit_fills)
             return metrics
         return None
 
@@ -236,6 +246,7 @@ def _compute(
         if option_path:
             metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
             _apply_option_path(metrics, option_path)
+            _apply_attribution(metrics, trade, entry_fill, exit_fills)
             return metrics
         return None
 
@@ -296,7 +307,20 @@ def _compute(
         post_exit_mfe_60m=post_60m,
         time_to_post_exit_high_minutes=time_to_post_high,
     )
+
+    # ATR-normalized excursions: entry ATR (last completed day) as % of entry
+    # price is the unit, so MFE/MAE are comparable across volatility profiles.
+    entry_atr = entry_ctx.entry_atr_14 if entry_ctx else None
+    if entry_atr and entry_price:
+        atr_pct = float(entry_atr) / entry_price * 100
+        if atr_pct > 0:
+            if mfe_pct is not None:
+                metrics.mfe_atr_multiple = _f(mfe_pct / atr_pct)
+            if mae_pct is not None:
+                metrics.mae_atr_multiple = _f(mae_pct / atr_pct)
+
     _apply_option_path(metrics, option_path)
+    _apply_attribution(metrics, trade, entry_fill, exit_fills)
     return metrics
 
 
@@ -424,6 +448,70 @@ def _apply_option_path(metrics: TradePathMetrics, option_path: dict | None) -> N
         return
     for key, value in option_path.items():
         setattr(metrics, key, value)
+
+
+def _apply_attribution(
+    metrics: TradePathMetrics,
+    trade: Trade,
+    entry_fill: Fill,
+    exit_fills: list[Fill],
+) -> None:
+    """First-order greeks PnL attribution for option trades.
+
+    realized_pnl ≈ delta + gamma + theta + vega + residual, all in dollars and
+    signed for the position (short options flip the sign). Uses the entry
+    fill's Black-Scholes greeks (per-share, theta per day, vega per IV point)
+    and the entry/exit fills' Polygon-enriched underlying prices and IVs. The
+    residual absorbs higher-order terms, path effects, and spread/slippage.
+    """
+    if trade.instrument_type != "option" or not exit_fills:
+        return
+    if trade.realized_pnl is None or not trade.opened_at or not trade.closed_at:
+        return
+    if entry_fill.delta_at_fill is None or entry_fill.underlying_price_at_fill is None:
+        return
+
+    last_exit = max(exit_fills, key=lambda f: f.executed_at)
+    if last_exit.underlying_price_at_fill is None:
+        return
+
+    s_entry = float(entry_fill.underlying_price_at_fill)
+    ds = float(last_exit.underlying_price_at_fill) - s_entry
+    mult = float(trade.contracts or 0) * 100.0  # shares represented
+    if mult <= 0:
+        return
+    sign = 1.0 if entry_fill.side == "buy_to_open" else -1.0
+    hold_days = max(0.0, (trade.closed_at - trade.opened_at).total_seconds() / 86400.0)
+
+    metrics.attr_delta_pnl = _f(sign * float(entry_fill.delta_at_fill) * ds * mult)
+    if entry_fill.gamma_at_fill is not None:
+        metrics.attr_gamma_pnl = _f(sign * 0.5 * float(entry_fill.gamma_at_fill) * ds * ds * mult)
+    if entry_fill.theta_at_fill is not None:
+        metrics.attr_theta_pnl = _f(sign * float(entry_fill.theta_at_fill) * hold_days * mult)
+
+    entry_iv = float(entry_fill.iv_at_fill) if entry_fill.iv_at_fill is not None else None
+    exit_iv = float(last_exit.iv_at_fill) if last_exit.iv_at_fill is not None else None
+    metrics.entry_iv = _f(entry_iv)
+    metrics.exit_iv = _f(exit_iv)
+    if entry_fill.vega_at_fill is not None and entry_iv is not None and exit_iv is not None:
+        # vega is per 1 IV *point*; IVs are stored as decimals
+        metrics.attr_vega_pnl = _f(
+            sign * float(entry_fill.vega_at_fill) * (exit_iv - entry_iv) * 100.0 * mult
+        )
+
+    if None not in (
+        metrics.attr_delta_pnl,
+        metrics.attr_gamma_pnl,
+        metrics.attr_theta_pnl,
+        metrics.attr_vega_pnl,
+    ):
+        explained = (
+            metrics.attr_delta_pnl
+            + metrics.attr_gamma_pnl
+            + metrics.attr_theta_pnl
+            + metrics.attr_vega_pnl
+        )
+        metrics.attr_residual_pnl = _f(float(trade.realized_pnl) - explained)
 
 
 def _option_contract_symbol(ticker: str, expiration: date, option_type: str, strike: float) -> str | None:

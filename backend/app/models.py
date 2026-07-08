@@ -3,6 +3,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from sqlalchemy import Column, Numeric, Text
+from sqlalchemy.orm import defer
 from sqlmodel import Field, Relationship, SQLModel
 
 DECIMAL_18_6 = Numeric(18, 6)
@@ -64,6 +65,46 @@ class Fill(SQLModel, table=True):
 
     account: Optional[Account] = Relationship(back_populates="fills")
     trade_fills: list["TradeFill"] = Relationship(back_populates="fill")
+
+
+class FillOut(SQLModel):
+    """API shape for a fill without the raw-email payload columns.
+
+    Endpoints return this instead of ``Fill`` so response serialization never
+    touches the deferred ``email_subject``/``email_body_text`` attributes —
+    each access would lazy-load a full email body per row.
+    """
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    account_id: uuid.UUID
+    ticker: str
+    instrument_type: str
+    side: str
+    contracts: float
+    price: float
+    executed_at: datetime
+    raw_email_id: str
+    option_type: Optional[str] = None
+    strike: Optional[float] = None
+    expiration: Optional[date] = None
+    iv_at_fill: Optional[float] = None
+    delta_at_fill: Optional[float] = None
+    iv_rank_at_fill: Optional[float] = None
+    underlying_price_at_fill: Optional[float] = None
+    gamma_at_fill: Optional[float] = None
+    theta_at_fill: Optional[float] = None
+    vega_at_fill: Optional[float] = None
+    sma_20_at_fill: Optional[float] = None
+    ema_20_at_fill: Optional[float] = None
+    rsi_14_at_fill: Optional[float] = None
+    macd_at_fill: Optional[float] = None
+    macd_signal_at_fill: Optional[float] = None
+    vwap_at_fill: Optional[float] = None
+    ema_9_at_fill: Optional[float] = None
+    sma_50_at_fill: Optional[float] = None
+    ema_9h_at_fill: Optional[float] = None
 
 
 class Trade(SQLModel, table=True):
@@ -249,6 +290,16 @@ class FillMarketContext(SQLModel, table=True):
     is_itm: Optional[int] = None              # 1 if in the money at entry
     is_otm: Optional[int] = None              # 1 if out of the money at entry
 
+    # Trader-state sequence metrics at fill time, derived from the journal's
+    # own fill/trade history (no external data). Same-day, same-account scope.
+    entries_today_before: Optional[int] = None       # entry fills earlier the same day
+    trades_closed_today_before: Optional[int] = None # trades already closed that day
+    realized_pnl_today_before: Optional[float] = None  # sum of those trades' PnL
+    loss_streak_today_before: Optional[int] = None   # consecutive losses ending at last close
+    minutes_since_last_exit: Optional[int] = None    # since last same-day trade close
+    open_positions_count: Optional[int] = None       # other trades open at fill time
+    is_reentry_after_loss: Optional[int] = None      # same ticker lost within prior 60m
+
 
 class TradePathMetrics(SQLModel, table=True):
     """Underlying and option path metrics for a closed trade. One row per trade."""
@@ -288,6 +339,24 @@ class TradePathMetrics(SQLModel, table=True):
     option_worst_unrealized_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
     option_giveback_from_peak: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
 
+    # ATR-normalized excursions: MFE/MAE as multiples of the entry-day ATR%
+    # (ATR from the last completed daily bar / entry price), so a 1% move on a
+    # quiet mega-cap and a volatile small-cap are comparable.
+    mfe_atr_multiple: Optional[float] = None
+    mae_atr_multiple: Optional[float] = None
+
+    # First-order greeks PnL attribution (options only, dollars, position-signed):
+    # realized_pnl ≈ delta + gamma + theta + vega + residual. Computed from the
+    # entry fill's Black-Scholes greeks and entry/exit IV; residual absorbs
+    # higher-order terms, intraday path effects, and spread/slippage.
+    attr_delta_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    attr_gamma_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    attr_theta_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    attr_vega_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    attr_residual_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    entry_iv: Optional[float] = None          # BS implied vol at entry fill (decimal)
+    exit_iv: Optional[float] = None           # BS implied vol at last exit fill (decimal)
+
     # Hash of the trade's inputs (status + fills) when these metrics were
     # computed. A rebuild reuses this row only when the rebuilt trade's
     # fingerprint still matches; otherwise the row is dropped and recomputed.
@@ -322,3 +391,12 @@ class WebullRawEvent(SQLModel, table=True):
     fill_id: Optional[uuid.UUID] = Field(default=None, foreign_key="fill.id")
     normalize_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     normalize_reason: Optional[str] = None                     # "fill" | "non_trade" | "non_execution" | "duplicate" | "error"
+
+
+# Loader options for bulk Fill queries: skip the legacy raw-email payload
+# columns (write-only history; nothing reads them back). Keeps multi-KB email
+# bodies per row off the wire — metered egress on hosted Postgres. Every
+# multi-row `select(Fill)` should pass `.options(*FILL_LIGHT)`.
+# Defined last: touching Fill's instrumented attributes configures the mappers,
+# which requires every related model above to exist already.
+FILL_LIGHT = (defer(Fill.email_subject), defer(Fill.email_body_text))

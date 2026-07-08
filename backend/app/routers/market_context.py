@@ -23,7 +23,7 @@ from app.engine.jobs import (
     run_job,
     running_job,
 )
-from app.models import Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
+from app.models import FILL_LIGHT, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 router = APIRouter()
 
@@ -170,7 +170,7 @@ async def get_trade_audit(trade_id: uuid.UUID, session: Session = Depends(get_se
 
     tfs = session.exec(select(TradeFill).where(TradeFill.trade_id == trade.id)).all()
     fill_ids = [tf.fill_id for tf in tfs]
-    fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
+    fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all()
 
     ctx_rows = session.exec(
         select(FillMarketContext).where(FillMarketContext.fill_id.in_(fill_ids))

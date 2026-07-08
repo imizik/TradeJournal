@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import DailyReviewRecord, Fill, Trade, TradeFill
+from app.models import FILL_LIGHT, DailyReviewRecord, Fill, Trade, TradeFill
 
 router = APIRouter()
 
@@ -83,7 +83,7 @@ async def create_daily_review(body: DailyReviewRequest, session: Session = Depen
 
     trade_fills = session.exec(select(TradeFill).where(TradeFill.trade_id.in_([trade.id for trade in trades]))).all()
     fill_ids = [tf.fill_id for tf in trade_fills]
-    fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)).all() if fill_ids else []
+    fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)).all() if fill_ids else []
 
     fills_by_id = {fill.id: fill for fill in fills}
     fills_by_trade_id: dict[str, list[Fill]] = {str(trade.id): [] for trade in trades}

@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.database import engine
-from app.models import Fill, FillMarketContext, JobRun, Trade, TradePathMetrics
+from app.models import FILL_LIGHT, Fill, FillMarketContext, JobRun, Trade, TradePathMetrics
 
 log = logging.getLogger(__name__)
 
@@ -283,6 +283,24 @@ def create_webull_listener_job(
     return job
 
 
+def _throttled_progress(job_id: uuid.UUID, min_interval: float = 2.0):
+    """Progress callback that drops job_run writes arriving faster than
+    ``min_interval`` seconds. Each write is a full round trip on hosted
+    Postgres; per-item updates were designed for local SQLite where a
+    commit costs microseconds."""
+    last = 0.0
+
+    def on_progress(done: int, label: str) -> None:
+        nonlocal last
+        now = time.monotonic()
+        if now - last < min_interval:
+            return
+        last = now
+        _set_job(job_id, ignore_locked=True, done=done, current=label)
+
+    return on_progress
+
+
 def run_polygon_enrichment_job(job: JobRun) -> int:
     from app.engine.enricher import enrich_fills
 
@@ -291,13 +309,13 @@ def run_polygon_enrichment_job(job: JobRun) -> int:
     if not fill_ids:
         return 0
 
-    def on_progress(done: int, label: str) -> None:
-        _set_job(job.id, ignore_locked=True, done=done, current=label)
-
-    with Session(engine) as session:
-        fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
+    # expire_on_commit=False: the enrichment loops keep working from objects
+    # loaded up front; default expiry would re-SELECT them from the DB after
+    # every batch commit (a network round trip each on hosted Postgres).
+    with Session(engine, expire_on_commit=False) as session:
+        fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all()
         _set_job(job.id, total=len(fills))
-        return enrich_fills(list(fills), session, on_progress=on_progress)
+        return enrich_fills(list(fills), session, on_progress=_throttled_progress(job.id))
 
 
 def run_alpaca_enrichment_job(job: JobRun) -> int:
@@ -309,15 +327,12 @@ def run_alpaca_enrichment_job(job: JobRun) -> int:
     if not fill_ids:
         return 0
 
-    def on_progress(done: int, label: str) -> None:
-        _set_job(job.id, ignore_locked=True, done=done, current=label)
-
-    with Session(engine) as session:
-        fills = session.exec(select(Fill).where(Fill.id.in_(fill_ids))).all()
+    with Session(engine, expire_on_commit=False) as session:
+        fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all()
         _set_job(job.id, total=len(fills))
         # The job's fill_ids are already filtered to missing/incomplete rows.
         # Process that explicit set even when the row has a partial context.
-        return enrich_fills_alpaca(list(fills), session, on_progress=on_progress, force=True)
+        return enrich_fills_alpaca(list(fills), session, on_progress=_throttled_progress(job.id), force=True)
 
 
 def run_trade_path_job(job: JobRun) -> int:
@@ -329,10 +344,7 @@ def run_trade_path_job(job: JobRun) -> int:
     if not trade_ids:
         return 0
 
-    def on_progress(done: int, label: str) -> None:
-        _set_job(job.id, ignore_locked=True, done=done, current=label)
-
-    with Session(engine) as session:
+    with Session(engine, expire_on_commit=False) as session:
         trades = session.exec(select(Trade).where(Trade.id.in_(trade_ids))).all()
         _set_job(job.id, total=len(trades))
-        return compute_path_metrics_for_trades(list(trades), session, on_progress=on_progress, force=force)
+        return compute_path_metrics_for_trades(list(trades), session, on_progress=_throttled_progress(job.id), force=force)

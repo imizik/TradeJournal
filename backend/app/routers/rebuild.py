@@ -5,7 +5,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import get_session
 from app.engine.reconstructor import FillInput, reconstruct
-from app.models import Fill, Trade, TradeFill, TradeTag
+from app.models import FILL_LIGHT, Fill, Trade, TradeFill, TradeTag
 
 router = APIRouter()
 
@@ -19,7 +19,7 @@ async def post_rebuild(session: Session = Depends(get_session)):
     session.commit()
 
     # 2. Load all fills ordered by executed_at ASC
-    fills = session.exec(select(Fill).order_by(Fill.executed_at)).all()
+    fills = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at)).all()
     if not fills:
         return {"status": "ok", "trades_rebuilt": 0}
 
