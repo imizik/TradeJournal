@@ -115,7 +115,11 @@ export default function DashboardActions() {
 
   useEffect(() => {
     refreshSummary();
-    pollRef.current = setInterval(refreshSummary, summary?.running ? 2000 : 15000);
+    // Fast cadence only while a sync is actually running; idle polling is
+    // slow and skips hidden tabs (each request is metered on hosted Postgres).
+    pollRef.current = setInterval(() => {
+      if (!document.hidden) refreshSummary();
+    }, summary?.running ? 2500 : 60000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };

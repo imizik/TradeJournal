@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
-from app.models import Account, Fill
+from app.models import Account, FILL_LIGHT, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research
 from app.routers.fills import (
     _rebuild_trades,
@@ -43,7 +43,7 @@ def _seed_and_normalize_roth_account() -> None:
         blank_account_ids: list[object] = []
         for blank_account in blank_roth_accounts:
             blank_account_ids.append(blank_account.id)
-            account_fills = session.exec(select(Fill).where(Fill.account_id == blank_account.id)).all()
+            account_fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.account_id == blank_account.id)).all()
             for fill in account_fills:
                 fill.account_id = target.id
                 session.add(fill)

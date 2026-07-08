@@ -170,7 +170,9 @@ export default function StatusPanel({ open, onClose }: Props) {
     }
     fetchJobs();
     fetchCoverage();
-    pollRef.current = setInterval(fetchJobs, 5000);
+    pollRef.current = setInterval(() => {
+      if (!document.hidden) fetchJobs();
+    }, 5000);
     return () => {
       if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     };
@@ -336,7 +338,11 @@ export function useAnyJobRunning(): boolean {
       setRunning(results.some((r) => r.status === "fulfilled" && r.value.running));
     }
     check();
-    const id = setInterval(check, 10000);
+    // 30s idle cadence + skip hidden tabs: this poll runs for the whole app
+    // session and every request is metered egress on hosted Postgres.
+    const id = setInterval(() => {
+      if (!document.hidden) check();
+    }, 30000);
     return () => { mounted = false; clearInterval(id); };
   }, []);
 

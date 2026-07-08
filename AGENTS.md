@@ -99,8 +99,11 @@ Analysis scripts:
 - `raw_email_id` is the dedupe key for imported fills.
 - Manual fills use `manual:` source IDs and are backed up to `backend/data/manual_fills.json`.
 - Enrichment fields are nullable and must be guarded before display, calculations, or AI prompts.
+- Bulk `select(Fill)` queries must pass `.options(*FILL_LIGHT)` and fill-returning endpoints must respond with `FillOut` (not raw `Fill`) so legacy email-body columns stay off the wire — DB egress is metered on hosted Postgres.
 - `job_run` rows are durable status records for import/enrichment/path jobs; do not rely on process-local progress state.
 - Alpaca context is fill-level context in `fill_market_context`; trade-level path metrics are separate rows in `trade_path_metrics`.
+- `fill_market_context` also carries journal-derived trader-state sequence metrics (see `backend/app/engine/behavior.py`); `trade_path_metrics` carries ATR-normalized MFE/MAE and options greeks PnL attribution.
+- "At fill" daily indicators use the last completed daily bar strictly before the fill date (no look-ahead); Polygon bar keys use real ET tz conversion. Preserve both behaviors.
 - Webull raw events are stored first in `webull_raw_event`; normalized fills use `webull:` source IDs.
 - AI review output is stored as JSON on `trade.ai_review` or in `dailyreview.review_json`.
 
