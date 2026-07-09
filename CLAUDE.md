@@ -165,9 +165,13 @@ These are present in the repo right now and may still be in flux:
   - `backend/app/engine/packets.py` builds deterministic premarket/postmarket market reports (indexes detail with VWAP/ORB/premarket/AH, sector rotation, macro gauges incl. ^VIX/^TNX via yfinance, bucketed high-beta universe with `rs_vs_spy`, leaders/laggards, raw Alpaca news).
   - Symbol universe is hand-editable in `backend/data/universe.json` (bucketed execution watchlist, not the market).
   - `backend/app/engine/news.py` wraps Alpaca `/v1beta1/news`; no relevance filtering in Python, so Claude triages headlines.
-  - `backend/mcp_server.py` is a stdio FastMCP server for Claude Desktop with read-only tools for market packets plus journal analysis (`get_market_report`, `get_news`, `get_trades`, `get_stats`, `get_trade_detail`, `get_coverage`, `get_trade_audit`, `get_trade_path_metrics`, `get_fill_contexts`); thin httpx adapter over `localhost:8000`, holds no API keys, logs calls to `backend/data/mcp_log/*.jsonl`.
+  - `backend/mcp_server.py` is a stdio FastMCP server for Claude Desktop with read-only tools for market packets plus journal analysis (`get_market_report`, `get_news`, `analyze_ticker`, `analyze_scalp`, `get_trades`, `get_stats`, `get_trade_detail`, `get_coverage`, `get_trade_audit`, `get_trade_path_metrics`, `get_fill_contexts`); thin httpx adapter over `localhost:8000`, holds no API keys, logs calls to `backend/data/mcp_log/*.jsonl`.
   - `backend/prompts/market_report.md` is the Claude-side analysis prompt (regime rules, 13-section output); judgment lives there, not in backend code.
   - Live "today" market data must use `fetch_snapshots`/`fetch_minute_bars_live` (never cached); the persistent minute cache never expires and must not be written with partial intraday data.
+- Scalper Analyzer (read-only decision support, never places trades):
+  - `backend/app/engine/scalper.py` gathers a live packet (snapshot, live minute bars, intraday VWAP/OR/EMA/RVOL, daily indicators, SPY/QQQ context, news, optional Alpaca option snapshot with greeks/spread) and scores it deterministically — verdict (`no_trade`/`wait`/`long_scalp`/`short_scalp`), confidence, bias, setup/liquidity/risk scores, level-based trigger/invalidation/targets, reasons, missing-data caveats.
+  - `score_scalp()` is a pure function over the packet (tested in `backend/tests/test_scalper.py` without network); `build_scalp_analysis()` is the gathering layer. Hard rules: closed market or stale data ⇒ wait/no_trade; option spread >10% of mid ⇒ reject; inside VWAP/OR band on weak RVOL ⇒ chop; extra strict in the first 5–15 minutes.
+  - Exposed at `GET /packets/scalp` and via the `analyze_scalp` MCP tool; option snapshots come from `fetch_option_snapshots`/`fetch_option_chain_snapshots` in `alpaca.py` (`ALPACA_OPTIONS_FEED`, default `indicative`, never cached).
 - Quote support is being added:
   - `backend/app/engine/quotes.py`
   - `backend/app/routers/quotes.py`
@@ -220,6 +224,7 @@ Highest-leverage backend files:
 - `backend/app/engine/webull_events.py`
 - `backend/app/engine/webull_listener.py`
 - `backend/app/engine/packets.py`
+- `backend/app/engine/scalper.py`
 - `backend/app/ai/reviewer.py`
 - `backend/app/ai/daily_reviewer.py`
 - `backend/app/routers/auth.py`
@@ -287,6 +292,8 @@ Stable current routes:
 - `GET /quotes`
 - `POST /quotes/positions`
 - `GET /packets/report?type=premarket|postmarket`
+- `GET /packets/analyze?symbol=...`
+- `GET /packets/scalp?symbol=...&direction=&instrument=&option_type=&expiration=&strike=&style=`
 - `GET /packets/news`
 - `POST /fills/enrich`
 - `GET /fills/enrich/status`

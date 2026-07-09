@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
 ALPACA_API_SECRET = os.environ.get("ALPACA_API_SECRET", "")
 ALPACA_DATA_FEED = os.environ.get("ALPACA_DATA_FEED", "iex")
+ALPACA_OPTIONS_FEED = os.environ.get("ALPACA_OPTIONS_FEED", "indicative")
 
 DATA_URL = "https://data.alpaca.markets"
 DAILY_CACHE_TTL_DAYS = 30
@@ -433,6 +434,62 @@ def fetch_minute_bars_live(tickers: list[str], day: date) -> dict[str, list]:
         for ticker in batch:
             result[ticker] = bars.get(ticker, [])
     return result
+
+
+def fetch_option_snapshots(symbols: list[str]) -> dict[str, dict]:
+    """
+    Fetch live option contract snapshots (latest quote/trade, IV, greeks) for
+    specific OCC symbols. Never cached — live decision-support path only.
+    Returns {occ_symbol: snapshot}; contracts Alpaca has no data for are absent.
+    """
+    normalized = [s.strip().upper() for s in symbols if s.strip()]
+    result: dict[str, dict] = {}
+    for i in range(0, len(normalized), 100):
+        batch = normalized[i : i + 100]
+        data = _alpaca_get(
+            "/v1beta1/options/snapshots",
+            {"symbols": ",".join(batch), "feed": ALPACA_OPTIONS_FEED},
+        )
+        for symbol, snap in (data.get("snapshots") or {}).items():
+            if isinstance(snap, dict):
+                result[symbol] = snap
+    return result
+
+
+def fetch_option_chain_snapshots(
+    underlying: str,
+    option_type: Optional[str] = None,
+    expiration: Optional[date] = None,
+    expiration_gte: Optional[date] = None,
+    expiration_lte: Optional[date] = None,
+    strike_gte: Optional[float] = None,
+    strike_lte: Optional[float] = None,
+    limit: int = 200,
+) -> dict[str, dict]:
+    """
+    Fetch a filtered option chain snapshot for an underlying. Never cached.
+    Single page only (no pagination) — pass strike/expiration filters to keep
+    the result within `limit`. Returns {occ_symbol: snapshot}.
+    """
+    params: dict = {"feed": ALPACA_OPTIONS_FEED, "limit": min(limit, 1000)}
+    if option_type:
+        params["type"] = option_type
+    if expiration:
+        params["expiration_date"] = expiration.isoformat()
+    if expiration_gte:
+        params["expiration_date_gte"] = expiration_gte.isoformat()
+    if expiration_lte:
+        params["expiration_date_lte"] = expiration_lte.isoformat()
+    if strike_gte is not None:
+        params["strike_price_gte"] = round(strike_gte, 2)
+    if strike_lte is not None:
+        params["strike_price_lte"] = round(strike_lte, 2)
+    data = _alpaca_get(f"/v1beta1/options/snapshots/{underlying.strip().upper()}", params)
+    return {
+        symbol: snap
+        for symbol, snap in (data.get("snapshots") or {}).items()
+        if isinstance(snap, dict)
+    }
 
 
 def alpaca_configured() -> bool:

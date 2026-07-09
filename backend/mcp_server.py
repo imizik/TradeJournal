@@ -160,6 +160,48 @@ def analyze_ticker(symbol: str) -> dict:
 
 
 @mcp.tool()
+def analyze_scalp(symbol: str, direction: str | None = None,
+                  instrument: str | None = None, option_type: str | None = None,
+                  expiration: str | None = None, strike: float | None = None,
+                  style: str | None = None) -> dict:
+    """Read-only scalp decision support: "should I scalp X right now?",
+    "should I buy intraday calls at the open?", "is this VWAP reclaim real?".
+
+    Returns `assessment` (deterministic verdict + scores + plan) and `data`
+    (the raw packet the scores were computed from). Never places trades.
+
+    Args:
+    - direction: "long"/"up" or "short"/"down"; omit to evaluate both sides.
+    - instrument: "stock" or "option". Passing option_type/expiration/strike
+      implies "option"; with no expiration/strike the nearest-expiry contract
+      closest to the money is auto-selected.
+    - option_type: "call" or "put" (derived from direction if omitted).
+    - expiration: YYYY-MM-DD. strike: contract strike.
+    - style: "open" | "midday" | "power_hour" (derived from clock if omitted).
+
+    assessment.verdict is "no_trade" / "wait" / "long_scalp" / "short_scalp"
+    with confidence, bias (bullish/bearish/mixed/chop), setup_score,
+    liquidity_score, risk_score (higher = riskier), a level-based trigger /
+    invalidation / targets plan, reasons_for/against, and missing-data
+    caveats. Hard rules baked in: closed market or stale data => wait/no_trade;
+    option spread over 10% of mid => reject; inside VWAP/opening-range band on
+    weak RVOL => chop; extra strict in the first 5-15 minutes.
+
+    You write the narrative: relay the verdict WITH its reasons and caveats,
+    triage the raw `data.news` headlines yourself (the scorer only counts
+    them), and never present this as guaranteed advice or an order to place.
+    Uses the free IEX feed — treat thin names and pre/post-market as
+    approximate. Takes a few seconds (live Alpaca calls).
+    """
+    params: dict = {k: v for k, v in {
+        "symbol": symbol, "direction": direction, "instrument": instrument,
+        "option_type": option_type, "expiration": expiration,
+        "strike": strike, "style": style,
+    }.items() if v is not None}
+    return _get("/packets/scalp", params, timeout=90.0)
+
+
+@mcp.tool()
 def get_trade_detail(trade_id: str) -> dict:
     """Full end-to-end bundle for a single trade (read-only).
 
