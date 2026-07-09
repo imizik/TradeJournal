@@ -49,6 +49,7 @@ Backend:
 - `backend/app/engine/webull_events.py`
 - `backend/app/engine/webull_listener.py`
 - `backend/app/engine/packets.py` (premarket/postmarket market reports; universe in `backend/data/universe.json`)
+- `backend/app/engine/scalper.py` (read-only scalp setup assessment: live data gathering + pure deterministic scoring; never trades)
 - `backend/mcp_server.py` (read-only MCP stdio server for Claude Desktop; market packet + trade-analysis tools over localhost:8000)
 - `backend/app/ai/reviewer.py`
 - `backend/app/ai/daily_reviewer.py`
@@ -121,7 +122,7 @@ Analysis scripts:
 - AI trade review: `POST /trades/{id}/review`
 - Daily review: `GET /daily-review`, `POST /daily-review`
 - Quotes: `GET /quotes`, `POST /quotes/positions`
-- Market packets: `GET /packets/report`, `GET /packets/news`
+- Market packets: `GET /packets/report`, `GET /packets/news`, `GET /packets/analyze`, `GET /packets/scalp`
 - Polygon enrichment: `POST /fills/enrich`
 - Alpaca fill context enrichment: `POST /market-context/enrich`
 - Trade path metrics: `POST /market-context/trade-path/compute`

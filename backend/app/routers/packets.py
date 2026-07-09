@@ -6,6 +6,7 @@ from app.engine.alpaca import ET
 from app.engine.analyzer import build_ticker_analysis
 from app.engine.news import fetch_news
 from app.engine.packets import build_market_report
+from app.engine.scalper import build_scalp_analysis
 
 router = APIRouter()
 
@@ -33,6 +34,41 @@ async def analyze(symbol: str = Query(..., description="Any ticker, traded or no
     """
     try:
         return build_ticker_analysis(symbol)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+
+@router.get("/scalp")
+async def scalp(
+    symbol: str = Query(..., description="Underlying ticker"),
+    direction: str | None = Query(None, description="long | short | up | down"),
+    instrument: str | None = Query(None, description="stock | option"),
+    option_type: str | None = Query(None, description="call | put"),
+    expiration: str | None = Query(None, description="Option expiration YYYY-MM-DD"),
+    strike: float | None = Query(None, gt=0),
+    style: str | None = Query(None, description="open | midday | power_hour"),
+):
+    """Read-only scalp setup assessment: live data packet + deterministic scoring.
+
+    Never places trades and never gives blind advice — returns verdict /
+    confidence / bias, setup/liquidity/risk scores, trigger, invalidation,
+    targets, reasons for/against, and missing-data caveats alongside the raw
+    data. Verdict is forced to wait/no_trade when the market is closed or the
+    live data is stale. Live minute bars are fetched fresh and never written
+    to the persistent enrichment cache.
+    """
+    try:
+        return build_scalp_analysis(
+            symbol,
+            direction=direction,
+            instrument=instrument,
+            option_type=option_type,
+            expiration=expiration,
+            strike=strike,
+            style=style,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
