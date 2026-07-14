@@ -31,6 +31,12 @@ TABLE_ORDER = [
     "fill_market_context",
     "trade_path_metrics",
     "job_run",
+    "strategy_definition",
+    "strategy_version",
+    "strategy_run",
+    "strategy_run_trade",
+    "strategy_run_metrics",
+    "strategy_experiment",
 ]
 
 

@@ -1,0 +1,5 @@
+﻿Trade number,Type,Date and time,Signal,Price USD,Size (qty),Size (value),Net PnL USD,Return %,Favorable excursion USD,Favorable excursion %,Adverse excursion USD,Adverse excursion %,Cumulative PnL USD,Cumulative PnL %,Duration (bars)
+101,Exit long,2026-03-09 10:15:00,Target reached,$12.75,125.5,"$1,600.13",$156.25,9.97%,$210.00,13.40%,($42.50),-2.71%,$156.25,9.97%,7
+101,Entry long,2026-03-09 09:45:00,Long reclaim,$11.50,125.5,"$1,443.25",$155.00,9.89%,$209.00,13.33%,($42.50),-2.71%,$155.00,9.89%,7
+102,Exit short,2026-11-06 11:00:00,Protective stop,$31.25,20,$625.00,($75.00),-10.71%,$35.00,5.00%,($90.00),-12.86%,$81.25,4.30%,4
+102,Entry short,2026-11-06 10:30:00,Short fade,$27.50,20,$550.00,($75.00),-10.71%,$35.00,5.00%,($90.00),-12.86%,$81.25,4.30%,4

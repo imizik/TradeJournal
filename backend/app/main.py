@@ -13,7 +13,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Account, FILL_LIGHT, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab
 from app.routers.fills import (
     _rebuild_trades,
     backup_manual_fills,
@@ -218,3 +218,4 @@ app.include_router(webull.router, prefix="/webull", tags=["webull"])
 app.include_router(gmail_push.router, prefix="/gmail", tags=["gmail"])
 app.include_router(packets.router, prefix="/packets", tags=["packets"])
 app.include_router(research.router, prefix="/research", tags=["research"])
+app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])

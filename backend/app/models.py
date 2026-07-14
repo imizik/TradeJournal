@@ -1,8 +1,9 @@
 import uuid
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import Column, Numeric, Text
+from sqlalchemy import CheckConstraint, Column, Index, Numeric, Text, UniqueConstraint, text
 from sqlalchemy.orm import defer
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -161,6 +162,279 @@ class ResearchWorkspace(SQLModel, table=True):
     schema_version: int = Field(default=1)
     data_json: str = Field(sa_column=Column(Text, nullable=False))
     revision: int = Field(default=0)                    # bumped on every save
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class StrategyDefinition(SQLModel, table=True):
+    """Named Pine strategy whose code and assumptions evolve through versions."""
+
+    __tablename__ = "strategy_definition"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_strategy_definition_name"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    name: str = Field(index=True)
+    description: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    setup_type: str = Field(default="custom", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class StrategyVersion(SQLModel, table=True):
+    """Immutable-after-use Pine source plus the hypothesis and test assumptions."""
+
+    __tablename__ = "strategy_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "strategy_definition_id",
+            "version_label",
+            name="uq_strategy_version_definition_label",
+        ),
+        CheckConstraint(
+            "status IN ('draft', 'challenger', 'champion', 'shadow', 'retired')",
+            name="ck_strategy_version_status",
+        ),
+        CheckConstraint(
+            "parent_version_id IS NULL OR parent_version_id <> id",
+            name="ck_strategy_version_not_own_parent",
+        ),
+        CheckConstraint("pyramiding >= 0", name="ck_strategy_version_pyramiding"),
+        Index(
+            "uq_strategy_version_one_champion",
+            "strategy_definition_id",
+            unique=True,
+            sqlite_where=text("status = 'champion'"),
+            postgresql_where=text("status = 'champion'"),
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    strategy_definition_id: uuid.UUID = Field(
+        foreign_key="strategy_definition.id", index=True
+    )
+    parent_version_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="strategy_version.id", index=True
+    )
+    version_label: str
+    pine_source: str = Field(sa_column=Column(Text, nullable=False))
+    source_fingerprint: str = Field(index=True)
+    source_reference: Optional[str] = None
+    change_summary: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    hypothesis: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    parameters_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    entry_rule_summary: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    exit_rule_summary: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    execution_timing: str = "unknown"  # bar_close|next_bar|intrabar|unknown
+    session_mode: str = "regular"      # regular|extended|custom
+    commission_type: str = "none"
+    commission_value: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    slippage_type: str = "none"
+    slippage_value: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    pyramiding: int = 0
+    known_limitations: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    repainting_risk_notes: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    lookahead_risk_notes: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    status: str = Field(default="draft", index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class StrategyRun(SQLModel, table=True):
+    """One TradingView backtest tied to the exact StrategyVersion that produced it."""
+
+    __tablename__ = "strategy_run"
+    __table_args__ = (
+        UniqueConstraint(
+            "strategy_version_id",
+            "source_sha256",
+            name="uq_strategy_run_version_source_sha256",
+        ),
+        CheckConstraint("pyramiding >= 0", name="ck_strategy_run_pyramiding"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    strategy_version_id: uuid.UUID = Field(foreign_key="strategy_version.id", index=True)
+    version_fingerprint: str = Field(index=True)
+    source: str = Field(default="tradingview", index=True)
+    symbol: str = Field(index=True)
+    timeframe: str
+    source_timezone: str
+    backtest_start: Optional[date] = None
+    backtest_end: Optional[date] = None
+    initial_capital: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    currency: str = "USD"
+    commission_type: str = "none"
+    commission_value: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    slippage_type: str = "none"
+    slippage_value: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    execution_timing: str = "unknown"
+    session_mode: str = "regular"
+    extended_hours: bool = False
+    pyramiding: int = 0
+    parameters_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    notes: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    source_file_name: Optional[str] = None
+    source_sha256: Optional[str] = Field(default=None, index=True)
+    source_headers_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    source_mapping_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    source_warnings_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    source_csv_text: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    imported_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class StrategyRunTrade(SQLModel, table=True):
+    """A simulated trade reconstructed from a TradingView Entry/Exit row pair."""
+
+    __tablename__ = "strategy_run_trade"
+    __table_args__ = (
+        UniqueConstraint("run_id", "trade_number", name="uq_strategy_run_trade_number"),
+        CheckConstraint("direction IN ('long', 'short')", name="ck_strategy_run_trade_direction"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="strategy_run.id", index=True)
+    trade_number: int
+    direction: str = Field(index=True)
+    entry_at: Optional[datetime] = Field(default=None, index=True)
+    exit_at: Optional[datetime] = Field(default=None, index=True)
+    entry_at_raw: Optional[str] = None
+    exit_at_raw: Optional[str] = None
+    entry_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    exit_price: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    quantity: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    net_pnl: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    return_pct: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    mfe: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    mfe_pct: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    mae: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    mae_pct: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    cumulative_pnl: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    cumulative_return_pct: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    duration_bars: Optional[int] = None
+    duration_minutes: Optional[int] = None
+    entry_signal: Optional[str] = None
+    exit_signal: Optional[str] = None
+    entry_comment: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    exit_comment: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    feature_snapshot_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    raw_entry_row_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    raw_exit_row_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class StrategyRunMetrics(SQLModel, table=True):
+    """Versioned, recalculable summary derived from StrategyRunTrade rows."""
+
+    __tablename__ = "strategy_run_metrics"
+
+    run_id: uuid.UUID = Field(primary_key=True, foreign_key="strategy_run.id")
+    calculation_version: str
+    calculated_at: datetime = Field(default_factory=datetime.utcnow)
+    trade_count: int = 0
+    winning_trades: int = 0
+    losing_trades: int = 0
+    win_rate: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    average_winner: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    average_loser: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    payoff_ratio: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    expectancy: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    profit_factor: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    total_net_pnl: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    net_return_pct: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    max_drawdown: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    max_drawdown_pct: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    average_mfe: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    median_mfe: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    average_mae: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    median_mae: Optional[Decimal] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
+    average_holding_minutes: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    top_1_profit_contribution_pct: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    top_3_profit_contribution_pct: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    top_5_profit_contribution_pct: Optional[Decimal] = Field(
+        default=None, sa_column=Column(DECIMAL_18_6, nullable=True)
+    )
+    long_summary_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    short_summary_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    time_bucket_summary_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    coverage_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    equity_curve_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    drawdown_curve_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    findings_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+
+
+class StrategyExperiment(SQLModel, table=True):
+    """Lightweight record of a controlled baseline/challenger hypothesis."""
+
+    __tablename__ = "strategy_experiment"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('proposed', 'running', 'passed', 'failed', 'inconclusive', 'deployed')",
+            name="ck_strategy_experiment_status",
+        ),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    strategy_definition_id: uuid.UUID = Field(
+        foreign_key="strategy_definition.id", index=True
+    )
+    baseline_version_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="strategy_version.id", index=True
+    )
+    challenger_version_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="strategy_version.id", index=True
+    )
+    baseline_run_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="strategy_run.id", index=True
+    )
+    challenger_run_id: Optional[uuid.UUID] = Field(
+        default=None, foreign_key="strategy_run.id", index=True
+    )
+    title: str
+    hypothesis: str = Field(sa_column=Column(Text, nullable=False))
+    variable_changed: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    expected_effect: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    training_start: Optional[date] = None
+    training_end: Optional[date] = None
+    validation_start: Optional[date] = None
+    validation_end: Optional[date] = None
+    test_start: Optional[date] = None
+    test_end: Optional[date] = None
+    status: str = Field(default="proposed", index=True)
+    conclusion: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    metrics_snapshot_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -400,3 +674,24 @@ class WebullRawEvent(SQLModel, table=True):
 # Defined last: touching Fill's instrumented attributes configures the mappers,
 # which requires every related model above to exist already.
 FILL_LIGHT = (defer(Fill.email_subject), defer(Fill.email_body_text))
+STRATEGY_VERSION_LIGHT = (defer(StrategyVersion.pine_source),)
+STRATEGY_RUN_LIGHT = (
+    defer(StrategyRun.source_csv_text),
+    defer(StrategyRun.source_headers_json),
+    defer(StrategyRun.source_mapping_json),
+    defer(StrategyRun.source_warnings_json),
+    defer(StrategyRun.notes),
+)
+STRATEGY_RUN_DETAIL_LIGHT = (
+    defer(StrategyRun.source_csv_text),
+    defer(StrategyRun.source_headers_json),
+    defer(StrategyRun.source_mapping_json),
+    defer(StrategyRun.source_warnings_json),
+)
+STRATEGY_RUN_TRADE_LIGHT = (
+    defer(StrategyRunTrade.entry_comment),
+    defer(StrategyRunTrade.exit_comment),
+    defer(StrategyRunTrade.feature_snapshot_json),
+    defer(StrategyRunTrade.raw_entry_row_json),
+    defer(StrategyRunTrade.raw_exit_row_json),
+)

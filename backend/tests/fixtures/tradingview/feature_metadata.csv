@@ -1,0 +1,5 @@
+Trade #,Order type,Date/Time,Signal,Comment,Price,Qty,Net profit,Net profit %,Run-up,Run-up %,Drawdown,Drawdown %,Cumulative profit,Cumulative profit %,Bars held
+201,Entry long,2026-04-14 09:40:00,Long reclaim,sl1|setup=vwap_reclaim|rvol=1.82|qqq_vwap=1|confirmed=true|gap=null,$48.00,10,$20.00,4.17%,$32.00,6.67%,($8.00),-1.67%,$20.00,4.17%,3
+201,Exit long,2026-04-14 09:55:00,Scale target,sl1|exit=target_one,$50.00,10,$20.00,4.17%,$32.00,6.67%,($8.00),-1.67%,$20.00,4.17%,3
+202,Entry short,2026-04-14 10:10:00,Short rejection,sl1|setup=opening_rejection|broken-token|rvol=2.05,$75.00,5,$15.00,4.00%,$18.00,4.80%,($4.00),-1.07%,$35.00,8.17%,2
+202,Exit short,2026-04-14 10:20:00,Cover,sl1|exit=time_stop,$72.00,5,$15.00,4.00%,$18.00,4.80%,($4.00),-1.07%,$35.00,8.17%,2

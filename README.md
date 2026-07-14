@@ -40,13 +40,14 @@ Repo helper note:
 
 - `fill` is the source layer.
 - `trade` and `tradefill` are derived from fills by FIFO reconstruction.
+- Strategy Lab simulations are stored separately in `strategy_definition`, `strategy_version`, and `strategy_run*` tables; they never enter journal fills or FIFO-derived trades.
 - Quantity is stored in `contracts` for stocks and options.
 - Stock quantities can be fractional.
 - Option `price` is dollars per contract; stock `price` is dollars per share.
 - `raw_email_id` dedupes imported fills; manual fills use `manual:` IDs and are backed up to `backend/data/manual_fills.json`.
 - Long-running work is tracked in `job_run`.
 
-Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `tradetag`, `job_run`, `fill_market_context`, `trade_path_metrics`, `dailyreview`, and `webull_raw_event`.
+Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `tradetag`, `job_run`, `fill_market_context`, `trade_path_metrics`, `dailyreview`, `webull_raw_event`, and the normalized `strategy_*` Strategy Lab tables.
 
 ## Main API Surfaces
 
@@ -62,6 +63,25 @@ Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `t
 - Gmail OAuth/push: `GET /auth/gmail/start`, `GET /auth/gmail/start/browser`, `GET /auth/gmail/callback`, `POST /gmail/watch`, `GET /gmail/watch/status`, `POST /gmail/push`
 - Webull: `GET /webull/health`, `GET /webull/accounts`, `GET /webull/orders/recent`, `GET /webull/orders/{order_id}`, `POST /webull/events/test-ingest`, `POST /webull/events/start`, `POST /webull/events/stop`, `GET /webull/events/status`
 - Market packets: `GET /packets/report?type=premarket|postmarket`, `GET /packets/news`
+- Strategy Lab: `GET/POST /strategy-lab/strategies`, `GET/PATCH /strategy-lab/strategies/{id}`, `POST /strategy-lab/strategies/{id}/versions`, `GET/PATCH /strategy-lab/versions/{id}`, `POST /strategy-lab/versions/{id}/fork`, `POST /strategy-lab/imports/preview`, `POST /strategy-lab/runs/import`, `GET /strategy-lab/runs`, `GET /strategy-lab/runs/{run_id}`, `GET /strategy-lab/runs/{run_id}/trades`, `POST /strategy-lab/runs/{run_id}/metrics/recalculate`, `GET /strategy-lab/runs/{run_id}/metrics`
+
+## Strategy Lab TradingView Import
+
+TradingView strategy CSVs use a preview-then-commit workflow. `POST /strategy-lab/imports/preview` is multipart with `strategy_version_id`, `source_timezone`, and `file`; it returns `source_sha256`, `version.source_fingerprint`, and `preview_fingerprint` plus the parsed trades and warnings. `POST /strategy-lab/runs/import` re-uploads the same file with a multipart `metadata` JSON field containing those expected fingerprints, the same version/timezone, required `symbol` and `timeframe`, and any optional run fields. Together the fingerprints bind the exact bytes, timezone, and result-producing strategy version.
+
+Both steps require an explicit IANA source timezone such as `America/New_York`; source timestamps are normalized to UTC instead of being inferred from the symbol or filename. Commit is all-or-nothing when preview reports rejected trade groups, and optional backtest bounds must contain every entry and exit date in the source timezone. A compact curl verification is in [Strategy Lab Pine Export Metadata](docs/strategy-lab-pine-metadata.md#curl-verification).
+
+Pine strategies can attach flat, export-visible feature metadata with `sl1|key=value|...`. See [Strategy Lab Pine Export Metadata](docs/strategy-lab-pine-metadata.md) for safe values, merge rules, examples, and current importer limitations.
+
+Imported simulations remain in `strategy_run*` tables and never enter journal fills or FIFO-derived trades. Run metrics are calculated explicitly after import, stored with a calculation version, and expose missing-field coverage instead of silently treating missing values as zero. Formula and curve semantics are documented in [Strategy Lab Metrics](docs/strategy-lab-metrics.md).
+
+## Strategy Lab Frontend
+
+Open `/strategy-lab` to create strategies and immutable-after-use Pine versions, browse version history, and review each version's source, hypothesis, parameters, execution assumptions, and risk notes. The version import page implements the same two-step preview/commit binding as the API and keeps the selected version and hypothesis visible while reviewing mappings, warnings, rejected groups, and normalized trades.
+
+After commit, the run page shows source/run assumptions, coverage-aware deterministic metrics, long/short and time-bucket summaries, equity and drawdown curves, and a paginated simulated-trade table filterable by direction, outcome, and entry date. `GET /strategy-lab/runs` supports strategy/version filters for run history, while the run-detail and trade endpoints omit stored CSV text and raw source-row payloads.
+
+Stage 4 reused the existing normalized `strategy_*` schema and Alembic revision `f1a2b3c4d5e6`; it added no schema migration. Two-run comparison, deterministic findings, experiment workflows, and Pine source diffs remain Stage 5 work.
 
 ## Durable Jobs
 

@@ -339,3 +339,26 @@ def test_same_contract_in_different_accounts_stays_separate():
     assert second.avg_entry_premium == D("495.000000")
     assert second.avg_exit_premium == D("475.000000")
     assert second.realized_pnl == D("-20.000000")
+
+
+def test_same_minute_open_and_close_orders_deterministically():
+    """Entry and partial exit sharing one email-minute must pair correctly.
+
+    Regardless of input order, the open must be processed before the
+    same-timestamp close; otherwise the close is orphaned and the entry
+    lots get falsely written off as expired worthless.
+    """
+    open_fill = _fill("buy_to_open", "20", price="54.0", executed_at=_dt(11, 12))
+    close_a = _fill("sell_to_close", "18", price="59.0", executed_at=_dt(11, 12))
+    close_b = _fill("sell_to_close", "2", price="68.0", executed_at=_dt(11, 15))
+
+    for fills in ([open_fill, close_a, close_b], [close_a, open_fill, close_b]):
+        result = reconstruct(list(fills), today=date(2026, 3, 29))
+
+        assert result.anomalies == []
+        assert len(result.trades) == 1
+        trade = result.trades[0]
+        assert trade.status == "closed"
+        assert trade.expired_worthless is False
+        # 18 * (59 - 54) + 2 * (68 - 54) = 90 + 28
+        assert trade.realized_pnl == D("118.000000")

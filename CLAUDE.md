@@ -12,6 +12,7 @@ Current scope is broader than the original MVP notes:
 - There is no auth and no multi-user model.
 - The repo is optimized for local analysis, repair, rebuild workflows, and eventual low-cost deployment.
 - Current scope also includes Webull read/listen/import plumbing, Gmail Pub/Sub push ingest, a Sync Center, AI trade/day review, market packets for Claude Desktop, live quotes, Alpaca fill context, and trade path metrics.
+- Strategy Lab has an end-to-end Stage 4 workflow for version-controlled Pine research: strategy/version creation and history, stored Pine source and assumptions, hash-bound TradingView CSV preview/import, deterministic persisted metrics, and run pages with curves and filterable simulated trades. It is separate from journal fills/trades, and every import requires an explicit source timezone. Run comparison, deterministic findings, experiment workflows, and Pine diffs remain Stage 5 work.
 
 ## Agent Operating Style
 
@@ -72,6 +73,8 @@ Important field semantics:
 
 The app currently allows editing fills to correct history, then rebuilding derived trades from scratch. So the conceptual rule is still "fills drive truth", but correction currently happens by updating bad fills rather than only appending compensating rows.
 
+Strategy Lab is a separate normalized domain: `strategy_definition` -> `strategy_version` -> `strategy_run` -> `strategy_run_trade`, with one-to-one `strategy_run_metrics` and lightweight `strategy_experiment` records. Simulated rows never enter `fill`, `trade`, or `tradefill`. Result-producing fields on a version become immutable after its first run; fork the version to test a change. TradingView import is a non-persistent preview followed by a commit that re-uploads the same bytes and verifies the returned source, version, and preview fingerprints. Source timestamps require an explicit IANA timezone and are normalized to UTC. Run metrics use a versioned pure-Decimal calculator and persist explicit source-field coverage; accounting curves remain unavailable when P&L or exit chronology is incomplete.
+
 Durable background work:
 
 - `job_run` records durable state for enrichment/path jobs.
@@ -130,6 +133,20 @@ Durable background work:
 - SQLite-to-Postgres copy script:
   - `backend/scripts/migrate_sqlite_to_postgres.py`
 - Reconciliation and CSV comparison scripts under `backend/scripts/`
+- Strategy Lab definition/version lifecycle and API:
+  - `backend/app/engine/strategy_lab.py`
+  - `backend/app/routers/strategy_lab.py`
+  - normalized `strategy_*` tables added by Alembic revision `f1a2b3c4d5e6`
+  - stable source fingerprints across database Decimal round-trips
+  - transactional one-champion transitions and run-backed version locking
+  - TradingView CSV preview at `POST /strategy-lab/imports/preview`
+  - hash-verified run commit at `POST /strategy-lab/runs/import`
+  - paginated/filterable run reads at `GET /strategy-lab/runs`, `GET /strategy-lab/runs/{run_id}`, and `GET /strategy-lab/runs/{run_id}/trades`
+  - deterministic metrics recalc at `POST /strategy-lab/runs/{run_id}/metrics/recalculate`
+  - stored metrics read at `GET /strategy-lab/runs/{run_id}/metrics`
+  - optional flat Pine metadata using the export-visible `sl1|key=value|...` convention documented in `docs/strategy-lab-pine-metadata.md`
+  - imported simulations remain isolated from journal fills and FIFO-derived trades
+  - Stage 4 reused Alembic revision `f1a2b3c4d5e6` and added no schema migration; comparison, findings, experiment workflows, and Pine diffs remain Stage 5 work
 
 ### Frontend
 
@@ -156,6 +173,7 @@ Durable background work:
 - Fill edit page
 - Analytics page with ticker, time-bucket, tag, and behavioral-flag breakdowns
 - Daily review index/detail pages
+- Strategy Lab pages for strategy/version creation and history, exact Pine source and assumptions, two-step TradingView CSV preview/commit, and run detail with coverage-aware metrics, equity/drawdown curves, and paginated/filterable simulated trades
 
 ## Current Capabilities And In-Flux Areas
 
@@ -244,6 +262,9 @@ Highest-leverage backend files:
 Highest-leverage frontend files:
 
 - `frontend/app/page.tsx`
+- `frontend/app/strategy-lab/`
+- `frontend/components/strategy-lab/`
+- `frontend/lib/strategy-lab/`
 - `frontend/app/trades/page.tsx`
 - `frontend/app/trades/[id]/page.tsx`
 - `frontend/app/daily/page.tsx`
@@ -328,6 +349,21 @@ Stable current routes:
 - `POST /webull/events/start`
 - `POST /webull/events/stop`
 - `GET /webull/events/status`
+- `GET /strategy-lab/strategies`
+- `POST /strategy-lab/strategies`
+- `GET /strategy-lab/strategies/{strategy_id}`
+- `PATCH /strategy-lab/strategies/{strategy_id}`
+- `POST /strategy-lab/strategies/{strategy_id}/versions`
+- `GET /strategy-lab/versions/{version_id}`
+- `PATCH /strategy-lab/versions/{version_id}`
+- `POST /strategy-lab/versions/{version_id}/fork`
+- `POST /strategy-lab/imports/preview`
+- `POST /strategy-lab/runs/import`
+- `GET /strategy-lab/runs`
+- `GET /strategy-lab/runs/{run_id}`
+- `GET /strategy-lab/runs/{run_id}/trades`
+- `POST /strategy-lab/runs/{run_id}/metrics/recalculate`
+- `GET /strategy-lab/runs/{run_id}/metrics`
 
 ## Run Locally
 

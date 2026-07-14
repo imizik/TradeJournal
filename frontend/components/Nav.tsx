@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { LayoutDashboard, FileText, BarChart2, Activity, ClipboardList, FlaskConical, ChevronRight } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart2, Activity, ClipboardList, FlaskConical, GitBranch, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/trades", label: "Trades", icon: FileText },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/fills", label: "Fills", icon: Activity },
+  { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
   { href: "/research/ai-buildout", label: "Research", icon: FlaskConical },
 ];
 

@@ -1,0 +1,10 @@
+Trade number,Type,Date and time,Signal,Price USD,Size (qty),Net PnL USD,Return %,Favorable excursion USD,Favorable excursion %,Adverse excursion USD,Adverse excursion %,Cumulative PnL USD,Cumulative PnL %,Duration (bars)
+301,Entry long,2026-05-18 09:35:00,Valid entry,$20.00,10,$10.00,5.00%,$14.00,7.00%,($3.00),-1.50%,$10.00,5.00%,2
+301,Exit long,2026-05-18 09:45:00,Valid exit,$21.00,10,$10.00,5.00%,$14.00,7.00%,($3.00),-1.50%,$10.00,5.00%,2
+302,Entry long,2026-05-18 10:00:00,Missing exit,$30.00,4,$0.00,0.00%,$2.00,1.67%,($1.00),-0.83%,$10.00,5.00%,1
+303,Entry short,2026-05-18 10:20:00,First duplicate entry,$40.00,3,$3.00,2.50%,$5.00,4.17%,($2.00),-1.67%,$13.00,7.50%,2
+303,Entry short,2026-05-18 10:21:00,Second duplicate entry,$40.10,3,$3.00,2.50%,$5.00,4.17%,($2.00),-1.67%,$13.00,7.50%,2
+303,Exit short,2026-05-18 10:30:00,Exit after duplicate,$39.00,3,$3.00,2.50%,$5.00,4.17%,($2.00),-1.67%,$13.00,7.50%,2
+304,Entry long,2026-05-18 11:00:00,Entry before duplicate exits,$25.00,2,$2.00,4.00%,$3.00,6.00%,($1.00),-2.00%,$15.00,11.50%,2
+304,Exit long,2026-05-18 11:10:00,First duplicate exit,$26.00,2,$2.00,4.00%,$3.00,6.00%,($1.00),-2.00%,$15.00,11.50%,2
+304,Exit long,2026-05-18 11:11:00,Second duplicate exit,$26.10,2,$2.00,4.00%,$3.00,6.00%,($1.00),-2.00%,$15.00,11.50%,2

@@ -126,7 +126,15 @@ def reconstruct(fills: list[FillInput], today: date | None = None) -> Reconstruc
     completed: list[_OpenTrade] = []
     anomalies: list[str] = []
 
-    for fill in sorted(fills, key=lambda f: _sort_dt(f.executed_at)):
+    # Email timestamps are minute-granular, so an entry and exit of the same
+    # contract often share executed_at. Opens must sort before closes at equal
+    # timestamps: otherwise the close is orphaned and the entry lots get
+    # written off as expired worthless. Final tie-break on fill id keeps the
+    # ordering deterministic regardless of DB row order.
+    for fill in sorted(
+        fills,
+        key=lambda f: (_sort_dt(f.executed_at), 0 if f.side in _OPEN_SIDES else 1, str(f.id)),
+    ):
         # Guard: option fills missing required metadata cannot be grouped into
         # a contract key safely (would collapse all such fills into one bucket
         # and produce bogus trades). Skip them with an anomaly — the Fill row

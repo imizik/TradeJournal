@@ -268,11 +268,26 @@ def fetch_daily_bars(tickers: list[str], start: date, end: date) -> dict[str, li
     return result
 
 
+def _minute_session_complete(day: date, now_et: datetime | None = None) -> bool:
+    """The 04:00–20:00 ET minute window for `day` is only final after 20:00 ET.
+
+    The per-day minute cache never expires, so writing a partial intraday day
+    would permanently poison enrichment and path-metric runs.
+    """
+    now_et = now_et or datetime.now(ET)
+    if day > now_et.date():
+        return False
+    if day == now_et.date():
+        # Small buffer past 20:00 so the feed has published the last bars.
+        return now_et >= now_et.replace(hour=20, minute=5, second=0, microsecond=0)
+    return True
+
+
 def fetch_minute_bars_for_date(tickers: list[str], day: date, cache_only: bool = False) -> dict[str, list]:
     """
     Fetch 1-minute bars for multiple tickers on a single trading date (04:00–20:00 ET).
     Returns {ticker: [bar_dict]}. Results are cached per ticker/date.
-    Skips today — intraday bars are not final.
+    Skips today until after 20:00 ET — intraday bars are not final.
     """
     result: dict[str, list] = {}
     missing: list[str] = []
@@ -290,8 +305,8 @@ def fetch_minute_bars_for_date(tickers: list[str], day: date, cache_only: bool =
     if cache_only:
         return result  # caller only wants what's already on disk
 
-    if day > datetime.now(ET).date():
-        log.info("Skipping minute bar fetch for %s — future date", day)
+    if not _minute_session_complete(day):
+        log.info("Skipping minute bar fetch for %s — session not complete, bars not final", day)
         return result
 
     log.info("Fetching minute bars for %d tickers on %s", len(missing), day)
