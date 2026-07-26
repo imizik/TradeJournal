@@ -13,11 +13,11 @@ Current scope is broader than the original MVP notes:
 - The repo is optimized for local analysis, repair, rebuild workflows, and eventual low-cost deployment.
 - Current scope also includes Webull read/listen/import plumbing, Gmail Pub/Sub push ingest, a Sync Center, AI trade/day review, market packets for Claude Desktop, live quotes, Alpaca fill context, and trade path metrics.
 - Strategy Lab has an end-to-end Stage 4 workflow for version-controlled Pine research: strategy/version creation and history, stored Pine source and assumptions, hash-bound TradingView CSV preview/import, deterministic persisted metrics, and run pages with curves and filterable simulated trades. It is separate from journal fills/trades, and every import requires an explicit source timezone. Run comparison, deterministic findings, experiment workflows, and Pine diffs remain Stage 5 work.
-- The TradingView live-signal loop currently has Step 1 only: a frozen,
-  network/DB-free v1 webhook parser with a distinct Pine
-  `indicator_version`, canonical identity, UTC bar-close semantics, bounded
-  snapshots, and semantic fingerprints. It has no table, migration, route,
-  worker, Pine script, or frontend page yet.
+- The TradingView live-signal loop has its contract and persistence
+  foundation: a frozen network/DB-free v1 parser, isolated
+  `tradingview_alert` table, guarded migration, atomic duplicate/collision
+  persistence, and light/full read services. It still has no HTTP route,
+  analysis worker, Pine script, or frontend page.
 
 ## Agent Operating Style
 
@@ -86,7 +86,9 @@ fixtures remain frozen while v1 data exists; changed fields, meaning,
 canonical identity, timestamp semantics, or acceptance rules require a new
 wire version. Future database changes use expand → version-pinned/idempotent
 backfill → constraint migrations and never reinterpret raw payloads with a
-generic current parser.
+generic current parser. Canonical `alert_id` is the only idempotency key:
+same semantic hash means duplicate even when raw bytes differ; a different
+semantic hash is a collision that preserves the first evidence.
 
 Durable background work:
 
@@ -146,11 +148,17 @@ Durable background work:
 - SQLite-to-Postgres copy script:
   - `backend/scripts/migrate_sqlite_to_postgres.py`
 - Reconciliation and CSV comparison scripts under `backend/scripts/`
-- TradingView live-alert v1 contract foundation:
+- TradingView live-alert contract and persistence foundation:
   - `backend/app/engine/tradingview.py`
+  - `backend/app/engine/tradingview_alerts.py`
+  - `TradingViewAlert` in `backend/app/models.py`
+  - Alembic revision `2e6f9a1b4c7d`
   - `backend/tests/test_tradingview.py`
+  - `backend/tests/test_tradingview_alert_model.py`
+  - `backend/tests/test_tradingview_alert_migration.py`
+  - `backend/tests/test_tradingview_alert_persistence.py`
   - `docs/tradingview-webhook-contract-v1.md`
-  - pure strict parser only; no persistence or HTTP surface yet
+  - no HTTP surface or analysis worker yet
 - Strategy Lab definition/version lifecycle and API:
   - `backend/app/engine/strategy_lab.py`
   - `backend/app/routers/strategy_lab.py`
@@ -262,6 +270,7 @@ Highest-leverage backend files:
 - `backend/app/engine/packets.py`
 - `backend/app/engine/scalper.py`
 - `backend/app/engine/tradingview.py`
+- `backend/app/engine/tradingview_alerts.py`
 - `backend/app/ai/reviewer.py`
 - `backend/app/ai/daily_reviewer.py`
 - `backend/app/routers/auth.py`

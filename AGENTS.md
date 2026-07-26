@@ -10,7 +10,7 @@ Current scope also includes Webull read/listen/import plumbing, a Sync Center, G
 
 Strategy Lab now has an end-to-end local workflow for version-controlled Pine research: normalized strategy definitions, immutable-after-use Pine versions, run/trade/metrics/experiment tables, strategy/version creation and history, Pine source pages, a preview-then-commit TradingView CSV importer, and deterministic persisted run metrics. The frontend exposes run metadata, coverage-aware metrics, equity/drawdown curves, and filterable simulated trades. Imports require an explicit source timezone and remain isolated from journal fills/trades. Run comparison, deterministic findings, experiment workflows, and Pine diffs remain Stage 5 work.
 
-The TradingView live-signal loop has a frozen Step 1 wire contract and pure parser only. Contract `v=1`, a separate Pine `indicator_version`, canonical alert identity, strict UTC bar-close timestamps, bounded snapshots, and semantic content fingerprints are defined in `docs/tradingview-webhook-contract-v1.md` and `backend/app/engine/tradingview.py`. Persistence, webhook routes, analysis workers, Pine code, and Signals UI are future steps.
+The TradingView live-signal loop has completed its contract and persistence foundation. Contract `v=1`, a separate Pine `indicator_version`, canonical alert identity, strict UTC bar-close timestamps, bounded snapshots, and semantic fingerprints are defined in `docs/tradingview-webhook-contract-v1.md` and the frozen parser in `backend/app/engine/tradingview.py`. Isolated `tradingview_alert` persistence, migration, atomic duplicate/collision classification, and light/full read services now exist. Webhook routes, analysis workers, Pine code, and Signals UI are future steps.
 
 ## Agent Operating Style
 
@@ -35,9 +35,8 @@ Work like a fast, practical senior dev helper:
 - `trade` rows are derived from `fill` rows and are safe to wipe and rebuild.
 - Manual data repair currently happens by editing fills and rebuilding.
 - Strategy Lab simulations stay in `strategy_run*` tables and never enter `fill`, `trade`, or `tradefill`.
-- TradingView live alerts are also a separate future domain. The current v1
-  contract/parser must never write to or be routed through journal or Strategy
-  Lab tables.
+- TradingView live alerts are a separate domain in `tradingview_alert`. They
+  must never write to or be routed through journal or Strategy Lab tables.
 
 ## Highest-Leverage Files
 
@@ -59,6 +58,7 @@ Backend:
 - `backend/app/engine/packets.py` (premarket/postmarket market reports; universe in `backend/data/universe.json`)
 - `backend/app/engine/scalper.py` (read-only scalp setup assessment: live data gathering + pure deterministic scoring; never trades)
 - `backend/app/engine/tradingview.py` (frozen, pure v1 live-alert contract parser, canonical IDs, UTC conversion, and semantic fingerprints; no DB/network)
+- `backend/app/engine/tradingview_alerts.py` (atomic persistence, duplicate/collision classification, exact normalized snapshots, and light/full alert reads; no market-data calls)
 - `backend/app/engine/strategy_lab.py` (Strategy Lab definition/version lifecycle, fingerprints, locking, champion transitions)
 - `backend/app/engine/strategy_metrics.py` (pure Decimal Strategy Lab run metrics, coverage, breakdowns, equity, and drawdown)
 - `backend/mcp_server.py` (read-only MCP stdio server for Claude Desktop; market packet + trade-analysis tools over localhost:8000)
@@ -126,6 +126,11 @@ Analysis scripts:
 - TradingView webhook `v` is the immutable wire-schema version and is distinct
   from Pine `indicator_version`. Keep version-pinned parsers and golden
   fixtures; never reparse stored v1 payloads using a future "current" parser.
+- `tradingview_alert.alert_id` is the sole database idempotency key. Equal
+  semantic hashes are retries even when raw bytes differ; the same ID with a
+  different semantic hash is a collision and never overwrites first evidence.
+- `persist_alert()` commits/rolls back its supplied session. Call it only with
+  a clean request-scoped session containing no unrelated pending writes.
 
 ## Main User Flows
 
@@ -144,9 +149,10 @@ Analysis scripts:
 - Strategy Lab run browsing: `GET /strategy-lab/runs`, `GET /strategy-lab/runs/{run_id}`, and paginated/filterable `GET /strategy-lab/runs/{run_id}/trades`
 - Strategy Lab run metrics: `POST /strategy-lab/runs/{run_id}/metrics/recalculate`, then `GET /strategy-lab/runs/{run_id}/metrics`; incomplete source fields stay explicit in metric coverage
 - Strategy Lab frontend: open `/strategy-lab`, create a strategy/version, review its Pine source and assumptions, preview/commit a TradingView CSV, then inspect the resulting run, curves, metrics, and simulated trades
-- TradingView live-alert Step 1: `parse_alert()` dispatches to frozen
-  `parse_alert_v1()` and validates canonical identity/fingerprint entirely
-  in memory. There is no `/tradingview/*` HTTP surface yet.
+- TradingView live-alert Steps 1–3: parse with `parse_alert_bytes()`, then
+  persist through `persist_alert()`; internal light/full reads are
+  `list_alerts()` and `get_alert()`. There is no `/tradingview/*` HTTP surface
+  yet.
 - View analytics and breakdowns: `GET /stats`
 - Review per-trade history via trade detail and fill timeline pages
 - AI trade review: `POST /trades/{id}/review`
@@ -180,8 +186,9 @@ These exist in the repo right now and may still be in flux:
 - Correct expired-option accounting when some contracts were already exited
 - Strategy Lab schema plus strategy/version API, stable source fingerprints, one-champion enforcement, run-backed version locking, hash-bound TradingView CSV preview/import, versioned deterministic run metrics, lightweight run/trade read endpoints, and the Stage 4 frontend workflow
 - Stage 4 reused the existing `strategy_*` schema and Alembic revision `f1a2b3c4d5e6`; it introduced no schema migration
-- TradingView live-alert contract v1 plus network/DB-free golden parser tests;
-  no `tradingview_alert` table or Alembic revision exists yet
+- TradingView live-alert contract v1, frozen golden parser tests, isolated
+  `tradingview_alert` schema in revision `2e6f9a1b4c7d`, exact SQLite/Postgres
+  Decimal storage, and atomic persistence/read services
 
 If tests or older docs disagree with one of the above, trust the working tree and inspect the diff before changing behavior.
 
@@ -275,6 +282,11 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
   `backend/app/engine/tradingview.py`, and
   `backend/tests/test_tradingview.py`; do not silently loosen v1 or reuse its
   parser for a changed wire meaning
+- TradingView live-alert persistence issue: inspect
+  `backend/app/engine/tradingview_alerts.py`, `TradingViewAlert` in
+  `backend/app/models.py`, Alembic revision `2e6f9a1b4c7d`, and the
+  `test_tradingview_alert_*` suites; never classify raw-hash differences alone
+  as a collision
 
 ## Reconciliation Notes
 
@@ -300,4 +312,8 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
   introduce `v=2` for changed meanings/fields/identity/timestamp rules, and
   use expand → version-pinned backfill → constraint migrations. Raw payloads
   are immutable audit evidence, not input to a future generic reparser.
+- Preserve insert-first TradingView idempotency. On `IntegrityError`, roll
+  back before reading the winner; preserve its raw payload and analysis state.
+  Map explicit SQLite busy errors to a retryable response in the future
+  router, never to duplicate/collision.
 - When scope changes materially, update both `AGENTS.md` and `CLAUDE.md`

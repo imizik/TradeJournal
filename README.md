@@ -85,16 +85,18 @@ Stage 4 reused the existing normalized `strategy_*` schema and Alembic revision 
 
 ## TradingView Live Signal Contract
 
-The live TradingView-to-scalp-verdict loop currently has its Step 1 foundation
-only. `backend/app/engine/tradingview.py` freezes webhook contract `v=1`,
-keeps the Pine `indicator_version` separate, derives canonical alert IDs from
-confirmed bar-close identity, converts timestamps to UTC, validates bounded
-flat snapshots, and calculates a stable semantic content fingerprint.
+The live TradingView-to-scalp-verdict loop now has its contract and persistence
+foundation. `backend/app/engine/tradingview.py` freezes webhook contract `v=1`,
+while `backend/app/engine/tradingview_alerts.py` atomically stores normalized
+alerts in the isolated `tradingview_alert` table, classifies true retries
+versus identity collisions, preserves the first raw evidence, and provides
+large-field-safe list/detail reads. Alembic revision `2e6f9a1b4c7d` creates
+the schema with SQLite/Postgres-safe exact Decimal handling.
 
 The exact payload, bounds, identity format, and future migration policy are in
 [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).
-No signal table, Alembic migration, public webhook, background analysis,
-Pine indicator, or Signals page exists yet.
+No public webhook, background analysis worker, Pine indicator, or Signals page
+exists yet.
 
 ## Durable Jobs
 
