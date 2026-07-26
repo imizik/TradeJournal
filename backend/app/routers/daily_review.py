@@ -71,7 +71,7 @@ async def get_daily_review(review_day: date, session: Session = Depends(get_sess
 
 
 @router.post("", response_model=DailyReviewResponse)
-async def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get_session)):
+def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get_session)):
     if not body.trade_ids:
         raise HTTPException(status_code=400, detail="At least one trade is required for a daily review")
 

@@ -514,13 +514,13 @@ async def enrich_missing(range: str = "week", force: bool = False, session: Sess
 
 
 @router.post("/import")
-async def import_fills(session: Session = Depends(get_session)):
+def import_fills(session: Session = Depends(get_session)):
     """Poll Gmail for new fill emails and save any new fills to the DB."""
     return _import_fills_from_gmail(session)
 
 
 @router.post("/resync-all")
-async def resync_all(session: Session = Depends(get_session)):
+def resync_all(session: Session = Depends(get_session)):
     """Delete fills and derived trade data, then import from Gmail and rebuild from scratch."""
     t0 = time.monotonic()
     log.warning("BEGIN /fills/resync-all")

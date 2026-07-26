@@ -11,7 +11,7 @@ router = APIRouter()
 
 
 @router.post("")
-async def post_rebuild(session: Session = Depends(get_session)):
+def post_rebuild(session: Session = Depends(get_session)):
     # 1. Wipe derived tables
     session.exec(delete(TradeTag))
     session.exec(delete(TradeFill))
