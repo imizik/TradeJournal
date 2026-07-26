@@ -12,7 +12,7 @@ router = APIRouter()
 
 
 @router.get("/report")
-async def market_report(type: str = Query(..., pattern="^(premarket|postmarket)$")):
+def market_report(type: str = Query(..., pattern="^(premarket|postmarket)$")):
     """Build the deterministic market report consumed by Claude via MCP.
 
     Takes a few seconds (Alpaca snapshots + minute bars + news, rate-limited).
@@ -24,7 +24,7 @@ async def market_report(type: str = Query(..., pattern="^(premarket|postmarket)$
 
 
 @router.get("/analyze")
-async def analyze(symbol: str = Query(..., description="Any ticker, traded or not")):
+def analyze(symbol: str = Query(..., description="Any ticker, traded or not")):
     """Live single-ticker analysis packet for any symbol, as of the latest data.
 
     Returns a short-term (intraday: VWAP, opening range, premarket, day
@@ -39,7 +39,7 @@ async def analyze(symbol: str = Query(..., description="Any ticker, traded or no
 
 
 @router.get("/scalp")
-async def scalp(
+def scalp(
     symbol: str = Query(..., description="Underlying ticker"),
     direction: str | None = Query(None, description="long | short | up | down"),
     instrument: str | None = Query(None, description="stock | option"),
@@ -74,7 +74,7 @@ async def scalp(
 
 
 @router.get("/news")
-async def news(
+def news(
     symbols: str | None = Query(None, description="Comma-separated tickers; omit for broad tape"),
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(30, ge=1, le=100),

@@ -32,7 +32,7 @@ class PositionQuote(BaseModel):
 
 
 @router.get("")
-async def stock_quotes(tickers: str = Query(..., description="Comma-separated tickers")):
+def stock_quotes(tickers: str = Query(..., description="Comma-separated tickers")):
     """Return current stock prices. Example: GET /quotes?tickers=NVDA,SPY"""
     ticker_list = [t.strip().upper() for t in tickers.split(",") if t.strip()]
     if not ticker_list:
@@ -41,7 +41,7 @@ async def stock_quotes(tickers: str = Query(..., description="Comma-separated ti
 
 
 @router.post("/positions")
-async def position_quotes(body: PositionQuoteRequest) -> list[PositionQuote]:
+def position_quotes(body: PositionQuoteRequest) -> list[PositionQuote]:
     """Return underlying prices + option premiums for a list of open positions.
 
     This is the main endpoint used by the dashboard to price open positions.
