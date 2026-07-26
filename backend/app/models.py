@@ -1,14 +1,66 @@
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, Column, Index, Numeric, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import defer
+from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, Relationship, SQLModel
 
 DECIMAL_18_6 = Numeric(18, 6)
 DECIMAL_18_4 = Numeric(18, 4)
+
+
+class ExactDecimal(TypeDecorator):
+    """Store exact Decimals without SQLite's float-backed NUMERIC rounding."""
+
+    impl = Numeric
+    cache_ok = True
+
+    def __init__(self, precision: int, scale: int) -> None:
+        self.precision = precision
+        self.scale = scale
+        super().__init__()
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "sqlite":
+            # Includes sign, decimal point, and headroom for future bounds.
+            return dialect.type_descriptor(String(48))
+        return dialect.type_descriptor(Numeric(self.precision, self.scale))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        decimal_value = value if isinstance(value, Decimal) else Decimal(str(value))
+        if dialect.name == "sqlite":
+            return format(decimal_value, "f")
+        return decimal_value
+
+    def process_result_value(self, value, _dialect):
+        if value is None or isinstance(value, Decimal):
+            return value
+        return Decimal(str(value))
+
+
+TRADINGVIEW_PRICE = ExactDecimal(28, 12)
+
+
+def utc_now_naive() -> datetime:
+    """Current UTC in the repository's existing naive-datetime convention."""
+
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Account(SQLModel, table=True):
@@ -667,6 +719,161 @@ class WebullRawEvent(SQLModel, table=True):
     normalize_reason: Optional[str] = None                     # "fill" | "non_trade" | "non_execution" | "duplicate" | "error"
 
 
+class TradingViewAlert(SQLModel, table=True):
+    """One immutable TradingView delivery plus its best-effort analysis state.
+
+    Live signals are an isolated decision-support domain: this model has no
+    relationship to journal fills/trades or Strategy Lab simulations. The
+    canonical ``alert_id`` is the idempotency key; duplicate/collision
+    classification belongs in the persistence service, not in extra database
+    uniqueness constraints.
+    """
+
+    __tablename__ = "tradingview_alert"
+    __table_args__ = (
+        CheckConstraint(
+            "contract_version >= 1",
+            name="ck_tradingview_alert_contract_version",
+        ),
+        CheckConstraint(
+            "side IN ('long', 'short')",
+            name="ck_tradingview_alert_side",
+        ),
+        CheckConstraint(
+            "CAST(price AS NUMERIC) > 0",
+            name="ck_tradingview_alert_price_positive",
+        ),
+        CheckConstraint(
+            "analysis_attempts >= 0",
+            name="ck_tradingview_alert_analysis_attempts",
+        ),
+        CheckConstraint(
+            "analysis_status IN ('pending', 'running', 'done', 'skipped', 'error')",
+            name="ck_tradingview_alert_analysis_status",
+        ),
+        CheckConstraint(
+            "verdict IS NULL OR verdict IN "
+            "('no_trade', 'wait', 'long_scalp', 'short_scalp')",
+            name="ck_tradingview_alert_verdict",
+        ),
+        CheckConstraint(
+            "confidence IS NULL OR confidence IN ('low', 'medium', 'high')",
+            name="ck_tradingview_alert_confidence",
+        ),
+        CheckConstraint(
+            "length(content_sha256) = 64",
+            name="ck_tradingview_alert_content_sha256",
+        ),
+        CheckConstraint(
+            "length(raw_payload_sha256) = 64",
+            name="ck_tradingview_alert_raw_payload_sha256",
+        ),
+        CheckConstraint(
+            "contract_version <> 1 OR "
+            "(bar_time_ms >= 946684800000 AND bar_time_ms < 4102444800000)",
+            name="ck_tradingview_alert_v1_bar_time",
+        ),
+        CheckConstraint(
+            "contract_version <> 1 OR "
+            "(length(alert_id) <= 200 "
+            "AND length(indicator_version) <= 32 "
+            "AND length(symbol) <= 32 "
+            "AND length(timeframe) <= 16 "
+            "AND length(setup) <= 64)",
+            name="ck_tradingview_alert_v1_text_bounds",
+        ),
+        Index("ix_tradingview_alert_received_at", "received_at"),
+        Index("ix_tradingview_alert_bar_time", "bar_time"),
+        Index(
+            "ix_tradingview_alert_symbol_received_at",
+            "symbol",
+            "received_at",
+        ),
+        Index(
+            "ix_tradingview_alert_setup_received_at",
+            "setup",
+            "received_at",
+        ),
+        Index(
+            "ix_tradingview_alert_analysis_status_updated_at",
+            "analysis_status",
+            "updated_at",
+        ),
+    )
+
+    alert_id: str = Field(
+        sa_column=Column(String(200), primary_key=True, nullable=False)
+    )
+    contract_version: int
+    parser_revision: str = Field(
+        sa_column=Column(String(64), nullable=False)
+    )
+    indicator_version: str = Field(
+        sa_column=Column(String(32), nullable=False)
+    )
+    content_sha256: str = Field(
+        sa_column=Column(String(64), nullable=False)
+    )
+    raw_payload_sha256: str = Field(
+        sa_column=Column(String(64), nullable=False)
+    )
+
+    symbol: str = Field(sa_column=Column(String(32), nullable=False))
+    timeframe: str = Field(sa_column=Column(String(16), nullable=False))
+    setup: str = Field(sa_column=Column(String(64), nullable=False))
+    side: str = Field(sa_column=Column(String(5), nullable=False))
+    price: Decimal = Field(sa_column=Column(TRADINGVIEW_PRICE, nullable=False))
+    bar_time_ms: int = Field(sa_column=Column(BigInteger, nullable=False))
+    # UTC-naive by repository convention; bar_time_ms remains authoritative.
+    bar_time: datetime = Field(sa_column=Column(DateTime, nullable=False))
+
+    received_at: datetime = Field(
+        default_factory=utc_now_naive,
+        sa_column=Column(DateTime, nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=utc_now_naive,
+        sa_column=Column(DateTime, nullable=False),
+    )
+
+    # Exact decoded UTF-8 body is immutable audit evidence. Normalized fields
+    # above drive reads and analysis; this is never fed to a future generic
+    # parser.
+    payload_json: str = Field(sa_column=Column(Text, nullable=False))
+    levels_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    context_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+
+    analysis_status: str = "pending"
+    analysis_attempts: int = 0
+    analysis_started_at: Optional[datetime] = None
+    analysis_completed_at: Optional[datetime] = None
+    # Deliberately separate from wire contract and Pine indicator versions.
+    scorer_revision: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    verdict: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(32), nullable=True),
+    )
+    confidence: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(16), nullable=True),
+    )
+    assessment_json: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    analysis_error_code: Optional[str] = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    analysis_error: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+
+
 # Loader options for bulk Fill queries: skip the legacy raw-email payload
 # columns (write-only history; nothing reads them back). Keeps multi-KB email
 # bodies per row off the wire — metered egress on hosted Postgres. Every
@@ -694,4 +901,11 @@ STRATEGY_RUN_TRADE_LIGHT = (
     defer(StrategyRunTrade.feature_snapshot_json),
     defer(StrategyRunTrade.raw_entry_row_json),
     defer(StrategyRunTrade.raw_exit_row_json),
+)
+TRADINGVIEW_ALERT_LIGHT = (
+    defer(TradingViewAlert.payload_json),
+    defer(TradingViewAlert.levels_json),
+    defer(TradingViewAlert.context_json),
+    defer(TradingViewAlert.assessment_json),
+    defer(TradingViewAlert.analysis_error),
 )
