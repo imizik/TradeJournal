@@ -13,7 +13,7 @@ from sqlmodel import Session, delete, select
 
 from app.database import create_db_and_tables, engine
 from app.models import Account, FILL_LIGHT, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts
 from app.routers.fills import (
     _rebuild_trades,
     backup_manual_fills,
@@ -176,6 +176,40 @@ def _maybe_autostart_gmail_watch() -> None:
     thread.start()
 
 
+def _tradingview_analysis_autostart_enabled() -> bool:
+    configured = os.environ.get(
+        "TRADINGVIEW_ANALYSIS_AUTOSTART",
+        "false",
+    ).strip().lower()
+    if configured in {"1", "true", "yes"}:
+        return True
+    if configured in {"0", "false", "no"}:
+        return False
+    _log.warning(
+        "Invalid TRADINGVIEW_ANALYSIS_AUTOSTART=%r; disabling worker",
+        configured,
+    )
+    return False
+
+
+def _maybe_start_tradingview_analysis_worker(app: FastAPI):
+    """Start one cooperative DB-backed worker in the private API process."""
+
+    if not _tradingview_analysis_autostart_enabled():
+        _log.info(
+            "TradingView analysis worker skipped: autostart disabled"
+        )
+        return None
+
+    from app.engine.tradingview_analysis import TradingViewAnalysisWorker
+
+    worker = TradingViewAnalysisWorker(engine)
+    worker.start()
+    app.state.tradingview_analysis_worker = worker
+    _log.info("TradingView analysis worker started")
+    return worker
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     create_db_and_tables()
@@ -187,7 +221,13 @@ async def lifespan(_app: FastAPI):
             session.commit()
     _maybe_autostart_webull_listener()
     _maybe_autostart_gmail_watch()
-    yield
+    tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
+    try:
+        yield
+    finally:
+        if tradingview_worker is not None:
+            tradingview_worker.stop()
+            _log.info("TradingView analysis worker stopped")
 
 
 app = FastAPI(title="Trade Journal API", lifespan=lifespan)
@@ -217,5 +257,10 @@ app.include_router(sync.router, prefix="/sync", tags=["sync"])
 app.include_router(webull.router, prefix="/webull", tags=["webull"])
 app.include_router(gmail_push.router, prefix="/gmail", tags=["gmail"])
 app.include_router(packets.router, prefix="/packets", tags=["packets"])
+app.include_router(
+    tradingview_alerts.router,
+    prefix="/tradingview",
+    tags=["tradingview"],
+)
 app.include_router(research.router, prefix="/research", tags=["research"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])

@@ -32,6 +32,7 @@ backend/Robinhood/
 *.swo
 .env
 .env.local
+backend/.env.tradingview
 backend/credentials.json
 backend/token.json
 .DS_Store
