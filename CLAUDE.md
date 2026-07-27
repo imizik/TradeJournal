@@ -13,11 +13,11 @@ Current scope is broader than the original MVP notes:
 - The repo is optimized for local analysis, repair, rebuild workflows, and eventual low-cost deployment.
 - Current scope also includes Webull read/listen/import plumbing, Gmail Pub/Sub push ingest, a Sync Center, AI trade/day review, market packets for Claude Desktop, live quotes, Alpaca fill context, and trade path metrics.
 - Strategy Lab has an end-to-end Stage 4 workflow for version-controlled Pine research: strategy/version creation and history, stored Pine source and assumptions, hash-bound TradingView CSV preview/import, deterministic persisted metrics, and run pages with curves and filterable simulated trades. It is separate from journal fills/trades, and every import requires an explicit source timezone. Run comparison, deterministic findings, experiment workflows, and Pine diffs remain Stage 5 work.
-- The TradingView live-signal loop has its contract and persistence
-  foundation: a frozen network/DB-free v1 parser, isolated
-  `tradingview_alert` table, guarded migration, atomic duplicate/collision
-  persistence, and light/full read services. It still has no HTTP route,
-  analysis worker, Pine script, or frontend page.
+- The TradingView live-signal loop has its local backend path through Step 4:
+  a frozen network/DB-free v1 parser, isolated `tradingview_alert` table,
+  guarded migration, token-protected webhook-only ingress, private light/full
+  reads, and one database-backed fenced Alpaca/scalper worker. Pine code and
+  the Signals page remain future work.
 
 ## Agent Operating Style
 
@@ -90,6 +90,11 @@ generic current parser. Canonical `alert_id` is the only idempotency key:
 same semantic hash means duplicate even when raw bytes differ; a different
 semantic hash is a collision that preserves the first evidence.
 
+The public ingress (`app.tradingview_ingress`) and private API (`app.main`) are
+separate applications. Expose only ingress port `8090`. Analysis claims commit
+before market calls and use `analysis_attempts` as a fencing token. The
+database is a durable local queue, not a Cloud scale-to-zero task dispatcher.
+
 Durable background work:
 
 - `job_run` records durable state for enrichment/path jobs.
@@ -148,17 +153,24 @@ Durable background work:
 - SQLite-to-Postgres copy script:
   - `backend/scripts/migrate_sqlite_to_postgres.py`
 - Reconciliation and CSV comparison scripts under `backend/scripts/`
-- TradingView live-alert contract and persistence foundation:
+- TradingView live-alert backend through Step 4:
   - `backend/app/engine/tradingview.py`
   - `backend/app/engine/tradingview_alerts.py`
+  - `backend/app/engine/tradingview_analysis.py`
+  - `backend/app/tradingview_ingress.py`
+  - `backend/app/tradingview_database.py`
+  - `backend/app/routers/tradingview_webhook.py`
+  - `backend/app/routers/tradingview_alerts.py`
   - `TradingViewAlert` in `backend/app/models.py`
   - Alembic revision `2e6f9a1b4c7d`
   - `backend/tests/test_tradingview.py`
   - `backend/tests/test_tradingview_alert_model.py`
   - `backend/tests/test_tradingview_alert_migration.py`
   - `backend/tests/test_tradingview_alert_persistence.py`
+  - `backend/tests/test_tradingview_analysis.py`
+  - `backend/tests/test_tradingview_routes.py`
   - `docs/tradingview-webhook-contract-v1.md`
-  - no HTTP surface or analysis worker yet
+  - Pine indicator and frontend Signals page are not implemented yet
 - Strategy Lab definition/version lifecycle and API:
   - `backend/app/engine/strategy_lab.py`
   - `backend/app/routers/strategy_lab.py`
@@ -271,6 +283,9 @@ Highest-leverage backend files:
 - `backend/app/engine/scalper.py`
 - `backend/app/engine/tradingview.py`
 - `backend/app/engine/tradingview_alerts.py`
+- `backend/app/engine/tradingview_analysis.py`
+- `backend/app/tradingview_ingress.py`
+- `backend/app/tradingview_database.py`
 - `backend/app/ai/reviewer.py`
 - `backend/app/ai/daily_reviewer.py`
 - `backend/app/routers/auth.py`
@@ -284,6 +299,8 @@ Highest-leverage backend files:
 - `backend/app/routers/gmail_push.py`
 - `backend/app/routers/packets.py`
 - `backend/app/routers/webull.py`
+- `backend/app/routers/tradingview_webhook.py`
+- `backend/app/routers/tradingview_alerts.py`
 - `backend/app/main.py`
 - `backend/app/models.py`
 
@@ -392,6 +409,9 @@ Stable current routes:
 - `GET /strategy-lab/runs/{run_id}/trades`
 - `POST /strategy-lab/runs/{run_id}/metrics/recalculate`
 - `GET /strategy-lab/runs/{run_id}/metrics`
+- Private: `GET /tradingview/alerts`
+- Private: `GET /tradingview/alerts/{alert_id}`
+- Public ingress `:8090`: `POST /tradingview/webhook`
 
 ## Run Locally
 
@@ -401,17 +421,28 @@ Backend:
 cd backend
 pip install -e .
 alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Use port `8080` only when `8000` is occupied. If you do, keep `NEXT_PUBLIC_API_URL`, `BACKEND_PUBLIC_URL`, and `FRONTEND_PUBLIC_URL` consistent with the actual frontend/backend ports and public callback URLs.
 
+Restricted TradingView ingress:
+
+```bash
+cd backend
+uvicorn app.tradingview_ingress:app --reload --no-access-log \
+  --host 127.0.0.1 --port 8090
+```
+
 Repo-specific local dev note:
 
-- Backend config now loads `.env` before DB init from `backend/.env` first, then repo-root `.env`; exported env vars still win. This matters for `DATABASE_URL`, autostart flags, API keys, and OAuth/public URL config.
+- The private backend loads `backend/.env` then repo-root `.env`; the public
+  ingress loads only `backend/.env.tradingview`. Never place private API keys
+  or unrestricted database credentials in the ingress environment.
 - `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
-- `startdev.ps1` intentionally launches the backend on `8080` and points the frontend there.
-- `startdev.sh` is the macOS/Linux equivalent; it also assumes backend config comes from `.env` instead of exporting `DATABASE_URL` inline.
+- `startdev.ps1` and `startdev.sh` launch the private backend on `8080`,
+  restricted TradingView ingress on `8090`, and frontend on `3000`.
+- Both local backend processes bind to `127.0.0.1`; tunnel only `8090`.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:
@@ -499,6 +530,14 @@ The report work is centered on understanding:
 - If recent trades have underlying/VWAP but missing RSI/EMA/MACD/ATR, inspect stale Alpaca daily cache coverage before changing indicator math.
 - Option `price` in the DB is total premium per contract (dollars). Divide by 100 for per-share price before passing to Black-Scholes.
 - Backend port is usually 8000. Use 8080 only when 8000 is occupied, and keep OAuth/API URLs in sync.
+- The public TradingView ingress is a separate `8090` process. Keep its exact
+  route allowlist, disable/redact access logging at Uvicorn and every
+  proxy/tunnel because TradingView requires a query token, and never expose
+  the private API.
+- Keep TradingView analysis network calls outside DB transactions. Preserve
+  atomic claims, attempt fencing, finite/bounded configuration, terminal
+  generic failures, and lease recovery. An always-on worker or durable task
+  dispatcher is still required for Cloud scale-to-zero deployment.
 - Polygon cache lives at `backend/data/polygon_cache/`. Delete a cache file to force a re-fetch for that ticker/date. Empty responses are also cached as `{"_empty_cached_at": ts}` markers (1 year for finalized history, 7 days for indicator series) so dead tickers/days stop burning the rate limit every sync; deleting the marker file forces a retry.
 - Alpaca cache lives at `backend/data/alpaca_cache/`. Daily cache files must be refreshed when they do not cover the requested date range.
 - For SQLite, avoid long write transactions in historical jobs; progress updates to `job_run` can otherwise hit `database is locked`.

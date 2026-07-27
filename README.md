@@ -15,7 +15,15 @@ Backend:
 cd backend
 pip install -e .
 alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+Restricted TradingView ingress (only when using live alerts):
+
+```bash
+cd backend
+uvicorn app.tradingview_ingress:app --reload --no-access-log \
+  --host 127.0.0.1 --port 8090
 ```
 
 Frontend:
@@ -31,9 +39,15 @@ The frontend dev server runs on `http://localhost:3000` by default. The frontend
 
 Repo helper note:
 
-- Backend config now loads `.env` before DB init from `backend/.env` first, then repo-root `.env`; exported env vars still win. This is where `DATABASE_URL`, API keys, autostart flags, and public callback URLs should usually live.
-- `startdev.ps1` intentionally starts the backend on `8080` and points the frontend there.
-- `startdev.sh` is the macOS/Linux equivalent and relies on the same `.env` loading behavior instead of exporting `DATABASE_URL` inline.
+- Private backend config loads `.env` before DB init from `backend/.env` first,
+  then repo-root `.env`; exported env vars still win.
+- The public TradingView process loads only `backend/.env.tradingview`, never
+  the private app's shared `.env`.
+- `startdev.ps1` starts the private backend on `8080`, restricted TradingView ingress on `8090`, and frontend on `3000`.
+- `startdev.sh` is the macOS/Linux equivalent. Both backend processes bind to `127.0.0.1`; tunnel only `8090`, never the private API.
+- Both startdev launchers refuse a hosted/private `DATABASE_URL` setup unless
+  `TRADINGVIEW_DATABASE_URL` is also set, preventing alerts and the worker
+  from silently using different databases.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API=http://localhost:8080` if you want the MCP tools to talk to a backend started by `startdev.ps1`.
 
 ## Core Model
@@ -47,7 +61,7 @@ Repo helper note:
 - `raw_email_id` dedupes imported fills; manual fills use `manual:` IDs and are backed up to `backend/data/manual_fills.json`.
 - Long-running work is tracked in `job_run`.
 
-Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `tradetag`, `job_run`, `fill_market_context`, `trade_path_metrics`, `dailyreview`, `webull_raw_event`, and the normalized `strategy_*` Strategy Lab tables.
+Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `tradetag`, `job_run`, `fill_market_context`, `trade_path_metrics`, `dailyreview`, `webull_raw_event`, the normalized `strategy_*` Strategy Lab tables, and isolated `tradingview_alert` rows.
 
 ## Main API Surfaces
 
@@ -64,6 +78,10 @@ Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `t
 - Webull: `GET /webull/health`, `GET /webull/accounts`, `GET /webull/orders/recent`, `GET /webull/orders/{order_id}`, `POST /webull/events/test-ingest`, `POST /webull/events/start`, `POST /webull/events/stop`, `GET /webull/events/status`
 - Market packets: `GET /packets/report?type=premarket|postmarket`, `GET /packets/news`
 - Strategy Lab: `GET/POST /strategy-lab/strategies`, `GET/PATCH /strategy-lab/strategies/{id}`, `POST /strategy-lab/strategies/{id}/versions`, `GET/PATCH /strategy-lab/versions/{id}`, `POST /strategy-lab/versions/{id}/fork`, `POST /strategy-lab/imports/preview`, `POST /strategy-lab/runs/import`, `GET /strategy-lab/runs`, `GET /strategy-lab/runs/{run_id}`, `GET /strategy-lab/runs/{run_id}/trades`, `POST /strategy-lab/runs/{run_id}/metrics/recalculate`, `GET /strategy-lab/runs/{run_id}/metrics`
+- TradingView private reads: `GET /tradingview/alerts`, `GET /tradingview/alerts/{alert_id}`
+
+The separate port `8090` ingress exposes only `POST /tradingview/webhook` and
+`GET /health`; it does not expose any of the private API surfaces above.
 
 ## Strategy Lab TradingView Import
 
@@ -83,20 +101,67 @@ After commit, the run page shows source/run assumptions, coverage-aware determin
 
 Stage 4 reused the existing normalized `strategy_*` schema and Alembic revision `f1a2b3c4d5e6`; it added no schema migration. Two-run comparison, deterministic findings, experiment workflows, and Pine source diffs remain Stage 5 work.
 
-## TradingView Live Signal Contract
+## TradingView Live Signal Loop
 
-The live TradingView-to-scalp-verdict loop now has its contract and persistence
-foundation. `backend/app/engine/tradingview.py` freezes webhook contract `v=1`,
-while `backend/app/engine/tradingview_alerts.py` atomically stores normalized
-alerts in the isolated `tradingview_alert` table, classifies true retries
-versus identity collisions, preserves the first raw evidence, and provides
-large-field-safe list/detail reads. Alembic revision `2e6f9a1b4c7d` creates
-the schema with SQLite/Postgres-safe exact Decimal handling.
+Steps 1–4 are implemented. The frozen v1 parser validates TradingView JSON,
+the isolated table preserves immutable first-delivery evidence, and a
+token-protected webhook-only process accepts alerts without exposing the
+journal API. The private backend runs one database-backed worker that claims
+alerts atomically, calls the existing read-only scalp analyzer outside any
+transaction, and stores a fenced verdict/confidence/assessment result.
+
+Local setup:
+
+1. Run `alembic upgrade head`.
+2. Generate a token:
+
+   ```bash
+   python -c "import secrets; print(secrets.token_urlsafe(32))"
+   ```
+
+3. Copy `backend/.env.tradingview.example` to
+   `backend/.env.tradingview` and put the token there as
+   `TRADINGVIEW_WEBHOOK_TOKEN=...`. If the private app uses `DATABASE_URL`,
+   set `TRADINGVIEW_DATABASE_URL` to the same database (preferably through a
+   restricted ingress role); leave it blank only for default local SQLite.
+4. In the private `backend/.env`, set
+   `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
+5. Run `bash startdev.sh`, or start `app.main:app` and
+   `app.tradingview_ingress:app` separately using the commands above.
+6. Test with the sample payload from
+   [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md):
+
+   ```bash
+   curl -X POST http://localhost:8090/tradingview/webhook \
+     -H "Authorization: Bearer <TOKEN>" \
+     -H "Content-Type: application/json" \
+     --data-binary @sample-alert.json
+   ```
+
+The TradingView UI cannot attach a Bearer header, so its webhook URL uses
+`https://<tunnel-host>/tradingview/webhook?token=<TOKEN>`. Query tokens can
+appear in proxy/access logs: the local ingress command disables Uvicorn access
+logs, and every tunnel/proxy/cloud hop must also disable or redact the request
+target. The token should be dedicated and rotated if exposed. Tunnel only port
+`8090`; `/health` returns `200` only when the token and isolated table are
+ready.
+
+The private reads are `GET /tradingview/alerts` and
+`GET /tradingview/alerts/{alert_id}`. The list omits raw payload, snapshots,
+assessment JSON, and full error text; detail returns them explicitly.
+Snapshot scalars in detail are tagged (`number`, `string`, `boolean`, `null`)
+so exact decimal text and original scalar types remain distinguishable.
+
+`backend/.env.example` documents private worker retry/lease/freshness settings.
+`backend/.env.tradingview.example` documents the public token and optional
+`TRADINGVIEW_DATABASE_URL`; production must use a service-specific environment
+and an ingress database role restricted to `tradingview_alert`. The ingress
+never runs migrations. Cloud scale-to-zero still needs an always-on worker or
+durable task dispatcher.
 
 The exact payload, bounds, identity format, and future migration policy are in
 [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).
-No public webhook, background analysis worker, Pine indicator, or Signals page
-exists yet.
+The Pine indicator and frontend Signals page remain future Steps 5–6.
 
 ## Durable Jobs
 

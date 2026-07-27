@@ -4,16 +4,17 @@ Status: frozen on 2026-07-23 and implemented by
 `backend/app/engine/tradingview.py`. The golden contract tests live in
 `backend/tests/test_tradingview.py`.
 
-This is the wire contract between the Pine indicator and the future
-TradingView webhook receiver. It is deliberately independent from Strategy
-Lab CSV metadata and from journal fills/trades.
+This is the wire contract between the Pine indicator and the webhook-only
+TradingView ingress. It is deliberately independent from Strategy Lab CSV
+metadata and from journal fills/trades.
 
 Step 1 implements bounded raw JSON decoding, parsing, normalization, canonical
 identity, raw and semantic fingerprints, and duplicate-key protection. Steps
 2–3 add the isolated `tradingview_alert` model, guarded Alembic revision
 `2e6f9a1b4c7d`, and `backend/app/engine/tradingview_alerts.py` for atomic
-insert-first persistence and light/full reads. There is still no HTTP route,
-analysis worker, Pine script, or Signals UI.
+insert-first persistence and light/full reads. Step 4 adds the authenticated
+webhook-only ingress, private read routes, and fenced database-backed analysis
+worker. There is still no Pine script or Signals UI.
 
 ## Payload
 
@@ -90,7 +91,7 @@ The persistence layer uses `alert_id` as its natural primary key and compares
 ## Frozen v1 bounds
 
 - Raw request body: at most 16 KiB, enforced before JSON decoding by the
-  future receiver.
+  webhook receiver.
 - `indicator_version` and `symbol`: at most 32 characters.
 - `timeframe`: at most 16 characters.
 - `setup`: at most 64 characters.
@@ -172,7 +173,9 @@ cd backend
 .venv/bin/python -m pytest -q \
   tests/test_tradingview_alert_model.py \
   tests/test_tradingview_alert_migration.py \
-  tests/test_tradingview_alert_persistence.py
+  tests/test_tradingview_alert_persistence.py \
+  tests/test_tradingview_analysis.py \
+  tests/test_tradingview_routes.py
 .venv/bin/python -m compileall -q app/engine/tradingview.py
 ```
 
@@ -181,3 +184,7 @@ strict raw decoding, duplicate-key rejection, context-independent Decimal
 normalization, immutability, the exact v1 golden fingerprint, schema
 upgrade/downgrade and create-all guards, exact Decimal storage, concurrent
 idempotency, collision preservation, and egress-safe reads.
+The Step 4 suites also pin fail-closed authentication, raw stream bounds,
+readiness, public/private route isolation, exact typed detail snapshots, worker
+claim races, attempt fencing, retry limits, abandoned-claim cleanup, and
+transaction-free market-data execution.

@@ -2,11 +2,10 @@
 
 **Audience:** a coding agent (Codex) implementing this cold. Everything needed is in this doc plus the referenced files. Read the referenced files before writing code; do not guess signatures.
 
-> **Implementation status (2026-07-25):** Steps 1–3 are complete. The frozen
-> v1 wire contract/parser, isolated `tradingview_alert` model and guarded
-> migration, and atomic persistence/light-read service are implemented and
-> tested. No HTTP router, analysis worker, Pine script, or frontend signal page
-> exists yet.
+> **Implementation status (2026-07-26):** Steps 1–4 are complete. The frozen
+> v1 contract/parser, isolated persistence, authenticated webhook-only ingress,
+> private read API, and fenced one-at-a-time analysis worker are implemented
+> and tested. No Pine script or frontend signal page exists yet.
 
 ## Goal
 
@@ -30,21 +29,25 @@ This is **read-only decision support**, exactly like the existing Scalper Analyz
 TradingView (Pine v6 "Isaac Market Map" indicator)
   ├─ draws objective levels on the chart (PDH/PDL/PDC, premarket/overnight/weekly H-L,
   │  5/15/30m opening ranges, VWAP, 9/20 EMA, gap/gap-fill, ATR zones, RVOL, RS vs SPY)
-  └─ on trigger: alert() sends JSON  ──HTTPS POST──►  FastAPI  POST /tradingview/webhook?token=SECRET
-                                                        1. verify shared-secret token
-                                                        2. persist raw alert (idempotent)
-                                                        3. return 200 fast
-                                                        4. background: build_scalp_analysis(symbol, side)
-                                                           → store verdict/confidence/assessment on the row
-Frontend "Signals" page  ◄──GET /tradingview/alerts──  (poll, hidden-tab-skip, 30–60s)
+  └─ on trigger: alert() sends JSON ──HTTPS POST──► webhook-only FastAPI :8090
+                                                       1. verify token before body/DB
+                                                       2. bounded stream + frozen parser
+                                                       3. persist idempotently
+                                                       4. return 200 fast
+Private TradeJournal API :8080
+  ├─ one DB-backed worker claims pending alerts
+  │    → build_scalp_analysis(symbol, side) outside a DB transaction
+  │    → fenced verdict/confidence/assessment update
+  └─ GET /tradingview/alerts + /alerts/{id}
+Frontend "Signals" page (future) ◄── private reads ── (poll, hidden-tab-skip, 30–60s)
 ```
 
 The webhook-only ingress must be **publicly reachable** (TradingView cannot hit
 `localhost`). The existing TradeJournal API has no general authentication and
 must remain private:
 
-- **Local/dev:** tunnel a dedicated ingress port, not the full backend on
-  `8000`/`8080`.
+- **Local/dev:** run `app.tradingview_ingress:app` on `8090` and tunnel only
+  that port, never the private backend on `8000`/`8080`.
 - **Prod:** deploy a separate restricted ingress and durable dispatcher. Do
   not expose journal routes, read APIs, docs, or OpenAPI on its hostname.
 - **TradingView webhooks require a paid TradingView plan** (free tier cannot POST webhooks). Note this to the user; it is a prerequisite, not a code task.
@@ -114,7 +117,7 @@ same-name wrong-column indexes are rejected. SQLite check expressions are also
 verified exactly; PostgreSQL rewrites reflected check SQL, so that dialect's
 guard verifies the canonical constraint names rather than comparing text.
 
-**2. Parser + persistence services (parser/persistence complete; analysis pending)**
+**2. Parser, persistence, and analysis services (complete)**
 
 Keep the network-free parsing logic in `backend/app/engine/tradingview.py`
 **pure and testable** (same split as `score_scalp` vs
@@ -122,8 +125,8 @@ Keep the network-free parsing logic in `backend/app/engine/tradingview.py`
 
 - `parse_alert_bytes(raw_body)` performs the frozen bounded UTF-8/JSON
   decoding, preserves decimals, rejects duplicate keys, and dispatches to
-  `parse_alert()` / `parse_alert_v1()`. The future router must use it instead
-  of `request.json()`.
+  `parse_alert()` / `parse_alert_v1()`. The receiver uses it instead of
+  `request.json()`.
 - `backend/app/engine/tradingview_alerts.py` now owns persistence and reads
   without adding DB imports to the frozen parser.
 - `persist_alert(session, parsed, raw_body)` inserts first and commits
@@ -135,34 +138,67 @@ Keep the network-free parsing logic in `backend/app/engine/tradingview.py`
   sorted compact JSON. `list_alerts()` applies bounded filters/pagination and
   defers large evidence fields; `get_alert()` explicitly hydrates full detail,
   including after a same-session light-list query.
-- `run_analysis(alert_id) -> None` owns its sessions. It claims work in one
-  short transaction, closes the session during `build_scalp_analysis()`, then
-  opens another short transaction to persist only the assessment. Missing
-  Alpaca configuration is `skipped`; network/retry exhaustion is a retryable
-  `error`; a closed market is a normal completed `no_trade`/`wait` result.
+- `backend/app/engine/tradingview_analysis.py` uses the database as the durable
+  queue. Conditional updates atomically claim recoverable rows and increment
+  `analysis_attempts`; that attempt is the fencing token on every finalize.
+- `run_alert_analysis()` closes the claim session before
+  `build_scalp_analysis(symbol, direction=side)`, then opens a new short
+  session for analysis fields only. Pine price/levels/context never feed the
+  verdict.
+- Missing Alpaca configuration and stale/future signals are `skipped`.
+  Explicit Alpaca transport failures and retryable HTTP responses
+  (`408`/`429`/`5xx`) use bounded attempts/backoff; generic code/output errors
+  are terminal. Closed, after-hours, premarket, and stale-market-data scorer
+  outputs are normal completed results.
+- `TradingViewAnalysisWorker` is one cooperatively stoppable private-process
+  poller. It periodically terminalizes exhausted abandoned claims, stale
+  running leases are reclaimable, and an older attempt cannot overwrite a
+  newer result. Its daemon thread permits bounded process shutdown; the
+  durable lease recovers any interrupted in-flight claim.
 
-**3. Router** — `backend/app/routers/tradingview.py`, thin, copying `gmail_push.py` almost verbatim for token verification:
+**3. HTTP surfaces (complete)** — deliberately split by trust boundary:
 
-- `_verify_webhook_token(token, authorization)` reads
-  `TRADINGVIEW_WEBHOOK_TOKEN` and fails closed when it is unset. Compare in
-  constant time. Accept token via `?token=` or `Authorization: Bearer`.
-- `POST /tradingview/webhook` — verify token → bound/read body → parse →
-  persist → dispatch only newly created or recoverable work. Use a bounded
-  one-worker local queue with startup recovery, not one thread per alert.
-  Return 200 on a true duplicate so TradingView stops retrying.
-- `GET /tradingview/alerts?limit=50&offset=0&symbol=` — light list DTO:
+- `backend/app/tradingview_ingress.py` is a separate FastAPI app exposing only
+  `POST /tradingview/webhook` and `GET /health`. It has no docs/OpenAPI, CORS,
+  slash redirects, journal routes, private reads, or market-data worker.
+  `/health` is readiness: it returns `503` unless the token and isolated table
+  are usable.
+- `backend/app/routers/tradingview_webhook.py` fails closed unless a token of
+  at least 32 bytes is configured, compares UTF-8 bytes with
+  `secrets.compare_digest`, authenticates before body streaming or DB session
+  creation, and accepts `?token=` or `Authorization: Bearer`.
+- The receiver stream-caps the body at 16 KiB, calls
+  `parse_alert_bytes()`, opens its DB session only after parsing succeeds,
+  returns `200` for true duplicates, `409` for identity collisions, and
+  retryable `503` for SQLite contention.
+- `backend/app/routers/tradingview_alerts.py` is registered only on the private
+  API. `GET /tradingview/alerts?limit=50&offset=0&symbol=` returns a light DTO:
   everything **except** `payload_json`/`assessment_json`/`levels_json`/
   `context_json`/`analysis_error`. Newest first.
-- `GET /tradingview/alerts/{alert_id}` — full detail incl. raw payload + parsed assessment.
+- `GET /tradingview/alerts/{alert_id}` — full detail incl. raw payload,
+  parsed assessment, and tagged snapshot scalars so exact numbers remain
+  distinguishable from strings.
 
 Return Pydantic DTOs, never the raw SQLModel row in the list (egress discipline).
 
-**4. Register** — in `backend/app/main.py`, add to the import line and:
-```python
-app.include_router(tradingview.router, prefix="/tradingview", tags=["tradingview"])
-```
+**4. Runtime registration (complete)**
 
-**5. Config** — `TRADINGVIEW_WEBHOOK_TOKEN` in `.env` (loaded via the existing `.env` precedence). Document it.
+- `app.main` includes only the private read router and starts/stops one worker
+  from its lifespan only when `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
+- `app.tradingview_ingress` includes only the public webhook router.
+- `startdev.sh`/`startdev.ps1` launch private API `:8080`, ingress `:8090`,
+  and frontend `:3000`; both backend processes bind to `127.0.0.1`.
+- Both startdev launchers fail preflight when the private API uses a configured
+  `DATABASE_URL` but ingress has no `TRADINGVIEW_DATABASE_URL`, preventing a
+  hosted-worker/local-ingress split.
+- The ingress loads only `backend/.env.tradingview` locally, not the private
+  app's `.env`. Its optional `TRADINGVIEW_DATABASE_URL` lets production use a
+  role restricted to `tradingview_alert`. It never runs migrations or
+  `create_all()`.
+
+**5. Config (complete)** — private worker settings are documented in
+`backend/.env.example`; public ingress settings are isolated in
+`backend/.env.tradingview.example`.
 
 **6. Tests**
 
@@ -180,17 +216,22 @@ Completed network/DB-independent foundations:
   concurrent duplicate delivery, deterministic snapshots, filters,
   pagination, and light-to-full hydration.
 
-Still required with the router:
+Completed HTTP/worker tests:
 
-- Idempotency: two posts with the same `alert_id` → one row, second returns
-  `dup=true` (use `TestClient`; stub analysis so no Alpaca call).
-- Token: wrong/missing request token → 401; no server token configured →
-  endpoint disabled with 503 and nothing persisted.
+- `backend/tests/test_tradingview_routes.py` covers fail-closed authentication,
+  auth-before-body/DB, Unicode tokens, hard stream bounds, idempotency,
+  collision/busy mappings, readiness, public/private topology, and
+  type-preserving light/detail DTOs.
+- `backend/tests/test_tradingview_analysis.py` covers success/skip/error
+  lifecycle, bounded transport/HTTP retries, two-worker claim races, attempt
+  fencing, no open DB transaction during market calls, bounded shutdown,
+  durable draining, and final-claim lease recovery.
 
 **Cloud note:** `job_run` stores status but is not a task delivery system.
-Cloud production needs an actual durable dispatcher such as Cloud Tasks or
-Pub/Sub. Do not claim Cloud Run readiness until that exists, and never block
-the webhook response on analysis.
+The database makes local pending work durable, but Cloud production still
+needs an always-on worker or an actual dispatcher such as Cloud Tasks/Pub/Sub.
+Do not claim scale-to-zero Cloud Run readiness until that exists, and never
+block the webhook response on analysis.
 
 ### Phase 2 — Frontend "Signals" page
 
@@ -242,7 +283,7 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 
 ## Acceptance criteria
 
-**Completed foundation (Steps 1–3):**
+**Completed foundation (Steps 1–4):**
 
 1. Frozen v1 parser and golden fixtures pass without network or DB access.
 2. `tradingview_alert` is the sole new isolated domain table and the guarded
@@ -253,24 +294,25 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
    full detail hydration are covered by tests.
 
 **Phase 1:**
-1. `curl -X POST 'http://localhost:8080/tradingview/webhook?token=T' -d '<sample JSON>'` → 200 `{accepted:true, dup:false}`; row exists in `tradingview_alert`.
+1. Authenticated `POST http://localhost:8090/tradingview/webhook` with the
+   sample JSON → 200 `{accepted:true, dup:false}`; row exists in
+   `tradingview_alert`.
 2. Same POST again → 200 `{dup:true}`; still one row.
 3. Wrong/missing token (when configured) → 401.
 4. Within a few seconds the row's `analysis_status` becomes `done` (including
    closed-market `no_trade`/`wait`), `skipped` (for example Alpaca is not
    configured or the signal is stale), or retryable `error`.
 5. `GET /tradingview/alerts` returns the row **without** `payload_json`; `GET /tradingview/alerts/{id}` returns it **with** raw payload + assessment.
-6. `pytest backend/tests/test_tradingview.py` passes (no network).
+6. The `test_tradingview*` suites pass without external network calls.
 7. `python -m compileall app` clean; `alembic upgrade head` applies the new migration.
 
 **Phase 2:** `/signals` lists alerts with color-coded verdicts, polls on the hidden-tab/30–60s convention, detail view shows scorer reasons.
 
 ## Handoff / housekeeping
 
-- `CLAUDE.md` and `AGENTS.md` already describe the Steps 1–3 foundation.
-  Update both together again when the router, worker, env var, and
-  `/tradingview/*` routes land.
-- Add `TRADINGVIEW_WEBHOOK_TOKEN` to `.env.example` if one exists.
+- `CLAUDE.md` and `AGENTS.md` describe the Steps 1–4 foundation. Update both
+  together again when Pine or the Signals frontend lands.
+- Keep the private backend and read APIs off the tunneled/public hostname.
 - Keep the MCP surface read-only; if exposing signals to Claude Desktop later, add a read-only `get_signals` tool in `backend/mcp_server.py` (separate task, not this plan).
 
 ## Suggested commit slices
@@ -278,7 +320,7 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 1. frozen contract/parser + golden tests + contract docs (complete)
 2. model + guarded Alembic migration (complete)
 3. persistence/read engine + tests (complete)
-4. restricted ingress, private read router, bounded worker, and configuration (next)
+4. restricted ingress, private read router, bounded worker, and configuration (complete)
 5. Pine v6 indicator (`docs/pine/isaac_market_map.pine`)
 6. frontend `/signals`
 7. docs (`CLAUDE.md`/`AGENTS.md`) update (ongoing per completed slice)

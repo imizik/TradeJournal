@@ -10,7 +10,7 @@ Current scope also includes Webull read/listen/import plumbing, a Sync Center, G
 
 Strategy Lab now has an end-to-end local workflow for version-controlled Pine research: normalized strategy definitions, immutable-after-use Pine versions, run/trade/metrics/experiment tables, strategy/version creation and history, Pine source pages, a preview-then-commit TradingView CSV importer, and deterministic persisted run metrics. The frontend exposes run metadata, coverage-aware metrics, equity/drawdown curves, and filterable simulated trades. Imports require an explicit source timezone and remain isolated from journal fills/trades. Run comparison, deterministic findings, experiment workflows, and Pine diffs remain Stage 5 work.
 
-The TradingView live-signal loop has completed its contract and persistence foundation. Contract `v=1`, a separate Pine `indicator_version`, canonical alert identity, strict UTC bar-close timestamps, bounded snapshots, and semantic fingerprints are defined in `docs/tradingview-webhook-contract-v1.md` and the frozen parser in `backend/app/engine/tradingview.py`. Isolated `tradingview_alert` persistence, migration, atomic duplicate/collision classification, and light/full read services now exist. Webhook routes, analysis workers, Pine code, and Signals UI are future steps.
+The TradingView live-signal loop now has its local backend path through Step 4. Contract `v=1`, a separate Pine `indicator_version`, canonical alert identity, strict UTC bar-close timestamps, bounded snapshots, and semantic fingerprints remain frozen in `docs/tradingview-webhook-contract-v1.md` and `backend/app/engine/tradingview.py`. An isolated public webhook-only process persists alerts, while the private API owns light/full reads and one database-backed, fenced Alpaca/scalper analysis worker. Pine code and the Signals UI remain future steps.
 
 ## Agent Operating Style
 
@@ -37,6 +37,8 @@ Work like a fast, practical senior dev helper:
 - Strategy Lab simulations stay in `strategy_run*` tables and never enter `fill`, `trade`, or `tradefill`.
 - TradingView live alerts are a separate domain in `tradingview_alert`. They
   must never write to or be routed through journal or Strategy Lab tables.
+- The public TradingView ingress and private TradeJournal API are separate
+  FastAPI apps. Expose/tunnel only ingress port `8090`, never the private API.
 
 ## Highest-Leverage Files
 
@@ -59,6 +61,9 @@ Backend:
 - `backend/app/engine/scalper.py` (read-only scalp setup assessment: live data gathering + pure deterministic scoring; never trades)
 - `backend/app/engine/tradingview.py` (frozen, pure v1 live-alert contract parser, canonical IDs, UTC conversion, and semantic fingerprints; no DB/network)
 - `backend/app/engine/tradingview_alerts.py` (atomic persistence, duplicate/collision classification, exact normalized snapshots, and light/full alert reads; no market-data calls)
+- `backend/app/engine/tradingview_analysis.py` (durable DB polling, atomic claims, attempt fencing, freshness/config guards, and read-only scalp analysis)
+- `backend/app/tradingview_ingress.py` and `backend/app/tradingview_database.py` (minimal public app and ingress-only database boundary)
+- `backend/app/routers/tradingview_webhook.py` and `backend/app/routers/tradingview_alerts.py` (public authenticated ingest and private light/detail reads)
 - `backend/app/engine/strategy_lab.py` (Strategy Lab definition/version lifecycle, fingerprints, locking, champion transitions)
 - `backend/app/engine/strategy_metrics.py` (pure Decimal Strategy Lab run metrics, coverage, breakdowns, equity, and drawdown)
 - `backend/mcp_server.py` (read-only MCP stdio server for Claude Desktop; market packet + trade-analysis tools over localhost:8000)
@@ -131,6 +136,15 @@ Analysis scripts:
   different semantic hash is a collision and never overwrites first evidence.
 - `persist_alert()` commits/rolls back its supplied session. Call it only with
   a clean request-scoped session containing no unrelated pending writes.
+- TradingView analysis claims commit before market-data calls. The claim
+  attempt is a fencing token: a stale worker must never overwrite a newer
+  attempt, and generic scorer/code failures are terminal rather than retried.
+- The database is the durable local alert queue, but it is not a Cloud
+  scale-to-zero dispatcher. Production still needs an always-on worker or a
+  durable task service.
+- Query-token auth is required by the TradingView UI but can leak through
+  access logs. Keep ingress/proxy/tunnel request-target logging disabled or
+  redacted and rotate the dedicated token if exposed.
 
 ## Main User Flows
 
@@ -149,10 +163,9 @@ Analysis scripts:
 - Strategy Lab run browsing: `GET /strategy-lab/runs`, `GET /strategy-lab/runs/{run_id}`, and paginated/filterable `GET /strategy-lab/runs/{run_id}/trades`
 - Strategy Lab run metrics: `POST /strategy-lab/runs/{run_id}/metrics/recalculate`, then `GET /strategy-lab/runs/{run_id}/metrics`; incomplete source fields stay explicit in metric coverage
 - Strategy Lab frontend: open `/strategy-lab`, create a strategy/version, review its Pine source and assumptions, preview/commit a TradingView CSV, then inspect the resulting run, curves, metrics, and simulated trades
-- TradingView live-alert Steps 1–3: parse with `parse_alert_bytes()`, then
-  persist through `persist_alert()`; internal light/full reads are
-  `list_alerts()` and `get_alert()`. There is no `/tradingview/*` HTTP surface
-  yet.
+- TradingView live alerts: public `POST :8090/tradingview/webhook`; private
+  `GET /tradingview/alerts` and `GET /tradingview/alerts/{alert_id}`. The
+  private process analyzes pending rows with the existing read-only scalper.
 - View analytics and breakdowns: `GET /stats`
 - Review per-trade history via trade detail and fill timeline pages
 - AI trade review: `POST /trades/{id}/review`
@@ -186,9 +199,10 @@ These exist in the repo right now and may still be in flux:
 - Correct expired-option accounting when some contracts were already exited
 - Strategy Lab schema plus strategy/version API, stable source fingerprints, one-champion enforcement, run-backed version locking, hash-bound TradingView CSV preview/import, versioned deterministic run metrics, lightweight run/trade read endpoints, and the Stage 4 frontend workflow
 - Stage 4 reused the existing `strategy_*` schema and Alembic revision `f1a2b3c4d5e6`; it introduced no schema migration
-- TradingView live-alert contract v1, frozen golden parser tests, isolated
-  `tradingview_alert` schema in revision `2e6f9a1b4c7d`, exact SQLite/Postgres
-  Decimal storage, and atomic persistence/read services
+- TradingView live-alert Steps 1–4: frozen v1 parser, isolated
+  `tradingview_alert` schema in revision `2e6f9a1b4c7d`, exact persistence,
+  token-protected webhook-only ingress, private reads, and a fenced durable
+  analysis worker. Pine and Signals UI are not implemented.
 
 If tests or older docs disagree with one of the above, trust the working tree and inspect the diff before changing behavior.
 
@@ -200,17 +214,28 @@ Backend:
 cd backend
 pip install -e .
 alembic upgrade head
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Use port `8080` only when `8000` is occupied. If you do, keep `NEXT_PUBLIC_API_URL`, `BACKEND_PUBLIC_URL`, and `FRONTEND_PUBLIC_URL` consistent with the actual frontend/backend ports and public callback URLs.
 
+Restricted TradingView ingress:
+
+```bash
+cd backend
+uvicorn app.tradingview_ingress:app --reload --no-access-log \
+  --host 127.0.0.1 --port 8090
+```
+
 Repo-specific local dev note:
 
-- Backend config now loads `.env` before DB init from `backend/.env` first, then repo-root `.env`; exported env vars still win. This matters for `DATABASE_URL`, autostart flags, API keys, and OAuth/public URL config.
+- The private backend loads `backend/.env` then repo-root `.env`; the public
+  ingress loads only `backend/.env.tradingview`. Never put private API keys or
+  unrestricted DB credentials in the ingress environment.
 - `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
-- `startdev.ps1` intentionally launches the backend on `8080` and points the frontend there.
-- `startdev.sh` is the macOS/Linux equivalent; it also assumes backend config comes from `.env` instead of exporting `DATABASE_URL` inline.
+- `startdev.ps1` and `startdev.sh` launch the private backend on `8080`,
+  restricted TradingView ingress on `8090`, and frontend on `3000`.
+- Both local backend processes bind to `127.0.0.1`; tunnel only `8090`.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:
@@ -287,6 +312,15 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
   `backend/app/models.py`, Alembic revision `2e6f9a1b4c7d`, and the
   `test_tradingview_alert_*` suites; never classify raw-hash differences alone
   as a collision
+- TradingView webhook issue: inspect
+  `backend/app/routers/tradingview_webhook.py`,
+  `backend/app/tradingview_ingress.py`, `backend/app/tradingview_database.py`,
+  and `backend/tests/test_tradingview_routes.py`; preserve the exact public
+  route allowlist and auth-before-body/DB ordering
+- TradingView analysis issue: inspect
+  `backend/app/engine/tradingview_analysis.py`, the alert analysis columns,
+  and `backend/tests/test_tradingview_analysis.py`; do not hold a DB
+  transaction across Alpaca calls or weaken attempt fencing
 
 ## Reconciliation Notes
 
@@ -314,6 +348,13 @@ python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
   are immutable audit evidence, not input to a future generic reparser.
 - Preserve insert-first TradingView idempotency. On `IntegrityError`, roll
   back before reading the winner; preserve its raw payload and analysis state.
-  Map explicit SQLite busy errors to a retryable response in the future
-  router, never to duplicate/collision.
+  Map explicit SQLite busy errors to a retryable response, never to
+  duplicate/collision.
+- Keep the public ingress minimal: no docs/OpenAPI, CORS, redirects, private
+  reads, journal routes, migrations, or market-data worker. Its optional
+  `TRADINGVIEW_DATABASE_URL` should use a role restricted to
+  `tradingview_alert`.
+- Keep TradingView market-data execution outside database transactions and
+  preserve claim-attempt fencing, bounded retries, freshness checks, and
+  lease recovery.
 - When scope changes materially, update both `AGENTS.md` and `CLAUDE.md`
