@@ -77,6 +77,15 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 root = Path(os.environ["TRADEJOURNAL_ROOT"])
+
+# Read the minimum from the application so the launcher cannot drift from
+# what the ingress actually enforces. Fall back only if the app is not
+# importable yet; the app itself still fails closed in that case.
+try:
+    from app.routers.tradingview_webhook import MIN_WEBHOOK_TOKEN_BYTES
+except Exception:
+    MIN_WEBHOOK_TOKEN_BYTES = 32
+
 ingress_values = dotenv_values(root / "backend" / ".env.tradingview")
 token = (
     os.getenv("TRADINGVIEW_WEBHOOK_TOKEN", "").strip()
@@ -100,6 +109,14 @@ if not token:
     errors.append(
         "TradingView ingress is enabled, but TRADINGVIEW_WEBHOOK_TOKEN is "
         "blank. Set it in backend/.env.tradingview."
+    )
+elif len(token.encode("utf-8")) < MIN_WEBHOOK_TOKEN_BYTES:
+    errors.append(
+        f"TRADINGVIEW_WEBHOOK_TOKEN is only "
+        f"{len(token.encode('utf-8'))} bytes; the ingress requires at least "
+        f"{MIN_WEBHOOK_TOKEN_BYTES} and would 503 every request. Generate "
+        "one with: python -c \"import secrets; "
+        "print(secrets.token_urlsafe(32))\""
     )
 if private_url and not ingress_url:
     errors.append(

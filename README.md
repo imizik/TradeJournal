@@ -47,8 +47,11 @@ Repo helper note:
   frontend on `3000` by default. TradingView ingress is disabled unless
   `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
 - When enabled, ingress binds to `127.0.0.1:8090`; tunnel only `8090`, never
-  the private API. The launchers then require a webhook token and refuse a
-  hosted/private `DATABASE_URL` setup without a matching
+  the private API. The launchers then refuse to start it unless
+  `TRADINGVIEW_WEBHOOK_TOKEN` is at least 32 bytes (`MIN_WEBHOOK_TOKEN_BYTES`,
+  read from the app itself) — the same minimum the ingress enforces, so a
+  too-short token fails at launch instead of 503-ing every request — and
+  unless a hosted/private `DATABASE_URL` setup has a matching
   `TRADINGVIEW_DATABASE_URL`.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API=http://localhost:8080` if you want the MCP tools to talk to a backend started by `startdev.ps1`.
 

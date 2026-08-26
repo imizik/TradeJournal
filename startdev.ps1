@@ -52,10 +52,25 @@ if ($tradingViewIngressEnabled) {
       "TRADINGVIEW_DATABASE_URL"
   }
 
+  # Keep in sync with MIN_WEBHOOK_TOKEN_BYTES in
+  # backend/app/routers/tradingview_webhook.py. Below this the ingress
+  # fails closed and 503s every request, including /health.
+  $minWebhookTokenBytes = 32
+
   if (-not $webhookToken) {
     Write-Error (
       "TradingView ingress is enabled, but TRADINGVIEW_WEBHOOK_TOKEN is " +
       "blank. Set it in backend\.env.tradingview."
+    )
+    exit 1
+  }
+  $webhookTokenBytes = [System.Text.Encoding]::UTF8.GetByteCount($webhookToken)
+  if ($webhookTokenBytes -lt $minWebhookTokenBytes) {
+    Write-Error (
+      "TRADINGVIEW_WEBHOOK_TOKEN is only $webhookTokenBytes bytes; the " +
+      "ingress requires at least $minWebhookTokenBytes and would 503 every " +
+      "request. Generate one with: " +
+      'python -c "import secrets; print(secrets.token_urlsafe(32))"'
     )
     exit 1
   }
