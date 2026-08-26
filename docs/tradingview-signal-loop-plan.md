@@ -186,11 +186,13 @@ Return Pydantic DTOs, never the raw SQLModel row in the list (egress discipline)
 - `app.main` includes only the private read router and starts/stops one worker
   from its lifespan only when `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
 - `app.tradingview_ingress` includes only the public webhook router.
-- `startdev.sh`/`startdev.ps1` launch private API `:8080`, ingress `:8090`,
-  and frontend `:3000`; both backend processes bind to `127.0.0.1`.
-- Both startdev launchers fail preflight when the private API uses a configured
-  `DATABASE_URL` but ingress has no `TRADINGVIEW_DATABASE_URL`, preventing a
-  hosted-worker/local-ingress split.
+- `startdev.sh`/`startdev.ps1` launch private API `:8080` and frontend `:3000`
+  by default. Ingress `:8090` is opt-in with
+  `TRADINGVIEW_INGRESS_ENABLED=true`; both backend processes bind to
+  `127.0.0.1` when it is enabled.
+- When ingress is enabled, both launchers require its token and fail preflight
+  if the private API uses a configured `DATABASE_URL` but ingress has no
+  `TRADINGVIEW_DATABASE_URL`, preventing a hosted-worker/local-ingress split.
 - The ingress loads only `backend/.env.tradingview` locally, not the private
   app's `.env`. Its optional `TRADINGVIEW_DATABASE_URL` lets production use a
   role restricted to `tradingview_alert`. It never runs migrations or
