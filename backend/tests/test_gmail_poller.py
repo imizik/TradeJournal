@@ -48,6 +48,10 @@ def test_poll_new_fills_does_not_stop_after_known_option_email(monkeypatch) -> N
     monkeypatch.setattr("app.engine.gmail_poller._get_service", lambda: _FakeService(payloads))
 
     def _fake_fetch(_service, query: str) -> list[str]:
+        # The poller issues three subject queries. Partial-fill option emails
+        # are still listed here but are dropped later by parse_option_email.
+        if 'subject:"Option order partially executed"' in query:
+            return ["option-partial-known"]
         if 'subject:"Option order executed"' in query:
             return ["option-known"]
         if 'subject:"Your order has been executed"' in query:
@@ -74,7 +78,7 @@ def test_poll_new_fills_does_not_stop_after_known_option_email(monkeypatch) -> N
         lambda subject, body, imap_uid: parsed_fill if imap_uid == "stock-new" else None,
     )
 
-    result = poll_new_fills(known_ids={"option-known"})
+    result = poll_new_fills(known_ids={"option-known", "option-partial-known"})
 
     assert [fill.raw_email_id for fill in result] == ["stock-new"]
 

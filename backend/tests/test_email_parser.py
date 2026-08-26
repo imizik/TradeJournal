@@ -1,6 +1,10 @@
 from decimal import Decimal
 
-from app.engine.email_parser import parse_option_email
+from app.engine.email_parser import (
+    OPTION_PARTIAL_SUBJECT,
+    OPTION_SUBJECT,
+    parse_option_email,
+)
 
 
 def test_parse_stock_email_with_integer_shares_wording() -> None:
@@ -41,7 +45,13 @@ def test_parse_stock_email_with_fractional_shares_keeps_precision() -> None:
     assert parsed.price == Decimal("8.17")
 
 
-def test_parse_option_email_with_partial_execution_uses_filled_contract_count() -> None:
+def test_partial_execution_option_email_is_skipped() -> None:
+    """
+    Partial-fill option emails report *cumulative* filled counts, so a
+    3-of-13 email followed by a 13-of-13 email would import 16 contracts.
+    They are deliberately excluded from OPTION_SUBJECTS; only the final
+    "Option order executed" email becomes a fill. See scripts/find_phantoms.py.
+    """
     body = (
         "Hi Isaac,\n"
         "Your limit order to sell 13 contracts of COST $1,050.00 Call 2/20 in your Roth IRA (...8267) "
@@ -49,13 +59,24 @@ def test_parse_option_email_with_partial_execution_uses_filled_contract_count() 
         "So far, 1 of 13 contracts were filled for an average price of $60.00 per contract."
     )
 
-    parsed = parse_option_email("Option order partially executed", body, "uid-cost-partial")
+    assert parse_option_email(OPTION_PARTIAL_SUBJECT, body, "uid-cost-partial") is None
+
+
+def test_complete_option_email_still_parses() -> None:
+    body = (
+        "Hi Isaac,\n"
+        "Your limit order to sell 13 contracts of COST $1,050.00 Call 2/20 in your Roth IRA (...8267) "
+        "account executed on February 10, 2026 at 1:54 PM ET "
+        "at an average price of $60.00 per contract."
+    )
+
+    parsed = parse_option_email(OPTION_SUBJECT, body, "uid-cost-complete")
 
     assert parsed is not None
     assert parsed.instrument_type == "option"
     assert parsed.ticker == "COST"
     assert parsed.side == "sell_to_close"
-    assert parsed.contracts == Decimal("1")
+    assert parsed.contracts == Decimal("13")
     assert parsed.price == Decimal("60.00")
     assert parsed.strike == Decimal("1050.00")
     assert parsed.account_last4 == "8267"
