@@ -43,11 +43,13 @@ Repo helper note:
   then repo-root `.env`; exported env vars still win.
 - The public TradingView process loads only `backend/.env.tradingview`, never
   the private app's shared `.env`.
-- `startdev.ps1` starts the private backend on `8080`, restricted TradingView ingress on `8090`, and frontend on `3000`.
-- `startdev.sh` is the macOS/Linux equivalent. Both backend processes bind to `127.0.0.1`; tunnel only `8090`, never the private API.
-- Both startdev launchers refuse a hosted/private `DATABASE_URL` setup unless
-  `TRADINGVIEW_DATABASE_URL` is also set, preventing alerts and the worker
-  from silently using different databases.
+- `startdev.ps1` and `startdev.sh` start the private backend on `8080` and
+  frontend on `3000` by default. TradingView ingress is disabled unless
+  `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
+- When enabled, ingress binds to `127.0.0.1:8090`; tunnel only `8090`, never
+  the private API. The launchers then require a webhook token and refuse a
+  hosted/private `DATABASE_URL` setup without a matching
+  `TRADINGVIEW_DATABASE_URL`.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API=http://localhost:8080` if you want the MCP tools to talk to a backend started by `startdev.ps1`.
 
 ## Core Model
@@ -126,8 +128,10 @@ Local setup:
    restricted ingress role); leave it blank only for default local SQLite.
 4. In the private `backend/.env`, set
    `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
-5. Run `bash startdev.sh`, or start `app.main:app` and
-   `app.tradingview_ingress:app` separately using the commands above.
+5. Run `TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh`, or start
+   `app.main:app` and `app.tradingview_ingress:app` separately using the
+   commands above. Without that launcher flag, normal development starts only
+   the private backend and frontend.
 6. Test with the sample payload from
    [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md):
 

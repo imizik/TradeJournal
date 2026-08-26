@@ -440,9 +440,11 @@ Repo-specific local dev note:
   ingress loads only `backend/.env.tradingview`. Never place private API keys
   or unrestricted database credentials in the ingress environment.
 - `frontend/lib/api.ts` defaults to `http://localhost:8080` when `NEXT_PUBLIC_API_URL` is unset.
-- `startdev.ps1` and `startdev.sh` launch the private backend on `8080`,
-  restricted TradingView ingress on `8090`, and frontend on `3000`.
-- Both local backend processes bind to `127.0.0.1`; tunnel only `8090`.
+- `startdev.ps1` and `startdev.sh` launch the private backend on `8080` and
+  frontend on `3000` by default. The restricted TradingView ingress on `8090`
+  is opt-in with `TRADINGVIEW_INGRESS_ENABLED=true`.
+- When ingress is enabled, both local backend processes bind to `127.0.0.1`;
+  tunnel only `8090`.
 - `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API` if you want Claude Desktop/MCP tools to hit a backend running on `8080`.
 
 Frontend:
