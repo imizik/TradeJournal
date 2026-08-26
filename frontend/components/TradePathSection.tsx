@@ -2,11 +2,6 @@
 
 import type { TradePathMetrics } from "@/lib/api";
 
-function fmt(val: number | null | undefined, decimals = 2, suffix = "%") {
-  if (val == null) return "-";
-  return `${val >= 0 ? "+" : ""}${val.toFixed(decimals)}${suffix}`;
-}
-
 function fmtAbs(val: number | null | undefined, decimals = 2, suffix = "%") {
   if (val == null) return "-";
   return `${Math.abs(val).toFixed(decimals)}${suffix}`;
