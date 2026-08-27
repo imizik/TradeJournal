@@ -1,0 +1,119 @@
+# Roadmap
+
+Where the engineering foundation stands and what comes next. This is a
+planning document, not a specification — reorder it freely. The principle
+throughout: **raise agent autonomy only as fast as the verification layer
+earns trust.**
+
+## Where we are
+
+Phase 1 (reproducibility and verification) is done. A fresh clone with no
+credentials can be set up, verified, and run:
+
+```bash
+bash scripts/setup.sh && bash scripts/verify.sh && bash startdev.sh
+```
+
+CI runs the same checks on every pull request. What that currently proves,
+and what it does not, is in [verification.md](verification.md).
+
+## Phase 2 — Frontend verification (next)
+
+**The weakest link.** Typecheck, lint and build all pass on a React component
+that is completely broken at runtime. Nothing in CI proves a page renders. Do
+this before deployment work, and before raising agent autonomy.
+
+1. **Seed fixture.** A `backend/scripts/seed_dev_data.py` that builds a small,
+   deterministic SQLite database: two accounts, a handful of option and stock
+   fills covering the interesting FIFO shapes (scale-in, partial exit, expired
+   worthless, same-second fills), and their rebuilt trades. No real personal
+   data. This unlocks browser tests, and also lets an agent exercise real data
+   paths by hand instead of staring at an empty dashboard.
+
+2. **Playwright smoke tests.** Chromium is the natural choice; one test per
+   major page (dashboard, trades list, trade detail, fills, analytics,
+   Strategy Lab run). Assert that real seeded values reach the DOM, not just
+   that the page returned 200. Six tests that would catch a white screen are
+   worth more than sixty component unit tests.
+
+3. **Wire into `verify.sh` and CI** as a separate tier (`--e2e`), since it is
+   slower than the rest.
+
+Done when: an agent can change a component, run one command, and show that the
+page still renders the right numbers.
+
+## Phase 3 — Environments
+
+Neon already hosts the database, so environment isolation should use Neon
+branches rather than a second platform.
+
+1. **A dedicated `dev` Neon branch** separate from whatever holds real trading
+   history, so exploratory and destructive work (`resync-all`, `rebuild-all`)
+   has an obvious safe target. Today the only safety rail is the test-suite
+   pin plus discipline.
+2. **Branch-per-PR** for migration testing: create a Neon branch from
+   production schema, run `alembic upgrade head` against it, tear it down.
+   This is where CI first needs a secret, so it is also where secret handling
+   gets designed.
+3. **A Postgres CI run** for the backend suite. SQLite passes today, but
+   dialect differences (JSON operators, constraint naming, case sensitivity)
+   are invisible until they hit Neon.
+
+## Phase 4 — Deployment
+
+Deliberately unspecified. Choose the host when there is something to deploy
+and real constraints to judge against. Decision criteria worth holding onto:
+
+- **The app is not stateless.** Startup runs migrations-ish work
+  (`create_all`, Roth normalization, manual-fill restore), and background
+  jobs, the Gmail watch renewer and the TradingView analysis worker all expect
+  a long-lived process. A scale-to-zero platform breaks the worker model —
+  `docs/agent/architecture.md` notes the database is a durable queue, not a
+  task dispatcher.
+- **Two processes must stay separated.** The public TradingView ingress is the
+  only thing that may be internet-reachable; the private API has no auth at
+  all. Any hosting choice has to preserve that boundary.
+- **Cost matters more than elasticity** for a single-user app. Neon egress is
+  metered, which is why `FILL_LIGHT`/`FillOut` and batched job commits exist.
+- Kubernetes is not warranted. Do not add it.
+
+Sequence when you get here: staging deploy → smoke-verify staging → merge →
+production deploy. Staging verification should reuse the Phase 2 Playwright
+tests pointed at the staging URL.
+
+## Phase 5 — Parallel agents
+
+Only after one agent is reliably trustworthy. Groundwork already in place:
+generated artifacts are gitignored so branches do not fight over them, and
+`test_schema_migrations.py` fails on two Alembic heads, which is the main way
+parallel branches collide in this repo.
+
+Still needed: a convention for splitting work so two agents do not both touch
+`reconstructor.py`, and a reviewer role that reads diffs rather than trusting
+the implementer's own report.
+
+## Open decisions
+
+Both sit in highest-risk areas and are judgment calls, not cleanups.
+
+**Same-second FIFO ordering.** The reconstructor's final tie-break is
+`str(fill.id)`, a random UUID. Stable across ordinary rebuilds, but
+`POST /fills/resync-all` re-imports fills with new ids, so realized PnL
+attribution for same-second fills can change after a resync. Multiple prints
+of one order within a second are common. A deterministic tie-break (broker
+sequence, `raw_email_id`, or import order) would fix it, but changing it
+changes reported PnL on existing trades. See
+[domain-rules.md](domain-rules.md#known-same-timestamp-ordering-is-arbitrary).
+
+**Gmail re-fetches partial-fill emails forever.** The poller lists
+partial-subject message ids, then `parse_option_email` correctly drops them —
+but because no fill is produced, their ids are never recorded as seen, so
+every sync fetches them again. Wasted API calls, no correctness impact. The
+partial-parsing branch inside `_parse_option` is also now unreachable.
+
+## Deliberately not doing
+
+- Docker, until deployment makes it earn its place.
+- Kubernetes, ever, for this workload.
+- A multi-agent orchestration framework.
+- Tests written to raise a coverage number.
