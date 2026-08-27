@@ -54,36 +54,29 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-# A table this module creates in its own scratch database, so a later run can
-# tell "my own residue" from "someone else's data". It lives in the schema
-# that gets dropped, and is recreated immediately afterwards.
-SCRATCH_MARKER_TABLE = "parity_scratch_marker"
+# Postgres bookkeeping this module did not create and does not count as data.
+_BOOKKEEPING_TABLES = {"alembic_version"}
+
+ALLOW_DESTRUCTIVE = os.environ.get(
+    "TEST_DATABASE_ALLOW_DESTRUCTIVE", ""
+).strip().lower() in {"1", "true", "yes"}
 
 
-def _is_marked_scratch(engine) -> bool:
-    return SCRATCH_MARKER_TABLE in inspect(engine).get_table_names()
+def _populated_tables(engine) -> list[str]:
+    """
+    Every table in `public` holding rows -- not just the ones in
+    SQLModel.metadata.
 
-
-def _mark_as_scratch(engine) -> None:
-    with engine.begin() as connection:
-        connection.execute(text(
-            f"CREATE TABLE IF NOT EXISTS {SCRATCH_MARKER_TABLE} ("
-            "note TEXT NOT NULL)"
-        ))
-        connection.execute(
-            text(f"INSERT INTO {SCRATCH_MARKER_TABLE} (note) VALUES (:note)"),
-            {"note": "disposable database for tests/test_postgres_parity.py"},
-        )
-
-
-def _populated_application_tables(engine) -> list[str]:
-    """Every application table currently holding rows."""
+    DROP SCHEMA public CASCADE destroys the whole schema, so the guard has to
+    look at the whole schema. A legacy table left by an older version of the
+    app, or anything else someone put there, is invisible to a model-driven
+    check and would be destroyed silently.
+    """
     inspector = inspect(engine)
-    present = set(inspector.get_table_names())
     populated: list[str] = []
     with engine.connect() as connection:
-        for table in sorted(set(SQLModel.metadata.tables) - {"alembic_version"}):
-            if table not in present:
+        for table in sorted(inspector.get_table_names()):
+            if table in _BOOKKEEPING_TABLES:
                 continue
             count = connection.execute(
                 text(f'SELECT COUNT(*) FROM "{table}"')
@@ -95,31 +88,33 @@ def _populated_application_tables(engine) -> list[str]:
 
 def _refuse_if_not_disposable(engine) -> None:
     """
-    These tests run DROP SCHEMA public CASCADE. Refuse anything that might not
-    be disposable.
+    These tests run DROP SCHEMA public CASCADE. Refuse a database that has
+    anything in it, unless a human has explicitly said to destroy it.
 
-    Checking one table is not enough: a database whose `fill` table is empty
-    can still hold irreplaceable TradingView alerts, Strategy Lab runs, Webull
-    raw events or accounts, and dropping the schema would take all of it. So
-    the rule is: any application data at all means refuse, unless this module
-    has previously claimed the database as scratch by leaving its marker.
+    Deliberately not clever. Earlier versions tried to infer disposability --
+    first from the fill table alone, then from a marker table this module left
+    behind -- and both inferences were wrong in a way that ends in data loss:
+    a database with no fills can still hold irreplaceable TradingView alerts,
+    and a marker left by an interrupted run keeps authorizing destruction long
+    after the database has been repurposed.
 
-    That keeps re-runs working (the marker is recreated after each drop)
-    without ever green-lighting a database it has not seen before.
+    So there is no inference. Empty is safe. Non-empty needs
+    TEST_DATABASE_ALLOW_DESTRUCTIVE, which someone has to set on purpose.
+    CI never needs it: its service container starts empty every run, which
+    also means this guard doubles as proof the container really is fresh.
     """
-    if _is_marked_scratch(engine):
+    populated = _populated_tables(engine)
+    if not populated:
         return
-
-    populated = _populated_application_tables(engine)
-    if populated:
-        raise AssertionError(
-            "TEST_DATABASE_URL points at a database holding application data:\n"
-            + "\n".join(f"  - {entry}" for entry in populated)
-            + "\n\nThese tests run DROP SCHEMA public CASCADE. Point them at a "
-            "disposable database. A database this module has already claimed "
-            f"carries a {SCRATCH_MARKER_TABLE} table and is accepted on later "
-            "runs."
-        )
+    if ALLOW_DESTRUCTIVE:
+        return
+    raise AssertionError(
+        "TEST_DATABASE_URL points at a database that is not empty:\n"
+        + "\n".join(f"  - {entry}" for entry in populated)
+        + "\n\nThese tests run DROP SCHEMA public CASCADE. Point them at an "
+        "empty database, or set TEST_DATABASE_ALLOW_DESTRUCTIVE=1 to confirm "
+        "you want this one destroyed."
+    )
 
 
 @pytest.fixture(scope="module")
@@ -129,10 +124,13 @@ def pg_engine():
     with engine.begin() as connection:
         connection.execute(text("DROP SCHEMA public CASCADE"))
         connection.execute(text("CREATE SCHEMA public"))
-    # The drop took the marker with it; re-claim the database so the next run
-    # recognises its own residue.
-    _mark_as_scratch(engine)
     yield engine
+    # Leave the scratch database empty so a later run passes the guard without
+    # anyone having to set TEST_DATABASE_ALLOW_DESTRUCTIVE. Deliberate, rather
+    # than relying on whichever test happened to run last.
+    with engine.begin() as connection:
+        connection.execute(text("DROP SCHEMA public CASCADE"))
+        connection.execute(text("CREATE SCHEMA public"))
     engine.dispose()
 
 
@@ -361,12 +359,30 @@ def test_tradingview_alert_identity_is_enforced_by_postgres(migrated):
     )
 
 
-def test_guard_refuses_a_database_whose_data_is_outside_the_fill_table(migrated):
+def test_guard_sees_data_outside_the_model_tables(migrated):
     """
-    The blind spot this guard was originally missing: a database with an empty
-    `fill` table can still hold irreplaceable TradingView alerts, Strategy Lab
-    runs, Webull events or accounts. Checking fills alone let DROP SCHEMA
-    CASCADE run over all of it.
+    A legacy table from an older schema is not in SQLModel.metadata, but
+    DROP SCHEMA public CASCADE destroys it just the same. A model-driven guard
+    could not see it.
+    """
+    with migrated.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE IF NOT EXISTS legacy_probe (id INTEGER PRIMARY KEY)"
+        ))
+        connection.execute(text("INSERT INTO legacy_probe (id) VALUES (1)"))
+    try:
+        assert any(
+            entry.startswith("legacy_probe") for entry in _populated_tables(migrated)
+        ), "a table outside SQLModel.metadata must still be visible to the guard"
+    finally:
+        with migrated.begin() as connection:
+            connection.execute(text("DROP TABLE legacy_probe"))
+
+
+def test_guard_sees_data_outside_the_fill_table(migrated):
+    """
+    The original blind spot: a database with an empty `fill` table can still
+    hold irreplaceable TradingView alerts, Strategy Lab runs or Webull events.
     """
     from app.models import WebullRawEvent
 
@@ -378,37 +394,25 @@ def test_guard_refuses_a_database_whose_data_is_outside_the_fill_table(migrated)
         ))
         session.commit()
 
-    populated = _populated_application_tables(migrated)
-    assert any(entry.startswith("webull_raw_event") for entry in populated), (
-        "data outside the fill table must be visible to the guard"
+    assert any(
+        entry.startswith("webull_raw_event") for entry in _populated_tables(migrated)
     )
+    with pytest.raises(AssertionError, match="not empty"):
+        _refuse_if_not_disposable(migrated)
 
-    # With the scratch marker removed, that data must block the drop.
-    with migrated.begin() as connection:
-        connection.execute(text(f"DROP TABLE {SCRATCH_MARKER_TABLE}"))
+
+def test_guard_accepts_an_empty_database():
+    """
+    Empty has nothing to lose, so it needs no confirmation.
+
+    Checked against a throwaway in-memory engine rather than the shared
+    Postgres schema: the guard only uses get_table_names() and COUNT(*), both
+    dialect-agnostic, and dropping the shared schema mid-module would leave
+    later tests depending on test ordering.
+    """
+    empty = create_engine("sqlite://")
     try:
-        assert not _is_marked_scratch(migrated)
-        with pytest.raises(AssertionError, match="holding application data"):
-            _refuse_if_not_disposable(migrated)
-    finally:
-        _mark_as_scratch(migrated)
-
-    # And with the marker back, the same database is accepted again, so
-    # re-running against a scratch database keeps working.
-    _refuse_if_not_disposable(migrated)
-
-
-def test_guard_accepts_an_empty_unclaimed_database(migrated):
-    """A database with no application data is safe to drop whether or not it
-    has been claimed before."""
-    inspector = inspect(migrated)
-    assert "fill" in inspector.get_table_names()  # schema exists
-    # Nothing asserted about markers here: an empty schema has nothing to lose.
-    empty = create_engine(TEST_DATABASE_URL)
-    try:
-        with empty.begin() as connection:
-            connection.execute(text("DROP SCHEMA public CASCADE"))
-            connection.execute(text("CREATE SCHEMA public"))
+        assert _populated_tables(empty) == []
         _refuse_if_not_disposable(empty)  # must not raise
     finally:
         empty.dispose()
