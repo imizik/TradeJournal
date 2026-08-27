@@ -17,30 +17,32 @@ bash scripts/setup.sh && bash scripts/verify.sh && bash startdev.sh
 CI runs the same checks on every pull request. What that currently proves,
 and what it does not, is in [verification.md](verification.md).
 
-## Phase 2 — Frontend verification (next)
+## Phase 2 — Frontend verification (done)
 
-**The weakest link.** Typecheck, lint and build all pass on a React component
-that is completely broken at runtime. Nothing in CI proves a page renders. Do
-this before deployment work, and before raising agent autonomy.
+Was the weakest link: typecheck, lint and build all pass on a React component
+that is broken at runtime, and nothing proved a page renders.
 
-1. **Seed fixture.** A `backend/scripts/seed_dev_data.py` that builds a small,
-   deterministic SQLite database: two accounts, a handful of option and stock
-   fills covering the interesting FIFO shapes (scale-in, partial exit, expired
-   worthless, same-second fills), and their rebuilt trades. No real personal
-   data. This unlocks browser tests, and also lets an agent exercise real data
-   paths by hand instead of staring at an empty dashboard.
+Now in place: `backend/scripts/seed_dev_data.py` builds a deterministic
+dataset through the real reconstructor, and `frontend/e2e/` asserts that its
+values reach the DOM on the dashboard, trades list, trade detail, fills and
+analytics. `scripts/verify.sh --e2e` runs them and CI has a Browser job.
+Details and the traps involved are in [verification.md](verification.md).
 
-2. **Playwright smoke tests.** Chromium is the natural choice; one test per
-   major page (dashboard, trades list, trade detail, fills, analytics,
-   Strategy Lab run). Assert that real seeded values reach the DOM, not just
-   that the page returned 200. Six tests that would catch a white screen are
-   worth more than sixty component unit tests.
+Still shallow on purpose: these are smoke tests. Filtering, sorting, forms,
+editing and Strategy Lab workflows are not covered, and there is no
+component-level unit coverage. Deepen when a regression justifies it.
 
-3. **Wire into `verify.sh` and CI** as a separate tier (`--e2e`), since it is
-   slower than the rest.
+What it took, worth knowing before extending it:
 
-Done when: an agent can change a component, run one command, and show that the
-page still renders the right numbers.
+1. **The fixture must be calendar-anchored.** An option's status depends on
+   whether its expiration has passed, so hard-coded dates make a fixture whose
+   meaning drifts: positions seeded as open silently become expired, taking
+   their asserted P&L with them. Dates are offsets from the run date.
+2. **CORS is load-bearing.** Client components fetch the API from the browser,
+   so the e2e frontend origin has to be allowed or those pages hang on a
+   loading state while server-rendered pages still pass.
+3. **Never reuse servers.** A leftover server serves a stale build, which
+   makes broken code pass.
 
 ## Phase 3 — Environments
 
