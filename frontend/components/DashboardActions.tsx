@@ -238,13 +238,35 @@ function SyncCenterDrawer({
         : "Resync All will delete imported fills, keep manual fills, re-import from Gmail, and rebuild trades. Continue?";
     if (!window.confirm(text)) return;
 
+    // Resync deletes fills. On a hosted database the backend refuses unless
+    // the request names the target, so ask which database the user thinks
+    // they are on rather than letting them find out from a 400. The generic
+    // confirm above never says whether this is a dev branch or production.
+    let confirmIdentity: string | undefined;
+    if (kind === "resync") {
+      try {
+        const { environment } = await api.health();
+        if (environment.destructive_requires_confirmation) {
+          const typed = window.prompt(
+            `This will delete imported fills on ${environment.identity} ` +
+              `(environment "${environment.name}").\n\n` +
+              "Type the database name exactly to confirm:",
+          );
+          if (typed === null) return;
+          confirmIdentity = typed.trim();
+        }
+      } catch {
+        // Health unreachable: send no confirmation and let the backend decide.
+      }
+    }
+
     setBusyAction(kind);
     setMessage(null);
     try {
       if (kind === "rebuild") {
         await api.advancedRebuildAll();
       } else {
-        await api.advancedResyncAll();
+        await api.advancedResyncAll(confirmIdentity);
       }
       setMessage(kind === "rebuild" ? "Advanced rebuild queued." : "Advanced resync queued.");
       await refresh();

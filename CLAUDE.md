@@ -20,6 +20,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
 | `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView |
 | `docs/agent/verification.md` | How to prove a change works |
+| `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/feature-map.md` | Which file owns a feature |
 
 Read what the task needs, not all four. The repository is the source of truth;
@@ -70,7 +71,10 @@ data-fetch patterns that can create N+1 calls. When PnL looks wrong, start at
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the
   test suite writes to whatever `DATABASE_URL` resolves to, which is the
   hosted Neon database on a normally configured machine.
-- A `DATABASE_URL` pointing at Neon is a real database. Destructive operations
-  (`resync-all`, `rebuild-all`) belong on a branch database.
+- A `DATABASE_URL` pointing at Neon is a real database. `resync-all` deletes
+  fills and belongs on a branch database; against any hosted database it now
+  refuses unless the request names the target. Check `GET /health` to see
+  which database you are on. (`rebuild-all` only recreates derived trades and
+  is not destructive.)
 - Keep `CLAUDE.md`, `AGENTS.md`, and `docs/agent/` consistent when scope
   changes materially.

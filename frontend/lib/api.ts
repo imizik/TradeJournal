@@ -31,6 +31,18 @@ export type Fill = {
   macd_signal_at_fill: number | null;
 };
 
+export type Health = {
+  status: string;
+  environment: {
+    name: string;
+    backend: string;
+    /** Redacted "host/database" (or filename). Never contains credentials. */
+    identity: string;
+    is_local: boolean;
+    destructive_requires_confirmation: boolean;
+  };
+};
+
 export type Account = {
   id: string;
   name: string;
@@ -447,7 +459,7 @@ export const api = {
   startGmailAuth: () => get<{ auth_url: string }>("/auth/gmail/start"),
   enrichMissing: (range: "day" | "week" | "month" | "all") => post<{ started: boolean; total_missing: number }>(`/fills/enrich?range=${range}`),
   enrichStatus: () => get<JobStatus>("/fills/enrich/status"),
-  resyncAll: () => post<{ status: string; saved: number; skipped: number; trades_rebuilt: number; anomalies: string[] }>("/fills/resync-all"),
+  resyncAll: (confirm?: string) => post<{ status: string; saved: number; skipped: number; trades_rebuilt: number; anomalies: string[] }>("/fills/resync-all", confirm ? { confirm } : undefined),
   rebuild: () => post<{ status: string; trades_rebuilt: number; anomalies: string[] }>("/rebuild"),
   reviewTrade: (id: string) => post<Trade>(`/trades/${id}/review`),
   dailyReviews: () => get<DailyReviewIndexItem[]>("/daily-review"),
@@ -476,5 +488,6 @@ export const api = {
   runSyncJob: (jobType: string, range: "day" | "week" | "month" | "all" = "week", force = false) =>
     post<{ run_id: string; started: boolean; total: number }>(`/sync/jobs/${jobType}/run?range=${range}${force ? "&force=true" : ""}`),
   advancedRebuildAll: () => post<{ run_id: string }>("/sync/advanced/rebuild-all"),
-  advancedResyncAll: () => post<{ run_id: string }>("/sync/advanced/resync-all"),
+  advancedResyncAll: (confirm?: string) => post<{ run_id: string }>("/sync/advanced/resync-all", confirm ? { confirm } : undefined),
+  health: () => get<Health>("/health"),
 };

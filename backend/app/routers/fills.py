@@ -23,6 +23,7 @@ from app.engine.jobs import (
     running_job,
 )
 from app.engine.reconstructor import FillInput, reconstruct
+from app.environment import require_destructive_confirmation
 from app.models import Account, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
 
 MANUAL_FILLS_BACKUP = Path(__file__).parent.parent.parent / "data" / "manual_fills.json"
@@ -519,11 +520,28 @@ def import_fills(session: Session = Depends(get_session)):
     return _import_fills_from_gmail(session)
 
 
+class DestructiveConfirmation(BaseModel):
+    """
+    Names the database the caller believes they are destroying.
+
+    Optional so the local SQLite dev loop is unchanged; required, and checked,
+    the moment the target is a hosted database. See app/environment.py.
+    """
+
+    confirm: str | None = None
+
+
 @router.post("/resync-all")
-def resync_all(session: Session = Depends(get_session)):
+def resync_all(
+    body: DestructiveConfirmation | None = None,
+    session: Session = Depends(get_session),
+):
     """Delete fills and derived trade data, then import from Gmail and rebuild from scratch."""
+    environment = require_destructive_confirmation(
+        body.confirm if body else None, "POST /fills/resync-all"
+    )
     t0 = time.monotonic()
-    log.warning("BEGIN /fills/resync-all")
+    log.warning("BEGIN /fills/resync-all on %s (%s)", environment.identity, environment.name)
 
     _clear_derived_trade_data(session)
     session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%"))))
