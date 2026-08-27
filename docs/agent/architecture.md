@@ -11,7 +11,7 @@ Three processes run locally, and they are deliberately not one:
 | Process | Port | Entry point | Exposure |
 |---|---|---|---|
 | Private API | 8080 (8000 also used) | `backend/app/main.py` | localhost only, **no auth** |
-| TradingView ingress | 8090 | `backend/app/tradingview_ingress.py` | the only tunnelable port |
+| TradingView ingress | 8090 | `backend/app/tradingview_ingress.py` | the only tunnelable port; **opt-in** |
 | Frontend | 3000 | `frontend/` (Next 16 App Router) | localhost |
 
 The ingress is a separate FastAPI application with its own route allowlist and
@@ -20,9 +20,16 @@ webhook can reach the database without exposing the private API. Private API
 keys and unrestricted database credentials must never appear in its
 environment.
 
-`startdev.sh` / `startdev.ps1` launch all three and refuse to start when the
-private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank — that
-split would silently point the two processes at different databases.
+`startdev.sh` / `startdev.ps1` launch the private backend and frontend by
+default. The ingress is opt-in:
+
+```bash
+TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh
+```
+
+When it is enabled, the launchers require a webhook token and refuse to start
+when the private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank
+— that split would silently point the two processes at different databases.
 
 ## Data flow
 

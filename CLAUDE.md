@@ -63,7 +63,8 @@ data-fetch patterns that can create N+1 calls. When PnL looks wrong, start at
 ## Hard constraints
 
 - Never expose or tunnel the private API (8080/8000). It has no auth. Only
-  port 8090, the TradingView ingress, is safe to tunnel.
+  port 8090, the TradingView ingress, is safe to tunnel — and it only runs when
+  `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
 - Never put private API keys or unrestricted database credentials in
   `backend/.env.tradingview`.
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the

@@ -106,8 +106,9 @@ showing the response, or running the app and exercising the page.
 ## Running the app
 
 ```bash
-bash startdev.sh    # backend 8080, TradingView ingress 8090, frontend 3000
+bash startdev.sh                                  # backend 8080, frontend 3000
+TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh # also ingress on 8090
 ```
 
-Both backend processes bind to `127.0.0.1`. Only ever tunnel `8090`; the
-private API has no auth.
+The TradingView ingress is opt-in; ordinary work does not need it. Everything
+binds to `127.0.0.1`. Only ever tunnel `8090`; the private API has no auth.
