@@ -49,10 +49,11 @@ What it took, worth knowing before extending it:
 Neon already hosts the database, so environment isolation should use Neon
 branches rather than a second platform.
 
-1. **A dedicated `dev` Neon branch** separate from whatever holds real trading
-   history, so exploratory and destructive work (`resync-all`, `rebuild-all`)
-   has an obvious safe target. Today the only safety rail is the test-suite
-   pin plus discipline.
+1. **A dedicated `dev` Neon branch.** The repository side is done: `GET /health`
+   reports which database a process is connected to, and `resync-all` refuses
+   on any hosted database unless the request names the target. Creating the
+   branch itself needs Neon credentials no agent worktree has — the steps are
+   in [environments.md](environments.md#creating-the-neon-dev-branch).
 2. **Branch-per-PR** for migration testing: create a Neon branch from
    production schema, run `alembic upgrade head` against it, tear it down.
    This is where CI first needs a secret, so it is also where secret handling

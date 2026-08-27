@@ -24,7 +24,9 @@ from app.engine.jobs import (
     running_job,
 )
 from app.models import Fill, JobRun, Trade
+from app.environment import require_destructive_confirmation
 from app.routers.fills import (
+    DestructiveConfirmation,
     _clear_derived_trade_data,
     _import_fills_from_gmail,
     _persist_rebuild,
@@ -493,10 +495,22 @@ async def advanced_rebuild_all(session: Session = Depends(get_session)):
 
 
 @router.post("/advanced/resync-all")
-async def advanced_resync_all(session: Session = Depends(get_session)):
+async def advanced_resync_all(
+    body: DestructiveConfirmation | None = None,
+    session: Session = Depends(get_session),
+):
+    # Checked before the job row is created, so a refused request leaves no
+    # trace of work that never started.
+    environment = require_destructive_confirmation(
+        body.confirm if body else None, "POST /sync/advanced/resync-all"
+    )
     if _active_job(session):
         raise HTTPException(status_code=409, detail="A sync or enrichment job is already running")
-    job = _create_run(session, JOB_RESYNC_ALL, "Queued destructive resync")
+    job = _create_run(
+        session,
+        JOB_RESYNC_ALL,
+        f"Queued destructive resync on {environment.identity} ({environment.name})",
+    )
 
     def runner() -> None:
         _set_job(job.id, status="running", started_at=_now(), error=None)
