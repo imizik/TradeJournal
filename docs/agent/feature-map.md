@@ -48,6 +48,7 @@ Paths are relative to `backend/`.
 `backend/scripts/` — stable utilities:
 
 - `generate_reconciliation_report.py` — markdown reports into `backend/reports/`
+- `analyze_tiebreak_impact.py` — read-only same-timestamp FIFO impact analysis
 - `csv_reconstruct.py` — DB-derived FIFO vs Robinhood CSV ground truth
 - `find_phantoms.py` — duplicate cumulative partial-fill investigation
 - `rebuild_trades.py`, `backfill_greeks.py`, `inspect_enrichment.py`

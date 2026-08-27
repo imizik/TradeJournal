@@ -102,9 +102,9 @@ Still needed: a convention for splitting work so two agents do not both touch
 `reconstructor.py`, and a reviewer role that reads diffs rather than trusting
 the implementer's own report.
 
-## Open decisions
+## Open decision
 
-Both sit in highest-risk areas and are judgment calls, not cleanups.
+This sits in a highest-risk area and is a judgment call, not a cleanup.
 
 **Same-second FIFO ordering.** The reconstructor's final tie-break is
 `str(fill.id)`, a random UUID. Stable across ordinary rebuilds, but
@@ -114,12 +114,8 @@ of one order within a second are common. A deterministic tie-break (broker
 sequence, `raw_email_id`, or import order) would fix it, but changing it
 changes reported PnL on existing trades. See
 [domain-rules.md](domain-rules.md#known-same-timestamp-ordering-is-arbitrary).
-
-**Gmail re-fetches partial-fill emails forever.** The poller lists
-partial-subject message ids, then `parse_option_email` correctly drops them —
-but because no fill is produced, their ids are never recorded as seen, so
-every sync fetches them again. Wasted API calls, no correctness impact. The
-partial-parsing branch inside `_parse_option` is also now unreachable.
+Run `backend/scripts/analyze_tiebreak_impact.py` against the target database
+before making that decision.
 
 ## Deliberately not doing
 

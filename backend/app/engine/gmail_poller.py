@@ -34,6 +34,7 @@ CREDENTIALS_FILE = _BACKEND_DIR / "credentials.json"
 TOKEN_FILE = _BACKEND_DIR / "token.json"
 OAUTH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_oauth_states.json"
 GMAIL_WATCH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_watch_state.json"
+GMAIL_SKIPPED_MESSAGE_IDS_FILE = _BACKEND_DIR / "data" / "gmail_skipped_message_ids.json"
 BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 GMAIL_OAUTH_CALLBACK_PATH = "/auth/gmail/callback"
 DEFAULT_GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"
@@ -61,6 +62,36 @@ def gmail_watch_state() -> dict[str, object] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return raw if isinstance(raw, dict) else None
+
+
+def _load_skipped_message_ids() -> set[str]:
+    """Load Gmail ids that were fetched and intentionally produced no fill."""
+    if not GMAIL_SKIPPED_MESSAGE_IDS_FILE.exists():
+        return set()
+    try:
+        raw = json.loads(GMAIL_SKIPPED_MESSAGE_IDS_FILE.read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("Could not read skipped Gmail message ids: %s", exc)
+        return set()
+
+    ids = raw.get("ids") if isinstance(raw, dict) and raw.get("version") == 1 else None
+    if not isinstance(ids, list) or any(not isinstance(value, str) for value in ids):
+        log.warning("Ignoring malformed skipped Gmail message id state")
+        return set()
+    return set(ids)
+
+
+def _save_skipped_message_ids(message_ids: set[str]) -> None:
+    """Atomically persist skipped ids without involving Fill.raw_email_id."""
+    GMAIL_SKIPPED_MESSAGE_IDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = GMAIL_SKIPPED_MESSAGE_IDS_FILE.with_name(
+        f".{GMAIL_SKIPPED_MESSAGE_IDS_FILE.name}.{secrets.token_hex(8)}.tmp"
+    )
+    try:
+        temp_path.write_text(json.dumps({"version": 1, "ids": sorted(message_ids)}, indent=2))
+        temp_path.replace(GMAIL_SKIPPED_MESSAGE_IDS_FILE)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _is_invalid_grant_error(exc: Exception) -> bool:
@@ -310,7 +341,8 @@ def poll_new_fills(
     """
     Fetch new Robinhood fill emails from Gmail.
 
-    known_ids: full set of raw_email_ids already in the DB.
+    known_ids: full set of raw_email_ids already in the DB. Persisted ids for
+        fetched messages that are intentionally skipped are merged in here.
     since_date: Gmail date string like "2025/06/01" to bound the search window.
 
     Returns a list of ParsedFill objects, oldest first.
@@ -319,8 +351,18 @@ def poll_new_fills(
 
     if known_ids is None:
         known_ids = set()
+    else:
+        known_ids = set(known_ids)
 
-    log.info("poll_new_fills start: known_ids=%d since_date=%s", len(known_ids), since_date)
+    skipped_ids = _load_skipped_message_ids()
+    known_ids.update(skipped_ids)
+
+    log.info(
+        "poll_new_fills start: known_ids=%d skipped_ids=%d since_date=%s",
+        len(known_ids),
+        len(skipped_ids),
+        since_date,
+    )
     service = _get_service()
 
     date_filter = f" after:{since_date}" if since_date else " after:2024/01/01"
@@ -346,6 +388,7 @@ def poll_new_fills(
         return []
 
     parsed: list[ParsedFill] = []
+    newly_skipped_ids: set[str] = set()
     t_fetch = _time.monotonic()
     fetched = 0
 
@@ -370,11 +413,24 @@ def poll_new_fills(
             fill = parse_option_email(subject, body, imap_uid=msg_id)
             if fill:
                 parsed.append(fill)
+            elif subject.strip() == OPTION_PARTIAL_SUBJECT:
+                # Partial option emails report cumulative quantities and must
+                # never become fills. Remember the fetched id outside the fill
+                # table so later polls skip the full-message API call.
+                newly_skipped_ids.add(msg_id)
 
         except EmailParseError as exc:
             log.warning("Failed to parse email %s: %s", msg_id, exc)
         except Exception as exc:
             log.warning("Unexpected error processing email %s: %s", msg_id, exc)
+
+    if newly_skipped_ids:
+        try:
+            _save_skipped_message_ids(skipped_ids | newly_skipped_ids)
+        except OSError as exc:
+            # Losing this cache only costs future Gmail API calls. It must not
+            # block otherwise-valid fills from being imported.
+            log.warning("Could not persist skipped Gmail message ids: %s", exc)
 
     log.info(
         "Fetched %d emails, parsed %d fills in %.1fs",
