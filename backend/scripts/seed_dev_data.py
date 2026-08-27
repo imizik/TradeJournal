@@ -106,14 +106,14 @@ def _fills() -> list[dict]:
         _option(ROTH_ACCOUNT_ID, "TSLA", "buy_to_open", "2", "150",
                 _days_ago(60, 13, 20), "call", "400", _expiry_ago(20)),
 
-        # 4. Two buys sharing one timestamp, then a full exit. Real orders fill
-        #    in multiple prints within the same second; this pins that shape so
-        #    a regression in the id tie-break shows up as a changed PnL.
-        #    450 @ 0.90 and 450 @ 0.80 = 765 cost, sold 900 @ 1.00 = 900.
-        #    PnL +135.
+        # 4. Two buys sharing one timestamp, then a partial exit. Real orders
+        #    fill in multiple prints within the same second. The fixed ids put
+        #    the 0.90 lot first, so selling 450 @ 1.00 realizes +45 and leaves
+        #    the 0.80 lot open. Price-ascending order would realize +90 instead,
+        #    making this fixture genuinely sensitive to the final tie-break.
         _stock(ROTH_ACCOUNT_ID, "RNXT", "buy", "450", "0.90", _days_ago(30, 11, 4)),
         _stock(ROTH_ACCOUNT_ID, "RNXT", "buy", "450", "0.80", _days_ago(30, 11, 4)),
-        _stock(ROTH_ACCOUNT_ID, "RNXT", "sell", "900", "1.00", _days_ago(29, 14, 46)),
+        _stock(ROTH_ACCOUNT_ID, "RNXT", "sell", "450", "1.00", _days_ago(29, 14, 46)),
 
         # 5. Fractional shares, closed. 9.5 @ 8.00 -> 9.5 @ 10.00. PnL +19.
         _stock(ROTH_ACCOUNT_ID, "RCAT", "buy", "9.5", "8.00", _days_ago(20, 9, 47)),
@@ -166,7 +166,7 @@ EXPECTED = {
         {"ticker": "NVDA", "account": "8267", "status": "closed", "realized_pnl": "1300.00"},
         {"ticker": "AAPL", "account": "8267", "status": "open", "realized_pnl": "400.00"},
         {"ticker": "TSLA", "account": "8267", "status": "expired", "realized_pnl": "-300.00"},
-        {"ticker": "RNXT", "account": "8267", "status": "closed", "realized_pnl": "135.00"},
+        {"ticker": "RNXT", "account": "8267", "status": "open", "realized_pnl": "45.00"},
         {"ticker": "RCAT", "account": "8267", "status": "closed", "realized_pnl": "19.00"},
         {"ticker": "AAPL", "account": "1113", "status": "open", "realized_pnl": None},
     ],
