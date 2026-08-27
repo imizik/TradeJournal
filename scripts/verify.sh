@@ -43,6 +43,16 @@ run() {
   fi
 }
 
+# Record a failure for a check that could not run at all. A verification tool
+# that reports success without verifying is worse than no tool.
+fail() {
+  local name="$1" reason="$2"
+  printf '\n\033[1m==> %s\033[0m\n' "$name"
+  echo "$reason"
+  FAILED+=("$name")
+  printf '\033[31mFAILED: %s\033[0m\n' "$name"
+}
+
 backend() { (cd "$ROOT/backend" && "$@"); }
 frontend() { (cd "$ROOT/frontend" && "$@"); }
 
@@ -61,7 +71,8 @@ fi
 
 if want_frontend; then
   if [ ! -d "$ROOT/frontend/node_modules" ]; then
-    echo "note: frontend/node_modules missing - skipping frontend checks (run scripts/setup.sh)"
+    fail "frontend dependencies" \
+      "frontend/node_modules is missing, so typecheck, lint and build cannot run. Run scripts/setup.sh."
   else
     run "frontend typecheck" frontend npm run --silent typecheck
     if want_slow; then
