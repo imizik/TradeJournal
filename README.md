@@ -6,6 +6,19 @@ Local-first trade journal and reconciliation system for Robinhood/Webull trade h
 
 - `frontend/` - Next.js 16, React 19, App Router, Tailwind
 - `backend/` - FastAPI, SQLModel, Alembic, SQLite by default, Postgres via `DATABASE_URL`
+- `docs/agent/` - architecture, domain rules, verification, feature map
+- `scripts/` - `setup.sh` and `verify.sh`
+
+## Quick Start
+
+```bash
+bash scripts/setup.sh    # clean clone -> runnable (venv, deps, migrations)
+bash scripts/verify.sh   # backend tests, frontend typecheck, lint, build
+bash startdev.sh         # backend 8080, TradingView ingress 8090, frontend 3000
+```
+
+No credentials are needed to install, test, or run against local SQLite. Every
+external integration is opt-in; see `backend/.env.example`.
 
 ## Run Locally
 
@@ -216,23 +229,31 @@ python scripts/find_phantoms.py
 ## Tests
 
 ```bash
-cd backend
-pytest
+bash scripts/verify.sh          # everything CI runs
+bash scripts/verify.sh --fast   # tests + typecheck only
 ```
 
-If `pytest` is unavailable in the local environment, use:
+Or directly:
 
 ```bash
-cd backend
-python -m compileall app scripts
+cd backend && pytest -q
+cd frontend && npm run typecheck && npm run lint && npm run build
 ```
 
-Frontend validation notes:
+The backend suite pins itself to a throwaway SQLite database, so an exported
+`DATABASE_URL` (including a hosted Neon one) is ignored and tests never touch
+real data. `docs/agent/verification.md` describes what the checks cover and,
+just as importantly, what they do not.
 
-- `npm run lint` may still fail because `frontend/package.json` still uses `next lint` on Next 16.
-- `npm run build` may fail in network-restricted environments because `next/font` fetches Google Fonts.
+Note: `next/font` fetches Google Fonts during `npm run build`, so the build
+step needs outbound network access.
 
 ## Agent Notes
+
+Durable context for coding agents lives in `docs/agent/`; `CLAUDE.md` and
+`AGENTS.md` are thin working agreements that point there. Assorted current
+notes:
+
 
 - `backend/mcp_server.py` is a read-only FastMCP adapter over the local API. It now exposes market packet tools plus journal-analysis tools such as trade detail, coverage, audit, path-metrics, and fill-context fetches.
 - `backend/app/engine/trade_path.py` now prefetches minute bars batched by day and uses cache-only fallback reads for misses. Preserve that pattern if you touch path-metric performance.
