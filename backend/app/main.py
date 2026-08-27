@@ -11,7 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, delete, select
 
-from app.database import create_db_and_tables, engine
+from app.database import engine
+from app.schema import ensure_current
 from app.models import Account, FILL_LIGHT, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts
 from app.routers.fills import (
@@ -212,7 +213,11 @@ def _maybe_start_tradingview_analysis_worker(app: FastAPI):
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    create_db_and_tables()
+    # Alembic owns the schema. The app used to call create_all() here, which
+    # meant a database could be built two different ways and end up in a state
+    # neither one describes; see app/schema.py. Refusing to start is louder
+    # than silently repairing, which is the point.
+    ensure_current(engine)
     _cleanup_orphaned_jobs()
     _seed_and_normalize_roth_account()
     with Session(engine) as session:

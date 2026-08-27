@@ -32,6 +32,7 @@ from sqlmodel import SQLModel  # noqa: E402
 
 import app.models  # noqa: F401,E402  -- registers every table on the metadata
 from app.environment import describe, resolve_database_url  # noqa: E402
+from app.schema import alembic_head, stamped_revision  # noqa: E402,F401
 
 def _types_differ(live, model, dialect=None) -> bool:
     """
@@ -94,29 +95,6 @@ def driver_problem(url: str) -> str | None:
             "set DATABASE_URL to postgresql+psycopg://... in backend/.env"
         )
     return None
-
-
-def alembic_head() -> str | None:
-    """The single head revision the migration scripts define, if there is one."""
-    try:
-        from alembic.config import Config
-        from alembic.script import ScriptDirectory
-
-        config = Config(str(BACKEND_DIR / "alembic.ini"))
-        config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-        heads = ScriptDirectory.from_config(config).get_heads()
-        return heads[0] if len(heads) == 1 else None
-    except Exception:
-        return None
-
-
-def stamped_revision(engine) -> str | None:
-    """What alembic_version says, or None if the table is absent or empty."""
-    if not inspect(engine).has_table("alembic_version"):
-        return None
-    with engine.connect() as connection:
-        row = connection.execute(text("SELECT version_num FROM alembic_version")).first()
-    return row[0] if row else None
 
 
 def _live_unique_column_sets(inspector, table: str) -> set[frozenset[str]]:

@@ -39,6 +39,15 @@ if DATABASE_URL.startswith("sqlite"):
 
 
 def create_db_and_tables() -> None:
+    """
+    Build the schema directly from the models, bypassing migrations.
+
+    No longer called at startup -- Alembic owns the schema (app/schema.py).
+    This remains for the places where building from the models is the correct
+    thing and migrations would only be overhead: the test suite, which pins its
+    own throwaway database, and scripts that construct a database to work on.
+    Do not reintroduce it into an application code path.
+    """
     SQLModel.metadata.create_all(engine)
 
 

@@ -126,11 +126,12 @@ Run this yourself — it needs Neon credentials, which no agent worktree has.
    names the command to run next. Check the identity against the Neon console;
    the endpoint name will not tell you on its own (see above).
 
-### Alembic and `create_all` both build this schema
+### A database from before Alembic owned the schema
 
-`app/database.py` calls `create_all()` at startup, so tables can exist that no
-migration ever ran. Which command is correct depends on what
-`alembic_version` says, and the two cases differ — both verified on
+Startup no longer calls `create_all()` (`app/schema.py`) — the app checks that
+the database is at head and refuses to start otherwise. Databases created
+before that change still have tables that no migration ran, and which command
+fixes them depends on what `alembic_version` says. Both cases verified on
 Postgres 16:
 
 | `alembic_version` | `alembic upgrade head` | Run |

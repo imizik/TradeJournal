@@ -45,8 +45,7 @@ Tests need no API keys and touch no real data.
   TradingView) is opt-in and dormant when its variables are unset.
 
 This matters more than it looks. Several tests drive the real `app.main:app`
-through `TestClient`, and that app's lifespan runs `create_db_and_tables()`,
-`_cleanup_orphaned_jobs()`, `_seed_and_normalize_roth_account()` (which can
+through `TestClient`, and that app's lifespan runs `_cleanup_orphaned_jobs()`, `_seed_and_normalize_roth_account()` (which can
 move fills between accounts and trigger a full trade rebuild) and
 `restore_manual_fills_from_backup()`. Before `conftest.py` existed, running
 `pytest` on a normally configured machine performed those writes against the
@@ -98,8 +97,14 @@ Notes that will save you time:
   blocked by the browser and those pages sit on a loading state forever, while
   server-rendered pages still pass.
 - **A sandbox with a preinstalled browser** whose build does not match this
-  Playwright version can point at it:
-  `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
+  Playwright version can point at it. The variable wants the executable, not
+  the directory, and the build number changes, so resolve it:
+  ```bash
+  PLAYWRIGHT_CHROMIUM_PATH=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome | head -1) \
+    bash scripts/verify.sh
+  ```
+  Without this the run fails with `browserType.launch: Executable doesn't
+  exist`, which reads like a missing install rather than a version mismatch.
 - Asserted numbers come from `EXPECTED` in `seed_dev_data.py`, which
   `backend/tests/test_seed_dev_data.py` independently verifies the
   reconstructor still produces. If the fixture changes, that test fails first,
@@ -185,9 +190,10 @@ and the end state is identical.
 ## Schema changes
 
 `backend/tests/test_schema_migrations.py` fails when a SQLModel field has no
-matching Alembic revision. This drift is invisible locally — startup calls
-`create_all()`, so a fresh SQLite file always looks correct — and only
-surfaces on a migrated database like Neon. The same test asserts a single
+matching Alembic revision. This drift used to be invisible locally, because startup called `create_all()`
+and a fresh SQLite file always looked correct. Alembic now owns the schema and
+`conftest.py` migrates the test database, so the suite runs against what
+migrations actually produce. The same test asserts a single
 Alembic head, which two branches adding revisions in parallel can otherwise
 break.
 
