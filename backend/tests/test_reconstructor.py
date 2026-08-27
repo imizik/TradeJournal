@@ -2,6 +2,7 @@
 Tests for the FIFO reconstructor.
 """
 
+import itertools
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
@@ -14,6 +15,17 @@ from app.engine.reconstructor import FillInput, reconstruct
 ET = ZoneInfo("America/New_York")
 ACCOUNT = uuid.uuid4()
 SECOND_ACCOUNT = uuid.uuid4()
+
+# The reconstructor's final sort tie-break is str(fill.id), so fills that share
+# an executed_at and open/close class are ordered by id. Random uuid4 ids made
+# any same-timestamp test non-deterministic (this file flaked ~33% of runs).
+# Monotonic ids make the tie-break follow the order fills are declared in,
+# which is what every test here assumes.
+_id_counter = itertools.count(1)
+
+
+def _next_id() -> uuid.UUID:
+    return uuid.UUID(int=next(_id_counter))
 
 
 def D(value: str) -> Decimal:
@@ -32,7 +44,7 @@ def _fill(
     expiration: date = date(2026, 3, 28),
 ) -> FillInput:
     return FillInput(
-        id=uuid.uuid4(),
+        id=_next_id(),
         account_id=ACCOUNT,
         ticker=ticker,
         instrument_type=instrument_type,
@@ -186,7 +198,7 @@ def test_orphaned_close_is_reported():
 def test_fractional_stock_round_trip_keeps_share_precision():
     fills = [
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="RCAT",
             instrument_type="stock",
@@ -196,7 +208,7 @@ def test_fractional_stock_round_trip_keeps_share_precision():
             executed_at=_dt(9, 47, 25),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="RCAT",
             instrument_type="stock",
@@ -217,7 +229,7 @@ def test_fractional_stock_round_trip_keeps_share_precision():
 def test_partial_stock_exit_stays_open_and_keeps_realized_pnl():
     fills = [
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="RNXT",
             instrument_type="stock",
@@ -227,7 +239,7 @@ def test_partial_stock_exit_stays_open_and_keeps_realized_pnl():
             executed_at=_dt(11, 4, 5),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="RNXT",
             instrument_type="stock",
@@ -237,7 +249,7 @@ def test_partial_stock_exit_stays_open_and_keeps_realized_pnl():
             executed_at=_dt(11, 4, 5),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="RNXT",
             instrument_type="stock",
@@ -247,7 +259,7 @@ def test_partial_stock_exit_stays_open_and_keeps_realized_pnl():
             executed_at=_dt(11, 4, 5),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="RNXT",
             instrument_type="stock",
@@ -269,7 +281,7 @@ def test_partial_stock_exit_stays_open_and_keeps_realized_pnl():
 def test_same_contract_in_different_accounts_stays_separate():
     fills = [
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="GOOG",
             instrument_type="option",
@@ -282,7 +294,7 @@ def test_same_contract_in_different_accounts_stays_separate():
             expiration=date(2026, 4, 2),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=SECOND_ACCOUNT,
             ticker="GOOG",
             instrument_type="option",
@@ -295,7 +307,7 @@ def test_same_contract_in_different_accounts_stays_separate():
             expiration=date(2026, 4, 2),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=ACCOUNT,
             ticker="GOOG",
             instrument_type="option",
@@ -308,7 +320,7 @@ def test_same_contract_in_different_accounts_stays_separate():
             expiration=date(2026, 4, 2),
         ),
         FillInput(
-            id=uuid.uuid4(),
+            id=_next_id(),
             account_id=SECOND_ACCOUNT,
             ticker="GOOG",
             instrument_type="option",

@@ -24,6 +24,18 @@ dependencies = [
     "mcp>=1.2.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[tool.pytest.ini_options]
+# Scope collection to tests/. Without this pytest walks scripts/, where some
+# ad hoc analysis utilities do real work (open databases, hit APIs) at import
+# time and abort the whole run during collection.
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  # Lets a maintainer or an agent re-run CI without pushing an empty commit.
+  workflow_dispatch:
+
+# A new push supersedes an in-flight run for the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches requires-python >=3.10 while staying on a version the
+          # scientific dependencies (scipy, yfinance) ship wheels for.
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install backend
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # No credentials and no DATABASE_URL: tests/conftest.py pins the suite to
+      # a throwaway SQLite database, and every external integration is opt-in.
+      # test_schema_migrations.py covers `alembic upgrade head` and the
+      # models-vs-migrations drift check, so no separate migration step is
+      # needed here.
+      - name: Tests
+        working-directory: backend
+        run: pytest -q
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      # Warnings are allowed on purpose; see frontend/eslint.config.mjs.
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      # Catches server-component and route errors that typecheck alone misses.
+      # next/font fetches Google Fonts at build time, which needs network.
+      - name: Build
+        working-directory: frontend
+        run: npm run build

@@ -67,7 +67,9 @@ export default function Cockpit() {
       {/* Top bar */}
       <div className="flex h-11 shrink-0 items-center gap-4 border-b border-border bg-card px-3">
         <div className="whitespace-nowrap font-mono text-[13px] font-semibold tracking-wide text-primary">
-          ▰ AI BUILDOUT <span className="text-muted-foreground/50">//</span> COCKPIT
+          ▰ AI BUILDOUT{" "}
+          {/* eslint-disable-next-line react/jsx-no-comment-textnodes -- "//" here is a visual separator, not a comment */}
+          <span className="text-muted-foreground/50">//</span> COCKPIT
         </div>
         <div className="flex gap-0.5 rounded-md border border-border p-0.5">
           {TABS.map((t) => (
