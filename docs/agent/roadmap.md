@@ -57,9 +57,17 @@ branches rather than a second platform.
    production schema, run `alembic upgrade head` against it, tear it down.
    This is where CI first needs a secret, so it is also where secret handling
    gets designed.
-3. **A Postgres CI run** for the backend suite. SQLite passes today, but
-   dialect differences (JSON operators, constraint naming, case sensitivity)
-   are invisible until they hit Neon.
+3. ~~**A Postgres CI run.**~~ Done. `test_postgres_parity.py` runs against a
+   `postgres:16` service container in CI and covers the full Alembic chain,
+   `ExactDecimal`'s NUMERIC path, and constraint enforcement. It immediately
+   found two revisions that broke `alembic upgrade head` on Postgres — the
+   documented Neon provisioning path did not work. See
+   [verification.md](verification.md#postgres-parity).
+
+   Still open: most test modules build their own SQLite engine, so only the
+   targeted parity module runs on Postgres. Broadening that means a shared
+   dialect-parametrized engine fixture, which is a wide refactor — worth doing
+   only if a dialect bug slips through in an area the parity module misses.
 
 ## Phase 4 — Deployment
 

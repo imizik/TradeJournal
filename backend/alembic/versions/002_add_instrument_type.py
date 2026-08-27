@@ -47,12 +47,26 @@ def upgrade() -> None:
                iv_at_fill, delta_at_fill, iv_rank_at_fill, underlying_price_at_fill
         FROM fill_old
     """)
-    op.drop_table("fill_old")
 
-    # Recreate trade table with instrument_type + nullable option fields
+    # Drop the dependents before fill_old, not after.
+    #
+    # Postgres foreign keys reference a table by identity, not by name, so
+    # rename_table("fill", "fill_old") drags tradefill_fill_id_fkey along with
+    # it. Dropping fill_old while tradefill still exists then fails with
+    # DependentObjectsStillExist, and `alembic upgrade head` -- the documented
+    # way to provision Neon -- dies here on a fresh database. SQLite does not
+    # enforce the dependency, so this went unnoticed.
+    #
+    # These three are derived tables that this revision recreates from scratch
+    # immediately below, so dropping them earlier changes nothing about the
+    # end state.
     op.execute("DROP TABLE IF EXISTS tradefill")
     op.execute("DROP TABLE IF EXISTS tradetag")
     op.execute("DROP TABLE IF EXISTS trade")
+
+    op.drop_table("fill_old")
+
+    # Recreate trade table with instrument_type + nullable option fields
     op.create_table(
         "trade",
         sa.Column("id", sa.Uuid(), nullable=False),

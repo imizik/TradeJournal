@@ -29,6 +29,7 @@ native PowerShell launcher for the app itself.
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
 | Browser smoke | `cd frontend && npm run e2e` | Whether pages actually render real data |
+| Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
 CI (`.github/workflows/ci.yml`) runs the same checks on every pull request, in
 two parallel jobs. Agent verification is not the only signal.
@@ -104,6 +105,63 @@ Notes that will save you time:
   reconstructor still produces. If the fixture changes, that test fails first,
   in the fast run.
 
+## Postgres parity
+
+The suite runs on SQLite; production runs on Neon. `test_postgres_parity.py`
+covers what only Postgres can show, and is skipped unless `TEST_DATABASE_URL`
+names a Postgres database:
+
+```bash
+cd backend
+TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/scratch pytest tests/test_postgres_parity.py
+```
+
+CI runs it against an ephemeral `postgres:16` service container. Deliberately
+not a Neon branch: no secret is needed, and dialect problems reproduce without
+Neon-specific behavior. Per-PR Neon branches earn their place later, for
+deploy previews and connection-level behavior.
+
+`TEST_DATABASE_URL` is intentionally a **different variable** from
+`DATABASE_URL`. `conftest.py` pins `DATABASE_URL` to throwaway SQLite so the
+suite can never inherit a hosted database, and that guard stays intact; this
+module builds its own engine. The module also drops and recreates the schema,
+so it refuses a database holding fills it did not create (rows it makes are
+prefixed `parity-`).
+
+What it covers, and why each earns its place:
+
+- **The full Alembic chain on Postgres.** This is the documented Neon
+  provisioning path. It was broken and nobody knew, because SQLite passing
+  proves nothing about it. Two separate revisions failed the first time this
+  ran (see below).
+- **`ExactDecimal` on NUMERIC.** `tradingview_alert.price` is
+  `NUMERIC(28, 12)` on Postgres and `VARCHAR(48)` on SQLite — genuinely
+  different storage code. Every other test exercises only the SQLite half.
+- **Constraint enforcement.** Uniqueness on `fill.raw_email_id` (the import
+  dedupe key) and `account.last4`, plus the `tradingview_alert.alert_id`
+  identity the ingress depends on.
+- **Model/migration drift under Postgres**, the same check
+  `test_schema_migrations.py` makes on SQLite.
+
+### Two Postgres-only migration bugs this found immediately
+
+Both were invisible on SQLite, and both broke `alembic upgrade head` on a
+fresh Postgres database:
+
+1. **Revision 002** renamed `fill` to `fill_old`, then dropped it. Postgres
+   foreign keys reference a table by identity rather than by name, so
+   `tradefill_fill_id_fkey` followed the rename and blocked the drop. Fixed by
+   dropping the derived tables (which that revision recreates anyway) first.
+2. **Revision 003** used `batch_alter_table(..., recreate="always")`. Batch
+   recreation is SQLite's workaround for having no `ALTER COLUMN`; forcing it
+   everywhere made Postgres rebuild too, and rebuilding drops the primary key,
+   which dependent foreign keys block. Fixed with `recreate="auto"`, which
+   rebuilds only where the dialect requires it.
+
+Editing applied revisions is safe here because both changes only affect
+provisioning a *fresh* database — any existing database is already past them,
+and the end state is identical.
+
 ## Schema changes
 
 `backend/tests/test_schema_migrations.py` fails when a SQLModel field has no
@@ -135,6 +193,10 @@ Be honest about this when reporting work:
 - **No integration tests against live Gmail/Polygon/Alpaca/Webull.** Those
   paths are only covered where they are stubbed. The browser tests run with no
   market-data credentials, so quote-dependent UI shows its empty state.
+- **Postgres coverage is targeted, not total.** The parity module below covers
+  migrations, decimals and constraints. The rest of the suite still runs only
+  on SQLite, because most test modules build their own SQLite engine. Query
+  behavior that differs by dialect elsewhere would not be caught.
 - **No load, migration-rollback, or Postgres-specific testing.** The suite runs
   on SQLite; dialect differences would not be caught.
 
