@@ -35,6 +35,9 @@ stable across a destructive resync, which re-imports fills with new ids — so
 realized PnL attribution for same-second fills can change after
 `POST /fills/resync-all`. Multiple prints of one order at the same second are
 common. Changing the tie-break is a PnL-semantics decision, not a cleanup.
+Quantify the current database first with
+`backend/scripts/analyze_tiebreak_impact.py`; the script is read-only and does
+not choose a replacement ordering.
 
 ## Accounts
 
@@ -48,8 +51,9 @@ common. Changing the tie-break is a PnL-semantics decision, not a cleanup.
   report cumulative filled counts, so a 3-of-13 email followed by the final
   13-of-13 email would import 16 contracts. Only `"Option order executed"` is
   in `OPTION_SUBJECTS`. See `backend/scripts/find_phantoms.py`.
-- The poller still lists partial-subject message ids; they are dropped at parse
-  time. Their ids are not recorded as seen, so each sync re-fetches them.
+- The poller still lists partial-subject message ids. After the first fetch,
+  their ids are recorded in `backend/data/gmail_skipped_message_ids.json` so
+  later syncs skip them without putting sentinel rows in `fill`.
 
 ## Enrichment
 

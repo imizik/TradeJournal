@@ -10,29 +10,34 @@ ET = ZoneInfo("America/New_York")
 
 
 class _FakeMessagesApi:
-    def __init__(self, payloads: dict[str, dict]):
+    def __init__(self, payloads: dict[str, dict], fetched_ids: list[str] | None = None):
         self.payloads = payloads
+        self.fetched_ids = fetched_ids
 
     def get(self, userId: str, id: str, format: str):
         assert userId == "me"
         assert format == "full"
+        if self.fetched_ids is not None:
+            self.fetched_ids.append(id)
         return SimpleNamespace(execute=lambda: self.payloads[id])
 
 
 class _FakeUsersApi:
-    def __init__(self, payloads: dict[str, dict]):
+    def __init__(self, payloads: dict[str, dict], fetched_ids: list[str] | None = None):
         self.payloads = payloads
+        self.fetched_ids = fetched_ids
 
     def messages(self):
-        return _FakeMessagesApi(self.payloads)
+        return _FakeMessagesApi(self.payloads, self.fetched_ids)
 
 
 class _FakeService:
-    def __init__(self, payloads: dict[str, dict]):
+    def __init__(self, payloads: dict[str, dict], fetched_ids: list[str] | None = None):
         self.payloads = payloads
+        self.fetched_ids = fetched_ids
 
     def users(self):
-        return _FakeUsersApi(self.payloads)
+        return _FakeUsersApi(self.payloads, self.fetched_ids)
 
 
 def test_poll_new_fills_does_not_stop_after_known_option_email(monkeypatch) -> None:
@@ -98,3 +103,43 @@ def test_poll_new_fills_queries_partial_option_subject(monkeypatch) -> None:
 
     assert result == []
     assert any('subject:"Option order partially executed"' in query for query in seen_queries)
+
+
+def test_partial_option_email_is_not_refetched_on_second_poll(monkeypatch, tmp_path) -> None:
+    skipped_path = tmp_path / "gmail_skipped_message_ids.json"
+    monkeypatch.setattr(
+        "app.engine.gmail_poller.GMAIL_SKIPPED_MESSAGE_IDS_FILE",
+        skipped_path,
+    )
+
+    partial_id = "option-partial"
+    payloads = {
+        partial_id: {
+            "payload": {
+                "headers": [
+                    {"name": "Subject", "value": "Option order partially executed"}
+                ],
+                "body": {},
+            }
+        }
+    }
+    fetched_ids: list[str] = []
+    monkeypatch.setattr(
+        "app.engine.gmail_poller._get_service",
+        lambda: _FakeService(payloads, fetched_ids),
+    )
+
+    def _fake_fetch(_service, query: str) -> list[str]:
+        if 'subject:"Option order partially executed"' in query:
+            return [partial_id]
+        return []
+
+    monkeypatch.setattr("app.engine.gmail_poller._fetch_all_message_ids", _fake_fetch)
+    monkeypatch.setattr("app.engine.gmail_poller._message_body", lambda _msg: "body")
+
+    assert poll_new_fills(known_ids=set()) == []
+    assert fetched_ids == [partial_id]
+    assert skipped_path.exists()
+
+    assert poll_new_fills(known_ids=set()) == []
+    assert fetched_ids == [partial_id]

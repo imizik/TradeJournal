@@ -60,12 +60,6 @@ STOCK_SUBJECT = "Your order has been executed"
 OPTION_SUBJECTS = (OPTION_SUBJECT,)  # Skip partial-fill emails — they report cumulative
 # counts that duplicate the complete-fill email. See scripts/find_phantoms.py.
 
-_OPT_PARTIAL_FILLED_RE = re.compile(
-    r"So far,\s*([\d,]+)\s+of\s+[\d,]+\s+contracts?\s+were filled",
-    re.IGNORECASE,
-)
-
-
 @dataclass
 class ParsedFill:
     ticker: str
@@ -93,13 +87,13 @@ def _to_decimal(value: str) -> Decimal:
 def parse_option_email(subject: str, body: str, imap_uid: str) -> ParsedFill | None:
     s = subject.strip()
     if s in OPTION_SUBJECTS:
-        return _parse_option(body, imap_uid, subject=s)
+        return _parse_option(body, imap_uid)
     if s == STOCK_SUBJECT:
         return _parse_stock(body, imap_uid)
     return None
 
 
-def _parse_option(body: str, imap_uid: str, subject: str) -> ParsedFill:
+def _parse_option(body: str, imap_uid: str) -> ParsedFill:
     fill_match = _OPT_FILL_RE.search(body)
     price_match = _OPT_PRICE_RE.search(body)
     dt_match = _DATETIME_RE.search(body)
@@ -112,19 +106,12 @@ def _parse_option(body: str, imap_uid: str, subject: str) -> ParsedFill:
         raise EmailParseError(f"Could not parse datetime from email uid={imap_uid!r}")
 
     action = fill_match.group(1).lower()
-    requested_contracts = _to_decimal(fill_match.group(2))
+    contracts = _to_decimal(fill_match.group(2))
     ticker = fill_match.group(3).upper()
     strike = _to_decimal(fill_match.group(4))
     option_type = fill_match.group(5).lower()
     exp_str = fill_match.group(6)
     price = _to_decimal(price_match.group(1))
-
-    contracts = requested_contracts
-    if subject == OPTION_PARTIAL_SUBJECT:
-        partial_match = _OPT_PARTIAL_FILLED_RE.search(body)
-        if not partial_match:
-            raise EmailParseError(f"Could not parse partial fill quantity from email uid={imap_uid!r}")
-        contracts = _to_decimal(partial_match.group(1))
 
     executed_at = _parse_dt(dt_match)
     expiration = _infer_expiration(exp_str, executed_at.date())
