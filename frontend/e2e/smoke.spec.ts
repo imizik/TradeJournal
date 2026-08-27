@@ -28,9 +28,9 @@ test.describe("fixture", () => {
       "e2e database does not match the seed fixture — something added data to it",
     ).toMatchObject({
       total_trades: 6,
-      open_trades: 2,
-      closed_trades: 4,
-      total_pnl: 1154, // NVDA 1300 + RNXT 135 + RCAT 19 - TSLA 300
+      open_trades: 3,
+      closed_trades: 3,
+      total_pnl: 1019, // NVDA 1300 + RCAT 19 - TSLA 300; open RNXT is excluded
     });
   });
 });
@@ -42,12 +42,13 @@ test.describe("dashboard", () => {
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
     // Aggregates computed by the backend from the seeded trades.
-    await expect(page.getByText("+$1154").first()).toBeVisible();
-    await expect(page.getByText("75.0%").first()).toBeVisible();
+    await expect(page.getByText("+$1019").first()).toBeVisible();
+    await expect(page.getByText("66.7%").first()).toBeVisible();
 
-    // Both open positions reach the table, and the two AAPL positions stay
-    // separated by account rather than merging.
+    // All three open positions reach the table, and the two AAPL positions
+    // stay separated by account rather than merging.
     const openPositions = page.getByRole("table").first();
+    await expect(openPositions.getByText("RNXT").first()).toBeVisible();
     await expect(openPositions.getByText("Roth IRA").first()).toBeVisible();
     await expect(openPositions.getByText("Individual").first()).toBeVisible();
   });

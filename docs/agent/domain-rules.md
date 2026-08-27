@@ -39,6 +39,10 @@ Quantify the current database first with
 `backend/scripts/analyze_tiebreak_impact.py`; the script is read-only and does
 not choose a replacement ordering.
 
+A test fixture only exposes that PnL difference when matching leaves some
+different-priced lots unconsumed, such as a partial exit. A full exit consumes
+every lot, so its total realized PnL is invariant to their FIFO order.
+
 ## Accounts
 
 - Roth IRA `8267` and Individual `1113` are the live accounts.

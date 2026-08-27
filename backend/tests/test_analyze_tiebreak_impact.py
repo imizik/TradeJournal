@@ -21,7 +21,7 @@ def _load_script(name: str, filename: str):
     return module
 
 
-def test_seed_detects_tie_group_without_inventing_a_pnl_delta(tmp_path) -> None:
+def test_seed_detects_tie_group_and_reports_pnl_delta(tmp_path) -> None:
     seed_module = _load_script("seed_dev_data_for_tiebreak", "seed_dev_data.py")
     analysis = _load_script("analyze_tiebreak_impact_seed", "analyze_tiebreak_impact.py")
     database_url = f"sqlite:///{tmp_path / 'seed.db'}"
@@ -33,68 +33,24 @@ def test_seed_detects_tie_group_without_inventing_a_pnl_delta(tmp_path) -> None:
     assert report["tie_group_count"] == 1
     assert report["affected_trade_count"] == 1
     assert report["tickers"] == [
-        {"ticker": "RNXT", "affected_trades": 1, "closed_or_expired": 1}
+        {"ticker": "RNXT", "affected_trades": 1, "closed_or_expired": 0}
     ]
-    # Both RNXT entry lots are eventually sold, so their order cannot change
-    # the trade's +$135 total. This is a property of the seed fixture, not a
-    # reason to manufacture a non-zero result.
-    assert {
-        candidate["delta_vs_id"]
-        for candidate in report["candidates"].values()
-    } == {"0.000000"}
-    assert "none of the tested orderings changes realized P&L" in report["verdict"]
-
-
-def test_partial_exit_fixture_reports_nonzero_candidate_delta() -> None:
-    analysis = _load_script("analyze_tiebreak_impact_delta", "analyze_tiebreak_impact.py")
-    account_id = uuid.UUID(int=100)
-    timestamp = datetime(2026, 3, 1, 10, 0, tzinfo=ET)
-    fills = [
-        analysis.SourceFill(
-            id=uuid.UUID(int=1),
-            account_id=account_id,
-            ticker="TIE",
-            instrument_type="stock",
-            side="buy",
-            contracts=Decimal("1"),
-            price=Decimal("10"),
-            executed_at=timestamp,
-            raw_email_id="b",
-        ),
-        analysis.SourceFill(
-            id=uuid.UUID(int=2),
-            account_id=account_id,
-            ticker="TIE",
-            instrument_type="stock",
-            side="buy",
-            contracts=Decimal("1"),
-            price=Decimal("20"),
-            executed_at=timestamp,
-            raw_email_id="a",
-        ),
-        analysis.SourceFill(
-            id=uuid.UUID(int=3),
-            account_id=account_id,
-            ticker="TIE",
-            instrument_type="stock",
-            side="sell",
-            contracts=Decimal("1"),
-            price=Decimal("30"),
-            executed_at=datetime(2026, 3, 1, 11, 0, tzinfo=ET),
-            raw_email_id="c",
-        ),
-    ]
-
-    report = analysis.analyze_fills(
-        fills,
-        account_labels={account_id: "Test (...0000)"},
-        today=date(2026, 3, 2),
+    assert report["candidates"]["id"]["realized_pnl_total"] == "1464.000000"
+    assert (
+        report["candidates"]["id"]["affected_trades"][0]["baseline_realized_pnl"]
+        == "45.000000"
     )
-
-    assert report["affected_trade_count"] == 1
-    assert report["candidates"]["id"]["realized_pnl_total"] == "20.000000"
-    assert report["candidates"]["raw_email_id"]["delta_vs_id"] == "-10.000000"
-    assert report["candidates"]["price_descending"]["delta_vs_id"] == "-10.000000"
+    assert (
+        report["candidates"]["price_ascending"]["affected_trades"][0][
+            "candidate_realized_pnl"
+        ]
+        == "90.000000"
+    )
+    assert report["candidates"]["price_ascending"]["delta_vs_id"] == "45.000000"
+    assert report["candidates"]["price_ascending"]["closed_delta_vs_id"] == "0.000000"
+    assert report["candidates"]["raw_email_id"]["delta_vs_id"] == "0.000000"
+    assert report["candidates"]["price_descending"]["delta_vs_id"] == "0.000000"
+    assert "changes realized P&L" in report["verdict"]
 
 
 def test_dataset_without_tie_groups_reports_no_affected_trades() -> None:
