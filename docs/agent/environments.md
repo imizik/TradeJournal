@@ -126,20 +126,33 @@ Run this yourself — it needs Neon credentials, which no agent worktree has.
    names the command to run next. Check the identity against the Neon console;
    the endpoint name will not tell you on its own (see above).
 
-### Why the first migration on a copied branch is not `upgrade`
+### Alembic and `create_all` both build this schema
 
-`app/database.py` calls `create_all()` at startup, so a database that has only
-ever been used by the app has a complete schema and an **empty**
-`alembic_version`. On that database `alembic upgrade head` fails: it starts at
-`001_initial` and tries to create tables that already exist. The correct
-command is `alembic stamp head`, which records the current state without
-running anything.
+`app/database.py` calls `create_all()` at startup, so tables can exist that no
+migration ever ran. Which command is correct depends on what
+`alembic_version` says, and the two cases differ — both verified on
+Postgres 16:
 
-Stamping is only honest if the schema really does match the models, which is
-why `check_database.py` checks that first and refuses to recommend a stamp
-when it finds drift. The two builds were compared directly on Postgres 16:
-`create_all` and `alembic upgrade head` produce the same 19 tables, differing
-only in `trade.ai_review` (`VARCHAR` vs `TEXT` — the same type in Postgres).
+| `alembic_version` | `alembic upgrade head` | Run |
+|---|---|---|
+| empty (never stamped) | **fails** — `DuplicateTable: relation "account" already exists` | `alembic stamp head` |
+| behind head | **succeeds** | `alembic upgrade head` |
+
+The difference is the migrations themselves. `001_initial` calls
+`op.create_table` unguarded, so it collides with anything `create_all` already
+made. Migrations from `f1a2b3c4d5e6` (`add_strategy_lab`) onward wrap each
+object in `if not _table_exists(...)`, precisely so Alembic can follow
+`create_all` — the comment in `2e6f9a1b4c7d` says so. So a database stamped
+part-way through and then extended by `create_all` upgrades cleanly, while one
+that was never stamped at all does not.
+
+`check_database.py` reads `alembic_version` and names the right one. It also
+refuses to recommend a stamp when it finds drift: stamping records "this
+database is at revision X", which is a lie if the schema is not what X
+produces. `create_all` and a full migration run were compared directly and
+produce the same 19 tables, differing only in `trade.ai_review` (`VARCHAR` vs
+`TEXT` — the same type in Postgres), which is what makes a stamp honest when
+the schema matches.
 
 Refresh the branch from production by deleting and re-creating it in the
 console; nothing in this repository depends on a dev branch's identity being
