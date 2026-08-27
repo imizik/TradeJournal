@@ -11,6 +11,7 @@ bash scripts/verify.sh         # everything CI runs
 bash scripts/verify.sh --fast  # tests + typecheck, no builds (inner loop)
 bash scripts/verify.sh --backend
 bash scripts/verify.sh --frontend
+bash scripts/verify.sh --e2e   # browser smoke tests only (slowest)
 ```
 
 `verify.sh` runs every check even after one fails, so one run reports every
@@ -27,6 +28,7 @@ native PowerShell launcher for the app itself.
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
+| Browser smoke | `cd frontend && npm run e2e` | Whether pages actually render real data |
 
 CI (`.github/workflows/ci.yml`) runs the same checks on every pull request, in
 two parallel jobs. Agent verification is not the only signal.
@@ -69,6 +71,39 @@ Collection is scoped to `backend/tests` by `[tool.pytest.ini_options]`.
 `backend/scripts/` holds ad hoc analysis utilities that do real work at import
 time; pytest must not walk them.
 
+## Browser tests
+
+`frontend/e2e/` holds Playwright smoke tests. They exist because typecheck,
+lint and build all pass on a component that is broken at runtime -- verified:
+a one-character change making the dashboard render every dollar figure 100x
+too small passes all three, and fails the browser tests.
+
+How a run works:
+
+1. `backend/scripts/seed_dev_data.py` builds a throwaway database
+   (`backend/data/e2e_seed.db`) from fixed fills.
+2. The backend starts against it on port 8099, the frontend is rebuilt and
+   started on 3099. Dedicated ports so a dev session on 8080/3000 is untouched.
+3. Tests assert that seeded values reach the DOM.
+
+Notes that will save you time:
+
+- **Servers are never reused** (`reuseExistingServer: false`). `NEXT_PUBLIC_*`
+  is baked at build time and the backend's seed and CORS origin come from the
+  Playwright config, so a leftover server serves a stale build against a stale
+  database -- tests then pass on code that is broken.
+- **The frontend origin must be in the backend's CORS allowlist.** The config
+  passes `FRONTEND_PUBLIC_URL`. Without it, client components' fetches are
+  blocked by the browser and those pages sit on a loading state forever, while
+  server-rendered pages still pass.
+- **A sandbox with a preinstalled browser** whose build does not match this
+  Playwright version can point at it:
+  `PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e`.
+- Asserted numbers come from `EXPECTED` in `seed_dev_data.py`, which
+  `backend/tests/test_seed_dev_data.py` independently verifies the
+  reconstructor still produces. If the fixture changes, that test fails first,
+  in the fast run.
+
 ## Schema changes
 
 `backend/tests/test_schema_migrations.py` fails when a SQLModel field has no
@@ -91,11 +126,15 @@ pytest tests/test_schema_migrations.py -q
 
 Be honest about this when reporting work:
 
-- **No frontend tests.** Typecheck, lint and build are the only frontend
-  signals. A React component can be fully broken at runtime and still pass.
-- **No end-to-end/browser tests.** No check proves a page renders real data.
+- **No component-level frontend tests.** The browser smoke tests prove pages
+  render real data, but there is no unit coverage of individual components,
+  so a broken edge case inside a working page goes unnoticed.
+- **The browser tests are smoke depth, not feature depth.** They assert that
+  seeded values reach the DOM on the main pages. Filtering, sorting, forms,
+  editing and Strategy Lab workflows are not exercised.
 - **No integration tests against live Gmail/Polygon/Alpaca/Webull.** Those
-  paths are only covered where they are stubbed.
+  paths are only covered where they are stubbed. The browser tests run with no
+  market-data credentials, so quote-dependent UI shows its empty state.
 - **No load, migration-rollback, or Postgres-specific testing.** The suite runs
   on SQLite; dialect differences would not be caught.
 

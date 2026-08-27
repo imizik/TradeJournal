@@ -6,6 +6,11 @@
 #   bash scripts/verify.sh --fast       tests + typecheck, no builds
 #   bash scripts/verify.sh --backend    backend only
 #   bash scripts/verify.sh --frontend   frontend only
+#   bash scripts/verify.sh --e2e        browser smoke tests only (slowest)
+#
+# The default run includes the browser tests. They are the only check that
+# proves a page renders: typecheck, lint and build all pass on a component
+# that is broken at runtime.
 #
 # Needs no credentials and touches no real data. The backend suite pins itself
 # to a throwaway SQLite database in backend/tests/conftest.py, so an exported
@@ -24,6 +29,7 @@ case "${1:-}" in
   --fast)     MODE="fast" ;;
   --backend)  MODE="backend" ;;
   --frontend) MODE="frontend" ;;
+  --e2e)      MODE="e2e" ;;
   "")         MODE="all" ;;
   -h|--help)  sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
   *)          echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
@@ -59,6 +65,8 @@ frontend() { (cd "$ROOT/frontend" && "$@"); }
 want_backend()  { [ "$MODE" = all ] || [ "$MODE" = fast ] || [ "$MODE" = backend ]; }
 want_frontend() { [ "$MODE" = all ] || [ "$MODE" = fast ] || [ "$MODE" = frontend ]; }
 want_slow()     { [ "$MODE" != fast ]; }
+# --fast skips it (it rebuilds the frontend and boots both servers, ~40s).
+want_e2e()      { [ "$MODE" = all ] || [ "$MODE" = e2e ]; }
 
 if want_backend; then
   if [ ! -x "$ROOT/backend/.venv/bin/python" ]; then
@@ -81,6 +89,22 @@ if want_frontend; then
       # Catches server-component and route errors that typecheck alone misses.
       run "frontend build" frontend npm run --silent build
     fi
+  fi
+fi
+
+if want_e2e; then
+  if [ ! -d "$ROOT/frontend/node_modules" ]; then
+    fail "browser tests" \
+      "frontend/node_modules is missing, so the browser tests cannot run. Run scripts/setup.sh."
+  elif [ ! -d "$ROOT/frontend/node_modules/@playwright" ]; then
+    fail "browser tests" \
+      "@playwright/test is not installed. Run 'npm install' in frontend/."
+  else
+    # Seeds its own database, boots the backend and a fresh frontend build on
+    # dedicated ports (8099/3099), and asserts real values reach the DOM.
+    # Needs a browser: CI installs one, and a sandbox with a preinstalled
+    # browser can point at it with PLAYWRIGHT_CHROMIUM_PATH.
+    run "browser tests" frontend npm run --silent e2e
   fi
 fi
 

@@ -232,12 +232,28 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="Trade Journal API", lifespan=lifespan)
 
+def _cors_origins() -> list[str]:
+    """
+    Browser origins allowed to call this API.
+
+    The default localhost:3000 pair covers ordinary local development.
+    FRONTEND_PUBLIC_URL is honored on top of it because the frontend does not
+    always run there: startdev uses other ports, browser tests use their own,
+    and a deployed frontend has a real hostname. auth.py already redirects to
+    FRONTEND_PUBLIC_URL, so leaving CORS hardcoded meant following the
+    documented advice to change ports produced an app whose OAuth worked while
+    every client-side fetch was blocked.
+    """
+    origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    configured = os.environ.get("FRONTEND_PUBLIC_URL", "").strip().rstrip("/")
+    if configured and configured not in origins:
+        origins.append(configured)
+    return origins
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

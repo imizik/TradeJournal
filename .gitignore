@@ -18,6 +18,12 @@ build/
 # between parallel branches.
 *.tsbuildinfo
 next-env.d.ts
+
+# Playwright failure artifacts (traces, screenshots) and reports.
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+frontend/.playwright/
 *.log
 *.out
 *.err
