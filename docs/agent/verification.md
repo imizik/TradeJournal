@@ -126,14 +126,27 @@ deploy previews and connection-level behavior.
 suite can never inherit a hosted database, and that guard stays intact; this
 module builds its own engine.
 
-The module runs `DROP SCHEMA public CASCADE`, so it refuses **any** database
-holding application data in **any** table, unless it has previously claimed
-that database by leaving a `parity_scratch_marker` table behind. Checking one
-table is not enough: a database whose `fill` table is empty can still hold
-irreplaceable TradingView alerts, Strategy Lab runs or Webull raw events, and
-an earlier fill-only check would have dropped all of it. The marker is
-recreated after each drop, so re-running against a scratch database keeps
-working without ever green-lighting a database the module has not seen.
+The module runs `DROP SCHEMA public CASCADE`, so it refuses any database that
+is not empty, unless `TEST_DATABASE_ALLOW_DESTRUCTIVE=1` says otherwise. It
+counts rows in **every** table in `public`, not just the ones in
+`SQLModel.metadata`, exempting only `alembic_version` as bookkeeping.
+
+That bluntness is deliberate, and was arrived at the hard way. Two earlier
+versions tried to infer disposability and both were wrong in a way that ends
+in data loss:
+
+- checking only the `fill` table — a database with no fills can still hold
+  irreplaceable TradingView alerts, Strategy Lab runs or Webull events;
+- leaving a marker table to recognise its own scratch database — a marker from
+  an interrupted run keeps authorizing destruction long after that database
+  has been repurposed, and a model-driven row count still cannot see a legacy
+  table left by an older schema.
+
+So there is no inference now. Empty is safe; anything else needs a human to
+say so. The module drops the schema again on teardown, so a scratch database
+is left empty and later runs pass without the variable. CI never sets it: its
+service container starts empty every run, which makes the guard double as
+proof the container really is fresh.
 
 What it covers, and why each earns its place:
 
