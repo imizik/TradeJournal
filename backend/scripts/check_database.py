@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
-from sqlalchemy import create_engine, inspect, text  # noqa: E402
+from sqlalchemy import UniqueConstraint, create_engine, inspect, text  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402
 
 import app.models  # noqa: F401,E402  -- registers every table on the metadata
@@ -119,8 +119,52 @@ def stamped_revision(engine) -> str | None:
     return row[0] if row else None
 
 
+def _live_unique_column_sets(inspector, table: str) -> set[frozenset[str]]:
+    """
+    Every uniqueness guarantee on a table, as sets of column names.
+
+    Constraints and unique indexes are unioned rather than compared apart:
+    the same `unique=True` renders as a UNIQUE constraint on one backend and
+    a unique index on another, and comparing by name would flag a database
+    that is correct. What matters is which column combinations are guaranteed
+    unique, not what the object enforcing it is called.
+    """
+    sets: set[frozenset[str]] = set()
+    for constraint in inspector.get_unique_constraints(table):
+        sets.add(frozenset(constraint["column_names"]))
+    for index in inspector.get_indexes(table):
+        if index.get("unique") and index.get("column_names"):
+            sets.add(frozenset(c for c in index["column_names"] if c))
+    return sets
+
+
+def _model_unique_column_sets(table) -> set[frozenset[str]]:
+    """The same, as the models declare it."""
+    sets: set[frozenset[str]] = set()
+    for constraint in table.constraints:
+        if isinstance(constraint, UniqueConstraint):
+            sets.add(frozenset(column.name for column in constraint.columns))
+    for index in table.indexes:
+        if index.unique:
+            sets.add(frozenset(column.name for column in index.columns))
+    for column in table.columns:
+        if column.unique:
+            sets.add(frozenset([column.name]))
+    return sets
+
+
 def schema_drift(engine) -> list[str]:
-    """Differences between the live schema and what the models declare."""
+    """
+    Differences between the live schema and what the models declare.
+
+    Tables and columns are the obvious half. Constraints are the half that
+    decides whether a stamp is safe: a database can have every table and every
+    column and still have lost the unique constraint on fill.raw_email_id,
+    which is what stops the same brokerage email being imported twice. Stamping
+    such a database records "already migrated" and permanently skips the
+    migration that would restore it, so duplicate fills accumulate silently and
+    PnL is wrong. Presence is not correctness.
+    """
     inspector = inspect(engine)
     live_tables = set(inspector.get_table_names()) - {"alembic_version"}
     model_tables = set(SQLModel.metadata.tables)
@@ -132,9 +176,10 @@ def schema_drift(engine) -> list[str]:
         problems.append(f"table present but not in the models: {name}")
 
     for name in sorted(live_tables & model_tables):
+        table = SQLModel.metadata.tables[name]
         live = {c["name"]: c for c in inspector.get_columns(name)}
-        model = SQLModel.metadata.tables[name].columns
-        for column in model:
+
+        for column in table.columns:
             if column.name not in live:
                 problems.append(f"{name}.{column.name}: column missing from the database")
                 continue
@@ -143,6 +188,31 @@ def schema_drift(engine) -> list[str]:
                 problems.append(
                     f"{name}.{column.name}: database has {actual}, models declare {column.type}"
                 )
+            # A column that has become nullable has lost a guarantee the
+            # application relies on, exactly like a dropped constraint.
+            if bool(live[column.name]["nullable"]) and not bool(column.nullable):
+                problems.append(f"{name}.{column.name}: nullable in the database, NOT NULL in the models")
+
+        live_unique = _live_unique_column_sets(inspector, name)
+        model_unique = _model_unique_column_sets(table)
+        for missing in sorted(model_unique - live_unique, key=sorted):
+            problems.append(
+                f"{name}: no uniqueness guarantee on ({', '.join(sorted(missing))}) -- "
+                "the models declare one"
+            )
+        for extra in sorted(live_unique - model_unique, key=sorted):
+            problems.append(
+                f"{name}: database enforces uniqueness on ({', '.join(sorted(extra))}) -- "
+                "the models do not"
+            )
+
+        live_pk = frozenset(inspector.get_pk_constraint(name).get("constrained_columns") or [])
+        model_pk = frozenset(column.name for column in table.primary_key)
+        if live_pk != model_pk:
+            problems.append(
+                f"{name}: primary key is ({', '.join(sorted(live_pk)) or 'none'}), "
+                f"models declare ({', '.join(sorted(model_pk)) or 'none'})"
+            )
     return problems
 
 

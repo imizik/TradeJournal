@@ -214,3 +214,70 @@ def test_describing_the_environment_does_not_build_an_engine():
     )
     assert result.returncode == 0, result.stderr
     assert "h/db" in result.stdout
+
+
+# --- presence is not correctness: constraints decide whether a stamp is safe --
+
+def test_a_dropped_dedupe_constraint_is_drift(script, clean_engine):
+    """
+    The finding that matters most. fill.raw_email_id unique is what stops the
+    same brokerage email being imported twice. A database can have every table
+    and every column and still have lost it -- and stamping such a database
+    records "already migrated", permanently skipping the migration that would
+    restore it, so duplicate fills accumulate silently and PnL goes wrong.
+    """
+    with clean_engine.begin() as connection:
+        connection.exec_driver_sql("DROP INDEX ix_fill_raw_email_id")
+
+    problems = script.schema_drift(clean_engine)
+    assert any("raw_email_id" in p and "uniqueness" in p for p in problems), problems
+
+
+def test_a_dropped_account_uniqueness_is_drift(script, clean_engine):
+    with clean_engine.begin() as connection:
+        connection.exec_driver_sql("DROP INDEX ix_account_last4")
+
+    problems = script.schema_drift(clean_engine)
+    assert any("last4" in p and "uniqueness" in p for p in problems), problems
+
+
+def test_uniqueness_is_compared_by_columns_not_by_object_name(script, clean_engine):
+    """
+    The same `unique=True` is a unique INDEX on SQLite (ix_fill_raw_email_id)
+    and a UNIQUE CONSTRAINT on Postgres (uq_fill_raw_email_id). Comparing names,
+    or constraints and indexes separately, would report every correct database
+    on one of the two backends as broken.
+    """
+    from sqlalchemy import inspect
+
+    inspector = inspect(clean_engine)
+    live = script._live_unique_column_sets(inspector, "fill")
+    model = script._model_unique_column_sets(SQLModel.metadata.tables["fill"])
+
+    assert frozenset(["raw_email_id"]) in live
+    assert model - live == set(), (model, live)
+
+
+def test_a_column_that_became_nullable_is_drift(script, tmp_path):
+    """A lost NOT NULL is a lost guarantee, exactly like a dropped constraint."""
+    engine = create_engine(f"sqlite:///{tmp_path}/nullable.db")
+    SQLModel.metadata.create_all(engine)
+    with engine.begin() as connection:
+        # SQLite cannot ALTER a column, so rebuild the table with name nullable
+        # and everything else identical -- nullability must be the only change.
+        connection.exec_driver_sql("DROP INDEX ix_account_last4")
+        connection.exec_driver_sql("DROP TABLE account")
+        connection.exec_driver_sql(
+            "CREATE TABLE account ("
+            "  id CHAR(32) NOT NULL,"
+            "  name VARCHAR,"                      # the drift: was NOT NULL
+            "  type VARCHAR NOT NULL,"
+            "  last4 VARCHAR NOT NULL,"
+            "  broker VARCHAR,"
+            "  broker_account_id VARCHAR,"
+            "  PRIMARY KEY (id))"
+        )
+        connection.exec_driver_sql("CREATE UNIQUE INDEX ix_account_last4 ON account (last4)")
+
+    problems = script.schema_drift(engine)
+    assert any("account.name" in p and "nullable" in p for p in problems), problems
