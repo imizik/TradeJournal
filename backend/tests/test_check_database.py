@@ -151,3 +151,66 @@ def test_typedecorator_columns_are_not_reported_as_drift(script, clean_engine):
     """
     problems = [p for p in script.schema_drift(clean_engine) if ".id:" in p or "price" in p]
     assert problems == [], problems
+
+
+# --- the URL never reaches SQLAlchemy's driver guess -------------------------
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("postgresql://user:pw@host/db", "names no driver"),
+        ("postgres://user:pw@host/db", "Unsupported scheme"),
+        ("postgresql+psycopg2://user:pw@host/db", "Unsupported scheme"),
+    ],
+)
+def test_urls_without_psycopg3_are_refused_with_the_fix(script, url, expected):
+    """
+    Every Postgres host hands out `postgresql://...`. SQLAlchemy defaults that
+    to psycopg2, which this project does not install, and the failure reads
+    `No module named 'psycopg2'` -- a missing dependency, apparently, inviting
+    `pip install psycopg2` instead of a one-word URL change.
+    """
+    problem = script.driver_problem(url)
+    assert problem is not None and expected in problem
+    assert "postgresql+psycopg://" in problem
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["postgresql+psycopg://user:pw@host/db", "sqlite:////tmp/x.db"],
+)
+def test_supported_urls_pass_the_driver_check(script, url):
+    assert script.driver_problem(url) is None
+
+
+def test_describing_the_environment_does_not_build_an_engine():
+    """
+    Regression, and the reason the preflight was useless the first time it was
+    needed: app/database.py constructs its engine at import time, so
+    `from app.database import DATABASE_URL` -- which describe() used to do --
+    raised before any diagnostic could run. A tool that cannot start when the
+    database URL is broken cannot diagnose a broken database URL.
+
+    Run out of process: by the time the suite reaches this test app.database is
+    already imported, which is the branch that is not being tested.
+    """
+    import subprocess
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys\n"
+            "sys.path.insert(0, '.')\n"
+            "import os\n"
+            "os.environ['DATABASE_URL'] = 'postgresql+nonexistentdriver://u:p@h/db'\n"
+            "from app.environment import describe\n"
+            "print(describe().identity)\n"
+            "assert 'app.database' not in sys.modules, 'describe() imported app.database'\n",
+        ],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "h/db" in result.stdout

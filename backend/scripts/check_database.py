@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
@@ -30,7 +31,7 @@ from sqlalchemy import create_engine, inspect, text  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402
 
 import app.models  # noqa: F401,E402  -- registers every table on the metadata
-from app.environment import describe  # noqa: E402
+from app.environment import describe, resolve_database_url  # noqa: E402
 
 def _types_differ(live, model, dialect=None) -> bool:
     """
@@ -65,6 +66,34 @@ def _types_differ(live, model, dialect=None) -> bool:
         return live._type_affinity is not model._type_affinity
     except AttributeError:
         return str(live) != str(model)
+
+
+def driver_problem(url: str) -> str | None:
+    """
+    Catch the URL that names no driver, before SQLAlchemy picks one for us.
+
+    Neon (and every other Postgres host) hands out `postgresql://...`. Pasted
+    verbatim, SQLAlchemy defaults that to the psycopg2 dialect, which this
+    project does not install -- it uses psycopg v3. The resulting error is
+    `No module named 'psycopg2'`, which reads as a missing dependency and
+    invites `pip install psycopg2` rather than the one-word fix to the URL.
+    """
+    scheme = urlparse(url).scheme
+    if scheme == "postgresql":
+        fixed = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        return (
+            "The URL names no driver, so SQLAlchemy would default to psycopg2, "
+            "which this project does not install (it uses psycopg v3).\n"
+            "This is the raw form a hosting provider gives you; add the driver:\n"
+            f"  {fixed.split('@')[-1] if '@' in fixed else fixed}\n"
+            "  ^ set DATABASE_URL to postgresql+psycopg://... in backend/.env"
+        )
+    if scheme in {"postgres", "postgresql+psycopg2"}:
+        return (
+            f"Unsupported scheme {scheme!r}. This project uses psycopg v3: "
+            "set DATABASE_URL to postgresql+psycopg://... in backend/.env"
+        )
+    return None
 
 
 def alembic_head() -> str | None:
@@ -122,12 +151,8 @@ def main() -> int:
     parser.add_argument("--url", help="database URL; defaults to the configured DATABASE_URL")
     args = parser.parse_args()
 
-    environment = describe(args.url) if args.url else describe()
-    url = args.url
-    if url is None:
-        from app.database import DATABASE_URL
-
-        url = DATABASE_URL
+    url = args.url or resolve_database_url()
+    environment = describe(url)
 
     print("Database")
     print(f"  environment  {environment.name}")
@@ -136,8 +161,13 @@ def main() -> int:
     print(f"  confirmation required for destructive ops: "
           f"{'yes' if environment.destructive_requires_confirmation else 'no'}")
 
-    engine = create_engine(url)
+    problem = driver_problem(url)
+    if problem:
+        print(f"\n{problem}")
+        return 1
+
     try:
+        engine = create_engine(url)
         with engine.connect():
             pass
     except Exception as error:
