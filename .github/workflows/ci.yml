@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  # Lets a maintainer or an agent re-run CI without pushing an empty commit.
+  workflow_dispatch:
 
 # A new push supersedes an in-flight run for the same ref.
 concurrency:
