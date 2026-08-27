@@ -124,9 +124,16 @@ deploy previews and connection-level behavior.
 `TEST_DATABASE_URL` is intentionally a **different variable** from
 `DATABASE_URL`. `conftest.py` pins `DATABASE_URL` to throwaway SQLite so the
 suite can never inherit a hosted database, and that guard stays intact; this
-module builds its own engine. The module also drops and recreates the schema,
-so it refuses a database holding fills it did not create (rows it makes are
-prefixed `parity-`).
+module builds its own engine.
+
+The module runs `DROP SCHEMA public CASCADE`, so it refuses **any** database
+holding application data in **any** table, unless it has previously claimed
+that database by leaving a `parity_scratch_marker` table behind. Checking one
+table is not enough: a database whose `fill` table is empty can still hold
+irreplaceable TradingView alerts, Strategy Lab runs or Webull raw events, and
+an earlier fill-only check would have dropped all of it. The marker is
+recreated after each drop, so re-running against a scratch database keeps
+working without ever green-lighting a database the module has not seen.
 
 What it covers, and why each earns its place:
 
