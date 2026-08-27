@@ -1,8 +1,9 @@
 """Read-only analysis of FIFO same-timestamp tie-break candidates.
 
 Usage:
-    python scripts/analyze_tiebreak_impact.py --database-url "$DATABASE_URL"
-    python scripts/analyze_tiebreak_impact.py --database-url "$DATABASE_URL" --json
+    python scripts/analyze_tiebreak_impact.py                       # configured DATABASE_URL
+    python scripts/analyze_tiebreak_impact.py --database-url URL
+    python scripts/analyze_tiebreak_impact.py --json
 
 The production reconstructor always applies its current fill-id tie-break.
 Candidate runs therefore use in-memory FillInput copies with monotonic surrogate
@@ -612,11 +613,22 @@ def format_human(report: dict[str, object]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--database-url", required=True, help="SQLAlchemy database URL")
+    parser.add_argument(
+        "--database-url",
+        help="SQLAlchemy database URL; defaults to the configured DATABASE_URL",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     args = parser.parse_args()
 
-    report = analyze_database(args.database_url)
+    database_url = args.database_url
+    if not database_url:
+        # DATABASE_URL lives in backend/.env, which python-dotenv reads and the
+        # shell does not -- so "$DATABASE_URL" is usually empty and passing it
+        # produced an unparseable-URL error rather than anything actionable.
+        from app.environment import resolve_database_url
+
+        database_url = resolve_database_url()
+    report = analyze_database(database_url)
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:

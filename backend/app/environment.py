@@ -27,7 +27,9 @@ Two rules it follows deliberately:
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 # A local SQLite file is a scratch database on this machine. Anything else is
@@ -77,14 +79,35 @@ def _redacted_identity(url: str, backend: str) -> str:
     return f"{host}{port}/{database}"
 
 
+def resolve_database_url() -> str:
+    """
+    The configured database URL, without constructing an engine.
+
+    app.database builds its engine at import time, so importing it just to read
+    the URL fails whenever the URL is unusable -- which is precisely when a
+    diagnostic needs to run. When that module is already imported its value is
+    authoritative and is reused; otherwise the same resolution is repeated
+    here: backend/.env, then the repository root .env, then the environment,
+    then the SQLite default. load_dotenv never overrides an exported variable,
+    so both paths agree.
+    """
+    module = sys.modules.get("app.database")
+    if module is not None:
+        return module.DATABASE_URL
+
+    from dotenv import load_dotenv
+
+    backend_dir = Path(__file__).resolve().parent.parent
+    load_dotenv(backend_dir / ".env")
+    load_dotenv(backend_dir.parent / ".env")
+    default = f"sqlite:///{backend_dir / 'data' / 'trade_journal.db'}"
+    return os.getenv("DATABASE_URL", default)
+
+
 def describe(url: str | None = None) -> Environment:
     """Describe the database this process is configured to use."""
     if url is None:
-        # Imported lazily: app.database resolves .env files at import time, and
-        # this module is also used by tooling that sets DATABASE_URL itself.
-        from app.database import DATABASE_URL
-
-        url = DATABASE_URL
+        url = resolve_database_url()
 
     scheme = urlparse(url).scheme or ""
     # "postgresql+psycopg" -> "postgresql"

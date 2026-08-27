@@ -43,6 +43,37 @@ A test fixture only exposes that PnL difference when matching leaves some
 different-priced lots unconsumed, such as a partial exit. A full exit consumes
 every lot, so its total realized PnL is invariant to their FIFO order.
 
+**Measured, 2026-08-27** (Neon dev branch: 4,326 fills, 1,556 trades, 108
+same-timestamp same-class groups):
+
+| Ordering | Total realized | vs `id` | vs `id`, closed/expired only |
+|---|---|---|---|
+| `id` (current) | $15,678.35 | — | — |
+| `raw_email_id` | $15,678.38 | +$0.03 | **$0.00** |
+| price ascending | $15,678.38 | +$0.03 | **$0.00** |
+| price descending | $15,678.35 | $0.00 | **$0.00** |
+
+105 trades (6.75%) sit in a same-timestamp group. 104 of them reconstruct
+identically under every candidate. The single mover is one **open** MSFT
+position, which is why realized PnL is unchanged in every column: no closed
+trade in this database has ever depended on the tie-break.
+
+**Decision: keep `str(fill.id)`.** Not because it is principled — it is not —
+but because no realistic alternative is either. `raw_email_id` is a Gmail
+message id, chronological only among Gmail-sourced fills; against a Webull or
+manually created id it sorts just as arbitrarily, which is what "comparable
+pairs" means in the script output (100.00% concordant over 8,901,713 such
+pairs, 1 inversion). Switching would move $0.03 on an unrealized position and
+require rebuilding 1,556 trades through PnL code.
+
+This conclusion is a property of the **data**, not the design. A partial exit
+against same-second lots at different prices could move real money at any
+time, and nothing would flag it. Re-run
+`backend/scripts/analyze_tiebreak_impact.py` (no arguments; read-only) before
+trusting the numbers above, and re-decide if the delta stops being noise. The
+seed fixture exposes a changed tie-break as a failing test, so a future change
+is verifiable rather than hopeful.
+
 ## Accounts
 
 - Roth IRA `8267` and Individual `1113` are the live accounts.

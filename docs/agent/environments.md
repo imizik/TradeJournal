@@ -26,7 +26,7 @@ SQLite files automatically, because the path is inside the worktree.
   "environment": {
     "name": "production",
     "backend": "postgresql",
-    "identity": "ep-prod-x9y8z7.us-east-2.aws.neon.tech/tradejournal",
+    "identity": "ep-restless-cell-a1b2c3.c-4.us-east-1.aws.neon.tech/neondb",
     "is_local": false,
     "destructive_requires_confirmation": true
   }
@@ -34,9 +34,18 @@ SQLite files automatically, because the path is inside the worktree.
 ```
 
 `identity` is redacted — host and database name only, never the username or
-password, because it appears in API responses, job rows and logs. Each Neon
-branch gets its own endpoint hostname, so a dev branch and production are
-visibly different strings.
+password, because it appears in API responses, job rows and logs.
+
+Each Neon branch gets its own endpoint hostname, so two branches are always
+**different** strings — a confirmation copied from one will not unlock the
+other. But they are not **self-describing**: Neon names endpoints with random
+words (`ep-restless-cell-a1b2c3`), and every branch of a project shares the
+same database name. Nothing in the identity says "dev" or "production".
+
+So `identity` answers "is this the same database I confirmed against?" on its
+own, and "which environment is this?" only by comparison with the Neon
+console. `APP_ENV` carries that second answer for a human reader — which is
+why it is worth setting, and why it is still only a label the guard ignores.
 
 `APP_ENV` sets `name`. It is a **label only** and never changes what is
 allowed; see below.
@@ -53,7 +62,7 @@ run unchanged. Against **any hosted database** they refuse unless the request
 names the target:
 
 ```json
-{"confirm": "ep-prod-x9y8z7.us-east-2.aws.neon.tech/tradejournal"}
+{"confirm": "ep-restless-cell-a1b2c3.c-4.us-east-1.aws.neon.tech/neondb"}
 ```
 
 The UI asks for this when it is required, showing the identity and environment
@@ -91,17 +100,59 @@ Run this yourself — it needs Neon credentials, which no agent worktree has.
    ```
    postgresql+psycopg://USER:PASSWORD@ep-....neon.tech/DBNAME?sslmode=require
    ```
+   Use the **direct** endpoint, not the one with `-pooler` in the hostname.
+   The pooled endpoint is PgBouncer in transaction mode, which conflicts with
+   psycopg3 prepared statements (`prepared statement "_pg3_0" already
+   exists`), and Alembic is where that usually surfaces. Pooling buys a
+   single-user app nothing.
 3. **Point a worktree at it** in `backend/.env`:
    ```
    DATABASE_URL=postgresql+psycopg://.../dbname?sslmode=require
    APP_ENV=dev
    ```
-4. **Confirm before doing anything:**
+4. **Confirm what you are connected to, before anything writes:**
    ```bash
-   curl -s localhost:8080/health | python3 -m json.tool
+   cd backend && .venv/bin/python scripts/check_database.py
    ```
-   Check `identity` names the dev branch, not production. This is the step
-   that makes the rest safe.
+   Use the venv interpreter, not `python`. Script docstrings in this
+   repository are written as `python scripts/...`, which assumes an activated
+   virtualenv; macOS has no `python` on PATH at all, and a bare `python3`
+   lacks psycopg. `scripts/verify.sh` resolves the same path. If
+   `backend/.venv` does not exist yet, run `scripts/setup.sh` from the
+   repository root.
+
+   Read-only — it never creates, alters or drops. It prints the identity,
+   compares the live schema against the models, reads `alembic_version`, and
+   names the command to run next. Check the identity against the Neon console;
+   the endpoint name will not tell you on its own (see above).
+
+### Alembic and `create_all` both build this schema
+
+`app/database.py` calls `create_all()` at startup, so tables can exist that no
+migration ever ran. Which command is correct depends on what
+`alembic_version` says, and the two cases differ — both verified on
+Postgres 16:
+
+| `alembic_version` | `alembic upgrade head` | Run |
+|---|---|---|
+| empty (never stamped) | **fails** — `DuplicateTable: relation "account" already exists` | `alembic stamp head` |
+| behind head | **succeeds** | `alembic upgrade head` |
+
+The difference is the migrations themselves. `001_initial` calls
+`op.create_table` unguarded, so it collides with anything `create_all` already
+made. Migrations from `f1a2b3c4d5e6` (`add_strategy_lab`) onward wrap each
+object in `if not _table_exists(...)`, precisely so Alembic can follow
+`create_all` — the comment in `2e6f9a1b4c7d` says so. So a database stamped
+part-way through and then extended by `create_all` upgrades cleanly, while one
+that was never stamped at all does not.
+
+`check_database.py` reads `alembic_version` and names the right one. It also
+refuses to recommend a stamp when it finds drift: stamping records "this
+database is at revision X", which is a lie if the schema is not what X
+produces. `create_all` and a full migration run were compared directly and
+produce the same 19 tables, differing only in `trade.ai_review` (`VARCHAR` vs
+`TEXT` — the same type in Postgres), which is what makes a stamp honest when
+the schema matches.
 
 Refresh the branch from production by deleting and re-creating it in the
 console; nothing in this repository depends on a dev branch's identity being
