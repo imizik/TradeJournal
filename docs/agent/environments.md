@@ -112,8 +112,15 @@ Run this yourself — it needs Neon credentials, which no agent worktree has.
    ```
 4. **Confirm what you are connected to, before anything writes:**
    ```bash
-   cd backend && python scripts/check_database.py
+   cd backend && .venv/bin/python scripts/check_database.py
    ```
+   Use the venv interpreter, not `python`. Script docstrings in this
+   repository are written as `python scripts/...`, which assumes an activated
+   virtualenv; macOS has no `python` on PATH at all, and a bare `python3`
+   lacks psycopg. `scripts/verify.sh` resolves the same path. If
+   `backend/.venv` does not exist yet, run `scripts/setup.sh` from the
+   repository root.
+
    Read-only — it never creates, alters or drops. It prints the identity,
    compares the live schema against the models, reads `alembic_version`, and
    names the command to run next. Check the identity against the Neon console;
