@@ -26,7 +26,7 @@ SQLite files automatically, because the path is inside the worktree.
   "environment": {
     "name": "production",
     "backend": "postgresql",
-    "identity": "ep-prod-x9y8z7.us-east-2.aws.neon.tech/tradejournal",
+    "identity": "ep-restless-cell-a1b2c3.c-4.us-east-1.aws.neon.tech/neondb",
     "is_local": false,
     "destructive_requires_confirmation": true
   }
@@ -34,9 +34,18 @@ SQLite files automatically, because the path is inside the worktree.
 ```
 
 `identity` is redacted — host and database name only, never the username or
-password, because it appears in API responses, job rows and logs. Each Neon
-branch gets its own endpoint hostname, so a dev branch and production are
-visibly different strings.
+password, because it appears in API responses, job rows and logs.
+
+Each Neon branch gets its own endpoint hostname, so two branches are always
+**different** strings — a confirmation copied from one will not unlock the
+other. But they are not **self-describing**: Neon names endpoints with random
+words (`ep-restless-cell-a1b2c3`), and every branch of a project shares the
+same database name. Nothing in the identity says "dev" or "production".
+
+So `identity` answers "is this the same database I confirmed against?" on its
+own, and "which environment is this?" only by comparison with the Neon
+console. `APP_ENV` carries that second answer for a human reader — which is
+why it is worth setting, and why it is still only a label the guard ignores.
 
 `APP_ENV` sets `name`. It is a **label only** and never changes what is
 allowed; see below.
@@ -53,7 +62,7 @@ run unchanged. Against **any hosted database** they refuse unless the request
 names the target:
 
 ```json
-{"confirm": "ep-prod-x9y8z7.us-east-2.aws.neon.tech/tradejournal"}
+{"confirm": "ep-restless-cell-a1b2c3.c-4.us-east-1.aws.neon.tech/neondb"}
 ```
 
 The UI asks for this when it is required, showing the identity and environment
@@ -91,17 +100,39 @@ Run this yourself — it needs Neon credentials, which no agent worktree has.
    ```
    postgresql+psycopg://USER:PASSWORD@ep-....neon.tech/DBNAME?sslmode=require
    ```
+   Use the **direct** endpoint, not the one with `-pooler` in the hostname.
+   The pooled endpoint is PgBouncer in transaction mode, which conflicts with
+   psycopg3 prepared statements (`prepared statement "_pg3_0" already
+   exists`), and Alembic is where that usually surfaces. Pooling buys a
+   single-user app nothing.
 3. **Point a worktree at it** in `backend/.env`:
    ```
    DATABASE_URL=postgresql+psycopg://.../dbname?sslmode=require
    APP_ENV=dev
    ```
-4. **Confirm before doing anything:**
+4. **Confirm what you are connected to, before anything writes:**
    ```bash
-   curl -s localhost:8080/health | python3 -m json.tool
+   cd backend && python scripts/check_database.py
    ```
-   Check `identity` names the dev branch, not production. This is the step
-   that makes the rest safe.
+   Read-only — it never creates, alters or drops. It prints the identity,
+   compares the live schema against the models, reads `alembic_version`, and
+   names the command to run next. Check the identity against the Neon console;
+   the endpoint name will not tell you on its own (see above).
+
+### Why the first migration on a copied branch is not `upgrade`
+
+`app/database.py` calls `create_all()` at startup, so a database that has only
+ever been used by the app has a complete schema and an **empty**
+`alembic_version`. On that database `alembic upgrade head` fails: it starts at
+`001_initial` and tries to create tables that already exist. The correct
+command is `alembic stamp head`, which records the current state without
+running anything.
+
+Stamping is only honest if the schema really does match the models, which is
+why `check_database.py` checks that first and refuses to recommend a stamp
+when it finds drift. The two builds were compared directly on Postgres 16:
+`create_all` and `alembic upgrade head` produce the same 19 tables, differing
+only in `trade.ai_review` (`VARCHAR` vs `TEXT` — the same type in Postgres).
 
 Refresh the branch from production by deleting and re-creating it in the
 console; nothing in this repository depends on a dev branch's identity being
