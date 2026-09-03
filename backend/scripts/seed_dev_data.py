@@ -183,17 +183,51 @@ def _resolve_database_url(explicit: str | None) -> str:
     return f"sqlite:///{DEFAULT_DB_PATH}"
 
 
-def _assert_safe_target(session) -> None:
-    """Refuse to run against a database holding anything but seeded fills."""
-    from sqlmodel import select
+def _assert_safe_target(engine) -> None:
+    """
+    Refuse to run against a database holding anything but seeded fills.
 
-    from app.models import FILL_LIGHT, Fill
+    Deliberately raw SQL over one column rather than the ORM. This runs before
+    migrations -- it has to, because refusing to touch someone's real fills
+    outranks bringing a database to head -- so the database may be at an older
+    revision than the models describe. `select(Fill)` would name every column
+    the current model has and fail on whichever one that revision predates,
+    turning a safety check into a crash. `raw_email_id` has been part of `fill`
+    since 001_initial, so this works on any revision.
+    """
+    from sqlalchemy import inspect, text
 
-    existing = session.exec(select(Fill).options(*FILL_LIGHT)).all()
-    foreign = [f for f in existing if not (f.raw_email_id or "").startswith(SEED_PREFIX)]
+    from app.schema import has_any_tables
+
+    tables = set(inspect(engine).get_table_names()) - {"alembic_version"}
+    if not tables:
+        return  # nothing here to own; migrations will build it
+
+    if "fill" not in tables:
+        # Tables, but not this application's tables. Ownership cannot be
+        # established, and _prepare_schema would treat an unstamped database
+        # with tables as a stale fixture and unlink the file -- so returning
+        # "safe" here deletes somebody else's database. Reproduced with a
+        # SQLite file holding one unrelated table: it was silently destroyed.
+        raise SystemExit(
+            f"Refusing to seed: target database has tables "
+            f"({', '.join(sorted(tables)[:5])}"
+            f"{', ...' if len(tables) > 5 else ''}) but no `fill` table, so it "
+            "is not a trade-journal database. Check --database-url."
+        )
+
+    with engine.connect() as connection:
+        foreign = connection.execute(
+            text(
+                "SELECT COUNT(*) FROM fill "
+                "WHERE raw_email_id IS NULL OR raw_email_id NOT LIKE :prefix"
+            ),
+            {"prefix": f"{SEED_PREFIX}%"},
+        ).scalar_one()
+
     if foreign:
         raise SystemExit(
-            f"Refusing to seed: target database holds {len(foreign)} fill(s) that "
+            f"Refusing to seed: target database holds {foreign} fill(s) that "
             "were not created by this script. Point --database-url at a scratch "
             "database instead."
         )
@@ -283,17 +317,10 @@ def seed(database_url: str) -> dict:
     # real fills, and refusing to touch it outranks bringing it to head --
     # otherwise a migration failure is what the caller sees instead of
     # "Refusing to seed", and the guard never gets to fire.
-    from app.schema import has_any_tables
-
-    if has_any_tables(engine):
-        with Session(engine) as session:
-            _assert_safe_target(session)
-
+    _assert_safe_target(engine)
     _prepare_schema(database_url, engine)
 
     with Session(engine) as session:
-        _assert_safe_target(session)
-
         # Idempotent: drop previously seeded fills so re-running converges.
         session.exec(delete(Fill).where(Fill.raw_email_id.like(f"{SEED_PREFIX}%")))
         session.commit()
