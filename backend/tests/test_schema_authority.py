@@ -151,3 +151,87 @@ def test_the_head_is_unambiguous():
 def test_stamped_revision_reads_back_what_migrations_wrote(migrated_template, tmp_path):
     engine = _copy_of(migrated_template, tmp_path / "stamped.db")
     assert stamped_revision(engine) == alembic_head()
+
+
+# --- an indeterminate head fails closed ---------------------------------------
+
+def test_an_unreadable_migration_directory_refuses_startup(migrated_template, tmp_path, monkeypatch):
+    """
+    Codex P1 on #18. ensure_current() used to return when the head could not be
+    resolved, which let the lifespan run cleanup, account normalization and
+    manual-fill restore against a database whose revision was never checked --
+    the exact thing this function exists to prevent, reached by another route.
+    """
+    import app.schema
+
+    def _explode() -> list[str]:
+        raise OSError("migration directory is unreadable")
+
+    monkeypatch.setattr(app.schema, "alembic_heads", _explode)
+
+    with pytest.raises(SchemaNotCurrent) as raised:
+        ensure_current(_copy_of(migrated_template, tmp_path / "unreadable.db"))
+    assert "cannot be verified" in str(raised.value)
+
+
+def test_multiple_heads_refuse_startup(migrated_template, tmp_path, monkeypatch):
+    """
+    Two heads mean there is no single revision to check against, and the
+    repository already treats that as invalid -- test_schema_migrations.py
+    asserts one head. Starting anyway would check against nothing.
+    """
+    import app.schema
+
+    monkeypatch.setattr(app.schema, "alembic_heads", lambda: ["aaaa1111", "bbbb2222"])
+
+    with pytest.raises(SchemaNotCurrent) as raised:
+        ensure_current(_copy_of(migrated_template, tmp_path / "twoheads.db"))
+    message = str(raised.value)
+    assert "2 heads" in message
+    assert "aaaa1111" in message and "bbbb2222" in message
+
+
+# --- the seed guard must work before migrations run ---------------------------
+
+def test_seed_safety_check_works_on_an_older_revision(tmp_path):
+    """
+    Codex P2 on #18. The seed script's ownership check runs before migrations --
+    it has to, because refusing to touch real fills outranks bringing a database
+    to head -- so the database may predate columns the current model declares.
+    Through the ORM this raised `no such column: fill.instrument_type` instead of
+    refusing, turning a safety check into a crash. Verified against a database at
+    001, which predates instrument_type.
+    """
+    import importlib.util
+
+    from sqlalchemy import create_engine, text
+
+    database = tmp_path / "old.db"
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "001"],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DATABASE_URL": f"sqlite:///{database}"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    engine = create_engine(f"sqlite:///{database}")
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT INTO account (id,name,type,last4) VALUES ('a1','Roth','roth_ira','8267')"
+        ))
+        connection.execute(text(
+            "INSERT INTO fill (id,account_id,ticker,side,contracts,price,executed_at,"
+            "option_type,strike,expiration,raw_email_id) VALUES "
+            "('f1','a1','REAL','buy',1,1,'2026-01-01','call',100,'2026-02-01','gmail-real-fill')"
+        ))
+
+    spec = importlib.util.spec_from_file_location(
+        "seed_dev_data_old", BACKEND_DIR / "scripts" / "seed_dev_data.py"
+    )
+    seed_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seed_module)
+
+    with pytest.raises(SystemExit, match="Refusing to seed"):
+        seed_module._assert_safe_target(engine)
