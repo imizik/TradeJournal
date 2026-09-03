@@ -235,3 +235,59 @@ def test_seed_safety_check_works_on_an_older_revision(tmp_path):
 
     with pytest.raises(SystemExit, match="Refusing to seed"):
         seed_module._assert_safe_target(engine)
+
+
+def test_seed_refuses_a_database_that_is_not_this_application(tmp_path):
+    """
+    Codex P2 on #19, and a data-loss path rather than an inconvenience.
+
+    Two changes combined to make it. The ownership check moved to raw SQL so it
+    would work before migrations, which removed the accidental protection the
+    ORM query gave -- `select(Fill)` failed on a database with no `fill` table.
+    And _prepare_schema learned to rebuild a stale unstamped fixture by
+    unlinking the file. Together: point --database-url at any SQLite database
+    with tables but no `fill` table, and it was silently deleted.
+
+    Reproduced before fixing, on a file holding one unrelated table with one
+    row: destroyed, exit 0, no warning.
+    """
+    import importlib.util
+
+    from sqlalchemy import create_engine, inspect, text
+
+    database = tmp_path / "someone_elses.db"
+    engine = create_engine(f"sqlite:///{database}")
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE important_notes (id INTEGER PRIMARY KEY, body TEXT)"))
+        connection.execute(text("INSERT INTO important_notes (body) VALUES ('not a trade journal')"))
+
+    spec = importlib.util.spec_from_file_location(
+        "seed_dev_data_foreign", BACKEND_DIR / "scripts" / "seed_dev_data.py"
+    )
+    seed_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seed_module)
+
+    with pytest.raises(SystemExit, match="no `fill` table"):
+        seed_module._assert_safe_target(engine)
+
+    # The point of the test: the database is still there.
+    assert database.exists()
+    assert "important_notes" in inspect(engine).get_table_names()
+    with engine.connect() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM important_notes")).scalar_one() == 1
+
+
+def test_seed_accepts_a_genuinely_empty_database(tmp_path):
+    """The refusal above must not block the ordinary case: nothing to own."""
+    import importlib.util
+
+    from sqlalchemy import create_engine
+
+    spec = importlib.util.spec_from_file_location(
+        "seed_dev_data_empty", BACKEND_DIR / "scripts" / "seed_dev_data.py"
+    )
+    seed_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seed_module)
+
+    engine = create_engine(f"sqlite:///{tmp_path}/empty.db")
+    seed_module._assert_safe_target(engine)  # must not raise

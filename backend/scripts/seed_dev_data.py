@@ -197,8 +197,24 @@ def _assert_safe_target(engine) -> None:
     """
     from sqlalchemy import inspect, text
 
-    if "fill" not in inspect(engine).get_table_names():
-        return
+    from app.schema import has_any_tables
+
+    tables = set(inspect(engine).get_table_names()) - {"alembic_version"}
+    if not tables:
+        return  # nothing here to own; migrations will build it
+
+    if "fill" not in tables:
+        # Tables, but not this application's tables. Ownership cannot be
+        # established, and _prepare_schema would treat an unstamped database
+        # with tables as a stale fixture and unlink the file -- so returning
+        # "safe" here deletes somebody else's database. Reproduced with a
+        # SQLite file holding one unrelated table: it was silently destroyed.
+        raise SystemExit(
+            f"Refusing to seed: target database has tables "
+            f"({', '.join(sorted(tables)[:5])}"
+            f"{', ...' if len(tables) > 5 else ''}) but no `fill` table, so it "
+            "is not a trade-journal database. Check --database-url."
+        )
 
     with engine.connect() as connection:
         foreign = connection.execute(
