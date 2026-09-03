@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from datetime import date, datetime, timedelta
@@ -198,6 +199,66 @@ def _assert_safe_target(session) -> None:
         )
 
 
+def _prepare_schema(database_url: str, engine) -> None:
+    """
+    Bring the seed database to the migration head.
+
+    Alembic owns the schema (app/schema.py) and the app refuses to start on a
+    database migrations did not build -- which includes this one, because the
+    e2e suite seeds a database and then runs the real app against it. Building
+    it with create_all() would leave no alembic_version and the backend would
+    not come up.
+
+    Migrations run out of process: alembic/env.py reads the URL through
+    `from app.database import DATABASE_URL`, which binds at import time, so an
+    in-process run migrates whichever database that module already resolved
+    rather than this one.
+    """
+    import subprocess
+
+    from app.schema import alembic_head, has_any_tables, stamped_revision
+
+    head = alembic_head()
+    stamped = stamped_revision(engine)
+
+    if head is not None and stamped == head:
+        return  # re-seeding a database that is already current
+
+    if stamped is None and has_any_tables(engine):
+        # A database built by create_all, before Alembic owned the schema.
+        # Migrating it would fail on tables that already exist.
+        #
+        # This is a fixture, and _assert_safe_target has already established it
+        # holds nothing but seeded rows, so rebuilding it is both safe and what
+        # the caller wants -- a stale e2e database should not need a human. Only
+        # for a local SQLite file: deleting anything on a hosted database is a
+        # different decision, and belongs to whoever owns that database.
+        if database_url.startswith("sqlite:///"):
+            path = Path(database_url.removeprefix("sqlite:///"))
+            engine.dispose()
+            path.unlink(missing_ok=True)
+            print(f"    rebuilt {path.name} (was built by create_all, before migrations)")
+        else:
+            raise SystemExit(
+                f"{database_url} has tables but no migration history, so "
+                "migrating it would fail on tables that already exist.\n"
+                "  .venv/bin/python scripts/check_database.py --url <url>\n"
+                "names the right command for it."
+            )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DATABASE_URL": database_url},
+    )
+    if result.returncode != 0:
+        raise SystemExit(
+            "Could not migrate the seed database:\n" + (result.stderr or result.stdout)
+        )
+
+
 def seed(database_url: str) -> dict:
     """
     Build the fixture in `database_url`. Returns a summary dict.
@@ -217,7 +278,18 @@ def seed(database_url: str) -> dict:
         {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     )
     engine = create_engine(database_url, connect_args=connect_args)
-    SQLModel.metadata.create_all(engine)
+
+    # Safety before schema. If this database already has tables it may hold
+    # real fills, and refusing to touch it outranks bringing it to head --
+    # otherwise a migration failure is what the caller sees instead of
+    # "Refusing to seed", and the guard never gets to fire.
+    from app.schema import has_any_tables
+
+    if has_any_tables(engine):
+        with Session(engine) as session:
+            _assert_safe_target(session)
+
+    _prepare_schema(database_url, engine)
 
     with Session(engine) as session:
         _assert_safe_target(session)

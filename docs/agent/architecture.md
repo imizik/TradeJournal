@@ -67,13 +67,21 @@ They share a database and nothing else. Do not route data between them.
   `backend/alembic/versions/`.
 - SQLite by default (`backend/data/trade_journal.db`), Postgres/Neon via
   `DATABASE_URL` using the `postgresql+psycopg://` driver form.
-- **Startup calls `create_all()`**, so a fresh local database is built from the
-  models, not from migrations. That is why models and migrations can drift
-  without anyone noticing locally, and why
-  `backend/tests/test_schema_migrations.py` exists.
-- A database created by `create_all()` carries no Alembic stamp, so a later
-  `alembic upgrade head` fails on "table already exists". `scripts/setup.sh`
-  detects and stamps that case for the local SQLite file only.
+- **Alembic is the only thing that builds the schema.** Startup checks that the
+  database is at head (`backend/app/schema.py`) and refuses to start otherwise,
+  naming the command to run. It does not create or repair anything.
+- Startup used to call `create_all()`. Two authorities meant a database could
+  be stamped at one revision with later tables added by `create_all` — a state
+  no migration produces, where `upgrade` and `stamp` are both plausible and
+  only one is right. It also forced every migration from `f1a2b3c4d5e6` on to
+  guard each object with `if not _table_exists(...)`.
+- Models can still drift from migrations, which is what
+  `backend/tests/test_schema_migrations.py` catches; the difference is that
+  drift no longer gets papered over at runtime.
+- Databases predating this change have tables and no `alembic_version`. Startup
+  sends them to `backend/scripts/check_database.py`, which compares the live
+  schema against the models — constraints included — and names `stamp` or
+  `upgrade` accordingly.
 
 ## Background work
 

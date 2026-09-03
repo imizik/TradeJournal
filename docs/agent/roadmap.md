@@ -49,16 +49,41 @@ What it took, worth knowing before extending it:
 Neon already hosts the database, so environment isolation should use Neon
 branches rather than a second platform.
 
-1. **A dedicated `dev` Neon branch.** The repository side is done: `GET /health`
-   reports which database a process is connected to, and `resync-all` refuses
-   on any hosted database unless the request names the target. Creating the
-   branch itself needs Neon credentials no agent worktree has — the steps are
-   in [environments.md](environments.md#creating-the-neon-dev-branch).
-2. **Branch-per-PR** for migration testing: create a Neon branch from
+1. ~~**A dedicated `dev` Neon branch.**~~ Done. `GET /health` reports which
+   database a process is connected to, `resync-all` refuses on any hosted
+   database unless the request names the target, and the branch exists and is
+   migrated to head. `backend/scripts/check_database.py` is the read-only
+   preflight for pointing a worktree at it.
+
+2. ~~**Alembic as the only schema authority.**~~ Done, and it was not on this
+   list. Startup called `create_all()`, so the app repaired its own database on
+   every boot. That is why the dev branch turned up stamped at `a4b5c6d7e8f9`
+   with later tables already present — a state no migration produces and no
+   clean container reproduces, where `upgrade` and `stamp` are both plausible.
+   It also taxed every migration from `f1a2b3c4d5e6` on with `_table_exists`
+   guards, cost `scripts/setup.sh` ~70 lines of stamp-or-upgrade logic, and
+   blocked separate database roles outright — an app that issues DDL at startup
+   cannot run as a DML-only role. Removing it immediately exposed a
+   test-isolation leak that had been absorbed silently for as long as it
+   existed.
+3. **CI migrates a `create_all`-built database.** CI runs `alembic upgrade
+   head` against an *empty* Postgres container. Real databases have history,
+   and the gap between those two is exactly what made the dev branch ambiguous.
+   Reproducing that state in a container is cheap and needs no secret. Do this
+   before branch-per-PR.
+
+4. **Separate database roles.** Everything connects as one role, which owns the
+   schema and can drop it. Unblocked now that the app does not issue DDL. The
+   split `architecture.md` describes: a migration/schema owner, a private API
+   role, a worker role, and the restricted TradingView ingress role.
+
+5. **Branch-per-PR** for migration testing: create a Neon branch from
    production schema, run `alembic upgrade head` against it, tear it down.
    This is where CI first needs a secret, so it is also where secret handling
-   gets designed.
-3. ~~**A Postgres CI run.**~~ Done. `test_postgres_parity.py` runs against a
+   gets designed. Item 3 covers most of the migration-testing value without
+   one; this earns its place when a PR needs a deploy preview or
+   Neon-specific connection behaviour.
+6. ~~**A Postgres CI run.**~~ Done. `test_postgres_parity.py` runs against a
    `postgres:16` service container in CI and covers the full Alembic chain,
    `ExactDecimal`'s NUMERIC path, and constraint enforcement. It immediately
    found two revisions that broke `alembic upgrade head` on Postgres — the

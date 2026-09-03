@@ -42,3 +42,29 @@ for _flag in (
 ):
     os.environ[_flag] = "false"
 os.environ.pop("WEBULL_LISTENER_ACCOUNTS", None)
+
+# The application no longer builds the schema. Alembic does (app/schema.py),
+# and app.main refuses to start on a database that is not at head -- which is
+# how several tests here get their database, via TestClient(app.main.app).
+#
+# Running the real migration chain rather than create_all() is deliberate. The
+# whole point of the change is that those two are not interchangeable, so a
+# suite that built its schema from the models and stamped it would be asserting
+# against a database no migration ever produces. It costs about a second once
+# per session, and it means a migration that breaks the schema fails the suite
+# rather than only the two modules that test migrations directly.
+_BACKEND_DIR = Path(__file__).resolve().parents[1]
+
+
+def _migrate_test_database() -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    # Config() with no file name: alembic.ini's fileConfig() would reconfigure
+    # logging out from under pytest.
+    config = Config()
+    config.set_main_option("script_location", str(_BACKEND_DIR / "alembic"))
+    command.upgrade(config, "head")
+
+
+_migrate_test_database()

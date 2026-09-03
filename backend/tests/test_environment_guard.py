@@ -15,6 +15,8 @@ value changes with it.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 from fastapi import HTTPException
 
@@ -28,6 +30,10 @@ NEON_PROD = (
     "postgresql+psycopg://tj_user:s3cret@"
     "ep-prod-x9y8z7.us-east-2.aws.neon.tech/tradejournal?sslmode=require"
 )
+
+
+# conftest pins this before any test module imports app.database.
+_PINNED_DATABASE_URL = os.environ["DATABASE_URL"]
 
 
 def test_local_sqlite_is_recognised_as_disposable():
@@ -87,6 +93,32 @@ def test_local_passes_without_confirmation(monkeypatch, tmp_path):
     require_destructive_confirmation(None, "POST /fills/resync-all")  # must not raise
 
 
+@pytest.fixture(autouse=True)
+def _restore_database_module():
+    """
+    Put app.database back after any test reloads it.
+
+    importlib.reload rebinds the module-level engine, and monkeypatch does not
+    undo that -- it only restores the environment variable. Without this,
+    every test after the first reload, in any module, talks to whichever
+    database that reload chose.
+
+    The leak was invisible until the app stopped calling create_all() at
+    startup: the lifespan simply built tables in the wrong database and carried
+    on. It surfaced as test_gmail_auth failing in the full suite and passing
+    alone.
+    """
+    yield
+
+    import importlib
+    import os
+
+    import app.database
+
+    os.environ["DATABASE_URL"] = _PINNED_DATABASE_URL
+    importlib.reload(app.database)
+
+
 def _reload_database_with(monkeypatch, url: str):
     monkeypatch.setenv("DATABASE_URL", url)
     import importlib
@@ -122,17 +154,18 @@ def test_hosted_accepts_the_matching_database_name(monkeypatch):
     assert environment.identity == identity
 
 
-def test_health_reports_the_environment(monkeypatch, tmp_path):
+def test_health_reports_the_environment():
+    """
+    Runs against the suite's pinned SQLite database, which conftest migrates.
+    An earlier version pointed this at its own empty tmp database and reloaded
+    app.main to pick it up -- which needed the app to build its own schema, and
+    left both modules bound to that database for the rest of the session.
+    """
     from fastapi.testclient import TestClient
 
-    _reload_database_with(monkeypatch, f"sqlite:///{tmp_path}/health.db")
-    import importlib
+    from app.main import app as fastapi_app
 
-    import app.main
-
-    importlib.reload(app.main)
-
-    with TestClient(app.main.app) as client:
+    with TestClient(fastapi_app) as client:
         payload = client.get("/health").json()
 
     assert payload["status"] == "ok"
