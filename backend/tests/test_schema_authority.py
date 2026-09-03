@@ -46,8 +46,11 @@ def migrated_template(tmp_path_factory) -> Path:
     and nothing here needs it run more than once.
     """
     database = tmp_path_factory.mktemp("migrated") / "head.db"
+    # `sys.executable -m alembic`, not a path into .venv/bin: CI installs into
+    # the system Python and has no virtualenv, which is exactly how this failed
+    # there while passing locally.
     result = subprocess.run(
-        [BACKEND_DIR / ".venv" / "bin" / "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
