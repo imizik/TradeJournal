@@ -38,18 +38,23 @@ class SchemaNotCurrent(RuntimeError):
     """The database is not at the migration head; the message says what to run."""
 
 
-def alembic_head() -> str | None:
-    """The single head revision the migration scripts define, if there is one."""
-    try:
-        from alembic.config import Config
-        from alembic.script import ScriptDirectory
+def alembic_heads() -> list[str]:
+    """Every head revision. Raises if the migration scripts cannot be read."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
 
-        config = Config(str(BACKEND_DIR / "alembic.ini"))
-        config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
-        heads = ScriptDirectory.from_config(config).get_heads()
-        return heads[0] if len(heads) == 1 else None
+    config = Config(str(BACKEND_DIR / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    return list(ScriptDirectory.from_config(config).get_heads())
+
+
+def alembic_head() -> str | None:
+    """The single head revision, or None if there is not exactly one."""
+    try:
+        heads = alembic_heads()
     except Exception:
         return None
+    return heads[0] if len(heads) == 1 else None
 
 
 def stamped_revision(engine) -> str | None:
@@ -74,12 +79,29 @@ def ensure_current(engine) -> None:
     scripts/check_database.py answers, and the messages here send you there
     rather than guessing on your behalf.
     """
-    head = alembic_head()
-    if head is None:
-        # Multiple heads, or the migration scripts are unreadable. Not
-        # something to fail startup over -- but not something to claim is fine.
-        return
+    # An unresolvable head fails closed. Returning here would let the lifespan
+    # run cleanup, account normalization and manual-fill restore against a
+    # database whose revision was never checked -- which is the whole thing
+    # this function exists to prevent, reached by a different route.
+    try:
+        heads = alembic_heads()
+    except Exception as error:
+        raise SchemaNotCurrent(
+            "Could not read the migration scripts, so this database's revision "
+            f"cannot be verified: {type(error).__name__}: {error}\n"
+            "Refusing to start rather than run against an unverified schema."
+        ) from error
 
+    if len(heads) != 1:
+        raise SchemaNotCurrent(
+            f"The migrations have {len(heads)} heads "
+            f"({', '.join(sorted(heads)) or 'none'}), so there is no single "
+            "revision to check against. Two branches adding revisions in "
+            "parallel is the usual cause; `alembic merge` resolves it. "
+            "test_schema_migrations.py asserts a single head for this reason."
+        )
+
+    head = heads[0]
     stamped = stamped_revision(engine)
     if stamped == head:
         return
