@@ -367,3 +367,47 @@ def test_seeding_a_named_database_ignores_a_stray_migration_url(tmp_path, monkey
 
     assert inspect(create_engine(f"sqlite:///{target}")).get_table_names(), "target not built"
     assert not decoy.exists(), "the stray MIGRATION_DATABASE_URL was followed"
+
+
+def test_the_migration_url_is_read_after_dotenv_is_loaded(monkeypatch):
+    """
+    Codex P1 on #21. The documented split-role setup puts both URLs in
+    backend/.env. Reading os.environ before those files load sees an empty
+    MIGRATION_DATABASE_URL, falls through to DATABASE_URL, and hands alembic
+    the application role -- which cannot create anything, so `upgrade` fails.
+
+    Reproduced before fixing: with both variables in backend/.env and nothing
+    exported, migration_database_url() returned the tj_app role.
+
+    This asserts the ordering behaviourally. The variable exists only once
+    load_env_files() has run, so a read placed before it cannot see it.
+    """
+    import app.environment
+    import app.schema
+
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    owner = "postgresql+psycopg://owner@host/db"
+
+    def _load_that_sets_it() -> None:
+        monkeypatch.setenv("MIGRATION_DATABASE_URL", owner)
+
+    monkeypatch.setattr(app.environment, "load_env_files", _load_that_sets_it)
+    assert app.schema.migration_database_url() == owner
+
+
+def test_the_suite_pins_the_migration_url_as_well_as_the_database_url():
+    """
+    Codex P1 on #21, and the more dangerous of the two.
+
+    Several helpers run alembic in a subprocess with a temporary DATABASE_URL,
+    including upgrade, stamp and downgrade. Once alembic prefers
+    MIGRATION_DATABASE_URL, an exported one takes precedence inside those
+    subprocesses -- and the documented split-role setup exports exactly that
+    variable, so `pytest` on a configured machine could have run migrations
+    against the hosted schema owner. conftest.py pins both, which is the same
+    guard CLAUDE.md forbids weakening.
+    """
+    import os
+
+    assert os.environ["MIGRATION_DATABASE_URL"].startswith("sqlite:///")
+    assert os.environ["MIGRATION_DATABASE_URL"] == os.environ["DATABASE_URL"]

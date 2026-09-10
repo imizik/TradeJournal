@@ -55,8 +55,13 @@ def migration_database_url() -> str:
     """
     import os as _os
 
-    from app.environment import resolve_database_url
+    from app.environment import load_env_files, resolve_database_url
 
+    # Before reading, not after. The documented configuration puts both URLs in
+    # backend/.env, and reading os.environ first sees an empty
+    # MIGRATION_DATABASE_URL, falls through, and returns the application role --
+    # so `alembic upgrade` connects as the role that cannot create anything.
+    load_env_files()
     return _os.environ.get("MIGRATION_DATABASE_URL", "").strip() or resolve_database_url()
 
 

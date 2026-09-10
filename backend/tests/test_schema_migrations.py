@@ -34,8 +34,11 @@ REQUIRED_UNIQUE_COLUMNS = {
 def _alembic(database_path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     # Exported values win over backend/.env, keeping tests off the configured
-    # developer/hosted database.
+    # developer/hosted database. Both variables: alembic prefers
+    # MIGRATION_DATABASE_URL, so setting only DATABASE_URL would migrate
+    # whichever database that named instead of this one.
     env["DATABASE_URL"] = f"sqlite:///{database_path}"
+    env["MIGRATION_DATABASE_URL"] = f"sqlite:///{database_path}"
     result = subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *arguments],
         cwd=BACKEND_DIR,

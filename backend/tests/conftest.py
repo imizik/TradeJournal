@@ -33,6 +33,15 @@ _TEST_DB_PATH = Path(_TEST_DB_DIR) / "test.db"
 # the exact failure this guards against.
 os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 
+# And MIGRATION_DATABASE_URL, which alembic prefers over DATABASE_URL once
+# database roles are split (app/schema.py). Several test helpers run alembic
+# in a subprocess with a temporary DATABASE_URL -- including upgrade, stamp and
+# downgrade -- and an exported MIGRATION_DATABASE_URL would take precedence
+# inside alembic and point those commands at the hosted schema owner instead.
+# The documented split-role setup exports exactly that variable, so this is not
+# hypothetical. Helpers that mean to migrate a named database override both.
+os.environ["MIGRATION_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+
 # Keep optional integrations dormant. Each is already opt-in, but an exported
 # value from a developer shell should not change what the suite exercises.
 for _flag in (

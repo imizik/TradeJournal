@@ -79,6 +79,22 @@ def _redacted_identity(url: str, backend: str) -> str:
     return f"{host}{port}/{database}"
 
 
+def load_env_files() -> None:
+    """
+    Load backend/.env, then the repository-root .env.
+
+    load_dotenv never overrides an already-exported variable, so an explicit
+    export still wins. Callers that read a configuration variable directly must
+    call this first: reading os.environ before the files are loaded sees an
+    empty value for anything configured only in .env.
+    """
+    from dotenv import load_dotenv
+
+    backend_dir = Path(__file__).resolve().parent.parent
+    load_dotenv(backend_dir / ".env")
+    load_dotenv(backend_dir.parent / ".env")
+
+
 def resolve_database_url() -> str:
     """
     The configured database URL, without constructing an engine.
@@ -95,11 +111,8 @@ def resolve_database_url() -> str:
     if module is not None:
         return module.DATABASE_URL
 
-    from dotenv import load_dotenv
-
+    load_env_files()
     backend_dir = Path(__file__).resolve().parent.parent
-    load_dotenv(backend_dir / ".env")
-    load_dotenv(backend_dir.parent / ".env")
     default = f"sqlite:///{backend_dir / 'data' / 'trade_journal.db'}"
     return os.getenv("DATABASE_URL", default)
 
