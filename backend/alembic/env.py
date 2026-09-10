@@ -11,10 +11,13 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.models import *
-from app.database import DATABASE_URL
+from app.schema import migration_database_url
 
 config = context.config
-config.set_main_option("sqlalchemy.url", DATABASE_URL)
+# MIGRATION_DATABASE_URL when set, else DATABASE_URL. With separate roles the
+# application connects as a role that cannot create or drop anything, so the
+# URL the app uses is not the URL migrations can run as.
+config.set_main_option("sqlalchemy.url", migration_database_url())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

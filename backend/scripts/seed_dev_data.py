@@ -285,7 +285,13 @@ def _prepare_schema(database_url: str, engine) -> None:
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": database_url},
+        # Both: alembic prefers MIGRATION_DATABASE_URL, so one inherited from
+        # the environment would migrate a different database than this one.
+        env={
+            **os.environ,
+            "DATABASE_URL": database_url,
+            "MIGRATION_DATABASE_URL": database_url,
+        },
     )
     if result.returncode != 0:
         raise SystemExit(

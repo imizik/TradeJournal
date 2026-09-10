@@ -54,7 +54,11 @@ def migrated_template(tmp_path_factory) -> Path:
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": f"sqlite:///{database}"},
+        env={
+            **os.environ,
+            "DATABASE_URL": f"sqlite:///{database}",
+            "MIGRATION_DATABASE_URL": f"sqlite:///{database}",
+        },
     )
     assert result.returncode == 0, result.stdout + result.stderr
     return database
@@ -212,7 +216,11 @@ def test_seed_safety_check_works_on_an_older_revision(tmp_path):
         cwd=BACKEND_DIR,
         capture_output=True,
         text=True,
-        env={**os.environ, "DATABASE_URL": f"sqlite:///{database}"},
+        env={
+            **os.environ,
+            "DATABASE_URL": f"sqlite:///{database}",
+            "MIGRATION_DATABASE_URL": f"sqlite:///{database}",
+        },
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
@@ -291,3 +299,71 @@ def test_seed_accepts_a_genuinely_empty_database(tmp_path):
 
     engine = create_engine(f"sqlite:///{tmp_path}/empty.db")
     seed_module._assert_safe_target(engine)  # must not raise
+
+
+# --- migrations run as a different role than the application ------------------
+
+def test_migration_url_falls_back_to_the_application_database(monkeypatch):
+    """
+    The single-role setup, which stays the default.
+
+    Asserted against resolve_database_url() rather than against DATABASE_URL
+    directly: that function prefers an already-imported app.database over the
+    environment, precisely so the two can never disagree about which database
+    the process is on. Setting the variable here would not change the answer,
+    and asserting it did would be asserting a contract the code does not make.
+    """
+    from app.environment import resolve_database_url
+    from app.schema import migration_database_url
+
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    assert migration_database_url() == resolve_database_url()
+
+
+def test_migration_url_prefers_the_schema_owner_when_roles_are_split(monkeypatch):
+    """
+    With roles split, DATABASE_URL names a role that cannot create or drop
+    anything, so migrations cannot use it. Verified against real Postgres roles:
+    `alembic upgrade head` as the application role fails with
+    InsufficientPrivilege.
+    """
+    from app.schema import migration_database_url
+
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://app@host/db")
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql+psycopg://owner@host/db")
+    assert migration_database_url() == "postgresql+psycopg://owner@host/db"
+
+
+def test_a_blank_migration_url_falls_back_rather_than_breaking(monkeypatch):
+    """An empty variable is how a half-configured .env looks."""
+    from app.environment import resolve_database_url
+    from app.schema import migration_database_url
+
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "   ")
+    assert migration_database_url() == resolve_database_url()
+
+
+def test_seeding_a_named_database_ignores_a_stray_migration_url(tmp_path, monkeypatch):
+    """
+    The hazard introduced by having two URLs. seed_dev_data migrates its target
+    out of process; if it passed only DATABASE_URL, a MIGRATION_DATABASE_URL
+    left in the environment would take precedence inside alembic and migrate
+    somewhere else entirely, leaving the named database untouched.
+    """
+    import importlib.util
+
+    from sqlalchemy import create_engine, inspect
+
+    decoy = tmp_path / "decoy.db"
+    target = tmp_path / "target.db"
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", f"sqlite:///{decoy}")
+
+    spec = importlib.util.spec_from_file_location(
+        "seed_dev_data_stray", BACKEND_DIR / "scripts" / "seed_dev_data.py"
+    )
+    seed_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seed_module)
+    seed_module.seed(f"sqlite:///{target}")
+
+    assert inspect(create_engine(f"sqlite:///{target}")).get_table_names(), "target not built"
+    assert not decoy.exists(), "the stray MIGRATION_DATABASE_URL was followed"

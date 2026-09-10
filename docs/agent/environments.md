@@ -159,15 +159,100 @@ Refresh the branch from production by deleting and re-creating it in the
 console; nothing in this repository depends on a dev branch's identity being
 stable.
 
+## Database roles
+
+The application no longer issues DDL — Alembic owns the schema — so it can run
+as a role that cannot create or drop anything. Three roles:
+
+| Role | Used by | Can |
+|---|---|---|
+| **owner** (`neondb_owner` on Neon) | `alembic` | everything; owns the schema |
+| **app** | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
+| **ingress** | the TradingView ingress (port 8090) | `tradingview_alert` only |
+
+The ingress is the one that matters. Port 8090 is the only tunnelable port and
+is meant to be internet-facing; 8080 is localhost-only by hard constraint. The
+launchers already refuse to start when `DATABASE_URL` is set and
+`TRADINGVIEW_DATABASE_URL` is blank, so the ingress must be pointed somewhere
+explicitly — but until these roles exist, the only thing to point it at is the
+schema owner. The remaining two are hygiene.
+
+### Configuration
+
+```
+DATABASE_URL=postgresql+psycopg://tj_app:...@host/db?sslmode=require
+MIGRATION_DATABASE_URL=postgresql+psycopg://neondb_owner:...@host/db?sslmode=require
+```
+
+`alembic` uses `MIGRATION_DATABASE_URL` when set and `DATABASE_URL` otherwise,
+so a single-role setup keeps working untouched. `backend/.env.tradingview` gets
+`TRADINGVIEW_DATABASE_URL` with the ingress role, and nothing else — no keys,
+no owner credentials (`architecture.md`).
+
+Anything that migrates a *named* database out of process must set both
+variables. `MIGRATION_DATABASE_URL` takes precedence inside Alembic, so one
+left in the environment would silently migrate somewhere else;
+`seed_dev_data.py` and the test helpers set both deliberately, and a test
+covers it.
+
+### Grants
+
+Run as the owner, connected to the application database. Verified on
+PostgreSQL 16 — every row of the table below was executed, not assumed.
+
+```sql
+GRANT USAGE ON SCHEMA public TO tj_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tj_app;
+-- Without this, the next migration creates a table the app cannot read.
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tj_app;
+
+GRANT USAGE ON SCHEMA public TO tj_ingress;
+GRANT SELECT, INSERT, UPDATE ON tradingview_alert TO tj_ingress;
+```
+
+`ALTER DEFAULT PRIVILEGES` is the line that is easy to omit and expensive to
+omit: without it every future migration produces a table the application
+cannot read, and the failure appears long after the migration ran.
+
+What was verified, each as the role named:
+
+| Attempt | Result |
+|---|---|
+| app writes any table | allowed |
+| app `CREATE TABLE` | `permission denied for schema public` |
+| app `DROP TABLE fill` | `must be owner of table fill` |
+| app runs `alembic upgrade` | `InsufficientPrivilege` |
+| owner runs `alembic upgrade` | applies |
+| app reads `alembic_version` | allowed — startup's check needs it |
+| ingress writes an alert through its own engine | allowed |
+| ingress reads `fill` / `account` | `permission denied` |
+| a table created *after* the grants | app can read and write it; ingress cannot |
+
+### Verify it on Neon before trusting it
+
+Neon manages roles through its console, and a console-created role may carry
+broader defaults than a plain `CREATE ROLE` — possibly membership in
+`neon_superuser`, which would make the restriction decorative. That was not
+testable from here, so check rather than assume. Connected **as the ingress
+role**:
+
+```sql
+SELECT count(*) FROM fill;
+```
+
+It must fail with `permission denied for table fill`. If it succeeds, the role
+is not restricted and the split has bought nothing.
+
 ### What still does not exist
 
 - **Staging.** Deferred with deployment (`roadmap.md` Phase 4). Staging and
   production must not share a database, credentials, webhook tokens, Gmail
   state or external-integration identity.
-- **Separate database roles.** Everything currently connects as one role. The
-  eventual split is a migration/schema owner, a private API role, a worker
-  role, and the restricted TradingView ingress role that
-  `architecture.md` already describes.
+- **A separate worker role.** Background workers share the application role.
+  A fourth role is real configuration complexity, and there is no threat it
+  addresses that the app role does not — worth splitting when a worker needs
+  privileges the API should not have, not before.
 - **Per-PR Neon branches.** CI uses an ephemeral `postgres:16` container
   instead, which catches dialect problems without needing a secret. Per-PR
   branches earn their place when a PR needs a deploy preview or
