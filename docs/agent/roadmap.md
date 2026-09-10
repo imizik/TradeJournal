@@ -66,11 +66,15 @@ branches rather than a second platform.
    cannot run as a DML-only role. Removing it immediately exposed a
    test-isolation leak that had been absorbed silently for as long as it
    existed.
-3. **CI migrates a `create_all`-built database.** CI runs `alembic upgrade
-   head` against an *empty* Postgres container. Real databases have history,
-   and the gap between those two is exactly what made the dev branch ambiguous.
-   Reproducing that state in a container is cheap and needs no secret. Do this
-   before branch-per-PR.
+3. ~~**CI migrates a `create_all`-built database.**~~ Done.
+   `test_postgres_migration_paths.py` builds the states a real database is
+   found in — unstamped and `create_all`-built, stamped part-way then extended,
+   stamped at head, empty — and asserts what the migration chain and
+   `check_database.py` do with each. The middle one is the shape the Neon dev
+   branch was actually in and the one CI never had; it holds only because
+   migrations from `f1a2b3c4d5e6` guard every object with `_table_exists`, and
+   removing one of those guards was verified to fail the test. Still an
+   ephemeral container, still no secret.
 
 4. **Separate database roles.** Everything connects as one role, which owns the
    schema and can drop it. Unblocked now that the app does not issue DDL. The

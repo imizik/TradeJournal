@@ -46,107 +46,36 @@ from app.models import Account, Fill
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL", "").strip()
-
-pytestmark = pytest.mark.skipif(
-    not TEST_DATABASE_URL.startswith("postgresql"),
-    reason="set TEST_DATABASE_URL to a Postgres URL to run dialect parity tests",
+from tests.postgres_support import (  # noqa: E402
+    ALLOW_DESTRUCTIVE,  # noqa: F401  -- re-exported for tests that assert on it
+    TEST_DATABASE_URL,
+    populated_tables as _populated_tables,
+    refuse_if_not_disposable as _refuse_if_not_disposable,
+    requires_postgres,
+    reset_schema,
+    run_alembic,
 )
 
-
-# Postgres bookkeeping this module did not create and does not count as data.
-_BOOKKEEPING_TABLES = {"alembic_version"}
-
-ALLOW_DESTRUCTIVE = os.environ.get(
-    "TEST_DATABASE_ALLOW_DESTRUCTIVE", ""
-).strip().lower() in {"1", "true", "yes"}
-
-
-def _populated_tables(engine) -> list[str]:
-    """
-    Every table in `public` holding rows -- not just the ones in
-    SQLModel.metadata.
-
-    DROP SCHEMA public CASCADE destroys the whole schema, so the guard has to
-    look at the whole schema. A legacy table left by an older version of the
-    app, or anything else someone put there, is invisible to a model-driven
-    check and would be destroyed silently.
-    """
-    inspector = inspect(engine)
-    populated: list[str] = []
-    with engine.connect() as connection:
-        for table in sorted(inspector.get_table_names()):
-            if table in _BOOKKEEPING_TABLES:
-                continue
-            count = connection.execute(
-                text(f'SELECT COUNT(*) FROM "{table}"')
-            ).scalar_one()
-            if count:
-                populated.append(f"{table} ({count} row(s))")
-    return populated
-
-
-def _refuse_if_not_disposable(engine) -> None:
-    """
-    These tests run DROP SCHEMA public CASCADE. Refuse a database that has
-    anything in it, unless a human has explicitly said to destroy it.
-
-    Deliberately not clever. Earlier versions tried to infer disposability --
-    first from the fill table alone, then from a marker table this module left
-    behind -- and both inferences were wrong in a way that ends in data loss:
-    a database with no fills can still hold irreplaceable TradingView alerts,
-    and a marker left by an interrupted run keeps authorizing destruction long
-    after the database has been repurposed.
-
-    So there is no inference. Empty is safe. Non-empty needs
-    TEST_DATABASE_ALLOW_DESTRUCTIVE, which someone has to set on purpose.
-    CI never needs it: its service container starts empty every run, which
-    also means this guard doubles as proof the container really is fresh.
-    """
-    populated = _populated_tables(engine)
-    if not populated:
-        return
-    if ALLOW_DESTRUCTIVE:
-        return
-    raise AssertionError(
-        "TEST_DATABASE_URL points at a database that is not empty:\n"
-        + "\n".join(f"  - {entry}" for entry in populated)
-        + "\n\nThese tests run DROP SCHEMA public CASCADE. Point them at an "
-        "empty database, or set TEST_DATABASE_ALLOW_DESTRUCTIVE=1 to confirm "
-        "you want this one destroyed."
-    )
+pytestmark = requires_postgres
 
 
 @pytest.fixture(scope="module")
 def pg_engine():
     engine = create_engine(TEST_DATABASE_URL)
     _refuse_if_not_disposable(engine)
-    with engine.begin() as connection:
-        connection.execute(text("DROP SCHEMA public CASCADE"))
-        connection.execute(text("CREATE SCHEMA public"))
+    reset_schema(engine)
     yield engine
     # Leave the scratch database empty so a later run passes the guard without
     # anyone having to set TEST_DATABASE_ALLOW_DESTRUCTIVE. Deliberate, rather
     # than relying on whichever test happened to run last.
-    with engine.begin() as connection:
-        connection.execute(text("DROP SCHEMA public CASCADE"))
-        connection.execute(text("CREATE SCHEMA public"))
+    reset_schema(engine)
     engine.dispose()
 
 
 @pytest.fixture(scope="module")
 def migrated(pg_engine):
     """The full Alembic chain, run against Postgres exactly as a deploy does."""
-    environment = os.environ.copy()
-    environment["DATABASE_URL"] = TEST_DATABASE_URL
-    result = subprocess.run(
-        [sys.executable, "-m", "alembic", "-c", "alembic.ini", "upgrade", "head"],
-        cwd=BACKEND_DIR,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    result = run_alembic("upgrade", "head", url=TEST_DATABASE_URL)
     assert result.returncode == 0, (
         "alembic upgrade head failed on Postgres. Several revisions use batch "
         "table recreation, a SQLite workaround.\n\n"

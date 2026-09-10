@@ -179,3 +179,15 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_parity
         run: pytest tests/test_postgres_parity.py -q
+
+      # The parity job above migrates an *empty* database. Real databases have
+      # history: the Neon dev branch was found stamped part-way with later
+      # tables already present, because startup used to call create_all().
+      # These build that state and the neighbouring ones and assert what the
+      # migration chain and the preflight do with each -- no secret and no Neon
+      # branch needed, since none of it depends on Neon-specific behavior.
+      - name: Migration path tests
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_parity
+        run: pytest tests/test_postgres_migration_paths.py -q
