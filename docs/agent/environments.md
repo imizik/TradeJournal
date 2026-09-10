@@ -229,20 +229,72 @@ What was verified, each as the role named:
 | ingress reads `fill` / `account` | `permission denied` |
 | a table created *after* the grants | app can read and write it; ingress cannot |
 
-### Verify it on Neon before trusting it
+### Neon: the grants alone are not enough
 
-Neon manages roles through its console, and a console-created role may carry
-broader defaults than a plain `CREATE ROLE` — possibly membership in
-`neon_superuser`, which would make the restriction decorative. That was not
-testable from here, so check rather than assume. Connected **as the ingress
-role**:
+**A role created through the Neon console is a member of `neon_superuser`**,
+and inherits read/write on everything through it. The grants above still apply
+exactly as written — the role simply has a second, wider source of privilege
+that overrides the intent. Console-created roles also carry `CREATEROLE` and
+`CREATEDB`, which survive revoking the membership.
 
-```sql
-SELECT count(*) FROM fill;
+Confirmed on a real Neon branch, where the ingress role read every fill despite
+having **no direct privilege on `fill` at all**:
+
+```
+=== roles tj_ingress belongs to ===
+  neon_superuser
+
+=== who has privileges on fill ===
+  neondb_owner | DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE
+  tj_app       | DELETE, INSERT, SELECT, UPDATE
 ```
 
-It must fail with `permission denied for table fill`. If it succeeds, the role
-is not restricted and the split has bought nothing.
+So after creating the roles, as the owner:
+
+```sql
+REVOKE neon_superuser FROM tj_app;
+REVOKE neon_superuser FROM tj_ingress;
+ALTER ROLE tj_app NOCREATEROLE NOCREATEDB;
+ALTER ROLE tj_ingress NOCREATEROLE NOCREATEDB;
+```
+
+Creating the roles in SQL (`CREATE ROLE tj_app LOGIN PASSWORD '...'`) rather
+than in the console avoids the membership in the first place.
+
+### Then verify, rather than assume
+
+Both directions, because a role that can do nothing looks the same as a role
+that is correctly restricted. Connected **as the ingress role**:
+
+```sql
+SELECT count(*) FROM fill;             -- must fail: permission denied
+SELECT count(*) FROM tradingview_alert;  -- must return a number
+```
+
+And as the application role: `fill` readable, `CREATE TABLE` refused.
+
+This check is the only thing that distinguishes a working split from a
+decorative one. It was written expecting to pass, and it failed on the first
+real Neon branch it ran against — every grant correct, every privilege
+inherited around them.
+
+### Diagnosing it
+
+Read-only, as the owner:
+
+```sql
+SELECT r.rolname FROM pg_auth_members m
+  JOIN pg_roles r ON r.oid = m.roleid
+  JOIN pg_roles u ON u.oid = m.member
+ WHERE u.rolname = 'tj_ingress';
+
+SELECT grantee, string_agg(privilege_type, ', ' ORDER BY privilege_type)
+  FROM information_schema.table_privileges
+ WHERE table_name = 'fill' GROUP BY grantee;
+```
+
+A role appearing in the first result with nothing in the second is inheriting
+its access, not being granted it.
 
 ### What still does not exist
 
