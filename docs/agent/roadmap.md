@@ -146,10 +146,11 @@ branches rather than a second platform.
 Deliberately unspecified. Choose the host when there is something to deploy
 and real constraints to judge against. Decision criteria worth holding onto:
 
-- **The app is not stateless.** Startup runs migrations-ish work
-  (`create_all`, Roth normalization, manual-fill restore), and background
-  jobs, the Gmail watch renewer and the TradingView analysis worker all expect
-  a long-lived process. A scale-to-zero platform breaks the worker model —
+- **The app is not stateless.** Startup normalizes the Roth account and
+  restores manual fills, and background jobs, the Gmail watch renewer and the
+  TradingView analysis worker all expect a long-lived process. (Startup no
+  longer builds the schema — Alembic owns it, and `ensure_current()` refuses
+  to boot on a database that is behind.) A scale-to-zero platform breaks the worker model —
   `docs/agent/architecture.md` notes the database is a durable queue, not a
   task dispatcher.
 - **Two processes must stay separated.** The public TradingView ingress is the
