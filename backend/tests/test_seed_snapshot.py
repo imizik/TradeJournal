@@ -50,6 +50,12 @@ UPDATING = os.environ.get("UPDATE_SNAPSHOTS", "").strip().lower() in {"1", "true
 # stocks/1Day/iex/NVDA.json, stays under test.
 REPO_ROOT = str(BACKEND_DIR.parent)
 
+# A fixed path that does not exist, rather than a temporary directory. The
+# auditor prints the cache path it failed to find, so a real temp directory
+# would put a fresh random string into the snapshot on every run -- trading one
+# kind of non-determinism for another. This name is constant on every machine.
+EMPTY_CACHE_DIR = Path("/nonexistent/snapshot-empty-alpaca-cache")
+
 
 def _load_seed_module():
     path = BACKEND_DIR / "scripts" / "seed_dev_data.py"
@@ -133,6 +139,20 @@ def _capture(database_url: str) -> dict:
     "Not enough data to compute path" path, which is what a cold cache produces
     anyway -- and keeps the snapshot a property of the fixture rather than of
     whatever the market did while the suite ran.
+
+    CACHE_DIR is redirected to an empty directory for the same reason, and it
+    is the less obvious half. `_audit_fill` and `_audit_indicators` read the
+    cache straight off disk rather than through the stubbed function, so on a
+    machine that has run the real app against AAPL, NVDA or TSLA -- any normal
+    developer clone -- those files would populate bars, indicator fields and
+    formulas that this cold-cache snapshot expects to be absent. The suite
+    would then pass or fail on untracked user data.
+
+    This was missed on the first pass because the container that wrote the
+    snapshot had an empty cache, so the defect was invisible exactly where it
+    was created. Verified by planting sixty days of NVDA bars: without the
+    redirect the snapshot flips to "No daily bars up to fill date"; with it,
+    the planted file is ignored.
     """
     from unittest.mock import patch
 
@@ -141,7 +161,10 @@ def _capture(database_url: str) -> dict:
     from app.models import Account, Fill, Trade, TradeFill, TradePathMetrics
 
     engine = create_engine(database_url)
-    with patch("app.engine.auditor.fetch_minute_bars_for_date", return_value={}):
+    with (
+        patch("app.engine.auditor.fetch_minute_bars_for_date", return_value={}),
+        patch("app.engine.auditor.CACHE_DIR", EMPTY_CACHE_DIR),
+    ):
         return _capture_with(engine)
 
 
