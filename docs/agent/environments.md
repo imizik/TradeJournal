@@ -215,6 +215,11 @@ GRANT USAGE ON SCHEMA public TO tj_ingress;
 GRANT SELECT, INSERT, UPDATE ON tradingview_alert TO tj_ingress;
 ```
 
+Those four verbs are the whole of what the application issues. It runs no
+`TRUNCATE` (which `DELETE` would not cover anyway), no DDL, and needs no
+sequence grant — every key is a UUID and the schema has no sequences.
+`resync-all` deletes through the ORM, so it needs nothing beyond `DELETE`.
+
 `ALTER DEFAULT PRIVILEGES` is the line that is easy to omit and expensive to
 omit: without it every future migration produces a table the application
 cannot read, and the failure appears long after the migration ran.
