@@ -126,6 +126,20 @@ def probe_plan(owner_role: str) -> list[tuple[str, str, bool]]:
     ]
 
 
+def role_url(base, role: str, password: str) -> str:
+    """
+    A connection string for one role, with the password intact.
+
+    render_as_string(hide_password=False) rather than str(): SQLAlchemy's
+    __str__ masks the password as `***`, which still parses and still connects
+    against a trust-auth server -- and is then rejected by any server that
+    actually checks. One helper because the probes and the printed .env lines
+    both need it, and two copies of this is how one of them goes back to str().
+    """
+    return base.set(username=role,
+                    password=password).render_as_string(hide_password=False)
+
+
 def run_probe(url: str, statement: str) -> str:
     """
     "allowed", "denied", or "other(<sqlstate>)".
@@ -308,7 +322,7 @@ def main() -> int:
             connection.execute(text(statement))
             print(f"  ok      {statement[:74]}")
 
-    urls = {role: str(url.set(username=role, password=password))
+    urls = {role: role_url(url, role, password)
             for role, password in passwords.items()}
 
     print("\nverification, both directions")
@@ -316,14 +330,12 @@ def main() -> int:
         print("\nSomething failed. Do not point .env at these roles yet.")
         return 1
 
-    render = lambda role: url.set(  # noqa: E731
-        username=role, password=passwords[role]).render_as_string(hide_password=False)
     print("\nAll checks passed. These are printed once and not stored:\n")
     print("--- backend/.env ---")
-    print(f"DATABASE_URL={render(APP_ROLE)}")
+    print(f"DATABASE_URL={urls[APP_ROLE]}")
     print(f"MIGRATION_DATABASE_URL={raw}")
     print("--- backend/.env.tradingview ---")
-    print(f"TRADINGVIEW_DATABASE_URL={render(INGRESS_ROLE)}")
+    print(f"TRADINGVIEW_DATABASE_URL={urls[INGRESS_ROLE]}")
     return 0
 
 

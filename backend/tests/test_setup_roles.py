@@ -9,6 +9,12 @@ working restriction, and that the target has to be named before anything runs.
 The Postgres tests use throwaway role names rather than the real constants.
 Roles are cluster-wide, so a test that created `tj_app` and dropped it at the
 end would destroy a real one on a developer's machine.
+
+Run them against a server that actually checks passwords. `initdb --auth=trust`
+accepts anything, including the `***` that `str(URL)` produces in place of a
+password -- which is how a broken connection string passed every local run here
+and was caught only by CI. CI's container uses scram-sha-256; a local one
+should too.
 """
 
 from __future__ import annotations
@@ -276,15 +282,16 @@ def test_dropping_fill_is_refused_for_privilege_before_dependencies(
     capsys.readouterr()
     from sqlalchemy.engine import make_url
 
-    app_url = make_url(TEST_DATABASE_URL).set(username=TEST_APP)
     with migrated_database.connect() as connection:
         exists = connection.execute(text(
             "SELECT 1 FROM pg_roles WHERE rolname = :role"), {"role": TEST_APP}).scalar()
         assert exists, "setup did not create the app role"
         # The generated password is printed, never stored, so set a known one.
         connection.execute(text(f"ALTER ROLE {TEST_APP} PASSWORD 'probe'"))
-    assert setup_roles.run_probe(str(app_url.set(password="probe")),
-                                 "DROP TABLE fill") == "denied"
+    # role_url, not str(): str masks the password, which a trust-auth server
+    # accepts and a real one rejects. This test had that bug too.
+    app_url = setup_roles.role_url(make_url(TEST_DATABASE_URL), TEST_APP, "probe")
+    assert setup_roles.run_probe(app_url, "DROP TABLE fill") == "denied"
 
 
 @requires_postgres
@@ -328,3 +335,18 @@ def test_verify_refuses_when_env_names_a_different_database(monkeypatch, capsys)
     output = capsys.readouterr().out
     assert "elsewhere.example" in output and "Refusing" in output
     assert "verification, both directions" not in output, "it probed anyway"
+
+
+def test_a_role_url_carries_the_real_password():
+    """
+    str(URL) masks the password as `***`. That string still parses and still
+    connects to a trust-auth server, so it passes every local check and is
+    rejected by the first server that actually verifies a password.
+    """
+    from sqlalchemy.engine import make_url
+
+    base = make_url("postgresql+psycopg://owner:ownerpw@host.example/db")
+    built = setup_roles.role_url(base, "tj_app", "s3cret-value_x")
+    assert "s3cret-value_x" in built
+    assert "***" not in built
+    assert make_url(built).password == "s3cret-value_x"
