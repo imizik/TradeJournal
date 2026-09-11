@@ -325,6 +325,13 @@ That last line is the one that separates a boundary from a speed bump. A role
 that inherits nothing but may still `SET ROLE` into the owner is not
 restricted; it is one statement away from unrestricted.
 
+If the check is scripted, classify the failure rather than catching every
+exception: `INSERT` into a table with eighteen `NOT NULL` columns raises a
+constraint violation, and a probe that treats any error as "denied" reports
+that as a working restriction. Only SQLSTATE `42501` is a privilege refusal.
+Run each probe inside a transaction and roll it back, so a probe that is
+wrongly *allowed* — `DROP TABLE fill` — still changes nothing.
+
 This check is the only thing that distinguishes a working split from a
 decorative one. It was written expecting to pass, and it failed on the first
 real Neon branch it ran against — every grant correct, every privilege
