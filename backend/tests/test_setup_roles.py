@@ -106,9 +106,9 @@ def test_every_role_is_probed_in_both_directions():
     restricted. Only checking both tells them apart.
     """
     plan = setup_roles.probe_plan("owner")
-    for role in (setup_roles.APP_ROLE, setup_roles.INGRESS_ROLE):
-        outcomes = {denied for probed, _, denied in plan if probed == role}
-        assert outcomes == {True, False}, f"{role} is only checked one way"
+    for label in ("app", "ingress"):
+        outcomes = {denied for probed, _, denied in plan if probed == label}
+        assert outcomes == {True, False}, f"{label} is only checked one way"
 
 
 def test_both_roles_are_checked_for_set_role():
@@ -117,8 +117,8 @@ def test_both_roles_are_checked_for_set_role():
     A role that may still SET ROLE is one statement from unrestricted.
     """
     plan = setup_roles.probe_plan("theowner")
-    for role in (setup_roles.APP_ROLE, setup_roles.INGRESS_ROLE):
-        assert any(probed == role and statement == "SET ROLE theowner" and denied
+    for label in ("app", "ingress"):
+        assert any(probed == label and statement == "SET ROLE theowner" and denied
                    for probed, statement, denied in plan)
 
 
@@ -323,8 +323,8 @@ def test_verify_refuses_when_env_names_a_different_database(monkeypatch, capsys)
     connection error.
     """
     monkeypatch.setattr(setup_roles, "configured_urls", lambda: {
-        setup_roles.APP_ROLE: "postgresql+psycopg://tj_app:pw@elsewhere.example/db",
-        setup_roles.INGRESS_ROLE: "",
+        "app": "postgresql+psycopg://tj_app:pw@elsewhere.example/db",
+        "ingress": "",
     })
     monkeypatch.setattr(sys, "argv", [
         "setup_roles.py",
@@ -350,3 +350,86 @@ def test_a_role_url_carries_the_real_password():
     assert "s3cret-value_x" in built
     assert "***" not in built
     assert make_url(built).password == "s3cret-value_x"
+
+
+def test_the_target_is_more_than_a_hostname():
+    """One server answers for many databases and ports."""
+    from sqlalchemy.engine import make_url
+
+    owner = make_url("postgresql+psycopg://o:p@host.example:5432/prod")
+    assert setup_roles.same_target(make_url("postgresql+psycopg://a:b@host.example/prod"), owner)
+    assert not setup_roles.same_target(
+        make_url("postgresql+psycopg://a:b@host.example/dev"), owner)
+    assert not setup_roles.same_target(
+        make_url("postgresql+psycopg://a:b@host.example:5433/prod"), owner)
+
+
+@requires_postgres
+def test_the_sweep_catches_ingress_access_to_a_table_nobody_probes(
+        migrated_database, throwaway_role_names, monkeypatch, capsys):
+    from sqlalchemy.engine import make_url
+
+    """
+    The probes name `fill` and `account`. `trade` is not among them, and a
+    sampled check reports success while the internet-facing credential can read
+    every trade.
+    """
+    assert _run(monkeypatch) == 0
+    with migrated_database.connect() as connection:
+        connection.execute(text(f"GRANT SELECT ON trade TO {TEST_INGRESS}"))
+    capsys.readouterr()
+    with migrated_database.connect() as connection:
+        problems = setup_roles.privilege_sweep(connection, TEST_INGRESS, is_ingress=True)
+    assert any("SELECT on trade" in problem for problem in problems), problems
+
+    # The probes alone do not notice, which is the whole reason for the sweep.
+    with migrated_database.connect() as connection:
+        connection.execute(text(f"ALTER ROLE {TEST_INGRESS} PASSWORD 'probe'"))
+        connection.execute(text(f"ALTER ROLE {TEST_APP} PASSWORD 'probe'"))
+        owner_role = connection.execute(text("SELECT current_user")).scalar()
+    base = make_url(TEST_DATABASE_URL)
+    urls = {"app": setup_roles.role_url(base, TEST_APP, "probe"),
+            "ingress": setup_roles.role_url(base, TEST_INGRESS, "probe")}
+    assert setup_roles.run_probe(urls["ingress"], "SELECT count(*) FROM trade") == "allowed"
+    assert all(setup_roles.run_probe(urls[label], statement) ==
+               ("denied" if denied else "allowed")
+               for label, statement, denied in setup_roles.probe_plan(owner_role)), \
+        "every probe still passes, so only the sweep can fail this"
+
+    # And the combined report fails on it.
+    assert setup_roles.report(TEST_DATABASE_URL, urls, owner_role) is False
+
+
+@requires_postgres
+def test_the_sweep_catches_a_verb_missing_from_one_table(migrated_database,
+                                                         throwaway_role_names,
+                                                         monkeypatch):
+    """
+    The probes prove SELECT on `fill` and INSERT on `tradingview_alert`. A role
+    missing DELETE on some other table passes every one of them and then fails
+    at runtime on resync.
+    """
+    assert _run(monkeypatch) == 0
+    with migrated_database.connect() as connection:
+        connection.execute(text(f"REVOKE DELETE ON trade FROM {TEST_APP}"))
+        problems = setup_roles.privilege_sweep(connection, TEST_APP, is_ingress=False)
+    assert any("lacks DELETE on trade" in problem for problem in problems), problems
+
+
+@requires_postgres
+def test_the_sweep_sees_privilege_reached_through_membership(
+        migrated_database, throwaway_role_names, monkeypatch):
+    """
+    The failure that prompted all of this: correct grants, and a role reading
+    everything through a membership. has_table_privilege accounts for it;
+    reading the grant tables does not.
+    """
+    assert _run(monkeypatch) == 0
+    with migrated_database.connect() as connection:
+        owner = connection.execute(text("SELECT current_user")).scalar()
+        connection.execute(text(f"GRANT {owner} TO {TEST_INGRESS}"))
+        try:
+            problems = setup_roles.privilege_sweep(connection, TEST_INGRESS, is_ingress=True)
+        finally:
+            connection.execute(text(f"REVOKE {owner} FROM {TEST_INGRESS}"))
+    assert any("on fill" in problem for problem in problems), problems

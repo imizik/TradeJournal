@@ -209,8 +209,14 @@ are random words and a dev branch is indistinguishable from production at a
 glance, so the target is named rather than inferred — the same reason
 `resync-all` refuses a hosted database it was not asked for by name.
 
-The script creates the roles, applies the grants below, and then connects as
-each role and tries what it must not be allowed to do. Passwords are generated,
+The script creates the roles, applies the grants below, and then checks them
+two ways. It asks the server, through `has_table_privilege`, what each role can
+do to **every** table in `public` — which accounts for privilege reached
+through role membership, the case that made the first Neon setup decorative.
+Then it connects as each role and tries what it must not be allowed to do,
+which a catalog query cannot prove. Neither alone is the check: a sampled probe
+list passed a role holding `SELECT` on `trade` because `trade` was not one of
+the samples. Passwords are generated,
 printed once, and not stored; Neon cannot show a SQL-created role's password
 either, so a copy kept anywhere else would go stale.
 
