@@ -49,7 +49,7 @@
           }
         ],
         "indicators": {
-          "cache_file": "/home/user/TradeJournal/backend/data/alpaca_cache/stocks/1Day/iex/AAPL.json",
+          "cache_file": "<repo>/backend/data/alpaca_cache/stocks/1Day/iex/AAPL.json",
           "error": "Daily bar cache not found"
         },
         "instrument_type": "option",
@@ -169,7 +169,7 @@
           }
         ],
         "indicators": {
-          "cache_file": "/home/user/TradeJournal/backend/data/alpaca_cache/stocks/1Day/iex/AAPL.json",
+          "cache_file": "<repo>/backend/data/alpaca_cache/stocks/1Day/iex/AAPL.json",
           "error": "Daily bar cache not found"
         },
         "instrument_type": "option",
@@ -330,7 +330,7 @@
           }
         ],
         "indicators": {
-          "cache_file": "/home/user/TradeJournal/backend/data/alpaca_cache/stocks/1Day/iex/NVDA.json",
+          "cache_file": "<repo>/backend/data/alpaca_cache/stocks/1Day/iex/NVDA.json",
           "error": "Daily bar cache not found"
         },
         "instrument_type": "option",
@@ -458,7 +458,7 @@
           }
         ],
         "indicators": {
-          "cache_file": "/home/user/TradeJournal/backend/data/alpaca_cache/stocks/1Day/iex/RCAT.json",
+          "cache_file": "<repo>/backend/data/alpaca_cache/stocks/1Day/iex/RCAT.json",
           "error": "Daily bar cache not found"
         },
         "instrument_type": "stock",
@@ -625,7 +625,7 @@
           }
         ],
         "indicators": {
-          "cache_file": "/home/user/TradeJournal/backend/data/alpaca_cache/stocks/1Day/iex/RNXT.json",
+          "cache_file": "<repo>/backend/data/alpaca_cache/stocks/1Day/iex/RNXT.json",
           "error": "Daily bar cache not found"
         },
         "instrument_type": "stock",
@@ -707,7 +707,7 @@
           }
         ],
         "indicators": {
-          "cache_file": "/home/user/TradeJournal/backend/data/alpaca_cache/stocks/1Day/iex/TSLA.json",
+          "cache_file": "<repo>/backend/data/alpaca_cache/stocks/1Day/iex/TSLA.json",
           "error": "Daily bar cache not found"
         },
         "instrument_type": "option",

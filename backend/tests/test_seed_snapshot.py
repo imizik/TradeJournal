@@ -41,6 +41,15 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]
 SNAPSHOT_PATH = Path(__file__).parent / "snapshots" / "seed_reconstruction.json"
 UPDATING = os.environ.get("UPDATE_SNAPSHOTS", "").strip().lower() in {"1", "true", "yes"}
 
+# The audit embeds filesystem paths, and one of them is absolute: the
+# "Daily bar cache not found" branch of _audit_indicators returns str(path)
+# while its success branch and _audit_fill both return a path relative to the
+# cache root. A snapshot recording the absolute form passes only on the machine
+# that wrote it -- this failed CI on the first run with /home/runner/... against
+# /home/user/... . Rewritten to a placeholder so the useful part of the path,
+# stocks/1Day/iex/NVDA.json, stays under test.
+REPO_ROOT = str(BACKEND_DIR.parent)
+
 
 def _load_seed_module():
     path = BACKEND_DIR / "scripts" / "seed_dev_data.py"
@@ -99,6 +108,8 @@ def _jsonable(value):
         return {key: _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
+    if isinstance(value, str):
+        return value.replace(REPO_ROOT, "<repo>")
     return value
 
 
@@ -278,3 +289,23 @@ def test_every_seeded_fill_is_assigned_to_exactly_one_trade(seeded):
     assert len(assigned) == expected_total, (
         f"{len(assigned)} of {expected_total} seeded fills are attached to a trade"
     )
+
+
+def test_the_snapshot_holds_no_machine_specific_paths():
+    """
+    A snapshot that records an absolute path passes only on the machine that
+    generated it. This is not hypothetical: the first CI run of this file
+    failed on nothing but /home/runner/... against /home/user/... .
+
+    Guarding the file rather than the normalizer, because the leak can arrive
+    from any new field the auditor starts returning, not only the one known
+    today.
+    """
+    assert SNAPSHOT_PATH.exists(), "snapshot has not been generated"
+    raw = SNAPSHOT_PATH.read_text()
+    for prefix in ('"/home/', '"/Users/', '"/root/', '"C:\\\\'):
+        assert prefix not in raw, (
+            f"the snapshot contains an absolute path starting {prefix}, so it "
+            "will fail on any other machine. Normalize it in _jsonable and "
+            "regenerate."
+        )
