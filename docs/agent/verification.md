@@ -223,8 +223,10 @@ Be honest about this when reporting work:
   migrations, decimals and constraints. The rest of the suite still runs only
   on SQLite, because most test modules build their own SQLite engine. Query
   behavior that differs by dialect elsewhere would not be caught.
-- **No load, migration-rollback, or Postgres-specific testing.** The suite runs
-  on SQLite; dialect differences would not be caught.
+- **No load testing.** Nothing measures behaviour under concurrent or
+  sustained traffic. (Postgres-specific and migration-path testing *do* exist —
+  see the bullet above and the parity job; an earlier version of this bullet
+  denied both and contradicted it.)
 
 If a change lands in one of these areas, say so and describe what you did
 verify instead — for example, driving the endpoint through `TestClient` and

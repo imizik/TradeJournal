@@ -201,9 +201,12 @@ GMAIL_PUBSUB_TOPIC=projects/YOUR_PROJECT_ID/topics/YOUR_TOPIC
 GMAIL_WATCH_LABEL_IDS=INBOX
 GMAIL_PUBSUB_VERIFICATION_TOKEN=choose-a-long-random-token
 GMAIL_WATCH_AUTOSTART=true
-BACKEND_PUBLIC_URL=https://YOUR_PUBLIC_BACKEND
+BACKEND_PUBLIC_URL=http://localhost:8000
 FRONTEND_PUBLIC_URL=http://localhost:3000
 ```
+
+`BACKEND_PUBLIC_URL` names where *this* process is reachable, for OAuth
+redirects. Keep it local. It is not an instruction to expose the backend.
 
 Register or renew the watch:
 
@@ -211,11 +214,22 @@ Register or renew the watch:
 curl -X POST http://localhost:8000/gmail/watch
 ```
 
-Pub/Sub should push to:
+Pub/Sub would push to `POST /gmail/push`, and **that path is not supported
+today.** Two things stand in the way, both worth knowing before you wire it up:
 
-```text
-https://YOUR_PUBLIC_BACKEND/gmail/push?token=choose-a-long-random-token
-```
+- Pub/Sub push needs a public HTTPS endpoint, and `/gmail/push` lives on the
+  private API, which has no authentication and must never be internet-reachable
+  (see the hard constraints in `CLAUDE.md`). Port 8090, the TradingView ingress,
+  is the only port that may be exposed.
+- `_verify_push_token` returns early when `GMAIL_PUBSUB_VERIFICATION_TOKEN` is
+  unset, so an unconfigured token accepts **any** caller — the opposite of the
+  ingress, which refuses to start without one. Exposing the route with the
+  token blank would hand anyone the ability to trigger the ingest pipeline.
+
+Use the OAuth pull path instead — `POST /sync/pipeline/run`, or the Sync
+Center in the UI — which needs no public endpoint. If push is wanted later, it belongs behind the ingress pattern — its
+own process, its own restricted database role, its own environment file — and
+that is a Phase 4 design question, not a configuration change.
 
 If you keep the backend running continuously, `GMAIL_WATCH_AUTOSTART=true` lets it renew the watch in-process. On startup the backend can also auto-start Webull listeners when `WEBULL_LISTENER_AUTOSTART=true` or `WEBULL_LISTENER_ACCOUNTS` is set. The `gmail_push` pipeline does not wait for slow Polygon enrichment to finish, so check `GET /fills/enrich/status` separately if coverage still looks incomplete right after a successful push or full pipeline run.
 

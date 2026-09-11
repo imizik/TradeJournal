@@ -10,7 +10,7 @@ Three processes run locally, and they are deliberately not one:
 
 | Process | Port | Entry point | Exposure |
 |---|---|---|---|
-| Private API | 8080 (8000 also used) | `backend/app/main.py` | localhost only, **no auth** |
+| Private API | 8080 from `startdev.sh`; 8000 from a bare `uvicorn` command and `mcp_server.py`'s default | `backend/app/main.py` | localhost only, **no auth** |
 | TradingView ingress | 8090 | `backend/app/tradingview_ingress.py` | the only tunnelable port; **opt-in** |
 | Frontend | 3000 | `frontend/` (Next 16 App Router) | localhost |
 

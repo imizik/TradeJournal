@@ -4,7 +4,7 @@ Session-wide isolation for the test database.
 app.database resolves DATABASE_URL from the environment, then backend/.env,
 then the repo-root .env -- and backend/.env is exactly where the hosted
 Neon URL is documented to live. Several tests exercise the real
-app.main:app through TestClient, whose lifespan runs create_db_and_tables(),
+app.main:app through TestClient, whose lifespan runs ensure_current(),
 _cleanup_orphaned_jobs(), _seed_and_normalize_roth_account() (which can move
 fills between accounts and trigger a full trade rebuild) and
 restore_manual_fills_from_backup().
