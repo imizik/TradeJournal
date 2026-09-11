@@ -200,6 +200,10 @@ covers it.
 Run as the owner, connected to the application database. Verified on
 PostgreSQL 16 — every row of the table below was executed, not assumed.
 
+On Neon, create the two roles in SQL rather than in the console before running
+these; a console-created role arrives with privileges these grants cannot take
+away, and cannot be repaired afterwards. See below.
+
 ```sql
 GRANT USAGE ON SCHEMA public TO tj_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tj_app;
@@ -232,10 +236,9 @@ What was verified, each as the role named:
 ### Neon: the grants alone are not enough
 
 **A role created through the Neon console is a member of `neon_superuser`**,
-and inherits read/write on everything through it. The grants above still apply
-exactly as written — the role simply has a second, wider source of privilege
-that overrides the intent. Console-created roles also carry `CREATEROLE` and
-`CREATEDB`, which survive revoking the membership.
+and through it inherits everything the schema owner can do. The grants above
+still apply exactly as written — the role simply has a second, wider source of
+privilege that overrides the intent.
 
 Confirmed on a real Neon branch, where the ingress role read every fill despite
 having **no direct privilege on `fill` at all**:
@@ -249,17 +252,57 @@ having **no direct privilege on `fill` at all**:
   tj_app       | DELETE, INSERT, SELECT, UPDATE
 ```
 
-So after creating the roles, as the owner:
+**A console-created role cannot be narrowed from SQL.** The owner holds no
+admin option on it, so every statement that would restrict it is refused.
+Reproduced on PostgreSQL 16 against a fixture with Neon's membership shape —
+all five, not just the first:
+
+| Run as `neondb_owner` | Result |
+|---|---|
+| `REVOKE neon_superuser FROM tj_app` | `permission denied to revoke role "neon_superuser"` |
+| `ALTER ROLE tj_app NOCREATEROLE NOCREATEDB` | `permission denied to alter role` |
+| `ALTER ROLE tj_app NOINHERIT` | `permission denied to alter role` |
+| `DROP ROLE tj_app` | `permission denied to drop role` |
+| `ALTER ROLE tj_app PASSWORD '...'` | `permission denied to alter role` |
+
+Run them in one transaction and only the first error is a privilege error; the
+rest report `current transaction is aborted`, which reads like a cascade from
+one fixable problem. They are five independent refusals. Use autocommit when
+probing what a role may do.
+
+`NOINHERIT` would not have been a fix in any case: membership still permits
+`SET ROLE neon_superuser`, so it stops accidents and not an attacker.
+
+### So create the roles in SQL, not in the console
+
+A role the owner creates is one the owner keeps the admin option on, and it
+gets no `neon_superuser` membership:
 
 ```sql
-REVOKE neon_superuser FROM tj_app;
-REVOKE neon_superuser FROM tj_ingress;
-ALTER ROLE tj_app NOCREATEROLE NOCREATEDB;
-ALTER ROLE tj_ingress NOCREATEROLE NOCREATEDB;
+CREATE ROLE tj_app     LOGIN PASSWORD '...' NOCREATEDB NOCREATEROLE;
+CREATE ROLE tj_ingress LOGIN PASSWORD '...' NOCREATEDB NOCREATEROLE;
 ```
 
-Creating the roles in SQL (`CREATE ROLE tj_app LOGIN PASSWORD '...'`) rather
-than in the console avoids the membership in the first place.
+Then apply the grants above. Neon does not store the password of a SQL-created
+role and cannot show it in the console, so keep it wherever the rest of the
+connection string lives.
+
+**If the roles already exist from the console**, delete them there — the
+control plane can, the owner cannot — but revoke their privileges first, or the
+delete fails with `role "tj_app" cannot be dropped because some objects depend
+on it`. The owner granted these, so the owner can take them back:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+  REVOKE ALL ON TABLES FROM tj_app;
+REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM tj_app, tj_ingress;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM tj_app, tj_ingress;
+REVOKE ALL ON SCHEMA public FROM tj_app, tj_ingress;
+```
+
+That list is what a `DROP ROLE` needs cleared; it was verified by dropping a
+role that the owner *could* drop, which failed on `privileges for schema
+public` until every line above had run.
 
 ### Then verify, rather than assume
 
@@ -267,11 +310,20 @@ Both directions, because a role that can do nothing looks the same as a role
 that is correctly restricted. Connected **as the ingress role**:
 
 ```sql
-SELECT count(*) FROM fill;             -- must fail: permission denied
+SELECT count(*) FROM fill;               -- must fail: permission denied
 SELECT count(*) FROM tradingview_alert;  -- must return a number
 ```
 
-And as the application role: `fill` readable, `CREATE TABLE` refused.
+And as the application role: `fill` readable, `CREATE TABLE` refused,
+`DROP TABLE fill` refused, and
+
+```sql
+SET ROLE neondb_owner;  -- must fail: permission denied to set role
+```
+
+That last line is the one that separates a boundary from a speed bump. A role
+that inherits nothing but may still `SET ROLE` into the owner is not
+restricted; it is one statement away from unrestricted.
 
 This check is the only thing that distinguishes a working split from a
 decorative one. It was written expecting to pass, and it failed on the first
