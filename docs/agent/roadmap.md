@@ -101,10 +101,19 @@ branches rather than a second platform.
    Applied and verified on the dev branch. On production the two halves are
    not deferrable on the same terms, and treating them as one is a mistake:
 
-   The **application** role can wait. The private API is localhost-only by hard
-   constraint and its `.env` sits on the same machine, so anyone who can reach
-   the API can already read the owner credential. That half starts defending
-   something when the API is hosted — Phase 4.
+   The **application** role is worth having on production on its own merits,
+   and is deferred here as sequencing rather than because it defends nothing.
+   It bounds what an application-level bug can do: an injection or a vulnerable
+   endpoint executes as whatever role the API connects with, and the difference
+   between that being the schema owner and a DML-only role is the difference
+   between `DROP TABLE` and a bad `SELECT`. None of that depends on where the
+   API runs.
+
+   Being localhost-only changes who can reach the API, not what a bug can do
+   once reached. Nor does reaching it hand anyone the credential: `/health`
+   drops the username, password and query string, and no route exposes
+   `DATABASE_URL` — reading it takes OS access to the host, which is a
+   different capability from talking to port 8080.
 
    The **ingress** role cannot, and `README.md` already requires it: port 8090
    is the only tunnelable port and is meant to be internet-facing, so an owner
