@@ -98,10 +98,30 @@ branches rather than a second platform.
    `fill` and `account` passed a role holding `SELECT` on `trade`, because
    `trade` was not one of the samples.
 
-   Applied and verified on the dev branch. Production deliberately still runs
-   as one role: the private API is localhost-only by hard constraint and its
-   `.env` sits on the same machine, so the split defends nothing there until
-   the API is hosted — which is Phase 4.
+   Applied and verified on the dev branch. On production the two halves are
+   not deferrable on the same terms, and treating them as one is a mistake:
+
+   The **application** role is worth having on production on its own merits,
+   and is deferred here as sequencing rather than because it defends nothing.
+   It bounds what an application-level bug can do: an injection or a vulnerable
+   endpoint executes as whatever role the API connects with, and the difference
+   between that being the schema owner and a DML-only role is the difference
+   between `DROP TABLE` and a bad `SELECT`. None of that depends on where the
+   API runs.
+
+   Being localhost-only changes who can reach the API, not what a bug can do
+   once reached. Nor does reaching it hand anyone the credential: `/health`
+   drops the username, password and query string, and no route exposes
+   `DATABASE_URL` — reading it takes OS access to the host, which is a
+   different capability from talking to port 8080.
+
+   The **ingress** role cannot, and `README.md` already requires it: port 8090
+   is the only tunnelable port and is meant to be internet-facing, so an owner
+   credential there is exposed whatever the private API does. The condition is
+   not "once the API is hosted" but *before `TRADINGVIEW_DATABASE_URL` on
+   production would otherwise hold the owner credential*. It is absent there
+   only because the ingress is not pointed at production; pointing it there
+   means running `setup_roles.py` against that branch first.
 
 5. **Branch-per-PR** for migration testing: create a Neon branch from
    production schema, run `alembic upgrade head` against it, tear it down.
