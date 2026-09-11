@@ -191,3 +191,14 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_parity
         run: pytest tests/test_postgres_migration_paths.py -q
+
+      # Roles are a server feature with no SQLite equivalent, so the only place
+      # setup_roles.py can be proven is here: it creates real roles and then
+      # connects as each one to check what it is actually refused. Uses
+      # throwaway role names -- roles are cluster-wide, and a test that created
+      # tj_app would collide with a real one on a developer's machine.
+      - name: Database role tests
+        working-directory: backend
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_parity
+        run: pytest tests/test_setup_roles.py -q

@@ -195,6 +195,38 @@ left in the environment would silently migrate somewhere else;
 `seed_dev_data.py` and the test helpers set both deliberately, and a test
 covers it.
 
+### Doing it
+
+```bash
+cd backend
+python scripts/setup_roles.py --confirm-host <host>            # create and verify
+python scripts/setup_roles.py --confirm-host <host> --verify   # re-check later
+python scripts/setup_roles.py --confirm-host <host> --release  # free console roles
+```
+
+`--confirm-host` must equal the host inside the owner URL. Neon branch names
+are random words and a dev branch is indistinguishable from production at a
+glance, so the target is named rather than inferred — the same reason
+`resync-all` refuses a hosted database it was not asked for by name.
+
+The script creates the roles, applies the grants below, and then checks them
+two ways. It asks the server, through `has_table_privilege`, what each role can
+do to **every** table in `public` — which accounts for privilege reached
+through role membership, the case that made the first Neon setup decorative.
+Then it connects as each role and tries what it must not be allowed to do,
+which a catalog query cannot prove. Neither alone is the check: a sampled probe
+list passed a role holding `SELECT` on `trade` because `trade` was not one of
+the samples. Passwords are generated,
+printed once, and not stored; Neon cannot show a SQL-created role's password
+either, so a copy kept anywhere else would go stale.
+
+`--verify` is the one to re-run — after switching branches, editing `.env`, or
+anything that moves which database is in play. It probes whatever `.env` and
+`.env.tradingview` currently point at.
+
+The rest of this section is what the script does and why, for when it has to be
+done by hand or the result needs explaining.
+
 ### Grants
 
 Run as the owner, connected to the application database. Verified on

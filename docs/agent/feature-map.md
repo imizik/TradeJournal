@@ -53,6 +53,9 @@ Paths are relative to `backend/`.
 - `find_phantoms.py` — duplicate cumulative partial-fill investigation
 - `rebuild_trades.py`, `backfill_greeks.py`, `inspect_enrichment.py`
 - `migrate_sqlite_to_postgres.py` — SQLite → Neon copy
+- `check_database.py` — read-only preflight: which database, schema ready?
+- `setup_roles.py` — create the app and ingress roles, then prove they are
+  limited by connecting as each one (`environments.md`)
 
 `backend/compare_fills*.py` are ad hoc scratch scripts, not stable app code.
 
