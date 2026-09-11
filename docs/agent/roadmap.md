@@ -76,10 +76,32 @@ branches rather than a second platform.
    removing one of those guards was verified to fail the test. Still an
    ephemeral container, still no secret.
 
-4. **Separate database roles.** Everything connects as one role, which owns the
-   schema and can drop it. Unblocked now that the app does not issue DDL. The
-   split `architecture.md` describes: a migration/schema owner, a private API
-   role, a worker role, and the restricted TradingView ingress role.
+4. ~~**Separate database roles.**~~ Done, as three roles rather than four: a
+   migration owner, an application role that cannot issue DDL, and the
+   TradingView ingress restricted to `tradingview_alert`. Background workers
+   share the application role — a fourth is real configuration complexity
+   against no threat the app role does not already cover, and earns its place
+   when a worker needs privileges the API should not have.
+
+   `alembic` uses `MIGRATION_DATABASE_URL` when set and `DATABASE_URL`
+   otherwise, so a single-role setup is untouched.
+   `backend/scripts/setup_roles.py` creates the roles and then proves they are
+   limited two ways: `has_table_privilege` across every table in `public`,
+   which accounts for privilege reached through role membership, and
+   connection probes that try what each role must be refused.
+
+   Both checks were necessary, and each caught what the other missed. On the
+   first real Neon branch every grant was correct and the ingress still read
+   all 4,326 fills — through `neon_superuser`, which a console-created role
+   belongs to and which the owner cannot revoke; such a role can only be
+   deleted and recreated in SQL (`environments.md`). And a probe list naming
+   `fill` and `account` passed a role holding `SELECT` on `trade`, because
+   `trade` was not one of the samples.
+
+   Applied and verified on the dev branch. Production deliberately still runs
+   as one role: the private API is localhost-only by hard constraint and its
+   `.env` sits on the same machine, so the split defends nothing there until
+   the API is hosted — which is Phase 4.
 
 5. **Branch-per-PR** for migration testing: create a Neon branch from
    production schema, run `alembic upgrade head` against it, tear it down.
