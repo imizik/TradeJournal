@@ -38,6 +38,33 @@ class SchemaNotCurrent(RuntimeError):
     """The database is not at the migration head; the message says what to run."""
 
 
+def migration_database_url() -> str:
+    """
+    The URL migrations run against.
+
+    With separate database roles the application connects as a role that cannot
+    create or drop anything, so DATABASE_URL is deliberately not usable for
+    migrations. MIGRATION_DATABASE_URL names the schema owner instead.
+
+    Unset, this falls back to DATABASE_URL, which is the single-role setup and
+    stays the default -- nothing changes for anyone who has not split roles.
+
+    Anything that migrates a *specific* database out of process must set this
+    as well as DATABASE_URL, or a MIGRATION_DATABASE_URL left in the
+    environment silently redirects the migration somewhere else.
+    """
+    import os as _os
+
+    from app.environment import load_env_files, resolve_database_url
+
+    # Before reading, not after. The documented configuration puts both URLs in
+    # backend/.env, and reading os.environ first sees an empty
+    # MIGRATION_DATABASE_URL, falls through, and returns the application role --
+    # so `alembic upgrade` connects as the role that cannot create anything.
+    load_env_files()
+    return _os.environ.get("MIGRATION_DATABASE_URL", "").strip() or resolve_database_url()
+
+
 def alembic_heads() -> list[str]:
     """Every head revision. Raises if the migration scripts cannot be read."""
     from alembic.config import Config

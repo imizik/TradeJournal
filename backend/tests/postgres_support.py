@@ -108,14 +108,17 @@ def run_alembic(*args: str, url: str) -> subprocess.CompletedProcess:
     """
     Alembic against a chosen database, out of process.
 
-    alembic/env.py reads the URL through `from app.database import
-    DATABASE_URL`, which binds at import time -- in-process, it would target
-    whichever database that module already resolved rather than this one.
+    Out of process because alembic/env.py resolves the URL at import time --
+    in-process it would target whichever database was already resolved.
+
+    Both variables are set: env.py prefers MIGRATION_DATABASE_URL (the schema
+    owner, once roles are split), so leaving it inherited from the environment
+    would silently migrate a different database than the one named here.
     """
     return subprocess.run(
         [sys.executable, "-m", "alembic", "-c", "alembic.ini", *args],
         cwd=BACKEND_DIR,
-        env={**os.environ, "DATABASE_URL": url},
+        env={**os.environ, "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url},
         capture_output=True,
         text=True,
         check=False,

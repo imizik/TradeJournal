@@ -159,15 +159,216 @@ Refresh the branch from production by deleting and re-creating it in the
 console; nothing in this repository depends on a dev branch's identity being
 stable.
 
+## Database roles
+
+The application no longer issues DDL — Alembic owns the schema — so it can run
+as a role that cannot create or drop anything. Three roles:
+
+| Role | Used by | Can |
+|---|---|---|
+| **owner** (`neondb_owner` on Neon) | `alembic` | everything; owns the schema |
+| **app** | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
+| **ingress** | the TradingView ingress (port 8090) | `tradingview_alert` only |
+
+The ingress is the one that matters. Port 8090 is the only tunnelable port and
+is meant to be internet-facing; 8080 is localhost-only by hard constraint. The
+launchers already refuse to start when `DATABASE_URL` is set and
+`TRADINGVIEW_DATABASE_URL` is blank, so the ingress must be pointed somewhere
+explicitly — but until these roles exist, the only thing to point it at is the
+schema owner. The remaining two are hygiene.
+
+### Configuration
+
+```
+DATABASE_URL=postgresql+psycopg://tj_app:...@host/db?sslmode=require
+MIGRATION_DATABASE_URL=postgresql+psycopg://neondb_owner:...@host/db?sslmode=require
+```
+
+`alembic` uses `MIGRATION_DATABASE_URL` when set and `DATABASE_URL` otherwise,
+so a single-role setup keeps working untouched. `backend/.env.tradingview` gets
+`TRADINGVIEW_DATABASE_URL` with the ingress role, and nothing else — no keys,
+no owner credentials (`architecture.md`).
+
+Anything that migrates a *named* database out of process must set both
+variables. `MIGRATION_DATABASE_URL` takes precedence inside Alembic, so one
+left in the environment would silently migrate somewhere else;
+`seed_dev_data.py` and the test helpers set both deliberately, and a test
+covers it.
+
+### Grants
+
+Run as the owner, connected to the application database. Verified on
+PostgreSQL 16 — every row of the table below was executed, not assumed.
+
+On Neon, create the two roles in SQL rather than in the console before running
+these; a console-created role arrives with privileges these grants cannot take
+away, and cannot be repaired afterwards. See below.
+
+```sql
+GRANT USAGE ON SCHEMA public TO tj_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tj_app;
+-- Without this, the next migration creates a table the app cannot read.
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tj_app;
+
+GRANT USAGE ON SCHEMA public TO tj_ingress;
+GRANT SELECT, INSERT, UPDATE ON tradingview_alert TO tj_ingress;
+```
+
+Those four verbs are the whole of what the application issues. It runs no
+`TRUNCATE` (which `DELETE` would not cover anyway), no DDL, and needs no
+sequence grant — every key is a UUID and the schema has no sequences.
+`resync-all` deletes through the ORM, so it needs nothing beyond `DELETE`.
+
+`ALTER DEFAULT PRIVILEGES` is the line that is easy to omit and expensive to
+omit: without it every future migration produces a table the application
+cannot read, and the failure appears long after the migration ran.
+
+What was verified, each as the role named:
+
+| Attempt | Result |
+|---|---|
+| app writes any table | allowed |
+| app `CREATE TABLE` | `permission denied for schema public` |
+| app `DROP TABLE fill` | `must be owner of table fill` |
+| app runs `alembic upgrade` | `InsufficientPrivilege` |
+| owner runs `alembic upgrade` | applies |
+| app reads `alembic_version` | allowed — startup's check needs it |
+| ingress writes an alert through its own engine | allowed |
+| ingress reads `fill` / `account` | `permission denied` |
+| a table created *after* the grants | app can read and write it; ingress cannot |
+
+### Neon: the grants alone are not enough
+
+**A role created through the Neon console is a member of `neon_superuser`**,
+and through it inherits everything the schema owner can do. The grants above
+still apply exactly as written — the role simply has a second, wider source of
+privilege that overrides the intent.
+
+Confirmed on a real Neon branch, where the ingress role read every fill despite
+having **no direct privilege on `fill` at all**:
+
+```
+=== roles tj_ingress belongs to ===
+  neon_superuser
+
+=== who has privileges on fill ===
+  neondb_owner | DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE
+  tj_app       | DELETE, INSERT, SELECT, UPDATE
+```
+
+**A console-created role cannot be narrowed from SQL.** The owner holds no
+admin option on it, so every statement that would restrict it is refused.
+Reproduced on PostgreSQL 16 against a fixture with Neon's membership shape —
+all five, not just the first:
+
+| Run as `neondb_owner` | Result |
+|---|---|
+| `REVOKE neon_superuser FROM tj_app` | `permission denied to revoke role "neon_superuser"` |
+| `ALTER ROLE tj_app NOCREATEROLE NOCREATEDB` | `permission denied to alter role` |
+| `ALTER ROLE tj_app NOINHERIT` | `permission denied to alter role` |
+| `DROP ROLE tj_app` | `permission denied to drop role` |
+| `ALTER ROLE tj_app PASSWORD '...'` | `permission denied to alter role` |
+
+Run them in one transaction and only the first error is a privilege error; the
+rest report `current transaction is aborted`, which reads like a cascade from
+one fixable problem. They are five independent refusals. Use autocommit when
+probing what a role may do.
+
+`NOINHERIT` would not have been a fix in any case: membership still permits
+`SET ROLE neon_superuser`, so it stops accidents and not an attacker.
+
+### So create the roles in SQL, not in the console
+
+A role the owner creates is one the owner keeps the admin option on, and it
+gets no `neon_superuser` membership:
+
+```sql
+CREATE ROLE tj_app     LOGIN PASSWORD '...' NOCREATEDB NOCREATEROLE;
+CREATE ROLE tj_ingress LOGIN PASSWORD '...' NOCREATEDB NOCREATEROLE;
+```
+
+Then apply the grants above. Neon does not store the password of a SQL-created
+role and cannot show it in the console, so keep it wherever the rest of the
+connection string lives.
+
+**If the roles already exist from the console**, delete them there — the
+control plane can, the owner cannot — but revoke their privileges first, or the
+delete fails with `role "tj_app" cannot be dropped because some objects depend
+on it`. The owner granted these, so the owner can take them back:
+
+```sql
+ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
+  REVOKE ALL ON TABLES FROM tj_app;
+REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM tj_app, tj_ingress;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM tj_app, tj_ingress;
+REVOKE ALL ON SCHEMA public FROM tj_app, tj_ingress;
+```
+
+That list is what a `DROP ROLE` needs cleared; it was verified by dropping a
+role that the owner *could* drop, which failed on `privileges for schema
+public` until every line above had run.
+
+### Then verify, rather than assume
+
+Both directions, because a role that can do nothing looks the same as a role
+that is correctly restricted. Connected **as the ingress role**:
+
+```sql
+SELECT count(*) FROM fill;               -- must fail: permission denied
+SELECT count(*) FROM tradingview_alert;  -- must return a number
+```
+
+And as the application role: `fill` readable, `CREATE TABLE` refused,
+`DROP TABLE fill` refused, and
+
+```sql
+SET ROLE neondb_owner;  -- must fail: permission denied to set role
+```
+
+That last line is the one that separates a boundary from a speed bump. A role
+that inherits nothing but may still `SET ROLE` into the owner is not
+restricted; it is one statement away from unrestricted.
+
+If the check is scripted, classify the failure rather than catching every
+exception: `INSERT` into a table with eighteen `NOT NULL` columns raises a
+constraint violation, and a probe that treats any error as "denied" reports
+that as a working restriction. Only SQLSTATE `42501` is a privilege refusal.
+Run each probe inside a transaction and roll it back, so a probe that is
+wrongly *allowed* — `DROP TABLE fill` — still changes nothing.
+
+This check is the only thing that distinguishes a working split from a
+decorative one. It was written expecting to pass, and it failed on the first
+real Neon branch it ran against — every grant correct, every privilege
+inherited around them.
+
+### Diagnosing it
+
+Read-only, as the owner:
+
+```sql
+SELECT r.rolname FROM pg_auth_members m
+  JOIN pg_roles r ON r.oid = m.roleid
+  JOIN pg_roles u ON u.oid = m.member
+ WHERE u.rolname = 'tj_ingress';
+
+SELECT grantee, string_agg(privilege_type, ', ' ORDER BY privilege_type)
+  FROM information_schema.table_privileges
+ WHERE table_name = 'fill' GROUP BY grantee;
+```
+
+A role appearing in the first result with nothing in the second is inheriting
+its access, not being granted it.
+
 ### What still does not exist
 
 - **Staging.** Deferred with deployment (`roadmap.md` Phase 4). Staging and
   production must not share a database, credentials, webhook tokens, Gmail
   state or external-integration identity.
-- **Separate database roles.** Everything currently connects as one role. The
-  eventual split is a migration/schema owner, a private API role, a worker
-  role, and the restricted TradingView ingress role that
-  `architecture.md` already describes.
+- **A separate worker role.** Background workers share the application role.
+  A fourth role is real configuration complexity, and there is no threat it
+  addresses that the app role does not — worth splitting when a worker needs
+  privileges the API should not have, not before.
 - **Per-PR Neon branches.** CI uses an ephemeral `postgres:16` container
   instead, which catches dialect problems without needing a secret. Per-PR
   branches earn their place when a PR needs a deploy preview or

@@ -68,6 +68,9 @@ def _alembic(
     # Exported values win over backend/.env, keeping tests off the configured
     # developer/hosted database.
     env["DATABASE_URL"] = _database_url(database_path)
+    # alembic prefers MIGRATION_DATABASE_URL; without this, an exported one
+    # would redirect these upgrade/downgrade commands to another database.
+    env["MIGRATION_DATABASE_URL"] = _database_url(database_path)
     result = subprocess.run(
         [
             sys.executable,
