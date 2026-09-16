@@ -1,7 +1,7 @@
 import threading
 import time
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,6 +23,7 @@ from app.engine.jobs import (
     run_job,
     running_job,
 )
+from app.engine.enricher import polygon_calls_per_minute
 from app.models import Fill, JobRun, Trade
 from app.environment import require_destructive_confirmation
 from app.routers.fills import (
@@ -44,21 +45,48 @@ JOB_GMAIL_PUSH = "gmail_push"
 JOB_RESYNC_ALL = "resync_all"
 
 JOB_CONFIG: list[dict[str, Any]] = [
-    {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False},
-    {"job_type": JOB_FILL_CHECK, "label": "Import/manual fills check", "description": "Verify imported and manual fills are present before rebuilding.", "advanced": False},
-    {"job_type": JOB_TRADE_REBUILD, "label": "Rebuild trades / FIFO matching", "description": "Recreate derived trades and trade-fill links from fill rows.", "advanced": False},
-    {"job_type": JOB_POLYGON_ENRICH, "label": "Enrich missing market data", "description": "Fill missing Polygon-derived prices, IV, Greeks, and indicators.", "advanced": False},
-    {"job_type": JOB_ALPACA_ENRICH, "label": "Alpaca context enrichment", "description": "Fetch fill-level market context and cached bars.", "advanced": False},
-    {"job_type": JOB_TRADE_PATH, "label": "Path metrics calculation", "description": "Compute closed-trade MFE, MAE, and exit efficiency.", "advanced": False},
-    {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False},
-    {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False},
+    {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False, "progress_unit": "step"},
+    {"job_type": JOB_FILL_CHECK, "label": "Import/manual fills check", "description": "Verify imported and manual fills are present before rebuilding.", "advanced": False, "progress_unit": "step"},
+    {"job_type": JOB_TRADE_REBUILD, "label": "Rebuild trades / FIFO matching", "description": "Recreate derived trades and trade-fill links from fill rows.", "advanced": False, "progress_unit": "step"},
+    {"job_type": JOB_POLYGON_ENRICH, "label": "Enrich missing market data", "description": "Fill missing Polygon-derived prices, IV, Greeks, and indicators.", "advanced": False, "progress_unit": "fill", "api_provider": "Polygon", "rate_limit_per_minute": polygon_calls_per_minute()},
+    {"job_type": JOB_ALPACA_ENRICH, "label": "Alpaca context enrichment", "description": "Fetch fill-level market context and cached bars.", "advanced": False, "progress_unit": "fill", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
+    {"job_type": JOB_TRADE_PATH, "label": "Path metrics calculation", "description": "Compute closed-trade MFE, MAE, and exit efficiency.", "advanced": False, "progress_unit": "trade", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
+    {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False, "progress_unit": "step"},
+    {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False, "progress_unit": "step"},
 ]
+
+_EXTRA_JOB_CONFIG: dict[str, dict[str, Any]] = {
+    JOB_FULL_PIPELINE: {
+        "job_type": JOB_FULL_PIPELINE,
+        "label": "Full sync pipeline",
+        "description": "Import, rebuild, enrich, and calculate path metrics.",
+        "advanced": False,
+        "progress_unit": "step",
+    },
+    JOB_RESYNC_ALL: {
+        "job_type": JOB_RESYNC_ALL,
+        "label": "Resync all",
+        "description": "Re-import fills and rebuild derived trades.",
+        "advanced": True,
+        "progress_unit": "step",
+    },
+}
+
+_JOB_CONFIG_BY_TYPE = {config["job_type"]: config for config in JOB_CONFIG}
+_JOB_CONFIG_BY_TYPE.update(_EXTRA_JOB_CONFIG)
 
 _sync_lock = threading.Lock()
 
 
 def _now() -> datetime:
     return datetime.utcnow()
+
+
+def _utc_iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    aware = value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+    return aware.isoformat().replace("+00:00", "Z")
 
 
 def _set_job(job_id: uuid.UUID, **values: Any) -> None:
@@ -96,7 +124,7 @@ def _active_job(session: Session) -> JobRun | None:
 
 
 def _run_simple_job(job_id: uuid.UUID, fn: Callable[[Session, uuid.UUID], tuple[int, str]]) -> None:
-    _set_job(job_id, status="running", started_at=_now(), error=None)
+    _set_job(job_id, status="running", phase="processing", started_at=_now(), error=None)
     try:
         with Session(engine) as session:
             processed, message = fn(session, job_id)
@@ -107,10 +135,11 @@ def _run_simple_job(job_id: uuid.UUID, fn: Callable[[Session, uuid.UUID], tuple[
             total=1,
             enriched=processed,
             current=message,
+            phase="complete",
             finished_at=_now(),
         )
     except Exception as exc:
-        _set_job(job_id, status="failed", error=str(exc), current=str(exc), finished_at=_now())
+        _set_job(job_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
 
 
 def _job_to_row(session: Session, config: dict[str, Any]) -> dict[str, Any]:
@@ -126,17 +155,23 @@ def _job_to_row(session: Session, config: dict[str, Any]) -> dict[str, Any]:
         "errors_count": 1 if status["error"] else 0,
         "message": status["current"] or status["error"] or None,
         "error_summary": status["error"],
+        "phase": status.get("phase"),
+        "wait_provider": status.get("wait_provider"),
+        "wait_reason": status.get("wait_reason"),
+        "wait_until": _utc_iso(status.get("wait_until")),
         "job_id": status["job_id"],
-        "created_at": job.created_at if job else None,
-        "started_at": status.get("started_at"),
-        "finished_at": status.get("finished_at"),
-        "last_run_at": status.get("finished_at") or status.get("started_at") or (job.created_at if job else None),
+        "created_at": _utc_iso(job.created_at) if job else None,
+        "started_at": _utc_iso(status.get("started_at")),
+        "finished_at": _utc_iso(status.get("finished_at")),
+        "updated_at": _utc_iso(status.get("updated_at")),
+        "last_run_at": _utc_iso(status.get("finished_at") or status.get("started_at") or (job.created_at if job else None)),
     }
 
 
 def _create_run(session: Session, job_type: str, message: str) -> JobRun:
     job = create_job(session, job_type, {"source": "sync_center", "message": message}, total=1)
     job.current = message
+    job.phase = "queued"
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -228,7 +263,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         _set_job(pipeline_id, status="failed", error="Another sync pipeline is already running", finished_at=_now())
         return
     try:
-        _set_job(pipeline_id, status="running", started_at=_now(), current="Starting full sync pipeline")
+        _set_job(pipeline_id, status="running", phase="starting", started_at=_now(), current="Starting full sync pipeline")
 
         import_result: dict[str, int] = {}
 
@@ -243,7 +278,14 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
 
         def _run_step(index: int, job_type: str, fn: Callable[[Session, uuid.UUID], tuple[int, str]]) -> None:
             nonlocal processed
-            _set_job(pipeline_id, done=index - 1, total=6, current=f"Running {job_type}")
+            step_config = _JOB_CONFIG_BY_TYPE.get(job_type, {})
+            _set_job(
+                pipeline_id,
+                done=index - 1,
+                total=6,
+                phase="pipeline_step",
+                current=f"Running {step_config.get('label', job_type)}",
+            )
             with Session(engine) as session:
                 child = _create_run(session, job_type, f"Pipeline step {index}")
             _run_simple_job(child.id, fn)
@@ -264,7 +306,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         # (e.g. yesterday's fills whose bars only became available today) and
         # no-op instantly when there is nothing to do.
 
-        _set_job(pipeline_id, done=3, total=6, current="Running market enrichment")
+        _set_job(pipeline_id, done=3, total=6, phase="pipeline_step", current="Running market enrichment")
         # Polygon's free tier is rate-limited to ~5 req/min, so a full enrich can
         # take many minutes. Launch it but do NOT block the pipeline on it — it
         # runs in its own thread and the UI polls /fills/enrich/status. Path
@@ -275,7 +317,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         if alpaca.total:
             _wait_for_job(alpaca.id)
 
-        _set_job(pipeline_id, done=5, total=6, current="Calculating path metrics")
+        _set_job(pipeline_id, done=5, total=6, phase="pipeline_step", current="Calculating path metrics")
         path = _run_existing_enrichment(JOB_TRADE_PATH, "all", False)
         if path.total:
             _wait_for_job(path.id)
@@ -289,11 +331,12 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
             done=6,
             total=6,
             enriched=processed,
+            phase="complete",
             current="Full sync pipeline completed",
             finished_at=_now(),
         )
     except Exception as exc:
-        _set_job(pipeline_id, status="failed", error=str(exc), current=str(exc), finished_at=_now())
+        _set_job(pipeline_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
     finally:
         _sync_lock.release()
 
@@ -303,7 +346,7 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
         _set_job(job_id, status="failed", error="Another sync pipeline is already running", finished_at=_now())
         return
     try:
-        _set_job(job_id, status="running", started_at=_now(), done=0, total=5, current="Importing Gmail fills")
+        _set_job(job_id, status="running", phase="pipeline_step", started_at=_now(), done=0, total=5, current="Importing Gmail fills")
         with Session(engine) as session:
             import_result = _import_fills_from_gmail(session, start_enrichment=False)
 
@@ -317,18 +360,19 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
                 done=5,
                 total=5,
                 enriched=processed,
+                phase="complete",
                 current=f"Gmail push processed; no new fills saved ({skipped} skipped).",
                 finished_at=_now(),
             )
             return
 
-        _set_job(job_id, done=1, current=f"Rebuilding trades after {saved} new fill(s)")
+        _set_job(job_id, done=1, phase="pipeline_step", current=f"Rebuilding trades after {saved} new fill(s)")
         with Session(engine) as session:
             rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/gmail-push")
             session.commit()
         processed += rebuilt
 
-        _set_job(job_id, done=2, current="Running market enrichment")
+        _set_job(job_id, done=2, phase="pipeline_step", current="Running market enrichment")
         # Polygon runs in the background (rate-limited, slow); don't block the
         # push pipeline on it. Its progress is visible via /fills/enrich/status.
         _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
@@ -336,7 +380,7 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
         if alpaca.total:
             processed += _wait_for_job(alpaca.id).enriched
 
-        _set_job(job_id, done=4, current="Calculating trade path metrics")
+        _set_job(job_id, done=4, phase="pipeline_step", current="Calculating trade path metrics")
         path = _run_existing_enrichment(JOB_TRADE_PATH, "all", False)
         if path.total:
             processed += _wait_for_job(path.id).enriched
@@ -350,11 +394,12 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
             done=5,
             total=5,
             enriched=processed,
+            phase="complete",
             current=message,
             finished_at=_now(),
         )
     except Exception as exc:
-        _set_job(job_id, status="failed", error=str(exc), current=str(exc), finished_at=_now())
+        _set_job(job_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
     finally:
         _sync_lock.release()
 
@@ -386,6 +431,7 @@ def queue_gmail_push_pipeline(
         total=5,
     )
     job.current = "Queued from Gmail Pub/Sub push"
+    job.phase = "queued"
     session.add(job)
     session.commit()
     session.refresh(job)
@@ -408,8 +454,14 @@ async def sync_summary(session: Session = Depends(get_session)):
     ).first()
     return {
         "running": active is not None,
-        "active_job": _job_to_row(session, {"job_type": active.job_type, "label": active.job_type, "description": "", "advanced": False}) if active else None,
-        "last_success_at": latest_success.finished_at if latest_success else None,
+        "active_job": _job_to_row(
+            session,
+            _JOB_CONFIG_BY_TYPE.get(
+                active.job_type,
+                {"job_type": active.job_type, "label": active.job_type, "description": "", "advanced": False, "progress_unit": "item"},
+            ),
+        ) if active else None,
+        "last_success_at": _utc_iso(latest_success.finished_at) if latest_success else None,
         "errors_count": len(latest_failures),
     }
 
@@ -432,9 +484,9 @@ async def list_sync_runs(limit: int = 50, session: Session = Depends(get_session
             "job_type": run.job_type,
             "label": labels.get(run.job_type, run.job_type),
             "status": run.status,
-            "created_at": run.created_at,
-            "started_at": run.started_at,
-            "finished_at": run.finished_at,
+            "created_at": _utc_iso(run.created_at),
+            "started_at": _utc_iso(run.started_at),
+            "finished_at": _utc_iso(run.finished_at),
             "duration_seconds": (
                 (run.finished_at - run.started_at).total_seconds()
                 if run.started_at and run.finished_at
@@ -513,7 +565,7 @@ async def advanced_resync_all(
     )
 
     def runner() -> None:
-        _set_job(job.id, status="running", started_at=_now(), error=None)
+        _set_job(job.id, status="running", phase="processing", started_at=_now(), error=None)
         try:
             with Session(engine) as run_session:
                 _clear_derived_trade_data(run_session)
@@ -525,9 +577,9 @@ async def advanced_resync_all(
             message = f"Resynced {result['saved']} fill(s), rebuilt {rebuilt} trade(s)."
             if anomalies:
                 message += f" {len(anomalies)} anomaly/anomalies logged."
-            _set_job(job.id, status="succeeded", done=1, total=1, enriched=result["saved"], current=message, finished_at=_now())
+            _set_job(job.id, status="succeeded", phase="complete", done=1, total=1, enriched=result["saved"], current=message, finished_at=_now())
         except Exception as exc:
-            _set_job(job.id, status="failed", error=str(exc), current=str(exc), finished_at=_now())
+            _set_job(job.id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
 
     _run_thread(runner)
     return {"run_id": str(job.id)}

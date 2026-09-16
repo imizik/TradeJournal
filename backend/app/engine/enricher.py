@@ -39,6 +39,7 @@ from scipy.optimize import brentq
 from scipy.stats import norm
 from sqlmodel import Session
 
+from app.engine.api_wait import observed_sleep
 from app.engine.indicators import polygon_bar_et_date, polygon_daily_indicators, polygon_hourly_ema
 from app.models import Fill
 
@@ -96,17 +97,23 @@ def _configured_calls_per_minute(raw: str | None = None) -> float:
 
 class _RateLimiter:
     def __init__(self, calls_per_minute: float = DEFAULT_CALLS_PER_MINUTE):
+        self.calls_per_minute = calls_per_minute
         self._interval = 60.0 / calls_per_minute
         self._last = 0.0
 
     def wait(self):
         elapsed = time.monotonic() - self._last
         if elapsed < self._interval:
-            time.sleep(self._interval - elapsed)
+            observed_sleep("Polygon", "rate_limit", self._interval - elapsed)
         self._last = time.monotonic()
 
 
 _limiter = _RateLimiter(calls_per_minute=_configured_calls_per_minute())
+
+
+def polygon_calls_per_minute() -> float:
+    """Configured request budget, safe to expose in status responses."""
+    return _limiter.calls_per_minute
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +153,7 @@ def _polygon_request(url: str, params: dict | None = None) -> dict:
             # Connection reset (e.g. after computer sleep) — retry with backoff
             wait = 20 * (attempt + 1)
             log.warning("Network error, waiting %ds (attempt %d/5): %s", wait, attempt + 1, e)
-            time.sleep(wait)
+            observed_sleep("Polygon", "network_retry", wait)
             continue
         if resp.status_code == 403:
             log.warning("403 from Polygon for %s - API key is not entitled to this endpoint/data window, skipping", url)
@@ -154,7 +161,7 @@ def _polygon_request(url: str, params: dict | None = None) -> dict:
         if resp.status_code == 429:
             wait = 30 * (attempt + 1)
             log.warning("429 from Polygon — waiting %ds (attempt %d/5)", wait, attempt + 1)
-            time.sleep(wait)
+            observed_sleep("Polygon", "provider_429", wait)
             continue
         resp.raise_for_status()
         return resp.json()

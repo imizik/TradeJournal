@@ -503,6 +503,10 @@ class JobRun(SQLModel, table=True):
     done: int = 0
     current: Optional[str] = None
     enriched: int = 0
+    phase: Optional[str] = None
+    wait_provider: Optional[str] = None
+    wait_reason: Optional[str] = None
+    wait_until: Optional[datetime] = None
     error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     created_at: datetime = Field(default_factory=datetime.utcnow)
     started_at: Optional[datetime] = None

@@ -8,6 +8,7 @@ import {
   Clock3,
   Database,
   History,
+  Hourglass,
   Loader2,
   Play,
   RefreshCw,
@@ -47,8 +48,41 @@ function fmtDuration(seconds: number | null) {
   return `${Math.round(seconds / 60)}m`;
 }
 
+function fmtRemaining(seconds: number) {
+  if (seconds < 60) return `~${Math.max(1, Math.round(seconds))}s left`;
+  if (seconds < 3600) return `~${Math.max(1, Math.round(seconds / 60))}m left`;
+  return `~${(seconds / 3600).toFixed(seconds < 7200 ? 1 : 0)}h left`;
+}
+
+function unitLabel(unit: string, count: number) {
+  const normalized = unit || "item";
+  return count === 1 ? normalized : `${normalized}s`;
+}
+
+function activeWaitSeconds(job: SyncJob, now = Date.now()) {
+  if (job.phase !== "waiting_api" || !job.wait_until) return null;
+  const remaining = Math.ceil((new Date(job.wait_until).getTime() - now) / 1000);
+  return remaining > 0 ? remaining : null;
+}
+
+function estimatedSecondsLeft(job: SyncJob, now = Date.now()) {
+  if (!job.running || !job.started_at || job.done <= 0 || job.done >= job.total) return null;
+  const elapsed = (now - new Date(job.started_at).getTime()) / 1000;
+  if (!Number.isFinite(elapsed) || elapsed < 8) return null;
+  const seconds = (job.total - job.done) / (job.done / elapsed);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null;
+}
+
+function waitDescription(job: SyncJob) {
+  const provider = job.wait_provider ?? job.api_provider ?? "Data provider";
+  if (job.wait_reason === "provider_429") return `${provider} asked us to slow down (HTTP 429).`;
+  if (job.wait_reason === "network_retry") return `${provider} request failed; waiting before a safe retry.`;
+  return `Pacing requests to stay inside the ${provider} API limit.`;
+}
+
 function statusClass(status: string) {
   if (status === "running" || status === "queued") return "border-sky-500/30 bg-sky-500/10 text-sky-300";
+  if (status === "waiting_api") return "border-amber-500/30 bg-amber-500/10 text-amber-200";
   if (status === "succeeded") return "border-emerald-500/30 bg-emerald-500/10 text-emerald-300";
   if (status === "failed") return "border-red-500/30 bg-red-500/10 text-red-300";
   return "border-border bg-secondary text-muted-foreground";
@@ -57,7 +91,7 @@ function statusClass(status: string) {
 function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize ${statusClass(status)}`}>
-      {status === "succeeded" ? "success" : status}
+      {status === "succeeded" ? "success" : status === "waiting_api" ? "API wait" : status}
     </span>
   );
 }
@@ -83,11 +117,20 @@ function SyncStatusIndicator({ summary }: { summary: SyncSummary | null }) {
 
   if (summary.running && summary.active_job) {
     const job = summary.active_job;
-    const progress = job.total > 0 ? ` ${job.done}/${job.total}` : "";
+    const waitSeconds = activeWaitSeconds(job);
+    const pct = job.total > 0 ? Math.min(100, Math.round((job.done / job.total) * 100)) : null;
+    if (waitSeconds != null) {
+      return (
+        <span className="hidden max-w-[360px] items-center gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-200 sm:inline-flex">
+          <Hourglass className="h-3.5 w-3.5" />
+          <span className="truncate">{job.wait_provider ?? "API"} pacing · next request in {waitSeconds}s</span>
+        </span>
+      );
+    }
     return (
       <span className="hidden max-w-[320px] items-center gap-1.5 rounded border border-sky-500/30 bg-sky-500/10 px-2.5 py-1.5 text-xs text-sky-300 sm:inline-flex">
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        <span className="truncate">Sync running: {job.label}{progress}</span>
+        <span className="truncate">{job.label}{pct == null ? "" : ` · ${pct}%`}</span>
       </span>
     );
   }
@@ -327,6 +370,22 @@ function SyncCenterDrawer({
               {message}
             </div>
           )}
+
+          {summary?.running && summary.active_job && (
+            <div className="mt-3 rounded-lg border border-sky-500/20 bg-sky-500/5 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-sky-300/80">Active now</p>
+                  <p className="mt-0.5 truncate text-sm font-medium text-foreground">{summary.active_job.label}</p>
+                  {summary.active_job.message && (
+                    <p className="mt-1 truncate text-xs text-muted-foreground">{summary.active_job.message}</p>
+                  )}
+                </div>
+                <StatusBadge status={activeWaitSeconds(summary.active_job) != null ? "waiting_api" : summary.active_job.status} />
+              </div>
+              <JobProgress job={summary.active_job} compact />
+            </div>
+          )}
         </header>
 
         <div className="flex border-b border-border px-5">
@@ -441,6 +500,82 @@ function TabButton({
   );
 }
 
+function JobProgress({ job, compact = false }: { job: SyncJob; compact?: boolean }) {
+  const total = Math.max(0, job.total);
+  const done = Math.min(Math.max(0, job.done), total || job.done);
+  const remaining = Math.max(0, total - done);
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const waitSeconds = activeWaitSeconds(job);
+  const eta = estimatedSecondsLeft(job);
+  const unit = job.progress_unit || "item";
+  const failed = job.status === "failed";
+  const complete = job.status === "succeeded";
+  const waiting = waitSeconds != null;
+  const barColor = failed ? "bg-red-500" : waiting ? "bg-amber-400" : complete ? "bg-emerald-500" : "bg-sky-500";
+
+  return (
+    <div className={compact ? "mt-2" : "mt-3"}>
+      {waiting && (
+        <div className="mb-2 flex items-start gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-2.5 py-2 text-amber-100">
+          <Hourglass className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <div className="min-w-0 text-[11px] leading-relaxed">
+            <p className="font-medium">{waitDescription(job)} Next request in {waitSeconds}s.</p>
+            {job.rate_limit_per_minute != null && (
+              <p className="text-amber-100/60">
+                Expected pacing at {job.rate_limit_per_minute.toLocaleString(undefined, { maximumFractionDigits: 1 })} requests/min; the job is healthy.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div
+        className="h-2 overflow-hidden rounded-full bg-secondary"
+        role="progressbar"
+        aria-label={`${job.label} progress`}
+        aria-valuemin={0}
+        aria-valuemax={total || undefined}
+        aria-valuenow={total ? done : undefined}
+      >
+        {total > 0 ? (
+          <div
+            className={`h-full rounded-full transition-[width] duration-700 ${barColor} ${waiting ? "animate-pulse" : ""}`}
+            style={{ width: `${pct}%` }}
+          />
+        ) : job.running ? (
+          <div className="h-full w-1/3 animate-pulse rounded-full bg-sky-500" />
+        ) : null}
+      </div>
+
+      <div className="mt-1.5 flex flex-wrap items-start justify-between gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <div className="flex flex-wrap gap-x-2">
+          {total > 0 ? (
+            <>
+              <span className="font-medium tabular-nums text-foreground/80">{pct}% complete</span>
+              <span className="tabular-nums">
+                {done.toLocaleString()} of {total.toLocaleString()} {unitLabel(unit, total)}
+              </span>
+              {remaining > 0 && (
+                <span className={failed ? "text-red-300" : ""}>
+                  {remaining.toLocaleString()} {failed ? "not completed" : "remaining"}
+                </span>
+              )}
+            </>
+          ) : (
+            <span>{job.running ? "Calculating the amount of work…" : "No work was needed"}</span>
+          )}
+        </div>
+        <div className="shrink-0 text-right tabular-nums">
+          {eta != null && <span title="Estimated from completed work and elapsed wall time">Est. {fmtRemaining(eta)}</span>}
+          {eta == null && job.running && done === 0 && total > 0 && !waiting && <span>Estimating time remaining…</span>}
+          {!job.running && job.items_processed > 0 && <span>{job.items_processed.toLocaleString()} items reported</span>}
+          {job.errors_count > 0 && <span className="ml-2 text-red-300">{job.errors_count} error{job.errors_count === 1 ? "" : "s"}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SyncJobRow({
   job,
   busy,
@@ -456,18 +591,18 @@ function SyncJobRow({
   onDetails: () => void;
   onRun: () => void;
 }) {
-  const pct = job.total > 0 ? Math.min(100, Math.round((job.done / job.total) * 100)) : 0;
+  const waiting = activeWaitSeconds(job) != null;
 
   return (
     <section className="rounded-lg border border-border bg-card p-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <StatusBadge status={job.status} />
+            <StatusBadge status={waiting ? "waiting_api" : job.status} />
             <h3 className="text-sm font-semibold text-foreground">{job.label}</h3>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">{job.description}</p>
-          <p className="mt-2 truncate text-xs text-muted-foreground/80">
+          <p className={`mt-2 break-words text-xs ${job.status === "failed" ? "text-red-300" : "text-muted-foreground/80"}`}>
             {job.message ?? "Idle. No recent message."}
           </p>
         </div>
@@ -489,23 +624,16 @@ function SyncJobRow({
         </div>
       </div>
 
-      {(job.running || job.total > 0) && (
-        <div className="mt-3">
-          <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
-            <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${Math.max(job.running ? 4 : 0, pct)}%` }} />
-          </div>
-          <div className="mt-1 flex flex-wrap justify-between gap-2 text-[11px] text-muted-foreground">
-            <span>{job.done.toLocaleString()} / {job.total.toLocaleString()}</span>
-            <span>{job.items_processed.toLocaleString()} processed - {job.errors_count} errors</span>
-          </div>
-        </div>
-      )}
+      {(job.running || job.total > 0) && <JobProgress job={job} />}
 
       {detailsOpen && (
         <div className="mt-3 grid gap-2 rounded border border-border bg-background p-3 text-xs text-muted-foreground sm:grid-cols-2">
           <Detail label="Last run" value={fmtTime(job.last_run_at)} />
           <Detail label="Started" value={fmtTime(job.started_at)} />
           <Detail label="Finished" value={fmtTime(job.finished_at)} />
+          <Detail label="Last progress" value={fmtTime(job.updated_at)} />
+          <Detail label="Work updated" value={job.items_processed.toLocaleString()} />
+          <Detail label="Current phase" value={(job.phase ?? "-").replaceAll("_", " ")} />
           <Detail label="Latest error" value={job.error_summary ?? "-"} />
         </div>
       )}
