@@ -69,17 +69,20 @@ PURE_MODULES = {
     "app.engine.strategy_lab",
     "app.engine.tradingview",
     "app.engine.tradingview_alerts",
+    "app.engine.indicators",
 }
 # Third-party packages a pure module may reach. httpx, yfinance, anthropic,
 # googleapiclient and grpc are deliberately absent: reaching any of them, even
-# through another app module, is what "not pure" means here.
-PURE_MAY_USE = {"sqlmodel", "sqlalchemy", "pydantic"}
+# through another app module, is what "not pure" means here. pandas is present
+# because it computes on data it is handed — it opens no socket and reads no
+# credential.
+PURE_MAY_USE = {"sqlmodel", "sqlalchemy", "pydantic", "pandas"}
 
 # Not pure today, and worth knowing why when you touch them:
-#   app.engine.indicators  -> app.engine.alpaca   one cache-only read (line ~286)
 #   app.engine.trade_path  -> app.engine.alpaca   live minute-bar fetch
 #   app.engine.auditor     -> app.engine.alpaca   live minute-bar fetch
-# Moving those reads behind an injected loader would let them join PURE_MODULES.
+# Moving those reads behind an injected loader would let them join PURE_MODULES,
+# the way app.engine.indicators took a MinuteBarLoader from its caller.
 
 
 # --- checks ------------------------------------------------------------------
