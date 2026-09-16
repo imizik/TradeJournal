@@ -130,9 +130,14 @@ is verifiable rather than hopeful.
   its key and was never refreshed, so a ticker's indicators froze at the
   day they were first fetched.) Minute bars stay cached per (ticker, day)
   under the original key; multi-day fetches write the same files.
-- Polygon call budget: `POLYGON_CALLS_PER_MINUTE` (default 4.5; Basic plan
-  allows 5). Paid plans are unlimited — raise it there, never by editing
-  the default.
+- Polygon call budget is **discovered, not configured**: the enricher runs
+  unpaced and learns the rate from a 429 — the number of calls that succeeded
+  in the preceding minute is the budget, so one refusal finds a Basic key's
+  5/min exactly and a paid key never paces. The rate steps back up after five
+  quiet minutes so a transient refusal is not permanent.
+  `POLYGON_CALLS_PER_MINUTE` is a **ceiling**, not a target; leave it unset
+  unless you mean to stay below what the plan allows. Never pin it to a
+  free-tier number in `.env.example` — that silently caps every paid key.
 - Cache markers: empty Polygon responses are cached as
   `{"_empty_cached_at": ts}` (1 year for finalized history); an empty bar
   window is retried weekly. Delete the file to force a retry.

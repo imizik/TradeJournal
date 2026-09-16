@@ -27,16 +27,27 @@ def test_observed_sleep_reports_only_user_visible_waits(monkeypatch):
 
 
 def test_polygon_limiter_labels_its_intentional_wait(monkeypatch):
-    limiter = enricher._RateLimiter(60.0)
-    limiter._last = 10.0
-    monotonic = iter([10.25, 11.0])
+    # Once a rate is known (here pinned by a ceiling), pacing is deliberate and
+    # must reach the UI as "rate_limit" rather than looking like a stall.
+    limiter = enricher._AdaptiveRateLimiter(ceiling=60.0, clock=lambda: 10.25)
+    limiter._next_slot = 11.0
     waits: list[tuple[str, str, float]] = []
-    monkeypatch.setattr(enricher.time, "monotonic", lambda: next(monotonic))
     monkeypatch.setattr(enricher, "observed_sleep", lambda provider, reason, seconds: waits.append((provider, reason, seconds)))
 
     limiter.wait()
 
     assert waits == [("Polygon", "rate_limit", 0.75)]
+
+
+def test_an_undiscovered_rate_does_not_pace_at_all(monkeypatch):
+    """The paid-plan path: nothing has refused us, so there is no wait to label."""
+    limiter = enricher._AdaptiveRateLimiter(ceiling=None, clock=lambda: 10.25)
+    waits: list[tuple[str, str, float]] = []
+    monkeypatch.setattr(enricher, "observed_sleep", lambda provider, reason, seconds: waits.append((provider, reason, seconds)))
+
+    limiter.wait()
+
+    assert waits == []
 
 
 def test_job_wait_observer_sets_and_clears_durable_wait_state(monkeypatch):
