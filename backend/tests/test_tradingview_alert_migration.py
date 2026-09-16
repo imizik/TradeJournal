@@ -13,7 +13,7 @@ from app import models as _models  # register all SQLModel tables for create_all
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "f1a2b3c4d5e6"
-TRADINGVIEW_REVISION = "2e6f9a1b4c7d"
+CURRENT_HEAD = "4c8e2a7d9b10"
 
 EXPECTED_COLUMNS = {
     "alert_id",
@@ -113,11 +113,11 @@ def _rewrite_create_all_table(
         )
 
 
-def test_migration_is_the_only_head_and_round_trips(tmp_path):
+def test_migration_chain_has_one_head_and_tradingview_round_trips(tmp_path):
     database_path = tmp_path / "fresh.sqlite"
 
     heads = _alembic(database_path, "heads")
-    assert heads.stdout.strip() == f"{TRADINGVIEW_REVISION} (head)"
+    assert heads.stdout.strip() == f"{CURRENT_HEAD} (head)"
 
     _alembic(database_path, "upgrade", "head")
     engine = create_engine(_database_url(database_path))

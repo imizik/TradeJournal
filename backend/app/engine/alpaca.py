@@ -26,6 +26,8 @@ from zoneinfo import ZoneInfo
 import httpx
 from dotenv import load_dotenv
 
+from app.engine.api_wait import observed_sleep
+
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 log = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ class _RateLimiter:
     def wait(self):
         elapsed = time.monotonic() - self._last
         if elapsed < self._interval:
-            time.sleep(self._interval - elapsed)
+            observed_sleep("Alpaca", "rate_limit", self._interval - elapsed)
         self._last = time.monotonic()
 
 
@@ -83,12 +85,12 @@ def _alpaca_get(path: str, params: dict) -> dict:
         except (httpx.NetworkError, httpx.ConnectError, httpx.RemoteProtocolError) as e:
             wait = 15 * (attempt + 1)
             log.warning("Alpaca network error, retrying in %ds: %s", wait, e)
-            time.sleep(wait)
+            observed_sleep("Alpaca", "network_retry", wait)
             continue
         if resp.status_code == 429:
             wait = 30 * (attempt + 1)
             log.warning("Alpaca 429 — waiting %ds (attempt %d/5)", wait, attempt + 1)
-            time.sleep(wait)
+            observed_sleep("Alpaca", "provider_429", wait)
             continue
         if resp.status_code == 403:
             log.warning("Alpaca 403 for %s — check key or feed entitlement", path)

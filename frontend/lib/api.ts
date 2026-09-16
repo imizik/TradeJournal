@@ -259,11 +259,16 @@ export type JobStatus = {
   total: number;
   current: string;
   enriched: number;
+  phase?: string | null;
+  wait_provider?: string | null;
+  wait_reason?: string | null;
+  wait_until?: string | null;
   error: string | null;
   job_id?: string | null;
   status?: string | null;
   started_at?: string | null;
   finished_at?: string | null;
+  updated_at?: string | null;
 };
 
 export type SyncJob = {
@@ -279,10 +284,18 @@ export type SyncJob = {
   errors_count: number;
   message: string | null;
   error_summary: string | null;
+  phase: string | null;
+  wait_provider: string | null;
+  wait_reason: string | null;
+  wait_until: string | null;
+  progress_unit: string;
+  api_provider?: string;
+  rate_limit_per_minute?: number;
   job_id: string | null;
   created_at: string | null;
   started_at: string | null;
   finished_at: string | null;
+  updated_at: string | null;
   last_run_at: string | null;
 };
 

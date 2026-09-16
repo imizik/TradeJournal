@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api, CoverageStats, JobStatus } from "@/lib/api";
-import { X, RefreshCw } from "lucide-react";
+import { Hourglass, X, RefreshCw } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,15 +27,19 @@ const JOB_COLORS: Record<keyof Jobs, { bar: string; dot: string }> = {
 };
 
 const JOB_RATE: Record<keyof Jobs, string> = {
-  polygon: "3 req/min · ~20s/call",
-  alpaca:  "60 req/min · ~1s/call",
-  path:    "no API limit",
+  polygon: "API pacing is automatic",
+  alpaca:  "API pacing is automatic",
+  path:    "uses cache; missing bars may call Alpaca",
 };
 
 function fmtEta(secs: number): string {
   if (secs < 60) return `~${Math.round(secs)}s left`;
   if (secs < 3600) return `~${Math.round(secs / 60)}m left`;
   return `~${(secs / 3600).toFixed(1)}h left`;
+}
+
+function parseBackendUtc(value: string): number {
+  return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`).getTime();
 }
 
 // ---------------------------------------------------------------------------
@@ -47,7 +51,7 @@ function ProgressBar({ pct, color }: { pct: number; color: string }) {
     <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/10">
       <div
         className={`absolute left-0 top-0 h-full rounded-full transition-all duration-700 ${color}`}
-        style={{ width: `${Math.max(2, pct)}%` }}
+        style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
       />
     </div>
   );
@@ -57,11 +61,14 @@ function ActiveJobRow({ jobKey, job }: { jobKey: keyof Jobs; job: JobStatus }) {
   const { bar, dot } = JOB_COLORS[jobKey];
   const isSetup = job.done === 0 && !!job.current;
   const pct = isSetup ? 0 : job.total > 0 ? (job.done / job.total) * 100 : 0;
+  const waitSeconds = job.phase === "waiting_api" && job.wait_until
+    ? Math.max(0, Math.ceil((parseBackendUtc(job.wait_until) - Date.now()) / 1000))
+    : 0;
 
   // ETA — only meaningful once progress has started
   let eta: string | null = null;
   if (!isSetup && job.started_at && job.done > 0 && job.done < job.total) {
-    const elapsedSecs = (Date.now() - new Date(job.started_at).getTime()) / 1000;
+    const elapsedSecs = (Date.now() - parseBackendUtc(job.started_at)) / 1000;
     if (elapsedSecs > 3) {
       const rate = job.done / elapsedSecs; // fills per second
       const remainingSecs = (job.total - job.done) / rate;
@@ -85,6 +92,12 @@ function ActiveJobRow({ jobKey, job }: { jobKey: keyof Jobs; job: JobStatus }) {
         </div>
       </div>
       <ProgressBar pct={pct} color={bar} />
+      {waitSeconds > 0 && (
+        <div className="flex items-center gap-1.5 rounded border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-[10px] text-amber-200">
+          <Hourglass className="h-3 w-3" />
+          Waiting for {job.wait_provider ?? "API"} · next request in {waitSeconds}s
+        </div>
+      )}
       {job.current && (
         <p className="truncate text-xs text-muted-foreground/60">{job.current}</p>
       )}

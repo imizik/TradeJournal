@@ -9,6 +9,7 @@ from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.database import engine
+from app.engine.api_wait import observe_api_waits
 from app.models import FILL_LIGHT, Fill, FillMarketContext, JobRun, Trade, TradePathMetrics
 
 log = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ def create_job(session: Session, job_type: str, params: dict[str, Any] | None = 
         id=uuid.uuid4(),
         job_type=job_type,
         status="queued" if total else "succeeded",
+        phase="queued" if total else "complete",
         params_json=json.dumps(params or {}),
         total=total,
         finished_at=now if not total else None,
@@ -52,9 +54,14 @@ def job_status(job: JobRun | None) -> dict[str, Any]:
             "total": 0,
             "current": "",
             "enriched": 0,
+            "phase": None,
+            "wait_provider": None,
+            "wait_reason": None,
+            "wait_until": None,
             "error": None,
             "job_id": None,
             "status": None,
+            "updated_at": None,
         }
     return {
         "running": job.status in {"queued", "running"},
@@ -62,11 +69,16 @@ def job_status(job: JobRun | None) -> dict[str, Any]:
         "total": job.total,
         "current": job.current or "",
         "enriched": job.enriched,
+        "phase": job.phase,
+        "wait_provider": job.wait_provider,
+        "wait_reason": job.wait_reason,
+        "wait_until": job.wait_until,
         "error": job.error,
         "job_id": str(job.id),
         "status": job.status,
         "started_at": job.started_at,
         "finished_at": job.finished_at,
+        "updated_at": job.updated_at,
     }
 
 
@@ -131,6 +143,10 @@ def _start_job(job_id: uuid.UUID) -> JobRun:
             raise ValueError(f"Job not found: {job_id}")
         job.status = "running"
         job.error = None
+        job.phase = "starting"
+        job.wait_provider = None
+        job.wait_reason = None
+        job.wait_until = None
         job.started_at = datetime.utcnow()
         job.updated_at = datetime.utcnow()
         session.add(job)
@@ -146,6 +162,10 @@ def _finish_job(job_id: uuid.UUID, enriched: int, total: int) -> None:
         done=total,
         current=None,
         enriched=enriched,
+        phase="complete",
+        wait_provider=None,
+        wait_reason=None,
+        wait_until=None,
         finished_at=datetime.utcnow(),
     )
 
@@ -155,6 +175,10 @@ def _fail_job(job_id: uuid.UUID, exc: Exception) -> None:
     _set_job(
         job_id,
         status="failed",
+        phase="failed",
+        wait_provider=None,
+        wait_reason=None,
+        wait_until=None,
         error=str(exc),
         finished_at=datetime.utcnow(),
     )
@@ -296,9 +320,49 @@ def _throttled_progress(job_id: uuid.UUID, min_interval: float = 2.0):
         if now - last < min_interval:
             return
         last = now
-        _set_job(job_id, ignore_locked=True, done=done, current=label)
+        normalized = label.lower()
+        if normalized.startswith(("indicators:", "fetching history", "computing indicators")):
+            phase = "preparing"
+        elif normalized.startswith("loading bars"):
+            phase = "fetching"
+        else:
+            phase = "processing"
+        _set_job(
+            job_id,
+            ignore_locked=True,
+            done=done,
+            current=label,
+            phase=phase,
+            wait_provider=None,
+            wait_reason=None,
+            wait_until=None,
+        )
 
     return on_progress
+
+
+def _api_wait_observer(job_id: uuid.UUID):
+    def observe(provider: str, reason: str | None, seconds: float) -> None:
+        if reason is None:
+            _set_job(
+                job_id,
+                ignore_locked=True,
+                phase="processing",
+                wait_provider=None,
+                wait_reason=None,
+                wait_until=None,
+            )
+            return
+        _set_job(
+            job_id,
+            ignore_locked=True,
+            phase="waiting_api",
+            wait_provider=provider,
+            wait_reason=reason,
+            wait_until=datetime.utcnow() + timedelta(seconds=seconds),
+        )
+
+    return observe
 
 
 def run_polygon_enrichment_job(job: JobRun) -> int:
@@ -315,7 +379,8 @@ def run_polygon_enrichment_job(job: JobRun) -> int:
     with Session(engine, expire_on_commit=False) as session:
         fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all()
         _set_job(job.id, total=len(fills))
-        return enrich_fills(list(fills), session, on_progress=_throttled_progress(job.id))
+        with observe_api_waits(_api_wait_observer(job.id)):
+            return enrich_fills(list(fills), session, on_progress=_throttled_progress(job.id))
 
 
 def run_alpaca_enrichment_job(job: JobRun) -> int:
@@ -332,7 +397,8 @@ def run_alpaca_enrichment_job(job: JobRun) -> int:
         _set_job(job.id, total=len(fills))
         # The job's fill_ids are already filtered to missing/incomplete rows.
         # Process that explicit set even when the row has a partial context.
-        return enrich_fills_alpaca(list(fills), session, on_progress=_throttled_progress(job.id), force=True)
+        with observe_api_waits(_api_wait_observer(job.id)):
+            return enrich_fills_alpaca(list(fills), session, on_progress=_throttled_progress(job.id), force=True)
 
 
 def run_trade_path_job(job: JobRun) -> int:
@@ -347,4 +413,5 @@ def run_trade_path_job(job: JobRun) -> int:
     with Session(engine, expire_on_commit=False) as session:
         trades = session.exec(select(Trade).where(Trade.id.in_(trade_ids))).all()
         _set_job(job.id, total=len(trades))
-        return compute_path_metrics_for_trades(list(trades), session, on_progress=_throttled_progress(job.id), force=force)
+        with observe_api_waits(_api_wait_observer(job.id)):
+            return compute_path_metrics_for_trades(list(trades), session, on_progress=_throttled_progress(job.id), force=force)
