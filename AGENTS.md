@@ -25,7 +25,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView |
 | `docs/agent/verification.md` | How to prove a change works |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
-| `docs/agent/feature-map.md` | Which file owns a feature |
+| `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
 
 Read what the task needs, not all four. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
