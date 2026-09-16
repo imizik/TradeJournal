@@ -147,6 +147,16 @@ def enrich_fills_alpaca(
 # Context builder
 # ---------------------------------------------------------------------------
 
+def _cached_minute_bars(ticker: str, day: date) -> list[dict]:
+    """Minute bars already on disk for one ticker/day; never fetches.
+
+    The time-adjusted RVOL history asks for up to 21 days per fill. Fetching
+    those would turn one enrichment run into thousands of Alpaca calls, so the
+    history is whatever the cache happens to hold and a miss is an empty list.
+    """
+    return fetch_minute_bars_for_date([ticker], day, cache_only=True).get(ticker, [])
+
+
 def _build_context(
     fill: Fill,
     daily_bars: dict[str, list],
@@ -193,7 +203,9 @@ def _build_context(
 
     # Relative volume
     rvol = compute_rvol(intraday, adv, fill_dt)
-    rvol_ta = compute_rvol_time_adjusted(ticker, fill_date, fill_dt, daily_bars.get(ticker, []))
+    rvol_ta = compute_rvol_time_adjusted(
+        ticker, fill_date, fill_dt, daily_bars.get(ticker, []), _cached_minute_bars
+    )
 
     # Flags (need prev fields added to intraday dict for flag computation)
     intraday_with_prev = {

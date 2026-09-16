@@ -9,7 +9,7 @@ and return results keyed by date string "YYYY-MM-DD" or hour string "YYYY-MM-DD 
 import math
 import logging
 from datetime import date, datetime
-from typing import Optional
+from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -18,6 +18,11 @@ log = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
+
+# Minute bars for one ticker on one day, as Alpaca bar dicts. Injected rather
+# than fetched here: this module computes, it does not decide where bars come
+# from or pay for them. An empty list means "no bars for that day".
+MinuteBarLoader = Callable[[str, date], list[dict]]
 
 
 # ---------------------------------------------------------------------------
@@ -275,16 +280,22 @@ def compute_rvol_time_adjusted(
     fill_date: date,
     fill_dt: datetime,
     daily_bars: list[dict],
+    load_minute_bars: MinuteBarLoader,
 ) -> Optional[float]:
     """
     Time-adjusted RVOL: compare today's cumulative RTH volume at fill time
     against the historical average cumulative volume at the same minute of day
-    over the past 20 trading days (cache-only — no extra API calls).
+    over the past 20 trading days.
 
-    Returns None if fewer than 5 cached historical days are available.
+    ``load_minute_bars(ticker, day)`` supplies the bars for one day and returns
+    an empty list when that day is not available. The caller decides where they
+    come from, and owns the "no extra API calls" part: this function asks for up
+    to 21 days and treats every miss as a day without data, so a loader that
+    only reads a cache keeps the cost at zero. A day this function cannot get
+    bars for does not count toward the history.
+
+    Returns None if fewer than 5 historical days are available.
     """
-    from app.engine.alpaca import fetch_minute_bars_for_date
-
     fill_dt_et = fill_dt.replace(tzinfo=ET)
     fill_mins = fill_dt_et.hour * 60 + fill_dt_et.minute
     market_open_mins = 9 * 60 + 30
@@ -293,7 +304,7 @@ def compute_rvol_time_adjusted(
     mins_since_open = fill_mins - market_open_mins
 
     def _cum_vol(d: date) -> Optional[float]:
-        bars = fetch_minute_bars_for_date([ticker], d, cache_only=True).get(ticker, [])
+        bars = load_minute_bars(ticker, d)
         if not bars:
             return None
         df = bars_to_df(bars)
