@@ -652,3 +652,141 @@ def _series_min(df: pd.DataFrame, col: str) -> Optional[float]:
 
 def _bar_date(bar: dict) -> date:
     return pd.to_datetime(bar["t"], utc=True).astimezone(ET).date()
+
+
+# ---------------------------------------------------------------------------
+# Polygon-equivalent indicators from Polygon aggregate bars
+# ---------------------------------------------------------------------------
+# The Polygon enricher used to fetch each indicator series from Polygon's
+# /v1/indicators endpoints (seven calls per ticker). These functions compute
+# the same numbers from the aggregates those endpoints are built on, so one
+# daily-bars call and one hourly-bars call replace them without changing any
+# stored value. Polygon does not document its formulas; every convention below
+# was established empirically against cached Polygon output and is pinned by
+# tests/test_enricher.py (max difference 0 for EMA/RSI/MACD, ~1e-13 for SMA):
+#
+#   SMA   mean of the last `window` closes; first value at bar `window`.
+#   EMA   alpha = 2/(window+1), seeded with the first close and iterated from
+#         bar 1; first *reported* value at bar `window`.
+#   RSI   Wilder smoothing (alpha = 1/window) of gains and losses. Seed at bar
+#         `window`: the first window-1 changes summed and divided by `window`.
+#   MACD  EMA(12) - EMA(26) of the closes, each EMA seeded and iterated as
+#         above, reported from bar 26. Signal = EMA(9) of the MACD line
+#         iterated from bar 1 (where the line is 0). Histogram = MACD - signal.
+#
+# Bars before the first reported value are omitted (None), matching the shape
+# of Polygon's series, so "last completed bar strictly before the fill"
+# lookups behave exactly as they did with the fetched series.
+#
+# Bars are Polygon aggregate dicts: ms-epoch `t`, plus `c` (close).
+
+def polygon_bar_et_date(bar: dict) -> str:
+    """Calendar date in America/New_York of a Polygon bar's timestamp."""
+    return datetime.fromtimestamp(bar["t"] / 1000, tz=UTC).astimezone(ET).strftime("%Y-%m-%d")
+
+
+def polygon_bar_et_hour(bar: dict) -> str:
+    """'YYYY-MM-DD HH' in America/New_York of a Polygon bar's timestamp."""
+    dt = datetime.fromtimestamp(bar["t"] / 1000, tz=UTC).astimezone(ET)
+    return f"{dt.strftime('%Y-%m-%d')} {dt.hour:02d}"
+
+
+def _polygon_sma(values: list[float], window: int) -> list[Optional[float]]:
+    out: list[Optional[float]] = [None] * len(values)
+    for i in range(window - 1, len(values)):
+        out[i] = sum(values[i - window + 1 : i + 1]) / window
+    return out
+
+
+def _polygon_ema(values: list[float], window: int, report_from: Optional[int] = None) -> list[Optional[float]]:
+    """EMA seeded with the first value; reported from index `report_from`
+    (default: bar `window`, i.e. index window-1)."""
+    alpha = 2.0 / (window + 1)
+    first = window - 1 if report_from is None else report_from
+    out: list[Optional[float]] = [None] * len(values)
+    ema: Optional[float] = None
+    for i, value in enumerate(values):
+        ema = value if ema is None else alpha * value + (1 - alpha) * ema
+        if i >= first:
+            out[i] = ema
+    return out
+
+
+def _polygon_rsi(values: list[float], window: int) -> list[Optional[float]]:
+    out: list[Optional[float]] = [None] * len(values)
+    if len(values) < window:
+        return out
+    gains = [max(values[i] - values[i - 1], 0.0) for i in range(1, len(values))]
+    losses = [max(values[i - 1] - values[i], 0.0) for i in range(1, len(values))]
+
+    def _rsi(avg_gain: float, avg_loss: float) -> float:
+        return 100.0 if avg_loss == 0 else 100 - 100 / (1 + avg_gain / avg_loss)
+
+    avg_gain = sum(gains[: window - 1]) / window
+    avg_loss = sum(losses[: window - 1]) / window
+    out[window - 1] = _rsi(avg_gain, avg_loss)
+    for i in range(window - 1, len(gains)):
+        avg_gain = (avg_gain * (window - 1) + gains[i]) / window
+        avg_loss = (avg_loss * (window - 1) + losses[i]) / window
+        out[i + 1] = _rsi(avg_gain, avg_loss)
+    return out
+
+
+def _polygon_macd(
+    values: list[float], fast: int = 12, slow: int = 26, signal: int = 9
+) -> tuple[list[Optional[float]], list[Optional[float]], list[Optional[float]]]:
+    ema_fast = _polygon_ema(values, fast, report_from=0)
+    ema_slow = _polygon_ema(values, slow, report_from=0)
+    line_full = [f - s for f, s in zip(ema_fast, ema_slow)]  # type: ignore[operator]
+    signal_full = _polygon_ema(line_full, signal, report_from=0)
+    n = len(values)
+    line: list[Optional[float]] = [None] * n
+    sig: list[Optional[float]] = [None] * n
+    hist: list[Optional[float]] = [None] * n
+    for i in range(slow - 1, n):
+        line[i] = line_full[i]
+        sig[i] = signal_full[i]
+        hist[i] = line_full[i] - signal_full[i]  # type: ignore[operator]
+    return line, sig, hist
+
+
+POLYGON_DAILY_INDICATORS = ("sma_20", "sma_50", "ema_9", "ema_20", "rsi_14", "macd", "macd_signal", "macd_histogram")
+
+
+def polygon_daily_indicators(bars: list[dict]) -> dict[str, dict[str, Optional[float]]]:
+    """
+    {date_str: {sma_20, sma_50, ema_9, ema_20, rsi_14, macd, macd_signal,
+    macd_histogram}} from Polygon daily bars, reproducing Polygon's own
+    indicator endpoints for the same bars. Warmup entries are None.
+    """
+    ordered = sorted(bars, key=lambda b: b["t"])
+    closes = [float(b["c"]) for b in ordered]
+    dates = [polygon_bar_et_date(b) for b in ordered]
+    sma_20 = _polygon_sma(closes, 20)
+    sma_50 = _polygon_sma(closes, 50)
+    ema_9 = _polygon_ema(closes, 9)
+    ema_20 = _polygon_ema(closes, 20)
+    rsi_14 = _polygon_rsi(closes, 14)
+    macd, macd_signal, macd_histogram = _polygon_macd(closes)
+    return {
+        day: {
+            "sma_20": sma_20[i],
+            "sma_50": sma_50[i],
+            "ema_9": ema_9[i],
+            "ema_20": ema_20[i],
+            "rsi_14": rsi_14[i],
+            "macd": macd[i],
+            "macd_signal": macd_signal[i],
+            "macd_histogram": macd_histogram[i],
+        }
+        for i, day in enumerate(dates)
+    }
+
+
+def polygon_hourly_ema(bars: list[dict], window: int = 9) -> dict[str, float]:
+    """{'YYYY-MM-DD HH' (ET) -> EMA} from Polygon hourly bars, same convention
+    as Polygon's hourly EMA endpoint. Warmup bars are omitted."""
+    ordered = sorted(bars, key=lambda b: b["t"])
+    closes = [float(b["c"]) for b in ordered]
+    keys = [polygon_bar_et_hour(b) for b in ordered]
+    return {key: value for key, value in zip(keys, _polygon_ema(closes, window)) if value is not None}
