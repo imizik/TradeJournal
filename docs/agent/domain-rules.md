@@ -113,9 +113,29 @@ is verifiable rather than hopeful.
   the path job. Attribution fields are options-only and all nullable.
 - The dashboard's Alpaca "All history" control must send
   `range=all&force=true`. `force` alone only reprocesses the selected range.
+- Polygon daily indicators (SMA 20/50, EMA 9/20, RSI 14, MACD) and the hourly
+  EMA-9 are **computed locally** from Polygon daily/hourly aggregates
+  (`polygon_daily_indicators` / `polygon_hourly_ema` in
+  `app/engine/indicators.py`), not fetched from `/v1/indicators`. The
+  formulas reproduce Polygon's endpoints bit-for-bit for the same bars —
+  first-close-seeded EMAs reported from bar `window`, Wilder RSI seeded at
+  bar 14, MACD signal iterated from bar 1 — and `tests/test_enricher.py`
+  pins them against real Polygon output. Do not "correct" them toward the
+  textbook (SMA-seeded) forms: that silently changes stored values.
+  `compute_daily_indicators` (Alpaca path, `fill_market_context`) is a
+  separate implementation with its own conventions; keep them apart.
+- Polygon bar caches (`_v2_aggs_bars_{day,hour}_{TICKER}.json`) record the
+  window they cover and are refreshed when a fill needs a later session, so
+  indicators track new sessions. (The old per-series cache had no date in
+  its key and was never refreshed, so a ticker's indicators froze at the
+  day they were first fetched.) Minute bars stay cached per (ticker, day)
+  under the original key; multi-day fetches write the same files.
+- Polygon call budget: `POLYGON_CALLS_PER_MINUTE` (default 4.5; Basic plan
+  allows 5). Paid plans are unlimited — raise it there, never by editing
+  the default.
 - Cache markers: empty Polygon responses are cached as
-  `{"_empty_cached_at": ts}` (1 year for finalized history, 7 days for
-  indicator series). Delete the file to force a retry.
+  `{"_empty_cached_at": ts}` (1 year for finalized history); an empty bar
+  window is retried weekly. Delete the file to force a retry.
 - Live "today" data must use `fetch_snapshots` / `fetch_minute_bars_live`,
   never the cache. The persistent minute cache never expires and must not be
   written with partial intraday data.

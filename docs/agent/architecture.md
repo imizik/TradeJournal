@@ -103,6 +103,13 @@ Two rules follow, and both have already been paid for once:
 - Enrichers and path metrics commit in batches and throttle `job_run` progress
   writes (`_throttled_progress`). Per-item commits were a SQLite-era pattern.
 
+Polygon enrichment is bounded by the API call budget, not the database:
+each call costs one rate-limiter slot (13.4s at the free-tier default).
+Per ticker it is one daily-bars call, one hourly-bars page per ~50 sessions
+needed, and one minute-bars call per 60-day window of fill dates; every
+indicator is derived locally from those bars. Adding a per-fill or
+per-indicator call reintroduces the hours-long backfills this replaced.
+
 Frontend polling follows the same instinct: status/summary polls skip hidden
 tabs and idle at 30–60s. Keep new polling loops on that pattern, and avoid N+1
 fetches — batch, or extend a shared API response.

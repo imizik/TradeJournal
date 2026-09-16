@@ -340,8 +340,8 @@
           "error": "Not enough data to compute path",
           "stored": {},
           "window_bars": 0,
-          "window_end_et": "2026-05-21 14:45",
-          "window_start_et": "2026-05-14 10:15"
+          "window_end_et": "T-113 14:45",
+          "window_start_et": "T-120 10:15"
         },
         "status": "closed",
         "strike": "900.000000",
@@ -468,8 +468,8 @@
           "error": "Not enough data to compute path",
           "stored": {},
           "window_bars": 0,
-          "window_end_et": "2026-08-23 10:05",
-          "window_start_et": "2026-08-22 09:47"
+          "window_end_et": "T-19 10:05",
+          "window_start_et": "T-20 09:47"
         },
         "status": "closed",
         "strike": null,
@@ -717,8 +717,8 @@
           "error": "Not enough data to compute path",
           "stored": {},
           "window_bars": 0,
-          "window_end_et": "2026-08-22 16:00",
-          "window_start_et": "2026-07-13 13:20"
+          "window_end_et": "T-20 16:00",
+          "window_start_et": "T-60 13:20"
         },
         "status": "expired",
         "strike": "400.000000",
