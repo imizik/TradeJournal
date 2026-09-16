@@ -8,7 +8,6 @@ from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-import pytest
 
 from app.engine.reconstructor import FillInput, reconstruct
 

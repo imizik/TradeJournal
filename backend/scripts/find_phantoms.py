@@ -7,7 +7,7 @@ import csv
 import re
 import sqlite3
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -116,11 +116,11 @@ for ticker, opt_type, strike, exp, side in phantom_specs:
         print(f"    !!! WARNING: still {remaining_to_remove} extra after deleting identified phantoms")
     print()
 
-print(f"\n=== SUMMARY ===")
+print("\n=== SUMMARY ===")
 print(f"Fills to delete: {len(fills_to_delete)}")
 total_phantom_contracts = sum(qty for _, _, qty, _ in fills_to_delete)
 print(f"Total phantom contracts to remove: {total_phantom_contracts}")
-print(f"\nFill IDs for deletion:")
+print("\nFill IDs for deletion:")
 for fid, ticker, qty, side in fills_to_delete:
     print(f"  {fid}  ({ticker} {side} qty={qty})")
 

@@ -117,7 +117,6 @@ def test_seed_is_stable_regardless_of_when_it_runs(seeded):
 
 def test_seed_refuses_to_run_against_a_database_holding_real_fills(seeded, tmp_path):
     """The guard that makes this safe to point at a scratch database."""
-    import uuid
     from datetime import datetime, timezone
     from decimal import Decimal
 

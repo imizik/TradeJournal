@@ -1,5 +1,3 @@
-import uuid
-
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, delete, select
 

@@ -197,7 +197,6 @@ def _assert_safe_target(engine) -> None:
     """
     from sqlalchemy import inspect, text
 
-    from app.schema import has_any_tables
 
     tables = set(inspect(engine).get_table_names()) - {"alembic_version"}
     if not tables:
@@ -309,7 +308,7 @@ def seed(database_url: str) -> dict:
     which would make this function silently write to whichever database was
     loaded first. Being explicit means the target is always the one passed in.
     """
-    from sqlmodel import Session, SQLModel, create_engine, delete, select
+    from sqlmodel import Session, create_engine, delete, select
 
     from app.models import Account, Fill  # noqa: F401  (registers the tables)
     from app.routers.fills import _rebuild_trades

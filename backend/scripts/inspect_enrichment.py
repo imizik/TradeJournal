@@ -13,7 +13,6 @@ Prints:
   - Trade path metrics with sanity flags
 """
 
-import json
 import sys
 from datetime import timedelta
 from pathlib import Path

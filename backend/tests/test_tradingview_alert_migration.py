@@ -8,7 +8,7 @@ import sys
 from sqlalchemy import inspect
 from sqlmodel import SQLModel, create_engine
 
-from app import models as _models  # register all SQLModel tables for create_all
+from app import models as _models  # noqa: F401  # registers all SQLModel tables for create_all
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]

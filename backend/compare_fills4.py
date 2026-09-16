@@ -110,14 +110,13 @@ print(f"Net phantom PnL effect:    ${total_phantom_exit_value - total_phantom_en
 
 # WMT + GOOG + AMD phantom BTOs all expired worthless
 phantom_expired_loss = (3 * 25.0) + (1 * 125.0) + (7 * 43.0)
-print(f"\nOf the phantom BTOs: WMT(3@25), GOOG(1@125), AMD(7@43) all expired worthless")
+print("\nOf the phantom BTOs: WMT(3@25), GOOG(1@125), AMD(7@43) all expired worthless")
 print(f"  Phantom expired loss: ${phantom_expired_loss:.2f}")
 print(f"  Phantom STC income:   ${total_phantom_exit_value:.2f}")
 print(f"  Net effect:           ${total_phantom_exit_value - phantom_expired_loss:+.2f}")
 
 # ── 3. Deeper: compare DB net vs CSV net per month ────────────────────────────
 print("\n=== MONTH-BY-MONTH CSV vs DB NET CASH FLOW ===")
-from collections import defaultdict
 
 # Group CSV by year-month
 csv_by_month = defaultdict(float)

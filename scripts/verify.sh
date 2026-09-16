@@ -3,7 +3,7 @@
 # verify.sh - the checks that decide whether a change is good.
 #
 #   bash scripts/verify.sh              everything (what CI runs)
-#   bash scripts/verify.sh --fast       tests + typecheck, no builds
+#   bash scripts/verify.sh --fast       lint + tests + typecheck, no builds
 #   bash scripts/verify.sh --backend    backend only
 #   bash scripts/verify.sh --frontend   frontend only
 #   bash scripts/verify.sh --e2e        browser smoke tests only (slowest)
@@ -72,6 +72,9 @@ if want_backend; then
   if [ ! -x "$ROOT/backend/.venv/bin/python" ]; then
     echo "note: backend/.venv not found, using $VENV_PY (run scripts/setup.sh for a clean env)"
   fi
+  # pyflakes and pycodestyle errors: unused imports and variables, undefined
+  # names, import placement. Rule set and version pin: backend/pyproject.toml.
+  run "backend lint" backend "$VENV_PY" -m ruff check .
   # What the public ingress may import, and which engine modules stay free of
   # network and database imports. Run on its own first so a boundary violation
   # is one named failure, not a line inside the suite (which runs it again).

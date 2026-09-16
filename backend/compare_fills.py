@@ -186,8 +186,8 @@ cur.execute("""
 db_open_cost = cur.fetchone()[0]
 conn.close()
 
-print(f"\n=== PnL RECONCILIATION ===")
+print("\n=== PnL RECONCILIATION ===")
 print(f"CSV net cash flow (all closed fills): ${csv_total_amount:+.2f}")
-print(f"  (negative = net cash out, positive = net cash in, excluding open positions)")
+print("  (negative = net cash out, positive = net cash in, excluding open positions)")
 print(f"DB realized PnL (closed + expired options, Roth): ${db_total_pnl:+.2f}")
 print(f"DB open position cost basis: ${db_open_cost:.2f}")

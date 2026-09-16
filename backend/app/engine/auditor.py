@@ -12,14 +12,13 @@ Does NOT modify any data.
 import json
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 
 from app.engine.alpaca import ALPACA_DATA_FEED, CACHE_DIR, fetch_minute_bars_for_date
-from app.engine.indicators import bars_to_df, _f, _pct_diff
+from app.engine.indicators import bars_to_df, _pct_diff
 from app.engine.trade_path import _date_range, _is_bullish
 from app.models import Fill, FillMarketContext, Trade, TradePathMetrics
 
@@ -39,9 +38,7 @@ def compute_audit(
     path: Optional[TradePathMetrics],
 ) -> dict:
     entry_fills = [f for f in fills if f.side in ("buy_to_open", "sell_to_open", "buy")]
-    exit_fills = [f for f in fills if f not in entry_fills]
     entry_fill = min(entry_fills, key=lambda f: f.executed_at) if entry_fills else None
-    last_exit = max(exit_fills, key=lambda f: f.executed_at) if exit_fills else None
 
     bullish = _is_bullish(trade, entry_fill) if entry_fill else None
 
@@ -138,14 +135,12 @@ def _audit_fill(fill: Fill, is_entry: bool, ctx: Optional[FillMarketContext]) ->
     day_low  = float(rth_to_fill["low"].min())  if not rth_to_fill.empty else None
 
     vwap = None
-    cum_vol = None
     if not rth_to_fill.empty and fill_dt_et.hour * 60 + fill_dt_et.minute >= 9 * 60 + 30:
         vols = rth_to_fill["volume"]
         typical = (rth_to_fill["high"] + rth_to_fill["low"] + rth_to_fill["close"]) / 3
         vol_sum = float(vols.sum())
         if vol_sum > 0:
             vwap = round(float((typical * vols).sum() / vol_sum), 4)
-            cum_vol = int(vol_sum)
 
     pm_high = float(pm_bars["high"].max()) if not pm_bars.empty else None
     pm_low  = float(pm_bars["low"].min())  if not pm_bars.empty else None
@@ -268,8 +263,6 @@ def _audit_path(
     bullish: Optional[bool],
     stored_path: Optional[TradePathMetrics],
 ) -> dict:
-    entry_ctx_underlying = None
-
     opened_et = trade.opened_at.replace(tzinfo=ET)
     closed_et = trade.closed_at.replace(tzinfo=ET)
     opened_utc = opened_et.astimezone(UTC)

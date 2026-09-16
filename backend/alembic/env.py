@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.models import *
+import app.models  # noqa: F401  # registers every table on SQLModel.metadata
 from app.schema import migration_database_url
 
 config = context.config

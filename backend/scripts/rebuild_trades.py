@@ -102,7 +102,7 @@ def main():
         FROM trade
     """).fetchone()
 
-    print(f"\n=== REBUILD COMPLETE ===")
+    print("\n=== REBUILD COMPLETE ===")
     print(f"  Total trades: {row['total']}")
     print(f"  Closed: {row['closed']}, Expired: {row['expired']}, Open: {row['open_count']}")
     print(f"  Dashboard PnL: ${row['dashboard_pnl']:+,.2f}")

@@ -3,7 +3,6 @@ Why does fill net (+$3,441) differ so much from realized PnL (-$908)?
 Check STC fills linked to expired trades, and find the biggest individual trade errors.
 """
 import sqlite3
-from collections import defaultdict
 
 conn = sqlite3.connect("data/trade_journal.db")
 cur = conn.cursor()

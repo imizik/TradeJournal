@@ -323,7 +323,6 @@ def run_alpaca_enrichment_job(job: JobRun) -> int:
 
     params = _params(job)
     fill_ids = [uuid.UUID(value) for value in params.get("fill_ids", [])]
-    force = bool(params.get("force", False))
     if not fill_ids:
         return 0
 

@@ -49,7 +49,6 @@ from app.engine.webull_client import (
     compute_signature,
     iso8601_utc_now,
     make_nonce,
-    webull_configured,
 )
 from app.engine.webull_proto import events_pb2, events_pb2_grpc
 

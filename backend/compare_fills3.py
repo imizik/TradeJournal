@@ -4,7 +4,6 @@ Investigate root causes of the 6 qty mismatches and $3,967 PnL gap.
 import csv
 import re
 import sqlite3
-from collections import defaultdict
 from datetime import date, datetime
 
 DESC_RE = re.compile(

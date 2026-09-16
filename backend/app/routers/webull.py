@@ -49,7 +49,7 @@ from app.engine.webull import (
     webull_configured,
 )
 from app.engine.webull_listener import request_stop, run_listener
-from app.models import Account, JobRun, WebullRawEvent
+from app.models import Account, WebullRawEvent
 
 log = logging.getLogger(__name__)
 
