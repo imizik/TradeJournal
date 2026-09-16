@@ -48,7 +48,7 @@ JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_FILL_CHECK, "label": "Import/manual fills check", "description": "Verify imported and manual fills are present before rebuilding.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_TRADE_REBUILD, "label": "Rebuild trades / FIFO matching", "description": "Recreate derived trades and trade-fill links from fill rows.", "advanced": False, "progress_unit": "step"},
-    {"job_type": JOB_POLYGON_ENRICH, "label": "Enrich missing market data", "description": "Fill missing Polygon-derived prices, IV, Greeks, and indicators.", "advanced": False, "progress_unit": "fill", "api_provider": "Polygon", "rate_limit_per_minute": polygon_calls_per_minute()},
+    {"job_type": JOB_POLYGON_ENRICH, "label": "Enrich missing market data", "description": "Fill missing Polygon-derived prices, IV, Greeks, and indicators.", "advanced": False, "progress_unit": "fill", "api_provider": "Polygon"},
     {"job_type": JOB_ALPACA_ENRICH, "label": "Alpaca context enrichment", "description": "Fetch fill-level market context and cached bars.", "advanced": False, "progress_unit": "fill", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
     {"job_type": JOB_TRADE_PATH, "label": "Path metrics calculation", "description": "Compute closed-trade MFE, MAE, and exit efficiency.", "advanced": False, "progress_unit": "trade", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
     {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False, "progress_unit": "step"},
@@ -145,8 +145,17 @@ def _run_simple_job(job_id: uuid.UUID, fn: Callable[[Session, uuid.UUID], tuple[
 def _job_to_row(session: Session, config: dict[str, Any]) -> dict[str, Any]:
     job = latest_job(session, config["job_type"])
     status = job_status(job)
+    # Polygon's pace is discovered at runtime (enricher._AdaptiveRateLimiter),
+    # so it is read here per request, not stored in JOB_CONFIG at import. None
+    # means unpaced, and the UI hides the pacing line.
+    rate_limit = (
+        {"rate_limit_per_minute": polygon_calls_per_minute()}
+        if config.get("api_provider") == "Polygon"
+        else {}
+    )
     return {
         **config,
+        **rate_limit,
         "status": status["status"] or "idle",
         "running": status["running"],
         "done": status["done"],

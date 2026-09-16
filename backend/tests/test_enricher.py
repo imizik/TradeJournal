@@ -357,19 +357,245 @@ def test_bars_cache_covers_requires_the_needed_session_to_be_published():
     assert not covers(entry("2024-09-01", "2026-09-14", now - timedelta(days=8), []), date(2024, 9, 16), date(2026, 9, 14), now)
 
 
-def test_calls_per_minute_setting(monkeypatch):
-    f = enricher._configured_calls_per_minute
-    assert f("") == 4.5
-    assert f("abc") == 4.5
-    assert f("0") == 4.5
-    assert f("-3") == 4.5
-    assert f("nan") == 4.5
+# ---------------------------------------------------------------------------
+# The rate limiter learns the plan's budget instead of guessing it
+# ---------------------------------------------------------------------------
+
+
+class _Clock:
+    """Hand-advanced monotonic clock, so pacing is tested without sleeping."""
+
+    def __init__(self, now: float = 1000.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def tick(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def _limiter(ceiling=None, clock=None):
+    return enricher._AdaptiveRateLimiter(ceiling=ceiling, clock=clock or _Clock())
+
+
+def test_the_setting_is_a_ceiling_and_unset_means_discover_the_rate(monkeypatch):
+    f = enricher._configured_ceiling
     assert f("30") == 30.0
+    # Unset or nonsense: discover it rather than falling back to a guess.
+    assert f("") is None
+    assert f("abc") is None
+    assert f("0") is None
+    assert f("-3") is None
+    assert f("nan") is None
     monkeypatch.setenv("POLYGON_CALLS_PER_MINUTE", "12")
     assert f() == 12.0
     monkeypatch.delenv("POLYGON_CALLS_PER_MINUTE")
-    assert f() == 4.5
-    assert enricher._RateLimiter(60)._interval == pytest.approx(1.0)
+    assert f() is None
+
+
+def test_a_key_that_is_never_refused_never_paces():
+    """The paid-plan case: no per-minute limit, so no delay, ever. This is the
+    whole point of discovering the rate -- the old fixed 4.5/min spent ~13s
+    before every call whatever the key was entitled to."""
+    limiter = _limiter()
+    assert limiter.rate is None
+    for _ in range(50):
+        assert limiter.reserve() == 0.0
+        limiter.note_success()
+    assert limiter.rate is None
+
+
+def test_one_refusal_learns_the_budget_from_what_got_through():
+    clock = _Clock()
+    limiter = _limiter(clock=clock)
+
+    # Five calls land inside the window, the sixth is refused: the budget is 5.
+    for _ in range(5):
+        limiter.reserve()
+        limiter.note_success()
+    clock.tick(1.0)
+    wait = limiter.note_refusal()
+
+    # Five got through, so five is the budget -- paced a few percent under it,
+    # because spacing at exactly the budget keeps clipping a rolling window.
+    assert limiter.rate == pytest.approx(5.0 / enricher._PACING_HEADROOM)
+    # Wait out the oldest call's place in the window, not a blind 30s penalty.
+    assert wait == pytest.approx(59.0)
+
+    # And from here it paces at the rate it measured: ~4.76/min = one per 12.6s.
+    clock.tick(wait)
+    assert limiter.reserve() == pytest.approx(0.0)
+    assert limiter.reserve() == pytest.approx(60.0 / limiter.rate)
+
+
+def test_what_is_learned_never_exceeds_a_configured_ceiling():
+    clock = _Clock()
+    limiter = _limiter(ceiling=3.0, clock=clock)
+    for _ in range(5):
+        limiter.note_success()
+    limiter.note_refusal()
+    assert limiter.rate == 3.0  # not the ~4.76 the five that got through imply
+
+
+def test_a_refusal_with_nothing_to_measure_halves_blindly():
+    limiter = _limiter()
+    limiter.note_refusal()  # refused before a single success landed
+    assert limiter.rate == pytest.approx(4.5)
+    limiter.note_refusal()
+    assert limiter.rate == pytest.approx(2.25)
+
+
+def test_retry_after_is_honored_when_polygon_sends_one():
+    limiter = _limiter()
+    limiter.note_success()
+    assert limiter.note_refusal(retry_after=7.0) == 7.0
+
+
+def test_the_rate_steps_back_up_after_a_quiet_period():
+    """A transient refusal must not pin the process slow for its whole life."""
+    clock = _Clock()
+    limiter = _limiter(ceiling=8.0, clock=clock)
+    for _ in range(5):
+        limiter.note_success()
+    limiter.note_refusal()
+    learned = limiter.rate
+    assert learned == pytest.approx(5.0 / enricher._PACING_HEADROOM)
+
+    clock.tick(enricher._RECOVERY_QUIET_PERIOD + 1)
+    limiter.reserve()
+    assert limiter.rate == pytest.approx(8.0)  # doubling overshoots, so it caps
+    assert limiter._last_refusal is None       # back at the ceiling, nothing left to recover
+
+    # A quiet period from here changes nothing: there is no headroom above a ceiling.
+    clock.tick(enricher._RECOVERY_QUIET_PERIOD + 1)
+    limiter.reserve()
+    assert limiter.rate == pytest.approx(8.0)
+
+
+def _run_against(limit_per_min, calls=60, latency=0.25, ceiling=None):
+    """Drive the limiter against a server enforcing a rolling-minute window.
+
+    This is the only test here that can fail when the *pacing* is wrong rather
+    than when a constant changes: it plays the provider's side, so clipping the
+    window shows up as refusals the way it would against Polygon.
+    """
+    clock = _Clock(0.0)
+    limiter = enricher._AdaptiveRateLimiter(ceiling=ceiling, clock=clock)
+    hits: list[float] = []
+    refusals = done = 0
+    while done < calls:
+        clock.tick(limiter.reserve())
+        clock.tick(latency)
+        if limit_per_min is not None and sum(1 for t in hits if clock.now - t <= 60.0) >= limit_per_min:
+            refusals += 1
+            clock.tick(limiter.note_refusal())
+            continue
+        hits.append(clock.now)
+        limiter.note_success()
+        done += 1
+    return clock.now, refusals, limiter.rate
+
+
+def test_pacing_stays_inside_a_rolling_window_once_it_has_learned(monkeypatch):
+    """One refusal to discover the budget, and then none from pacing itself.
+
+    Spacing calls at exactly the measured budget keeps clipping the edge of a
+    rolling window: with _PACING_HEADROOM at 1.0 this same run takes 10 further
+    refusals, each a wasted round trip. That is what the headroom buys, and
+    asserting the constant instead of this would pass either way.
+
+    Recovery is held off here so this measures pacing alone; the probe's own
+    refusals are the next test's subject.
+    """
+    monkeypatch.setattr(enricher, "_RECOVERY_QUIET_PERIOD", 10**9)
+    elapsed, refusals, rate = _run_against(5, calls=60)
+
+    assert refusals == 1
+    assert rate < 5.0
+    # 60 calls paced just under 5/min, plus the wait that discovered it.
+    assert elapsed == pytest.approx(60 * 60.0 / rate, rel=0.15)
+
+
+def test_probing_for_more_speed_backs_off_instead_of_repeating_forever():
+    """A capped plan must not be re-probed on a fixed interval.
+
+    The probe doubles the rate, overshoots a hard limit and buys a 429. Held at
+    a constant five minutes, a 12-minute run pays that three times and a long
+    backfill pays it all day; doubling the wait after each refused probe makes
+    the attempts converge while a one-off refusal still recovers quickly.
+    """
+    refusal_times: list[float] = []
+    clock = _Clock(0.0)
+    limiter = enricher._AdaptiveRateLimiter(ceiling=None, clock=clock)
+    hits: list[float] = []
+    done = 0
+    while done < 300:
+        clock.tick(limiter.reserve())
+        clock.tick(0.25)
+        if sum(1 for t in hits if clock.now - t <= 60.0) >= 5:
+            refusal_times.append(clock.now)
+            clock.tick(limiter.note_refusal())
+            continue
+        hits.append(clock.now)
+        limiter.note_success()
+        done += 1
+
+    gaps = [b - a for a, b in zip(refusal_times, refusal_times[1:])]
+    assert gaps, "the probe never ran, so this proves nothing about backing off"
+    assert all(later > earlier for earlier, later in zip(gaps, gaps[1:])), gaps
+    # An hour of calls, not a refusal every five minutes.
+    assert len(refusal_times) <= 6, refusal_times
+
+
+def test_an_unlimited_plan_pays_nothing_but_latency():
+    """The reason the rate is discovered at all: a key with no per-minute limit
+    must never sleep. The old fixed 4.5/min spent 13.3s before every call."""
+    elapsed, refusals, rate = _run_against(None, calls=60, latency=0.25)
+
+    assert (refusals, rate) == (0, None)
+    assert elapsed == pytest.approx(60 * 0.25)
+
+
+class _Resp:
+    def __init__(self, status_code: int, headers: dict | None = None, payload: dict | None = None):
+        self.status_code = status_code
+        self.headers = headers or {}
+        self._payload = payload or {"results": [], "status": "OK"}
+
+    def json(self) -> dict:
+        return self._payload
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            raise AssertionError(f"unexpected {self.status_code}")
+
+
+def test_a_429_through_the_request_path_teaches_the_limiter_and_the_retry_succeeds(monkeypatch):
+    """End to end: the limiter only learns if _polygon_request actually reports
+    successes and refusals to it. Planted the other way round, this fails."""
+    clock = _Clock()
+    limiter = enricher._AdaptiveRateLimiter(ceiling=None, clock=clock)
+    monkeypatch.setattr(enricher, "_limiter", limiter)
+    monkeypatch.setattr(enricher, "POLYGON_API_KEY", "test")
+
+    slept: list[tuple[str, float]] = []
+    monkeypatch.setattr(
+        enricher, "observed_sleep",
+        lambda provider, reason, seconds, **kw: (slept.append((reason, seconds)), clock.tick(seconds))[1],
+    )
+
+    responses = [_Resp(200), _Resp(200), _Resp(429, {"Retry-After": "11"}), _Resp(200)]
+    monkeypatch.setattr(enricher.httpx, "get", lambda url, timeout=30: responses.pop(0))
+
+    assert enricher._polygon_request("https://api.polygon.io/x")["status"] == "OK"
+    assert enricher._polygon_request("https://api.polygon.io/y")["status"] == "OK"
+    assert limiter.rate is None  # nothing has refused us yet, so no pacing
+    assert slept == []
+
+    assert enricher._polygon_request("https://api.polygon.io/z")["status"] == "OK"
+    assert limiter.rate == pytest.approx(2.0 / enricher._PACING_HEADROOM)  # the two that landed
+    assert slept == [("provider_429", 11.0)]  # Polygon's own Retry-After
 
 
 def test_a_403_is_never_cached_as_no_data(fake, monkeypatch):

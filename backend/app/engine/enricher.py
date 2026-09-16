@@ -11,9 +11,11 @@ needed, and one minute-aggregates call per 60-day window of fill dates. The
 previous design made seven indicator calls per ticker plus one minute call per
 fill day, and never refreshed a fetched indicator series.
 
-Rate limit: Polygon's Basic (free) plan allows 5 calls/min. The limiter stays
-at 4.5/min for headroom; POLYGON_CALLS_PER_MINUTE raises it on a paid plan
-(which has no per-minute limit).
+Rate limit: discovered, not configured. Calls run unpaced until Polygon
+answers 429, and the number that succeeded in the preceding minute is the
+budget -- so a free key finds its 5/min after one refusal and a paid key
+(no per-minute limit) never paces at all. POLYGON_CALLS_PER_MINUTE is a
+ceiling for pinning the rate lower on purpose.
 
 Cache: raw Polygon responses are saved to backend/data/polygon_cache/ so a
 backfill can be interrupted and resumed without re-fetching. Daily/hourly bar
@@ -25,9 +27,11 @@ import json
 import logging
 import math
 import os
+import threading
 import time
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import Iterable, Optional
 from urllib.parse import urlencode
@@ -71,49 +75,190 @@ _DAILY_INDICATOR_COLUMNS = ("sma_20", "sma_50", "ema_9", "ema_20", "rsi_14", "ma
 
 
 # ---------------------------------------------------------------------------
-# Rate limiter: default 4.5 calls/min = one call every 13.4s
+# Rate limiter: observed, not configured
+#
+# Polygon Basic (free) allows 5 calls/min; paid Stocks plans have no per-minute
+# limit at all. A fixed rate means guessing which one you are on, and the wrong
+# guess costs in both directions: guess high on a free key and the budget goes
+# to 429s, guess low on a paid key and a one-minute backfill takes half an hour.
+# The old default did the second -- 4.5/min, which is ~25 minutes for a week of
+# fills across 38 tickers no matter what the key is entitled to.
+#
+# So the rate is discovered. Calls run unpaced until Polygon refuses one, and a
+# refusal carries the answer with it: the number of calls that *succeeded* in
+# the preceding minute is the budget. One 429 finds a free key's limit exactly
+# -- no halving ladder -- and a paid key never sees one, so it never paces.
+# After a quiet period the rate steps back up, so a transient refusal does not
+# pin the process slow for the rest of its life.
+#
+# POLYGON_CALLS_PER_MINUTE still works, but it is now a *ceiling* rather than a
+# target: set it only to pin the rate below whatever the plan would allow.
 # ---------------------------------------------------------------------------
 
-DEFAULT_CALLS_PER_MINUTE = 4.5
+_LEARN_WINDOW = 60.0            # Polygon's limit is per minute
+_MIN_LEARNED_RATE = 1.0         # never pace slower than one call a minute
+_BLIND_REFUSAL_RATE = 9.0       # refused with nothing to learn from: halve to 4.5
+# Pace just under what was measured. Polygon counts a rolling window, so
+# spacing calls at exactly the budget keeps clipping its edge: simulating this
+# job at a measured-exactly 5/min took 22 further refusals, each a wasted round
+# trip. A few percent of headroom removes all of them.
+_PACING_HEADROOM = 1.05
+_RECOVERY_QUIET_PERIOD = 300.0  # no refusal for this long: try twice the rate
+# Each probe that gets refused doubles the wait before the next one. Without
+# this, a plan with a real cap is probed every five minutes forever: the rate
+# doubles, overshoots, and buys a 429 -- three of them inside a 12-minute
+# simulated run. Backing off converges on "stop asking" while still letting a
+# one-off refusal recover quickly.
+_RECOVERY_MAX_QUIET = 7200.0
 
 
-def _configured_calls_per_minute(raw: str | None = None) -> float:
-    """POLYGON_CALLS_PER_MINUTE, or the free-tier-safe default when unset or
-    invalid. Polygon Basic allows 5/min; paid plans are unlimited."""
+def _configured_ceiling(raw: str | None = None) -> float | None:
+    """POLYGON_CALLS_PER_MINUTE as a ceiling, or None to let the rate be
+    discovered. Non-positive and unparseable values are ignored."""
     if raw is None:
         raw = os.environ.get("POLYGON_CALLS_PER_MINUTE", "")
     raw = (raw or "").strip()
     if not raw:
-        return DEFAULT_CALLS_PER_MINUTE
+        return None
     try:
         value = float(raw)
     except ValueError:
         value = float("nan")
     if not math.isfinite(value) or value <= 0:
-        log.warning("Ignoring POLYGON_CALLS_PER_MINUTE=%r; using %s calls/min", raw, DEFAULT_CALLS_PER_MINUTE)
-        return DEFAULT_CALLS_PER_MINUTE
+        log.warning("Ignoring POLYGON_CALLS_PER_MINUTE=%r; discovering the rate instead", raw)
+        return None
     return value
 
 
-class _RateLimiter:
-    def __init__(self, calls_per_minute: float = DEFAULT_CALLS_PER_MINUTE):
-        self.calls_per_minute = calls_per_minute
-        self._interval = 60.0 / calls_per_minute
-        self._last = 0.0
+class _AdaptiveRateLimiter:
+    """Paces at the fastest rate Polygon has actually allowed.
 
-    def wait(self):
-        elapsed = time.monotonic() - self._last
-        if elapsed < self._interval:
-            observed_sleep("Polygon", "rate_limit", self._interval - elapsed)
-        self._last = time.monotonic()
+    `rate is None` means unpaced. A 429 sets it from what got through; quiet
+    time raises it again, never above `ceiling`.
+    """
+
+    def __init__(self, ceiling: float | None = None, clock=time.monotonic):
+        self.ceiling = ceiling
+        self.rate = ceiling
+        self._clock = clock
+        self._successes: deque[float] = deque()
+        self._next_slot = 0.0
+        self._last_refusal: float | None = None
+        self._recovery_after = _RECOVERY_QUIET_PERIOD
+        self._probing = False
+        self._lock = threading.Lock()
+
+    # -- state -------------------------------------------------------------
+
+    def _trim(self, now: float) -> None:
+        while self._successes and now - self._successes[0] > _LEARN_WINDOW:
+            self._successes.popleft()
+
+    def _recover(self, now: float) -> None:
+        """Step back up after a quiet period, so one refusal is not permanent."""
+        if self.rate is None or self._last_refusal is None:
+            return
+        if now - self._last_refusal < self._recovery_after:
+            return
+        self._last_refusal = now
+        self._probing = True
+        raised = self.rate * 2.0
+        if self.ceiling is None:
+            self.rate = raised
+        elif raised >= self.ceiling:
+            self.rate = self.ceiling
+            self._last_refusal = None  # back at the ceiling; nothing left to recover
+        else:
+            self.rate = raised
+        log.info("Polygon quiet since last refusal; raising pace to %s calls/min", self.rate)
+
+    # -- the three things callers do ---------------------------------------
+
+    def reserve(self) -> float:
+        """Claim the next slot and return how long to wait before using it."""
+        with self._lock:
+            now = self._clock()
+            self._recover(now)
+            if self.rate is None:
+                self._next_slot = now
+                return 0.0
+            delay = max(0.0, self._next_slot - now)
+            self._next_slot = max(now, self._next_slot) + 60.0 / self.rate
+            return delay
+
+    def wait(self) -> None:
+        delay = self.reserve()
+        if delay > 0:
+            observed_sleep("Polygon", "rate_limit", delay)
+
+    def note_success(self) -> None:
+        with self._lock:
+            now = self._clock()
+            self._successes.append(now)
+            self._trim(now)
+
+    def note_refusal(self, retry_after: float | None = None) -> float:
+        """Learn the budget from a 429; return how long to wait before retrying."""
+        with self._lock:
+            now = self._clock()
+            self._trim(now)
+            if self._probing:
+                # We raised the rate ourselves and the plan refused it: that is
+                # a cap, not a hiccup. Wait longer before asking again.
+                self._recovery_after = min(self._recovery_after * 2.0, _RECOVERY_MAX_QUIET)
+                self._probing = False
+            landed = len(self._successes)
+            if landed:
+                # `landed` calls got through in the last minute and the next one
+                # did not: that is the budget, measured rather than assumed.
+                learned = max(float(landed) / _PACING_HEADROOM, _MIN_LEARNED_RATE)
+                self.rate = learned if self.rate is None else min(self.rate, learned)
+            else:
+                # Refused without a single success to measure -- halve blindly.
+                current = self.rate if self.rate is not None else _BLIND_REFUSAL_RATE
+                self.rate = max(current / 2.0, _MIN_LEARNED_RATE)
+            self._last_refusal = now
+            if retry_after is not None:
+                wait = max(0.0, retry_after)
+            elif self._successes:
+                # Wait for the oldest call to age out of the window.
+                wait = max(0.0, _LEARN_WINDOW - (now - self._successes[0]))
+            else:
+                wait = _LEARN_WINDOW
+            # The caller sleeps `wait` before retrying, so that sleep *is* this
+            # call's pacing. Scheduling the next slot any later would stack our
+            # delay on top of the provider's own Retry-After and wait twice.
+            self._next_slot = now + wait
+            return wait
 
 
-_limiter = _RateLimiter(calls_per_minute=_configured_calls_per_minute())
+_limiter = _AdaptiveRateLimiter(ceiling=_configured_ceiling())
 
 
-def polygon_calls_per_minute() -> float:
-    """Configured request budget, safe to expose in status responses."""
-    return _limiter.calls_per_minute
+def polygon_calls_per_minute() -> float | None:
+    """The rate currently being paced at, or None while unpaced. Safe to expose
+    in status responses; read it per request, it changes as the rate is learned."""
+    return _limiter.rate
+
+
+def _retry_after_seconds(headers) -> float | None:
+    """`Retry-After` in seconds, whether sent as a delay or an HTTP date."""
+    raw = (headers.get("Retry-After") or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC_TZ)
+    return max(0.0, (when - datetime.now(UTC_TZ)).total_seconds())
 
 
 # ---------------------------------------------------------------------------
@@ -159,11 +304,15 @@ def _polygon_request(url: str, params: dict | None = None) -> dict:
             log.warning("403 from Polygon for %s - API key is not entitled to this endpoint/data window, skipping", url)
             raise PolygonNotEntitled(url)
         if resp.status_code == 429:
-            wait = 30 * (attempt + 1)
-            log.warning("429 from Polygon — waiting %ds (attempt %d/5)", wait, attempt + 1)
+            wait = _limiter.note_refusal(_retry_after_seconds(resp.headers))
+            log.warning(
+                "429 from Polygon — pacing at %s calls/min, waiting %.0fs (attempt %d/5)",
+                _limiter.rate, wait, attempt + 1,
+            )
             observed_sleep("Polygon", "provider_429", wait)
             continue
         resp.raise_for_status()
+        _limiter.note_success()
         return resp.json()
 
     raise RuntimeError(f"Polygon request failed after 5 retries: {url}")
