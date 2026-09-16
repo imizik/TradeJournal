@@ -372,6 +372,60 @@ def test_calls_per_minute_setting(monkeypatch):
     assert enricher._RateLimiter(60)._interval == pytest.approx(1.0)
 
 
+def test_a_403_is_never_cached_as_no_data(fake, monkeypatch):
+    """A bad key or a plan that lacks the window must not poison the cache:
+    the old code cached a 403 as a one-year empty marker per day, and a
+    batched window would have written one for every day in it."""
+    session, account = _session()
+    d1, d2, d3, _ = _recent_sessions()
+    at_the_money = round(next(b for b in fake.bars("AAA", "minute", d3, d3) if b["t"] == _et_ms(d3, 10, 35))["c"])
+    fills = [
+        _fill(account, "AAA", d1, time(10, 35)),
+        _fill(account, "AAA", d3, time(10, 35), option=True, strike=at_the_money),
+    ]
+    for fill in fills:
+        session.add(fill)
+    session.commit()
+
+    def forbidden(url, params=None):
+        fake.calls.append(url)
+        raise enricher.PolygonNotEntitled(url)
+
+    monkeypatch.setattr(enricher, "_polygon_request", forbidden)
+    assert enricher.enrich_fills(fills, session) == 2
+    assert len(fake.calls) == 3  # daily, hourly, minute window — each refused once
+    assert fills[0].underlying_price_at_fill is None and fills[0].sma_20_at_fill is None
+    assert fills[0].ema_9h_at_fill is None and fills[1].iv_at_fill is None
+    assert list(enricher.CACHE_DIR.glob("*.json")) == []
+
+    # A single-day request goes through _polygon_get: same rule.
+    with pytest.raises(enricher.PolygonNotEntitled):
+        enricher._polygon_get(f"/v2/aggs/ticker/AAA/range/1/minute/{d2}/{d2}", enricher._MINUTE_PARAMS, empty_ttl=1.0)
+    assert list(enricher.CACHE_DIR.glob("*.json")) == []
+
+    # Once the key works, everything is fetched and stored normally.
+    monkeypatch.setattr(enricher, "_polygon_request", fake)
+    fake.calls.clear()
+    assert enricher.enrich_fills(fills, session) == 2
+    assert len(fake.calls) == 3
+    assert fills[0].underlying_price_at_fill is not None and fills[0].sma_20_at_fill is not None
+    assert fills[1].iv_at_fill is not None
+
+
+def test_polygon_request_raises_on_403(monkeypatch):
+    class Resp:
+        status_code = 403
+
+        def raise_for_status(self):
+            raise AssertionError("not reached")
+
+    monkeypatch.setattr(enricher.httpx, "get", lambda url, timeout: Resp())
+    monkeypatch.setattr(enricher, "POLYGON_API_KEY", "KEY")
+    monkeypatch.setattr(enricher._limiter, "wait", lambda: None)
+    with pytest.raises(enricher.PolygonNotEntitled):
+        enricher._polygon_request("https://api.polygon.io/v2/aggs/ticker/AAA/range/1/day/2026-01-01/2026-02-01")
+
+
 def test_polygon_request_appends_the_key_to_next_url_without_dropping_its_cursor(monkeypatch):
     seen = {}
 

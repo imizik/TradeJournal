@@ -30,6 +30,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import sys
 from datetime import date, datetime
 from pathlib import Path
@@ -219,6 +220,33 @@ def _capture_with(engine) -> dict:
     return {"trades": captured, "trade_count": len(captured)}
 
 
+_ET_STAMP = re.compile(r"^(\d{4}-\d{2}-\d{2})( \d{2}:\d{2})?$")
+
+
+def _relative_dates(value):
+    """
+    Every remaining absolute date in the audit, as an offset from today.
+
+    The auditor formats several timestamps itself ("2026-05-21 14:45" for the
+    path window, bar times for MFE/MAE, "2026-05-14" for daily-bar coverage)
+    rather than returning datetimes, so `_days_from_today` never sees them.
+    Left as they were, the snapshot passed on the day it was written and failed
+    every day after: verified 2026-09-15 against a snapshot from 2026-09-11,
+    where the only diff was those window fields, each shifted by four days.
+    The date part becomes "T-118"; the time of day stays under test.
+    """
+    if isinstance(value, dict):
+        return {key: _relative_dates(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_relative_dates(item) for item in value]
+    if isinstance(value, str):
+        match = _ET_STAMP.match(value)
+        if match:
+            offset = _days_from_today(match.group(1))
+            return f"T{offset:+d}{match.group(2) or ''}"
+    return value
+
+
 def _normalize_audit(audit: dict) -> dict:
     """
     The audit minus what cannot be stable: the random trade id, and absolute
@@ -238,7 +266,7 @@ def _normalize_audit(audit: dict) -> dict:
             if date_key in fill_audit:
                 fill_audit[f"{date_key}_days_from_today"] = _days_from_today(
                     fill_audit.pop(date_key))
-    return _jsonable(normalized)
+    return _relative_dates(_jsonable(normalized))
 
 
 def test_the_seed_fixture_reconstructs_to_its_recorded_snapshot(seeded):

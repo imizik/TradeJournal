@@ -122,8 +122,14 @@ def _cache_path(key: str) -> Path:
     return CACHE_DIR / f"{safe}.json"
 
 
+class PolygonNotEntitled(RuntimeError):
+    """Polygon answered 403: the key is invalid, or the plan does not cover the
+    requested endpoint or data window. Never a cacheable "no data" result —
+    fixing the key or plan must make the next sync fetch again."""
+
+
 def _polygon_request(url: str, params: dict | None = None) -> dict:
-    """One rate-limited GET with retries. Returns {} on 403 (not entitled).
+    """One rate-limited GET with retries. Raises PolygonNotEntitled on 403.
 
     `url` is either an API path's full URL or a Polygon `next_url`, which
     already carries its own query string. httpx replaces rather than merges a
@@ -144,7 +150,7 @@ def _polygon_request(url: str, params: dict | None = None) -> dict:
             continue
         if resp.status_code == 403:
             log.warning("403 from Polygon for %s - API key is not entitled to this endpoint/data window, skipping", url)
-            return {}
+            raise PolygonNotEntitled(url)
         if resp.status_code == 429:
             wait = 30 * (attempt + 1)
             log.warning("429 from Polygon — waiting %ds (attempt %d/5)", wait, attempt + 1)
@@ -184,7 +190,7 @@ def _polygon_get(path: str, params: dict, empty_ttl: float | None = None) -> dic
     that many seconds, so permanently data-less requests (delisted tickers,
     days Polygon has no bars for) stop burning the rate-limit budget on every
     sync. If None, empty responses are never cached (recent data may still be
-    published later).
+    published later). A 403 raises PolygonNotEntitled and caches nothing.
     """
     cp = _cache_path(_cache_key(path, params))
     cached = _read_cached(cp, empty_ttl)
@@ -260,8 +266,9 @@ def _bars_cache_covers(entry: dict, frm: date, to: date, now_et: datetime) -> bo
     fetched_at = datetime.fromtimestamp(float(entry["fetched_at"]), tz=ET)
     results = entry.get("results") or []
     if not results:
-        # No bars at all (delisted, index-only symbol, not yet listed, or a
-        # 403): retry weekly, as the old empty-series marker did.
+        # No bars at all (delisted, index-only symbol, not yet listed): retry
+        # weekly, as the old empty-series marker did. A 403 never gets here —
+        # it raises before anything is cached.
         return date.fromisoformat(entry["to"]) >= to and (now_et - fetched_at).total_seconds() < _EMPTY_TTL_SERIES
     if date.fromisoformat(polygon_bar_et_date(results[-1])) >= to:
         return True
@@ -271,7 +278,7 @@ def _bars_cache_covers(entry: dict, frm: date, to: date, now_et: datetime) -> bo
 def fetch_aggregate_bars(ticker: str, timespan: str, frm: date, to: date, fetch_to: date | None = None) -> list[dict]:
     """Daily ('day') or hourly ('hour') bars covering [frm, to], cached per
     (ticker, timespan). A miss fetches [frm, fetch_to or to] and replaces the
-    cached window."""
+    cached window. Raises (and caches nothing) on 403 or network failure."""
     now_et = datetime.now(ET)
     entry = _load_bars_cache(ticker, timespan)
     if entry is not None and _bars_cache_covers(entry, frm, to, now_et):
@@ -366,6 +373,8 @@ def fetch_minute_bars_for_days(ticker: str, days: Iterable[date]) -> dict[date, 
                 continue
             data = _fetch_aggregates(ticker, "minute", window[0], window[-1])
         except Exception as e:
+            # Includes PolygonNotEntitled: nothing is cached for these days, so
+            # a fixed key or plan fetches them on the next sync.
             log.warning("Failed to fetch bars for %s %s..%s: %s", ticker, window[0], window[-1], e)
             for day in window:
                 out.setdefault(day, {})
