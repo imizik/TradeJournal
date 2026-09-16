@@ -17,8 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
-import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -30,7 +29,6 @@ from app.models import (
     Account,
     Fill,
     ResearchWorkspace,
-    TradingViewAlert,
     WebullRawEvent,
 )
 

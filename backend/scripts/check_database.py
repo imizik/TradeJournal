@@ -27,7 +27,7 @@ from urllib.parse import urlparse
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
-from sqlalchemy import UniqueConstraint, create_engine, inspect, text  # noqa: E402
+from sqlalchemy import UniqueConstraint, create_engine, inspect  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402
 
 import app.models  # noqa: F401,E402  -- registers every table on the metadata

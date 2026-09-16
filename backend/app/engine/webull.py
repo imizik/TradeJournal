@@ -56,13 +56,10 @@ from dotenv import load_dotenv
 from sqlmodel import Session, select
 
 from app.engine.webull_client import (
-    WEBULL_APP_KEY,
-    WEBULL_APP_SECRET,
     WEBULL_ENVIRONMENT,
     WEBULL_REGION_ID,
     WebullClientError,
     WebullHttpClient,
-    resolve_base_url,
     webull_configured,
     _sanitize,
 )

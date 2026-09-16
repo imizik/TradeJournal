@@ -16,7 +16,7 @@ Two things this module guards, in order of importance:
 import json
 import re
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 

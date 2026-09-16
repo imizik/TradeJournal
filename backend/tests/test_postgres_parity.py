@@ -29,10 +29,6 @@ guard below that refuses a database holding fills.
 from __future__ import annotations
 
 import hashlib
-import os
-import subprocess
-import sys
-import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -267,7 +263,6 @@ def test_tradingview_alert_identity_is_enforced_by_postgres(migrated):
     semantic hashes are retries, and a second row with the same id must never
     overwrite first evidence. That guarantee is the database's to keep.
     """
-    from app.models import TradingViewAlert
 
     inspector = inspect(migrated)
     columns = {c["name"] for c in inspector.get_columns("tradingview_alert")}

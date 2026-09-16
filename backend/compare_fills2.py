@@ -134,32 +134,32 @@ for key in sorted(all_keys):
         elif abs(csv_avg - db_avg) > 1.0:  # >$1/contract tolerance
             price_mismatch.append((key, csv_qty, csv_avg, db_avg))
 
-print(f"\n=== AFTER CONSOLIDATION ===")
+print("\n=== AFTER CONSOLIDATION ===")
 print(f"Keys only in CSV (truly missing from DB):     {len(missing_from_db)}")
 print(f"Keys only in DB  (phantom fills, not in CSV): {len(phantom_in_db)}")
 print(f"Keys in both but contract qty mismatch:       {len(contract_mismatch)}")
 print(f"Keys in both but avg price mismatch >$1:      {len(price_mismatch)}")
 
 if missing_from_db:
-    print(f"\n--- MISSING FROM DB (first 20) ---")
+    print("\n--- MISSING FROM DB (first 20) ---")
     for (dt, tkr, ot, strike, exp, side), g in missing_from_db[:20]:
         avg = g["total_value"] / g["contracts"] if g["contracts"] else 0
         print(f"  {dt} {tkr:6s} {ot:4s} {side:14s} ${strike:8.2f} exp={exp} qty={g['contracts']:3d} avg=${avg:.2f}/contract")
 
 if phantom_in_db:
-    print(f"\n--- PHANTOM IN DB (first 20) ---")
+    print("\n--- PHANTOM IN DB (first 20) ---")
     for (dt, tkr, ot, strike, exp, side), g in phantom_in_db[:20]:
         avg = g["total_value"] / g["contracts"] if g["contracts"] else 0
         print(f"  {dt} {tkr:6s} {ot:4s} {side:14s} ${strike:8.2f} exp={exp} qty={g['contracts']:3d} avg=${avg:.2f}/contract")
 
 if contract_mismatch:
-    print(f"\n--- CONTRACT QTY MISMATCH (first 20) ---")
+    print("\n--- CONTRACT QTY MISMATCH (first 20) ---")
     for (dt, tkr, ot, strike, exp, side), csv_q, db_q, csv_avg, db_avg in contract_mismatch[:20]:
         print(f"  {dt} {tkr:6s} {ot:4s} {side:14s} ${strike:8.2f} exp={exp} "
               f"csv_qty={csv_q} db_qty={db_q} csv_avg=${csv_avg:.2f} db_avg=${db_avg:.2f}")
 
 if price_mismatch:
-    print(f"\n--- PRICE MISMATCH >$1/contract (first 20) ---")
+    print("\n--- PRICE MISMATCH >$1/contract (first 20) ---")
     for (dt, tkr, ot, strike, exp, side), qty, csv_avg, db_avg in price_mismatch[:20]:
         print(f"  {dt} {tkr:6s} {ot:4s} {side:14s} ${strike:8.2f} exp={exp} qty={qty} "
               f"csv_avg=${csv_avg:.2f} db_avg=${db_avg:.2f} diff={db_avg - csv_avg:+.2f}")
@@ -228,7 +228,7 @@ open_deployed = cur.fetchone()[0]
 
 conn.close()
 
-print(f"\n=== PnL RECONCILIATION ===")
+print("\n=== PnL RECONCILIATION ===")
 print(f"CSV BTO total (cash out):  ${csv_bto_total:+,.2f}")
 print(f"CSV STC total (cash in):   ${csv_stc_total:+,.2f}")
 print(f"CSV net cash flow (P&L minus fees): ${csv_net:+,.2f}")
@@ -246,6 +246,6 @@ print(f"OEXP rows in CSV (expired worthless): {len(csv_oexp_rows)}")
 print("  (expired worthless losses ARE in the BTO cash flows above)")
 
 # Show OEXP samples
-print(f"\n--- OEXP sample (first 10) ---")
+print("\n--- OEXP sample (first 10) ---")
 for r in csv_oexp_rows[:10]:
     print(f"  {r['date']} {r['desc'][:60]}")

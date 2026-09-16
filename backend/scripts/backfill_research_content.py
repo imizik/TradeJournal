@@ -80,17 +80,17 @@ def apply_content(data: dict, content: dict) -> dict:
             c["aiDraft"] = True
 
     for layer_id, patch in content["layers"].items():
-        l = data.get("layers", {}).get(layer_id)
-        if not l:
+        layer = data.get("layers", {}).get(layer_id)
+        if not layer:
             continue
         touched = False
         for f in LAYER_FIELDS:
-            if f in patch and is_blank(l.get(f)):
-                l[f] = patch[f]
+            if f in patch and is_blank(layer.get(f)):
+                layer[f] = patch[f]
                 stats["layer_fields"] += 1
                 touched = True
         if touched:
-            l["aiDraft"] = True
+            layer["aiDraft"] = True
 
     moat = data.setdefault("moat", {})
     for cluster_id, cluster in content["moat"].items():

@@ -8,7 +8,7 @@ How to prove a change works in this repository. The standard is evidence, not
 ```bash
 bash scripts/setup.sh          # clean clone -> runnable (idempotent)
 bash scripts/verify.sh         # everything CI runs
-bash scripts/verify.sh --fast  # tests + typecheck, no builds (inner loop)
+bash scripts/verify.sh --fast  # lint + tests + typecheck, no builds (inner loop)
 bash scripts/verify.sh --backend
 bash scripts/verify.sh --frontend
 bash scripts/verify.sh --e2e   # browser smoke tests only (slowest)
@@ -24,6 +24,7 @@ native PowerShell launcher for the app itself.
 
 | Check | Command | Catches |
 |---|---|---|
+| Backend lint | `cd backend && ruff check .` | Unused imports and variables, undefined names, redefinitions, import placement — pyflakes and pycodestyle errors, no style rules; `[tool.ruff]` in `backend/pyproject.toml` |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
 | Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |

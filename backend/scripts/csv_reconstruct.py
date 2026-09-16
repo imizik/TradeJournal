@@ -180,7 +180,7 @@ def print_result(label: str, result: ReconstructResult) -> dict:
     print(f"  Anomalies:      {len(result.anomalies):>6}")
 
     if result.anomalies:
-        print(f"\n  Anomalies:")
+        print("\n  Anomalies:")
         for a in result.anomalies[:15]:
             print(f"    - {a[:100]}")
         if len(result.anomalies) > 15:
@@ -194,7 +194,7 @@ def print_result(label: str, result: ReconstructResult) -> dict:
             monthly[ym] += float(t.realized_pnl)
 
     if monthly:
-        print(f"\n  Monthly PnL:")
+        print("\n  Monthly PnL:")
         for ym in sorted(monthly):
             print(f"    {ym}: ${monthly[ym]:>+10,.2f}")
 
@@ -248,7 +248,7 @@ def compare_trades(csv_result: ReconstructResult, db_result: ReconstructResult):
     diffs.sort(key=lambda d: abs(d["diff"]), reverse=True)
 
     print(f"\n{'='*60}")
-    print(f"  CSV vs DB COMPARISON")
+    print("  CSV vs DB COMPARISON")
     print(f"{'='*60}")
     print(f"  Contract keys compared: {len(all_keys)}")
     print(f"  Keys with PnL diff > $1 or trade count mismatch: {len(diffs)}")
@@ -319,12 +319,12 @@ def main():
         # Summary
         gap = db_stats["total_pnl"] - csv_stats["total_pnl"]
         print(f"\n{'='*60}")
-        print(f"  SUMMARY")
+        print("  SUMMARY")
         print(f"{'='*60}")
         print(f"  CSV ground truth PnL:  ${csv_stats['total_pnl']:>+12,.2f}")
         print(f"  DB reconstructed PnL:  ${db_stats['total_pnl']:>+12,.2f}")
         print(f"  Gap (DB - CSV):        ${gap:>+12,.2f}")
-        print(f"  (Positive gap = DB overstates, negative = DB understates)")
+        print("  (Positive gap = DB overstates, negative = DB understates)")
 
 
 if __name__ == "__main__":

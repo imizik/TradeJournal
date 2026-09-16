@@ -28,7 +28,7 @@ from app.engine.strategy_csv import (
     TradingViewParseResult,
     parse_tradingview_csv,
 )
-from app.models import StrategyRunMetrics, StrategyRunTrade, StrategyVersion
+from app.models import StrategyRunMetrics, StrategyVersion
 
 router = APIRouter()
 

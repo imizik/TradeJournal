@@ -37,6 +37,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # pyflakes and pycodestyle errors only: unused imports and variables,
+      # undefined names, import placement. The rule set and the exact ruff
+      # version live in pyproject.toml, so this run matches verify.sh locally.
+      - name: Lint
+        working-directory: backend
+        run: ruff check .
+
       # The static import graph: what the public ingress may reach, that the
       # private app never imports the ingress side, and which engine modules
       # stay free of network and database imports. Run first and on its own so

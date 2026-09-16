@@ -159,7 +159,6 @@ def _capture(database_url: str) -> dict:
 
     from sqlmodel import create_engine
 
-    from app.models import Account, Fill, Trade, TradeFill, TradePathMetrics
 
     engine = create_engine(database_url)
     with (

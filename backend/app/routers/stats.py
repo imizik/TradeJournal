@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import Account, Tag, Trade, TradeFill, TradeTag
+from app.models import Account, Tag, Trade, TradeTag
 
 router = APIRouter()
 
@@ -51,7 +51,6 @@ async def get_stats(
     # Tag breakdowns — load tags for each trade
     tag_map: dict[str, list[Trade]] = defaultdict(list)
     trade_tags = session.exec(select(TradeTag)).all()
-    tag_ids = {tt.tag_id for tt in trade_tags}
     tags_by_id = {t.id: t.name for t in session.exec(select(Tag)).all()}
     trade_id_to_tags: dict = defaultdict(list)
     for tt in trade_tags:

@@ -3,7 +3,6 @@ Find fills not linked to any trade (orphaned) and understand the reconstructor g
 """
 import sqlite3
 from collections import defaultdict
-from datetime import date, datetime
 
 conn = sqlite3.connect("data/trade_journal.db")
 cur = conn.cursor()
@@ -84,7 +83,7 @@ for tid, db_pnl, avg_entry, avg_exit, contracts, status, tkr, exp in trades:
             "diff": db_pnl - fill_implied_pnl
         })
 
-print(f"\n=== TRADE PnL CONSISTENCY CHECK ===")
+print("\n=== TRADE PnL CONSISTENCY CHECK ===")
 print(f"Total trades checked: {len(trades)}")
 print(f"Trades where db_pnl != fill_implied_pnl by >$0.50: {len(pnl_errors)}")
 print(f"Sum of fill-implied PnL: ${total_fill_net:+,.2f}")
@@ -92,7 +91,7 @@ print(f"Sum of db realized PnL:  ${total_db_pnl:+,.2f}")
 print(f"Diff: ${total_db_pnl - total_fill_net:+,.2f}")
 
 if pnl_errors:
-    print(f"\n--- Inconsistent trades (largest diff first) ---")
+    print("\n--- Inconsistent trades (largest diff first) ---")
     for e in sorted(pnl_errors, key=lambda x: abs(x["diff"]), reverse=True)[:20]:
         print(f"  {e['ticker']:6s} {e['exp']} {e['status']:8s} qty={e['contracts']:3d} "
               f"entry=${e['fill_entry']:.2f} exit=${e['fill_exit']:.2f} "
@@ -119,7 +118,7 @@ cur.execute("""
 """)
 linked_stc = cur.fetchone()[0]
 
-print(f"\n=== FILL ACCOUNTING ===")
+print("\n=== FILL ACCOUNTING ===")
 print(f"Total BTO fills value:            ${698014.04:>12,.2f}")
 print(f"  linked to trades:               ${linked_bto:>12,.2f}")
 print(f"  orphaned:                       ${orphan_bto_val:>12,.2f}")
