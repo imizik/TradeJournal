@@ -20,6 +20,18 @@ webhook can reach the database without exposing the private API. Private API
 keys and unrestricted database credentials must never appear in its
 environment.
 
+That separation is enforced on the import graph, not only described here.
+`backend/tests/test_import_boundaries.py` fails if anything the ingress
+imports, through any chain, lies outside a six-module allowlist
+(`app.tradingview_ingress`, `app.tradingview_database`,
+`app.routers.tradingview_webhook`, `app.engine.tradingview`,
+`app.engine.tradingview_alerts`, `app.models`); if a private module imports
+the ingress side; or if a pure engine module — the reconstructor, the parsers,
+Strategy Lab metrics — starts reaching the network or the database engine.
+The allowlists at the top of that file are the policy. Changing them is an
+architecture change: make it deliberately, in the same commit as the import
+that needs it, and say why.
+
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend by
 default. The ingress is opt-in:
 

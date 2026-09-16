@@ -24,7 +24,8 @@ native PowerShell launcher for the app itself.
 
 | Check | Command | Catches |
 |---|---|---|
-| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift |
+| Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
+| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
@@ -32,7 +33,8 @@ native PowerShell launcher for the app itself.
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
 CI (`.github/workflows/ci.yml`) runs the same checks on every pull request, in
-two parallel jobs. Agent verification is not the only signal.
+four parallel jobs (backend, frontend, browser, Postgres parity). Agent
+verification is not the only signal.
 
 ## Credentials and data: none required
 
@@ -70,6 +72,39 @@ Follow what the suite already does:
 Collection is scoped to `backend/tests` by `[tool.pytest.ini_options]`.
 `backend/scripts/` holds ad hoc analysis utilities that do real work at import
 time; pytest must not walk them.
+
+## Two rules every check must satisfy
+
+Both come from review findings that recurred until they were written down.
+They apply to anything that claims to catch something: a test, a preflight, a
+privilege probe, a CI step.
+
+**A guard takes its universe from the system, never from a literal.** A
+hand-written list of things to check is a sample, and a sample passes when
+the thing it did not list is broken. The role probe in `setup_roles.py` was
+rewritten three times with a longer table list each time; what fixed it was
+sweeping `has_table_privilege()` over every table in `public`. The parity
+module counts rows in every table, not the ones in `SQLModel.metadata`. The
+import-boundary test checks the closure grimp computes from the code, and its
+only literals are the allowlists — so a new module is caught the first time
+anything reaches it, not the first time someone remembers to list it. When a
+literal list has to stay (an allowlist is a policy, and a policy is a
+literal), the check fails closed: an item outside the list is a failure, not
+a pass. Before you commit a check, ask what it enumerates by hand and whether
+the system could enumerate it instead.
+
+**Verify where the failure can exhibit.** A passing check proves only that it
+did not fail *here*. Three checks in this repository passed in environments
+where the defect they targeted could not have shown up: a password-masking
+bug passed against a Postgres started with `--auth=trust`, which accepts any
+password; a snapshot holding absolute paths matched on the machine that
+produced it and nowhere else; a cache-dependence bug hid behind an empty
+cache directory. Before saying a check catches X, make X happen and watch the
+check fail — plant the defect, run, take it out. The browser tests were
+proven this way (a 100x rendering error passes typecheck, lint and build), so
+were the role probes (a role granted too much), and `test_import_boundaries.py`
+keeps its planted graphs as permanent tests. If you cannot make the failure
+happen where you ran, say so rather than reporting the pass as proof.
 
 ## Browser tests
 

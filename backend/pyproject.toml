@@ -27,6 +27,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    # Static import graph for tests/test_import_boundaries.py.
+    "grimp>=3.0",
 ]
 
 [tool.pytest.ini_options]

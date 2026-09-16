@@ -72,6 +72,10 @@ if want_backend; then
   if [ ! -x "$ROOT/backend/.venv/bin/python" ]; then
     echo "note: backend/.venv not found, using $VENV_PY (run scripts/setup.sh for a clean env)"
   fi
+  # What the public ingress may import, and which engine modules stay free of
+  # network and database imports. Run on its own first so a boundary violation
+  # is one named failure, not a line inside the suite (which runs it again).
+  run "import boundaries" backend "$VENV_PY" -m pytest tests/test_import_boundaries.py -q
   # Covers the FIFO reconstructor, parsers, routes, Strategy Lab, TradingView,
   # and the Alembic-vs-models schema drift guard.
   run "backend tests" backend "$VENV_PY" -m pytest -q
