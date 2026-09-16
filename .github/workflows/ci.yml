@@ -37,6 +37,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
+      # The static import graph: what the public ingress may reach, that the
+      # private app never imports the ingress side, and which engine modules
+      # stay free of network and database imports. Run first and on its own so
+      # a boundary violation reads as one named failure; the full suite below
+      # runs it again, which costs a tenth of a second.
+      - name: Import boundaries
+        working-directory: backend
+        run: pytest tests/test_import_boundaries.py -q
+
       # No credentials and no DATABASE_URL: tests/conftest.py pins the suite to
       # a throwaway SQLite database, and every external integration is opt-in.
       # test_schema_migrations.py covers `alembic upgrade head` and the

@@ -189,6 +189,11 @@ is verifiable rather than hopeful.
 - Query-token auth is required by TradingView but leaks through access logs.
   Keep ingress/proxy/tunnel request-target logging disabled or redacted, and
   rotate the token if exposed.
+- The ingress process may import only `app.tradingview_ingress`,
+  `app.tradingview_database`, `app.routers.tradingview_webhook`,
+  `app.engine.tradingview`, `app.engine.tradingview_alerts` and `app.models`,
+  through any chain. `backend/tests/test_import_boundaries.py` enforces this;
+  a new import on that path is an architecture change, not a convenience.
 - Future schema work uses expand → version-pinned idempotent backfill →
   constraint migration.
 
