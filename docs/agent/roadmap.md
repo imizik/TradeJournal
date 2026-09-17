@@ -17,6 +17,16 @@ bash scripts/setup.sh && bash scripts/verify.sh && bash startdev.sh
 CI runs the same checks on every pull request. What that currently proves,
 and what it does not, is in [verification.md](verification.md).
 
+Since then the repository gained the layer documentation cannot provide: rules
+an agent cannot break by accident, because CI rejects them.
+`backend/tests/test_import_boundaries.py` holds the public ingress to a
+six-module allowlist, keeps the private app off the ingress side, and keeps
+the pure engine modules free of network and database imports; `ruff check .`
+covers the backend for unused and undefined names. Both run as their own named
+checks in `verify.sh --fast` and in CI, ahead of the suite. Two review findings
+that kept recurring are written down as rules in
+[verification.md](verification.md#two-rules-every-check-must-satisfy).
+
 ## Phase 2 — Frontend verification (done)
 
 Was the weakest link: typecheck, lint and build all pass on a React component
@@ -171,24 +181,42 @@ generated artifacts are gitignored so branches do not fight over them, and
 `test_schema_migrations.py` fails on two Alembic heads, which is the main way
 parallel branches collide in this repo.
 
+The trust question has been tested once, for real. A cold cloud session with
+no context from this conversation history was given the `app.engine.indicators`
+purity ratchet and produced #32: it navigated by `docs/agent/`, ran the full
+`verify.sh` including browser tests, planted the lazy import back to prove the
+boundary test catches it, and its description names what it did **not** cover
+(no before/after comparison of real RVOL values, no end-to-end run against a
+populated cache). That is the evidence this phase was waiting on.
+
 Still needed: a convention for splitting work so two agents do not both touch
 `reconstructor.py`, and a reviewer role that reads diffs rather than trusting
-the implementer's own report.
+the implementer's own report — currently Codex, whose reviews have been
+rate-limited off since #30, so that signal is dark.
 
-## Open decision
+## Decided, with the reasoning worth keeping
 
-This sits in a highest-risk area and is a judgment call, not a cleanup.
+**Same-second FIFO ordering.** Measured and settled in `70e54df`; it is no
+longer an open question, but the caveat is.
 
-**Same-second FIFO ordering.** The reconstructor's final tie-break is
-`str(fill.id)`, a random UUID. Stable across ordinary rebuilds, but
-`POST /fills/resync-all` re-imports fills with new ids, so realized PnL
-attribution for same-second fills can change after a resync. Multiple prints
-of one order within a second are common. A deterministic tie-break (broker
-sequence, `raw_email_id`, or import order) would fix it, but changing it
-changes reported PnL on existing trades. See
+The reconstructor's final tie-break is `str(fill.id)`, a random UUID — stable
+across ordinary rebuilds, not stable across `POST /fills/resync-all`, which
+re-imports fills with new ids. Measured against 4,326 real fills and 1,556
+trades, it is worth **three cents**, on one open MSFT position: every
+candidate ordering (`raw_email_id`, price ascending, price descending)
+produces identical realized PnL on every closed or expired trade, and 104 of
+the 105 trades in same-timestamp groups reconstruct identically regardless.
+
+Keeping `str(fill.id)` — not because it is principled but because no
+alternative is. `raw_email_id` is a Gmail message id: chronological only among
+Gmail-sourced fills, arbitrary against a Webull or manual one.
+
+That is a fact about the current data, not about the design. A partial exit
+against same-second lots at different prices could move real money at any time
+and nothing would flag it, so re-measure with
+`backend/scripts/analyze_tiebreak_impact.py` rather than trusting this
+paragraph. See
 [domain-rules.md](domain-rules.md#known-same-timestamp-ordering-is-arbitrary).
-Run `backend/scripts/analyze_tiebreak_impact.py` against the target database
-before making that decision.
 
 ## Deliberately not doing
 
