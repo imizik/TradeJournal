@@ -96,13 +96,16 @@ a pass. Before you commit a check, ask what it enumerates by hand and whether
 the system could enumerate it instead.
 
 **Verify where the failure can exhibit.** A passing check proves only that it
-did not fail *here*. Three checks in this repository passed in environments
+did not fail *here*. Four checks in this repository passed in environments
 where the defect they targeted could not have shown up: a password-masking
 bug passed against a Postgres started with `--auth=trust`, which accepts any
 password; a snapshot holding absolute paths matched on the machine that
 produced it and nowhere else; a cache-dependence bug hid behind an empty
-cache directory. Before saying a check catches X, make X happen and watch the
-check fail — plant the defect, run, take it out. The browser tests were
+cache directory; and `test_docs_links.py` shipped green locally and failed in
+CI on its first run, because `backend/.venv` exists on a developer machine and
+not on a runner, and git will not call a path it cannot see a directory. Your
+own machine is the least neutral place to check any of this. Before saying a
+check catches X, make X happen and watch the check fail — plant the defect, run, take it out. The browser tests were
 proven this way (a 100x rendering error passes typecheck, lint and build), so
 were the role probes (a role granted too much), and `test_import_boundaries.py`
 keeps its planted graphs as permanent tests. If you cannot make the failure
