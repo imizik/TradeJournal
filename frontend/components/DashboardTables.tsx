@@ -2,20 +2,9 @@
 
 import { useState } from "react";
 import type { Account, PositionQuote, Trade } from "@/lib/api";
+import { computeUnrealizedPnl, formatHoldDuration, getCurrentMark, type OpenPositionRow } from "@/lib/dashboard";
 
-export type OpenPositionMeta = {
-  openedQty: number;
-  exitedQty: number;
-  qtyLeft: number;
-  capitalLeft: number;
-  realizedSoFar: number | null;
-  lastActivityAt: string;
-};
-
-export type OpenPositionRow = {
-  trade: Trade;
-  meta: OpenPositionMeta;
-};
+export type { OpenPositionMeta, OpenPositionRow } from "@/lib/dashboard";
 
 type SortDir = "asc" | "desc";
 
@@ -145,25 +134,6 @@ function Td({ children }: { children: React.ReactNode }) {
   return <td className="px-4 py-3">{children}</td>;
 }
 
-function getCurrentMark(trade: Trade, quote: PositionQuote | undefined): number | null {
-  if (!quote) return null;
-  if (trade.instrument_type === "stock") return quote.underlying_price;
-  return quote.option_mid ?? quote.option_last_price;
-}
-
-function computeUnrealizedPnl(
-  trade: Trade,
-  meta: OpenPositionMeta,
-  quote: PositionQuote | undefined,
-): number | null {
-  const currentMark = getCurrentMark(trade, quote);
-  if (currentMark == null) return null;
-
-  // avg_entry_premium is per-contract; option marks from yfinance are per-share
-  const markPerContract = trade.instrument_type === "option" ? currentMark * 100 : currentMark;
-  return (markPerContract - trade.avg_entry_premium) * meta.qtyLeft;
-}
-
 function getOpenSortVal(
   { trade, meta }: OpenPositionRow,
   key: OpenSortKey,
@@ -283,7 +253,7 @@ export function OpenPositionsTable({
             <Th {...thProps("expiration")}>Expiry</Th>
             <Th {...thProps("qty_left")}>Qty Left</Th>
             <Th {...thProps("avg_cost")}>Avg Cost</Th>
-            <Th {...thProps("cost_left")}>Cost Left</Th>
+            <Th {...thProps("cost_left")}>Entry Value Left</Th>
             <Th {...thProps("current_price")}>Mark</Th>
             <Th {...thProps("unrealized_pnl")}>Unreal. P&amp;L</Th>
             <Th {...thProps("realized")}>Realized</Th>
@@ -443,7 +413,7 @@ export function RecentClosedTable({
               <Td>
                 <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
               </Td>
-              <Td>{trade.hold_duration_mins != null ? `${Math.round(trade.hold_duration_mins)}m` : "-"}</Td>
+              <Td>{formatHoldDuration(trade.hold_duration_mins)}</Td>
               <Td>
                 <StatusBadge status={trade.status} />
               </Td>
