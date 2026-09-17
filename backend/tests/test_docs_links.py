@@ -110,8 +110,16 @@ def _deliberately_ignored(token: str) -> bool:
     Generated caches and per-machine env files are named in the docs on purpose
     and never tracked. Asking git beats keeping an exception list here, which
     would go stale exactly the way the documents do.
+
+    Each candidate is asked twice, bare and with a trailing slash. Most ignore
+    patterns here are directory-only (`.venv/`, `backend/data/`), and git will
+    not treat a path it cannot see on disk as a directory -- so the bare form
+    of an absent directory comes back "not ignored". That is how this shipped
+    green locally, where `backend/.venv` exists, and failed in CI, where it
+    does not.
     """
-    candidates = [prefix + token.rstrip("/") for prefix in PREFIXES]
+    bare = [prefix + token.rstrip("/") for prefix in PREFIXES]
+    candidates = bare + [c + "/" for c in bare]
     result = subprocess.run(
         ["git", "check-ignore", "--stdin"],
         cwd=REPO_ROOT, input="\n".join(candidates), capture_output=True, text=True,
@@ -224,6 +232,28 @@ def test_a_glob_resolves_when_something_matches_and_not_otherwise() -> None:
 def test_a_gitignored_path_is_not_reported() -> None:
     # Named in feature-map.md on purpose; never tracked.
     assert missing_paths("caches live at `backend/data/polygon_cache/`") == []
+
+
+def test_an_absent_gitignored_directory_is_still_recognised() -> None:
+    """The path used here cannot exist on any machine, so this exercises the
+    absent-directory branch everywhere rather than only where it is missing.
+
+    `.venv/` and `backend/data/` are directory-only patterns. Asking git about
+    the bare name of a directory that is not on disk answers "not ignored",
+    because git cannot know it is a directory -- so environments.md's
+    `backend/.venv` (in a sentence about it *not existing yet*) read as a
+    broken reference on a machine without one. Every developer has the
+    directory; CI does not.
+    """
+    # Both unanchored directory patterns, so they hold at any depth.
+    assert _deliberately_ignored("backend/nowhere-in-particular/.venv")
+    assert _deliberately_ignored("backend/nowhere-in-particular/node_modules")
+    # Still says no to something genuinely unignored, or it would pass everything.
+    assert not _deliberately_ignored("backend/nowhere-in-particular/app.py")
+    # And path-anchored patterns stay anchored: backend/data/ is ignored,
+    # a `data` directory somewhere else is not.
+    assert _deliberately_ignored("backend/data")
+    assert not _deliberately_ignored("backend/nowhere-in-particular/data")
 
 
 def test_things_that_are_not_paths_are_left_alone() -> None:
