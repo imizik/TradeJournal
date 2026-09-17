@@ -32,6 +32,13 @@ The allowlists at the top of that file are the policy. Changing them is an
 architecture change: make it deliberately, in the same commit as the import
 that needs it, and say why.
 
+A module leaves the impure set by taking what it needs as an argument rather
+than reaching for it. `app.engine.indicators` was held out by one lazy
+`fetch_minute_bars_for_date` import for a cache-only read; it now accepts a
+`MinuteBarLoader` and its caller decides where bars come from and who pays for
+them. `trade_path` and `auditor` are the same shape and are the remaining
+targets, listed in the test.
+
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend by
 default. The ingress is opt-in:
 
@@ -115,12 +122,16 @@ Two rules follow, and both have already been paid for once:
 - Enrichers and path metrics commit in batches and throttle `job_run` progress
   writes (`_throttled_progress`). Per-item commits were a SQLite-era pattern.
 
-Polygon enrichment is bounded by the API call budget, not the database:
-each call costs one rate-limiter slot (13.4s at the free-tier default).
-Per ticker it is one daily-bars call, one hourly-bars page per ~50 sessions
-needed, and one minute-bars call per 60-day window of fill dates; every
-indicator is derived locally from those bars. Adding a per-fill or
-per-indicator call reintroduces the hours-long backfills this replaced.
+Polygon enrichment is bounded by the API call budget, not the database. The
+rate is discovered rather than configured: calls run unpaced until Polygon
+answers 429, and the number that succeeded in the preceding minute is the
+budget — so a Basic key settles near its 5/min after one refusal and a paid
+key (no per-minute limit) never paces at all. Per ticker the work is one
+daily-bars call, one hourly-bars page per ~50 sessions needed, and one
+minute-bars call per 60-day window of fill dates; every indicator is derived
+locally from those bars. Adding a per-fill or per-indicator call reintroduces
+the hours-long backfills this replaced: on a free key every extra call per
+ticker costs about eight minutes across a 38-ticker week.
 
 Frontend polling follows the same instinct: status/summary polls skip hidden
 tabs and idle at 30–60s. Keep new polling loops on that pattern, and avoid N+1

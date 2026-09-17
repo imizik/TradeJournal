@@ -6,14 +6,14 @@ Local-first trade journal and reconciliation system for Robinhood/Webull trade h
 
 - `frontend/` - Next.js 16, React 19, App Router, Tailwind
 - `backend/` - FastAPI, SQLModel, Alembic, SQLite by default, Postgres via `DATABASE_URL`
-- `docs/agent/` - architecture, domain rules, verification, feature map
+- `docs/agent/` - architecture, domain rules, verification, environments, feature map, roadmap
 - `scripts/` - `setup.sh` and `verify.sh`
 
 ## Quick Start
 
 ```bash
 bash scripts/setup.sh    # clean clone -> runnable (venv, deps, migrations)
-bash scripts/verify.sh   # backend tests, frontend typecheck, lint, build
+bash scripts/verify.sh   # backend lint + tests, import boundaries, frontend typecheck/lint/build, browser tests
 bash startdev.sh         # backend 8080, TradingView ingress 8090, frontend 3000
 ```
 
@@ -248,7 +248,7 @@ python scripts/find_phantoms.py
 
 ```bash
 bash scripts/verify.sh          # everything CI runs
-bash scripts/verify.sh --fast   # tests + typecheck only
+bash scripts/verify.sh --fast   # lint, import boundaries, tests, typecheck
 ```
 
 Or directly:
