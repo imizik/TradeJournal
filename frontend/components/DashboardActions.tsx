@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   CheckCircle2,
@@ -144,13 +145,24 @@ function SyncStatusIndicator({ summary }: { summary: SyncSummary | null }) {
 }
 
 export default function DashboardActions() {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<SyncSummary | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const refreshAfterSyncRef = useRef(false);
+
+  function handleSummaryChange(nextSummary: SyncSummary) {
+    setSummary(nextSummary);
+
+    if (refreshAfterSyncRef.current && !nextSummary.running) {
+      refreshAfterSyncRef.current = false;
+      startTransition(() => router.refresh());
+    }
+  }
 
   async function refreshSummary() {
     try {
-      setSummary(await api.syncSummary());
+      handleSummaryChange(await api.syncSummary());
     } catch {
       // Keep the toolbar quiet if the backend is still booting.
     }
@@ -178,7 +190,14 @@ export default function DashboardActions() {
         <RefreshCw className="h-3.5 w-3.5" />
         Sync / Update Data
       </button>
-      <SyncCenterDrawer open={open} onClose={() => setOpen(false)} onSummaryChange={setSummary} />
+      <SyncCenterDrawer
+        open={open}
+        onClose={() => setOpen(false)}
+        onSummaryChange={handleSummaryChange}
+        onSyncQueued={() => {
+          refreshAfterSyncRef.current = true;
+        }}
+      />
     </div>
   );
 }
@@ -187,10 +206,12 @@ function SyncCenterDrawer({
   open,
   onClose,
   onSummaryChange,
+  onSyncQueued,
 }: {
   open: boolean;
   onClose: () => void;
   onSummaryChange: (summary: SyncSummary) => void;
+  onSyncQueued: () => void;
 }) {
   const [tab, setTab] = useState<Tab>("jobs");
   const [jobs, setJobs] = useState<SyncJob[]>([]);
@@ -238,6 +259,7 @@ function SyncCenterDrawer({
     setMessage(null);
     try {
       await api.runSyncPipeline();
+      onSyncQueued();
       setMessage("Full sync pipeline queued.");
       await refresh();
     } catch (e) {
@@ -265,6 +287,7 @@ function SyncCenterDrawer({
     try {
       const effectiveRange = forceAll && job.job_type === "alpaca_enrich" ? "all" : range;
       await api.runSyncJob(job.job_type, effectiveRange, forceAll && ENRICHMENT_JOBS.has(job.job_type));
+      onSyncQueued();
       setMessage(`${job.label} queued.`);
       await refresh();
     } catch (e) {
@@ -311,6 +334,7 @@ function SyncCenterDrawer({
       } else {
         await api.advancedResyncAll(confirmIdentity);
       }
+      onSyncQueued();
       setMessage(kind === "rebuild" ? "Advanced rebuild queued." : "Advanced resync queued.");
       await refresh();
     } catch (e) {

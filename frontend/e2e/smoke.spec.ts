@@ -52,6 +52,23 @@ test.describe("dashboard", () => {
     await expect(openPositions.getByText("Roth IRA").first()).toBeVisible();
     await expect(openPositions.getByText("Individual").first()).toBeVisible();
   });
+
+  test("refreshes server-rendered tables when a sync job finishes", async ({ page }) => {
+    await page.goto("/");
+    const frontendOrigin = new URL(page.url()).origin;
+
+    await page.getByRole("button", { name: "Sync / Update Data" }).click();
+    const fillCheck = page.locator("section").filter({ hasText: "Import/manual fills check" });
+    await expect(fillCheck).toBeVisible();
+
+    const pageRefresh = page.waitForRequest((request) => {
+      const url = new URL(request.url());
+      return url.origin === frontendOrigin && url.pathname === "/" && request.headers().rsc === "1";
+    });
+
+    await fillCheck.getByRole("button", { name: "Run" }).click();
+    await pageRefresh;
+  });
 });
 
 test.describe("trades", () => {
