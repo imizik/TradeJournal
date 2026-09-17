@@ -1,6 +1,13 @@
-import { api, Account, Fill, Trade, PositionQuote } from "@/lib/api";
+import { api, Account, Fill, PositionQuote } from "@/lib/api";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
+import PerformanceOverview from "@/components/PerformanceOverview";
+import {
+  buildOpenPositionMeta,
+  computeUnrealizedPnl,
+  getPositionMarketValue,
+  type OpenPositionRow,
+} from "@/lib/dashboard";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -10,32 +17,6 @@ function pnlColor(val: number | null | undefined) {
 function fmt$(val: number | null | undefined) {
   if (val == null) return "-";
   return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
-}
-
-function fmtPct(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
-}
-
-function isEntryFill(fill: Fill) {
-  return fill.side === "buy_to_open" || fill.side === "sell_to_open" || fill.side === "buy";
-}
-
-function buildOpenPositionMeta(trade: Trade, fills: Fill[]) {
-  const entryQty = fills.filter(isEntryFill).reduce((sum, fill) => sum + fill.contracts, 0);
-  const exitedQty = fills.filter((fill) => !isEntryFill(fill)).reduce((sum, fill) => sum + fill.contracts, 0);
-  const openedQty = entryQty || trade.contracts;
-  const qtyLeft = Math.max(openedQty - exitedQty, 0);
-  const capitalLeft = qtyLeft * trade.avg_entry_premium;
-
-  return {
-    openedQty,
-    exitedQty,
-    qtyLeft,
-    capitalLeft,
-    realizedSoFar: trade.realized_pnl,
-    lastActivityAt: fills.at(-1)?.executed_at ?? trade.opened_at,
-  };
 }
 
 // Main dashboard route.
@@ -146,26 +127,35 @@ export default async function DashboardPage({
       };
     }
   }
-  const openPositionRows = openTrades
+  const openPositionRows: OpenPositionRow[] = openTrades
     .map((trade) => ({
       trade,
       meta: buildOpenPositionMeta(trade, openTradeFills[trade.id] ?? []),
     }))
     .filter(({ meta }) => meta.qtyLeft > 0);
 
-  // Sum unrealized P&L across all open positions that have a live quote
-  const totalUnrealizedPnl = openPositionRows.reduce<number | null>((sum, { trade, meta }) => {
-    const quote = quotesByTradeId[trade.id];
-    if (!quote) return sum;
-    const rawMark =
-      trade.instrument_type === "stock"
-        ? quote.underlying_price
-        : (quote.option_mid ?? quote.option_last_price);
-    if (rawMark == null) return sum;
-    const markPerContract = trade.instrument_type === "option" ? rawMark * 100 : rawMark;
-    const pnl = (markPerContract - trade.avg_entry_premium) * meta.qtyLeft;
-    return (sum ?? 0) + pnl;
-  }, null);
+  const positionMarks = openPositionRows.map(({ trade, meta }) => ({
+    trade,
+    meta,
+    marketValue: getPositionMarketValue(trade, meta, quotesByTradeId[trade.id]),
+    unrealizedPnl: computeUnrealizedPnl(trade, meta, quotesByTradeId[trade.id]),
+  }));
+  const quotedPositions = positionMarks.filter(({ marketValue }) => marketValue != null);
+  const allPositionsQuoted = openPositionRows.length > 0 && quotedPositions.length === openPositionRows.length;
+  const totalUnrealizedPnl = allPositionsQuoted && positionMarks.every(({ unrealizedPnl }) => unrealizedPnl != null)
+    ? positionMarks.reduce((sum, { unrealizedPnl }) => sum + (unrealizedPnl ?? 0), 0)
+    : null;
+  const grossMarkedValue = quotedPositions.length > 0
+    ? quotedPositions.reduce((sum, { marketValue }) => sum + (marketValue ?? 0), 0)
+    : null;
+  const netMarkedValue = allPositionsQuoted && positionMarks.every(({ meta }) => meta.direction !== "unknown")
+    ? positionMarks.reduce((sum, { meta, marketValue }) =>
+        sum + (meta.direction === "short" ? -1 : 1) * (marketValue ?? 0), 0)
+    : null;
+  const largestMarkedPosition = quotedPositions.reduce<typeof quotedPositions[number] | null>(
+    (largest, position) => !largest || (position.marketValue ?? 0) > (largest.marketValue ?? 0) ? position : largest,
+    null,
+  );
 
   const recentClosed = trades.filter((trade) => trade.status !== "open").slice(0, 10);
 
@@ -201,33 +191,48 @@ export default async function DashboardPage({
         </FilterGroup>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
-        <StatCard label="Today's P&L" value={fmt$(stats.today_pnl)} valueClass={pnlColor(stats.today_pnl)} />
-        {(() => {
-          const totalPnl =
-            totalUnrealizedPnl != null ? stats.total_pnl + totalUnrealizedPnl : stats.total_pnl;
-          return (
-            <StatCard label="Total P&L" value={fmt$(totalPnl)} valueClass={pnlColor(totalPnl)} />
-          );
-        })()}
-        <StatCard label="Realized P&L" value={fmt$(stats.total_pnl)} valueClass={pnlColor(stats.total_pnl)} />
+      <PerformanceOverview trades={trades} />
+
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatCard label="Today's Closed P&L" value={fmt$(stats.today_pnl)} valueClass={pnlColor(stats.today_pnl)} />
         <StatCard
           label="Unrealized P&L"
           value={totalUnrealizedPnl != null ? fmt$(totalUnrealizedPnl) : "-"}
           valueClass={pnlColor(totalUnrealizedPnl)}
+          detail={`${quotedPositions.length} of ${openPositionRows.length} open positions quoted`}
         />
-        <StatCard label="Win Rate" value={`${((stats.win_rate ?? 0) * 100).toFixed(1)}%`} />
-        <StatCard label="Open Positions" value={String(stats.open_trades)} />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatCard label="Avg Winner" value={fmtPct(stats.avg_win_pct)} valueClass="text-emerald-400" />
-        <StatCard label="Avg Loser" value={fmtPct(stats.avg_loss_pct)} valueClass="text-red-400" />
-        <StatCard label="Avg Hold" value={stats.avg_hold_mins ? `${Math.round(stats.avg_hold_mins)}m` : "-"} />
+        <StatCard label="Open Positions" value={String(openPositionRows.length)} />
       </div>
 
       {openPositionRows.length > 0 && (
         <section>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                Current Exposure
+              </h2>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Quoted market value; option values use premium × 100. This does not include account cash or represent maximum loss.
+              </p>
+            </div>
+          </div>
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <StatCard
+              label="Gross Marked Value"
+              value={grossMarkedValue != null ? fmtMoney(grossMarkedValue) : "-"}
+              detail={`${quotedPositions.length} of ${openPositionRows.length} positions marked`}
+            />
+            <StatCard
+              label="Net Marked Value"
+              value={netMarkedValue != null ? fmtSignedMoney(netMarkedValue) : "-"}
+              valueClass={pnlColor(netMarkedValue)}
+            />
+            <StatCard
+              label="Largest Position"
+              value={largestMarkedPosition ? `${largestMarkedPosition.trade.ticker} · ${fmtMoney(largestMarkedPosition.marketValue)}` : "-"}
+            />
+          </div>
+
           <div className="mb-3 flex items-end justify-between gap-3">
             <div>
               <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -258,17 +263,30 @@ function StatCard({
   label,
   value,
   valueClass = "text-foreground",
+  detail,
 }: {
   label: string;
   value: string;
   valueClass?: string;
+  detail?: string;
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className={`mt-1 text-2xl font-semibold tabular-nums ${valueClass}`}>{value}</p>
+      {detail && <p className="mt-1 text-xs text-muted-foreground">{detail}</p>}
     </div>
   );
+}
+
+function fmtMoney(val: number | null | undefined) {
+  if (val == null) return "-";
+  return `$${val.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtSignedMoney(val: number | null | undefined) {
+  if (val == null) return "-";
+  return `${val >= 0 ? "+" : "-"}$${Math.abs(val).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {

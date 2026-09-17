@@ -36,14 +36,24 @@ test.describe("fixture", () => {
 });
 
 test.describe("dashboard", () => {
-  test("renders seeded totals and open positions", async ({ page }) => {
+  test("renders realized performance, range metrics, and open positions", async ({ page }) => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
-    // Aggregates computed by the backend from the seeded trades.
-    await expect(page.getByText("+$1019").first()).toBeVisible();
-    await expect(page.getByText("66.7%").first()).toBeVisible();
+    // Aggregates computed from the seeded, reconstructed closed trades.
+    await expect(page.getByText("+$1,019.00").first()).toBeVisible();
+    await expect(page.getByText("4.40", { exact: true })).toBeVisible();
+    await expect(page.getByText("+$339.67", { exact: true })).toBeVisible();
+
+    // A period selection recomputes the total and trader metrics from the
+    // closes inside that window. The seed's TSLA expiry and RCAT close are in 1M.
+    await page.getByRole("button", { name: "1M" }).click();
+    await expect(page.getByText("1M Closed P&L")).toBeVisible();
+    await expect(page.getByText("-$281.00", { exact: true })).toBeVisible();
+    await expect(page.getByText("Closed Trades", { exact: true }).locator("xpath=..")).toContainText("2");
+    await page.getByRole("button", { name: "ALL" }).click();
+    await expect(page.getByText("+$1,019.00", { exact: true })).toBeVisible();
 
     // All three open positions reach the table, and the two AAPL positions
     // stay separated by account rather than merging.
