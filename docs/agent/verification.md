@@ -25,6 +25,7 @@ native PowerShell launcher for the app itself.
 | Check | Command | Catches |
 |---|---|---|
 | Backend lint | `cd backend && ruff check .` | Unused imports and variables, undefined names, redefinitions, import placement — pyflakes and pycodestyle errors, no style rules; `[tool.ruff]` in `backend/pyproject.toml` |
+| Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
 | Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
