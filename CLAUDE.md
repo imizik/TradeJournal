@@ -77,4 +77,7 @@ data-fetch patterns that can create N+1 calls. When PnL looks wrong, start at
   which database you are on. (`rebuild-all` only recreates derived trades and
   is not destructive.)
 - Keep `CLAUDE.md`, `AGENTS.md`, and `docs/agent/` consistent when scope
-  changes materially.
+  changes materially. `backend/tests/test_docs_links.py` fails when a document
+  names a file or heading that no longer exists; it cannot see a sentence that
+  is merely no longer true, so run `.claude/skills/docs-drift/SKILL.md` after a
+  run of merges.

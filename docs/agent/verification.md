@@ -25,6 +25,7 @@ native PowerShell launcher for the app itself.
 | Check | Command | Catches |
 |---|---|---|
 | Backend lint | `cd backend && ruff check .` | Unused imports and variables, undefined names, redefinitions, import placement — pyflakes and pycodestyle errors, no style rules; `[tool.ruff]` in `backend/pyproject.toml` |
+| Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
 | Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
@@ -95,13 +96,16 @@ a pass. Before you commit a check, ask what it enumerates by hand and whether
 the system could enumerate it instead.
 
 **Verify where the failure can exhibit.** A passing check proves only that it
-did not fail *here*. Three checks in this repository passed in environments
+did not fail *here*. Four checks in this repository passed in environments
 where the defect they targeted could not have shown up: a password-masking
 bug passed against a Postgres started with `--auth=trust`, which accepts any
 password; a snapshot holding absolute paths matched on the machine that
 produced it and nowhere else; a cache-dependence bug hid behind an empty
-cache directory. Before saying a check catches X, make X happen and watch the
-check fail — plant the defect, run, take it out. The browser tests were
+cache directory; and `test_docs_links.py` shipped green locally and failed in
+CI on its first run, because `backend/.venv` exists on a developer machine and
+not on a runner, and git will not call a path it cannot see a directory. Your
+own machine is the least neutral place to check any of this. Before saying a
+check catches X, make X happen and watch the check fail — plant the defect, run, take it out. The browser tests were
 proven this way (a 100x rendering error passes typecheck, lint and build), so
 were the role probes (a role granted too much), and `test_import_boundaries.py`
 keeps its planted graphs as permanent tests. If you cannot make the failure

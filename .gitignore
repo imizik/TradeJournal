@@ -48,8 +48,11 @@ backend/credentials.json
 backend/token.json
 .DS_Store
 
-# Claude Code internal
-.claude/
+# Claude Code internal. Skills are shared project tooling -- a skill that only
+# exists on one machine cannot help the cold agent that clones this repo -- so
+# .claude/skills/ is tracked and everything else under .claude/ is not.
+.claude/*
+!.claude/skills/
 
 # Installers
 *.exe
