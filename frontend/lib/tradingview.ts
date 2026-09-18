@@ -56,6 +56,17 @@ export function snapshotText(value: TradingViewSnapshotValue): string {
   return String(value.value);
 }
 
+/**
+ * Postgres NUMERIC pads to the column scale, so a price stored as 268.4321
+ * reads back as "268.432100000000". Trim for display at the string level:
+ * parsing to a float to reformat would defeat storing it as exact text.
+ */
+export function fmtDecimal(value: string): string {
+  if (!value.includes(".")) return value;
+  const trimmed = value.replace(/0+$/, "").replace(/\.$/, "");
+  return trimmed === "" || trimmed === "-" ? value : trimmed;
+}
+
 export function fmtScore(score: number | null | undefined): string {
   return score == null ? "—" : String(Math.round(score));
 }

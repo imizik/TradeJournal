@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { api, TradingViewAlertDetail, TradingViewSnapshotValue } from "@/lib/api";
 import {
   fmtAlertTime,
+  fmtDecimal,
   fmtScore,
   snapshotText,
   statusClasses,
@@ -109,7 +110,7 @@ export default async function SignalDetailPage({
       <Card title="Alert">
         <dl className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4">
           <Field label="Side" value={<span className="capitalize">{alert.side}</span>} />
-          <Field label="Price" value={<span className="tabular-nums">{alert.price}</span>} />
+          <Field label="Price" value={<span className="tabular-nums">{fmtDecimal(alert.price)}</span>} />
           <Field label="Timeframe" value={alert.timeframe} />
           <Field label="Bar time" value={fmtAlertTime(alert.bar_time)} />
           <Field label="Received" value={fmtAlertTime(alert.received_at)} />

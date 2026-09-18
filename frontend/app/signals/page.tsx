@@ -2,6 +2,7 @@ import Link from "next/link";
 import { api, TradingViewAlert } from "@/lib/api";
 import {
   fmtAlertTime,
+  fmtDecimal,
   statusClasses,
   verdictClasses,
   verdictLabel,
@@ -109,7 +110,7 @@ export default async function SignalsPage() {
                     <td className="px-4 py-2 text-muted-foreground">{alert.setup}</td>
                     <td className="px-4 py-2 capitalize">{alert.side}</td>
                     <td className="px-4 py-2 text-muted-foreground">{alert.timeframe}</td>
-                    <td className="px-4 py-2 tabular-nums">{alert.price}</td>
+                    <td className="px-4 py-2 tabular-nums">{fmtDecimal(alert.price)}</td>
                     <td className="px-4 py-2">
                       <Pill className={verdictClasses(alert.verdict)}>
                         {verdictLabel(alert.verdict)}
