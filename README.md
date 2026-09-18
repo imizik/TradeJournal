@@ -118,7 +118,7 @@ Stage 4 reused the existing normalized `strategy_*` schema and Alembic revision 
 
 ## TradingView Live Signal Loop
 
-Steps 1–4 are implemented. The frozen v1 parser validates TradingView JSON,
+Steps 1–4 and 6 are implemented. The frozen v1 parser validates TradingView JSON,
 the isolated table preserves immutable first-delivery evidence, and a
 token-protected webhook-only process accepts alerts without exposing the
 journal API. The private backend runs one database-backed worker that claims
@@ -178,7 +178,12 @@ durable task dispatcher.
 
 The exact payload, bounds, identity format, and future migration policy are in
 [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).
-The Pine indicator and frontend Signals page remain future Steps 5–6.
+The Signals page at `/signals` lists every alert with its verdict, confidence
+and analysis status, and links to a per-alert view of the indicator levels,
+the indicator context, and the stored assessment. Alerts whose status is
+`skipped` are counted as "Unanalyzed": they arrived while the worker was down
+and aged past `TRADINGVIEW_ALERT_MAX_AGE_SECONDS`, so they keep the signal but
+never receive a verdict. The Pine indicator remains future Step 5.
 
 ## Durable Jobs
 
