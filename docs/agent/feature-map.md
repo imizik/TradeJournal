@@ -76,6 +76,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
+| TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail** | no automated coverage — verified by hand against a live alert |
 | TradingView alerts | `app/engine/tradingview.py`, `tradingview_alerts.py`, `tradingview_analysis.py`; `app/routers/tradingview_*.py`; `app/tradingview_ingress.py`, `app/tradingview_database.py` | private `GET /tradingview/alerts`, `/tradingview/alerts/{alert_id}`; public ingress on `:8090` `POST /tradingview/webhook`, `GET /health` | `test_tradingview.py`, `_routes`, `_alert_model`, `_alert_persistence`, `_alert_migration`, `_analysis`; `test_import_boundaries.py` (what the ingress may import) |
 | Schema | `app/models.py`, `alembic/versions/`, `app/schema.py` | — | `test_schema_migrations.py`, `test_schema_authority.py`, `test_postgres_parity.py`, `test_postgres_migration_paths.py` |
 | Which database am I on | `app/environment.py`, `app/database.py`, `app/routers/health.py` | `GET /health` | `test_environment_guard.py`, `test_check_database.py` |
@@ -133,7 +134,7 @@ reason, and ruff lints them without importing them.
   decision support and never places orders.
 - No component-level frontend tests; the Playwright smoke tests are the only
   frontend coverage, and they are smoke depth.
-- Pine indicator source and a Signals page are not implemented.
+- Pine indicator source is not implemented (Step 5); the Signals page is.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig

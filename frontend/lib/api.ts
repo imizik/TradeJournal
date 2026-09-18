@@ -412,6 +412,85 @@ export type TradeAudit = {
   indicators: AuditIndicators | null;
 };
 
+export type TradingViewAnalysisStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "skipped"
+  | "error";
+
+export type TradingViewVerdict =
+  | "no_trade"
+  | "wait"
+  | "long_scalp"
+  | "short_scalp";
+
+export type TradingViewAlert = {
+  alert_id: string;
+  contract_version: number;
+  parser_revision: string;
+  indicator_version: string;
+  content_sha256: string;
+  raw_payload_sha256: string;
+  symbol: string;
+  timeframe: string;
+  setup: string;
+  side: "long" | "short";
+  /** Exact decimal text, never a JS number. */
+  price: string;
+  bar_time_ms: number;
+  bar_time: string;
+  received_at: string;
+  updated_at: string;
+  analysis_status: TradingViewAnalysisStatus;
+  analysis_attempts: number;
+  analysis_started_at: string | null;
+  analysis_completed_at: string | null;
+  scorer_revision: string | null;
+  verdict: TradingViewVerdict | null;
+  confidence: "low" | "medium" | "high" | null;
+  analysis_error_code: string | null;
+};
+
+/** Tagged so exact decimal text and original scalar types stay distinguishable. */
+export type TradingViewSnapshotValue = {
+  type: "null" | "boolean" | "string" | "number";
+  value: boolean | string | null;
+};
+
+export type TradingViewScalpPlanLevel = {
+  level: string;
+  price: number | null;
+  description?: string;
+};
+
+export type TradingViewScalpAssessment = {
+  verdict: TradingViewVerdict;
+  confidence: "low" | "medium" | "high";
+  bias: string;
+  market_state: string;
+  style: string;
+  setup_score: number | null;
+  liquidity_score: number | null;
+  risk_score: number | null;
+  reasons_for: string[];
+  reasons_against: string[];
+  missing: string[];
+  trigger: TradingViewScalpPlanLevel | null;
+  invalidation: TradingViewScalpPlanLevel | null;
+  targets: TradingViewScalpPlanLevel[];
+  data_source_notes?: string[];
+  disclaimer?: string;
+};
+
+export type TradingViewAlertDetail = TradingViewAlert & {
+  payload_json: string;
+  levels: Record<string, TradingViewSnapshotValue>;
+  context: Record<string, TradingViewSnapshotValue>;
+  assessment: { assessment?: TradingViewScalpAssessment } | null;
+  analysis_error: string | null;
+};
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${API}${path}`, { cache: "no-store" });
   if (!res.ok) throw await buildApiError(path, res);
@@ -503,4 +582,8 @@ export const api = {
   advancedRebuildAll: () => post<{ run_id: string }>("/sync/advanced/rebuild-all"),
   advancedResyncAll: (confirm?: string) => post<{ run_id: string }>("/sync/advanced/resync-all", confirm ? { confirm } : undefined),
   health: () => get<Health>("/health"),
+  tradingViewAlerts: (params?: string) =>
+    get<TradingViewAlert[]>(`/tradingview/alerts${params ? `?${params}` : ""}`),
+  tradingViewAlert: (alertId: string) =>
+    get<TradingViewAlertDetail>(`/tradingview/alerts/${encodeURIComponent(alertId)}`),
 };
