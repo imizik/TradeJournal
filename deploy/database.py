@@ -21,6 +21,18 @@ def target(url: str) -> tuple:
     return value.get_backend_name(), value.host, value.port or 5432, value.database, value.query
 
 
+def drop_to_service_account() -> None:
+    account = pwd.getpwnam("tradejournal")
+    # setuid() does not update the inherited login environment. Leaving
+    # HOME=/root makes libpq look for client certificates under /root after
+    # privileges have been dropped, which fails before it can connect.
+    os.environ.update({"HOME": account.pw_dir, "USER": account.pw_name, "LOGNAME": account.pw_name})
+    if os.geteuid() == 0:
+        os.initgroups(account.pw_name, account.pw_gid)
+        os.setgid(account.pw_gid)
+        os.setuid(account.pw_uid)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["identity", "check", "migration-check", "migrate"])
@@ -43,11 +55,7 @@ def main() -> None:
     if owner_url:
         os.environ["MIGRATION_DATABASE_URL"] = owner_url
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
-    account = pwd.getpwnam("tradejournal")
-    if os.geteuid() == 0:
-        os.initgroups(account.pw_name, account.pw_gid)
-        os.setgid(account.pw_gid)
-        os.setuid(account.pw_uid)
+    drop_to_service_account()
     os.chdir(RELEASE / "backend")
     sys.path.insert(0, str(RELEASE / "backend"))
     from app.environment import describe
