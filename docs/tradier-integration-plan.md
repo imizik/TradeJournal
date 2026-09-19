@@ -237,13 +237,59 @@ cd backend
 .venv/bin/python -m scripts.compare_quote_providers --option NVDA:2026-10-17:180:call
 ```
 
-Adopt Tradier if it is consistently tighter and fresher. The three-way matters:
-Alpaca is already paid for, and if its option feed holds up, promoting it costs
-nothing and adds no vendor.
-
 This lands where `scripts/verify.sh` does not reach — live external data — so
 the comparison script **is** the verification, and `docs/agent/verification.md`
-should say so rather than implying the suite covers it.
+says so rather than implying the suite covers it.
+
+#### The acceptance test is the `age` column, during RTH
+
+Not the spread. Read `age` first, and read it in regular hours.
+
+`age` is how old the provider's own quote timestamp is. It is the only field
+that distinguishes a **real-time** entitlement from the **15-minute-delayed**
+one, and that distinction is the whole decision:
+
+| Tradier `age` during RTH | Means | Do |
+|---|---|---|
+| under ~2s | real-time entitlement confirmed | flip `QUOTES_PROVIDER=tradier` |
+| pinned near 900s | the account is on the delayed feed | stop — the live-quote case collapses, and no spread comparison rescues it |
+| anything between | neither; investigate before trusting a number | ask Tradier support what the account is entitled to |
+
+**A closed-market run cannot answer this.** After hours every provider returns
+the last quote its feed carried, so a delayed feed and a real-time one look
+identical. Anyone reading a favourable after-hours table as proof of
+entitlement — as this plan's author did once — has proved only that the token
+is valid and the symbols resolve.
+
+Secondary, once `age` has passed: adopt Tradier if its spreads are consistently
+tighter. The three-way matters because Alpaca is already paid for, and if its
+option feed holds up, promoting it costs nothing and adds no vendor.
+
+#### Measured 2026-09-19, 02:35 ET — market closed
+
+An after-hours run, so it settles nothing about freshness. It does settle two
+things that are not freshness-dependent, and both narrow the field:
+
+- **Alpaca's equity quotes are not usable as marks.** SPY came back
+  738.39/784.10 — a 6% market — with HSAI and SLS at ~27%, four symbols
+  (ASTS, RKLB, KEEL, NBIS) returning a bid and no ask at all, and MRVL, APLD,
+  MSFT and GOOG all near 10%. That is the IEX feed being one venue out of
+  many, not staleness; a consolidated feed does not have that shape at any
+  hour. It removes "just promote Alpaca for equities" from the options.
+- **yfinance returns no two-sided market for equities at all** — last trade
+  only, every row. Open stock positions are currently marked with no spread
+  visibility of any kind.
+- On the one option in the book, Tradier matched yfinance's NBBO exactly
+  (0.55/0.60) and Alpaca's indicative feed was 80% wider (15.65% vs 8.70%).
+- Latency, one round for 13 positions: Tradier 190–203ms, Alpaca ~1.1s,
+  yfinance ~2.2s.
+- Three vendors reported three IVs for the same contract — 1.1143, 1.1445,
+  1.1024. A ~3% spread on an identical contract, which is the practical
+  argument for the rule above that vendor greeks never share a column with
+  ours.
+
+The quote timestamps in that run place Tradier's book at ~20:00 ET (the
+extended-hours close) and Alpaca's at ~16:00 (where IEX stops).
 
 ### Phase 1 — `fill_quote_snapshot`
 
@@ -297,17 +343,24 @@ None of these can be settled from documentation:
 
 1. Does an **unfunded / Lite** account return real-time production data, or
    does entitlement require funding or accepting a market-data agreement?
+   **Partly answered 2026-09-19:** the token authenticates, equities and an OCC
+   option resolve, and greeks come back — so the account is not blocked. Whether
+   the feed is real-time or delayed is still open and is settled by the `age`
+   column during RTH, above.
 2. Maximum symbols per `POST /v1/markets/quotes`, and whether OCC symbols batch
    cleanly alongside equities. A third-party review claims 100; Tradier's own
    docs state no limit. Trust neither until measured.
 3. **SPXW and index options.** This journal holds 5 SPXW trades, and
    cash-settled index symbology is where broker APIs diverge most. Confirm the
-   symbol form Tradier expects and that quotes and greeks come back.
+   symbol form Tradier expects and that quotes and greeks come back. No SPXW
+   position was open on 2026-09-19, so probe it explicitly:
+   `--option SPXW:<expiry>:<strike>:call`.
 4. Does `/v1/markets/timesales` accept OCC symbols, and at what depth? The docs
    are silent. This decides whether a missed Phase 1 snapshot can ever be
    backfilled within the 20-day window.
 5. Observed `greeks.updated_at` staleness during RTH — truly hourly, or worse
-   near the open?
+   near the open? The 2026-09-19 run showed `2026-09-18 19:59:55`, which only
+   establishes that ORATS stops updating after the close.
 6. Quote freshness against Alpaca indicative and yfinance, **measured**. This
    is the decision, and Phase 0's comparison script exists to make it.
 7. Whether the token is shared with any other tool: both the one-session rule
