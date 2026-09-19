@@ -42,7 +42,7 @@ jobs:
       # version live in pyproject.toml, so this run matches verify.sh locally.
       - name: Lint
         working-directory: backend
-        run: ruff check .
+        run: ruff check . && ruff check --config pyproject.toml ../deploy
 
       # The static import graph: what the public ingress may reach, that the
       # private app never imports the ingress side, and which engine modules

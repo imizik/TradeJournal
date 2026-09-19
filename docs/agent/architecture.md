@@ -50,6 +50,17 @@ When it is enabled, the launchers require a webhook token and refuse to start
 when the private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank
 — that split would silently point the two processes at different databases.
 
+The [Ubuntu deployment package](../../deploy/README.md) instead supervises
+five services: frontend, API and the three worker lanes. It keeps the frontend
+and API on loopback; private Tailscale Serve reaches the frontend, whose
+same-origin `/api/backend` proxy carries browser requests. Server components
+use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
+Because that frontend grants access to the private API, it must never be made
+public. Local development retains the existing direct API URL default.
+Release code lives under `/opt/tradejournal`, persistent data/OAuth/locks under
+`/var/lib/tradejournal`. Initial hosting keeps Neon; moving Postgres onto the
+VPS remains a separate migration after a successful backup/restore rehearsal.
+
 ## Data flow
 
 ```

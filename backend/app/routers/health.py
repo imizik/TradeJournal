@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter
 
 from app.environment import describe
@@ -14,4 +16,4 @@ def health():
     dev branch from production before pressing anything. It carries a redacted
     identity only -- never credentials.
     """
-    return {"status": "ok", "environment": describe().as_dict()}
+    return {"status": "ok", "environment": describe().as_dict(), "release": os.getenv("TRADEJOURNAL_RELEASE")}

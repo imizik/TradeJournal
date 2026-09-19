@@ -1,4 +1,4 @@
-import { API } from "../api";
+import { apiUrl } from "../api";
 import type {
   CommitStrategyRunImportInput,
   PreviewStrategyRunImportInput,
@@ -93,7 +93,7 @@ async function responseBody(response: Response): Promise<unknown> {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
+  const response = await fetch(apiUrl(path), {
     cache: "no-store",
     ...init,
   });

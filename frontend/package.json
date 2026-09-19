@@ -6,7 +6,7 @@
     "predev": "npx --yes kill-port 3000 || echo Port 3000 was free",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/start-standalone.mjs",
     "lint": "eslint .",
     "lint:strict": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",

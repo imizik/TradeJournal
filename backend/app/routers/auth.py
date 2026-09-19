@@ -13,7 +13,7 @@ FRONTEND_PUBLIC_URL = os.getenv("FRONTEND_PUBLIC_URL", "http://localhost:3000").
 @router.get("/gmail/start")
 async def start_gmail_auth(request: Request):
     try:
-        return {"auth_url": begin_gmail_oauth(str(request.base_url))}
+        return {"auth_url": begin_gmail_oauth(os.getenv("BACKEND_PUBLIC_URL") or str(request.base_url))}
     except GmailPollingError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -21,7 +21,7 @@ async def start_gmail_auth(request: Request):
 @router.get("/gmail/start/browser")
 async def start_gmail_auth_browser(request: Request):
     try:
-        return RedirectResponse(begin_gmail_oauth(str(request.base_url)))
+        return RedirectResponse(begin_gmail_oauth(os.getenv("BACKEND_PUBLIC_URL") or str(request.base_url)))
     except GmailPollingError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 

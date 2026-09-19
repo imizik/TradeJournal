@@ -7,6 +7,7 @@ from app.main import app
 
 
 def test_gmail_auth_uses_request_base_url(monkeypatch) -> None:
+    monkeypatch.delenv("BACKEND_PUBLIC_URL", raising=False)
     captured: dict[str, str] = {}
 
     def _fake_begin(callback_base_url: str | None = None) -> str:
@@ -20,6 +21,16 @@ def test_gmail_auth_uses_request_base_url(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert captured["callback_base_url"] == "http://127.0.0.1:8080/"
+
+
+def test_gmail_auth_preserves_private_proxy_prefix(monkeypatch) -> None:
+    captured = []
+    monkeypatch.setenv("BACKEND_PUBLIC_URL", "https://journal.example.ts.net/api/backend")
+    monkeypatch.setattr("app.routers.auth.begin_gmail_oauth", lambda base: captured.append(base) or "https://accounts.google.com/")
+    with TestClient(app, base_url="http://127.0.0.1:8080") as client:
+        assert client.get("/auth/gmail/start").status_code == 200
+        assert client.get("/auth/gmail/start/browser", follow_redirects=False).status_code == 307
+    assert captured == ["https://journal.example.ts.net/api/backend"] * 2
 
 
 def test_gmail_oauth_reuses_state_redirect_uri(monkeypatch, tmp_path) -> None:

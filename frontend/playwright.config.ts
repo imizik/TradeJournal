@@ -83,10 +83,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         DATABASE_URL: `sqlite:///${E2E_DB}`,
-        // Client components fetch the API straight from the browser, so this
-        // origin has to be in the backend's CORS allowlist or every
-        // client-side request fails and those pages render a stuck loading
-        // state.
+        // Also keep direct-API development requests on the correct origin.
         FRONTEND_PUBLIC_URL: `http://127.0.0.1:${FRONTEND_PORT}`,
         // Background workers would make runs nondeterministic and reach for
         // credentials that are deliberately absent here.
@@ -99,7 +96,7 @@ export default defineConfig({
       // NEXT_PUBLIC_* is inlined at build time, so the build has to happen
       // here with the e2e API URL set; a previously built bundle would point
       // at the wrong backend.
-      command: `npm run build && npx next start -p ${FRONTEND_PORT}`,
+      command: "npm run build && npm run start",
       cwd: __dirname,
       url: `http://127.0.0.1:${FRONTEND_PORT}`,
       // Never reuse. NEXT_PUBLIC_* is baked at build time and the backend's
@@ -110,7 +107,13 @@ export default defineConfig({
       // be trustworthy.
       reuseExistingServer: false,
       timeout: 180_000,
-      env: { NEXT_PUBLIC_API_URL: API_URL },
+      // Exercise the same-origin production proxy as well as server-side fetch.
+      env: {
+        NEXT_PUBLIC_API_URL: "/api/backend",
+        API_PROXY_TARGET: API_URL,
+        API_INTERNAL_URL: API_URL,
+        PORT: String(FRONTEND_PORT),
+      },
     },
   ],
 });

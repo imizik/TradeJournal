@@ -115,12 +115,16 @@ It cannot replay a completed or failed row or steal a running job. Its existing
 Gmail watch renewal and optional TradingView analysis are still API-owned
 background threads. TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
-also remain request-time operations. This change does not provision services,
-alter Webull reconnection policy, or claim deployment readiness for those paths.
+also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
+now provides systemd services for the three lanes and the private API/frontend.
+It does not alter Webull reconnection policy or move the remaining API threads
+to supervised worker lanes.
 
 `backend/tests/test_job_runtime.py` exercises competing real processes, API
 lifespan restarts during execution, forced process death, persisted queue
 consumption, nested pipelines, and import retry/dedupe with FIFO reconstruction.
 Provider traffic is stubbed. The suite does not exercise live Gmail, Webull,
-Alpaca, Polygon, or a production supervisor. Postgres-specific checks remain
-separate from the local verification script.
+Alpaca, or Polygon. The separate Ubuntu deployment workflow exercises systemd
+with a packaged application and disposable Postgres; real-VPS reboot and live
+provider checks remain operator work. Those checks and Postgres-specific tests
+are separate from the local verification script.

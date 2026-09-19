@@ -64,6 +64,10 @@ test.describe("dashboard", () => {
   });
 
   test("refreshes server-rendered tables when a sync job finishes", async ({ page }) => {
+    const requests: string[] = [];
+    page.on("request", (request) => {
+      if (["fetch", "xhr"].includes(request.resourceType())) requests.push(request.url());
+    });
     await page.goto("/");
     const frontendOrigin = new URL(page.url()).origin;
 
@@ -76,8 +80,13 @@ test.describe("dashboard", () => {
       return url.origin === frontendOrigin && url.pathname === "/" && request.headers().rsc === "1";
     });
 
+    const queued = page.waitForResponse((response) =>
+      new URL(response.url()).pathname === "/api/backend/sync/jobs/fill_import_check/run" && response.ok(),
+    );
     await fillCheck.getByRole("button", { name: "Run" }).click();
+    await queued;
     await pageRefresh;
+    expect(requests.some((url) => new URL(url).port === "8099" || new URL(url).port === "8080")).toBe(false);
   });
 });
 
@@ -118,8 +127,7 @@ test.describe("fills", () => {
 
     await expect(page.getByRole("heading", { name: "Fills" })).toBeVisible();
 
-    // The table is client-rendered, so this also proves the browser-side
-    // fetch reached the backend.
+    // The table is server-rendered; Sync Center above covers browser fetches.
     await expect(page.getByText("RNXT").first()).toBeVisible();
     await expect(page.getByText("RCAT").first()).toBeVisible();
   });

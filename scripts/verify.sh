@@ -2,7 +2,7 @@
 #
 # verify.sh - the checks that decide whether a change is good.
 #
-#   bash scripts/verify.sh              everything (what CI runs)
+#   bash scripts/verify.sh              all local checks (CI also tests Postgres/systemd)
 #   bash scripts/verify.sh --fast       lint + tests + typecheck, no builds
 #   bash scripts/verify.sh --backend    backend only
 #   bash scripts/verify.sh --frontend   frontend only
@@ -75,6 +75,7 @@ if want_backend; then
   # pyflakes and pycodestyle errors: unused imports and variables, undefined
   # names, import placement. Rule set and version pin: backend/pyproject.toml.
   run "backend lint" backend "$VENV_PY" -m ruff check .
+  run "deployment lint" backend "$VENV_PY" -m ruff check --config pyproject.toml ../deploy
   # What the public ingress may import, and which engine modules stay free of
   # network and database imports. Run on its own first so a boundary violation
   # is one named failure, not a line inside the suite (which runs it again).
