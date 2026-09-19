@@ -1,5 +1,14 @@
 export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
+/** Relative browser requests stay on the private frontend origin. Server-side
+ * fetch needs an absolute internal URL; it never inherits a browser Host header. */
+export function apiUrl(path: string): string {
+  const base = typeof window === "undefined" && API.startsWith("/")
+    ? process.env.API_INTERNAL_URL ?? "http://127.0.0.1:8080"
+    : API;
+  return `${base}${path}`;
+}
+
 export type Fill = {
   id: string;
   account_id: string;
@@ -492,13 +501,13 @@ export type TradingViewAlertDetail = TradingViewAlert & {
 };
 
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${API}${path}`, { cache: "no-store" });
+  const res = await fetch(apiUrl(path), { cache: "no-store" });
   if (!res.ok) throw await buildApiError(path, res);
   return res.json();
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -508,7 +517,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function put<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API}${path}`, {
+  const res = await fetch(apiUrl(path), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

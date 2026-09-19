@@ -394,7 +394,10 @@ its access, not being granted it.
 
 ### What still does not exist
 
-- **Staging.** Deferred with deployment (`roadmap.md` Phase 4). Staging and
+- **Staging.** No persistent staging host has been provisioned. The
+  [Ubuntu package](../../deploy/README.md) is tested on a disposable CI host;
+  the first real host keeps Neon until a separately rehearsed migration.
+  Staging and
   production must not share a database, credentials, webhook tokens, Gmail
   state or external-integration identity.
 - **A separate worker role.** Background workers share the application role.

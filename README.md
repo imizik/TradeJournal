@@ -252,7 +252,7 @@ python scripts/find_phantoms.py
 ## Tests
 
 ```bash
-bash scripts/verify.sh          # everything CI runs
+bash scripts/verify.sh          # local checks; CI also tests Postgres and systemd
 bash scripts/verify.sh --fast   # lint, import boundaries, tests, typecheck
 ```
 
@@ -272,6 +272,11 @@ Note: `next/font` fetches Google Fonts during `npm run build`, so the build
 step needs outbound network access.
 
 ## Agent Notes
+
+For private Ubuntu 24.04 hosting, see the [deployment guide](deploy/README.md).
+It packages independent systemd services and preserves runtime state across
+releases. Neon remains the initial database; migrating it onto the VPS is a
+separate step after backup/restore verification.
 
 Durable context for coding agents lives in `docs/agent/`; `CLAUDE.md` and
 `AGENTS.md` are thin working agreements that point there. Assorted current

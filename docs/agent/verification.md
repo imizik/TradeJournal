@@ -7,7 +7,7 @@ How to prove a change works in this repository. The standard is evidence, not
 
 ```bash
 bash scripts/setup.sh          # clean clone -> runnable (idempotent)
-bash scripts/verify.sh         # everything CI runs
+bash scripts/verify.sh         # all local checks; CI also runs Postgres/systemd
 bash scripts/verify.sh --fast  # lint + tests + typecheck, no builds (inner loop)
 bash scripts/verify.sh --backend
 bash scripts/verify.sh --frontend
@@ -25,6 +25,7 @@ native PowerShell launcher for the app itself.
 | Check | Command | Catches |
 |---|---|---|
 | Backend lint | `cd backend && ruff check .` | Unused imports and variables, undefined names, redefinitions, import placement — pyflakes and pycodestyle errors, no style rules; `[tool.ruff]` in `backend/pyproject.toml` |
+| Deployment lint | `cd backend && ruff check --config pyproject.toml ../deploy` | Defects in release building and server-operation scripts |
 | Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
 | Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, and the import boundaries again |
@@ -34,9 +35,14 @@ native PowerShell launcher for the app itself.
 | Browser smoke | `cd frontend && npm run e2e` | Whether pages actually render real data |
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
-CI (`.github/workflows/ci.yml`) runs the same checks on every pull request, in
-four parallel jobs (backend, frontend, browser, Postgres parity). Agent
-verification is not the only signal.
+CI (`.github/workflows/ci.yml`) runs backend, frontend, browser and Postgres
+jobs on every pull request. Postgres parity, migration-path and role checks
+are additional to the local script. `.github/workflows/deployment.yml` also
+builds an Ubuntu artifact and exercises actual systemd installation, proxy
+requests, queued work, restart, release switching and rollback with disposable
+Postgres. See [deployment verification](../../deploy/README.md#verification-boundaries).
+It checks boot enablement but does not reboot a real VPS or test Tailscale/live
+integrations. Agent verification is not the only signal.
 
 Review is a separate layer and proves nothing about correctness. Codex reviews
 pull requests through the `chatgpt-codex-connector` GitHub App, which is
@@ -154,10 +160,11 @@ Notes that will save you time:
   is baked at build time and the backend's seed and CORS origin come from the
   Playwright config, so a leftover server serves a stale build against a stale
   database -- tests then pass on code that is broken.
-- **The frontend origin must be in the backend's CORS allowlist.** The config
-  passes `FRONTEND_PUBLIC_URL`. Without it, client components' fetches are
-  blocked by the browser and those pages sit on a loading state forever, while
-  server-rendered pages still pass.
+- **Browser requests use the same-origin production proxy.** The config sets
+  `NEXT_PUBLIC_API_URL=/api/backend` and points both the rewrite and server
+  fetches at port 8099. The Sync Center test asserts the browser reaches the proxy
+  without directly contacting a backend port. Direct-API local development
+  still needs `FRONTEND_PUBLIC_URL` in the backend's CORS allowlist.
 - **A sandbox with a preinstalled browser** whose build does not match this
   Playwright version can point at it. The variable wants the executable, not
   the directory, and the build number changes, so resolve it:

@@ -2,7 +2,7 @@
 // save path needs custom 409 (revision conflict) handling that the generic
 // helpers don't provide.
 
-import { API } from "@/lib/api";
+import { apiUrl } from "@/lib/api";
 import type { Workspace, WorkspaceData } from "./types";
 
 export class RevisionConflictError extends Error {
@@ -15,7 +15,7 @@ export class RevisionConflictError extends Error {
 }
 
 export async function getWorkspace(slug: string): Promise<Workspace> {
-  const res = await fetch(`${API}/research/workspaces/${slug}`, {
+  const res = await fetch(apiUrl(`/research/workspaces/${slug}`), {
     cache: "no-store",
   });
   if (!res.ok) throw new Error(`GET workspace ${slug} -> ${res.status}`);
@@ -27,7 +27,7 @@ export async function saveWorkspace(
   baseRevision: number,
   data: WorkspaceData
 ): Promise<Workspace> {
-  const res = await fetch(`${API}/research/workspaces/${slug}`, {
+  const res = await fetch(apiUrl(`/research/workspaces/${slug}`), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ base_revision: baseRevision, data }),

@@ -1,0 +1,55 @@
+name: Deployment package
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ubuntu:
+    name: Ubuntu package and systemd
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: tj
+          POSTGRES_PASSWORD: tj
+          POSTGRES_DB: tj_deployment
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Prepare host runtime
+        run: sudo apt-get update && sudo apt-get install -y python3.12-venv
+      - name: Build committed source away from production
+        run: python deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-${{ github.run_id }}-${{ github.run_attempt }}"
+      - name: Install and exercise actual services
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/smoke.py dist/*.tar.gz
+      - name: Save verified release
+        uses: actions/upload-artifact@v4
+        with:
+          name: tradejournal-ubuntu-24.04-x86_64
+          path: dist/
+          retention-days: 14

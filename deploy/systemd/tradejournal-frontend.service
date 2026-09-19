@@ -1,0 +1,23 @@
+[Unit]
+Description=TradeJournal private frontend
+After=network-online.target
+
+[Service]
+Type=simple
+User=tradejournal
+Group=tradejournal
+WorkingDirectory=/opt/tradejournal/current/frontend
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/launch.py frontend
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tradejournal
+
+[Install]
+WantedBy=multi-user.target

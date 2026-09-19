@@ -22,9 +22,10 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/verification.md` | How to prove a change works |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
+| `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
 
-Read what the task needs, not all four. The repository is the source of truth;
+Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
 fixed in the same change.
 
@@ -40,7 +41,8 @@ change lands somewhere the suite does not cover — any frontend rendering, any
 live external integration — say so explicitly and describe what you did verify
 instead. `docs/agent/verification.md` lists the gaps honestly; use it.
 
-CI runs the same checks on every pull request.
+CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
+the local verification script does not run those checks.
 
 ## Operating style
 
