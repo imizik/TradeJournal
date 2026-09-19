@@ -9,6 +9,7 @@ import io
 import json
 from pathlib import Path
 import tarfile
+from types import SimpleNamespace
 
 import pytest
 
@@ -108,6 +109,29 @@ def test_database_owner_must_match_routing_parameters():
     target = load("database").target
     assert target("postgresql+psycopg://app:secret@db/journal") == target("postgresql+psycopg://owner:other@db:5432/journal")
     assert target("postgresql+psycopg://app@db/journal") != target("postgresql+psycopg://owner@db/journal?host=other")
+
+
+def test_database_helper_resets_login_environment_before_dropping_privileges(monkeypatch):
+    database = load("database")
+    account = SimpleNamespace(pw_name="tradejournal", pw_dir="/var/lib/tradejournal", pw_uid=123, pw_gid=456)
+    events = []
+    monkeypatch.setattr(database.pwd, "getpwnam", lambda _: account)
+    monkeypatch.setattr(database.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(database.os, "initgroups", lambda name, gid: events.append(("groups", name, gid)))
+    monkeypatch.setattr(database.os, "setgid", lambda gid: events.append(("gid", gid)))
+    monkeypatch.setattr(database.os, "setuid", lambda uid: events.append(("uid", uid)))
+    monkeypatch.setenv("HOME", "/root")
+    monkeypatch.setenv("USER", "root")
+    monkeypatch.setenv("LOGNAME", "root")
+
+    database.drop_to_service_account()
+
+    assert {name: database.os.environ[name] for name in ("HOME", "USER", "LOGNAME")} == {
+        "HOME": "/var/lib/tradejournal",
+        "USER": "tradejournal",
+        "LOGNAME": "tradejournal",
+    }
+    assert events == [("groups", "tradejournal", 456), ("gid", 456), ("uid", 123)]
 
 
 def test_archive_link_cannot_target_an_existing_release(control, tmp_path, monkeypatch):
