@@ -11,8 +11,6 @@ from zoneinfo import ZoneInfo
 import app.engine.scalper as scalper
 from app.engine.scalper import (
     _intraday_block,
-    _occ_symbol,
-    _parse_occ,
     _staleness_block,
     score_scalp,
 )
@@ -415,27 +413,3 @@ def test_staleness_block_flags_dead_tape_during_rth():
     # outside RTH the staleness gate is handled by market_state instead
     closed = _staleness_block("closed", {}, [], now_et)
     assert closed["is_stale"] is False
-
-
-# ---------------------------------------------------------------------------
-# OCC symbol helpers
-# ---------------------------------------------------------------------------
-
-def test_occ_symbol_round_trip():
-    occ = _occ_symbol("TSLA", date(2026, 7, 10), "call", 250)
-    assert occ == "TSLA260710C00250000"
-    parsed = _parse_occ(occ)
-    assert parsed == {"root": "TSLA", "expiration": date(2026, 7, 10),
-                      "option_type": "call", "strike": 250.0}
-
-    occ = _occ_symbol("nbis", date(2026, 12, 18), "put", 42.5)
-    assert occ == "NBIS261218P00042500"
-    parsed = _parse_occ(occ)
-    assert parsed["option_type"] == "put"
-    assert parsed["strike"] == 42.5
-
-
-def test_parse_occ_rejects_garbage():
-    assert _parse_occ("") is None
-    assert _parse_occ("TSLA") is None
-    assert _parse_occ("TSLA260710X00250000") is None

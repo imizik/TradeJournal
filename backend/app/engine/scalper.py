@@ -48,6 +48,7 @@ from app.engine.indicators import (
     compute_rvol,
 )
 from app.engine.news import fetch_news
+from app.engine.occ import occ_symbol, parse_occ
 from app.engine.packets import _market_state, _symbol_metrics
 
 log = logging.getLogger(__name__)
@@ -550,7 +551,10 @@ def _resolve_option_contract(
     missing: list[str],
 ) -> tuple[Optional[str], Optional[dict], bool]:
     if expiration is not None and strike is not None:
-        occ = _occ_symbol(symbol, expiration, option_type, strike)
+        occ = occ_symbol(symbol, expiration, option_type, strike)
+        if occ is None:
+            missing.append(f"option: cannot build a contract symbol for {symbol} {option_type} {strike}")
+            return None, None, False
         snap = fetch_option_snapshots([occ]).get(occ)
         return occ, snap, False
 
@@ -574,7 +578,7 @@ def _resolve_option_contract(
     chain = fetch_option_chain_snapshots(symbol, **kwargs)
     candidates = []
     for occ, snap in chain.items():
-        parsed = _parse_occ(occ)
+        parsed = parse_occ(occ)
         if parsed and parsed["option_type"] == option_type:
             candidates.append((occ, parsed, snap))
     if not candidates:
@@ -596,7 +600,7 @@ def _option_block(
     spot: Optional[float],
     session_date: date,
 ) -> dict:
-    parsed = _parse_occ(occ) or {}
+    parsed = parse_occ(occ) or {}
     exp = parsed.get("expiration")
     strike = parsed.get("strike")
     quote = (snap or {}).get("latestQuote") or {}
@@ -642,30 +646,6 @@ def _option_block(
         "rho": greeks.get("rho"),
         "quote_missing": not quote and not trade,
         "feed": ALPACA_OPTIONS_FEED,
-    }
-
-
-def _occ_symbol(ticker: str, expiration: date, option_type: str, strike: float) -> str:
-    cp = "C" if option_type == "call" else "P"
-    return f"{ticker.upper()}{expiration.strftime('%y%m%d')}{cp}{int(round(strike * 1000)):08d}"
-
-
-def _parse_occ(occ: str) -> Optional[dict]:
-    if not occ or len(occ) < 16:
-        return None
-    tail = occ[-15:]
-    exp_s, cp, strike_s = tail[:6], tail[6], tail[7:]
-    if cp not in ("C", "P") or not exp_s.isdigit() or not strike_s.isdigit():
-        return None
-    try:
-        exp = date(2000 + int(exp_s[:2]), int(exp_s[2:4]), int(exp_s[4:6]))
-    except ValueError:
-        return None
-    return {
-        "root": occ[:-15],
-        "expiration": exp,
-        "option_type": "call" if cp == "C" else "put",
-        "strike": int(strike_s) / 1000.0,
     }
 
 

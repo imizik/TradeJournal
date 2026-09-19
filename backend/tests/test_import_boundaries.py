@@ -70,6 +70,10 @@ PURE_MODULES = {
     "app.engine.tradingview",
     "app.engine.tradingview_alerts",
     "app.engine.indicators",
+    # OCC symbol conversion. Pure by construction (stdlib only), and listed
+    # here so it stays that way: it is imported by the vendor clients, which is
+    # exactly the direction a network import would travel.
+    "app.engine.occ",
 }
 # Third-party packages a pure module may reach. httpx, yfinance, anthropic,
 # googleapiclient and grpc are deliberately absent: reaching any of them, even

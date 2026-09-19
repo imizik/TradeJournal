@@ -137,6 +137,25 @@ Frontend polling follows the same instinct: status/summary polls skip hidden
 tabs and idle at 30–60s. Keep new polling loops on that pattern, and avoid N+1
 fetches — batch, or extend a shared API response.
 
+## Historical data and live quotes are different problems
+
+Enrichment is historical and cached: Polygon bars for the fill minute and the
+indicator series, Alpaca bars for market context and the option path. Both are
+bounded by an API budget and both write to disk caches, because the same fill
+is enriched once and read forever.
+
+Live quotes are not that. `app/engine/quotes.py` prices open positions on
+demand, holds results for 60 seconds in memory, and caches nothing to disk. It
+dispatches on `QUOTES_PROVIDER`: `yfinance` (the default, unofficial, one
+option-chain download per contract) or `tradier` (licensed, consolidated, every
+position in one request), falling back to yfinance whenever Tradier errors.
+
+Keep the two apart. A live quote must never be written into a fill's
+`*_at_fill` columns — those describe the fill minute, which a quote taken now
+is not — and a vendor's greeks carry their own `updated_at` because they are
+refreshed hourly, not live. `docs/tradier-integration-plan.md` has the whole
+assessment, including why Tradier is not a candidate for the historical side.
+
 ## Frontend
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed

@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from sqlmodel import Session, select
 
 from app.engine.alpaca import ALPACA_DATA_FEED, fetch_minute_bars_for_date, fetch_option_bars
+from app.engine.occ import occ_symbol
 from app.engine.indicators import bars_to_df, _f
 from app.models import FILL_LIGHT, Fill, FillMarketContext, Trade, TradePathMetrics
 
@@ -369,7 +370,7 @@ def _compute_option_path(trade: Trade, entry_fill: Fill) -> dict | None:
     if trade.instrument_type != "option" or not trade.expiration or trade.strike is None or not trade.option_type:
         return None
 
-    symbol = _option_contract_symbol(trade.ticker, trade.expiration, trade.option_type, float(trade.strike))
+    symbol = occ_symbol(trade.ticker, trade.expiration, trade.option_type, float(trade.strike))
     if not symbol:
         return None
 
@@ -512,17 +513,6 @@ def _apply_attribution(
             + metrics.attr_vega_pnl
         )
         metrics.attr_residual_pnl = _f(float(trade.realized_pnl) - explained)
-
-
-def _option_contract_symbol(ticker: str, expiration: date, option_type: str, strike: float) -> str | None:
-    root = "".join(ch for ch in ticker.upper() if ch.isalnum())
-    if not root:
-        return None
-    side = "C" if option_type.lower() == "call" else "P" if option_type.lower() == "put" else None
-    if side is None:
-        return None
-    strike_part = f"{int(round(strike * 1000)):08d}"
-    return f"{root}{expiration:%y%m%d}{side}{strike_part}"
 
 
 def _compute_post_exit(
