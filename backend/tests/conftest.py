@@ -50,6 +50,11 @@ for _flag in (
     "TRADINGVIEW_ANALYSIS_AUTOSTART",
 ):
     os.environ[_flag] = "false"
+
+# Same reasoning for the live-quote provider: a developer shell that exports
+# QUOTES_PROVIDER=tradier would otherwise change which code path the suite
+# exercises. Tests that mean to exercise a provider set it themselves.
+os.environ["QUOTES_PROVIDER"] = "yfinance"
 os.environ.pop("WEBULL_LISTENER_ACCOUNTS", None)
 
 # The application no longer builds the schema. Alembic does (app/schema.py),
