@@ -88,12 +88,17 @@ jobs:
             HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
             SHORT_SHA=${HEAD_SHA:0:10}
 
+            # --paginate with --jq runs the filter per page and prints one
+            # count per line, so `[ "$N" -gt 0 ]` gets "1\n1\n1" and errors
+            # into the wrong branch. --slurp gathers the pages into one array
+            # (it refuses to combine with --jq, hence the pipe to jq).
+            #
             # Claude stamps its own comment with an HTML marker naming the
             # commit. That marker is the only thing standing between a Codex
             # outage and re-reviewing the same commit every ten minutes, so it
             # is checked first and cheaply.
-            ALREADY=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-              --jq "[.[] | select((.body // \"\") | contains(\"claude-review:$HEAD_SHA\"))] | length")
+            ALREADY=$(gh api --paginate --slurp "repos/$REPO/issues/$PR/comments" \
+              | jq "[.[][] | select((.body // \"\") | contains(\"claude-review:$HEAD_SHA\"))] | length")
             if [ "$ALREADY" -gt 0 ]; then
               echo "PR #$PR ($SHORT_SHA): Claude already reviewed this commit."
               continue
@@ -107,12 +112,12 @@ jobs:
             # Codex stamps its review body with "Reviewed commit: <sha>", which
             # is what makes this per-commit: a PR whose branch moved after a
             # Codex review is unreviewed again, which has already happened here.
-            CODEX=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
-              --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
-                         | select((.body // \"\") | contains(\"$SHORT_SHA\"))] | length")
-            CODEX_C=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-              --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
-                         | select((.body // \"\") | contains(\"$SHORT_SHA\"))] | length")
+            CODEX=$(gh api --paginate --slurp "repos/$REPO/pulls/$PR/reviews" \
+              | jq "[.[][] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
+                          | select((.body // \"\") | contains(\"$SHORT_SHA\"))] | length")
+            CODEX_C=$(gh api --paginate --slurp "repos/$REPO/issues/$PR/comments" \
+              | jq "[.[][] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
+                          | select((.body // \"\") | contains(\"$SHORT_SHA\"))] | length")
 
             if [ -n "$ONLY_PR" ]; then
               echo "PR #$PR ($SHORT_SHA): dispatched by hand, reviewing regardless."
@@ -172,8 +177,26 @@ jobs:
       matrix:
         pr: ${{ fromJson(needs.find.outputs.prs) }}
     steps:
+      # Pin the commit under review once, up front. Everything downstream --
+      # the checkout, the prompt, the dedup marker -- must agree on it. A push
+      # landing mid-review would otherwise have the marker name the NEW commit
+      # and suppress the review of a commit nobody ever looked at.
+      - name: Resolve the commit under review
+        id: head
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA=$(gh api "repos/${{ github.repository }}/pulls/${{ matrix.pr }}" --jq .head.sha)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Reviewing ${SHA:0:10} of PR #${{ matrix.pr }}."
+
       - uses: actions/checkout@v4
         with:
+          # A scheduled run carries no pull-request ref, so without this the
+          # job would check out the default branch and review the PR against
+          # the wrong working tree.
+          ref: ${{ steps.head.outputs.sha }}
           fetch-depth: 0
 
       - name: Claude review
@@ -209,13 +232,13 @@ jobs:
             Post exactly one comment with `gh pr comment`. It MUST begin with
             these two lines, the marker first:
 
-            <!-- claude-review:HEADSHA -->
+            <!-- claude-review:${{ steps.head.outputs.sha }} -->
             ### 🤖 Claude Review (Codex fallback)
 
-            Replace HEADSHA with the full head SHA from
-            `gh pr view ${{ matrix.pr }} --json headRefOid --jq .headRefOid`.
-            The marker is what stops this review repeating every ten minutes;
-            without it the sweep will review this same commit again.
+            Copy that marker line exactly as written -- do not look the SHA up
+            yourself, it is the commit this job pinned. The marker is what
+            stops this review repeating every ten minutes; without it the
+            sweep will review this same commit again.
 
             Lead with the findings that would change the code. Say plainly if
             you find nothing wrong -- do not invent findings to fill the
@@ -235,11 +258,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ matrix.pr }}
+          # The pinned commit, not a fresh lookup: if a push landed during the
+          # review, marking the new commit reviewed would bury it.
+          HEAD_SHA: ${{ steps.head.outputs.sha }}
         run: |
           set -euo pipefail
-          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
-          FOUND=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq "[.[] | select((.body // \"\") | contains(\"claude-review:$HEAD_SHA\"))] | length")
+          FOUND=$(gh api --paginate --slurp "repos/$REPO/issues/$PR/comments" \
+            | jq "[.[][] | select((.body // \"\") | contains(\"claude-review:$HEAD_SHA\"))] | length")
           if [ "$FOUND" -eq 0 ]; then
             echo "::warning::The review comment carried no dedup marker; posting one so this commit is not reviewed again."
             gh api "repos/$REPO/issues/$PR/comments" \
