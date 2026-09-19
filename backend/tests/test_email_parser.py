@@ -80,3 +80,37 @@ def test_complete_option_email_still_parses() -> None:
     assert parsed.price == Decimal("60.00")
     assert parsed.strike == Decimal("1050.00")
     assert parsed.account_last4 == "8267"
+
+
+def test_option_email_before_price_format_switch_keeps_literal_price() -> None:
+    """Pre-2026-09-18 emails quote the per-contract total; store it verbatim."""
+    body = (
+        "Hi Isaac,\n"
+        "Your limit order to buy 2 contracts of NBIS $230.00 Call 9/25 in your Roth IRA (...8267) "
+        "account executed at an average price of $785.00 per contract "
+        "on September 17, 2026 at 9:34 AM ET."
+    )
+
+    parsed = parse_option_email(OPTION_SUBJECT, body, "uid-nbis-old-format")
+
+    assert parsed is not None
+    assert parsed.price == Decimal("785.00")
+
+
+def test_option_email_after_price_format_switch_is_scaled_to_per_contract() -> None:
+    """
+    From 2026-09-18 Robinhood quotes the per-share premium in the same
+    "per contract" sentence, so $3.30 means $330.00 for the contract.
+    """
+    body = (
+        "Hi Isaac,\n"
+        "Your limit order to buy 1 contract of NBIS $230.00 Call 9/25 in your Roth IRA (...8267) "
+        "account executed at an average price of $3.30 per contract "
+        "on September 18, 2026 at 10:00 AM ET."
+    )
+
+    parsed = parse_option_email(OPTION_SUBJECT, body, "uid-nbis-new-format")
+
+    assert parsed is not None
+    assert parsed.price == Decimal("330.00")
+    assert parsed.contracts == Decimal("1")

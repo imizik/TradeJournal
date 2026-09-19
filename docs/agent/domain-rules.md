@@ -16,6 +16,12 @@ patterns that can create N+1 calls.
 - Stock quantities may be fractional.
 - Option `price` is total premium **per contract in dollars** — divide by 100
   for a per-share price before passing it to Black-Scholes.
+- Robinhood's option confirmation email changed on 2026-09-18: "average price
+  of $X per contract" now quotes the **per-share** premium ($3.30), where it
+  used to quote the per-contract total ($785.00). `email_parser` multiplies by
+  100 for emails executed on or after that date and keeps older ones literal —
+  pre-switch totals under $100 are common, so a magnitude test alone would
+  corrupt history on a resync.
 - Stock `price` is per share.
 - `raw_email_id` is the dedupe key for imported fills. Manual fills use
   `manual:` prefixes, Webull fills use `webull:{event_id}`.
