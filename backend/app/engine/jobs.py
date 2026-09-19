@@ -20,7 +20,7 @@ JOB_TRADE_PATH = "trade_path"
 JOB_WEBULL_LISTENER = "webull_listener"
 
 
-def create_job(session: Session, job_type: str, params: dict[str, Any] | None = None, total: int = 0) -> JobRun:
+def create_job(session: Session, job_type: str, params: dict[str, Any] | None = None, total: int = 0, *, current: str | None = None) -> JobRun:
     now = datetime.utcnow()
     job = JobRun(
         id=uuid.uuid4(),
@@ -29,6 +29,7 @@ def create_job(session: Session, job_type: str, params: dict[str, Any] | None = 
         phase="queued" if total else "complete",
         params_json=json.dumps(params or {}),
         total=total,
+        current=current,
         finished_at=now if not total else None,
         updated_at=now,
     )
@@ -223,8 +224,19 @@ def _trade_path_ids(session: Session, range_value: str, force: bool) -> list[uui
     return list(session.exec(query).all())
 
 
-def create_polygon_enrichment_job(session: Session, range_value: str = "week", force: bool = False) -> JobRun:
+def create_polygon_enrichment_job(session: Session, range_value: str = "week", force: bool = False, *, reuse_active: bool = False) -> JobRun:
     fill_ids = _polygon_fill_ids(session, range_value, force)
+    if reuse_active:
+        active = session.exec(
+            select(JobRun).where(JobRun.job_type == JOB_POLYGON_ENRICH, JobRun.status.in_(["queued", "running"]))
+            .order_by(JobRun.created_at.desc())
+        ).all()
+        covered = {value for job in active for value in _params(job).get("fill_ids", [])}
+        fill_ids = [fill_id for fill_id in fill_ids if str(fill_id) not in covered]
+        if not fill_ids and active:
+            return active[0]
+        # A later push can bring new fills while an earlier Polygon job runs.
+        # Queue only those uncovered fills; the Polygon lane serializes them.
     return create_job(
         session,
         JOB_POLYGON_ENRICH,
@@ -254,6 +266,12 @@ def create_trade_path_job(session: Session, range_value: str = "week", force: bo
 
 
 def run_job(job_id: uuid.UUID) -> int:
+    from app.engine.job_runtime import execute_job
+    return execute_job(job_id, db_engine=engine)
+
+
+def _run_job(job_id: uuid.UUID) -> int:
+    """Handler invoked only after the runtime claims the execution lock."""
     job = _start_job(job_id)
     try:
         if job.job_type == JOB_POLYGON_ENRICH:

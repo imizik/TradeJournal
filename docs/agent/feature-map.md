@@ -56,6 +56,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 
 | Working on | Start at | Routes | Proof |
 |---|---|---|---|
+| Background job ownership and recovery | `app/engine/job_runtime.py`, `app/jobs/worker.py`; commands in [background-jobs.md](background-jobs.md) | Sync Center, Gmail push, enrichment and Webull start routes | `tests/test_job_runtime.py` (competing processes, API restarts, worker death, queue consumption and fill dedupe/FIFO); external providers stubbed |
 | PnL, FIFO, trade shape | `app/engine/reconstructor.py` | `POST /rebuild`; runs after every fill write and in `trade_rebuild` | `tests/test_reconstructor.py`; `test_seed_dev_data.py` (`EXPECTED`); `test_seed_snapshot.py` (golden snapshot over the seed) |
 | Robinhood email parsing | `app/engine/email_parser.py` | — | `test_email_parser.py` |
 | Gmail fetch and import | `app/engine/gmail_poller.py`, `app/routers/fills.py` | `POST /fills/import`, `POST /fills/resync-all` (destructive, needs `confirm`) | `test_gmail_poller.py`, `test_fill_import.py`, `test_environment_guard.py` |

@@ -20,18 +20,15 @@ from app.engine.jobs import (
     create_trade_path_job,
     job_status,
     latest_job,
-    run_job,
     running_job,
 )
 from app.models import FILL_LIGHT, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
+from app.engine.job_runtime import submit_job
 
 router = APIRouter()
 
 def _start_job_thread(job_id: uuid.UUID) -> None:
-    import threading
-
-    t = threading.Thread(target=run_job, args=(job_id,), daemon=True)
-    t.start()
+    submit_job(job_id)
 
 
 # ---------------------------------------------------------------------------

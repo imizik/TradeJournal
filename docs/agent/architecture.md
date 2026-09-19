@@ -107,9 +107,14 @@ They share a database and nothing else. Do not route data between them.
 `job_run` rows are the durable record of enrichment, path-metric and sync
 work. API status endpoints read `job_run`, never process-local state.
 
-Local routes may start convenience background threads, but the same work must
-run through `python -m app.jobs.run`, so a scheduler or Cloud Run Job can
-invoke it later with the same container.
+`JOB_EXECUTION_MODE=embedded` (default) dispatches API-owned threads through
+the shared ownership runtime. `external` leaves committed requests for
+`python -m app.jobs.worker --lane sync`, plus separate `polygon` and `webull`
+workers. This is a single-host design with shared local process locks, not a
+distributed or Cloud Run queue. API restarts do not invalidate live owners;
+dead owners become failed and require an explicit new run. See
+[background-jobs.md](background-jobs.md) for configuration, recovery and the
+remaining API-owned tasks.
 
 ## Cost and latency constraints
 

@@ -1,4 +1,4 @@
-import threading
+import json
 import time
 import uuid
 from datetime import date, datetime, timezone
@@ -23,6 +23,7 @@ from app.engine.jobs import (
     run_job,
     running_job,
 )
+from app.engine.job_runtime import execute_job, in_sync_worker, submit_job
 from app.engine.enricher import polygon_calls_per_minute
 from app.models import Fill, JobRun, Trade
 from app.environment import require_destructive_confirmation
@@ -75,9 +76,6 @@ _EXTRA_JOB_CONFIG: dict[str, dict[str, Any]] = {
 _JOB_CONFIG_BY_TYPE = {config["job_type"]: config for config in JOB_CONFIG}
 _JOB_CONFIG_BY_TYPE.update(_EXTRA_JOB_CONFIG)
 
-_sync_lock = threading.Lock()
-
-
 def _now() -> datetime:
     return datetime.utcnow()
 
@@ -99,11 +97,6 @@ def _set_job(job_id: uuid.UUID, **values: Any) -> None:
         job.updated_at = _now()
         session.add(job)
         session.commit()
-
-
-def _run_thread(target: Callable[[], None]) -> None:
-    thread = threading.Thread(target=target, daemon=True)
-    thread.start()
 
 
 # Job types that the Sync Center treats as "blocking syncs". Excludes
@@ -177,14 +170,12 @@ def _job_to_row(session: Session, config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _create_run(session: Session, job_type: str, message: str) -> JobRun:
-    job = create_job(session, job_type, {"source": "sync_center", "message": message}, total=1)
-    job.current = message
-    job.phase = "queued"
-    session.add(job)
-    session.commit()
-    session.refresh(job)
-    return job
+def _create_run(session: Session, job_type: str, message: str, *, params: dict | None = None, total: int = 1) -> JobRun:
+    # Persist a complete request in one commit: a worker can claim it immediately.
+    return create_job(
+        session, job_type, {"source": "sync_center", "message": message, **(params or {})},
+        total=total, current=message,
+    )
 
 
 def _run_gmail_sync(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
@@ -239,10 +230,11 @@ def _run_daily_review(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
 
 def _run_existing_enrichment(job_type: str, range_value: str, force: bool) -> JobRun:
     with Session(engine) as session:
-        if running_job(session, job_type):
+        existing = running_job(session, job_type)
+        if existing and not (in_sync_worker() and job_type == JOB_POLYGON_ENRICH):
             raise HTTPException(status_code=409, detail="That job is already running")
         if job_type == JOB_POLYGON_ENRICH:
-            job = create_polygon_enrichment_job(session, range_value=range_value, force=force)
+            job = create_polygon_enrichment_job(session, range_value=range_value, force=force, reuse_active=in_sync_worker())
         elif job_type == JOB_ALPACA_ENRICH:
             job = create_alpaca_enrichment_job(session, range_value=range_value, force=force)
         elif job_type == JOB_TRADE_PATH:
@@ -250,7 +242,10 @@ def _run_existing_enrichment(job_type: str, range_value: str, force: bool) -> Jo
         else:
             raise HTTPException(status_code=400, detail="Unsupported enrichment job")
     if job.total:
-        _run_thread(lambda: run_job(job.id))
+        if in_sync_worker() and job_type != JOB_POLYGON_ENRICH:
+            run_job(job.id)
+        else:
+            submit_job(job.id)
     return job
 
 
@@ -268,9 +263,6 @@ def _wait_for_job(job_id: uuid.UUID) -> JobRun:
 
 
 def _run_pipeline(pipeline_id: uuid.UUID) -> None:
-    if not _sync_lock.acquire(blocking=False):
-        _set_job(pipeline_id, status="failed", error="Another sync pipeline is already running", finished_at=_now())
-        return
     try:
         _set_job(pipeline_id, status="running", phase="starting", started_at=_now(), current="Starting full sync pipeline")
 
@@ -297,7 +289,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
             )
             with Session(engine) as session:
                 child = _create_run(session, job_type, f"Pipeline step {index}")
-            _run_simple_job(child.id, fn)
+            execute_job(child.id, runner=lambda: _run_simple_job(child.id, fn))
             with Session(engine) as session:
                 row = session.get(JobRun, child.id)
                 if row and row.status == "failed":
@@ -318,7 +310,7 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         _set_job(pipeline_id, done=3, total=6, phase="pipeline_step", current="Running market enrichment")
         # Polygon's free tier is rate-limited to ~5 req/min, so a full enrich can
         # take many minutes. Launch it but do NOT block the pipeline on it — it
-        # runs in its own thread and the UI polls /fills/enrich/status. Path
+        # runs in the Polygon execution lane and the UI polls /fills/enrich/status. Path
         # metrics use Alpaca's underlying price as the primary source (Polygon is
         # only a fallback), so we still wait for Alpaca before computing them.
         _run_existing_enrichment(JOB_POLYGON_ENRICH, "all", False)
@@ -346,14 +338,9 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         )
     except Exception as exc:
         _set_job(pipeline_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
-    finally:
-        _sync_lock.release()
 
 
 def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
-    if not _sync_lock.acquire(blocking=False):
-        _set_job(job_id, status="failed", error="Another sync pipeline is already running", finished_at=_now())
-        return
     try:
         _set_job(job_id, status="running", phase="pipeline_step", started_at=_now(), done=0, total=5, current="Importing Gmail fills")
         with Session(engine) as session:
@@ -409,8 +396,6 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
         )
     except Exception as exc:
         _set_job(job_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
-    finally:
-        _sync_lock.release()
 
 
 def queue_gmail_push_pipeline(
@@ -419,32 +404,14 @@ def queue_gmail_push_pipeline(
     history_id: str | None = None,
     email_address: str | None = None,
 ) -> tuple[JobRun, bool]:
-    active = _active_job(session)
-    if active:
-        job = create_job(
-            session,
-            JOB_GMAIL_PUSH,
-            {"history_id": history_id, "email_address": email_address, "skipped_for_active_job": str(active.id)},
-            total=0,
-        )
-        job.current = f"Skipped because {active.job_type} is already active."
-        session.add(job)
-        session.commit()
-        session.refresh(job)
-        return job, False
-
     job = create_job(
         session,
         JOB_GMAIL_PUSH,
         {"history_id": history_id, "email_address": email_address},
         total=5,
+        current="Queued from Gmail Pub/Sub push",
     )
-    job.current = "Queued from Gmail Pub/Sub push"
-    job.phase = "queued"
-    session.add(job)
-    session.commit()
-    session.refresh(job)
-    _run_thread(lambda: _run_gmail_push_pipeline(job.id))
+    submit_job(job.id)
     return job, True
 
 
@@ -514,11 +481,8 @@ async def list_sync_runs(limit: int = 50, session: Session = Depends(get_session
 async def run_sync_pipeline(session: Session = Depends(get_session)):
     if _active_job(session):
         raise HTTPException(status_code=409, detail="A sync or enrichment job is already running")
-    job = _create_run(session, JOB_FULL_PIPELINE, "Queued full sync pipeline")
-    job.total = 6
-    session.add(job)
-    session.commit()
-    _run_thread(lambda: _run_pipeline(job.id))
+    job = _create_run(session, JOB_FULL_PIPELINE, "Queued full sync pipeline", total=6)
+    submit_job(job.id)
     return {"pipeline_run_id": str(job.id)}
 
 
@@ -542,7 +506,7 @@ async def run_sync_job(job_type: str, range: str = "week", force: bool = False, 
         raise HTTPException(status_code=404, detail="Unknown sync job")
 
     job = _create_run(session, job_type, "Queued from Sync Center")
-    _run_thread(lambda: _run_simple_job(job.id, runner))
+    submit_job(job.id)
     return {"run_id": str(job.id), "started": True, "total": job.total}
 
 
@@ -551,7 +515,7 @@ async def advanced_rebuild_all(session: Session = Depends(get_session)):
     if _active_job(session):
         raise HTTPException(status_code=409, detail="A sync or enrichment job is already running")
     job = _create_run(session, JOB_TRADE_REBUILD, "Queued advanced rebuild")
-    _run_thread(lambda: _run_simple_job(job.id, _run_trade_rebuild))
+    submit_job(job.id)
     return {"run_id": str(job.id)}
 
 
@@ -571,24 +535,45 @@ async def advanced_resync_all(
         session,
         JOB_RESYNC_ALL,
         f"Queued destructive resync on {environment.identity} ({environment.name})",
+        params={"confirmed_database": environment.identity},
     )
-
-    def runner() -> None:
-        _set_job(job.id, status="running", phase="processing", started_at=_now(), error=None)
-        try:
-            with Session(engine) as run_session:
-                _clear_derived_trade_data(run_session)
-                run_session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%"))))
-                run_session.commit()
-                result = _import_fills_from_gmail(run_session, start_enrichment=False)
-                rebuilt, anomalies = _persist_rebuild(run_session, anomalies_label="/sync/resync-all")
-                run_session.commit()
-            message = f"Resynced {result['saved']} fill(s), rebuilt {rebuilt} trade(s)."
-            if anomalies:
-                message += f" {len(anomalies)} anomaly/anomalies logged."
-            _set_job(job.id, status="succeeded", phase="complete", done=1, total=1, enriched=result["saved"], current=message, finished_at=_now())
-        except Exception as exc:
-            _set_job(job.id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
-
-    _run_thread(runner)
+    submit_job(job.id)
     return {"run_id": str(job.id)}
+
+
+def _run_resync_all(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
+    job = session.get(JobRun, job_id)
+    confirmation = json.loads(job.params_json).get("confirmed_database")
+    if not confirmation:
+        raise RuntimeError("Resync has no recorded database confirmation; submit a new request.")
+    require_destructive_confirmation(confirmation, "background resync-all")
+    _clear_derived_trade_data(session)
+    session.exec(delete(Fill).where(not_(Fill.raw_email_id.like("manual:%"))))
+    session.commit()
+    result = _import_fills_from_gmail(session, start_enrichment=False)
+    rebuilt, anomalies = _persist_rebuild(session, anomalies_label="/sync/resync-all")
+    session.commit()
+    message = f"Resynced {result['saved']} fill(s), rebuilt {rebuilt} trade(s)."
+    if anomalies:
+        message += f" {len(anomalies)} anomaly/anomalies logged."
+    return result["saved"], message
+
+
+def execute_sync_job(job: JobRun) -> None:
+    """Dispatch persisted work only after job_runtime has claimed ownership."""
+    if job.job_type == JOB_FULL_PIPELINE:
+        _run_pipeline(job.id)
+    elif job.job_type == JOB_GMAIL_PUSH:
+        _run_gmail_push_pipeline(job.id)
+    else:
+        runners = {
+            JOB_GMAIL_SYNC: _run_gmail_sync,
+            JOB_FILL_CHECK: _run_fill_check,
+            JOB_TRADE_REBUILD: _run_trade_rebuild,
+            JOB_DAILY_REVIEW: _run_daily_review,
+            JOB_RESYNC_ALL: _run_resync_all,
+        }
+        runner = runners.get(job.job_type)
+        if runner is None:
+            raise ValueError(f"Unsupported sync job: {job.job_type}")
+        _run_simple_job(job.id, runner)

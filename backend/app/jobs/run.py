@@ -5,6 +5,9 @@ import uuid
 from sqlmodel import Session
 
 from app.database import engine
+from app.schema import ensure_current
+from app.engine.job_runtime import lock_directory
+from app.models import JobRun
 from app.engine.jobs import (
     JOB_ALPACA_ENRICH,
     JOB_POLYGON_ENRICH,
@@ -36,6 +39,8 @@ def main() -> None:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
+    lock_directory()
+    ensure_current(engine)
 
     if args.job_id:
         job_id = uuid.UUID(args.job_id)
@@ -63,8 +68,12 @@ def main() -> None:
                 job = create_trade_path_job(session, range_value=args.range, force=args.force)
             job_id = job.id
 
-    enriched = run_job(job_id)
-    print(f"job_id={job_id} enriched={enriched}")
+    run_job(job_id)
+    with Session(engine) as session:
+        job = session.get(JobRun, job_id)
+        print(f"job_id={job_id} status={job.status} enriched={job.enriched}")
+        if job.status != "succeeded":
+            raise SystemExit(1)
 
 
 if __name__ == "__main__":

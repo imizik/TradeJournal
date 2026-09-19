@@ -49,7 +49,7 @@ Tests need no API keys and touch no real data.
   TradingView) is opt-in and dormant when its variables are unset.
 
 This matters more than it looks. Several tests drive the real `app.main:app`
-through `TestClient`, and that app's lifespan runs `_cleanup_orphaned_jobs()`, `_seed_and_normalize_roth_account()` (which can
+through `TestClient`, and that app's lifespan runs `_seed_and_normalize_roth_account()` (which can
 move fills between accounts and trigger a full trade rebuild) and
 `restore_manual_fills_from_backup()`. Before `conftest.py` existed, running
 `pytest` on a normally configured machine performed those writes against the

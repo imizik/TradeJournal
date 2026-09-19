@@ -60,29 +60,6 @@ def _seed_and_normalize_roth_account() -> None:
         backup_manual_fills(session)
 
 
-def _cleanup_orphaned_jobs() -> None:
-    """Mark any running/queued jobs as failed — they were orphaned by a restart."""
-    from datetime import datetime
-    with Session(engine) as session:
-        from app.models import JobRun
-        from sqlmodel import select as sel
-        stuck = session.exec(
-            sel(JobRun).where(JobRun.status.in_(["running", "queued"]))
-        ).all()
-        for job in stuck:
-            job.status = "failed"
-            job.error = "Orphaned: server restarted while job was running"
-            job.finished_at = datetime.utcnow()
-            job.updated_at = datetime.utcnow()
-            session.add(job)
-        if stuck:
-            session.commit()
-            import logging
-            logging.getLogger(__name__).warning(
-                "Marked %d orphaned job(s) as failed on startup", len(stuck)
-            )
-
-
 def _maybe_autostart_webull_listener() -> None:
     """
     Optionally start the Webull TRADE event listener on uvicorn boot.
@@ -93,9 +70,7 @@ def _maybe_autostart_webull_listener() -> None:
       - no local Account rows exist with broker='webull' and a broker_account_id
 
     Each match logs an INFO line so operators can diagnose why it didn't fire.
-    Runs AFTER the orphan-cleanup pass — any stale 'running' listener row
-    from a prior uvicorn boot has already been marked failed, so spawning a
-    fresh listener here is safe.
+    Uses the same durable queue and ownership rules as the HTTP route.
     """
     if os.environ.get("WEBULL_LISTENER_AUTOSTART", "false").lower() not in ("1", "true", "yes"):
         return
@@ -104,7 +79,7 @@ def _maybe_autostart_webull_listener() -> None:
     # flag is off (keeps test imports light).
     from app.engine.jobs import JOB_WEBULL_LISTENER, create_webull_listener_job, running_job
     from app.engine.webull import resolve_local_webull_accounts, webull_configured
-    from app.engine.webull_listener import run_listener
+    from app.engine.job_runtime import submit_job
 
     if not webull_configured():
         _log.info("Webull autostart skipped: credentials not configured")
@@ -134,15 +109,9 @@ def _maybe_autostart_webull_listener() -> None:
             return
         job = create_webull_listener_job(session, accounts=accounts)
 
-    thread = threading.Thread(
-        target=run_listener,
-        args=(job.id,),
-        daemon=True,
-        name=f"webull-listener-{job.id}",
-    )
-    thread.start()
+    submit_job(job.id)
     _log.info(
-        "Webull autostart: listener spawned (job_id=%s, accounts=%d, source=%s)",
+        "Webull autostart: listener queued (job_id=%s, accounts=%d, source=%s)",
         job.id, len(accounts), source,
     )
 
@@ -218,12 +187,13 @@ async def lifespan(_app: FastAPI):
     # neither one describes; see app/schema.py. Refusing to start is louder
     # than silently repairing, which is the point.
     ensure_current(engine)
-    _cleanup_orphaned_jobs()
     _seed_and_normalize_roth_account()
     with Session(engine) as session:
         restored = restore_manual_fills_from_backup(session)
         if restored:
             session.commit()
+    from app.engine.job_runtime import resume_embedded_jobs
+    resume_embedded_jobs()
     _maybe_autostart_webull_listener()
     _maybe_autostart_gmail_watch()
     tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
