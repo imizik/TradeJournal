@@ -69,7 +69,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Trades, tags | `app/routers/trades.py` | `GET /trades`, `/trades/{id}`, `/trades/{id}/fills`, `/trades/fills/bulk?ids=`; `POST /trades/{id}/tags` | browser tests; `test_seed_dev_data.py` |
 | Fills CRUD | `app/routers/fills.py` | `GET`/`POST /fills`, `GET`/`PUT /fills/{id}` | browser tests |
 | Stats, accounts | `app/routers/stats.py`, `app/routers/accounts.py` | `GET /stats`, `GET /accounts` | the browser fixture test asserts `/stats` totals |
-| Live quotes | `app/engine/quotes.py`, `app/routers/quotes.py` | `GET /quotes?tickers=`, `POST /quotes/positions` | — (yfinance) |
+| Live quotes | `app/engine/quotes.py` (provider seam), `app/engine/tradier.py`, `app/engine/occ.py`, `app/routers/quotes.py` | `GET /quotes?tickers=`, `POST /quotes/positions` | `test_quotes_provider.py` (dispatch, batching, fallback), `test_tradier.py`, `test_occ.py` — the live call itself is uncovered; `scripts/compare_quote_providers.py` is how it gets checked |
 | Market packets, reports, ticker analysis | `app/engine/packets.py`, `app/engine/analyzer.py`, `app/engine/news.py`, `prompts/market_report.md` | `GET /packets/report`, `/packets/analyze`, `/packets/news` | — (live Alpaca and yfinance) |
 | Scalp analysis | `app/engine/scalper.py` (`score_scalp()` is pure) | `GET /packets/scalp` | `test_scalper.py` |
 | AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py`, `app/routers/daily_review.py` | `POST /trades/{id}/review`; `GET /daily-review`, `/daily-review/{day}`, `POST /daily-review`; job `daily_review` | — (Anthropic) |

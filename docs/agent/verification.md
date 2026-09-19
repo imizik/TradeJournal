@@ -256,9 +256,17 @@ Be honest about this when reporting work:
 - **The browser tests are smoke depth, not feature depth.** They assert that
   seeded values reach the DOM on the main pages. Filtering, sorting, forms,
   editing and Strategy Lab workflows are not exercised.
-- **No integration tests against live Gmail/Polygon/Alpaca/Webull.** Those
-  paths are only covered where they are stubbed. The browser tests run with no
-  market-data credentials, so quote-dependent UI shows its empty state.
+- **No integration tests against live Gmail/Polygon/Alpaca/Tradier/Webull.**
+  Those paths are only covered where they are stubbed. The browser tests run
+  with no market-data credentials, so quote-dependent UI shows its empty state.
+  The live-quote providers are the clearest case: `test_quotes_provider.py`
+  and `test_tradier.py` pin the dispatch, the batching, the response shapes and
+  the fallback, and prove nothing at all about whether a quote is *correct* or
+  *fresh*. That question is answered by running
+  `backend/scripts/compare_quote_providers.py` against a real account and
+  reading the numbers — it is the verification for anything touching
+  `app/engine/quotes.py` or `app/engine/tradier.py`, and no suite run
+  substitutes for it.
 - **Postgres coverage is targeted, not total.** The parity module below covers
   migrations, decimals and constraints. The rest of the suite still runs only
   on SQLite, because most test modules build their own SQLite engine. Query

@@ -1,8 +1,10 @@
 # Plan: Tradier as a live-quote provider
 
-**Status (2026-09-18):** assessment only. Nothing is implemented. No decision
-has been made beyond "investigate"; Phase 0 below is the smallest change that
-would settle it with evidence.
+**Status (2026-09-18):** Phase 0 is implemented and unproven. The client, the
+provider seam and the comparison script exist; `QUOTES_PROVIDER` still defaults
+to `yfinance`, and no Tradier call has been made with a real token. The
+comparison script is what turns this from a reading of vendor documentation
+into a decision — run it before flipping the default. Phases 1–3 are untouched.
 
 **Audience:** a coding agent (Claude or Codex) implementing this cold, and the
 account owner deciding whether it is worth doing. Read the referenced files
@@ -193,31 +195,47 @@ optimizing a number that is already ~2% of budget.
 
 ## Implementation
 
-### Phase 0 — swap yfinance behind a flag (the whole first change)
+### Phase 0 — swap yfinance behind a flag (the whole first change) — DONE
 
-- New `backend/app/engine/tradier.py`: thin `httpx` client, `TRADIER_API_KEY`
-  and `TRADIER_BASE_URL` from env, one function
-  `get_quotes(symbols, greeks=False)` that POSTs a comma-joined symbol list to
-  `/v1/markets/quotes`, plus an `_occ_symbol()` helper (reuse the existing
-  format in `backend/app/engine/trade_path.py` / `backend/app/engine/scalper.py`
-  — do not write a third one).
-- In `backend/app/engine/quotes.py`, add a provider seam:
-  `QUOTES_PROVIDER=yfinance|tradier|alpaca`, keeping the `OptionQuoteResult`
-  dataclass and the **per-share** option premium contract intact. Tradier
-  returns per-share premium like yfinance, so the ×100 conversion in
-  `frontend/lib/dashboard.ts` stays correct and no frontend change is needed.
-- yfinance remains the fallback on exception.
+- `backend/app/engine/tradier.py`: thin `httpx` client, `TRADIER_API_KEY` and
+  `TRADIER_BASE_URL` from env, one function `get_quotes(symbols, greeks=False)`
+  that POSTs a comma-joined symbol list to `/v1/markets/quotes`.
+- `backend/app/engine/occ.py`: the OCC conversion, which had been written twice
+  already (`trade_path`, `scalper`) and was about to be written a third time.
+  Both existing copies now import it. They disagreed on two things, and the
+  shared version settles both: a non-alphanumeric root is stripped (`BRK.B` →
+  `BRKB`, which is what the exchanges use), and an option type that is neither
+  call nor put returns None instead of being treated as a put.
+- `backend/app/engine/quotes.py` dispatches on `QUOTES_PROVIDER`
+  (`yfinance` default, or `tradier`), keeping the `OptionQuoteResult` dataclass
+  and the **per-share** option premium contract intact. Tradier reports
+  per-share premium like yfinance, so the ×100 conversion in
+  `frontend/lib/dashboard.ts` stays correct and no frontend change was needed.
+- yfinance remains the fallback: any `TradierError` — including a rejected
+  token — degrades to the old provider rather than blanking the open-position
+  table.
+- `OptionQuoteResult` gained `provider` and `iv_updated_at`. Nothing displays
+  them yet; they exist so the comparison script can report the staleness of an
+  hourly greek, and so nothing downstream can mistake ORATS IV for live IV.
 - `backend/app/routers/quotes.py` is untouched. No migration. No schema change.
 
-That is one new module plus a dispatch function.
+Tradier quotes one contract at a time rather than a chain, so it uses its own
+60-second cache keyed by OCC symbol; the two providers never share cached
+state.
 
-### How to decide whether to adopt it
+### How to decide whether to adopt it — NOT YET DONE
 
-`backend/scripts/compare_quote_providers.py` (read-only, new): price today's
-open positions through Tradier, yfinance **and** Alpaca option snapshots in the
-same second; print bid, ask, mid, IV, spread %, and wall-clock latency per
+`backend/scripts/compare_quote_providers.py` (read-only): prices today's open
+positions through Tradier, yfinance **and** Alpaca option snapshots in the same
+second; prints bid, ask, mid, IV, spread %, and wall-clock latency per
 provider. Run it several times across a session — open, mid, close, and once
 after hours.
+
+```bash
+cd backend
+.venv/bin/python -m scripts.compare_quote_providers
+.venv/bin/python -m scripts.compare_quote_providers --option NVDA:2026-10-17:180:call
+```
 
 Adopt Tradier if it is consistently tighter and fresher. The three-way matters:
 Alpaca is already paid for, and if its option feed holds up, promoting it costs
