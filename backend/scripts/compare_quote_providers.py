@@ -42,7 +42,9 @@ from typing import Any, Optional
 from sqlmodel import Session, select
 
 from app.database import engine
+from app.engine.alpaca import ET
 from app.engine.occ import occ_symbol
+from app.engine.packets import _market_state
 from app.models import Trade
 
 
@@ -56,6 +58,9 @@ class Row:
     mid: Optional[float] = None
     iv: Optional[float] = None
     iv_updated_at: Optional[str] = None
+    # Age of the quote itself, from the provider's own timestamp. After hours
+    # this is the whole story: a "live" NBBO at 2am is Friday's overnight book.
+    quote_age_s: Optional[float] = None
     error: Optional[str] = None
 
     @property
@@ -165,6 +170,7 @@ def price_with_tradier(positions: list[Position]) -> tuple[list[Row], float]:
                 mid=quote.mid,
                 iv=quote.iv_mid,
                 iv_updated_at=quote.greeks_updated_at,
+                quote_age_s=_age_from_ms(quote.bid_date or quote.trade_date),
             )
         )
     return rows, elapsed
@@ -260,7 +266,17 @@ def price_with_alpaca(positions: list[Position]) -> tuple[list[Row], float]:
             for position in stocks:
                 snap = snaps.get(position.ticker.upper()) or {}
                 trade = snap.get("latestTrade") or {}
-                rows.append(Row(position.label, "alpaca", last=trade.get("p")))
+                quote = snap.get("latestQuote") or {}
+                bid, ask = quote.get("bp"), quote.get("ap")
+                rows.append(Row(
+                    position.label,
+                    "alpaca",
+                    last=trade.get("p"),
+                    bid=bid or None,
+                    ask=ask or None,
+                    mid=round((bid + ask) / 2, 4) if bid and ask else None,
+                    quote_age_s=_age_from_iso(quote.get("t") or trade.get("t")),
+                ))
         except Exception as exc:  # noqa: BLE001
             rows += [Row(p.label, "alpaca", error=repr(exc)) for p in stocks]
 
@@ -286,6 +302,7 @@ def price_with_alpaca(positions: list[Position]) -> tuple[list[Row], float]:
                         mid=round((bid + ask) / 2, 4) if bid and ask else None,
                         iv=snap.get("impliedVolatility"),
                         iv_updated_at=greeks.get("updated_at"),
+                        quote_age_s=_age_from_iso(quote.get("t") or trade.get("t")),
                     )
                 )
         except Exception as exc:  # noqa: BLE001
@@ -309,6 +326,34 @@ def _ms(started: float) -> float:
     return round((time.perf_counter() - started) * 1000, 1)
 
 
+def _age_from_ms(epoch_ms: Optional[int]) -> Optional[float]:
+    """Seconds since a provider's millisecond timestamp."""
+    if not epoch_ms:
+        return None
+    return round(time.time() - (epoch_ms / 1000.0), 1)
+
+
+def _age_from_iso(stamp: Optional[str]) -> Optional[float]:
+    """Seconds since an RFC-3339 timestamp, which is how Alpaca reports them."""
+    if not stamp:
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return round((datetime.now(parsed.tzinfo) - parsed).total_seconds(), 1)
+
+
+def _fmt_age(seconds: Optional[float]) -> str:
+    if seconds is None:
+        return "-"
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds / 3600:.1f}h"
+
+
 def _fmt(value: Any, places: int = 4) -> str:
     if value is None:
         return "-"
@@ -324,7 +369,10 @@ def print_table(rows_by_provider: dict[str, list[Row]], timings: dict[str, float
             if row.label not in labels:
                 labels.append(row.label)
 
-    header = f"{'position':<38} {'provider':<9} {'bid':>10} {'ask':>10} {'mid':>10} {'last':>10} {'spread%':>8} {'iv':>7}  iv_as_of"
+    header = (
+        f"{'position':<38} {'provider':<9} {'bid':>10} {'ask':>10} {'mid':>10} "
+        f"{'last':>10} {'spread%':>8} {'age':>6} {'iv':>7}  iv_as_of"
+    )
     print(header)
     print("-" * len(header))
 
@@ -339,7 +387,8 @@ def print_table(rows_by_provider: dict[str, list[Row]], timings: dict[str, float
                 print(
                     f"{label:<38} {provider:<9} {_fmt(row.bid):>10} {_fmt(row.ask):>10} "
                     f"{_fmt(row.mid):>10} {_fmt(row.last):>10} "
-                    f"{_fmt(row.spread_pct, 2):>8} {_fmt(row.iv, 4):>7}  {row.iv_updated_at or '-'}"
+                    f"{_fmt(row.spread_pct, 2):>8} {_fmt_age(row.quote_age_s):>6} "
+                    f"{_fmt(row.iv, 4):>7}  {row.iv_updated_at or '-'}"
                 )
         print()
 
@@ -374,11 +423,20 @@ def main() -> int:
         return 1
 
     chosen = args.provider or list(PROVIDERS)
+    now_et = datetime.now(ET)
+    state = _market_state(now_et)
     print(
-        f"# {datetime.now().astimezone().isoformat(timespec='seconds')} — "
+        f"# {now_et.isoformat(timespec='seconds')} — market {state} — "
         f"{len(positions)} position(s) from {'the database' if from_db else 'the command line'}",
         file=sys.stderr,
     )
+    if state != "rth":
+        print(
+            f"# WARNING: the market is {state}. Quotes outside regular hours are the "
+            "overnight book or a stale close, and spreads are meaningless for "
+            "comparison. Re-run during RTH before deciding anything.",
+            file=sys.stderr,
+        )
 
     rows_by_provider: dict[str, list[Row]] = {}
     timings: dict[str, float] = {}
