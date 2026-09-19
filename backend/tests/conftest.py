@@ -5,7 +5,7 @@ app.database resolves DATABASE_URL from the environment, then backend/.env,
 then the repo-root .env -- and backend/.env is exactly where the hosted
 Neon URL is documented to live. Several tests exercise the real
 app.main:app through TestClient, whose lifespan runs ensure_current(),
-_cleanup_orphaned_jobs(), _seed_and_normalize_roth_account() (which can move
+_seed_and_normalize_roth_account() (which can move
 fills between accounts and trigger a full trade rebuild) and
 restore_manual_fills_from_backup().
 
@@ -41,6 +41,11 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 # The documented split-role setup exports exactly that variable, so this is not
 # hypothetical. Helpers that mean to migrate a named database override both.
 os.environ["MIGRATION_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
+
+# TestClient lifespans must not dispatch jobs left by another test. Individual
+# worker tests execute jobs explicitly and use isolated lock directories.
+os.environ["JOB_EXECUTION_MODE"] = "external"
+os.environ["JOB_LOCK_DIR"] = str(Path(_TEST_DB_DIR) / "job-locks")
 
 # Keep optional integrations dormant. Each is already opt-in, but an exported
 # value from a developer shell should not change what the suite exercises.

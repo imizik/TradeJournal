@@ -3,10 +3,10 @@ Webull TRADE event listener.
 
 Architecture:
   - One JobRun row of type 'webull_listener' tracks the listener's state
-    (queued/running/queued_stop/succeeded/failed). Survives uvicorn reloads
-    via the orphan-cleanup pass in app/main.py.
+    (queued/running/queued_stop/succeeded/failed). Ownership is managed by
+    engine.job_runtime; API reloads leave independent executors alone.
   - run_listener(job_id) is invoked either from:
-      a) the HTTP route /webull/events/start (spawns a thread — dev only), or
+      a) the HTTP route /webull/events/start (queues work; embedded thread in dev), or
       b) `python -m app.jobs.run --type webull_listener` (production worker).
   - Subscribes to the Webull TRADE event service via gRPC server streaming
     (see engine.webull_events). Each received data event is routed through
@@ -87,7 +87,7 @@ def _read_params(job_id: uuid.UUID) -> dict:
 def _mark_running(job_id: uuid.UUID, label: str = "listening") -> None:
     with Session(engine) as session:
         job = session.get(JobRun, job_id)
-        if job is None:
+        if job is None or job.status == "queued_stop":
             return
         job.status = "running"
         job.started_at = job.started_at or datetime.utcnow()
@@ -154,7 +154,12 @@ def _default_subscriber(
 # Main loop
 # ---------------------------------------------------------------------------
 
-def run_listener(
+def run_listener(job_id: uuid.UUID, **kwargs) -> int:
+    from app.engine.job_runtime import execute_job
+    return execute_job(job_id, runner=lambda: _run_listener(job_id, **kwargs), db_engine=engine)
+
+
+def _run_listener(
     job_id: uuid.UUID,
     *,
     subscriber: SubscriberFn = _default_subscriber,

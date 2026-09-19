@@ -1,4 +1,6 @@
 import os
+import sqlite3
+import time
 from collections.abc import Generator
 from pathlib import Path
 
@@ -33,7 +35,19 @@ if DATABASE_URL.startswith("sqlite"):
         NORMAL sync is safe with WAL and ~3x faster than FULL.
         """
         cur = dbapi_conn.cursor()
-        cur.execute("PRAGMA journal_mode=WAL")
+        # Several supervised processes can open a new database together.
+        # Changing journal mode needs an exclusive lock and SQLite can reject
+        # that upgrade immediately, even with a busy timeout. Existing WAL
+        # databases need no mode change; retry only this initialization race.
+        for attempt in range(5):
+            try:
+                if cur.execute("PRAGMA journal_mode").fetchone()[0].lower() != "wal":
+                    cur.execute("PRAGMA journal_mode=WAL")
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() or attempt == 4:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
         cur.execute("PRAGMA synchronous=NORMAL")
         cur.close()
 

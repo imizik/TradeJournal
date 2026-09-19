@@ -14,14 +14,13 @@ Endpoints:
   GET  /webull/events/status
 
 The long-running listener should run as `python -m app.jobs.run --type webull_listener`
-in production. /events/start spawns a dev convenience thread; the JobRun row is
-the source of truth either way.
+for one-off execution. /events/start queues work for the shared runtime; in
+external mode `python -m app.jobs.worker --lane webull` consumes it.
 """
 
 from __future__ import annotations
 
 import logging
-import threading
 import uuid
 from typing import Any
 
@@ -48,7 +47,8 @@ from app.engine.webull import (
     list_recent_orders_remote,
     webull_configured,
 )
-from app.engine.webull_listener import request_stop, run_listener
+from app.engine.webull_listener import request_stop
+from app.engine.job_runtime import submit_job
 from app.models import Account, WebullRawEvent
 
 log = logging.getLogger(__name__)
@@ -146,9 +146,7 @@ def webull_test_ingest(
 # ---------------------------------------------------------------------------
 
 def _spawn_listener_thread(job_id: uuid.UUID) -> None:
-    """Dev-only convenience. Production should run the CLI worker instead."""
-    thread = threading.Thread(target=run_listener, args=(job_id,), daemon=True, name=f"webull-listener-{job_id}")
-    thread.start()
+    submit_job(job_id)
 
 
 class _StartEventsRequest(BaseModel):

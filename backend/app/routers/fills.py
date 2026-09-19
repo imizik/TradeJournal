@@ -1,6 +1,5 @@
 import json
 import logging
-import threading
 import time
 import uuid
 from datetime import date, datetime, timedelta
@@ -19,10 +18,10 @@ from app.engine.jobs import (
     create_polygon_enrichment_job,
     job_status,
     latest_job,
-    run_job,
     running_job,
 )
 from app.engine.reconstructor import FillInput, reconstruct
+from app.engine.job_runtime import submit_job
 from app.environment import require_destructive_confirmation
 from app.models import Account, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
 
@@ -490,8 +489,7 @@ async def create_fill(body: FillCreate, session: Session = Depends(get_session))
 
 
 def _start_job_thread(job_id: uuid.UUID) -> None:
-    t = threading.Thread(target=run_job, args=(job_id,), daemon=True)
-    t.start()
+    submit_job(job_id)
 
 
 @router.get("/enrich/status")

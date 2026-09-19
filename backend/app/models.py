@@ -498,6 +498,9 @@ class JobRun(SQLModel, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     job_type: str = Field(index=True)
     status: str = Field(default="queued", index=True)  # queued|running|succeeded|failed
+    owner_id: Optional[str] = None
+    owner_host: Optional[str] = None
+    owner_lock_dir: Optional[str] = None
     params_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
     total: int = 0
     done: int = 0
