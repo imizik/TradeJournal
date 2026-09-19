@@ -22,6 +22,15 @@ _OPT_FILL_RE = re.compile(
 )
 _OPT_PRICE_RE = re.compile(r"average price of \$([\d,]+\.?\d*) per contract", re.IGNORECASE)
 
+# Robinhood changed the option confirmation wording on 2026-09-18. The sentence
+# still reads "average price of $X per contract", but X is now the per-share
+# premium ($3.30) where it used to be the per-contract total ($785.00). Fills
+# store option price as dollars per contract, so emails executed on or after
+# the switch need the x100 multiplier. Older emails (including anything
+# re-imported during a resync) must keep their literal value — pre-switch
+# totals under $100 are common and would otherwise be inflated 100x.
+_PER_SHARE_PRICE_FROM = date(2026, 9, 18)
+
 _STK_FILL_RE = re.compile(
     r"to (buy|sell) ([\d,]+\.?\d*) shares? of ([A-Z]+)",
     re.IGNORECASE,
@@ -111,9 +120,8 @@ def _parse_option(body: str, imap_uid: str) -> ParsedFill:
     strike = _to_decimal(fill_match.group(4))
     option_type = fill_match.group(5).lower()
     exp_str = fill_match.group(6)
-    price = _to_decimal(price_match.group(1))
-
     executed_at = _parse_dt(dt_match)
+    price = _option_price_per_contract(_to_decimal(price_match.group(1)), executed_at.date())
     expiration = _infer_expiration(exp_str, executed_at.date())
     account_last4, account_type = _parse_account(body)
     side = "buy_to_open" if action == "buy" else "sell_to_close"
@@ -173,6 +181,13 @@ def _parse_stock(body: str, imap_uid: str) -> ParsedFill:
         account_last4=account_last4,
         account_type=account_type,
     )
+
+
+def _option_price_per_contract(price: Decimal, executed_on: date) -> Decimal:
+    """Normalize the quoted option price to dollars per contract."""
+    if executed_on >= _PER_SHARE_PRICE_FROM:
+        return price * Decimal("100")
+    return price
 
 
 def _parse_dt(dt_match: re.Match) -> datetime:
