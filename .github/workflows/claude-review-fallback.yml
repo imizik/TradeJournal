@@ -1,0 +1,158 @@
+name: Claude review (fallback)
+
+# Codex reviews pull requests through the chatgpt-codex-connector GitHub App,
+# which lives in ChatGPT's settings rather than in this repository. Nothing
+# here can see its quota, and when that quota runs out the app simply stops
+# posting -- no error, no failing check, just a PR that silently never got
+# reviewed. This workflow treats "Codex posted nothing" as the signal and
+# reviews the PR with Claude instead, so a review always happens.
+#
+# Deliberately not a job in ci.yml: that file holds the checks that decide
+# whether the code works. An AI review is advisory and must not read as one of
+# them.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  # Lets you force a Claude review on a PR without waiting for the timer.
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR number to review
+        required: true
+
+# A new push supersedes an in-flight wait for the same PR.
+concurrency:
+  group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  fallback:
+    name: Review if Codex did not
+    # Draft PRs are not ready for review by anyone.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Claude needs the PR branch and enough history to diff it.
+          ref: ${{ github.event.pull_request.head.sha || '' }}
+          fetch-depth: 0
+
+      # The baseline for "did a Codex review land while we waited". Recorded
+      # here rather than read back from the Actions API, which would need an
+      # `actions: read` scope this job otherwise has no use for.
+      - name: Mark the start of the wait
+        id: waited_from
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Codex usually posts within a couple of minutes of a push. Waiting is
+      # what keeps this a fallback rather than a second always-on reviewer:
+      # on the PRs Codex handles, the job below is skipped and nothing is
+      # spent. Actions minutes are free on a public repository, so the wait
+      # itself costs nothing.
+      - name: Give Codex time to review
+        if: github.event_name != 'workflow_dispatch'
+        run: sleep 300
+
+      - name: Check whether Codex reviewed this commit
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number || inputs.pr_number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # The secrets context is not available in a job-level `if`, so the
+          # "is Claude even configured" gate has to live here in a step.
+          CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CLAUDE_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          RUN_STARTED: ${{ steps.waited_from.outputs.at }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$CLAUDE_TOKEN" ] && [ -z "$CLAUDE_API_KEY" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret is set, so the Claude fallback cannot run. Add one in Settings > Secrets and variables > Actions."
+            exit 0
+          fi
+
+          # Resolve the head SHA ourselves on workflow_dispatch, where the
+          # pull_request event payload is absent.
+          if [ -z "${HEAD_SHA:-}" ]; then
+            HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
+          fi
+          SHORT_SHA=${HEAD_SHA:0:10}
+
+          # The REST API reports the app as "chatgpt-codex-connector[bot]"
+          # while `gh pr view --json reviews` strips the suffix, so match on a
+          # prefix rather than equality -- exact matching silently finds
+          # nothing here and would make every PR look unreviewed.
+          #
+          # Two independent signals that Codex has seen *this* commit, because
+          # either one alone has a blind spot. Codex stamps its review body
+          # with "Reviewed commit: <sha>", which is exact but depends on their
+          # wording; a review submitted after the wait began is wording-proof
+          # but misses a Codex review that landed before the wait began.
+          # Either counts.
+          CODEX_REVIEWS=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+            --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
+                       | select((.body // \"\" | contains(\"$SHORT_SHA\"))
+                                or (.submitted_at // \"\") >= \"$RUN_STARTED\")]
+                  | length")
+
+          # Codex has also been known to leave plain issue comments rather than
+          # a formal review; a review by any route still counts as reviewed.
+          CODEX_COMMENTS=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
+                       | select((.body // \"\" | contains(\"$SHORT_SHA\"))
+                                or (.created_at // \"\") >= \"$RUN_STARTED\")]
+                  | length")
+
+          if [ "$CODEX_REVIEWS" -gt 0 ] || [ "$CODEX_COMMENTS" -gt 0 ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Codex reviewed $SHORT_SHA. Skipping the Claude fallback."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::Codex did not review $SHORT_SHA within the wait window. Falling back to Claude."
+          fi
+
+      - name: Claude review
+        if: steps.check.outputs.run == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          # Prefer the subscription token; fall back to API credits. Whichever
+          # is set is the one that gets billed.
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          claude_args: >-
+            --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git diff:*),Read,Grep,Glob"
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number || inputs.pr_number }}
+            in ${{ github.repository }}. Read it with `gh pr view` and `gh pr diff`.
+
+            Codex normally reviews this repository and did not this time, so
+            this is the only review the PR will get. Read CLAUDE.md and the
+            relevant files under docs/agent/ before judging anything.
+
+            Weight the review toward where this repository actually breaks:
+            PnL math, FIFO reconstruction, Gmail and email parsing, fill
+            dedupe, account identity, reconciliation outputs, nullable
+            enrichment fields, and frontend data-fetch patterns that can
+            create N+1 calls. Check the hard constraints in CLAUDE.md too --
+            the private API must never be exposed, the conftest.py database
+            pin must not be weakened, and destructive operations must not
+            reach a hosted database.
+
+            Also check the PR body's "Verified" section against the diff. A
+            claim of coverage the change does not have is a finding here.
+
+            Post one review comment with `gh pr comment`, headed
+            "### 🤖 Claude Review (Codex fallback)". Lead with the findings
+            that would change the code. Say plainly if you find nothing
+            wrong -- do not invent findings to fill the comment, and do not
+            restate what the diff already says.

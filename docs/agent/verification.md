@@ -38,6 +38,17 @@ CI (`.github/workflows/ci.yml`) runs the same checks on every pull request, in
 four parallel jobs (backend, frontend, browser, Postgres parity). Agent
 verification is not the only signal.
 
+Review is a separate layer and proves nothing about correctness. Codex reviews
+pull requests through the `chatgpt-codex-connector` GitHub App, which is
+configured in ChatGPT rather than in this repository, so no workflow here can
+see its quota or tell you when it stops posting.
+`.github/workflows/claude-review-fallback.yml` covers that gap: it waits five
+minutes, and if no Codex review has appeared for the head commit it reviews the
+PR with Claude instead. It is advisory, it is not a required check, and `main`
+has no branch protection — a PR can merge with no review at all. The fallback
+is inert until a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` repository
+secret exists; without one it logs a notice and exits clean.
+
 ## Credentials and data: none required
 
 Tests need no API keys and touch no real data.
