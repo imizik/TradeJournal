@@ -3,126 +3,180 @@ name: Claude review (fallback)
 # Codex reviews pull requests through the chatgpt-codex-connector GitHub App,
 # which lives in ChatGPT's settings rather than in this repository. Nothing
 # here can see its quota, and when that quota runs out the app simply stops
-# posting -- no error, no failing check, just a PR that silently never got
-# reviewed. This workflow treats "Codex posted nothing" as the signal and
-# reviews the PR with Claude instead, so a review always happens.
+# posting -- no error, no failing check, just a pull request that silently
+# never got reviewed. main has no branch protection, so it merges anyway.
+# Roughly a third of recent PRs got no Codex review at all.
 #
-# Deliberately not a job in ci.yml: that file holds the checks that decide
-# whether the code works. An AI review is advisory and must not read as one of
-# them.
+# This sweeps open pull requests on a timer and reviews any whose head commit
+# Codex has left alone. A timer rather than a pull_request trigger on purpose:
+# measured Codex latency here runs 2.7-6.0 minutes and is trending up, so any
+# wait short enough not to slow a PR down is short enough to fire a false
+# fallback and pay for two reviews. Off the PR's path, the wait costs nothing
+# and can be set safely long. Nothing attaches to the PR's checks list.
+#
+# Deliberately not in ci.yml: that file holds the checks that decide whether
+# the code works. An AI review is advisory and must not read as one of them.
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-  # Lets you force a Claude review on a PR without waiting for the timer.
+  schedule:
+    # Every 10 minutes. GitHub delays cron under load and disables it entirely
+    # on a public repo after 60 days without a push, so treat this as
+    # best-effort -- it is a backstop, not a gate.
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       pr_number:
-        description: PR number to review
-        required: true
+        description: Review this PR now, skipping the age and Codex checks
+        required: false
 
-# A new push supersedes an in-flight wait for the same PR.
 concurrency:
-  group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
-  cancel-in-progress: true
+  group: claude-review-sweep
+  cancel-in-progress: false
 
 permissions:
   contents: read
   pull-requests: write
 
+env:
+  # How long Codex gets before a commit counts as unreviewed. Double the
+  # slowest observed Codex review (6.0 min) -- the cost of waiting longer here
+  # is only that a genuine fallback review lands later, while the cost of
+  # waiting too little is a duplicate paid review on every healthy PR.
+  GRACE_MINUTES: 12
+  # Most PRs this sweep could ever need to review at once. A runaway loop
+  # (Codex down and every open PR eligible) is capped rather than unbounded.
+  MAX_PER_SWEEP: 5
+
 jobs:
-  fallback:
-    name: Review if Codex did not
-    # Draft PRs are not ready for review by anyone.
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+  find:
+    name: Find unreviewed pull requests
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
+    outputs:
+      prs: ${{ steps.scan.outputs.prs }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          # Claude needs the PR branch and enough history to diff it.
-          ref: ${{ github.event.pull_request.head.sha || '' }}
-          fetch-depth: 0
-
-      # The baseline for "did a Codex review land while we waited". Recorded
-      # here rather than read back from the Actions API, which would need an
-      # `actions: read` scope this job otherwise has no use for.
-      - name: Mark the start of the wait
-        id: waited_from
-        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      # Codex usually posts within a couple of minutes of a push. Waiting is
-      # what keeps this a fallback rather than a second always-on reviewer:
-      # on the PRs Codex handles, the job below is skipped and nothing is
-      # spent. Actions minutes are free on a public repository, so the wait
-      # itself costs nothing.
-      - name: Give Codex time to review
-        if: github.event_name != 'workflow_dispatch'
-        run: sleep 300
-
-      - name: Check whether Codex reviewed this commit
-        id: check
+      - name: Scan open pull requests
+        id: scan
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number || inputs.pr_number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          ONLY_PR: ${{ inputs.pr_number }}
           # The secrets context is not available in a job-level `if`, so the
           # "is Claude even configured" gate has to live here in a step.
           CLAUDE_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CLAUDE_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          RUN_STARTED: ${{ steps.waited_from.outputs.at }}
         run: |
           set -euo pipefail
 
           if [ -z "$CLAUDE_TOKEN" ] && [ -z "$CLAUDE_API_KEY" ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "prs=[]" >> "$GITHUB_OUTPUT"
             echo "::notice::No CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY secret is set, so the Claude fallback cannot run. Add one in Settings > Secrets and variables > Actions."
             exit 0
           fi
 
-          # Resolve the head SHA ourselves on workflow_dispatch, where the
-          # pull_request event payload is absent.
-          if [ -z "${HEAD_SHA:-}" ]; then
-            HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
-          fi
-          SHORT_SHA=${HEAD_SHA:0:10}
-
-          # The REST API reports the app as "chatgpt-codex-connector[bot]"
-          # while `gh pr view --json reviews` strips the suffix, so match on a
-          # prefix rather than equality -- exact matching silently finds
-          # nothing here and would make every PR look unreviewed.
-          #
-          # Two independent signals that Codex has seen *this* commit, because
-          # either one alone has a blind spot. Codex stamps its review body
-          # with "Reviewed commit: <sha>", which is exact but depends on their
-          # wording; a review submitted after the wait began is wording-proof
-          # but misses a Codex review that landed before the wait began.
-          # Either counts.
-          CODEX_REVIEWS=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
-            --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
-                       | select((.body // \"\" | contains(\"$SHORT_SHA\"))
-                                or (.submitted_at // \"\") >= \"$RUN_STARTED\")]
-                  | length")
-
-          # Codex has also been known to leave plain issue comments rather than
-          # a formal review; a review by any route still counts as reviewed.
-          CODEX_COMMENTS=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-            --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
-                       | select((.body // \"\" | contains(\"$SHORT_SHA\"))
-                                or (.created_at // \"\") >= \"$RUN_STARTED\")]
-                  | length")
-
-          if [ "$CODEX_REVIEWS" -gt 0 ] || [ "$CODEX_COMMENTS" -gt 0 ]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Codex reviewed $SHORT_SHA. Skipping the Claude fallback."
+          if [ -n "$ONLY_PR" ]; then
+            CANDIDATES="$ONLY_PR"
           else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "::warning::Codex did not review $SHORT_SHA within the wait window. Falling back to Claude."
+            CANDIDATES=$(gh api --paginate "repos/$REPO/pulls?state=open&per_page=100" \
+              --jq '.[] | select(.draft == false) | .number')
           fi
+
+          NOW=$(date -u +%s)
+          SELECTED=()
+
+          for PR in $CANDIDATES; do
+            HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
+            SHORT_SHA=${HEAD_SHA:0:10}
+
+            # Claude stamps its own comment with an HTML marker naming the
+            # commit. That marker is the only thing standing between a Codex
+            # outage and re-reviewing the same commit every ten minutes, so it
+            # is checked first and cheaply.
+            ALREADY=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+              --jq "[.[] | select((.body // \"\") | contains(\"claude-review:$HEAD_SHA\"))] | length")
+            if [ "$ALREADY" -gt 0 ]; then
+              echo "PR #$PR ($SHORT_SHA): Claude already reviewed this commit."
+              continue
+            fi
+
+            # The REST API reports the app as "chatgpt-codex-connector[bot]"
+            # while `gh pr view --json reviews` strips the suffix, so match on
+            # a prefix -- exact matching silently finds nothing here and would
+            # make every PR look unreviewed.
+            #
+            # Codex stamps its review body with "Reviewed commit: <sha>", which
+            # is what makes this per-commit: a PR whose branch moved after a
+            # Codex review is unreviewed again, which has already happened here.
+            CODEX=$(gh api --paginate "repos/$REPO/pulls/$PR/reviews" \
+              --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
+                         | select((.body // \"\") | contains(\"$SHORT_SHA\"))] | length")
+            CODEX_C=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+              --jq "[.[] | select(.user.login | startswith(\"chatgpt-codex-connector\"))
+                         | select((.body // \"\") | contains(\"$SHORT_SHA\"))] | length")
+
+            if [ -n "$ONLY_PR" ]; then
+              echo "PR #$PR ($SHORT_SHA): dispatched by hand, reviewing regardless."
+              SELECTED+=("$PR")
+              continue
+            fi
+
+            if [ "$CODEX" -gt 0 ] || [ "$CODEX_C" -gt 0 ]; then
+              echo "PR #$PR ($SHORT_SHA): Codex reviewed it. Skipping."
+              continue
+            fi
+
+            # How long Codex has actually had. The later of the commit's own
+            # timestamp and the PR opening, since a commit can predate the PR
+            # by days on a long-lived branch and Codex only sees it at open.
+            COMMIT_AT=$(gh api "repos/$REPO/commits/$HEAD_SHA" --jq .commit.committer.date)
+            PR_AT=$(gh api "repos/$REPO/pulls/$PR" --jq .created_at)
+            COMMIT_TS=$(date -u -d "$COMMIT_AT" +%s)
+            PR_TS=$(date -u -d "$PR_AT" +%s)
+            BASE_TS=$(( COMMIT_TS > PR_TS ? COMMIT_TS : PR_TS ))
+            AGE_MIN=$(( (NOW - BASE_TS) / 60 ))
+
+            if [ "$AGE_MIN" -lt "$GRACE_MINUTES" ]; then
+              echo "PR #$PR ($SHORT_SHA): only ${AGE_MIN}m old, still inside the ${GRACE_MINUTES}m grace window."
+              continue
+            fi
+
+            echo "::warning::PR #$PR ($SHORT_SHA) is ${AGE_MIN}m old with no Codex review. Queueing a Claude review."
+            SELECTED+=("$PR")
+          done
+
+          # Cap the sweep, oldest PRs first.
+          COUNT=${#SELECTED[@]}
+          if [ "$COUNT" -gt "$MAX_PER_SWEEP" ]; then
+            echo "::warning::${COUNT} pull requests are eligible; reviewing the first ${MAX_PER_SWEEP} this sweep."
+            SELECTED=("${SELECTED[@]:0:$MAX_PER_SWEEP}")
+          fi
+
+          if [ ${#SELECTED[@]} -eq 0 ]; then
+            echo "prs=[]" >> "$GITHUB_OUTPUT"
+          else
+            printf -v JOINED '%s,' "${SELECTED[@]}"
+            echo "prs=[${JOINED%,}]" >> "$GITHUB_OUTPUT"
+          fi
+
+  review:
+    name: Review PR #${{ matrix.pr }}
+    needs: find
+    if: needs.find.outputs.prs != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      # One at a time: a sweep that queues several reviews should spend
+      # predictably rather than fan out.
+      max-parallel: 1
+      matrix:
+        pr: ${{ fromJson(needs.find.outputs.prs) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Claude review
-        if: steps.check.outputs.run == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           # Prefer the subscription token; fall back to API credits. Whichever
@@ -132,12 +186,13 @@ jobs:
           claude_args: >-
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git diff:*),Read,Grep,Glob"
           prompt: |
-            Review pull request #${{ github.event.pull_request.number || inputs.pr_number }}
-            in ${{ github.repository }}. Read it with `gh pr view` and `gh pr diff`.
+            Review pull request #${{ matrix.pr }} in ${{ github.repository }}.
+            Read it with `gh pr view` and `gh pr diff`.
 
-            Codex normally reviews this repository and did not this time, so
-            this is the only review the PR will get. Read CLAUDE.md and the
-            relevant files under docs/agent/ before judging anything.
+            Codex normally reviews this repository and did not review this
+            commit, so this is the only review the pull request will get. Read
+            CLAUDE.md and the relevant files under docs/agent/ before judging
+            anything.
 
             Weight the review toward where this repository actually breaks:
             PnL math, FIFO reconstruction, Gmail and email parsing, fill
@@ -151,8 +206,42 @@ jobs:
             Also check the PR body's "Verified" section against the diff. A
             claim of coverage the change does not have is a finding here.
 
-            Post one review comment with `gh pr comment`, headed
-            "### 🤖 Claude Review (Codex fallback)". Lead with the findings
-            that would change the code. Say plainly if you find nothing
-            wrong -- do not invent findings to fill the comment, and do not
-            restate what the diff already says.
+            Post exactly one comment with `gh pr comment`. It MUST begin with
+            these two lines, the marker first:
+
+            <!-- claude-review:HEADSHA -->
+            ### 🤖 Claude Review (Codex fallback)
+
+            Replace HEADSHA with the full head SHA from
+            `gh pr view ${{ matrix.pr }} --json headRefOid --jq .headRefOid`.
+            The marker is what stops this review repeating every ten minutes;
+            without it the sweep will review this same commit again.
+
+            Lead with the findings that would change the code. Say plainly if
+            you find nothing wrong -- do not invent findings to fill the
+            comment, and do not restate what the diff already says.
+
+      # Belt and braces. The marker is the only thing stopping this sweep from
+      # reviewing the same commit every ten minutes, and it is written by a
+      # model that was merely asked to include it. If the review succeeded but
+      # the marker is missing, post one -- a stray one-line comment is a much
+      # cheaper failure than an unbounded review loop.
+      #
+      # Deliberately only on success: when the review step fails there is no
+      # review, and the next sweep should retry it.
+      - name: Guarantee the dedup marker
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ matrix.pr }}
+        run: |
+          set -euo pipefail
+          HEAD_SHA=$(gh api "repos/$REPO/pulls/$PR" --jq .head.sha)
+          FOUND=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq "[.[] | select((.body // \"\") | contains(\"claude-review:$HEAD_SHA\"))] | length")
+          if [ "$FOUND" -eq 0 ]; then
+            echo "::warning::The review comment carried no dedup marker; posting one so this commit is not reviewed again."
+            gh api "repos/$REPO/issues/$PR/comments" \
+              -f body="<!-- claude-review:$HEAD_SHA -->"
+          fi

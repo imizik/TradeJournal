@@ -42,12 +42,23 @@ Review is a separate layer and proves nothing about correctness. Codex reviews
 pull requests through the `chatgpt-codex-connector` GitHub App, which is
 configured in ChatGPT rather than in this repository, so no workflow here can
 see its quota or tell you when it stops posting.
-`.github/workflows/claude-review-fallback.yml` covers that gap: it waits five
-minutes, and if no Codex review has appeared for the head commit it reviews the
-PR with Claude instead. It is advisory, it is not a required check, and `main`
-has no branch protection — a PR can merge with no review at all. The fallback
-is inert until a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` repository
-secret exists; without one it logs a notice and exits clean.
+`.github/workflows/claude-review-fallback.yml` covers that gap: every ten
+minutes it sweeps open pull requests and reviews, with Claude, any whose head
+commit Codex has left alone for twelve minutes. It runs on a timer rather than
+on the pull request itself because measured Codex latency here is 2.7–6.0
+minutes and rising — a wait short enough not to delay a PR is short enough to
+pay for a second review on a healthy one. Nothing attaches to the PR's checks
+list, so it slows nothing down.
+
+Re-review is prevented by an HTML marker naming the head commit, which Claude
+writes into its comment and the workflow backfills if it is missing. A new
+push is a new commit, so it is reviewed again; that is deliberate, and Codex
+leaving a branch unreviewed after a force-push has already happened here.
+
+It is advisory, it is not a required check, and `main` has no branch
+protection — a PR can merge with no review at all. The fallback is inert until
+a `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` repository secret exists;
+without one it logs a notice and exits clean.
 
 ## Credentials and data: none required
 
