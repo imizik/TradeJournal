@@ -48,6 +48,9 @@ Things worth knowing before you touch a page:
   `job_run` rows, never process memory (`architecture.md`).
 - `/accounts` (`app/accounts/page.tsx`) is a static placeholder: not in the
   sidebar, calls nothing, renders "No accounts yet."
+- `/privacy` (`app/privacy/page.tsx`) is static and not in the sidebar. The
+  Google OAuth consent screen links to it; keep it true to what the Gmail
+  integration does.
 
 ## Backend by feature
 
