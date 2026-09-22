@@ -2,7 +2,7 @@
 
 This package runs one private, single-user TradeJournal installation. It uses
 native systemd services for Next.js, the API, the sync, Polygon, Webull and
-Gmail worker lanes, plus backup, Gmail-import and Sync Everything timers. **The initial database remains Neon.** Moving that database to
+Gmail worker lanes, plus local/offsite backup, Gmail-import and Sync Everything timers. **The initial database remains Neon.** Moving that database to
 the VPS is a separate cutover, gated on an off-host backup and a successful
 restore rehearsal with data checks. Nothing here exports or deletes Neon data.
 
@@ -19,6 +19,7 @@ restore rehearsal with data checks. Nothing here exports or deletes Neon data.
 | Runtime state | `/var/lib/tradejournal/data`, `oauth`, `job-locks`, `frontend-cache` |
 | Private application config | `/etc/tradejournal/backend.env`; root owned, mode 0600 |
 | Migration credentials | `/etc/tradejournal/migration.env`; root owned, mode 0600 |
+| Offsite backup credentials | `/etc/tradejournal/offsite.env` and `restic-password`; root owned, mode 0600 |
 
 The frontend proxy has the same authority as the unauthenticated private API.
 Keep **both** services behind private access. Restrict the Tailscale access
@@ -151,7 +152,7 @@ database port, frontend port or API port is needed.
 
 ## Backups and scheduled Robinhood import
 
-The release installs three timers:
+The release installs four timers:
 
 - `tradejournal-backup.timer` runs daily at 05:15 UTC with up to 15 minutes of
   jitter. It creates a custom-format PostgreSQL dump plus a compressed archive
@@ -160,6 +161,11 @@ The release installs three timers:
   files and retains seven dated restore points under
   `/var/backups/tradejournal/`. Backups created before format version 2 do not
   contain the deployment configuration.
+- `tradejournal-offsite-backup.timer` runs daily at 06:15 UTC with up to 15
+  minutes of jitter. Once configured, it verifies the newest local backup,
+  uploads it through restic's encryption to a private R2 bucket, keeps 30 daily
+  snapshots, and checks the repository. Without the two root-only offsite
+  credential files, the service is skipped.
 - `tradejournal-gmail-sync.timer` checks Gmail five minutes after timer
   activation and five minutes after each prior check finishes. It treats an
   already-active sync as a safe skip. When Gmail imports new fills, it waits
@@ -200,6 +206,50 @@ before changing `DATABASE_URL`. Repeat the dump and comparison with writers
 stopped for the final cutover; the live database can gain new fills after a
 rehearsal. Keep the Neon source until the local service and off-host restore
 have both been verified.
+
+### Encrypted offsite backup in Cloudflare R2
+
+Create a private R2 bucket using **Standard** storage. Make a bucket-scoped
+Object Read & Write token; Cloudflare shows its Access Key ID and Secret Access
+Key only at creation. Use the **account endpoint**, not the bucket URL, in the
+restic repository string. For example, if the bucket URL ends in
+`/trade-journal`, set the repository to
+`s3:https://ACCOUNT_ID.r2.cloudflarestorage.com/trade-journal/tradejournal-v1`.
+The extra path is a dedicated restic repository prefix. Never make the bucket
+public and never put its S3 credentials in a Git checkout or chat.
+
+Install the Ubuntu restic package and create two root-owned `0600` files:
+
+- `/etc/tradejournal/offsite.env`, based on `deploy/offsite.env.example`, with
+  that repository string and the bucket-scoped S3 access key and secret.
+- `/etc/tradejournal/restic-password`, containing one generated random password
+  for restic encryption. Save a copy of this password in a password manager
+  **outside the VPS**. Losing it makes the offsite backup unreadable; possession
+  of the R2 token alone cannot decrypt it.
+
+Keep the password out of shell history, process arguments, and logs. Generate
+the file on the VPS with `sudo openssl rand -base64 48` redirected to the
+root-only file under a `077` umask, then copy its contents to the password
+manager through a private channel. The token may be rotated; the restic
+password must remain available for recovery.
+
+After the files exist, initialize and exercise the dedicated repository:
+
+```bash
+sudo apt-get install -y restic
+sudo /opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/offsite.py init
+sudo /opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/offsite.py backup
+sudo /opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/offsite.py restore-drill
+sudo systemctl enable --now tradejournal-offsite-backup.timer
+```
+
+The drill downloads the encrypted snapshot to a temporary root-only directory,
+verifies both archive checksums, restores the database dump into a disposable
+local PostgreSQL database, queries its tables and Alembic revision, then removes
+both the restored files and disposable database. Check the timer and service
+logs after the first scheduled run. Do not retire Neon until this drill passes,
+the VPS database candidate's table counts match a final quiesced Neon dump,
+and the application is healthy against the VPS database.
 
 ## Real-time Gmail import
 

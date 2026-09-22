@@ -51,7 +51,7 @@ when the private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank
 — that split would silently point the two processes at different databases.
 
 The [Ubuntu deployment package](../../deploy/README.md) instead supervises
-five services: frontend, API and the three worker lanes. It keeps the frontend
+six services: frontend, API and the four worker lanes. It keeps the frontend
 and API on loopback; private Tailscale Serve reaches the frontend, whose
 same-origin `/api/backend` proxy carries browser requests. Server components
 use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
@@ -60,7 +60,8 @@ public. Local development retains the existing direct API URL default.
 Release code lives under `/opt/tradejournal`, persistent data/OAuth/locks under
 `/var/lib/tradejournal`. Initial hosting keeps Neon; moving Postgres onto the
 VPS remains a separate migration after a successful backup/restore rehearsal.
-The package also enables a daily verified application backup, a five-minute
+The package also enables a daily verified application backup, an encrypted
+offsite backup timer when R2 credentials are configured, a five-minute
 Gmail-import timer and an 08:00/17:00 New York Sync Everything timer. The
 Gmail timer rebuilds trades only when it imported new fills and never starts
 market-data enrichment; with real-time import enabled it is the safety net. Backup retention, prerequisites
