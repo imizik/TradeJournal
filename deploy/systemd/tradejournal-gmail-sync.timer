@@ -2,7 +2,7 @@
 Description=Check Gmail for new Robinhood fills every five minutes
 
 [Timer]
-OnBootSec=5m
+OnActiveSec=5m
 OnUnitInactiveSec=5m
 Unit=tradejournal-gmail-sync.service
 
