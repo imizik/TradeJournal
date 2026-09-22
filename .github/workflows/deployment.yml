@@ -42,7 +42,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Prepare host runtime
-        run: sudo apt-get update && sudo apt-get install -y python3.12-venv
+        run: sudo apt-get update && sudo apt-get install -y python3.12-venv postgresql-client
       - name: Build committed source away from production
         run: python deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Install and exercise actual services

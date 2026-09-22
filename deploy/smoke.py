@@ -67,7 +67,16 @@ def main():
         control.run("runuser", "-u", "tradejournal", "--", release / "backend/.venv/bin/python", "scripts/seed_dev_data.py", "--database-url", URL, cwd=release / "backend", env={**os.environ, "DATABASE_URL": URL, "MIGRATION_DATABASE_URL": URL, "PYTHONDONTWRITEBYTECODE": "1"})
         cli("activate", release.name, "--confirm-database", IDENTITY)
         assert request("/stats")["total_trades"] == 6
-        control.run("systemctl", "is-enabled", *control.SERVICES)
+        control.run("systemctl", "is-enabled", *control.SERVICES, *control.TIMERS)
+        control.run("systemctl", "start", "tradejournal-backup.service")
+        latest_backup = control.BACKUPS / "latest"
+        assert latest_backup.is_symlink()
+        control.run(
+            release / "backend/.venv/bin/python",
+            release / "deploy/backup.py",
+            "verify",
+            latest_backup.resolve(),
+        )
         # The backend/frontend must not acquire a wildcard listener.
         sockets = control.run("ss", "-ltnH", capture_output=True, text=True).stdout
         for port in (3000, 8080):
@@ -120,11 +129,10 @@ def main():
         # Boot wiring is inspected; a stop/start tests full process recovery.
         # This is deliberately not labelled a physical VPS reboot test.
         control.stop_services()
-        control.run("systemctl", "start", *control.SERVICES)
-        control.health(release, IDENTITY)
+        control.start_services(release, IDENTITY)
         assert request("/stats")["total_trades"] == 6
         assert job_status() == "succeeded"
-        print("Native deployment smoke passed: install, migration, proxy, workers, API restart, crash restart, upgrade, rollback, persistent state and full restart")
+        print("Native deployment smoke passed: install, migration, proxy, workers, backup, timers, API restart, crash restart, upgrade, rollback, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)
         subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in control.SERVICES]], check=False)

@@ -60,6 +60,10 @@ public. Local development retains the existing direct API URL default.
 Release code lives under `/opt/tradejournal`, persistent data/OAuth/locks under
 `/var/lib/tradejournal`. Initial hosting keeps Neon; moving Postgres onto the
 VPS remains a separate migration after a successful backup/restore rehearsal.
+The package also enables a daily verified application backup and a five-minute
+Gmail-import timer. The Gmail timer rebuilds trades only when it imported new
+fills and never starts market-data enrichment. Backup retention, prerequisites
+and the off-host boundary are documented in `deploy/README.md`.
 
 ## Data flow
 

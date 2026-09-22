@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the TradeJournal backup every day
+
+[Timer]
+OnCalendar=*-*-* 05:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=tradejournal-backup.service
+
+[Install]
+WantedBy=timers.target
