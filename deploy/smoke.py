@@ -68,6 +68,9 @@ def main():
         cli("activate", release.name, "--confirm-database", IDENTITY)
         assert request("/stats")["total_trades"] == 6
         control.run("systemctl", "is-enabled", *control.SERVICES, *control.TIMERS)
+        # A real 08:00/17:00 New York run would make the sync POSTs below
+        # return 409. Enablement is what this smoke asserts.
+        control.run("systemctl", "stop", "tradejournal-sync-pipeline.timer")
         control.run("systemctl", "start", "tradejournal-backup.service")
         latest_backup = control.BACKUPS / "latest"
         assert latest_backup.is_symlink()

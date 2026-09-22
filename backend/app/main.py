@@ -125,6 +125,12 @@ def _maybe_autostart_gmail_watch() -> None:
     """
     if os.environ.get("GMAIL_WATCH_AUTOSTART", "false").lower() not in ("1", "true", "yes"):
         return
+    from app.engine.gmail_listener import listener_enabled
+
+    if listener_enabled():
+        # One owner: the listener queues renewals in the sync lane.
+        _log.info("Gmail watch autostart skipped: renewal is owned by the Gmail listener")
+        return
 
     def runner() -> None:
         interval = int(os.environ.get("GMAIL_WATCH_RENEW_SECONDS", str(24 * 60 * 60)))
@@ -144,6 +150,22 @@ def _maybe_autostart_gmail_watch() -> None:
 
     thread = threading.Thread(target=runner, daemon=True, name="gmail-watch-renewer")
     thread.start()
+
+
+def _maybe_autostart_gmail_listener() -> None:
+    """Development only: run the Gmail listener inside the API process.
+
+    Under JOB_EXECUTION_MODE=external the gmail lane worker keeps its own
+    listener request alive, so the API does nothing here.
+    """
+    from app.engine.gmail_listener import ensure_listener_request
+    from app.engine.job_runtime import execution_mode, submit_job
+
+    if execution_mode() != "embedded":
+        return
+    job_id = ensure_listener_request(ignore_backoff=True)
+    if job_id is not None:
+        submit_job(job_id)
 
 
 def _tradingview_analysis_autostart_enabled() -> bool:
@@ -196,10 +218,15 @@ async def lifespan(_app: FastAPI):
     resume_embedded_jobs()
     _maybe_autostart_webull_listener()
     _maybe_autostart_gmail_watch()
+    _maybe_autostart_gmail_listener()
     tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
     try:
         yield
     finally:
+        from app.engine.job_runtime import execution_mode, shutdown_requested
+
+        if execution_mode() == "embedded":
+            shutdown_requested.set()  # let an embedded Gmail listener end cleanly
         if tradingview_worker is not None:
             tradingview_worker.stop()
             _log.info("TradingView analysis worker stopped")

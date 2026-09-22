@@ -26,6 +26,8 @@ import os
 import tempfile
 from pathlib import Path
 
+import pytest
+
 _TEST_DB_DIR = tempfile.mkdtemp(prefix="trade-journal-tests-")
 _TEST_DB_PATH = Path(_TEST_DB_DIR) / "test.db"
 
@@ -51,6 +53,7 @@ os.environ["JOB_LOCK_DIR"] = str(Path(_TEST_DB_DIR) / "job-locks")
 # value from a developer shell should not change what the suite exercises.
 for _flag in (
     "GMAIL_WATCH_AUTOSTART",
+    "GMAIL_LISTENER_ENABLED",
     "WEBULL_LISTENER_AUTOSTART",
     "TRADINGVIEW_ANALYSIS_AUTOSTART",
 ):
@@ -87,3 +90,29 @@ def _migrate_test_database() -> None:
 
 
 _migrate_test_database()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gmail_state(tmp_path, monkeypatch):
+    """Gmail sidecar files default to backend/data, the developer's real state.
+
+    Any test that reaches the poller, OAuth or listener code writes here instead.
+    """
+    from app.engine import gmail_listener, gmail_poller
+    from app.engine.job_runtime import shutdown_requested
+
+    state = tmp_path / "gmail-state"
+    for name, filename in (
+        ("CREDENTIALS_FILE", "credentials.json"),
+        ("TOKEN_FILE", "token.json"),
+        ("OAUTH_STATE_FILE", "gmail_oauth_states.json"),
+        ("GMAIL_WATCH_STATE_FILE", "gmail_watch_state.json"),
+        ("GMAIL_SKIPPED_MESSAGE_IDS_FILE", "gmail_skipped_message_ids.json"),
+        ("GMAIL_HISTORY_CURSOR_FILE", "gmail_history_cursor.json"),
+        ("GMAIL_AUTH_STATE_FILE", "gmail_auth_state.json"),
+    ):
+        monkeypatch.setattr(gmail_poller, name, state / filename)
+    monkeypatch.setattr(gmail_listener, "LISTENER_STATE_FILE", state / "gmail_listener_state.json")
+    shutdown_requested.clear()
+    yield
+    shutdown_requested.clear()

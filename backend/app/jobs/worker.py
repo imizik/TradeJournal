@@ -7,7 +7,7 @@ import signal
 import threading
 
 from app.database import engine
-from app.engine.job_runtime import LANES, lock_directory, recover_interrupted, worker_tick
+from app.engine.job_runtime import LANES, lock_directory, recover_interrupted, shutdown_requested, worker_tick
 from app.schema import ensure_current
 
 
@@ -26,17 +26,30 @@ def main() -> None:
     lock_directory()
     ensure_current(engine)
     stop = threading.Event()
+
+    def request_stop(*_):
+        stop.set()
+        shutdown_requested.set()
+
     # Finish the current job on SIGTERM. A supervisor can force-kill after its
     # shutdown timeout; the next worker records that interruption without replay.
+    # Open-ended listeners watch shutdown_requested and exit promptly.
     for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, lambda *_: stop.set())
+        signal.signal(sig, request_stop)
     if args.recover_unowned or args.recover_only:
         recovered = recover_interrupted(lane=args.lane, unowned=args.recover_unowned)
         logging.info("Recovered %d interrupted job(s)", recovered)
     if args.recover_only:
         return
+    ensure_request = None
+    if args.lane == "gmail":
+        # This lane keeps its listener request alive itself: an API-side
+        # autostart would race deploys (see docs/agent/background-jobs.md).
+        from app.engine.gmail_listener import ensure_listener_request as ensure_request
     while not stop.is_set():
         try:
+            if ensure_request is not None:
+                ensure_request()
             worker_tick(args.lane)
         except Exception:
             logging.exception("Worker iteration failed (%s)", args.lane)

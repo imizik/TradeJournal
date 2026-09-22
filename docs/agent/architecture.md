@@ -60,9 +60,10 @@ public. Local development retains the existing direct API URL default.
 Release code lives under `/opt/tradejournal`, persistent data/OAuth/locks under
 `/var/lib/tradejournal`. Initial hosting keeps Neon; moving Postgres onto the
 VPS remains a separate migration after a successful backup/restore rehearsal.
-The package also enables a daily verified application backup and a five-minute
-Gmail-import timer. The Gmail timer rebuilds trades only when it imported new
-fills and never starts market-data enrichment. Backup retention, prerequisites
+The package also enables a daily verified application backup, a five-minute
+Gmail-import timer and an 08:00/17:00 New York Sync Everything timer. The
+Gmail timer rebuilds trades only when it imported new fills and never starts
+market-data enrichment; with real-time import enabled it is the safety net. Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
 ## Data flow
@@ -76,6 +77,12 @@ Manual entry           ─┘         │
                                               │
                                               └──> trade_path_metrics (per trade)
 ```
+
+Real-time Gmail import is outbound only: Gmail publishes a change notice to a
+Pub/Sub topic, the `gmail` lane holds a pull subscription, and each notice
+queues one coalesced `gmail_push` job. The sync lane reads Gmail history from
+a stored cursor, imports only new Robinhood execution emails, rebuilds trades,
+then enriches. `GET /gmail/health` reports whether that chain is live.
 
 `fill` rows are the source records. `trade` and `tradefill` are **derived** and
 safe to wipe and rebuild — rebuilding is normal, not a repair of last resort.

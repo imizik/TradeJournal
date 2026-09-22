@@ -27,10 +27,10 @@ def main() -> None:
         os.environ.update(JOB_EXECUTION_MODE="external", JOB_LOCK_DIR=str(STATE / "job-locks"))
         if service == "api":
             command = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8080"]
-        elif service == "worker" and args in (["sync"], ["polygon"], ["webull"]):
+        elif service == "worker" and args in (["sync"], ["polygon"], ["webull"], ["gmail"]):
             command = [sys.executable, "-m", "app.jobs.worker", "--lane", args[0]]
         else:
-            raise SystemExit("Expected api, frontend, or worker sync|polygon|webull")
+            raise SystemExit("Expected api, frontend, or worker sync|polygon|webull|gmail")
     os.execv(command[0], command)
 
 

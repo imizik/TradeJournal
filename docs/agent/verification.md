@@ -286,7 +286,10 @@ Be honest about this when reporting work:
   seeded values reach the DOM on the main pages. Filtering, sorting, forms,
   editing and Strategy Lab workflows are not exercised.
 - **No integration tests against live Gmail/Polygon/Alpaca/Tradier/Webull.**
-  Those paths are only covered where they are stubbed. The browser tests run
+  Those paths are only covered where they are stubbed. The real-time Gmail
+  listener is tested with a fake Pub/Sub subscriber and a fake Gmail service;
+  a live check is the `gcloud pubsub topics publish` plumbing test in
+  `deploy/README.md`, then a real execution email. The browser tests run
   with no market-data credentials, so quote-dependent UI shows its empty state.
   The live-quote providers are the clearest case: `test_quotes_provider.py`
   and `test_tradier.py` pin the dispatch, the batching, the response shapes and

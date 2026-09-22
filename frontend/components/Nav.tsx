@@ -6,6 +6,8 @@ import { useState } from "react";
 import { LayoutDashboard, FileText, BarChart2, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
+import { useGmailHealth } from "@/lib/useGmailHealth";
+import type { GmailHealth } from "@/lib/api";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -18,6 +20,25 @@ const navItems = [
   { href: "/research/ai-buildout", label: "Research", icon: FlaskConical },
 ];
 
+const SYNC_STATUS: Record<GmailHealth["status"], { label: string; dot: string }> = {
+  live: { label: "Live sync", dot: "bg-emerald-400" },
+  degraded: { label: "Sync delayed", dot: "bg-amber-400" },
+  down: { label: "Sync stopped", dot: "bg-red-500" },
+  off: { label: "Scheduled sync", dot: "bg-muted-foreground" },
+};
+
+function SyncStatusLine() {
+  const health = useGmailHealth();
+  if (!health) return null;
+  const { label, dot } = SYNC_STATUS[health.status];
+  return (
+    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground" title={health.message}>
+      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", dot)} />
+      {health.action === "reconnect_gmail" ? "Gmail disconnected" : label}
+    </p>
+  );
+}
+
 export function Nav() {
   const pathname = usePathname();
   const [panelOpen, setPanelOpen] = useState(false);
@@ -28,6 +49,7 @@ export function Nav() {
       <nav className="flex h-screen w-56 shrink-0 flex-col border-r bg-card p-4 sticky top-0">
         <div className="mb-6">
           <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
+          <SyncStatusLine />
         </div>
 
         <ul className="space-y-1">

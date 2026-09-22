@@ -95,6 +95,16 @@ is verifiable rather than hopeful.
 - The poller still lists partial-subject message ids. After the first fetch,
   their ids are recorded in `backend/data/gmail_skipped_message_ids.json` so
   later syncs skip them without putting sentinel rows in `fill`.
+- A Gmail notification is a hint, never the source of what to import. The
+  real-time path reads Gmail history from the cursor in
+  `backend/data/gmail_history_cursor.json` and advances it only after the
+  import commits; with no usable cursor (first run, or history expired after
+  about a week) it falls back to the ordinary search. Watch renewal may seed a
+  missing cursor but never moves one.
+- Both paths share one fetch-and-parse loop and the `raw_email_id` dedupe in
+  `_import_fills_from_gmail`. Messages found through history are checked by
+  From/Subject headers first; anything that is not a Robinhood execution email
+  is never downloaded in full.
 
 ## Enrichment
 

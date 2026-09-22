@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Sync Everything at 08:00 and 17:00 New York time
+
+[Timer]
+OnCalendar=*-*-* 08:00:00 America/New_York
+OnCalendar=*-*-* 17:00:00 America/New_York
+RandomizedDelaySec=60
+Persistent=true
+Unit=tradejournal-sync-pipeline.service
+
+[Install]
+WantedBy=timers.target

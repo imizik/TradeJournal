@@ -67,12 +67,28 @@ def gmail_sync() -> None:
     print(f"Trade rebuild succeeded: {rebuilt.get('message') or ''}")
 
 
+def sync_pipeline(retry_seconds: float = 600, pause: float = 15) -> None:
+    """Queue Sync Everything; wait out a short Gmail import instead of skipping."""
+    deadline = time.monotonic() + retry_seconds
+    while True:
+        status, response = request("/sync/pipeline/run", "POST")
+        if status != 409:
+            print(f"Sync Everything queued: {response['pipeline_run_id']}")
+            return
+        if time.monotonic() >= deadline:
+            print("Sync Everything skipped: another sync or enrichment job stayed active")
+            return
+        time.sleep(pause)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["gmail-sync"])
+    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline"])
     args = parser.parse_args()
     if args.action == "gmail-sync":
         gmail_sync()
+    elif args.action == "sync-pipeline":
+        sync_pipeline()
 
 
 if __name__ == "__main__":

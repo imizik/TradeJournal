@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from sqlmodel import Session
 
 from app.database import get_session
+from app.engine.gmail_health import gmail_health
 from app.engine.gmail_poller import GmailPollingError, gmail_watch_state, register_gmail_watch
 from app.routers.sync import queue_gmail_push_pipeline
 
@@ -54,6 +55,12 @@ def _verify_push_token(token: str | None, authorization: str | None) -> None:
         bearer = authorization[7:].strip()
     if token != expected and bearer != expected:
         raise HTTPException(status_code=401, detail="Invalid Gmail Pub/Sub verification token")
+
+
+@router.get("/health")
+async def health(session: Session = Depends(get_session)):
+    """Whether new fills are arriving; drives the frontend status banner."""
+    return gmail_health(session)
 
 
 @router.get("/watch/status")

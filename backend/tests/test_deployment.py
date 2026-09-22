@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import tarfile
 from types import SimpleNamespace
@@ -223,3 +224,51 @@ def test_launcher_forces_private_bind_and_shared_ownership(tmp_path, monkeypatch
     assert commands[0][-4:] == ["--host", "127.0.0.1", "--port", "8080"]
     assert launch.os.environ["JOB_LOCK_DIR"] == "/var/lib/tradejournal/job-locks"
     assert launch.os.environ["JOB_EXECUTION_MODE"] == "external"
+
+
+def test_launcher_accepts_the_gmail_listener_lane(tmp_path, monkeypatch):
+    launch = load("launch")
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "release.json").write_text('{"release_id":"test"}')
+    monkeypatch.setattr(launch, "RELEASE", tmp_path)
+    monkeypatch.setattr(launch.sys, "argv", ["launch.py", "worker", "gmail"])
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    # launch.main() rewrites these in os.environ; restore them for later tests.
+    for name in ("JOB_EXECUTION_MODE", "JOB_LOCK_DIR", "TRADEJOURNAL_RELEASE", "PYTHONDONTWRITEBYTECODE"):
+        monkeypatch.setenv(name, os.environ.get(name, ""))
+    monkeypatch.chdir(tmp_path)
+    commands = []
+    monkeypatch.setattr(launch.os, "execv", lambda _, command: commands.append(command))
+    launch.main()
+    assert commands[0][-2:] == ["--lane", "gmail"]
+
+
+def test_every_managed_unit_ships_with_the_release():
+    control = load("control")
+    systemd = Path(__file__).resolve().parents[2] / "deploy" / "systemd"
+    assert "tradejournal-worker@gmail" in control.SERVICES
+    assert "tradejournal-sync-pipeline.timer" in control.TIMERS
+    for name in control.OPTIONAL_UNITS:
+        assert (systemd / name).is_file(), name
+    timer = (systemd / "tradejournal-sync-pipeline.timer").read_text()
+    assert "OnCalendar=*-*-* 08:00:00 America/New_York" in timer
+    assert "OnCalendar=*-*-* 17:00:00 America/New_York" in timer
+
+
+def test_sync_pipeline_waits_out_a_running_sync(monkeypatch):
+    automation = load("automation")
+    responses = [(409, {"detail": "busy"}), (409, {"detail": "busy"}), (200, {"pipeline_run_id": "run-1"})]
+    calls = []
+    monkeypatch.setattr(automation, "request", lambda path, method="GET": calls.append((path, method)) or responses.pop(0))
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    automation.sync_pipeline()
+    assert calls == [("/sync/pipeline/run", "POST")] * 3
+
+
+def test_sync_pipeline_gives_up_after_its_retry_window(monkeypatch, capsys):
+    automation = load("automation")
+    monkeypatch.setattr(automation, "request", lambda *_args, **_kwargs: (409, {"detail": "busy"}))
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    automation.sync_pipeline(retry_seconds=0)
+    assert "skipped" in capsys.readouterr().out

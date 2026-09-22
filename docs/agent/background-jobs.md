@@ -21,13 +21,14 @@ network filesystems are unsupported. Never delete lock files while executors
 are running; unlinking them defeats mutual exclusion. A job from a different
 host or lock directory is left untouched for operator investigation.
 
-Three execution lanes have separate locks:
+Four execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
-| `sync` | Gmail import/push, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review and confirmed resync |
+| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review and confirmed resync |
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
+| `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
 
 Pipeline children execute inside the parent's sync lane. Polygon is queued
 independently, so provider pacing cannot block pipeline completion. Additional
@@ -77,6 +78,7 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane sync --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane polygon --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane webull --recover-unowned --recover-only
+   .venv/bin/python -m app.jobs.worker --lane gmail --recover-unowned --recover-only
    ```
 
 5. Run each command as a separate supervised process, from `backend/`, with
@@ -87,12 +89,29 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane sync
    .venv/bin/python -m app.jobs.worker --lane polygon
    .venv/bin/python -m app.jobs.worker --lane webull
+   .venv/bin/python -m app.jobs.worker --lane gmail
    ```
 
 The Webull worker consumes a listener request made by the existing Start route
 or `WEBULL_LISTENER_AUTOSTART=true` on API startup. It does not invent a
 subscription or restart a failed listener automatically. Existing bounded
 transport reconnects and credential failures remain visible as failed runs.
+
+The Gmail worker differs on purpose. With `GMAIL_LISTENER_ENABLED=true` and a
+subscription and key configured, it queues its own `gmail_listener` request
+before each poll whenever none is queued or running, backing off 10 s, 30 s,
+2 min, 10 min, then 30 min after consecutive failures. Pub/Sub has no
+connection cap to protect, and an API-side autostart would race deploys: the
+API starts before the workers and would still see the dead run as running.
+SIGTERM sets `job_runtime.shutdown_requested`, so the listener ends as
+succeeded ("Stopped for shutdown") within seconds instead of waiting out the
+kill timeout. Stream errors resubscribe in place; credential and subscription
+errors fail the run with the setting to check. The listener never calls Gmail.
+It queues `gmail_watch_renew` in the sync lane daily and whenever the watch
+is within 48 hours of Gmail's seven-day expiry, and then `GMAIL_WATCH_AUTOSTART`
+is ignored. Push requests coalesce: at most one `gmail_push` waits at a time,
+and one is re-queued behind a running push because that run may already have
+read the history cursor.
 
 Workers poll every five seconds (`--poll-seconds` adjusts this). This keeps a
 hosted database awake: it is not a scale-to-zero design. SIGTERM stops claiming
@@ -112,11 +131,12 @@ It cannot replay a completed or failed row or steal a running job. Its existing
 
 ## Remaining work and evidence
 
-Gmail watch renewal and optional TradingView analysis are still API-owned
+Optional TradingView analysis, and Gmail watch renewal when the Gmail listener
+is disabled (`GMAIL_WATCH_AUTOSTART`, development only), are still API-owned
 background threads. TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
-now provides systemd services for the three lanes and the private API/frontend.
+now provides systemd services for the four lanes and the private API/frontend.
 It does not alter Webull reconnection policy or move the remaining API threads
 to supervised worker lanes.
 

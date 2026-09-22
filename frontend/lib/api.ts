@@ -315,6 +315,18 @@ export type SyncSummary = {
   errors_count: number;
 };
 
+export type GmailHealth = {
+  status: "live" | "degraded" | "down" | "off";
+  message: string;
+  action: "reconnect_gmail" | null;
+  listener_enabled: boolean;
+  last_notification_at: string | null;
+  last_import_at: string | null;
+  watch_expires_at: string | null;
+  // Changes whenever imported fills or rebuilt trades change.
+  data_version: string;
+};
+
 export type SyncRun = {
   id: string;
   job_type: string;
@@ -583,6 +595,7 @@ export const api = {
   auditTrade: (tradeId: string) => get<TradeAudit>(`/market-context/audit/${tradeId}`),
   coverage: () => get<CoverageStats>("/market-context/coverage"),
   syncSummary: () => get<SyncSummary>("/sync/summary"),
+  gmailHealth: () => get<GmailHealth>("/gmail/health"),
   syncJobs: () => get<SyncJob[]>("/sync/jobs"),
   syncRuns: () => get<SyncRun[]>("/sync/runs"),
   runSyncPipeline: () => post<{ pipeline_run_id: string }>("/sync/pipeline/run"),
