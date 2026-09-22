@@ -6,7 +6,10 @@ dependencies = [
     "fastapi>=0.109.0",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.27.0",
-    "sqlmodel>=0.0.14",
+    # 0.0.46 rejects the app's established naive-UTC model values at bind time.
+    # Keep deployment resolution on the last verified compatible release until
+    # the timestamp model and stored data are migrated together.
+    "sqlmodel==0.0.42",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     "google-api-python-client>=2.170.0",
