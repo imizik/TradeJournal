@@ -116,11 +116,21 @@ ownership to `tradejournal:tradejournal`; files should be 0600 and directories
 0700. Do not copy old process lock files. Include this state directory in
 off-host backups: a database backup alone does not contain OAuth or caches.
 
-Register the exact Gmail callback in the Google OAuth client:
+The VPS needs a **Web application** OAuth client; a Desktop client only
+allows loopback redirects, so its Reconnect flow can never finish on the VPS.
+Create one in the same Google Cloud project with this exact redirect URI and
+install its downloaded JSON as `/var/lib/tradejournal/oauth/credentials.json`:
 `https://YOUR_SERVER.YOUR_TAILNET.ts.net/api/backend/auth/gmail/callback`.
-The browser opening that callback must be connected to the tailnet. Confirm
-Google accepts the chosen redirect domain for your OAuth client; if it does
-not, resolve the private hostname/OAuth configuration before enabling Gmail.
+The browser opening that callback must be connected to the tailnet. Google
+accepts the tailnet domain (`YOUR_TAILNET.ts.net`) as an authorized domain.
+
+Publish the OAuth app (*Audience → Publish app*): in *Testing*, Google expires
+Gmail sign-ins after seven days. Publishing first needs a home page, a privacy
+policy link and an authorized domain on the *Branding* page; the app serves
+`/privacy` for this, and the private Serve origin works for all three.
+Personal use under 100 users needs no verification; the consent screen shows
+an "unverified app" warning (*Advanced → Go to Trade Journal*). Reconnect Gmail
+once afterwards so the stored token no longer carries the seven-day limit.
 The live Google flow is not tested by the automated suite.
 
 Check the target identity, then copy that exact redacted value into the next
