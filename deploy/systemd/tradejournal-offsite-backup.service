@@ -1,0 +1,20 @@
+[Unit]
+Description=TradeJournal encrypted offsite backup
+Wants=network-online.target
+After=network-online.target tradejournal-backup.service
+ConditionPathExists=/etc/tradejournal/offsite.env
+ConditionPathExists=/etc/tradejournal/restic-password
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/offsite.py backup
+TimeoutStartSec=2h
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/tradejournal
+ReadWritePaths=/var/backups/tradejournal

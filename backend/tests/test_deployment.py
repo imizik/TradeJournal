@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tarfile
 from types import SimpleNamespace
 
@@ -185,6 +186,50 @@ def test_backup_archive_contains_runtime_state_and_recovery_credentials(tmp_path
             assert bundle.extractfile(f"config/{name}").read() == f"test-{name}".encode()
 
 
+def test_offsite_credentials_are_confined_to_restic_environment(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    offsite = load("offsite")
+    config = tmp_path / "offsite.env"
+    config.write_text(
+        "RESTIC_REPOSITORY=s3:https://account.r2.cloudflarestorage.com/trade-journal/repo\n"
+        "AWS_ACCESS_KEY_ID=access-id\nAWS_SECRET_ACCESS_KEY=private-secret\n"
+    )
+    password = tmp_path / "restic-password"
+    password.write_text("encryption-secret\n")
+    monkeypatch.setattr(offsite, "CONFIG", config)
+    monkeypatch.setattr(offsite, "PASSWORD_FILE", password)
+    monkeypatch.setattr(offsite.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(offsite, "_root_only", lambda _path: None)
+    monkeypatch.setenv("UNRELATED_SECRET", "never-inherit")
+
+    environment = offsite.restic_environment()
+    assert environment["AWS_SECRET_ACCESS_KEY"] == "private-secret"
+    assert environment["RESTIC_PASSWORD_FILE"] == str(password)
+    assert "encryption-secret" not in str(environment)
+    assert "UNRELATED_SECRET" not in environment
+
+
+def test_offsite_restore_drops_disposable_database_on_failure(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    offsite = load("offsite")
+    dump = tmp_path / "database.dump"
+    dump.write_bytes(b"test dump")
+    calls = []
+
+    def run(command, **_kwargs):
+        calls.append(command)
+        if "pg_restore" in command:
+            raise subprocess.CalledProcessError(1, command)
+        return SimpleNamespace(stdout="")
+
+    monkeypatch.setattr(offsite.subprocess, "run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        offsite.restore_database(dump)
+    assert any("createdb" in command for command in calls)
+    assert any("dropdb" in command for command in calls)
+    assert all("test dump" not in str(command) for command in calls)
+
+
 def test_gmail_automation_rebuilds_only_after_new_fills(monkeypatch):
     automation = load("automation")
     starts = []
@@ -275,6 +320,7 @@ def test_every_managed_unit_ships_with_the_release():
     systemd = Path(__file__).resolve().parents[2] / "deploy" / "systemd"
     assert "tradejournal-worker@gmail" in control.SERVICES
     assert "tradejournal-sync-pipeline.timer" in control.TIMERS
+    assert "tradejournal-offsite-backup.timer" in control.TIMERS
     for name in control.OPTIONAL_UNITS:
         assert (systemd / name).is_file(), name
     timer = (systemd / "tradejournal-sync-pipeline.timer").read_text()
