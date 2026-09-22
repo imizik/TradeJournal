@@ -159,6 +159,32 @@ def test_backup_retention_ignores_unrecognized_directories(tmp_path, monkeypatch
     assert (tmp_path / "keep-me").is_dir()
 
 
+def test_backup_archive_contains_runtime_state_and_recovery_credentials(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    backup = load("backup")
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    for name in ("data", "oauth"):
+        (state / name).mkdir(parents=True)
+        (state / name / "sample").write_text(name)
+    config.mkdir()
+    for name in backup.CONFIG_FILES:
+        (config / name).write_text(f"test-{name}")
+    (config / "local-postgres.env").write_text("staging-only")
+    monkeypatch.setattr(backup, "STATE_ROOT", state)
+    monkeypatch.setattr(backup, "CONFIG_ROOT", config)
+
+    archive = tmp_path / "state.tar.gz"
+    backup.archive_state(archive)
+
+    with tarfile.open(archive) as bundle:
+        names = set(bundle.getnames())
+        assert {"data/sample", "oauth/sample", "config/backend.env", "config/migration.env"} <= names
+        assert "config/local-postgres.env" not in names
+        for name in backup.CONFIG_FILES:
+            assert bundle.extractfile(f"config/{name}").read() == f"test-{name}".encode()
+
+
 def test_gmail_automation_rebuilds_only_after_new_fills(monkeypatch):
     automation = load("automation")
     starts = []

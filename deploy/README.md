@@ -155,12 +155,16 @@ The release installs three timers:
 
 - `tradejournal-backup.timer` runs daily at 05:15 UTC with up to 15 minutes of
   jitter. It creates a custom-format PostgreSQL dump plus a compressed archive
-  of `/var/lib/tradejournal/data` and `oauth`, verifies both, and retains seven
-  dated restore points under `/var/backups/tradejournal/`.
-- `tradejournal-gmail-sync.timer` checks Gmail five minutes after boot and five
-  minutes after each prior check finishes. It treats an already-active sync as
-  a safe skip. When Gmail imports new fills, it waits for that durable job and
-  then queues a trade rebuild; it does not start market-data enrichment.
+  of `/var/lib/tradejournal/data`, `oauth`, and the active
+  `/etc/tradejournal/backend.env` and `migration.env` files. It verifies both
+  files and retains seven dated restore points under
+  `/var/backups/tradejournal/`. Backups created before format version 2 do not
+  contain the deployment configuration.
+- `tradejournal-gmail-sync.timer` checks Gmail five minutes after timer
+  activation and five minutes after each prior check finishes. It treats an
+  already-active sync as a safe skip. When Gmail imports new fills, it waits
+  for that durable job and then queues a trade rebuild; it does not start
+  market-data enrichment.
   With real-time import enabled this is the safety net for a dropped
   notification.
 - `tradejournal-sync-pipeline.timer` queues Sync Everything (import, rebuild,
@@ -185,10 +189,17 @@ sudo systemctl list-timers 'tradejournal-*'
 
 The dated directories are local restore artifacts, not independent storage by
 themselves. Ensure the provider's daily VPS backup is active so they leave the
-host, and retain a second-provider copy before moving Postgres off Neon. A
-successful `verify` checks archive structure and checksums; the local-Postgres
-cutover still requires restoring a dump into a disposable database and
-querying it before changing `DATABASE_URL`.
+host, and retain an **encrypted** second-provider copy before moving Postgres
+off Neon. The state archive contains OAuth tokens and API/database credentials;
+never upload it unencrypted. A successful `verify` checks archive structure
+and checksums. The local-Postgres cutover still requires restoring a dump into
+a disposable database, checking every table's row count and the Alembic
+revision, verifying the restricted database roles, and serving a
+database-backed request from an isolated API
+before changing `DATABASE_URL`. Repeat the dump and comparison with writers
+stopped for the final cutover; the live database can gain new fills after a
+rehearsal. Keep the Neon source until the local service and off-host restore
+have both been verified.
 
 ## Real-time Gmail import
 

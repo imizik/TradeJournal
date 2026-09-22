@@ -31,6 +31,7 @@ STATE_ROOT = Path("/var/lib/tradejournal")
 CONFIG_ROOT = Path("/etc/tradejournal")
 RETENTION = 7
 BACKUP_NAME = re.compile(r"^\d{8}T\d{6}Z$")
+CONFIG_FILES = ("backend.env", "migration.env")
 
 
 def sha256(path: Path) -> str:
@@ -108,6 +109,11 @@ def archive_state(destination: Path) -> None:
             if not source.is_dir():
                 raise RuntimeError(f"Missing persistent state directory: {source}")
             bundle.add(source, arcname=name, recursive=True)
+        for name in CONFIG_FILES:
+            source = CONFIG_ROOT / name
+            if not source.is_file():
+                raise RuntimeError(f"Missing deployment configuration: {source}")
+            bundle.add(source, arcname=f"config/{name}", recursive=False)
 
 
 def verify_backup(directory: Path) -> dict:
@@ -121,9 +127,14 @@ def verify_backup(directory: Path) -> dict:
         raise RuntimeError("pg_restore is not installed")
     subprocess.run([restore, "--list", directory / "database.dump"], check=True, stdout=subprocess.DEVNULL)
     with tarfile.open(directory / "state.tar.gz") as bundle:
-        roots = {Path(member.name).parts[0] for member in bundle.getmembers() if member.name}
+        members = {member.name: member for member in bundle.getmembers()}
+        roots = {Path(name).parts[0] for name in members if name}
     if not {"data", "oauth"}.issubset(roots):
         raise RuntimeError("State archive is missing data or OAuth")
+    if manifest.get("format_version", 1) >= 2:
+        if any(not members.get(f"config/{name}", None) or not members[f"config/{name}"].isfile()
+               for name in CONFIG_FILES):
+            raise RuntimeError("State archive is missing deployment configuration")
     return manifest
 
 
@@ -158,6 +169,7 @@ def create_backup() -> Path:
             for path in (pending / "database.dump", pending / "state.tar.gz")
         }
         manifest = {
+            "format_version": 2,
             "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "database_identity": redacted_identity(app_url),
             "release_id": release["release_id"],
