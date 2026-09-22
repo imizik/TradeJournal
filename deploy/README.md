@@ -232,9 +232,12 @@ GMAIL_WATCH_LABELS=TradeJournal/Fills
 GMAIL_WATCH_AUTOSTART=false
 ```
 
-Then `sudo systemctl restart tradejournal-worker@gmail tradejournal-api` and
-check `curl -s http://127.0.0.1:8080/gmail/health`; `status` should reach
-`live` within a minute. The listener registers the Gmail watch itself and
+Then `sudo systemctl restart tradejournal-worker@gmail tradejournal-worker@sync tradejournal-api`
+and check `curl -s http://127.0.0.1:8080/gmail/health`; `status` should reach
+`live` within a minute. The sync worker must restart too: it runs the watch
+registration, and a stale environment fails it with "GMAIL_PUBSUB_TOPIC is
+required" (the listener then retries every 15 minutes, or run
+`curl -s -X POST http://127.0.0.1:8080/gmail/watch` once). The listener registers the Gmail watch itself and
 renews it daily through a `gmail_watch_renew` sync job; Gmail stops
 notifications after seven days without renewal. A plumbing test that needs no
 trade:
