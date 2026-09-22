@@ -35,6 +35,10 @@ TOKEN_FILE = _BACKEND_DIR / "token.json"
 OAUTH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_oauth_states.json"
 GMAIL_WATCH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_watch_state.json"
 GMAIL_SKIPPED_MESSAGE_IDS_FILE = _BACKEND_DIR / "data" / "gmail_skipped_message_ids.json"
+GMAIL_HISTORY_CURSOR_FILE = _BACKEND_DIR / "data" / "gmail_history_cursor.json"
+GMAIL_AUTH_STATE_FILE = _BACKEND_DIR / "data" / "gmail_auth_state.json"
+ROBINHOOD_SENDER = "noreply@robinhood.com"
+FILL_SUBJECTS = frozenset({OPTION_SUBJECT, OPTION_PARTIAL_SUBJECT, STOCK_SUBJECT})
 BACKEND_PUBLIC_URL = os.getenv("BACKEND_PUBLIC_URL", "http://localhost:8000").rstrip("/")
 GMAIL_OAUTH_CALLBACK_PATH = "/auth/gmail/callback"
 DEFAULT_GMAIL_OAUTH_CALLBACK_URL = f"{BACKEND_PUBLIC_URL}{GMAIL_OAUTH_CALLBACK_PATH}"
@@ -49,9 +53,72 @@ class GmailAuthRequired(GmailPollingError):
     """Raised when Gmail needs an interactive OAuth login."""
 
 
+class GmailHistoryExpired(GmailPollingError):
+    """Raised when Gmail no longer retains history from the stored cursor."""
+
+
+def write_private_file(path: Path, text: str) -> None:
+    """Replace a file atomically, readable only by the service account.
+
+    On the VPS the token and data files are symlinks from a read-only release
+    into /var/lib/tradejournal. Replacing the resolved target keeps the link;
+    replacing the link itself would fail, or detach the file from its state.
+    Readers in other processes never observe a partial write.
+    """
+    target = path.resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = target.with_name(f".{target.name}.{secrets.token_hex(8)}.tmp")
+    try:
+        temp_path.write_text(text)
+        temp_path.chmod(0o600)
+        temp_path.replace(target)
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+
+def _read_json_object(path: Path) -> dict[str, object] | None:
+    if not path.exists():
+        return None
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def gmail_auth_state() -> dict[str, object] | None:
+    return _read_json_object(GMAIL_AUTH_STATE_FILE)
+
+
+def _record_gmail_auth(status: str, error: str | None = None) -> None:
+    """Remember whether Gmail needs reconnecting; written only on change."""
+    current = gmail_auth_state() or {}
+    if current.get("status") == status:
+        return
+    try:
+        write_private_file(
+            GMAIL_AUTH_STATE_FILE,
+            json.dumps({"status": status, "since": int(time.time()), "error": error}, indent=2),
+        )
+    except OSError as exc:
+        log.warning("Could not persist Gmail authorization state: %s", exc)
+
+
+def load_history_cursor() -> str | None:
+    state = _read_json_object(GMAIL_HISTORY_CURSOR_FILE) or {}
+    value = state.get("history_id")
+    return str(value) if value else None
+
+
+def save_history_cursor(history_id: str) -> None:
+    write_private_file(
+        GMAIL_HISTORY_CURSOR_FILE,
+        json.dumps({"history_id": str(history_id), "updated_at": int(time.time())}, indent=2),
+    )
+
+
 def _save_gmail_watch_state(state: dict[str, object]) -> None:
-    GMAIL_WATCH_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    GMAIL_WATCH_STATE_FILE.write_text(json.dumps(state, indent=2))
+    write_private_file(GMAIL_WATCH_STATE_FILE, json.dumps(state, indent=2))
 
 
 def gmail_watch_state() -> dict[str, object] | None:
@@ -196,11 +263,22 @@ def finish_gmail_oauth(code: str, state: str) -> None:
     except Exception as exc:
         log.warning("Unable to finish Gmail authorization", exc_info=exc)
         raise GmailPollingError(f"Unable to finish Gmail authorization: {exc}") from exc
-    TOKEN_FILE.write_text(flow.credentials.to_json())
+    write_private_file(TOKEN_FILE, flow.credentials.to_json())
+    _record_gmail_auth("ok")
     log.info("Saved Gmail OAuth token")
 
 
 def _get_service():
+    try:
+        service = _build_service()
+    except GmailAuthRequired as exc:
+        _record_gmail_auth("needs_reconnect", str(exc))
+        raise
+    _record_gmail_auth("ok")
+    return service
+
+
+def _build_service():
     log.info("Initializing Gmail API client")
     try:
         from google.auth.transport.requests import Request
@@ -230,7 +308,7 @@ def _get_service():
             else:
                 raise GmailAuthRequired("Gmail authorization is required. Connect Gmail from the app, then retry sync.")
 
-            TOKEN_FILE.write_text(creds.to_json())
+            write_private_file(TOKEN_FILE, creds.to_json())
 
         log.info("Gmail API client ready")
         return build("gmail", "v1", credentials=creds)
@@ -292,6 +370,30 @@ def _fetch_all_message_ids(service, query: str) -> list[str]:
     return ids
 
 
+def _configured_watch_labels() -> list[str]:
+    raw = os.getenv("GMAIL_WATCH_LABELS") or os.getenv("GMAIL_WATCH_LABEL_IDS") or "INBOX"
+    return [value.strip() for value in raw.split(",") if value.strip()]
+
+
+def _resolve_label_ids(service, labels: list[str]) -> list[str]:
+    """Accept Gmail label names (e.g. "TradeJournal/Fills") as well as ids."""
+    try:
+        listed = service.users().labels().list(userId="me").execute().get("labels", [])
+    except Exception as exc:
+        raise GmailPollingError(f"Unable to list Gmail labels: {exc}") from exc
+    by_id = {label.get("id"): label.get("id") for label in listed}
+    by_name = {str(label.get("name", "")).casefold(): label.get("id") for label in listed}
+    resolved = []
+    for label in labels:
+        label_id = by_id.get(label) or by_name.get(label.casefold())
+        if not label_id:
+            raise GmailPollingError(
+                f"Gmail label {label!r} does not exist. Create the Gmail filter and label first."
+            )
+        resolved.append(label_id)
+    return resolved
+
+
 def register_gmail_watch(
     *,
     topic_name: str | None = None,
@@ -300,9 +402,9 @@ def register_gmail_watch(
     """
     Register/renew Gmail push notifications via Google Pub/Sub.
 
-    Gmail sends only mailbox-change metadata to Pub/Sub. The webhook should
-    still call the existing importer so fill parsing and dedupe stay in one
-    place.
+    Gmail sends only mailbox-change metadata to Pub/Sub. The listener still
+    runs the existing importer so fill parsing and dedupe stay in one place.
+    Renewal never moves the import cursor; it only seeds a missing one.
     """
     service = _get_service()
     topic = (topic_name or os.getenv("GMAIL_PUBSUB_TOPIC") or "").strip()
@@ -310,8 +412,7 @@ def register_gmail_watch(
         raise GmailPollingError("GMAIL_PUBSUB_TOPIC is required to register a Gmail watch.")
 
     if label_ids is None:
-        raw_labels = os.getenv("GMAIL_WATCH_LABEL_IDS", "INBOX")
-        label_ids = [value.strip() for value in raw_labels.split(",") if value.strip()]
+        label_ids = _resolve_label_ids(service, _configured_watch_labels())
 
     body: dict[str, object] = {"topicName": topic}
     if label_ids:
@@ -331,7 +432,151 @@ def register_gmail_watch(
         "registered_at": int(time.time()),
     }
     _save_gmail_watch_state(state)
+    if result.get("historyId") and load_history_cursor() is None:
+        save_history_cursor(str(result["historyId"]))
     return state
+
+
+def watch_label_id() -> str | None:
+    """The single watched label, used to narrow history reads."""
+    labels = (gmail_watch_state() or {}).get("label_ids")
+    if isinstance(labels, list) and len(labels) == 1 and isinstance(labels[0], str):
+        return labels[0]
+    return None
+
+
+def mailbox_history_id(service) -> str:
+    try:
+        return str(service.users().getProfile(userId="me").execute()["historyId"])
+    except Exception as exc:
+        raise GmailPollingError(f"Unable to read the Gmail mailbox history id: {exc}") from exc
+
+
+def _is_not_found(exc: Exception) -> bool:
+    return getattr(getattr(exc, "resp", None), "status", None) == 404
+
+
+def history_message_ids(service, start_history_id: str, label_id: str | None) -> tuple[list[str], str]:
+    """Message ids added (or labelled) since start_history_id, oldest first.
+
+    Returns the ids and the mailbox history id to store once they are imported.
+    """
+    ids: list[str] = []
+    latest = str(start_history_id)
+    page_token = None
+    while True:
+        kwargs: dict[str, object] = {
+            "userId": "me",
+            "startHistoryId": start_history_id,
+            "historyTypes": ["messageAdded", "labelAdded"],
+            "maxResults": 500,
+        }
+        if label_id:
+            kwargs["labelId"] = label_id
+        if page_token:
+            kwargs["pageToken"] = page_token
+        try:
+            result = service.users().history().list(**kwargs).execute()
+        except Exception as exc:
+            if _is_not_found(exc):
+                raise GmailHistoryExpired(f"Gmail history from {start_history_id} is no longer available") from exc
+            raise GmailPollingError(f"Unable to read Gmail history: {exc}") from exc
+        for record in result.get("history", []):
+            for added in record.get("messagesAdded", []):
+                ids.append(added["message"]["id"])
+            for labelled in record.get("labelsAdded", []):
+                if label_id is None or label_id in labelled.get("labelIds", []):
+                    ids.append(labelled["message"]["id"])
+        latest = str(result.get("historyId") or latest)
+        page_token = result.get("nextPageToken")
+        if not page_token:
+            break
+    return list(dict.fromkeys(ids)), latest
+
+
+def pending_history_message_ids() -> tuple[list[str] | None, str]:
+    """What arrived since the stored cursor, and the cursor to store afterwards.
+
+    Returns (None, current) when there is no usable cursor; the caller then
+    runs the search import. The current id is read before that search, so a
+    message arriving during it is replayed next time and deduplicated.
+    """
+    service = _get_service()
+    cursor = load_history_cursor()
+    if cursor:
+        try:
+            return history_message_ids(service, cursor, watch_label_id())
+        except GmailHistoryExpired:
+            log.warning("Gmail history cursor %s expired; falling back to a search import", cursor)
+    return None, mailbox_history_id(service)
+
+
+def _fetch_and_parse(
+    service, message_ids: list[str], known_ids: set[str], skipped_ids: set[str], *, strict: bool = False
+) -> list[ParsedFill]:
+    """Fetch, parse and remember skipped emails, preserving input order.
+
+    strict (history imports): a fetch error aborts the batch so the history
+    cursor is not advanced past a message that was never read. A message that
+    fails to *parse* is still logged and skipped either way; retrying it would
+    fail the same way.
+    """
+    import time as _time
+
+    parsed: list[ParsedFill] = []
+    newly_skipped_ids: set[str] = set()
+    t_fetch = _time.monotonic()
+    fetched = 0
+
+    # Skip known IDs rather than breaking on the first one. Once the stock and
+    # option result sets are merged, a known option email does not guarantee
+    # there are no newer unseen stock emails later in the combined list.
+    for msg_id in message_ids:
+        if msg_id in known_ids:
+            log.info("Skipping known email %s", msg_id)
+            continue
+
+        try:
+            msg = service.users().messages().get(
+                userId="me", id=msg_id, format="full"
+            ).execute()
+            fetched += 1
+
+            headers = {header["name"]: header["value"] for header in msg["payload"].get("headers", [])}
+            subject = headers.get("Subject", "")
+            body = _message_body(msg)
+
+            fill = parse_option_email(subject, body, imap_uid=msg_id)
+            if fill:
+                parsed.append(fill)
+            elif subject.strip() == OPTION_PARTIAL_SUBJECT:
+                # Partial option emails report cumulative quantities and must
+                # never become fills. Remember the fetched id outside the fill
+                # table so later polls skip the full-message API call.
+                newly_skipped_ids.add(msg_id)
+
+        except EmailParseError as exc:
+            log.warning("Failed to parse email %s: %s", msg_id, exc)
+        except Exception as exc:
+            if strict:
+                raise GmailPollingError(f"Unable to read Gmail message {msg_id}: {exc}") from exc
+            log.warning("Unexpected error processing email %s: %s", msg_id, exc)
+
+    if newly_skipped_ids:
+        try:
+            _save_skipped_message_ids(skipped_ids | newly_skipped_ids)
+        except OSError as exc:
+            # Losing this cache only costs future Gmail API calls. It must not
+            # block otherwise-valid fills from being imported.
+            log.warning("Could not persist skipped Gmail message ids: %s", exc)
+
+    log.info(
+        "Fetched %d emails, parsed %d fills in %.1fs",
+        fetched,
+        len(parsed),
+        _time.monotonic() - t_fetch,
+    )
+    return parsed
 
 
 def poll_new_fills(
@@ -366,9 +611,9 @@ def poll_new_fills(
     service = _get_service()
 
     date_filter = f" after:{since_date}" if since_date else " after:2024/01/01"
-    opt_query = f'subject:"{OPTION_SUBJECT}" from:noreply@robinhood.com{date_filter}'
-    opt_partial_query = f'subject:"{OPTION_PARTIAL_SUBJECT}" from:noreply@robinhood.com{date_filter}'
-    stk_query = f'subject:"{STOCK_SUBJECT}" from:noreply@robinhood.com{date_filter}'
+    opt_query = f'subject:"{OPTION_SUBJECT}" from:{ROBINHOOD_SENDER}{date_filter}'
+    opt_partial_query = f'subject:"{OPTION_PARTIAL_SUBJECT}" from:{ROBINHOOD_SENDER}{date_filter}'
+    stk_query = f'subject:"{STOCK_SUBJECT}" from:{ROBINHOOD_SENDER}{date_filter}'
 
     t_list = _time.monotonic()
     try:
@@ -387,58 +632,41 @@ def poll_new_fills(
     if not all_ids:
         return []
 
-    parsed: list[ParsedFill] = []
-    newly_skipped_ids: set[str] = set()
-    t_fetch = _time.monotonic()
-    fetched = 0
-
-    # Skip known IDs rather than breaking on the first one. Once the stock and
-    # option result sets are merged, a known option email does not guarantee
-    # there are no newer unseen stock emails later in the combined list.
-    for msg_id in all_ids:
-        if msg_id in known_ids:
-            log.info("Skipping known email %s", msg_id)
-            continue
-
-        try:
-            msg = service.users().messages().get(
-                userId="me", id=msg_id, format="full"
-            ).execute()
-            fetched += 1
-
-            headers = {header["name"]: header["value"] for header in msg["payload"].get("headers", [])}
-            subject = headers.get("Subject", "")
-            body = _message_body(msg)
-
-            fill = parse_option_email(subject, body, imap_uid=msg_id)
-            if fill:
-                parsed.append(fill)
-            elif subject.strip() == OPTION_PARTIAL_SUBJECT:
-                # Partial option emails report cumulative quantities and must
-                # never become fills. Remember the fetched id outside the fill
-                # table so later polls skip the full-message API call.
-                newly_skipped_ids.add(msg_id)
-
-        except EmailParseError as exc:
-            log.warning("Failed to parse email %s: %s", msg_id, exc)
-        except Exception as exc:
-            log.warning("Unexpected error processing email %s: %s", msg_id, exc)
-
-    if newly_skipped_ids:
-        try:
-            _save_skipped_message_ids(skipped_ids | newly_skipped_ids)
-        except OSError as exc:
-            # Losing this cache only costs future Gmail API calls. It must not
-            # block otherwise-valid fills from being imported.
-            log.warning("Could not persist skipped Gmail message ids: %s", exc)
-
-    log.info(
-        "Fetched %d emails, parsed %d fills in %.1fs",
-        fetched,
-        len(parsed),
-        _time.monotonic() - t_fetch,
-    )
+    parsed = _fetch_and_parse(service, all_ids, known_ids, skipped_ids)
     log.info("poll_new_fills complete")
 
     # Return oldest-first so the reconstructor processes fills in chronological order.
     return list(reversed(parsed))
+
+
+def _is_fill_email(headers: dict[str, str]) -> bool:
+    return ROBINHOOD_SENDER in headers.get("From", "").lower() and headers.get("Subject", "").strip() in FILL_SUBJECTS
+
+
+def poll_fills_by_ids(message_ids: list[str], known_ids: set[str] | None = None) -> list[ParsedFill]:
+    """Import specific messages (from Gmail history), oldest first.
+
+    Only the From/Subject headers of other mail are read: a message that is
+    not a Robinhood execution email is never downloaded in full.
+    """
+    skipped_ids = _load_skipped_message_ids()
+    known_ids = set(known_ids or ()) | skipped_ids
+    candidates = [msg_id for msg_id in message_ids if msg_id not in known_ids]
+    if not candidates:
+        return []
+    service = _get_service()
+    fill_ids = []
+    for msg_id in candidates:
+        try:
+            msg = service.users().messages().get(
+                userId="me", id=msg_id, format="metadata", metadataHeaders=["From", "Subject"]
+            ).execute()
+        except Exception as exc:
+            if _is_not_found(exc):
+                continue  # deleted before we read it
+            raise GmailPollingError(f"Unable to read Gmail message {msg_id}: {exc}") from exc
+        headers = {header["name"]: header["value"] for header in msg.get("payload", {}).get("headers", [])}
+        if _is_fill_email(headers):
+            fill_ids.append(msg_id)
+    log.info("Gmail history: %d new message(s), %d Robinhood execution email(s)", len(candidates), len(fill_ids))
+    return _fetch_and_parse(service, fill_ids, known_ids, skipped_ids, strict=True) if fill_ids else []

@@ -1,16 +1,19 @@
 import json
+import threading
 import time
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, not_
+from sqlalchemy import func, not_, update
 from sqlmodel import Session, delete, select
 
 from app.database import engine, get_session
 from app.engine.jobs import (
     JOB_ALPACA_ENRICH,
+    JOB_GMAIL_LISTENER,
+    JOB_GMAIL_WATCH_RENEW,
     JOB_POLYGON_ENRICH,
     JOB_TRADE_PATH,
     JOB_WEBULL_LISTENER,
@@ -71,6 +74,20 @@ _EXTRA_JOB_CONFIG: dict[str, dict[str, Any]] = {
         "advanced": True,
         "progress_unit": "step",
     },
+    JOB_GMAIL_WATCH_RENEW: {
+        "job_type": JOB_GMAIL_WATCH_RENEW,
+        "label": "Gmail watch renewal",
+        "description": "Register or renew Gmail notifications (queued by the Gmail listener).",
+        "advanced": True,
+        "progress_unit": "step",
+    },
+    JOB_GMAIL_LISTENER: {
+        "job_type": JOB_GMAIL_LISTENER,
+        "label": "Gmail notification listener",
+        "description": "Receive Gmail notifications from Pub/Sub and queue imports.",
+        "advanced": True,
+        "progress_unit": "item",
+    },
 }
 
 _JOB_CONFIG_BY_TYPE = {config["job_type"]: config for config in JOB_CONFIG}
@@ -104,7 +121,7 @@ def _set_job(job_id: uuid.UUID, **values: Any) -> None:
 # background workers, not finite sync jobs — they should NOT block the
 # user from running sync/enrichment work, and they should NOT be shown
 # in the "Sync running: ..." banner.
-_LISTENER_JOB_TYPES = {JOB_WEBULL_LISTENER}
+_LISTENER_JOB_TYPES = {JOB_WEBULL_LISTENER, JOB_GMAIL_LISTENER}
 
 
 def _active_job(session: Session) -> JobRun | None:
@@ -340,16 +357,68 @@ def _run_pipeline(pipeline_id: uuid.UUID) -> None:
         _set_job(pipeline_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
 
 
+def _run_gmail_watch_renew(_session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
+    from app.engine.gmail_poller import register_gmail_watch
+
+    state = register_gmail_watch()
+    expires = state.get("expiration")
+    until = datetime.fromtimestamp(int(expires) / 1000, tz=timezone.utc).isoformat() if expires else "unknown"
+    return 1, f"Gmail watch registered for {state.get('label_ids')} until {until}."
+
+
+def _import_gmail_changes(session: Session) -> dict[str, int]:
+    """Import what changed since the stored Gmail history cursor.
+
+    A notification only says the mailbox changed. Gmail search can lag it and
+    Gmail drops notifications above one per second, so the history cursor --
+    not the notification -- decides what to read, and it advances only after
+    the fills commit. Without a usable cursor this is the ordinary search.
+    """
+    from app.engine.gmail_poller import pending_history_message_ids, save_history_cursor
+
+    message_ids, next_cursor = pending_history_message_ids()
+    if message_ids is None:
+        result = _import_fills_from_gmail(session, start_enrichment=False)
+    elif message_ids:
+        result = _import_fills_from_gmail(session, start_enrichment=False, message_ids=message_ids)
+    else:
+        result = {"saved": 0, "skipped": 0}
+    save_history_cursor(next_cursor)
+    return result
+
+
+def _defer_enrichment_to_waiting_push(session: Session) -> bool:
+    """Hand enrichment to an already-queued push so its import runs first."""
+    waiting = session.exec(
+        select(JobRun)
+        .where(JobRun.job_type == JOB_GMAIL_PUSH, JobRun.status == "queued")
+        .order_by(JobRun.created_at)
+        .limit(1)
+    ).first()
+    if waiting is None:
+        return False
+    params = json.loads(waiting.params_json or "{}")
+    params["enrich_pending"] = True
+    handed_over = session.execute(
+        update(JobRun).where(JobRun.id == waiting.id, JobRun.status == "queued").values(params_json=json.dumps(params))
+    )
+    session.commit()
+    return handed_over.rowcount == 1
+
+
 def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
     try:
         _set_job(job_id, status="running", phase="pipeline_step", started_at=_now(), done=0, total=5, current="Importing Gmail fills")
         with Session(engine) as session:
-            import_result = _import_fills_from_gmail(session, start_enrichment=False)
+            job = session.get(JobRun, job_id)
+            enrich_pending = bool(json.loads(job.params_json or "{}").get("enrich_pending")) if job else False
+            import_result = _import_gmail_changes(session)
 
         saved = int(import_result["saved"])
         skipped = int(import_result["skipped"])
         processed = saved + skipped
-        if saved <= 0:
+        rebuilt, anomalies = 0, []
+        if saved <= 0 and not enrich_pending:
             _set_job(
                 job_id,
                 status="succeeded",
@@ -362,11 +431,22 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
             )
             return
 
-        _set_job(job_id, done=1, phase="pipeline_step", current=f"Rebuilding trades after {saved} new fill(s)")
+        if saved > 0:
+            _set_job(job_id, done=1, phase="pipeline_step", current=f"Rebuilding trades after {saved} new fill(s)")
+            with Session(engine) as session:
+                rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/gmail-push")
+                session.commit()
+            processed += rebuilt
+
         with Session(engine) as session:
-            rebuilt, anomalies = _rebuild_trades(session, anomalies_label="/sync/gmail-push")
-            session.commit()
-        processed += rebuilt
+            deferred = _defer_enrichment_to_waiting_push(session)
+        if deferred:
+            # Another execution email is already waiting. Import it first; the
+            # queued run enriches both, so a burst of fills is not held behind
+            # provider-paced enrichment.
+            message = f"Gmail push imported {saved} fill(s) and rebuilt {rebuilt} trade(s); enrichment deferred to the next queued push."
+            _set_job(job_id, status="succeeded", done=5, total=5, enriched=processed, phase="complete", current=message, finished_at=_now())
+            return
 
         _set_job(job_id, done=2, phase="pipeline_step", current="Running market enrichment")
         # Polygon runs in the background (rate-limited, slow); don't block the
@@ -398,19 +478,44 @@ def _run_gmail_push_pipeline(job_id: uuid.UUID) -> None:
         _set_job(job_id, status="failed", phase="failed", error=str(exc), current=str(exc), finished_at=_now())
 
 
+_PUSH_QUEUE_LOCK = threading.Lock()
+
+
 def queue_gmail_push_pipeline(
     session: Session,
     *,
     history_id: str | None = None,
     email_address: str | None = None,
+    trigger: str = "http_push",
 ) -> tuple[JobRun, bool]:
-    job = create_job(
-        session,
-        JOB_GMAIL_PUSH,
-        {"history_id": history_id, "email_address": email_address},
-        total=5,
-        current="Queued from Gmail Pub/Sub push",
-    )
+    """Request a Gmail push import; returns (job, created).
+
+    At most one push waits at a time. A notification that arrives while one
+    is queued joins it; one that arrives while a push is *running* queues a
+    follow-up, because the running import may already have read the cursor.
+    """
+    with _PUSH_QUEUE_LOCK:
+        waiting = session.exec(
+            select(JobRun.id)
+            .where(JobRun.job_type == JOB_GMAIL_PUSH, JobRun.status == "queued")
+            .order_by(JobRun.created_at)
+            .limit(1)
+        ).first()
+        if waiting is not None:
+            # Conditional touch: if a worker claimed it in between, fall through.
+            touched = session.execute(
+                update(JobRun).where(JobRun.id == waiting, JobRun.status == "queued").values(updated_at=_now())
+            )
+            session.commit()
+            if touched.rowcount == 1:
+                return session.get(JobRun, waiting), False
+        job = create_job(
+            session,
+            JOB_GMAIL_PUSH,
+            {"history_id": history_id, "email_address": email_address, "trigger": trigger},
+            total=5,
+            current=f"Queued from Gmail notification ({trigger})",
+        )
     submit_job(job.id)
     return job, True
 
@@ -454,6 +559,8 @@ async def list_sync_runs(limit: int = 50, session: Session = Depends(get_session
     labels[JOB_FULL_PIPELINE] = "Full sync pipeline"
     labels[JOB_GMAIL_PUSH] = "Gmail push ingest"
     labels[JOB_RESYNC_ALL] = "Resync all"
+    labels[JOB_GMAIL_WATCH_RENEW] = "Gmail watch renewal"
+    labels[JOB_GMAIL_LISTENER] = "Gmail notification listener"
     return [
         {
             "id": str(run.id),
@@ -572,6 +679,7 @@ def execute_sync_job(job: JobRun) -> None:
             JOB_TRADE_REBUILD: _run_trade_rebuild,
             JOB_DAILY_REVIEW: _run_daily_review,
             JOB_RESYNC_ALL: _run_resync_all,
+            JOB_GMAIL_WATCH_RENEW: _run_gmail_watch_renew,
         }
         runner = runners.get(job.job_type)
         if runner is None:

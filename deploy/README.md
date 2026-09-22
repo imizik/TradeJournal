@@ -1,8 +1,8 @@
 # Ubuntu 24.04 deployment
 
 This package runs one private, single-user TradeJournal installation. It uses
-native systemd services for Next.js, the API, the sync, Polygon and Webull
-worker lanes, plus backup and Gmail-import timers. **The initial database remains Neon.** Moving that database to
+native systemd services for Next.js, the API, the sync, Polygon, Webull and
+Gmail worker lanes, plus backup, Gmail-import and Sync Everything timers. **The initial database remains Neon.** Moving that database to
 the VPS is a separate cutover, gated on an off-host backup and a successful
 restore rehearsal with data checks. Nothing here exports or deletes Neon data.
 
@@ -103,10 +103,10 @@ owner credentials, and it drops root before accessing the database.
 Set `FRONTEND_PUBLIC_URL` to the private HTTPS Tailscale origin and
 `BACKEND_PUBLIC_URL` to that origin plus `/api/backend`. Configure only the
 integration keys needed. Autostarts default to false; turn on Webull listening
-only after installing its credentials and stopping the old executor. Gmail
-watch renewal and TradingView analysis, when enabled, remain API-owned.
-Public Gmail Pub/Sub delivery is not provided by this private deployment;
-manual Gmail sync remains available.
+only after installing its credentials and stopping the old executor.
+TradingView analysis, when enabled, remains API-owned. Real-time Gmail import
+is opt-in and needs no public endpoint; see
+[Real-time Gmail import](#real-time-gmail-import).
 
 Copy needed state from the old host **before activation**, with all writers
 stopped. Market caches, manual-fill backups and Gmail sidecars go under
@@ -141,7 +141,7 @@ database port, frontend port or API port is needed.
 
 ## Backups and scheduled Robinhood import
 
-The release installs two timers:
+The release installs three timers:
 
 - `tradejournal-backup.timer` runs daily at 05:15 UTC with up to 15 minutes of
   jitter. It creates a custom-format PostgreSQL dump plus a compressed archive
@@ -151,6 +151,12 @@ The release installs two timers:
   minutes after each prior check finishes. It treats an already-active sync as
   a safe skip. When Gmail imports new fills, it waits for that durable job and
   then queues a trade rebuild; it does not start market-data enrichment.
+  With real-time import enabled this is the safety net for a dropped
+  notification.
+- `tradejournal-sync-pipeline.timer` queues Sync Everything (import, rebuild,
+  Polygon, Alpaca, path metrics) at 08:00 and 17:00 New York time. It waits
+  up to ten minutes for a running sync to finish instead of skipping, and
+  `Persistent=true` runs a missed slot after downtime.
 
 Install a `pg_dump`/`pg_restore` client at least as new as the hosted PostgreSQL
 server before enabling the backup timer. The service keeps the database
@@ -164,7 +170,7 @@ sudo journalctl --no-pager -u tradejournal-backup.service
 sudo /opt/tradejournal/current/backend/.venv/bin/python \
   /opt/tradejournal/current/deploy/backup.py verify \
   /var/backups/tradejournal/latest
-sudo systemctl list-timers tradejournal-backup.timer tradejournal-gmail-sync.timer
+sudo systemctl list-timers 'tradejournal-*'
 ```
 
 The dated directories are local restore artifacts, not independent storage by
@@ -174,13 +180,83 @@ successful `verify` checks archive structure and checksums; the local-Postgres
 cutover still requires restoring a dump into a disposable database and
 querying it before changing `DATABASE_URL`.
 
+## Real-time Gmail import
+
+Gmail can announce each new execution email through Google Pub/Sub. The
+`tradejournal-worker@gmail` service holds a **pull** subscription open, an
+outbound HTTPS connection, so nothing on the VPS accepts inbound traffic and
+Funnel is never involved. Each notification queues one coalesced
+`gmail_push` job. The sync lane reads Gmail history from a saved cursor,
+imports only new Robinhood execution emails through the ordinary parser and
+dedupe, and rebuilds trades, typically within about 15 seconds of the email.
+Only one machine may listen and register the watch: keep
+`GMAIL_LISTENER_ENABLED=false` anywhere else that shares this database.
+
+It stays off until configured. One-time setup, in Cloud Shell for the Google
+Cloud project that owns the Gmail OAuth client:
+
+```bash
+PROJECT_ID="$(gcloud config get-value project)"
+gcloud services enable pubsub.googleapis.com
+gcloud pubsub topics create tradejournal-gmail
+gcloud pubsub topics add-iam-policy-binding tradejournal-gmail \
+  --member="serviceAccount:gmail-api-push@system.gserviceaccount.com" --role="roles/pubsub.publisher"
+gcloud pubsub subscriptions create tradejournal-gmail-vps --topic=tradejournal-gmail \
+  --ack-deadline=60 --message-retention-duration=7d --expiration-period=never
+gcloud iam service-accounts create tradejournal-gmail-listener --display-name="TradeJournal Gmail listener (pull only)"
+gcloud pubsub subscriptions add-iam-policy-binding tradejournal-gmail-vps \
+  --member="serviceAccount:tradejournal-gmail-listener@${PROJECT_ID}.iam.gserviceaccount.com" --role="roles/pubsub.subscriber"
+gcloud iam service-accounts keys create pubsub-subscriber.json \
+  --iam-account="tradejournal-gmail-listener@${PROJECT_ID}.iam.gserviceaccount.com"
+```
+
+The key can only read that one subscription. Install it as
+`/var/lib/tradejournal/oauth/pubsub-subscriber.json` (owner
+`tradejournal:tradejournal`, mode 0600) and delete the Cloud Shell copy. The
+state backup already includes it.
+
+In Gmail, create a filter from `noreply@robinhood.com` with subject
+`"Option order executed" OR "Option order partially executed" OR "Your order has been executed"`
+that applies a new label `TradeJournal/Fills` and is never sent to spam.
+Watching that label keeps unrelated mail from waking the listener; the importer
+reads only the From/Subject headers of anything else.
+
+Set in `/etc/tradejournal/backend.env`:
+
+```
+GMAIL_LISTENER_ENABLED=true
+GMAIL_PUBSUB_TOPIC=projects/PROJECT_ID/topics/tradejournal-gmail
+GMAIL_PUBSUB_SUBSCRIPTION=projects/PROJECT_ID/subscriptions/tradejournal-gmail-vps
+GMAIL_PUBSUB_CREDENTIALS_FILE=/var/lib/tradejournal/oauth/pubsub-subscriber.json
+GMAIL_WATCH_LABELS=TradeJournal/Fills
+GMAIL_WATCH_AUTOSTART=false
+```
+
+Then `sudo systemctl restart tradejournal-worker@gmail tradejournal-api` and
+check `curl -s http://127.0.0.1:8080/gmail/health`; `status` should reach
+`live` within a minute. The listener registers the Gmail watch itself and
+renews it daily through a `gmail_watch_renew` sync job; Gmail stops
+notifications after seven days without renewal. A plumbing test that needs no
+trade:
+
+```bash
+gcloud pubsub topics publish tradejournal-gmail --message='{"emailAddress":"you@gmail.com","historyId":"1"}'
+```
+
+A `gmail_push` run should appear within seconds and finish with no new fills.
+
+A Google Cloud OAuth app left in *Testing* issues Gmail sign-ins that expire
+after seven days. Publish it to *In production* (personal use under 100 users
+does not need verification) and reconnect Gmail once. When Gmail does need
+reconnecting, every page shows a banner with a Reconnect button.
+
 ## Updates, restarts and rollback
 
 Install the next verified archive using its checksum. The installer creates
 an offline venv and preserves state/config. Release IDs cannot be overwritten.
 When the controller changes, update `/usr/local/sbin/tradejournal-deploy` from
 that verified artifact too. Before switching, wait for long-running jobs to
-finish; deployment stops all five services. Workers get 90 seconds to finish,
+finish; deployment stops all six services and the timers. Workers get 90 seconds to finish,
 after which systemd can kill them. Queued jobs survive. Interrupted jobs fail
 visibly and need an explicit new run; destructive or paid work is never
 automatically replayed.
@@ -189,9 +265,9 @@ automatically replayed.
 sudo tradejournal-deploy migrate NEW_RELEASE_ID --confirm-database 'HOST/DATABASE'
 sudo tradejournal-deploy activate NEW_RELEASE_ID --confirm-database 'HOST/DATABASE'
 sudo tradejournal-deploy status
-# API-only restart leaves the three worker services running:
+# API-only restart leaves the four worker services running:
 sudo systemctl restart tradejournal-api
-sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -f
+sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -u tradejournal-worker@gmail -f
 # Roll back code only, when its required schema still matches:
 sudo tradejournal-deploy rollback --confirm-database 'HOST/DATABASE'
 ```
@@ -210,7 +286,7 @@ start; use a forward fix or an explicitly planned database restore. Shared
 runtime state and configuration do not roll back with code. Retain known-good
 artifacts off the VPS. Do not delete the shared job-lock directory or files.
 
-All five units are enabled for boot and restart on process failure. A provider
+All six units are enabled for boot and restart on process failure. A provider
 error that is caught inside a still-running worker is not a process crash;
 inspect job failures/logs. Webull's reconnect cap remains unchanged. On the
 first real VPS, verify a reboot, browser access, OAuth, and the desired live
@@ -225,7 +301,9 @@ workflow additionally installs the built artifact, migrates fresh Postgres,
 executes queued work, restarts the API without restarting its worker, checks
 crash recovery, upgrades/rolls back releases, preserves state, and stops and
 starts the entire service set. It checks boot enablement; it does not reboot
-a VPS, enroll Tailscale, exercise Neon networking, or contact live providers.
+a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
+the Gmail listener runs there disabled, and its Pub/Sub path is covered by
+`backend/tests/test_gmail_listener.py` with a fake subscriber.
 
 The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)

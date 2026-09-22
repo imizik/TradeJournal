@@ -50,6 +50,12 @@ why it is worth setting, and why it is still only a label the guard ignores.
 `APP_ENV` sets `name`. It is a **label only** and never changes what is
 allowed; see below.
 
+Real-time Gmail import has one owner. Only the host running
+`tradejournal-worker@gmail` may set `GMAIL_LISTENER_ENABLED=true` or register a
+Gmail watch: a second listener on the same Pub/Sub subscription would take
+some notifications, and a second watch would replace the first. A laptop that
+points at the production database keeps both off.
+
 ## Destructive operations
 
 Two endpoints delete fills the application cannot rebuild from itself:

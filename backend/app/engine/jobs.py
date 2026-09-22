@@ -18,6 +18,8 @@ JOB_POLYGON_ENRICH = "polygon_enrich"
 JOB_ALPACA_ENRICH = "alpaca_enrich"
 JOB_TRADE_PATH = "trade_path"
 JOB_WEBULL_LISTENER = "webull_listener"
+JOB_GMAIL_LISTENER = "gmail_listener"
+JOB_GMAIL_WATCH_RENEW = "gmail_watch_renew"
 
 
 def create_job(session: Session, job_type: str, params: dict[str, Any] | None = None, total: int = 0, *, current: str | None = None) -> JobRun:

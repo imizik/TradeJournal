@@ -27,8 +27,13 @@ from app.database import engine
 from app.models import JobRun
 
 log = logging.getLogger(__name__)
-LANES = ("sync", "polygon", "webull")
+LANES = ("sync", "polygon", "webull", "gmail")
+# Job types that own a lane of their own; everything else runs in "sync".
+_DEDICATED_LANES = {"polygon_enrich": "polygon", "webull_listener": "webull", "gmail_listener": "gmail"}
 _current_lane: ContextVar[str | None] = ContextVar("job_lane", default=None)
+# Set by a worker's SIGTERM handler. Open-ended listeners poll it so a
+# supervisor stop ends them cleanly instead of waiting out the kill timeout.
+shutdown_requested = threading.Event()
 
 
 def execution_mode() -> str:
@@ -56,15 +61,15 @@ def lock_directory(db_engine=None) -> Path:
 
 
 def job_lane(job_type: str) -> str:
-    return {"polygon_enrich": "polygon", "webull_listener": "webull"}.get(job_type, "sync")
+    return _DEDICATED_LANES.get(job_type, "sync")
 
 
 def _lane_filter(lane: str):
     if lane == "sync":
-        return JobRun.job_type.notin_(["polygon_enrich", "webull_listener"])
+        return JobRun.job_type.notin_(list(_DEDICATED_LANES))
     if lane not in LANES:
         raise ValueError(f"Unknown job lane: {lane}")
-    return JobRun.job_type == {"polygon": "polygon_enrich", "webull": "webull_listener"}[lane]
+    return JobRun.job_type == {value: key for key, value in _DEDICATED_LANES.items()}[lane]
 
 
 def in_sync_worker() -> bool:
@@ -163,6 +168,9 @@ def _dispatch(job: JobRun) -> int:
     if job.job_type == "webull_listener":
         from app.engine.webull_listener import _run_listener
         return _run_listener(job.id)
+    if job.job_type == "gmail_listener":
+        from app.engine.gmail_listener import run_listener
+        return run_listener(job.id)
     if job.job_type in {"polygon_enrich", "alpaca_enrich", "trade_path"}:
         from app.engine.jobs import _run_job
         return _run_job(job.id)

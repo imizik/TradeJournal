@@ -46,6 +46,7 @@ backend/Robinhood/
 backend/.env.tradingview
 backend/credentials.json
 backend/token.json
+backend/pubsub-subscriber.json
 .DS_Store
 
 # Claude Code internal. Skills are shared project tooling -- a skill that only

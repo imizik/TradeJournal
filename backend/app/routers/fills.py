@@ -156,8 +156,17 @@ def _normalize_executed_at(executed_at: datetime) -> datetime:
     return executed_at.astimezone(ET).replace(tzinfo=None)
 
 
-def _import_fills_from_gmail(session: Session, *, start_enrichment: bool = True) -> dict[str, int]:
-    from app.engine.gmail_poller import GmailPollingError, poll_new_fills
+def _import_fills_from_gmail(
+    session: Session,
+    *,
+    start_enrichment: bool = True,
+    message_ids: list[str] | None = None,
+) -> dict[str, int]:
+    """Search Gmail for new execution emails, or import only `message_ids`.
+
+    Both paths share the parser and the raw_email_id dedupe below.
+    """
+    from app.engine.gmail_poller import GmailPollingError, poll_fills_by_ids, poll_new_fills
 
     t0 = time.monotonic()
     log.info("BEGIN /fills/import")
@@ -165,16 +174,19 @@ def _import_fills_from_gmail(session: Session, *, start_enrichment: bool = True)
     known_ids: set[str] = {raw_id for raw_id in session.exec(select(Fill.raw_email_id)).all() if raw_id}
     log.info("Loaded %d known email IDs", len(known_ids))
 
-    latest_fill = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at.desc())).first()
-    since_date: str | None = None
-    if latest_fill and latest_fill.executed_at:
-        d = latest_fill.executed_at.date() - timedelta(days=1)
-        since_date = d.strftime("%Y/%m/%d")
-    log.info("Polling Gmail since_date=%s", since_date)
-
     try:
-        log.info("Calling Gmail poller for /fills/import")
-        parsed_fills = poll_new_fills(known_ids=known_ids, since_date=since_date)
+        if message_ids is not None:
+            log.info("Fetching %d Gmail message(s) from history", len(message_ids))
+            parsed_fills = poll_fills_by_ids(message_ids, known_ids=known_ids)
+        else:
+            latest_fill = session.exec(select(Fill).options(*FILL_LIGHT).order_by(Fill.executed_at.desc())).first()
+            since_date: str | None = None
+            if latest_fill and latest_fill.executed_at:
+                d = latest_fill.executed_at.date() - timedelta(days=1)
+                since_date = d.strftime("%Y/%m/%d")
+            log.info("Polling Gmail since_date=%s", since_date)
+            log.info("Calling Gmail poller for /fills/import")
+            parsed_fills = poll_new_fills(known_ids=known_ids, since_date=since_date)
     except GmailPollingError as exc:
         log.warning("FAIL /fills/import: %s", exc)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
