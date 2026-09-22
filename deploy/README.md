@@ -1,8 +1,8 @@
 # Ubuntu 24.04 deployment
 
 This package runs one private, single-user TradeJournal installation. It uses
-native systemd services for Next.js, the API, and the sync, Polygon and Webull
-worker lanes. **The initial database remains Neon.** Moving that database to
+native systemd services for Next.js, the API, the sync, Polygon and Webull
+worker lanes, plus backup and Gmail-import timers. **The initial database remains Neon.** Moving that database to
 the VPS is a separate cutover, gated on an off-host backup and a successful
 restore rehearsal with data checks. Nothing here exports or deletes Neon data.
 
@@ -138,6 +138,41 @@ Use the HTTPS address reported by Serve. Per the
 [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve),
 this shares with the tailnet; Funnel would expose it publicly. No public
 database port, frontend port or API port is needed.
+
+## Backups and scheduled Robinhood import
+
+The release installs two timers:
+
+- `tradejournal-backup.timer` runs daily at 05:15 UTC with up to 15 minutes of
+  jitter. It creates a custom-format PostgreSQL dump plus a compressed archive
+  of `/var/lib/tradejournal/data` and `oauth`, verifies both, and retains seven
+  dated restore points under `/var/backups/tradejournal/`.
+- `tradejournal-gmail-sync.timer` checks Gmail five minutes after boot and five
+  minutes after each prior check finishes. It treats an already-active sync as
+  a safe skip. When Gmail imports new fills, it waits for that durable job and
+  then queues a trade rebuild; it does not start market-data enrichment.
+
+Install a `pg_dump`/`pg_restore` client at least as new as the hosted PostgreSQL
+server before enabling the backup timer. The service keeps the database
+password out of its arguments and metadata, reads the root-only migration URL,
+and runs the database client as `tradejournal`. Backup directories and files
+use the root-only `0700`/`0600` defaults.
+
+```bash
+sudo systemctl start tradejournal-backup.service
+sudo journalctl --no-pager -u tradejournal-backup.service
+sudo /opt/tradejournal/current/backend/.venv/bin/python \
+  /opt/tradejournal/current/deploy/backup.py verify \
+  /var/backups/tradejournal/latest
+sudo systemctl list-timers tradejournal-backup.timer tradejournal-gmail-sync.timer
+```
+
+The dated directories are local restore artifacts, not independent storage by
+themselves. Ensure the provider's daily VPS backup is active so they leave the
+host, and retain a second-provider copy before moving Postgres off Neon. A
+successful `verify` checks archive structure and checksums; the local-Postgres
+cutover still requires restoring a dump into a disposable database and
+querying it before changing `DATABASE_URL`.
 
 ## Updates, restarts and rollback
 

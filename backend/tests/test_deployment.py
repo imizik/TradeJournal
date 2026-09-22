@@ -134,6 +134,61 @@ def test_database_helper_resets_login_environment_before_dropping_privileges(mon
     assert events == [("groups", "tradejournal", 456), ("gid", 456), ("uid", 123)]
 
 
+def test_backup_database_command_never_contains_password(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    backup = load("backup")
+    safe, password = backup.pg_dump_url(
+        "postgresql+psycopg://owner:s%40cret@db.example/journal?sslmode=require"
+    )
+    assert password == "s@cret"
+    assert "s@cret" not in safe
+    assert "s%40cret" not in safe
+    assert safe == "postgresql://owner@db.example/journal?sslmode=require"
+
+
+def test_backup_retention_ignores_unrecognized_directories(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    backup = load("backup")
+    monkeypatch.setattr(backup, "BACKUP_ROOT", tmp_path)
+    for day in range(1, 10):
+        (tmp_path / f"202609{day:02d}T051500Z").mkdir()
+    (tmp_path / "keep-me").mkdir()
+    removed = backup.prune_backups(7)
+    assert [path.name for path in removed] == ["20260901T051500Z", "20260902T051500Z"]
+    assert (tmp_path / "keep-me").is_dir()
+
+
+def test_gmail_automation_rebuilds_only_after_new_fills(monkeypatch):
+    automation = load("automation")
+    starts = []
+    results = {
+        "gmail": {"message": "Imported 2 new fill(s), skipped 0."},
+        "rebuild": {"message": "Rebuilt 4 trade(s)."},
+    }
+
+    def start(job_type, **_kwargs):
+        starts.append(job_type)
+        return "gmail" if job_type == "gmail_sync" else "rebuild"
+
+    monkeypatch.setattr(automation, "start_job", start)
+    monkeypatch.setattr(automation, "wait_for_job", lambda job_id: results[job_id])
+    automation.gmail_sync()
+    assert starts == ["gmail_sync", "trade_rebuild"]
+
+
+def test_gmail_automation_does_not_rebuild_without_new_fills(monkeypatch):
+    automation = load("automation")
+    starts = []
+    monkeypatch.setattr(automation, "start_job", lambda job_type, **_kwargs: starts.append(job_type) or "gmail")
+    monkeypatch.setattr(
+        automation,
+        "wait_for_job",
+        lambda _job_id: {"message": "Imported 0 new fill(s), skipped 0."},
+    )
+    automation.gmail_sync()
+    assert starts == ["gmail_sync"]
+
+
 def test_archive_link_cannot_target_an_existing_release(control, tmp_path, monkeypatch):
     archive = tmp_path / "release.tar"
     with tarfile.open(archive, "w") as bundle:

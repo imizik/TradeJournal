@@ -25,6 +25,10 @@ STATE = Path("/var/lib/tradejournal")
 CONFIG = Path("/etc/tradejournal")
 UNITS = Path("/etc/systemd/system")
 SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull")]]
+AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-gmail-sync"]
+TIMERS = [f"{name}.timer" for name in AUTOMATION_SERVICES]
+OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS]
+BACKUPS = Path("/var/backups/tradejournal")
 
 
 def run(*command, **kwargs):
@@ -110,6 +114,8 @@ def install(archive: Path, digest: str) -> Path:
         for directory in (STATE, STATE / "data", STATE / "oauth", STATE / "job-locks", STATE / "frontend-cache", STATE / "frontend-cache" / destination.name):
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chown(directory, account.pw_uid, account.pw_gid)
+        BACKUPS.mkdir(parents=True, exist_ok=True, mode=0o700)
+        BACKUPS.chmod(0o700)
         backend = destination / "backend"
         (backend / "data").symlink_to(STATE / "data")
         for filename in ("credentials.json", "token.json"):
@@ -142,7 +148,17 @@ def database(release: Path, action: str, confirmation: str | None = None) -> Non
 
 
 def install_units(release: Path) -> None:
-    for unit in (release / "deploy/systemd").glob("*.service"):
+    bundled = {
+        unit.name: unit
+        for pattern in ("*.service", "*.timer")
+        for unit in (release / "deploy/systemd").glob(pattern)
+    }
+    for name in OPTIONAL_UNITS:
+        target = UNITS / name
+        if name not in bundled and target.exists():
+            subprocess.run(["systemctl", "disable", "--now", name], check=False)
+            target.unlink()
+    for unit in bundled.values():
         shutil.copyfile(unit, UNITS / unit.name)
         (UNITS / unit.name).chmod(0o644)
     run("systemctl", "daemon-reload")
@@ -150,7 +166,7 @@ def install_units(release: Path) -> None:
 
 def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
-    for service in SERVICES:
+    for service in [*TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
         if result.stdout.strip() == "not-found":
             continue
@@ -192,6 +208,10 @@ def start_services(release: Path, confirmation: str) -> None:
     run("systemctl", "start", *SERVICES[2:])
     time.sleep(2)
     run("systemctl", "is-active", *SERVICES)
+    available_timers = [timer for timer in TIMERS if (release / "deploy/systemd" / timer).is_file()]
+    if available_timers:
+        run("systemctl", "enable", "--now", *available_timers)
+        run("systemctl", "is-active", *available_timers)
 
 
 def activate(release: Path, confirmation: str) -> None:

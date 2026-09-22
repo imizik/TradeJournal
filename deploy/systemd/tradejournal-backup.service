@@ -1,0 +1,19 @@
+[Unit]
+Description=TradeJournal verified application backup
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/tradejournal/migration.env
+
+[Service]
+Type=oneshot
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/backup.py create
+TimeoutStartSec=30min
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/tradejournal /var/lib/tradejournal
+ReadWritePaths=/var/backups/tradejournal

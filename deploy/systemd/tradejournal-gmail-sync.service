@@ -1,0 +1,18 @@
+[Unit]
+Description=Import new Robinhood fills from Gmail and rebuild trades
+Wants=network-online.target tradejournal-api.service tradejournal-worker@sync.service
+After=network-online.target tradejournal-api.service tradejournal-worker@sync.service
+
+[Service]
+Type=oneshot
+User=tradejournal
+Group=tradejournal
+WorkingDirectory=/opt/tradejournal/current/backend
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/automation.py gmail-sync
+TimeoutStartSec=10min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tradejournal
