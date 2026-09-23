@@ -119,7 +119,7 @@ export default function StrategyRunTradesTable({
             <select
               value={direction}
               onChange={(event) => setDirection(event.target.value as typeof direction)}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring"
+              className="h-9 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             >
               <option value="all">All</option>
               <option value="long">Long</option>
@@ -130,7 +130,7 @@ export default function StrategyRunTradesTable({
             <select
               value={outcome}
               onChange={(event) => setOutcome(event.target.value as typeof outcome)}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring"
+              className="h-9 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             >
               <option value="all">All</option>
               <option value="winner">Winner</option>
@@ -144,7 +144,7 @@ export default function StrategyRunTradesTable({
               type="date"
               value={entryDateFrom}
               onChange={(event) => setEntryDateFrom(event.target.value)}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring"
+              className="h-9 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             />
           </FilterField>
           <FilterField label="Entry through">
@@ -152,7 +152,7 @@ export default function StrategyRunTradesTable({
               type="date"
               value={entryDateTo}
               onChange={(event) => setEntryDateTo(event.target.value)}
-              className="h-9 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring"
+              className="h-9 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             />
           </FilterField>
           <Button type="submit" size="sm" disabled={loading}>

@@ -279,6 +279,10 @@ pytest tests/test_schema_migrations.py -q
 
 Be honest about this when reporting work:
 
+- **Phone rendering is covered only at smoke depth.** `e2e/phone.spec.ts` runs
+  the main pages at iPhone width and asserts the menu replaces the sidebar, no
+  page scrolls sideways, and the manifest and icons are served. It does not
+  check how any individual page reads on a real phone.
 - **No component-level frontend tests.** The browser smoke tests prove pages
   render real data, but there is no unit coverage of individual components,
   so a broken edge case inside a working page goes unnoticed.

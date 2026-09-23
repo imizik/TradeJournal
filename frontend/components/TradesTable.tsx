@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { cn } from "@/lib/utils";
 import { Trade, Account } from "@/lib/api";
 
 type SortKey =
@@ -77,16 +78,23 @@ function Th({
   currentSort,
   dir,
   onSort,
+  wide,
 }: {
   children: React.ReactNode;
   sortKey: SortKey;
   currentSort: SortKey | null;
   dir: SortDir;
   onSort: (key: SortKey) => void;
+  wide?: boolean;
 }) {
   return (
     <th
-      className="px-4 py-2 text-left font-medium cursor-pointer select-none whitespace-nowrap hover:text-foreground/80"
+      className={cn(
+        "px-2 py-2 text-left font-medium cursor-pointer select-none whitespace-nowrap hover:text-foreground/80 sm:px-4",
+        // A phone fits about four columns; the rest return from sm up, and
+        // the ticker still opens the trade for everything they hold.
+        wide && "hidden sm:table-cell"
+      )}
       onClick={() => onSort(sortKey)}
     >
       {children}
@@ -95,8 +103,8 @@ function Th({
   );
 }
 
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3">{children}</td>;
+function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
+  return <td className={cn("px-2 py-3 sm:px-4", wide && "hidden sm:table-cell")}>{children}</td>;
 }
 
 export default function TradesTable({
@@ -123,27 +131,27 @@ export default function TradesTable({
           cmp(getSortVal(a, sort.key, accountMap), getSortVal(b, sort.key, accountMap), sort.dir)
         );
 
-  function thProps(key: SortKey) {
-    return { sortKey: key, currentSort: sort?.key ?? null, dir: sort?.dir ?? "asc", onSort: handleSort };
+  function thProps(key: SortKey, wide = false) {
+    return { sortKey: key, currentSort: sort?.key ?? null, dir: sort?.dir ?? "asc", onSort: handleSort, wide };
   }
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
+    <div className="overflow-x-auto rounded-lg border bg-card">
       <table className="w-full text-sm">
         <thead className="bg-muted text-xs text-muted-foreground uppercase">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
-            <Th {...thProps("account")}>Account</Th>
-            <Th {...thProps("strike")}>Strike</Th>
-            <Th {...thProps("option_type")}>Type</Th>
-            <Th {...thProps("expiration")}>Expiry</Th>
+            <Th {...thProps("account", true)}>Account</Th>
+            <Th {...thProps("strike", true)}>Strike</Th>
+            <Th {...thProps("option_type", true)}>Type</Th>
+            <Th {...thProps("expiration", true)}>Expiry</Th>
             <Th {...thProps("contracts")}>Contracts</Th>
-            <Th {...thProps("avg_entry_premium")}>Entry</Th>
-            <Th {...thProps("avg_exit_premium")}>Exit</Th>
+            <Th {...thProps("avg_entry_premium", true)}>Entry</Th>
+            <Th {...thProps("avg_exit_premium", true)}>Exit</Th>
             <Th {...thProps("realized_pnl")}>P&amp;L</Th>
-            <Th {...thProps("pnl_pct")}>P&amp;L %</Th>
-            <Th {...thProps("hold_duration_mins")}>Hold</Th>
-            <Th {...thProps("entry_time_bucket")}>Bucket</Th>
+            <Th {...thProps("pnl_pct", true)}>P&amp;L %</Th>
+            <Th {...thProps("hold_duration_mins", true)}>Hold</Th>
+            <Th {...thProps("entry_time_bucket", true)}>Bucket</Th>
             <Th {...thProps("status")}>Status</Th>
           </tr>
         </thead>
@@ -162,7 +170,7 @@ export default function TradesTable({
                   {t.ticker}
                 </a>
               </Td>
-              <Td>
+              <Td wide>
                 <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
                   accountMap[t.account_id]?.type === "roth_ira"
                     ? "bg-purple-900/40 text-purple-300"
@@ -171,16 +179,16 @@ export default function TradesTable({
                   {accountMap[t.account_id]?.name ?? "—"}
                 </span>
               </Td>
-              <Td>{t.strike != null ? `$${t.strike}` : <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td>{t.option_type ?? <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td>{t.expiration ?? <span className="text-muted-foreground/40">—</span>}</Td>
+              <Td wide>{t.strike != null ? `$${t.strike}` : <span className="text-muted-foreground/40">—</span>}</Td>
+              <Td wide>{t.option_type ?? <span className="text-muted-foreground/40">—</span>}</Td>
+              <Td wide>{t.expiration ?? <span className="text-muted-foreground/40">—</span>}</Td>
               <Td>{t.contracts}</Td>
-              <Td>${t.avg_entry_premium}</Td>
-              <Td>{t.avg_exit_premium != null ? `$${t.avg_exit_premium}` : "—"}</Td>
+              <Td wide>${t.avg_entry_premium}</Td>
+              <Td wide>{t.avg_exit_premium != null ? `$${t.avg_exit_premium}` : "—"}</Td>
               <Td><span className={pnlColor(t.realized_pnl)}>{fmt$(t.realized_pnl)}</span></Td>
-              <Td><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
-              <Td>{t.hold_duration_mins != null ? `${Math.round(t.hold_duration_mins)}m` : "—"}</Td>
-              <Td>{t.entry_time_bucket ?? "—"}</Td>
+              <Td wide><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
+              <Td wide>{t.hold_duration_mins != null ? `${Math.round(t.hold_duration_mins)}m` : "—"}</Td>
+              <Td wide>{t.entry_time_bucket ?? "—"}</Td>
               <Td><StatusBadge status={t.status} /></Td>
             </tr>
           ))}

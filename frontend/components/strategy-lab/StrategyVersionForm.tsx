@@ -19,7 +19,7 @@ type Props = {
 };
 
 const inputClass =
-  "h-10 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring disabled:cursor-not-allowed disabled:opacity-60";
+  "h-10 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring disabled:cursor-not-allowed disabled:opacity-60";
 const textareaClass =
   "min-h-28 resize-y rounded-md border bg-background px-3 py-2 text-sm outline-none focus:border-ring disabled:cursor-not-allowed disabled:opacity-60";
 

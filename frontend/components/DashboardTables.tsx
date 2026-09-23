@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { cn } from "@/lib/utils";
 import type { Account, PositionQuote, Trade } from "@/lib/api";
 import { computeUnrealizedPnl, formatHoldDuration, getCurrentMark, type OpenPositionRow } from "@/lib/dashboard";
 
@@ -112,16 +113,23 @@ function Th<K extends string>({
   currentSort,
   dir,
   onSort,
+  wide,
 }: {
   children: React.ReactNode;
   sortKey: K;
   currentSort: K | null;
   dir: SortDir;
   onSort: (key: K) => void;
+  wide?: boolean;
 }) {
   return (
     <th
-      className="cursor-pointer select-none whitespace-nowrap px-4 py-2 text-left font-medium hover:text-foreground/80"
+      className={cn(
+        "cursor-pointer select-none whitespace-nowrap px-2 py-2 text-left font-medium hover:text-foreground/80 sm:px-4",
+        // Phones keep the few columns worth reading at a glance; the ticker
+        // still opens the trade for everything else.
+        wide && "hidden sm:table-cell"
+      )}
       onClick={() => onSort(sortKey)}
     >
       {children}
@@ -130,8 +138,8 @@ function Th<K extends string>({
   );
 }
 
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3">{children}</td>;
+function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
+  return <td className={cn("px-2 py-3 sm:px-4", wide && "hidden sm:table-cell")}>{children}</td>;
 }
 
 function getOpenSortVal(
@@ -231,34 +239,35 @@ export function OpenPositionsTable({
           ),
         );
 
-  function thProps(key: OpenSortKey) {
+  function thProps(key: OpenSortKey, wide = false) {
     return {
       sortKey: key,
       currentSort: sort?.key ?? null,
       dir: sort?.dir ?? "asc",
       onSort: handleSort,
+      wide,
     };
   }
 
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full min-w-[1380px] text-sm">
+      <table className="w-full text-sm sm:min-w-[1380px]">
         <thead className="bg-muted text-xs uppercase text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
-            <Th {...thProps("account")}>Account</Th>
-            <Th {...thProps("instrument_type")}>Instrument</Th>
-            <Th {...thProps("strike")}>Strike</Th>
-            <Th {...thProps("option_type")}>Type</Th>
-            <Th {...thProps("expiration")}>Expiry</Th>
+            <Th {...thProps("account", true)}>Account</Th>
+            <Th {...thProps("instrument_type", true)}>Instrument</Th>
+            <Th {...thProps("strike", true)}>Strike</Th>
+            <Th {...thProps("option_type", true)}>Type</Th>
+            <Th {...thProps("expiration", true)}>Expiry</Th>
             <Th {...thProps("qty_left")}>Qty Left</Th>
-            <Th {...thProps("avg_cost")}>Avg Cost</Th>
-            <Th {...thProps("cost_left")}>Entry Value Left</Th>
+            <Th {...thProps("avg_cost", true)}>Avg Cost</Th>
+            <Th {...thProps("cost_left", true)}>Entry Value Left</Th>
             <Th {...thProps("current_price")}>Mark</Th>
             <Th {...thProps("unrealized_pnl")}>Unreal. P&amp;L</Th>
-            <Th {...thProps("realized")}>Realized</Th>
-            <Th {...thProps("opened_at")}>Opened</Th>
-            <Th {...thProps("last_activity")}>Last Activity</Th>
+            <Th {...thProps("realized", true)}>Realized</Th>
+            <Th {...thProps("opened_at", true)}>Opened</Th>
+            <Th {...thProps("last_activity", true)}>Last Activity</Th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -275,17 +284,17 @@ export function OpenPositionsTable({
                     {trade.ticker}
                   </a>
                 </Td>
-                <Td>
+                <Td wide>
                   <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
                 </Td>
-                <Td>
+                <Td wide>
                   <span className="capitalize">{trade.instrument_type}</span>
                 </Td>
-                <Td>
+                <Td wide>
                   {trade.strike != null ? fmtMoney(trade.strike) : <span className="text-muted-foreground/40">-</span>}
                 </Td>
-                <Td>{fmtOptionType(trade.option_type)}</Td>
-                <Td>
+                <Td wide>{fmtOptionType(trade.option_type)}</Td>
+                <Td wide>
                   {trade.expiration ? fmtDateShort(trade.expiration) : <span className="text-muted-foreground/40">-</span>}
                 </Td>
                 <Td>
@@ -296,8 +305,8 @@ export function OpenPositionsTable({
                     </span>
                   </div>
                 </Td>
-                <Td>{fmtMoney(trade.avg_entry_premium)}</Td>
-                <Td>{fmtMoney(meta.capitalLeft)}</Td>
+                <Td wide>{fmtMoney(trade.avg_entry_premium)}</Td>
+                <Td wide>{fmtMoney(meta.capitalLeft)}</Td>
                 <Td>
                   <div className="flex flex-col">
                     <span>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">--</span>}</span>
@@ -315,11 +324,11 @@ export function OpenPositionsTable({
                     <span className="text-muted-foreground/40">--</span>
                   )}
                 </Td>
-                <Td>
+                <Td wide>
                   <span className={pnlColor(meta.realizedSoFar)}>{fmt$(meta.realizedSoFar)}</span>
                 </Td>
-                <Td>{fmtDateShort(trade.opened_at)}</Td>
-                <Td>{fmtDateShort(meta.lastActivityAt)}</Td>
+                <Td wide>{fmtDateShort(trade.opened_at)}</Td>
+                <Td wide>{fmtDateShort(meta.lastActivityAt)}</Td>
               </tr>
             );
           })}
@@ -353,29 +362,30 @@ export function RecentClosedTable({
           cmp(getClosedSortVal(a, sort.key, accountMap), getClosedSortVal(b, sort.key, accountMap), sort.dir),
         );
 
-  function thProps(key: ClosedSortKey) {
+  function thProps(key: ClosedSortKey, wide = false) {
     return {
       sortKey: key,
       currentSort: sort?.key ?? null,
       dir: sort?.dir ?? "asc",
       onSort: handleSort,
+      wide,
     };
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card">
+    <div className="overflow-x-auto rounded-lg border bg-card">
       <table className="w-full text-sm">
         <thead className="bg-muted text-xs uppercase text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
-            <Th {...thProps("account")}>Account</Th>
-            <Th {...thProps("instrument_type")}>Instrument</Th>
-            <Th {...thProps("strike")}>Strike</Th>
-            <Th {...thProps("option_type")}>Type</Th>
-            <Th {...thProps("expiration")}>Expiry</Th>
+            <Th {...thProps("account", true)}>Account</Th>
+            <Th {...thProps("instrument_type", true)}>Instrument</Th>
+            <Th {...thProps("strike", true)}>Strike</Th>
+            <Th {...thProps("option_type", true)}>Type</Th>
+            <Th {...thProps("expiration", true)}>Expiry</Th>
             <Th {...thProps("realized_pnl")}>P&amp;L</Th>
-            <Th {...thProps("pnl_pct")}>P&amp;L %</Th>
-            <Th {...thProps("hold_duration_mins")}>Hold</Th>
+            <Th {...thProps("pnl_pct", true)}>P&amp;L %</Th>
+            <Th {...thProps("hold_duration_mins", true)}>Hold</Th>
             <Th {...thProps("status")}>Status</Th>
           </tr>
         </thead>
@@ -394,26 +404,26 @@ export function RecentClosedTable({
                   {trade.ticker}
                 </a>
               </Td>
-              <Td>
+              <Td wide>
                 <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
               </Td>
-              <Td>
+              <Td wide>
                 <span className="capitalize">{trade.instrument_type}</span>
               </Td>
-              <Td>
+              <Td wide>
                 {trade.strike != null ? fmtMoney(trade.strike) : <span className="text-muted-foreground/40">-</span>}
               </Td>
-              <Td>{fmtOptionType(trade.option_type)}</Td>
-              <Td>
+              <Td wide>{fmtOptionType(trade.option_type)}</Td>
+              <Td wide>
                 {trade.expiration ? fmtDateShort(trade.expiration) : <span className="text-muted-foreground/40">-</span>}
               </Td>
               <Td>
                 <span className={pnlColor(trade.realized_pnl)}>{fmt$(trade.realized_pnl)}</span>
               </Td>
-              <Td>
+              <Td wide>
                 <span className={pnlColor(trade.pnl_pct)}>{fmtPct(trade.pnl_pct)}</span>
               </Td>
-              <Td>{formatHoldDuration(trade.hold_duration_mins)}</Td>
+              <Td wide>{formatHoldDuration(trade.hold_duration_mins)}</Td>
               <Td>
                 <StatusBadge status={trade.status} />
               </Td>

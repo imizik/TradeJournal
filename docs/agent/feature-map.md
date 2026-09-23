@@ -51,6 +51,13 @@ Things worth knowing before you touch a page:
 - `/privacy` (`app/privacy/page.tsx`) is static and not in the sidebar. The
   Google OAuth consent screen links to it; keep it true to what the Gmail
   integration does.
+- Phone layout: below `md` the sidebar in `components/Nav.tsx` is replaced by a
+  bar plus a slide-out menu (same `navItems`), and below `sm` tables mark
+  secondary columns `wide` so only a few show -- `TradesTable`,
+  `DashboardTables`, `app/fills/page.tsx`. A row still opens the full record.
+  `app/manifest.ts` plus `public/icon-*.png` (regenerate with
+  `frontend/scripts/generate-icons.py`) make the home-screen shortcut open like
+  an app. Proof: `e2e/phone.spec.ts`.
 
 ## Backend by feature
 
