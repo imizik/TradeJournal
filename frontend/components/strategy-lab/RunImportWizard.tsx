@@ -32,7 +32,7 @@ import type {
 type Phase = "idle" | "previewing" | "ready" | "committing";
 
 const inputClass =
-  "h-10 w-full rounded-md border bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring";
+  "h-10 w-full rounded-md border bg-background px-3 text-base sm:text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-ring";
 
 export default function RunImportWizard({
   version,
@@ -152,7 +152,7 @@ export default function RunImportWizard({
 
         <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(260px,0.55fr)_auto] lg:items-end">
           <Field label="List of Trades CSV" htmlFor="strategy-run-csv">
-            <label htmlFor="strategy-run-csv" className="flex h-10 cursor-pointer items-center gap-3 rounded-md border bg-background px-3 text-sm hover:bg-secondary/40">
+            <label htmlFor="strategy-run-csv" className="flex h-10 cursor-pointer items-center gap-3 rounded-md border bg-background px-3 text-base sm:text-sm hover:bg-secondary/40">
               <FileSpreadsheet className="h-4 w-4 shrink-0 text-sky-300" />
               <span className="min-w-0 flex-1 truncate text-foreground/85">
                 {file?.name || "Choose CSV file"}
@@ -291,7 +291,7 @@ export default function RunImportWizard({
                   onChange={(event) => setCurrency(event.target.value.toUpperCase())}
                 />
               </Field>
-              <label className="flex min-h-10 items-center gap-3 self-end rounded-md border bg-background px-3 text-sm">
+              <label className="flex min-h-10 items-center gap-3 self-end rounded-md border bg-background px-3 text-base sm:text-sm">
                 <input
                   type="checkbox"
                   checked={extendedHours}

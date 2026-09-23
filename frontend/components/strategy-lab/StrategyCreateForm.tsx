@@ -62,7 +62,7 @@ export default function StrategyCreateForm() {
             id="strategy-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring"
+            className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             placeholder="VWAP Reclaim"
             maxLength={200}
             disabled={busy}
@@ -75,7 +75,7 @@ export default function StrategyCreateForm() {
             id="strategy-setup-type"
             value={setupType}
             onChange={(event) => setSetupType(event.target.value)}
-            className="h-10 rounded-md border bg-background px-3 text-sm outline-none focus:border-ring"
+            className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm outline-none focus:border-ring"
             disabled={busy}
           >
             {SETUP_TYPES.map((option) => (

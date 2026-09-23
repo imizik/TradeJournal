@@ -209,7 +209,7 @@ export default function ManualFillForm({
               id="account"
               value={form.accountId}
               onChange={(event) => update("accountId", event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               disabled={busy}
               required
             >
@@ -227,7 +227,7 @@ export default function ManualFillForm({
               id="instrument_type"
               value={form.instrumentType}
               onChange={(event) => handleInstrumentTypeChange(event.target.value as "stock" | "option")}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               disabled={busy}
             >
               <option value="stock">Stock</option>
@@ -241,7 +241,7 @@ export default function ManualFillForm({
               id="ticker"
               value={form.ticker}
               onChange={(event) => update("ticker", event.target.value.toUpperCase())}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               placeholder="ASTS"
               disabled={busy}
               required
@@ -254,7 +254,7 @@ export default function ManualFillForm({
               id="side"
               value={form.side}
               onChange={(event) => update("side", event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               disabled={busy}
             >
               {sideOptions.map((option) => (
@@ -274,7 +274,7 @@ export default function ManualFillForm({
               step="0.000001"
               value={form.contracts}
               onChange={(event) => update("contracts", event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               placeholder={form.instrumentType === "stock" ? "10" : "2"}
               disabled={busy}
               required
@@ -290,7 +290,7 @@ export default function ManualFillForm({
               step="0.000001"
               value={form.price}
               onChange={(event) => update("price", event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               placeholder={form.instrumentType === "stock" ? "22.50" : "1.35"}
               disabled={busy}
               required
@@ -304,7 +304,7 @@ export default function ManualFillForm({
               type="date"
               value={form.tradeDate}
               onChange={(event) => update("tradeDate", event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               disabled={busy}
               required
             />
@@ -317,7 +317,7 @@ export default function ManualFillForm({
               type="time"
               value={form.tradeTime}
               onChange={(event) => update("tradeTime", event.target.value)}
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+              className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
               disabled={busy}
             />
           </Field>
@@ -331,7 +331,7 @@ export default function ManualFillForm({
                 id="option_type"
                 value={form.optionType}
                 onChange={(event) => update("optionType", event.target.value as "call" | "put")}
-                className="h-10 rounded-md border bg-background px-3 text-sm"
+                className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
                 disabled={busy}
               >
                 <option value="call">Call</option>
@@ -348,7 +348,7 @@ export default function ManualFillForm({
                 step="0.01"
                 value={form.strike}
                 onChange={(event) => update("strike", event.target.value)}
-                className="h-10 rounded-md border bg-background px-3 text-sm"
+                className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
                 placeholder="250"
                 disabled={busy}
                 required={form.instrumentType === "option"}
@@ -362,7 +362,7 @@ export default function ManualFillForm({
                 type="date"
                 value={form.expiration}
                 onChange={(event) => update("expiration", event.target.value)}
-                className="h-10 rounded-md border bg-background px-3 text-sm"
+                className="h-10 rounded-md border bg-background px-3 text-base sm:text-sm"
                 disabled={busy}
                 required={form.instrumentType === "option"}
               />
