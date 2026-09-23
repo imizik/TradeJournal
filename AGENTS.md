@@ -76,11 +76,12 @@ data-fetch patterns. When PnL looks wrong, start at
 - Never put private API keys or unrestricted database credentials in
   `backend/.env.tradingview`.
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the
-  test suite writes to whatever `DATABASE_URL` resolves to, which is the
-  hosted Neon database on a normally configured machine.
-- A `DATABASE_URL` pointing at Neon is a real database. `resync-all` deletes
-  fills and belongs on a branch database; against any hosted database it now
-  refuses unless the request names the target. Check `GET /health` to see
+  test suite writes to whatever `DATABASE_URL` resolves to, including a
+  production VPS or Neon database.
+- A `DATABASE_URL` pointing at VPS Postgres or Neon is a real database.
+  `resync-all` deletes fills and belongs on a branch database; against any
+  hosted database it now refuses unless the request names the target. Check
+  `GET /health` to see
   which database you are on. (`rebuild-all` only recreates derived trades and
   is not destructive.)
 - Keep `CLAUDE.md`, `AGENTS.md`, and `docs/agent/` consistent when scope

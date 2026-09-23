@@ -9,7 +9,12 @@ Which database a process talks to, how to tell, and what is safe where.
 | **Worktree** (default) | `backend/data/trade_journal.db` (SQLite) | none | yes — it is a file |
 | **CI** | ephemeral SQLite; a `postgres:16` container for parity tests | none | yes — thrown away every run |
 | **Dev** | a Neon branch | dev branch role | yes — that is what it is for |
-| **Production** | the Neon primary | production role | **no** |
+| **Production** | PostgreSQL on the Ubuntu VPS, `127.0.0.1:5432/tradejournal` | restricted `tj_app` role | **no** |
+
+The Neon primary is the retained pre-cutover source, not a live production
+writer. A Mac worktree may still contain Neon URLs; do not run it as a second
+production API or worker. Check the active VPS database with its private
+`GET /health` before any operation that changes data.
 
 An ordinary worktree needs no Neon and no integration credentials: leave
 `DATABASE_URL` unset, keep the integration autostarts off, and use fixtures.
@@ -26,7 +31,7 @@ SQLite files automatically, because the path is inside the worktree.
   "environment": {
     "name": "production",
     "backend": "postgresql",
-    "identity": "ep-restless-cell-a1b2c3.c-4.us-east-1.aws.neon.tech/neondb",
+    "identity": "127.0.0.1:5432/tradejournal",
     "is_local": false,
     "destructive_requires_confirmation": true
   }
@@ -36,7 +41,8 @@ SQLite files automatically, because the path is inside the worktree.
 `identity` is redacted — host and database name only, never the username or
 password, because it appears in API responses, job rows and logs.
 
-Each Neon branch gets its own endpoint hostname, so two branches are always
+The VPS identity identifies its loopback endpoint and database name. Each Neon
+branch gets its own endpoint hostname, so two branches are always
 **different** strings — a confirmation copied from one will not unlock the
 other. But they are not **self-describing**: Neon names endpoints with random
 words (`ep-restless-cell-a1b2c3`), and every branch of a project shares the
@@ -172,9 +178,9 @@ as a role that cannot create or drop anything. Three roles:
 
 | Role | Used by | Can |
 |---|---|---|
-| **owner** (`neondb_owner` on Neon) | `alembic` | everything; owns the schema |
-| **app** | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
-| **ingress** | the TradingView ingress (port 8090) | `tradingview_alert` only |
+| **owner** (`tj_owner` on VPS; `neondb_owner` on Neon) | `alembic` | everything; owns the schema |
+| **app** (`tj_app` on VPS) | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
+| **ingress** (`tj_ingress` on VPS) | the TradingView ingress (port 8090) | `tradingview_alert` only |
 
 The ingress is the one that matters. Port 8090 is the only tunnelable port and
 is meant to be internet-facing; 8080 is localhost-only by hard constraint. The
@@ -402,9 +408,8 @@ its access, not being granted it.
 
 - **Staging.** No persistent staging host has been provisioned. The
   [Ubuntu package](../../deploy/README.md) is tested on a disposable CI host;
-  the first real host keeps Neon until a separately rehearsed migration.
-  Staging and
-  production must not share a database, credentials, webhook tokens, Gmail
+  the first real host now uses VPS PostgreSQL. Staging and production must not
+  share a database, credentials, webhook tokens, Gmail
   state or external-integration identity.
 - **A separate worker role.** Background workers share the application role.
   A fourth role is real configuration complexity, and there is no threat it

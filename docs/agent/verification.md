@@ -181,7 +181,8 @@ Notes that will save you time:
 
 ## Postgres parity
 
-The suite runs on SQLite; production runs on Neon. `test_postgres_parity.py`
+The default suite runs on SQLite; production runs on VPS PostgreSQL.
+`test_postgres_parity.py`
 covers what only Postgres can show, and is skipped unless `TEST_DATABASE_URL`
 names a Postgres database:
 

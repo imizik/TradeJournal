@@ -115,7 +115,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 - `find_phantoms.py` — duplicate cumulative partial-fill investigation
 - `rebuild_trades.py`, `backfill_greeks.py`, `inspect_enrichment.py`
 - `seed_dev_data.py` — the fixed fills behind the browser tests and the snapshot
-- `migrate_sqlite_to_postgres.py` — SQLite → Neon copy
+- `migrate_sqlite_to_postgres.py` — SQLite → PostgreSQL copy
 - `check_database.py` — read-only preflight: which database, schema ready?
 - `setup_roles.py` — create the app and ingress roles, then prove they are
   limited by connecting as each one (`environments.md`)

@@ -2,9 +2,9 @@
 
 This package runs one private, single-user TradeJournal installation. It uses
 native systemd services for Next.js, the API, the sync, Polygon, Webull and
-Gmail worker lanes, plus local/offsite backup, Gmail-import and Sync Everything timers. **The initial database remains Neon.** Moving that database to
-the VPS is a separate cutover, gated on an off-host backup and a successful
-restore rehearsal with data checks. Nothing here exports or deletes Neon data.
+Gmail worker lanes, plus local/offsite backup, Gmail-import and Sync Everything
+timers. Production now uses PostgreSQL on the VPS. The original Neon primary is
+retained as a pre-cutover recovery source; it is no longer the live database.
 
 ## Access and layout
 
@@ -87,7 +87,8 @@ sudoedit /etc/tradejournal/backend.env
 sudoedit /etc/tradejournal/migration.env
 ```
 
-Set `DATABASE_URL` to the existing Neon application-role URL. Set
+For an initial Neon-backed installation, set `DATABASE_URL` to its existing
+application-role URL. Set
 `MIGRATION_DATABASE_URL` in **migration.env only**, using the owner role for
 the same endpoint, database and URL query settings. Use the same hostname
 spelling (do not mix pooled and direct endpoints); prefer the direct endpoint
@@ -194,18 +195,32 @@ sudo systemctl list-timers 'tradejournal-*'
 ```
 
 The dated directories are local restore artifacts, not independent storage by
-themselves. Ensure the provider's daily VPS backup is active so they leave the
-host, and retain an **encrypted** second-provider copy before moving Postgres
-off Neon. The state archive contains OAuth tokens and API/database credentials;
-never upload it unencrypted. A successful `verify` checks archive structure
-and checksums. The local-Postgres cutover still requires restoring a dump into
-a disposable database, checking every table's row count and the Alembic
-revision, verifying the restricted database roles, and serving a
-database-backed request from an isolated API
-before changing `DATABASE_URL`. Repeat the dump and comparison with writers
-stopped for the final cutover; the live database can gain new fills after a
-rehearsal. Keep the Neon source until the local service and off-host restore
-have both been verified.
+themselves. Keep the provider's daily VPS backup active and retain the
+**encrypted** second-provider R2 copy. The state archive contains OAuth tokens
+and API/database credentials; never upload it unencrypted. A successful
+`verify` checks archive structure and checksums. Confirm scheduled local and
+offsite backup runs; periodically restore an R2 snapshot into a disposable
+database, since a successful upload alone does not prove recoverability.
+
+### Production database cutover (2026-09-23)
+
+The Ubuntu 24.04 VPS runs PostgreSQL 18 on `127.0.0.1:5432/tradejournal`.
+The app uses `tj_app`; Alembic uses `tj_owner`; the future TradingView ingress
+role is `tj_ingress`. PostgreSQL, the API and the frontend listen on loopback;
+private Tailscale Serve reaches only the frontend. No database port is public.
+
+For the cutover, all application writers and timers were stopped. A final Neon
+dump was verified, uploaded encrypted to R2, and restored in a disposable
+database. Every table count and the Alembic revision matched the restored VPS
+database. Schema and role checks passed before switching `DATABASE_URL`. The
+live API, frontend proxy, workers, Gmail sync and a fresh VPS-database
+backup/restore drill passed afterwards.
+The root-only `backend.env.neon-before-local` and
+`migration.env.neon-before-local` files preserve the previous connection
+settings. Neon was not modified or deleted during the cutover. Once the VPS
+database accepts writes, switching back to the old Neon snapshot requires
+reconciling any newer VPS data first; copying those old settings back alone
+would lose writes.
 
 ### Encrypted offsite backup in Cloudflare R2
 
@@ -247,9 +262,8 @@ The drill downloads the encrypted snapshot to a temporary root-only directory,
 verifies both archive checksums, restores the database dump into a disposable
 local PostgreSQL database, queries its tables and Alembic revision, then removes
 both the restored files and disposable database. Check the timer and service
-logs after the first scheduled run. Do not retire Neon until this drill passes,
-the VPS database candidate's table counts match a final quiesced Neon dump,
-and the application is healthy against the VPS database.
+logs after scheduled runs. Retire Neon only after deciding how long to keep the
+pre-cutover source and confirming continued recoverability from R2.
 
 ## Real-time Gmail import
 

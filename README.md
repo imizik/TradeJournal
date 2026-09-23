@@ -275,8 +275,8 @@ step needs outbound network access.
 
 For private Ubuntu 24.04 hosting, see the [deployment guide](deploy/README.md).
 It packages independent systemd services and preserves runtime state across
-releases. Neon remains the initial database; migrating it onto the VPS is a
-separate step after backup/restore verification.
+releases. Production now uses PostgreSQL on the VPS after a verified Neon
+backup, row-count comparison and encrypted offsite restore drill.
 
 Durable context for coding agents lives in `docs/agent/`; `CLAUDE.md` and
 `AGENTS.md` are thin working agreements that point there. Assorted current
@@ -290,10 +290,15 @@ notes:
 - Sync Center pipelines intentionally do not wait for slow Polygon enrich completion. A succeeded pipeline may still have Polygon work running; check `GET /fills/enrich/status` separately.
 - Daily review is intentionally separate from "Sync Everything" and Gmail push. Generate it from the daily page or the standalone `daily_review` Sync Center job.
 
-## Postgres/Neon Migration
+## SQLite to PostgreSQL migration (development databases)
+
+This is for a new PostgreSQL target, not the live VPS database. See the
+[deployment guide](deploy/README.md) for production operations.
 
 ```bash
 cd backend
-DATABASE_URL="postgresql+psycopg://USER:PASSWORD@HOST/dbname?sslmode=require" alembic upgrade head
-python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
+export DATABASE_URL="postgresql+psycopg://USER:PASSWORD@HOST/dbname?sslmode=require"
+export MIGRATION_DATABASE_URL="$DATABASE_URL"
+.venv/bin/python -m alembic upgrade head
+.venv/bin/python scripts/migrate_sqlite_to_postgres.py --target "$DATABASE_URL"
 ```
