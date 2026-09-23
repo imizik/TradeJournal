@@ -62,7 +62,8 @@ test("main content gets the width, and key numbers are readable", async ({ page 
   expect(mainWidth).toBeGreaterThan(viewport * 0.9);
 
   // The seeded all-time P&L must render in full, not clipped to "+$1,0...".
-  await expect(page.getByText("+$1,019.00")).toBeVisible();
+  // exact: the chart's own tooltip label also contains this number.
+  await expect(page.getByText("+$1,019.00", { exact: true })).toBeVisible();
 });
 
 test("the home-screen manifest and icons are served", async ({ page, request }) => {
