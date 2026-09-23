@@ -306,7 +306,7 @@ export default function AuditPanel({ tradeId }: Props) {
   };
 
   return (
-    <div className="w-80 shrink-0">
+    <div className="w-full lg:w-80 lg:shrink-0">
       {/* Toggle button */}
       <button
         onClick={handleOpen}

@@ -66,6 +66,27 @@ test("main content gets the width, and key numbers are readable", async ({ page 
   await expect(page.getByText("+$1,019.00", { exact: true })).toBeVisible();
 });
 
+test("a trade opens to a readable detail page", async ({ page }) => {
+  await page.goto("/trades");
+  await page.locator('tbody a[href^="/trades/"]').first().click();
+  await expect(page).toHaveURL(/\/trades\/[0-9a-f-]+$/);
+
+  // The audit panel is a fixed 320px column: beside it the trade itself was
+  // squeezed to a few pixels.
+  const widths = await page.evaluate(() => ({
+    content: Math.max(
+      ...[...document.querySelectorAll("main h2")].map((el) => el.getBoundingClientRect().width),
+    ),
+    viewport: window.innerWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }));
+  expect(widths.content).toBeGreaterThan(widths.viewport * 0.7);
+  expect(widths.scrollWidth).toBeLessThanOrEqual(widths.viewport + 1);
+
+  await expect(page.getByText("Trade Summary")).toBeVisible();
+  await expect(page.getByRole("button", { name: /Show Audit/ })).toBeVisible();
+});
+
 test("the home-screen manifest and icons are served", async ({ page, request }) => {
   await page.goto("/");
   const manifest = await (await request.get("/manifest.webmanifest")).json();

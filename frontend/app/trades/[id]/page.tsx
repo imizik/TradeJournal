@@ -99,10 +99,10 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
   const returnTo = `/trades?ticker=${encodeURIComponent(trade.ticker)}`;
 
   return (
-    <div className="flex gap-6 items-start">
+    <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
     {/* Left column — main content */}
     <div className="flex-1 min-w-0 space-y-6">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <a href="/trades" className="text-sm text-muted-foreground hover:text-foreground">
           Back to Trades
         </a>
@@ -116,7 +116,7 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Trade Summary
         </h2>
-        <div className="grid grid-cols-2 gap-x-8">
+        <div className="grid grid-cols-1 gap-x-8 sm:grid-cols-2">
           <div>
             <Row label={sizeLabel} value={String(trade.contracts)} />
             <Row label="Avg Entry" value={`$${trade.avg_entry_premium}`} />
@@ -171,7 +171,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
                 href={`/fills/${fill.id}?returnTo=${encodeURIComponent(returnTo)}`}
                 className="block rounded-md bg-muted px-4 py-3 text-sm transition-colors hover:bg-muted/80"
               >
-                <div className="flex items-center gap-4">
+                {/* Wraps on a phone: five fixed cells clipped the Edit fill link. */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
                   <span
                     className={`w-20 shrink-0 rounded px-2 py-0.5 text-center text-xs font-semibold ${
                       isEntryFill(fill) ? "bg-blue-900/40 text-blue-300" : "bg-orange-900/40 text-orange-300"
@@ -182,7 +183,7 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
                   <span className="text-xs text-muted-foreground">{new Date(fill.executed_at).toLocaleString()}</span>
                   <span className="font-medium">{fill.contracts}x @ ${fill.price}</span>
                   <span className="text-muted-foreground">${(fill.contracts * fill.price).toFixed(2)} total</span>
-                  <span className="ml-auto text-xs font-medium text-foreground/80">Edit fill</span>
+                  <span className="text-xs font-medium text-foreground/80 sm:ml-auto">Edit fill</span>
                 </div>
                 {chips.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -235,8 +236,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
       </div>
     </div>
 
-    {/* Right column — sticky audit panel */}
-    <div className="sticky top-6 self-start">
+    {/* Right column — sticky audit panel (below the trade on small screens) */}
+    <div className="lg:sticky lg:top-6 lg:self-start">
       <AuditPanel tradeId={id} />
     </div>
     </div>
