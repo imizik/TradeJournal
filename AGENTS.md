@@ -28,6 +28,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
+| `WISHLIST.md` | What the owner wants next, and what "done" means for it — read before starting anything sizeable |
 
 Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
@@ -49,6 +50,13 @@ instead. `docs/agent/verification.md` lists the gaps honestly; use it.
 
 CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
 the local verification script does not run those checks.
+
+## Finished means deployed
+
+A merged pull request the owner cannot see is not a finished change. For
+anything that changes what they look at, install the release on the VPS
+(`deploy/README.md`) and check the result on the running site, then say what
+you checked. Update `WISHLIST.md` when an item ships.
 
 ## Operating style
 
