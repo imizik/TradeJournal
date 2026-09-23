@@ -58,8 +58,9 @@ use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
 Because that frontend grants access to the private API, it must never be made
 public. Local development retains the existing direct API URL default.
 Release code lives under `/opt/tradejournal`, persistent data/OAuth/locks under
-`/var/lib/tradejournal`. Initial hosting keeps Neon; moving Postgres onto the
-VPS remains a separate migration after a successful backup/restore rehearsal.
+`/var/lib/tradejournal`. Production PostgreSQL now runs on the same VPS, bound
+to loopback; Neon remains a pre-cutover recovery source. The cutover and
+recovery checks are recorded in [the deployment guide](../../deploy/README.md).
 The package also enables a daily verified application backup, an encrypted
 offsite backup timer when R2 credentials are configured, a five-minute
 Gmail-import timer and an 08:00/17:00 New York Sync Everything timer. The
