@@ -166,15 +166,15 @@ Notes that will save you time:
   fetches at port 8099. The Sync Center test asserts the browser reaches the proxy
   without directly contacting a backend port. Direct-API local development
   still needs `FRONTEND_PUBLIC_URL` in the backend's CORS allowlist.
-- **A sandbox with a preinstalled browser** whose build does not match this
-  Playwright version can point at it. The variable wants the executable, not
-  the directory, and the build number changes, so resolve it:
-  ```bash
-  PLAYWRIGHT_CHROMIUM_PATH=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome | head -1) \
-    bash scripts/verify.sh
-  ```
-  Without this the run fails with `browserType.launch: Executable doesn't
-  exist`, which reads like a missing install rather than a version mismatch.
+- **The browser is installed by `scripts/setup.sh`** (`npx playwright install
+  --only-shell chromium`), except in a sandbox that ships one under
+  `/opt/pw-browsers` -- a Claude Code cloud session does. That build rarely
+  matches this Playwright version, so `verify.sh` points
+  `PLAYWRIGHT_CHROMIUM_PATH` at it automatically when the variable is unset.
+  Set the variable yourself (to the executable, not the directory) to use a
+  different browser. `browserType.launch: Executable doesn't exist` means no
+  browser was found, which reads like a missing install but can also be a
+  version mismatch.
 - Asserted numbers come from `EXPECTED` in `seed_dev_data.py`, which
   `backend/tests/test_seed_dev_data.py` independently verifies the
   reconstructor still produces. If the fixture changes, that test fails first,

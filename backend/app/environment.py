@@ -112,9 +112,15 @@ def resolve_database_url() -> str:
         return module.DATABASE_URL
 
     load_env_files()
-    backend_dir = Path(__file__).resolve().parent.parent
-    default = f"sqlite:///{backend_dir / 'data' / 'trade_journal.db'}"
-    return os.getenv("DATABASE_URL", default)
+    configured = os.getenv("DATABASE_URL")
+    if configured:
+        return configured
+    # backend/data/ is gitignored, so a fresh clone has no such directory and
+    # SQLite cannot create the file. app.database makes it too; `alembic
+    # upgrade` on a fresh clone reaches this path without importing that.
+    db_path = Path(__file__).resolve().parent.parent / "data" / "trade_journal.db"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite:///{db_path}"
 
 
 def describe(url: str | None = None) -> Environment:

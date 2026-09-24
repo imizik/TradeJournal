@@ -110,8 +110,13 @@ if want_e2e; then
   else
     # Seeds its own database, boots the backend and a fresh frontend build on
     # dedicated ports (8099/3099), and asserts real values reach the DOM.
-    # Needs a browser: CI installs one, and a sandbox with a preinstalled
-    # browser can point at it with PLAYWRIGHT_CHROMIUM_PATH.
+    # Needs a browser: setup.sh and CI install one. A cloud sandbox ships a
+    # preinstalled Chromium under /opt/pw-browsers whose build rarely matches
+    # this Playwright version, so point at it unless told otherwise.
+    if [ -z "${PLAYWRIGHT_CHROMIUM_PATH:-}" ]; then
+      preinstalled="$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome 2>/dev/null | head -1 || true)"
+      [ -n "$preinstalled" ] && export PLAYWRIGHT_CHROMIUM_PATH="$preinstalled"
+    fi
     run "browser tests" frontend npm run --silent e2e
   fi
 fi
