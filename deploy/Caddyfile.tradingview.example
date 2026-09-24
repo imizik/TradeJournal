@@ -1,0 +1,43 @@
+# Dedicated webhook proxy. Replace BOTH alerts.example.com and 203.0.113.10.
+# Bind only the VPS's public IPv4 so private Tailscale Serve keeps its listener.
+{
+    admin off
+    auto_https disable_redirects
+    # No access logging. Strip request fields from runtime/error logs too:
+    # upstream failures otherwise include the query-string webhook token.
+    log default {
+        format filter {
+            wrap json
+            fields {
+                request delete
+            }
+        }
+    }
+}
+
+http://alerts.example.com {
+    bind 203.0.113.10
+    respond 404
+}
+
+https://alerts.example.com {
+    bind 203.0.113.10
+    @webhook {
+        method POST
+        path /tradingview/webhook
+    }
+    handle @webhook {
+        request_body {
+            max_size 16384
+        }
+        reverse_proxy 127.0.0.1:8090 {
+            transport http {
+                dial_timeout 1s
+                response_header_timeout 2s
+            }
+        }
+    }
+    handle {
+        respond 404
+    }
+}

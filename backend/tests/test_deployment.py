@@ -344,3 +344,155 @@ def test_sync_pipeline_gives_up_after_its_retry_window(monkeypatch, capsys):
     monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
     automation.sync_pipeline(retry_seconds=0)
     assert "skipped" in capsys.readouterr().out
+
+
+@pytest.fixture
+def ingress(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    return load("ingress")
+
+
+def ingress_config():
+    return {
+        "TRADINGVIEW_INGRESS_ENABLED": "true",
+        "TRADINGVIEW_DATABASE_URL": "postgresql+psycopg://ingress:secret@db/journal",
+        "TRADINGVIEW_WEBHOOK_TOKEN": "dedicated-test-token-" * 3,
+    }, {
+        "DATABASE_URL": "postgresql+psycopg://app:other@db:5432/journal",
+        "TRADINGVIEW_ANALYSIS_AUTOSTART": "true",
+        "ALPACA_API_KEY": "fake-key", "ALPACA_API_SECRET": "fake-secret",
+    }
+
+
+def test_ingress_preflight_is_opt_in_and_accepts_separate_matching_role(ingress):
+    assert not ingress.validate_settings({}, {})
+    assert not ingress.validate_settings({"TRADINGVIEW_INGRESS_ENABLED": "false"}, {})
+    settings, private = ingress_config()
+    assert ingress.validate_settings(settings, private)
+
+
+@pytest.mark.parametrize("change", [
+    {"TRADINGVIEW_INGRESS_ENABLED": "yes"},
+    {"TRADINGVIEW_WEBHOOK_TOKEN": "short"},
+    {"TRADINGVIEW_DATABASE_URL": "sqlite:///scratch.db"},
+    {"TRADINGVIEW_DATABASE_URL": "postgresql+psycopg://app:secret@db/journal"},
+    {"TRADINGVIEW_DATABASE_URL": "postgresql+psycopg://ingress:secret@other/journal"},
+    {"TRADINGVIEW_DATABASE_URL": "postgresql+psycopg://ingress:secret@db/other"},
+    {"TRADINGVIEW_DATABASE_URL": "postgresql+psycopg://ingress:secret@db/journal?host=other"},
+    {"DATABASE_URL": "private-secret-must-never-appear"},
+    {"ALPACA_API_KEY": "private-secret-must-never-appear"},
+])
+def test_ingress_rejects_unsafe_configuration_without_disclosing_it(ingress, change):
+    settings, private = ingress_config()
+    settings.update(change)
+    with pytest.raises(ValueError) as error:
+        ingress.validate_settings(settings, private)
+    assert "secret" not in str(error.value)
+
+
+@pytest.mark.parametrize("change", [
+    {"TRADINGVIEW_ANALYSIS_AUTOSTART": "false"},
+    {"ALPACA_API_SECRET": ""},
+])
+def test_ingress_requires_configured_analysis_worker(ingress, change):
+    settings, private = ingress_config()
+    private.update(change)
+    with pytest.raises(ValueError):
+        ingress.validate_settings(settings, private)
+
+
+def test_ingress_preflight_failure_leaves_healthy_release_running(control, monkeypatch):
+    old = control.release_path("old")
+    old.mkdir()
+    control.atomic_link(old, control.ROOT / "current")
+    events = []
+    monkeypatch.setattr(control, "database", lambda *_: None)
+    monkeypatch.setattr(control, "stop_services", lambda: events.append("stopped"))
+
+    def fail(_release):
+        raise RuntimeError("Ingress database/schema/role check failed")
+
+    monkeypatch.setattr(control, "ingress_enabled", fail)
+    with pytest.raises(RuntimeError, match="Ingress"):
+        control.activate(control.release_path("new"), "scratch")
+    assert control.current() == old
+    assert not events
+
+
+def test_ingress_launcher_scrubs_private_environment_and_binds_loopback(tmp_path, monkeypatch):
+    launch = load("launch")
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "release.json").write_text('{"release_id":"test"}')
+    monkeypatch.setattr(launch, "RELEASE", tmp_path)
+    monkeypatch.setattr(launch.sys, "argv", ["launch.py", "ingress"])
+    settings, _ = ingress_config()
+    for key, value in settings.items():
+        monkeypatch.setenv(key, value)
+    for key in ("DATABASE_URL", "MIGRATION_DATABASE_URL", "ALPACA_API_KEY", "PGHOST", "PYTHONPATH"):
+        monkeypatch.setenv(key, "never-inherit")
+    for key in ("TRADEJOURNAL_RELEASE", "PYTHONDONTWRITEBYTECODE"):
+        monkeypatch.setenv(key, os.environ.get(key, ""))
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(launch.os, "execve", lambda executable, args, env: calls.append((args, env)))
+    launch.main()
+    args, environment = calls[0]
+    assert "app.tradingview_ingress:app" in args
+    assert args[-5:] == ["--host", "127.0.0.1", "--port", "8090", "--no-access-log"]
+    assert "never-inherit" not in environment.values()
+    assert environment["TRADINGVIEW_WEBHOOK_TOKEN"] == settings["TRADINGVIEW_WEBHOOK_TOKEN"]
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_service_lifecycle_respects_ingress_opt_in(control, tmp_path, monkeypatch, enabled):
+    release = tmp_path / "release"
+    unit_dir = release / "deploy/systemd"
+    unit_dir.mkdir(parents=True)
+    (unit_dir / "tradejournal-ingress.service").touch()
+    monkeypatch.setattr(control, "ingress_enabled", lambda _: enabled)
+    monkeypatch.setattr(control, "install_units", lambda _: None)
+    monkeypatch.setattr(control, "health", lambda *_: None)
+    monkeypatch.setattr(control.time, "sleep", lambda _: None)
+    calls = []
+    monkeypatch.setattr(control, "run", lambda *args: calls.append(args))
+    monkeypatch.setattr(control, "ingress_health", lambda: calls.append(("ingress-ready",)))
+    control.start_services(release, "scratch")
+    if enabled:
+        assert ("systemctl", "enable", "--now", "tradejournal-ingress") in calls
+        assert ("ingress-ready",) in calls
+    else:
+        assert ("systemctl", "disable", "--now", "tradejournal-ingress") in calls
+        assert ("ingress-ready",) not in calls
+
+
+def test_rollback_to_release_without_ingress_removes_its_boot_unit(control, tmp_path, monkeypatch):
+    units = tmp_path / "units"
+    units.mkdir()
+    (units / "tradejournal-ingress.service").touch()
+    release = tmp_path / "old"
+    release.mkdir()
+    monkeypatch.setattr(control, "UNITS", units)
+    monkeypatch.setattr(control, "run", lambda *_: None)
+    calls = []
+    monkeypatch.setattr(control.subprocess, "run", lambda args, **_: calls.append(args))
+    assert not control.ingress_enabled(release)
+    control.install_units(release)
+    assert ["systemctl", "disable", "--now", "tradejournal-ingress.service"] in calls
+    assert not (units / "tradejournal-ingress.service").exists()
+
+
+def test_backups_preserve_optional_ingress_credentials(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    backup = load("backup")
+    state, config = tmp_path / "state", tmp_path / "config"
+    config.mkdir()
+    for name in ("data", "oauth"):
+        (state / name).mkdir(parents=True)
+    for name in (*backup.CONFIG_FILES, "tradingview.env"):
+        (config / name).write_text("fixture-credentials")
+    monkeypatch.setattr(backup, "STATE_ROOT", state)
+    monkeypatch.setattr(backup, "CONFIG_ROOT", config)
+    archive = tmp_path / "state.tar.gz"
+    backup.archive_state(archive)
+    with tarfile.open(archive) as bundle:
+        assert bundle.extractfile("config/tradingview.env").read() == b"fixture-credentials"

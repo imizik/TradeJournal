@@ -32,6 +32,7 @@ CONFIG_ROOT = Path("/etc/tradejournal")
 RETENTION = 7
 BACKUP_NAME = re.compile(r"^\d{8}T\d{6}Z$")
 CONFIG_FILES = ("backend.env", "migration.env")
+OPTIONAL_CONFIG_FILES = ("tradingview.env",)
 
 
 def sha256(path: Path) -> str:
@@ -114,6 +115,10 @@ def archive_state(destination: Path) -> None:
             if not source.is_file():
                 raise RuntimeError(f"Missing deployment configuration: {source}")
             bundle.add(source, arcname=f"config/{name}", recursive=False)
+        for name in OPTIONAL_CONFIG_FILES:
+            source = CONFIG_ROOT / name
+            if source.is_file():
+                bundle.add(source, arcname=f"config/{name}", recursive=False)
 
 
 def verify_backup(directory: Path) -> dict:

@@ -175,6 +175,9 @@ so exact decimal text and original scalar types remain distinguishable.
 and an ingress database role restricted to `tradingview_alert`. The ingress
 never runs migrations. Cloud scale-to-zero still needs an always-on worker or
 durable task dispatcher.
+The Ubuntu deployment includes an opt-in ingress service with a separate OS
+user, restricted database-role preflight and a dedicated HTTPS proxy template;
+see [production webhook setup](deploy/README.md#tradingview-webhooks).
 
 The exact payload, bounds, identity format, and future migration policy are in
 [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).

@@ -21,8 +21,8 @@ def target(url: str) -> tuple:
     return value.get_backend_name(), value.host, value.port or 5432, value.database, value.query
 
 
-def drop_to_service_account() -> None:
-    account = pwd.getpwnam("tradejournal")
+def drop_to_service_account(name: str = "tradejournal") -> None:
+    account = pwd.getpwnam(name)
     # setuid() does not update the inherited login environment. Leaving
     # HOME=/root makes libpq look for client certificates under /root after
     # privileges have been dropped, which fails before it can connect.

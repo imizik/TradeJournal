@@ -1,0 +1,29 @@
+[Unit]
+Description=TradeJournal restricted TradingView webhook ingress
+Wants=network-online.target
+After=network-online.target tradejournal-api.service
+ConditionPathExists=/etc/tradejournal/tradingview.env
+
+[Service]
+Type=simple
+User=tradejournal-ingress
+Group=tradejournal-ingress
+WorkingDirectory=/opt/tradejournal/current/backend
+EnvironmentFile=/etc/tradejournal/tradingview.env
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/launch.py ingress
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+InaccessiblePaths=/var/lib/tradejournal /etc/tradejournal /var/backups/tradejournal
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -25,7 +25,6 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(_BACKEND_DIR / ".env.tradingview")
 
 _default_sqlite_path = _BACKEND_DIR / "data" / "trade_journal.db"
-_default_sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 _fallback_database_url = (
     os.getenv("DATABASE_URL", "").strip()
     or f"sqlite:///{_default_sqlite_path}"
@@ -34,6 +33,10 @@ TRADINGVIEW_DATABASE_URL = (
     os.getenv("TRADINGVIEW_DATABASE_URL", "").strip()
     or _fallback_database_url
 )
+if TRADINGVIEW_DATABASE_URL == f"sqlite:///{_default_sqlite_path}":
+    # A production ingress user cannot access the private runtime directory.
+    # PostgreSQL startup must not touch it even to create an unused fallback.
+    _default_sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 
 _connect_args = (
     {"check_same_thread": False, "timeout": 30}

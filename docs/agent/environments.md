@@ -154,6 +154,10 @@ MIGRATION_DATABASE_URL=postgresql+psycopg://tj_owner:...@host/db
 so a single-role setup keeps working untouched. `backend/.env.tradingview` gets
 `TRADINGVIEW_DATABASE_URL` with the ingress role, and nothing else — no keys,
 no owner credentials (`architecture.md`).
+On Ubuntu the equivalent file is `/etc/tradejournal/tradingview.env`;
+deployment preflight checks the matching endpoint and effective ingress
+privileges before activation. It is injected only into the separate ingress
+service. See [production webhooks](../../deploy/README.md#tradingview-webhooks).
 
 Anything that migrates a *named* database out of process must set both
 variables. `MIGRATION_DATABASE_URL` takes precedence inside Alembic, so one
