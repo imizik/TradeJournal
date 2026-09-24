@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignalsRefresh from "@/components/SignalsRefresh";
 import { api, TradingViewAlert } from "@/lib/api";
 import {
   fmtAlertTime,
@@ -38,12 +39,13 @@ export default async function SignalsPage() {
   const counts = alerts.reduce(
     (acc, alert) => {
       acc.total += 1;
+      if (alert.analysis_status === "pending" || alert.analysis_status === "running") acc.pending += 1;
       if (alert.analysis_status === "skipped") acc.skipped += 1;
       if (alert.analysis_status === "error") acc.errored += 1;
       if (alert.verdict === "long_scalp" || alert.verdict === "short_scalp") acc.tradeable += 1;
       return acc;
     },
-    { total: 0, skipped: 0, errored: 0, tradeable: 0 }
+    { total: 0, pending: 0, skipped: 0, errored: 0, tradeable: 0 }
   );
 
   return (
@@ -51,19 +53,21 @@ export default async function SignalsPage() {
       <div>
         <h1 className="text-xl font-semibold text-foreground">Signals</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-          Live TradingView alerts delivered to the webhook ingress, each graded by the scalp
-          analyzer at the moment it arrived. These are decision-support records only — they are
+          TradingView alerts and their latest scalp analysis. These are decision-support records
+          only — they are
           isolated from journal fills and FIFO trades, and nothing here places an order.
         </p>
+        <SignalsRefresh />
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
         <SummaryCard label="Alerts" value={counts.total} hint="Most recent 200" />
         <SummaryCard label="Tradeable verdicts" value={counts.tradeable} hint="long or short scalp" />
+        <SummaryCard label="Awaiting analysis" value={counts.pending} hint="Pending or running" />
         <SummaryCard
-          label="Unanalyzed"
+          label="Skipped"
           value={counts.skipped}
-          hint="Arrived while the worker was down or stale"
+          hint="See signal details for the reason"
         />
         <SummaryCard label="Errored" value={counts.errored} hint="Analysis failed" />
       </div>
@@ -77,11 +81,7 @@ export default async function SignalsPage() {
 
         {alerts.length === 0 ? (
           <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            No alerts received yet. Start the ingress with{" "}
-            <code className="rounded bg-muted px-1.5 py-0.5 text-xs">
-              TRADINGVIEW_INGRESS_ENABLED=true
-            </code>{" "}
-            and point your TradingView alert at its webhook URL.
+            No alerts received yet. New TradingView alerts will appear here automatically.
           </div>
         ) : (
           <div className="overflow-x-auto">

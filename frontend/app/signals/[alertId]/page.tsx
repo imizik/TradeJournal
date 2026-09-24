@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignalsRefresh from "@/components/SignalsRefresh";
 import { notFound } from "next/navigation";
 import { api, TradingViewAlertDetail, TradingViewSnapshotValue } from "@/lib/api";
 import {
@@ -105,6 +106,7 @@ export default async function SignalDetailPage({
           </span>
         </div>
         <p className="mt-2 font-mono text-xs break-all text-muted-foreground">{alert.alert_id}</p>
+        <SignalsRefresh />
       </div>
 
       <Card title="Alert">
@@ -128,21 +130,32 @@ export default async function SignalDetailPage({
         <SnapshotGrid values={alert.context} />
       </Card>
 
-      {alert.analysis_status === "skipped" && (
+      {(alert.analysis_status === "pending" || alert.analysis_status === "running") && (
         <Card title="Analysis">
           <p className="text-sm text-muted-foreground">
-            This alert was never graded. The scalp analyzer reads live market data, so an alert
-            that arrives while the worker is down goes stale and is skipped rather than scored
-            against a market that has since moved. The signal itself is still recorded above.
+            {alert.analysis_status === "pending"
+              ? "Waiting for analysis. The result will appear here automatically."
+              : "Analysis is running. The result will appear here automatically."}
           </p>
         </Card>
       )}
 
-      {alert.analysis_error && (
+      {alert.analysis_status === "skipped" && (
+        <Card title="Analysis">
+          <p className="text-sm text-muted-foreground">
+            This alert was recorded without a verdict. {alert.analysis_error ?? "Analysis was skipped."}
+          </p>
+          {alert.analysis_error_code && (
+            <p className="mt-2 text-xs text-muted-foreground">{alert.analysis_error_code}</p>
+          )}
+        </Card>
+      )}
+
+      {alert.analysis_status === "error" && (
         <Card title="Analysis Error">
           <p className="text-sm text-red-400">{alert.analysis_error_code}</p>
           <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-muted-foreground">
-            {alert.analysis_error}
+            {alert.analysis_error ?? "Analysis failed. No verdict is available."}
           </pre>
         </Card>
       )}

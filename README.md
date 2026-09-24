@@ -183,10 +183,11 @@ The exact payload, bounds, identity format, and future migration policy are in
 [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).
 The Signals page at `/signals` lists every alert with its verdict, confidence
 and analysis status, and links to a per-alert view of the indicator levels,
-the indicator context, and the stored assessment. Alerts whose status is
-`skipped` are counted as "Unanalyzed": they arrived while the worker was down
-and aged past `TRADINGVIEW_ALERT_MAX_AGE_SECONDS`, so they keep the signal but
-never receive a verdict. The Pine indicator remains future Step 5.
+the indicator context, and the stored assessment. Both views refresh every
+30 seconds while visible, immediately when returning to the tab, and through
+**Refresh now**. Pending/running alerts are counted separately from skipped
+and failed analysis; details show the recorded skip/error reason. The Pine
+indicator remains future Step 5.
 
 ## Durable Jobs
 

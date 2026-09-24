@@ -2,14 +2,16 @@
 
 **Audience:** a coding agent (Codex) implementing this cold. Everything needed is in this doc plus the referenced files. Read the referenced files before writing code; do not guess signatures.
 
-> **Implementation status (2026-09-23):** Steps 1–4 and the Signals list/detail
+> **Implementation status (2026-09-24):** Steps 1–4 and the Signals list/detail
 > pages are implemented. The frozen
 > v1 contract/parser, isolated persistence, authenticated webhook-only ingress,
 > private read API, and fenced one-at-a-time analysis worker are implemented
 > with backend test coverage. The opt-in Ubuntu ingress service, deployment
 > preflight and HTTPS proxy template are implemented; live VPS/DNS/TLS setup
-> must be verified separately. Pine (Step 5), automatic Signals refresh and
-> optional notifications remain. See [production setup](../deploy/README.md#tradingview-webhooks).
+> must be verified separately. Signals refreshes every 30 seconds while visible
+> and on tab return, with browser coverage. Pine (Step 5), a real TradingView
+> alert/verdict test and optional notifications remain.
+> See [production setup](../deploy/README.md#tradingview-webhooks).
 
 ## Goal
 
@@ -43,7 +45,7 @@ Private TradeJournal API :8080
   │    → build_scalp_analysis(symbol, side) outside a DB transaction
   │    → fenced verdict/confidence/assessment update
   └─ GET /tradingview/alerts + /alerts/{id}
-Frontend "Signals" page (future) ◄── private reads ── (poll, hidden-tab-skip, 30–60s)
+Frontend "Signals" list/detail ◄── private reads ── (refresh, hidden-tab-skip, 30s)
 ```
 
 The webhook-only ingress must be **publicly reachable** (TradingView cannot hit
@@ -241,14 +243,17 @@ block the webhook response on analysis.
 
 ### Phase 2 — Frontend "Signals" page
 
-The list/detail pages and navigation exist. Automatic polling remains open;
-the original acceptance checklist below is not a claim that polling shipped.
+The list/detail pages and navigation are implemented, including automatic refresh.
 
-- New route `frontend/app/signals/page.tsx` + a `SignalsTable` component (reuse table styling from `TradesTable.tsx`; do not duplicate table logic wholesale).
-- Columns: time, symbol, timeframe, setup, side, price, **verdict** (color-coded), confidence.
-- Row → detail drawer/page showing the scorer's reasons/trigger/invalidation/targets + the Pine-reported `levels`/`context`.
-- Data via `GET /tradingview/alerts`. Add helpers to `frontend/lib/api.ts`.
-- Poll on the repo convention: **skip hidden tabs, idle at 30–60s** (match existing status polls). Add a dashboard link.
+- `frontend/app/signals/page.tsx` lists time, symbol, timeframe, setup, side,
+  price, verdict, confidence and analysis status, using the light list API.
+- The detail page shows the scorer's reasons/trigger/invalidation/targets,
+  Pine-reported `levels`/`context`, and the recorded skip/error reason.
+- Shared `frontend/components/SignalsRefresh.tsx` refreshes server-rendered
+  data every 30 seconds while visible, immediately on tab return, or manually.
+  An in-flight refresh prevents another; navigation cleans up the timer/listener.
+- `frontend/e2e/signals.spec.ts` covers new rows, completed analysis, hidden
+  tabs, slow responses and cleanup against a disposable database.
 
 ### Phase 3 — Notifications (optional, only if requested)
 
@@ -319,9 +324,8 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 
 ## Handoff / housekeeping
 
-- `CLAUDE.md` is the working agreement and describes the Steps 1–4
-  foundation; `AGENTS.md` only points at it. Update `CLAUDE.md` again when
-  Pine or the Signals frontend lands.
+- `CLAUDE.md` is the working agreement; `AGENTS.md` only points at it.
+  Keep shared feature facts and verification status in `docs/agent/`.
 - Keep the private backend and read APIs off the tunneled/public hostname.
 - Keep the MCP surface read-only; if exposing signals to Claude Desktop later, add a read-only `get_signals` tool in `backend/mcp_server.py` (separate task, not this plan).
 
@@ -332,5 +336,5 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 3. persistence/read engine + tests (complete)
 4. restricted ingress, private read router, bounded worker, and configuration (complete)
 5. Pine v6 indicator (`docs/pine/isaac_market_map.pine`)
-6. frontend `/signals`
+6. frontend `/signals` list/detail and automatic refresh (complete)
 7. docs (`CLAUDE.md`, `docs/agent/`) update (ongoing per completed slice)
