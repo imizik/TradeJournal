@@ -224,7 +224,8 @@ is verifiable rather than hopeful.
   `app.models`), and fill-returning endpoints must respond with `FillOut`, never
   a raw `Fill`. `fill.email_subject` / `email_body_text` are legacy write-only
   payloads; FastAPI dumping all model fields lazy-loads one email body per row,
-  and egress is metered on Neon.
+  which is one query per row before any bytes are counted. It mattered twice
+  over on metered Neon egress; on the VPS database it is still an N+1.
 - `GET /fills` takes `limit` (default 2000) and `offset`.
 - On SQLite, avoid long write transactions in historical jobs, or `job_run`
   progress updates hit "database is locked".

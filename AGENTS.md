@@ -1,39 +1,14 @@
 # AGENTS.md
 
-Working agreement for coding agents (Codex and others) in this repository.
-Durable knowledge about the system lives in `docs/agent/` so that every agent
-reads the same facts; this file says how to work here, not what the system is.
+The working agreement for coding agents in this repository — Codex, Claude
+Code, anything else — is [CLAUDE.md](CLAUDE.md). Read it first. Nothing in it
+is Claude-specific, and it is deliberately the only copy: this file used to
+hold a second one, and hand-editing both is how they drifted apart.
 
-Claude Code reads `CLAUDE.md`, which is the same agreement pointing at the same
-documents. Keep the two consistent, and put shared facts in `docs/agent/`
-rather than in either file.
-
-## What this is
-
-A local-first trade journal and reconciliation system for Robinhood and Webull
-trading history. It ingests fills, rebuilds FIFO trades, tracks open positions,
-enriches fills and trades with market context, supports AI review, and produces
-reconciliation and market-report artifacts. It also carries two separate
-domains: Strategy Lab (version-controlled Pine research) and a TradingView
-live-alert loop. Stocks and options, multiple accounts, no auth, single user.
-
-## Read before changing things
-
-| File | For |
-|---|---|
-| `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
-| `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView |
-| `docs/agent/verification.md` | How to prove a change works |
-| `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
-| `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
-| `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
-| `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
-
-Read what the task needs. The repository is the source of truth;
-if a document disagrees with the code, the code wins and the document gets
-fixed in the same change.
-
-## Setup and verification
+Durable knowledge about the system lives in `docs/agent/`. `CLAUDE.md` carries
+the table saying which document answers what, and
+[docs/agent/README.md](docs/agent/README.md) is the same index with longer
+descriptions.
 
 ```bash
 bash scripts/setup.sh           # clean clone -> runnable
@@ -42,58 +17,5 @@ bash scripts/verify.sh          # before saying it works
 bash startdev.sh                # run the app
 ```
 
-Do not report a change as working on the strength of reading the diff. If a
-change lands somewhere the suite does not cover — any frontend rendering, any
-live external integration — say so explicitly and describe what you did verify
-instead. `docs/agent/verification.md` lists the gaps honestly; use it.
-
-CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
-the local verification script does not run those checks.
-
-## Operating style
-
-- Read only the files that matter for the task.
-- Batch file reads, searches, and cheap status checks.
-- Do not repeatedly inspect repository state unless something changed.
-- Find the root cause, make the smallest safe fix, avoid broad refactors.
-- Do not ask "want me to fix this?" when the fix is obvious and local.
-- Keep narration short and final summaries shorter: what changed, what was
-  verified, what risk remains.
-- Avoid duplicated UI/table logic and N+1 frontend data fetching.
-
-## Extra care required
-
-PnL math, FIFO reconstruction, Gmail/email parsing, fill dedupe, account
-identity, reconciliation outputs, nullable enrichment fields, and frontend
-data-fetch patterns. When PnL looks wrong, start at
-`backend/app/engine/reconstructor.py` and the fill history — not at the UI.
-
-## Hard constraints
-
-- Never expose or tunnel the private API (8080/8000). It has no auth. Only
-  port 8090, the TradingView ingress, is safe to tunnel — and it only runs when
-  `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
-- Never put private API keys or unrestricted database credentials in
-  `backend/.env.tradingview`.
-- Never weaken the database pin in `backend/tests/conftest.py`. Without it the
-  test suite writes to whatever `DATABASE_URL` resolves to, including a
-  production VPS or Neon database.
-- A `DATABASE_URL` pointing at VPS Postgres or Neon is a real database.
-  `resync-all` deletes fills and belongs on a branch database; against any
-  hosted database it now refuses unless the request names the target. Check
-  `GET /health` to see
-  which database you are on. (`rebuild-all` only recreates derived trades and
-  is not destructive.)
-- Keep `CLAUDE.md`, `AGENTS.md`, and `docs/agent/` consistent when scope
-  changes materially. `backend/tests/test_docs_links.py` fails when a document
-  names a file or heading that no longer exists; it cannot see a sentence that
-  is merely no longer true, so run `.claude/skills/docs-drift/SKILL.md` after a
-  run of merges.
-
-## Parallel work
-
-Develop on a branch, never directly on `main`. Generated artifacts
-(`.next/`, `*.tsbuildinfo`, `next-env.d.ts`, `backend/data/`) are gitignored so
-parallel branches do not fight over them. Alembic revisions are the one place
-parallel work collides: two branches each adding a revision creates two heads,
-and `test_schema_migrations.py` fails on that deliberately.
+The repository is the source of truth. If a document disagrees with the code,
+the code wins and the document gets fixed in the same change.

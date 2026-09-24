@@ -71,6 +71,12 @@ test("a trade opens to a readable detail page", async ({ page }) => {
   await page.locator('tbody a[href^="/trades/"]').first().click();
   await expect(page).toHaveURL(/\/trades\/[0-9a-f-]+$/);
 
+  // Wait for a heading before measuring them. toHaveURL resolves on the URL
+  // change, and the client-side navigation can leave `main` empty for a frame,
+  // where Math.max over no headings is -Infinity and the failure names a
+  // width instead of the empty page that caused it.
+  await expect(page.getByText("Trade Summary")).toBeVisible();
+
   // The audit panel is a fixed 320px column: beside it the trade itself was
   // squeezed to a few pixels.
   const widths = await page.evaluate(() => ({
@@ -83,7 +89,6 @@ test("a trade opens to a readable detail page", async ({ page }) => {
   expect(widths.content).toBeGreaterThan(widths.viewport * 0.7);
   expect(widths.scrollWidth).toBeLessThanOrEqual(widths.viewport + 1);
 
-  await expect(page.getByText("Trade Summary")).toBeVisible();
   await expect(page.getByRole("button", { name: /Show Audit/ })).toBeVisible();
 });
 

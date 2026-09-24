@@ -2,8 +2,8 @@
 
 The API commits requests to `job_run`. With `JOB_EXECUTION_MODE=external`,
 separate workers execute them. This supports a single Linux or macOS host with
-SQLite or Postgres, including the existing Neon configuration. It does not
-change database credentials or move the database.
+SQLite or a hosted PostgreSQL, including the VPS database production now uses.
+It does not change database credentials or move the database.
 
 ## Ownership and recovery
 
