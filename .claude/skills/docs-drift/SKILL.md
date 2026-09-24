@@ -83,7 +83,7 @@ bash scripts/verify.sh --fast
 Then record what you reconciled to, which is what clears the freshness test:
 
 ```json
-{"commit": "<the sha you read up to>", "date": "<YYYY-MM-DD>", "note": "..."}
+{"commit": "<the full 40-character sha you read up to>", "date": "<YYYY-MM-DD>", "note": "..."}
 ```
 
 in `docs/agent/last-reconciled.json`. Write it after the pass, not before —

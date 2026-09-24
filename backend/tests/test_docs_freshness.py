@@ -58,26 +58,44 @@ def code_commits_since(sha: str) -> int:
     return int(result.stdout.strip())
 
 
-def _history_reaches(sha: str) -> bool:
-    """Whether this checkout has the marker commit and descends from it.
+def marker_state(sha: str) -> str:
+    """What this checkout can say about the marker commit.
 
-    A shallow clone (`actions/checkout` fetches one commit by default) does
-    not, which is why the backend CI job asks for full history. A branch cut
-    before the marker does not either.
+    - `"usable"` -- present, and HEAD descends from it. Count against it.
+    - `"shallow"` -- absent, and the clone is shallow, so absent proves
+      nothing. `actions/checkout` fetches one commit by default, which is why
+      the backend CI job asks for full history.
+    - `"unknown"` -- absent from a complete clone. The marker names a commit
+      this repository does not have: a typo, a truncation, or a rewritten
+      history. Not a reason to skip -- the guard is off until someone fixes it.
+    - `"not-ancestor"` -- present, but HEAD does not descend from it. A branch
+      cut before the marker landed; there is no range to count.
     """
     if _git("cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
-        return False
-    return _git("merge-base", "--is-ancestor", sha, "HEAD").returncode == 0
+        shallow = _git("rev-parse", "--is-shallow-repository").stdout.strip()
+        return "shallow" if shallow == "true" else "unknown"
+    if _git("merge-base", "--is-ancestor", sha, "HEAD").returncode != 0:
+        return "not-ancestor"
+    return "usable"
 
 
 def test_the_drift_pass_is_not_overdue() -> None:
     marker = json.loads(MARKER.read_text(encoding="utf-8"))
     sha = marker["commit"]
+    state = marker_state(sha)
 
-    if not _history_reaches(sha):
+    assert state != "unknown", (
+        f"{MARKER.relative_to(REPO_ROOT)} names commit {sha}, which this "
+        f"repository does not contain -- a typo, a truncated sha, or a "
+        f"rewritten history.\n\nNothing is being counted while that is true, "
+        f"so this check is off until the marker names a real commit. Set it "
+        f"to the full 40-character sha the documentation was last reconciled "
+        f"to."
+    )
+    if state != "usable":
         pytest.skip(
-            f"{sha} is not in this checkout's history (shallow clone, or a "
-            f"branch cut before it) -- nothing to count against"
+            f"{sha} is not countable here ({state}) -- a shallow clone, or a "
+            f"branch cut before the marker landed"
         )
 
     behind = code_commits_since(sha)
@@ -90,7 +108,7 @@ def test_the_drift_pass_is_not_overdue() -> None:
         f"    git diff --stat {sha}..HEAD\n\n"
         f"Then record what you reconciled to in "
         f"{MARKER.relative_to(REPO_ROOT)}:\n"
-        f'    {{"commit": "<sha>", "date": "<YYYY-MM-DD>", "note": "..."}}\n\n'
+        f'    {{"commit": "<full sha>", "date": "<YYYY-MM-DD>", "note": "..."}}\n\n'
         f"Bumping the marker without reading the documents is the one thing "
         f"this check cannot detect, and the only way it stops working."
     )
@@ -100,7 +118,12 @@ def test_the_marker_is_shaped_the_way_the_failure_message_says() -> None:
     """A malformed marker would skip the check silently rather than fail it."""
     marker = json.loads(MARKER.read_text(encoding="utf-8"))
     assert set(marker) >= {"commit", "date", "note"}, marker
-    assert len(marker["commit"]) >= 7, "a short sha collides sooner than it looks"
+    commit = marker["commit"]
+    assert len(commit) == 40 and set(commit) <= set("0123456789abcdef"), (
+        f"{commit!r} is not a full sha. An abbreviation resolves here and "
+        f"collides later, and a typo in one reads exactly like a commit this "
+        f"clone has not fetched."
+    )
     date.fromisoformat(marker["date"])
 
 
@@ -143,8 +166,17 @@ def test_counting_ignores_merges_and_documentation(tmp_path: Path) -> None:
     assert counted == "1", "doc-only commits must not start the clock"
 
 
-def test_a_marker_this_checkout_does_not_have_is_not_counted() -> None:
-    assert not _history_reaches("0" * 40)
-    assert _history_reaches(
-        _git("rev-parse", "HEAD").stdout.strip()
-    ), "HEAD must always be reachable, or every run would skip"
+def test_a_marker_this_checkout_does_not_have_fails_rather_than_skips() -> None:
+    """The failure mode the reviewer of #62 named: a mistyped sha is absent
+    exactly like a shallow clone's is, and skipping on both would leave the
+    guard off with CI green. A complete clone can tell them apart."""
+    assert _git("rev-parse", "--is-shallow-repository").stdout.strip() == "false", (
+        "this characterises a complete clone and is running in a shallow one. "
+        "In CI that means the backend job lost its `fetch-depth: 0`, which is "
+        "the setting that lets the check above tell a bad marker from a "
+        "history it simply does not have."
+    )
+    assert marker_state("0" * 40) == "unknown"
+    assert marker_state(_git("rev-parse", "HEAD").stdout.strip()) == "usable", (
+        "HEAD must always be countable, or every run would skip"
+    )
