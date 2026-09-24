@@ -5,12 +5,13 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import and_, or_
 from sqlalchemy.exc import OperationalError
 from sqlmodel import Session, select
 
 from app.database import engine
 from app.engine.api_wait import observe_api_waits
-from app.models import FILL_LIGHT, Fill, FillMarketContext, JobRun, Trade, TradePathMetrics
+from app.models import FILL_LIGHT, Fill, FillMarketContext, JobRun, Trade
 
 log = logging.getLogger(__name__)
 
@@ -187,10 +188,27 @@ def _fail_job(job_id: uuid.UUID, exc: Exception) -> None:
     )
 
 
+# "Missing" means a field the trade page shows is still empty, not merely that
+# a row exists. Same-day enrichment (the 17:00 Sync Everything) has no final
+# minute bars or same-day hourly bar, and columns added later start empty on
+# old rows; the scheduled pipeline reselects these until the data arrives.
+# Gaps known to be permanent (fills past the Polygon history window, an option
+# price with no implied volatility) are left out so they are not retried forever.
+
 def _polygon_fill_ids(session: Session, range_value: str, force: bool) -> list[uuid.UUID]:
+    from app.engine.enricher import gap_repair_floor
+
     query = select(Fill.id)
     if not force:
-        query = query.where(Fill.underlying_price_at_fill == None)  # noqa: E711
+        query = query.where(
+            or_(
+                Fill.underlying_price_at_fill == None,  # noqa: E711
+                and_(
+                    Fill.executed_at >= gap_repair_floor(),
+                    or_(Fill.ema_9h_at_fill == None, Fill.rsi_14_at_fill == None),  # noqa: E711
+                ),
+            )
+        )
     cutoff = _cutoff(range_value)
     if cutoff is not None:
         query = query.where(Fill.executed_at >= cutoff)
@@ -206,6 +224,8 @@ def _alpaca_fill_ids(session: Session, range_value: str, force: bool) -> list[uu
                 .where(FillMarketContext.entry_rsi_14 != None)  # noqa: E711
                 .where(FillMarketContext.entry_ema_9 != None)  # noqa: E711
                 .where(FillMarketContext.entry_ema_20 != None)  # noqa: E711
+                .where(FillMarketContext.entry_underlying_price != None)  # noqa: E711
+                .where(FillMarketContext.entry_vwap != None)  # noqa: E711
             ).all()
         )
         query = query.where(Fill.id.notin_(complete_context_fill_ids))
@@ -216,14 +236,16 @@ def _alpaca_fill_ids(session: Session, range_value: str, force: bool) -> list[uu
 
 
 def _trade_path_ids(session: Session, range_value: str, force: bool) -> list[uuid.UUID]:
-    query = select(Trade.id).where(Trade.status.in_(["closed", "expired"]))
+    from app.engine.trade_path import trades_needing_path_metrics
+
+    query = select(Trade).where(Trade.status.in_(["closed", "expired"]))
     cutoff = _cutoff(range_value)
     if cutoff is not None:
         query = query.where(Trade.opened_at >= cutoff)
-    if not force:
-        existing_trade_ids = set(session.exec(select(TradePathMetrics.trade_id)).all())
-        query = query.where(Trade.id.notin_(existing_trade_ids))
-    return list(session.exec(query).all())
+    trades = list(session.exec(query).all())
+    if force:
+        return [trade.id for trade in trades]
+    return trades_needing_path_metrics(session, trades)
 
 
 def create_polygon_enrichment_job(session: Session, range_value: str = "week", force: bool = False, *, reuse_active: bool = False) -> JobRun:
@@ -400,7 +422,9 @@ def run_polygon_enrichment_job(job: JobRun) -> int:
         fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all()
         _set_job(job.id, total=len(fills))
         with observe_api_waits(_api_wait_observer(job.id)):
-            return enrich_fills(list(fills), session, on_progress=_throttled_progress(job.id))
+            return enrich_fills(
+                list(fills), session, on_progress=_throttled_progress(job.id), keep_existing=not params.get("force", False)
+            )
 
 
 def run_alpaca_enrichment_job(job: JobRun) -> int:
@@ -433,4 +457,8 @@ def run_trade_path_job(job: JobRun) -> int:
         trades = session.exec(select(Trade).where(Trade.id.in_(trade_ids))).all()
         _set_job(job.id, total=len(trades))
         with observe_api_waits(_api_wait_observer(job.id)):
-            return compute_path_metrics_for_trades(list(trades), session, on_progress=_throttled_progress(job.id), force=force)
+            # trade_ids already holds only the trades needing work, including
+            # existing rows with gaps; without force those rows would be skipped.
+            return compute_path_metrics_for_trades(
+                list(trades), session, on_progress=_throttled_progress(job.id), force=True, keep_existing=not force
+            )

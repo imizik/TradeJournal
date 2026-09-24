@@ -176,6 +176,20 @@ is verifiable rather than hopeful.
   trade-path work. It skips the rebuild step when Gmail saves 0 new fills.
 - Polygon enrichment is launched in the background: pipeline success does
   **not** mean Polygon finished. Check `GET /fills/enrich/status` separately.
+  Path metrics computed before it finishes lack greeks attribution; the next
+  scheduled run fills that in.
+- "Missing work" is field-level, not row-level (`_polygon_fill_ids`,
+  `_alpaca_fill_ids`, `trades_needing_path_metrics`). The 17:00 run enriches
+  the day's fills before minute bars are final (20:05 ET) and before the
+  same-day hourly bar is published, and new columns start empty on old rows,
+  so rows with empty VWAP/underlying, hourly EMA-9, daily RSI, path MFE, ATR
+  multiples or attribution are reselected until the data exists. Gaps known to
+  be permanent are excluded so they are not retried forever: fills older than
+  the Polygon history window, option prices with no implied volatility, path
+  windows over `MAX_PATH_WINDOW_DAYS`, and attribution/ATR whose inputs are
+  still empty. Unforced runs pass `keep_existing`, so a failed fetch never
+  replaces a stored value with nothing. `GET /market-context/coverage`
+  reports these rows as `*_incomplete`.
 - Daily review is intentionally **not** part of "Sync Everything" or the Gmail
   push pipeline. It runs only on explicit request. Do not re-add it.
 - `webull_listener` is a persistent listener, not a finite sync job.
