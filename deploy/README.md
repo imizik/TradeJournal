@@ -2,8 +2,8 @@
 
 This package runs one private, single-user TradeJournal installation. It uses
 native systemd services for Next.js, the API, the sync, Polygon, Webull and
-Gmail worker lanes, plus local/offsite backup, Gmail-import and Sync Everything
-timers. Production now uses PostgreSQL on the VPS. The original Neon primary is
+Gmail worker lanes, plus local/offsite backup, Gmail-import, Sync Everything
+and phone-alert timers. Production now uses PostgreSQL on the VPS. The original Neon primary is
 retained as a pre-cutover recovery source; it is no longer the live database.
 
 ## Access and layout
@@ -20,6 +20,7 @@ retained as a pre-cutover recovery source; it is no longer the live database.
 | Private application config | `/etc/tradejournal/backend.env`; root owned, mode 0600 |
 | Migration credentials | `/etc/tradejournal/migration.env`; root owned, mode 0600 |
 | Offsite backup credentials | `/etc/tradejournal/offsite.env` and `restic-password`; root owned, mode 0600 |
+| Phone alert settings | `/etc/tradejournal/alerts.env`; root owned, mode 0600 |
 
 The frontend proxy has the same authority as the unauthenticated private API.
 Keep **both** services behind private access. Restrict the Tailscale access
@@ -153,7 +154,7 @@ database port, frontend port or API port is needed.
 
 ## Backups and scheduled Robinhood import
 
-The release installs four timers:
+The release installs five timers:
 
 - `tradejournal-backup.timer` runs daily at 05:15 UTC with up to 15 minutes of
   jitter. It creates a custom-format PostgreSQL dump plus a compressed archive
@@ -178,6 +179,10 @@ The release installs four timers:
   Polygon, Alpaca, path metrics) at 08:00 and 17:00 New York time. It waits
   up to ten minutes for a running sync to finish instead of skipping, and
   `Persistent=true` runs a missed slot after downtime.
+- `tradejournal-alerts.timer` checks every two minutes whether anything above,
+  the API or real-time Gmail has stopped working, and sends a phone alert.
+  Without `/etc/tradejournal/alerts.env` the check is skipped; see
+  [Phone alerts](#phone-alerts).
 
 Install a `pg_dump`/`pg_restore` client at least as new as the hosted PostgreSQL
 server before enabling the backup timer. The service keeps the database
@@ -338,14 +343,57 @@ after seven days. Publish it to *In production* (personal use under 100 users
 does not need verification) and reconnect Gmail once. When Gmail does need
 reconnecting, every page shows a banner with a Reconnect button.
 
+## Phone alerts
+
+`tradejournal-alerts.timer` runs `deploy/alerts.py check` every two minutes as
+`tradejournal`. It reads the loopback API and `systemctl show`, remembers what
+it saw in `/var/lib/tradejournal/alerts/state.json`, and sends one
+[ntfy](https://ntfy.sh) notification when a problem starts and one when it
+clears. It never repeats an alert.
+
+| Alert | Fires when | Waits |
+|---|---|---|
+| TradeJournal isn't responding | any of its API requests fails | 5 min |
+| Gmail needs reconnecting / Robinhood import stopped | `GET /gmail/health` is `down` or `degraded` | 10 min |
+| Webull connection stopped | the Webull listener run fails | — |
+| *Job* failed | the newest finished run of a job type failed; listeners are excluded, and Gmail jobs wait 10 min and stay quiet while the Gmail alert is active | — |
+| Nightly backup, Offsite backup or Scheduled Sync Everything failed | its systemd service is `failed` | — |
+| *Schedule* is switched off | the backup, offsite, Sync Everything or Gmail-check timer is not active | 15 min |
+
+Failures that finished before the first check are history and never alerted,
+which is why a Webull listener that failed long ago stays quiet. A reboot
+clears systemd's failed state; only a later successful run counts as recovery.
+A pipeline and its failed step arrive as one message, and an interrupted
+import says to run *Rebuild trades*. Messages pass through ntfy.sh, so they
+carry only a title and the first line of an error, never fills or P&L.
+
+Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
+owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a
+long random topic such as `tradejournal-` followed by `openssl rand -hex 16`.
+Subscribe to that topic in the ntfy phone app, then:
+
+```bash
+sudo /opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/alerts.py test
+sudo systemctl start tradejournal-alerts.service
+sudo journalctl --no-pager -u tradejournal-alerts.service -n 20
+```
+
+The server cannot report its own death. Set `HEALTHCHECK_PING_URL` to an
+outside dead-man's switch, such as a free healthchecks.io check with a
+five-minute period and ten-minute grace that notifies the same ntfy topic.
+Every check pings it, or pings `/fail` when a notification could not be
+delivered, and the outside service alerts when the pings stop.
+
 ## Updates, restarts and rollback
 
 Install the next verified archive using its checksum. The installer creates
 an offline venv and preserves state/config. Release IDs cannot be overwritten.
 When the controller changes, update `/usr/local/sbin/tradejournal-deploy` from
 that verified artifact too. Before switching, wait for long-running jobs to
-finish; deployment stops all six services and the timers. Workers get 90 seconds to finish,
-after which systemd can kill them. Queued jobs survive. Interrupted jobs fail
+finish; deployment stops all six services and every timer except the
+phone-alert check, which keeps watching so a release that fails to start is
+still reported. Workers get 90 seconds to finish, after which systemd can kill
+them. Queued jobs survive. Interrupted jobs fail
 visibly and need an explicit new run; destructive or paid work is never
 automatically replayed.
 
@@ -391,7 +439,10 @@ crash recovery, upgrades/rolls back releases, preserves state, and stops and
 starts the entire service set. It checks boot enablement; it does not reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by
-`backend/tests/test_gmail_listener.py` with a fake subscriber.
+`backend/tests/test_gmail_listener.py` with a fake subscriber. The workflow
+runs the sandboxed phone-alert unit against the real API and systemd and
+checks that it delivers to a loopback stand-in for ntfy; delivery through
+ntfy.sh itself is proved only by `alerts.py test` on the server.
 
 The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)

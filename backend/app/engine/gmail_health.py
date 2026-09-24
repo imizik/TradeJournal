@@ -1,6 +1,7 @@
 """One plain-language answer to "are new Robinhood fills arriving?".
 
-Read by GET /gmail/health, which the frontend polls for its status banner.
+Read by GET /gmail/health, which the frontend polls for its status banner and
+deploy/alerts.py turns into a phone alert.
 It reads local state files and a few indexed rows; it never calls Google.
 """
 
