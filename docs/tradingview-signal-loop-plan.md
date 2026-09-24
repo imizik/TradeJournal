@@ -2,10 +2,14 @@
 
 **Audience:** a coding agent (Codex) implementing this cold. Everything needed is in this doc plus the referenced files. Read the referenced files before writing code; do not guess signatures.
 
-> **Implementation status (2026-07-26):** Steps 1–4 are complete. The frozen
+> **Implementation status (2026-09-23):** Steps 1–4 and the Signals list/detail
+> pages are implemented. The frozen
 > v1 contract/parser, isolated persistence, authenticated webhook-only ingress,
 > private read API, and fenced one-at-a-time analysis worker are implemented
-> and tested. No Pine script or frontend signal page exists yet.
+> with backend test coverage. The opt-in Ubuntu ingress service, deployment
+> preflight and HTTPS proxy template are implemented; live VPS/DNS/TLS setup
+> must be verified separately. Pine (Step 5), automatic Signals refresh and
+> optional notifications remain. See [production setup](../deploy/README.md#tradingview-webhooks).
 
 ## Goal
 
@@ -236,6 +240,9 @@ Do not claim scale-to-zero Cloud Run readiness until that exists, and never
 block the webhook response on analysis.
 
 ### Phase 2 — Frontend "Signals" page
+
+The list/detail pages and navigation exist. Automatic polling remains open;
+the original acceptance checklist below is not a claim that polling shipped.
 
 - New route `frontend/app/signals/page.tsx` + a `SignalsTable` component (reuse table styling from `TradesTable.tsx`; do not duplicate table logic wholesale).
 - Columns: time, symbol, timeframe, setup, side, price, **verdict** (color-coded), confidence.

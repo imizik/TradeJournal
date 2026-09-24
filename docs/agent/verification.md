@@ -41,7 +41,10 @@ jobs on every pull request. Postgres parity, migration-path and role checks
 are additional to the local script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
-Postgres. See [deployment verification](../../deploy/README.md#verification-boundaries).
+Postgres. It also exercises the optional ingress, its restricted DB/OS roles,
+duplicate delivery, stale-alert analysis and Caddy routing/token-log filtering
+over local HTTP. Public DNS and certificate issuance are not covered.
+See [deployment verification](../../deploy/README.md#verification-boundaries).
 It checks boot enablement but does not reboot a real VPS or test Tailscale/live
 integrations. Agent verification is not the only signal.
 
