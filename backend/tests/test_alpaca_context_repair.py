@@ -61,6 +61,8 @@ def test_alpaca_fill_selection_retries_partial_context_rows():
                 fill_id=complete_fill.id,
                 data_source="alpaca_iex",
                 fetched_at=datetime.utcnow(),
+                entry_underlying_price=150,
+                entry_vwap=149,
                 entry_rsi_14=50,
                 entry_ema_9=100,
                 entry_ema_20=95,

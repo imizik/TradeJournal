@@ -43,7 +43,8 @@ Things worth knowing before you touch a page:
   listener creates. `POST
   /sync/pipeline/run` (`_run_pipeline`) runs six
   stages: Gmail sync, fill check, trade rebuild (only when new fills arrived),
-  then Polygon, Alpaca and trade-path enrichment over everything missing.
+  then Polygon, Alpaca and trade-path enrichment over everything missing,
+  including rows whose fields are still empty (`domain-rules.md`).
   Daily review is deliberately not one of them. Status endpoints read
   `job_run` rows, never process memory (`architecture.md`).
 - `/accounts` (`app/accounts/page.tsx`) is a static placeholder: not in the
@@ -75,9 +76,9 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Gmail OAuth | `app/routers/auth.py` | `GET /auth/gmail/start`, `/auth/gmail/start/browser`, `/auth/gmail/callback` | `test_gmail_auth.py`, `test_cors.py` |
 | Real-time Gmail import (Pub/Sub pull) | `app/engine/gmail_listener.py` (lane `gmail`), history cursor in `app/engine/gmail_poller.py`, `_import_gmail_changes` and `queue_gmail_push_pipeline` in `app/routers/sync.py`; setup in [deploy/README.md](../../deploy/README.md#real-time-gmail-import) | jobs `gmail_listener`, `gmail_push`, `gmail_watch_renew`; `POST /gmail/watch`, `GET /gmail/watch/status`, `POST /gmail/push` (same coalesced queue; nothing public calls it) | `test_gmail_listener.py` (fake subscriber), `test_gmail_realtime.py` (cursor, targeted fetch, coalescing) |
 | Gmail status banner and live refresh | `app/engine/gmail_health.py`; `components/GmailStatusBanner.tsx`, `lib/useGmailHealth.ts`, status line in `components/Nav.tsx` | `GET /gmail/health` (polled every 30s while visible; `data_version` drives `router.refresh()`) | `test_gmail_realtime.py` (health states); rendering is not in the browser suite |
-| Polygon enrichment, greeks, indicators | `app/engine/enricher.py`, `app/engine/indicators.py` | `POST /fills/enrich?range=`, `GET /fills/enrich/status`; job `polygon_enrich` | `test_enricher.py` (incl. the discovered rate limit), `test_indicators_rvol.py` |
+| Polygon enrichment, greeks, indicators | `app/engine/enricher.py`, `app/engine/indicators.py` | `POST /fills/enrich?range=`, `GET /fills/enrich/status`; job `polygon_enrich` | `test_enricher.py` (incl. the discovered rate limit), `test_indicators_rvol.py`, `test_enrichment_gap_repair.py` (which empty fields are retried) |
 | Alpaca fill context | `app/engine/alpaca.py`, `app/engine/alpaca_enricher.py`, `app/engine/behavior.py` (sequence metrics) | `POST /market-context/enrich?range=&force=`, `GET /market-context/enrich/status`, `/market-context/fill/{id}`, `/market-context/fills/bulk?ids=`, `/market-context/coverage`; job `alpaca_enrich` | `test_alpaca_context_repair.py`, `test_indicators_rvol.py` (the injected cache-only bar loader) |
-| Trade path metrics (MFE, MAE, exit efficiency) | `app/engine/trade_path.py` | `POST /market-context/trade-path/compute`, `GET /market-context/trade-path/status`, `/market-context/trade/{id}`, `/market-context/trade-path/bulk?ids=`; job `trade_path` | — (live Alpaca fetch; `test_seed_snapshot.py` stubs it) |
+| Trade path metrics (MFE, MAE, exit efficiency) | `app/engine/trade_path.py` | `POST /market-context/trade-path/compute`, `GET /market-context/trade-path/status`, `/market-context/trade/{id}`, `/market-context/trade-path/bulk?ids=`; job `trade_path` | `test_enrichment_gap_repair.py` (row selection, keep-existing merge); live Alpaca fetch untested, `test_seed_snapshot.py` stubs it |
 | Trade audit | `app/engine/auditor.py` | `GET /market-context/audit/{trade_id}` | `test_seed_snapshot.py` (Alpaca stubbed, cache emptied) |
 | Durable jobs, Sync Center | `app/engine/jobs.py`, `app/jobs/run.py`, `app/routers/sync.py`; `app/engine/api_wait.py` (per-job pacing and backoff telemetry) | `GET /sync/summary`, `/sync/jobs`, `/sync/runs`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run?range=&force=`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` | `test_sync_progress.py`, `test_environment_guard.py` (the destructive guard) |
 | Trades, tags | `app/routers/trades.py` | `GET /trades`, `/trades/{id}`, `/trades/{id}/fills`, `/trades/fills/bulk?ids=`; `POST /trades/{id}/tags` | browser tests; `test_seed_dev_data.py` |

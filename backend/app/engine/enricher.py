@@ -66,12 +66,22 @@ _DAILY_HISTORY_DAYS = 730
 # Calendar days of hourly bars before the earliest fill: ~500 hourly bars, so
 # the EMA-9 seed (weight 0.8**n) is long gone by the first fill.
 _HOURLY_WARMUP_DAYS = 45
+
 # Calendar days of fill dates per minute-bars call: ~42 sessions x 960 bars
 # stays under Polygon's 50,000-base-aggregate page.
 _MINUTE_WINDOW_DAYS = 60
 _AGGS_PAGE_LIMIT = 50000
 
 _DAILY_INDICATOR_COLUMNS = ("sma_20", "sma_50", "ema_9", "ema_20", "rsi_14", "macd", "macd_signal")
+
+
+def gap_repair_floor() -> datetime:
+    """Earliest fill time whose indicator gaps a re-enrich can still fill.
+
+    Older fills fall outside the daily/hourly history window, so retrying
+    their empty indicators would only ever produce empty values again.
+    """
+    return datetime.utcnow() - timedelta(days=_DAILY_HISTORY_DAYS - _HOURLY_WARMUP_DAYS)
 
 
 # ---------------------------------------------------------------------------
@@ -672,10 +682,21 @@ def _find_bar(bars: dict[str, dict], executed_at: datetime) -> Optional[dict]:
     return None
 
 
-def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
+def _assign(fill: Fill, name: str, value, keep_existing: bool) -> None:
+    # A gap-filling run never swaps a stored value for nothing: an empty
+    # result there means a failed or out-of-window fetch, not a new answer.
+    if value is None and keep_existing:
+        return
+    setattr(fill, name, value)
+
+
+def enrich_fills(fills: list[Fill], session: Session, on_progress=None, keep_existing: bool = False) -> int:
     """
     Enrich a list of fills with underlying price, greeks, and technical indicators.
     Writes results directly to DB. Returns count of fills enriched.
+
+    keep_existing: only fill empty fields; a value this run could not compute
+    leaves the stored one in place (the scheduled gap repair uses this).
     """
     if not POLYGON_API_KEY:
         log.warning("POLYGON_API_KEY not set — skipping enrichment")
@@ -742,9 +763,9 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
 
         for fill in day_fills:
             bar = _find_bar(bars, fill.executed_at) if bars else None
-            underlying_price = bar["close"] if bar else None
-            fill.underlying_price_at_fill = underlying_price
-            fill.vwap_at_fill = bar["vwap"] if bar else None
+            _assign(fill, "underlying_price_at_fill", bar["close"] if bar else None, keep_existing)
+            _assign(fill, "vwap_at_fill", bar["vwap"] if bar else None, keep_existing)
+            underlying_price = float(fill.underlying_price_at_fill) if fill.underlying_price_at_fill is not None else None
 
             # Greeks only for options with all required data
             if (
@@ -773,19 +794,14 @@ def enrich_fills(fills: list[Fill], session: Session, on_progress=None) -> int:
 
             # Daily indicators: last completed day before the fill (the fill
             # day's own value is computed on its close — look-ahead at fill time)
-            fill.sma_20_at_fill = _prior_value(indicators.get("sma_20", {}), day_str)
-            fill.sma_50_at_fill = _prior_value(indicators.get("sma_50", {}), day_str)
-            fill.ema_9_at_fill = _prior_value(indicators.get("ema_9", {}), day_str)
-            fill.ema_20_at_fill = _prior_value(indicators.get("ema_20", {}), day_str)
-            fill.rsi_14_at_fill = _prior_value(indicators.get("rsi_14", {}), day_str)
-            fill.macd_at_fill = _prior_value(indicators.get("macd", {}), day_str)
-            fill.macd_signal_at_fill = _prior_value(indicators.get("macd_signal", {}), day_str)
+            for name in _DAILY_INDICATOR_COLUMNS:
+                _assign(fill, f"{name}_at_fill", _prior_value(indicators.get(name, {}), day_str), keep_existing)
 
             # Hourly EMA-9: last completed hour bar (the fill's own hour bar
             # closes after the fill), key "YYYY-MM-DD HH" in ET
             prior_hour = fill.executed_at - timedelta(hours=1)
             hour_key = f"{prior_hour.strftime('%Y-%m-%d')} {prior_hour.hour:02d}"
-            fill.ema_9h_at_fill = ema_9h_cache.get(ticker, {}).get(hour_key)
+            _assign(fill, "ema_9h_at_fill", ema_9h_cache.get(ticker, {}).get(hour_key), keep_existing)
 
             session.add(fill)
             enriched += 1
