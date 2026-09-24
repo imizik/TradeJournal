@@ -158,6 +158,14 @@ How a run works:
    started on 3099. Dedicated ports so a dev session on 8080/3000 is untouched.
 3. Tests assert that seeded values reach the DOM.
 
+`frontend/e2e/signals.spec.ts` also inserts synthetic alerts and changes their
+analysis state through `frontend/e2e/fixtures/signals.py`, which is pinned to
+that same disposable SQLite file. It verifies list/detail refresh, visibility
+pause/resume, navigation cleanup, slow requests and recorded skip/error reasons.
+The browser clock is advanced rather than waiting 30 seconds per poll. This
+proves rendering and private reads; it does not exercise TradingView delivery
+or a live Alpaca verdict.
+
 Notes that will save you time:
 
 - **Servers are never reused** (`reuseExistingServer: false`). `NEXT_PUBLIC_*`
