@@ -15,6 +15,12 @@ fails when a document names a file or a heading that no longer exists. Do not
 re-do it by hand; run it and move on. What it cannot see is a sentence that is
 still well-formed and no longer true, and that is everything below.
 
+**What sends you here is usually the other test.**
+`backend/tests/test_docs_freshness.py` fails when more than 30 code commits
+have landed since `docs/agent/last-reconciled.json`, and its failure message
+carries the commit range to reconcile. Use that range as `<since>` below; if
+you arrived some other way, the marker file still says where to start.
+
 ## The method
 
 ### 1. Find what changed
@@ -73,6 +79,16 @@ new test modules in `feature-map.md`'s Proof column.
 ```bash
 bash scripts/verify.sh --fast
 ```
+
+Then record what you reconciled to, which is what clears the freshness test:
+
+```json
+{"commit": "<the sha you read up to>", "date": "<YYYY-MM-DD>", "note": "..."}
+```
+
+in `docs/agent/last-reconciled.json`. Write it after the pass, not before —
+nothing detects a marker bumped on its own, so it is the one shortcut that
+quietly disables the whole mechanism.
 
 Then say plainly what you could not check. Prose accuracy is not machine
 verifiable: the honest report is "each claim was re-read against the code it

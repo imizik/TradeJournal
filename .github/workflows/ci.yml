@@ -22,6 +22,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          # test_docs_freshness.py counts commits since documentation was last
+          # reconciled. The default shallow fetch has no history to count, and
+          # the check would skip itself silently rather than fail.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

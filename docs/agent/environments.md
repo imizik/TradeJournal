@@ -8,18 +8,20 @@ Which database a process talks to, how to tell, and what is safe where.
 |---|---|---|---|
 | **Worktree** (default) | `backend/data/trade_journal.db` (SQLite) | none | yes — it is a file |
 | **CI** | ephemeral SQLite; a `postgres:16` container for parity tests | none | yes — thrown away every run |
-| **Dev** | a Neon branch | dev branch role | yes — that is what it is for |
+| **Dev** | a hosted branch you point a worktree at | that branch's role | yes — that is what it is for |
 | **Production** | PostgreSQL on the Ubuntu VPS, `127.0.0.1:5432/tradejournal` | restricted `tj_app` role | **no** |
 
-The Neon primary is the retained pre-cutover source, not a live production
-writer. A Mac worktree may still contain Neon URLs; do not run it as a second
-production API or worker. Check the active VPS database with its private
-`GET /health` before any operation that changes data.
+Production moved to the VPS on 2026-09-23. The Neon project is the retained
+pre-cutover source, not a live production writer; a Mac worktree may still
+contain Neon URLs, and must not be run as a second production API or worker.
+Check the active database with the private `GET /health` before any operation
+that changes data. The cutover and its recovery path are in
+[the deploy README](../../deploy/README.md).
 
-An ordinary worktree needs no Neon and no integration credentials: leave
-`DATABASE_URL` unset, keep the integration autostarts off, and use fixtures.
-`scripts/setup.sh` sets this up. Two agents in two worktrees get two separate
-SQLite files automatically, because the path is inside the worktree.
+An ordinary worktree needs no hosted database and no integration credentials:
+leave `DATABASE_URL` unset, keep the integration autostarts off, and use
+fixtures. `scripts/setup.sh` sets this up. Two agents in two worktrees get two
+separate SQLite files automatically, because the path is inside the worktree.
 
 ## Telling them apart
 
@@ -41,20 +43,16 @@ SQLite files automatically, because the path is inside the worktree.
 `identity` is redacted — host and database name only, never the username or
 password, because it appears in API responses, job rows and logs.
 
-The VPS identity identifies its loopback endpoint and database name. Each Neon
-branch gets its own endpoint hostname, so two branches are always
-**different** strings — a confirmation copied from one will not unlock the
-other. But they are not **self-describing**: Neon names endpoints with random
-words (`ep-restless-cell-a1b2c3`), and every branch of a project shares the
-same database name. Nothing in the identity says "dev" or "production".
+Two hosted databases are always **different** strings, so a confirmation
+copied from one will not unlock the other. They are not **self-describing**:
+nothing in a Neon endpoint name (`ep-restless-cell-a1b2c3`) says "dev" or
+"production", and every branch of a project shares a database name. So
+`identity` answers "is this the same database I confirmed against?" on its
+own, and "which environment is this?" only by comparison with the host's
+console.
 
-So `identity` answers "is this the same database I confirmed against?" on its
-own, and "which environment is this?" only by comparison with the Neon
-console. `APP_ENV` carries that second answer for a human reader — which is
-why it is worth setting, and why it is still only a label the guard ignores.
-
-`APP_ENV` sets `name`. It is a **label only** and never changes what is
-allowed; see below.
+`APP_ENV` sets `name`. It is a **label only** for a human reader and never
+changes what is allowed.
 
 Real-time Gmail import has one owner. Only the host running
 `tradejournal-worker@gmail` may set `GMAIL_LISTENER_ENABLED=true` or register a
@@ -74,7 +72,7 @@ run unchanged. Against **any hosted database** they refuse unless the request
 names the target:
 
 ```json
-{"confirm": "ep-restless-cell-a1b2c3.c-4.us-east-1.aws.neon.tech/neondb"}
+{"confirm": "127.0.0.1:5432/tradejournal"}
 ```
 
 The UI asks for this when it is required, showing the identity and environment
@@ -83,8 +81,7 @@ name. The 400 response also spells out exactly what to send.
 `POST /sync/advanced/rebuild-all` is **not** guarded. It calls the normal
 `_rebuild_trades` path with `preserve_path_metrics=True`; rebuilding derived
 trades is routine (`domain-rules.md`) and gating it would be friction with no
-benefit. `CLAUDE.md` groups it with resync as "destructive" — that overstates
-it; only resync deletes fills.
+benefit. Only resync deletes fills.
 
 ### Why confirmation is per-request and not a setting
 
@@ -99,101 +96,58 @@ So nothing ambient grants permission. The confirmation names the live target,
 which means repointing the database changes the expected value with it. A
 stale confirmation cannot exist.
 
-## Creating the Neon dev branch
+## Pointing a worktree at a hosted database
 
-Run this yourself — it needs Neon credentials, which no agent worktree has.
-
-1. **Neon console → your project → Branches → Create branch.** Branch from
-   `main` (or `production`). Name it `dev`. Branching is copy-on-write, so it
-   starts as a full copy of production data at that moment and costs almost
-   nothing until it diverges.
-2. **Copy its connection string.** Convert it to the SQLAlchemy driver form
-   this app uses — `postgresql+psycopg://`, not `postgres://`:
-   ```
-   postgresql+psycopg://USER:PASSWORD@ep-....neon.tech/DBNAME?sslmode=require
-   ```
-   Use the **direct** endpoint, not the one with `-pooler` in the hostname.
-   The pooled endpoint is PgBouncer in transaction mode, which conflicts with
-   psycopg3 prepared statements (`prepared statement "_pg3_0" already
-   exists`), and Alembic is where that usually surfaces. Pooling buys a
-   single-user app nothing.
-3. **Point a worktree at it** in `backend/.env`:
-   ```
-   DATABASE_URL=postgresql+psycopg://.../dbname?sslmode=require
-   APP_ENV=dev
-   ```
-4. **Confirm what you are connected to, before anything writes:**
+1. **Use the SQLAlchemy driver form** — `postgresql+psycopg://`, not
+   `postgres://`. On Neon use the **direct** endpoint, not the one with
+   `-pooler` in the hostname: the pooled endpoint is PgBouncer in transaction
+   mode, which conflicts with psycopg3 prepared statements (`prepared
+   statement "_pg3_0" already exists`), and Alembic is where that usually
+   surfaces.
+2. **Set it in `backend/.env`** with `APP_ENV` as a label for readers.
+3. **Confirm what you are connected to, before anything writes:**
    ```bash
    cd backend && .venv/bin/python scripts/check_database.py
    ```
    Use the venv interpreter, not `python`. Script docstrings in this
    repository are written as `python scripts/...`, which assumes an activated
    virtualenv; macOS has no `python` on PATH at all, and a bare `python3`
-   lacks psycopg. `scripts/verify.sh` resolves the same path. If
-   `backend/.venv` does not exist yet, run `scripts/setup.sh` from the
-   repository root.
+   lacks psycopg. If `backend/.venv` does not exist yet, run
+   `scripts/setup.sh` from the repository root.
 
-   Read-only — it never creates, alters or drops. It prints the identity,
-   compares the live schema against the models, reads `alembic_version`, and
-   names the command to run next. Check the identity against the Neon console;
-   the endpoint name will not tell you on its own (see above).
+   It is read-only — it never creates, alters or drops. It prints the
+   identity, compares the live schema against the models, reads
+   `alembic_version`, and names the command to run next. Check the identity
+   against the host's console; the endpoint name will not tell you on its own.
 
-### A database from before Alembic owned the schema
-
-Startup no longer calls `create_all()` (`app/schema.py`) — the app checks that
-the database is at head and refuses to start otherwise. Databases created
-before that change still have tables that no migration ran, and which command
-fixes them depends on what `alembic_version` says. Both cases verified on
-Postgres 16:
-
-| `alembic_version` | `alembic upgrade head` | Run |
-|---|---|---|
-| empty (never stamped) | **fails** — `DuplicateTable: relation "account" already exists` | `alembic stamp head` |
-| behind head | **succeeds** | `alembic upgrade head` |
-
-The difference is the migrations themselves. `001_initial` calls
-`op.create_table` unguarded, so it collides with anything `create_all` already
-made. Migrations from `f1a2b3c4d5e6` (`add_strategy_lab`) onward wrap each
-object in `if not _table_exists(...)`, precisely so Alembic can follow
-`create_all` — the comment in `2e6f9a1b4c7d` says so. So a database stamped
-part-way through and then extended by `create_all` upgrades cleanly, while one
-that was never stamped at all does not.
-
-`check_database.py` reads `alembic_version` and names the right one. It also
-refuses to recommend a stamp when it finds drift: stamping records "this
-database is at revision X", which is a lie if the schema is not what X
-produces. `create_all` and a full migration run were compared directly and
-produce the same 19 tables, differing only in `trade.ai_review` (`VARCHAR` vs
-`TEXT` — the same type in Postgres), which is what makes a stamp honest when
-the schema matches.
-
-Refresh the branch from production by deleting and re-creating it in the
-console; nothing in this repository depends on a dev branch's identity being
-stable.
+Alembic owns the schema and startup refuses to boot a database that is behind.
+A database built by the old startup `create_all()` needs `alembic stamp head`
+rather than `upgrade` when `alembic_version` is empty, because `001_initial`
+creates tables unguarded; `check_database.py` reads the version and names the
+right one, and refuses to recommend a stamp when it finds schema drift.
+`test_postgres_migration_paths.py` holds every one of those states.
 
 ## Database roles
 
-The application no longer issues DDL — Alembic owns the schema — so it can run
-as a role that cannot create or drop anything. Three roles:
+The application issues no DDL — Alembic owns the schema — so it runs as a role
+that cannot create or drop anything. Three roles:
 
 | Role | Used by | Can |
 |---|---|---|
-| **owner** (`tj_owner` on VPS; `neondb_owner` on Neon) | `alembic` | everything; owns the schema |
-| **app** (`tj_app` on VPS) | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
-| **ingress** (`tj_ingress` on VPS) | the TradingView ingress (port 8090) | `tradingview_alert` only |
+| **owner** (`tj_owner`) | `alembic` | everything; owns the schema |
+| **app** (`tj_app`) | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
+| **ingress** (`tj_ingress`) | the TradingView ingress (port 8090) | `tradingview_alert` only |
 
-The ingress is the one that matters. Port 8090 is the only tunnelable port and
-is meant to be internet-facing; 8080 is localhost-only by hard constraint. The
-launchers already refuse to start when `DATABASE_URL` is set and
-`TRADINGVIEW_DATABASE_URL` is blank, so the ingress must be pointed somewhere
-explicitly — but until these roles exist, the only thing to point it at is the
-schema owner. The remaining two are hygiene.
+The ingress is the one that matters: port 8090 is the only tunnelable port and
+is meant to be internet-facing, while 8080 is localhost-only by hard
+constraint. The other two bound what an application-level bug can reach — the
+difference between a bad `SELECT` and a `DROP TABLE`.
 
 ### Configuration
 
 ```
-DATABASE_URL=postgresql+psycopg://tj_app:...@host/db?sslmode=require
-MIGRATION_DATABASE_URL=postgresql+psycopg://neondb_owner:...@host/db?sslmode=require
+DATABASE_URL=postgresql+psycopg://tj_app:...@host/db
+MIGRATION_DATABASE_URL=postgresql+psycopg://tj_owner:...@host/db
 ```
 
 `alembic` uses `MIGRATION_DATABASE_URL` when set and `DATABASE_URL` otherwise,
@@ -211,214 +165,54 @@ covers it.
 
 ```bash
 cd backend
-python scripts/setup_roles.py --confirm-host <host>            # create and verify
-python scripts/setup_roles.py --confirm-host <host> --verify   # re-check later
-python scripts/setup_roles.py --confirm-host <host> --release  # free console roles
+.venv/bin/python scripts/setup_roles.py --confirm-host <host>            # create and verify
+.venv/bin/python scripts/setup_roles.py --confirm-host <host> --verify   # re-check later
 ```
 
-`--confirm-host` must equal the host inside the owner URL. Neon branch names
-are random words and a dev branch is indistinguishable from production at a
-glance, so the target is named rather than inferred — the same reason
-`resync-all` refuses a hosted database it was not asked for by name.
+`--confirm-host` must equal the host inside the owner URL — the target is
+named rather than inferred, for the same reason `resync-all` refuses a hosted
+database it was not asked for by name.
 
-The script creates the roles, applies the grants below, and then checks them
-two ways. It asks the server, through `has_table_privilege`, what each role can
-do to **every** table in `public` — which accounts for privilege reached
-through role membership, the case that made the first Neon setup decorative.
-Then it connects as each role and tries what it must not be allowed to do,
-which a catalog query cannot prove. Neither alone is the check: a sampled probe
-list passed a role holding `SELECT` on `trade` because `trade` was not one of
-the samples. Passwords are generated,
-printed once, and not stored; Neon cannot show a SQL-created role's password
-either, so a copy kept anywhere else would go stale.
+The script creates the roles, grants `USAGE` on `public` plus the four DML
+verbs the application actually issues (no `TRUNCATE`, no DDL, no sequence
+grant — every key is a UUID), and sets `ALTER DEFAULT PRIVILEGES` so future
+migrations do not produce tables the application cannot read. That last line
+is the easy one to omit and the expensive one: the failure appears long after
+the migration ran.
 
-`--verify` is the one to re-run — after switching branches, editing `.env`, or
-anything that moves which database is in play. It probes whatever `.env` and
-`.env.tradingview` currently point at.
+Then it checks the result two ways, and neither alone is the check. It asks
+the server through `has_table_privilege` what each role can do to **every**
+table in `public`, which accounts for privilege reached through role
+membership; then it connects as each role and tries what must be refused,
+which a catalog query cannot prove. A sampled probe list once passed a role
+holding `SELECT` on `trade`, because `trade` was not one of the samples. Only
+SQLSTATE `42501` counts as a refusal — an `INSERT` into a table with eighteen
+`NOT NULL` columns fails on a constraint, which a naive probe reads as
+"denied". Passwords are generated, printed once, and not stored.
 
-The rest of this section is what the script does and why, for when it has to be
-done by hand or the result needs explaining.
+`--verify` is the one to re-run after switching databases, editing `.env`, or
+anything that moves which database is in play.
 
-### Grants
-
-Run as the owner, connected to the application database. Verified on
-PostgreSQL 16 — every row of the table below was executed, not assumed.
-
-On Neon, create the two roles in SQL rather than in the console before running
-these; a console-created role arrives with privileges these grants cannot take
-away, and cannot be repaired afterwards. See below.
-
-```sql
-GRANT USAGE ON SCHEMA public TO tj_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tj_app;
--- Without this, the next migration creates a table the app cannot read.
-ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO tj_app;
-
-GRANT USAGE ON SCHEMA public TO tj_ingress;
-GRANT SELECT, INSERT, UPDATE ON tradingview_alert TO tj_ingress;
-```
-
-Those four verbs are the whole of what the application issues. It runs no
-`TRUNCATE` (which `DELETE` would not cover anyway), no DDL, and needs no
-sequence grant — every key is a UUID and the schema has no sequences.
-`resync-all` deletes through the ORM, so it needs nothing beyond `DELETE`.
-
-`ALTER DEFAULT PRIVILEGES` is the line that is easy to omit and expensive to
-omit: without it every future migration produces a table the application
-cannot read, and the failure appears long after the migration ran.
-
-What was verified, each as the role named:
-
-| Attempt | Result |
-|---|---|
-| app writes any table | allowed |
-| app `CREATE TABLE` | `permission denied for schema public` |
-| app `DROP TABLE fill` | `must be owner of table fill` |
-| app runs `alembic upgrade` | `InsufficientPrivilege` |
-| owner runs `alembic upgrade` | applies |
-| app reads `alembic_version` | allowed — startup's check needs it |
-| ingress writes an alert through its own engine | allowed |
-| ingress reads `fill` / `account` | `permission denied` |
-| a table created *after* the grants | app can read and write it; ingress cannot |
-
-### Neon: the grants alone are not enough
-
-**A role created through the Neon console is a member of `neon_superuser`**,
-and through it inherits everything the schema owner can do. The grants above
-still apply exactly as written — the role simply has a second, wider source of
-privilege that overrides the intent.
-
-Confirmed on a real Neon branch, where the ingress role read every fill despite
-having **no direct privilege on `fill` at all**:
-
-```
-=== roles tj_ingress belongs to ===
-  neon_superuser
-
-=== who has privileges on fill ===
-  neondb_owner | DELETE, INSERT, REFERENCES, SELECT, TRIGGER, TRUNCATE, UPDATE
-  tj_app       | DELETE, INSERT, SELECT, UPDATE
-```
-
-**A console-created role cannot be narrowed from SQL.** The owner holds no
-admin option on it, so every statement that would restrict it is refused.
-Reproduced on PostgreSQL 16 against a fixture with Neon's membership shape —
-all five, not just the first:
-
-| Run as `neondb_owner` | Result |
-|---|---|
-| `REVOKE neon_superuser FROM tj_app` | `permission denied to revoke role "neon_superuser"` |
-| `ALTER ROLE tj_app NOCREATEROLE NOCREATEDB` | `permission denied to alter role` |
-| `ALTER ROLE tj_app NOINHERIT` | `permission denied to alter role` |
-| `DROP ROLE tj_app` | `permission denied to drop role` |
-| `ALTER ROLE tj_app PASSWORD '...'` | `permission denied to alter role` |
-
-Run them in one transaction and only the first error is a privilege error; the
-rest report `current transaction is aborted`, which reads like a cascade from
-one fixable problem. They are five independent refusals. Use autocommit when
-probing what a role may do.
-
-`NOINHERIT` would not have been a fix in any case: membership still permits
-`SET ROLE neon_superuser`, so it stops accidents and not an attacker.
-
-### So create the roles in SQL, not in the console
-
-A role the owner creates is one the owner keeps the admin option on, and it
-gets no `neon_superuser` membership:
-
-```sql
-CREATE ROLE tj_app     LOGIN PASSWORD '...' NOCREATEDB NOCREATEROLE;
-CREATE ROLE tj_ingress LOGIN PASSWORD '...' NOCREATEDB NOCREATEROLE;
-```
-
-Then apply the grants above. Neon does not store the password of a SQL-created
-role and cannot show it in the console, so keep it wherever the rest of the
-connection string lives.
-
-**If the roles already exist from the console**, delete them there — the
-control plane can, the owner cannot — but revoke their privileges first, or the
-delete fails with `role "tj_app" cannot be dropped because some objects depend
-on it`. The owner granted these, so the owner can take them back:
-
-```sql
-ALTER DEFAULT PRIVILEGES FOR ROLE neondb_owner IN SCHEMA public
-  REVOKE ALL ON TABLES FROM tj_app;
-REVOKE ALL ON ALL TABLES    IN SCHEMA public FROM tj_app, tj_ingress;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM tj_app, tj_ingress;
-REVOKE ALL ON SCHEMA public FROM tj_app, tj_ingress;
-```
-
-That list is what a `DROP ROLE` needs cleared; it was verified by dropping a
-role that the owner *could* drop, which failed on `privileges for schema
-public` until every line above had run.
-
-### Then verify, rather than assume
-
-Both directions, because a role that can do nothing looks the same as a role
-that is correctly restricted. Connected **as the ingress role**:
-
-```sql
-SELECT count(*) FROM fill;               -- must fail: permission denied
-SELECT count(*) FROM tradingview_alert;  -- must return a number
-```
-
-And as the application role: `fill` readable, `CREATE TABLE` refused,
-`DROP TABLE fill` refused, and
-
-```sql
-SET ROLE neondb_owner;  -- must fail: permission denied to set role
-```
-
-That last line is the one that separates a boundary from a speed bump. A role
-that inherits nothing but may still `SET ROLE` into the owner is not
-restricted; it is one statement away from unrestricted.
-
-If the check is scripted, classify the failure rather than catching every
-exception: `INSERT` into a table with eighteen `NOT NULL` columns raises a
-constraint violation, and a probe that treats any error as "denied" reports
-that as a working restriction. Only SQLSTATE `42501` is a privilege refusal.
-Run each probe inside a transaction and roll it back, so a probe that is
-wrongly *allowed* — `DROP TABLE fill` — still changes nothing.
-
-This check is the only thing that distinguishes a working split from a
-decorative one. It was written expecting to pass, and it failed on the first
-real Neon branch it ran against — every grant correct, every privilege
-inherited around them.
-
-### Diagnosing it
-
-Read-only, as the owner:
-
-```sql
-SELECT r.rolname FROM pg_auth_members m
-  JOIN pg_roles r ON r.oid = m.roleid
-  JOIN pg_roles u ON u.oid = m.member
- WHERE u.rolname = 'tj_ingress';
-
-SELECT grantee, string_agg(privilege_type, ', ' ORDER BY privilege_type)
-  FROM information_schema.table_privileges
- WHERE table_name = 'fill' GROUP BY grantee;
-```
-
-A role appearing in the first result with nothing in the second is inheriting
-its access, not being granted it.
+**On Neon, create roles in SQL, never in the console.** A console-created role
+is a member of `neon_superuser` and inherits everything the owner can do —
+verified on a real branch, where the ingress role read every fill with no
+direct privilege on it — and the owner holds no admin option, so it cannot be
+narrowed, re-passworded or dropped from SQL afterwards. Only the console can
+delete it, and only after the owner revokes its grants. `setup_roles.py`
+creates roles in SQL and its `--release` flag frees console-created ones.
 
 ### What still does not exist
 
 - **Staging.** No persistent staging host has been provisioned. The
-  [Ubuntu package](../../deploy/README.md) is tested on a disposable CI host;
-  the first real host now uses VPS PostgreSQL. Staging and production must not
-  share a database, credentials, webhook tokens, Gmail
-  state or external-integration identity.
+  [Ubuntu package](../../deploy/README.md) is tested on a disposable CI host.
+  Staging and production must not share a database, credentials, webhook
+  tokens, Gmail state or external-integration identity.
 - **A separate worker role.** Background workers share the application role.
   A fourth role is real configuration complexity, and there is no threat it
   addresses that the app role does not — worth splitting when a worker needs
   privileges the API should not have, not before.
-- **Per-PR Neon branches.** CI uses an ephemeral `postgres:16` container
-  instead, which catches dialect problems without needing a secret. Per-PR
-  branches earn their place when a PR needs a deploy preview or
-  Neon-specific connection behavior.
+- **Per-PR database branches.** CI uses an ephemeral `postgres:16` container
+  instead, which catches dialect problems without needing a secret.
 
 ## Test databases
 

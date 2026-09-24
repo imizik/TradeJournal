@@ -278,9 +278,9 @@ It packages independent systemd services and preserves runtime state across
 releases. Production now uses PostgreSQL on the VPS after a verified Neon
 backup, row-count comparison and encrypted offsite restore drill.
 
-Durable context for coding agents lives in `docs/agent/`; `CLAUDE.md` and
-`AGENTS.md` are thin working agreements that point there. Assorted current
-notes:
+Durable context for coding agents lives in `docs/agent/`. `CLAUDE.md` is the
+working agreement and points there; `AGENTS.md` points at `CLAUDE.md`, so
+there is only one copy. Assorted current notes:
 
 
 - `backend/mcp_server.py` is a read-only FastMCP adapter over the local API. It now exposes market packet tools plus journal-analysis tools such as trade detail, coverage, audit, path-metrics, and fill-context fetches.

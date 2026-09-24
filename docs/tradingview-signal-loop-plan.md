@@ -312,8 +312,9 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 
 ## Handoff / housekeeping
 
-- `CLAUDE.md` and `AGENTS.md` describe the Steps 1–4 foundation. Update both
-  together again when Pine or the Signals frontend lands.
+- `CLAUDE.md` is the working agreement and describes the Steps 1–4
+  foundation; `AGENTS.md` only points at it. Update `CLAUDE.md` again when
+  Pine or the Signals frontend lands.
 - Keep the private backend and read APIs off the tunneled/public hostname.
 - Keep the MCP surface read-only; if exposing signals to Claude Desktop later, add a read-only `get_signals` tool in `backend/mcp_server.py` (separate task, not this plan).
 
@@ -325,4 +326,4 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 4. restricted ingress, private read router, bounded worker, and configuration (complete)
 5. Pine v6 indicator (`docs/pine/isaac_market_map.pine`)
 6. frontend `/signals`
-7. docs (`CLAUDE.md`/`AGENTS.md`) update (ongoing per completed slice)
+7. docs (`CLAUDE.md`, `docs/agent/`) update (ongoing per completed slice)

@@ -133,6 +133,14 @@ Scripts in `backend/scripts/` may do real work (open databases, call APIs) at
 **import** time. Pytest collection is scoped to `backend/tests` for this
 reason, and ruff lints them without importing them.
 
+## Documentation upkeep
+
+- `docs/agent/last-reconciled.json` — the commit documentation was last
+  reconciled to. `tests/test_docs_freshness.py` counts code commits past it
+  and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
+  judgement half is `.claude/skills/docs-drift/SKILL.md`, and the scheduled
+  agent that runs it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
+
 ## Reference documents
 
 - `docs/tradingview-webhook-contract-v1.md` — frozen wire contract

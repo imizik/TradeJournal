@@ -108,7 +108,7 @@ They share a database and nothing else. Do not route data between them.
 
 - SQLModel models in `backend/app/models.py`; Alembic revisions in
   `backend/alembic/versions/`.
-- SQLite by default (`backend/data/trade_journal.db`), Postgres/Neon via
+- SQLite by default (`backend/data/trade_journal.db`), PostgreSQL via
   `DATABASE_URL` using the `postgresql+psycopg://` driver form.
 - **Alembic is the only thing that builds the schema.** Startup checks that the
   database is at head (`backend/app/schema.py`) and refuses to start otherwise,
