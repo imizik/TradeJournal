@@ -127,9 +127,12 @@ itself is 0. Trade SPX/SPXW from a separate strategy, not this one.
 
 ## Set it up in TradingView
 
-1. Pine Editor → paste the file → **Add to chart** on a 2m or 5m chart. Turn
-   extended hours on if you want premarket levels; everything else works
-   without them.
+1. Pine Editor → paste the file → **Add to chart** on a 2m or 5m chart.
+   Extended hours changes the signals, not just the premarket levels: EMA 9
+   and 20 run through every bar on the chart, so premarket bars move them at
+   the open. The round 1 exports were made with extended hours on. Pick one
+   setting and keep it, and give the Python backtester the same one
+   (`--extended-hours`).
 2. **Check compile first.** This file has never been compiled; there is no
    Pine compiler in this repository's CI. Fix whatever the editor flags.
 3. Open **Pine Logs**. Each entry logs its exact JSON. Check that one line
@@ -166,6 +169,9 @@ python scripts/backtest_market_map.py MU META AAPL NBIS SPY --days 365
 python scripts/backtest_market_map.py AMD LLY TSLA GOOG --days 365 --set allow_shorts=true
 ```
 
+Add `--extended-hours` when the TradingView chart has extended hours on, as
+the round 1 charts did: the EMAs, and so the signals, depend on it.
+
 It prints a cohort report grouped by ticker, setup, side, grade, window, exit
 reason and tier (n, total R, average R, win %, PF, max drawdown in R, then
 dollars) and writes it, plus one TradingView-shaped "List of trades" CSV per
@@ -183,69 +189,124 @@ script fetches bars with the cached clients in `app/engine/alpaca.py` and
 resamples 1-minute bars to `--timeframe` (default 5). Execution matches the
 `strategy()` settings: signals and entries on bar close, stop orders checked
 intrabar from the next bar (a bar that opens through the stop fills at the
-open), a stop moved on a bar takes effect on the next, 2 ticks of slippage on
-market and stop fills.
+open), a stop moved on a bar takes effect on the next unless that bar's own
+close is already through it (`process_orders_on_close` gives the order one
+attempt there, so it fills at that close), 2 ticks of slippage on market and
+stop fills.
 
 **Data differences to expect.** The default IEX feed prints a small share of
 volume, so RVOL (A vs B, full vs half) will not match TradingView; the script
 warns, and `--feed sip` fixes it where the key allows. Daily ATR comes from
-Alpaca daily bars, which are split-adjusted while minute bars are raw; the
-script warns when their closes disagree, and `--atr-source minutes` builds
-ATR from regular-session minute bars instead. Bars are regular hours only
-unless `--extended-hours` is given; the round 1 exports look regular-hours
-only (their history fits TradingView's bar limit only without extended hours).
+Alpaca daily bars, which are split- and dividend-adjusted while minute bars
+are raw; the script warns when their closes disagree, and `--atr-source
+minutes` builds ATR from regular-session minute bars instead. It asks for
+daily bars only through the day before `--end`, since ATR is the prior day's
+and SIP refuses a same-day daily request. Bars are regular hours only unless
+`--extended-hours` is given; match the chart, because the EMAs depend on it
+(the round 1 exports need it, see parity below).
 
 **What is verified.**
 
 - `backend/tests/test_market_map.py`, on synthetic bars: every setup on both
   sides, every exit reason (`stop`, a gap through the stop, `be`, `trail`,
-  `time`, `eod`, `target`, `overnight_exit`), the stop moving a bar late, the
-  cooldown boundary, both daily limits, grades, midday modes, tiers, and the
-  stop cap and floor. Every Pine input is checked against its
-  `MarketMapConfig` default by reading the Pine source. Planted defects
+  `time`, `eod`, `target`, `overnight_exit`), the stop moving a bar late, a
+  moved stop filling at the close it is already through (and that exit being
+  noticed a bar later), the cooldown boundary, both daily limits, grades,
+  midday modes, tiers, and the stop cap and floor. Every Pine input is
+  checked against its `MarketMapConfig` default by reading the Pine source. Planted defects
   (breakeven at 0.5R, as a default and in the logic; a 10-minute cooldown;
   counting breakeven exits as losses; no slippage on stops; a network import)
   each fail it.
 - `backend/tests/test_market_map_exports.py` checks the execution model
   against every one of the 1,432 trades in the round 1 exports: breakeven
-  exits fill exactly 4 ticks under the entry fill or worse on a gap, never
-  better (254 exact, 51 gaps); every time stop lasts 30 minutes; every `eod`
-  is the 15:50 bar; grade, size and window follow the v1.0.0 rules on all
-  1,432; the next entry comes at least 15 minutes after a stop-type exit and
-  20 after a market close (the script only notices those on the next bar, and
-  TradingView shows both boundaries); no day has more than 3 entries or an
-  entry after 2 full-stop losses.
+  exits fill exactly 4 ticks under the entry fill, or worse when the stop was
+  already through the price it filled at (a gap open, or the close of the bar
+  that moved it), never better (254 exact, 51 worse); every time stop lasts
+  30 minutes; every `eod` is the 15:50 bar; grade, size and window follow the
+  v1.0.0 rules on all 1,432; the next entry comes at least 15 minutes after a
+  stop-type exit and 20 after a market close (the script only notices those
+  on the next bar, and TradingView shows both boundaries); no day has more
+  than 3 entries or an entry after 2 full-stop losses.
 - `backend/tests/test_market_map_report.py`: the CSVs import through the real
   Strategy Lab importer with no warnings, the report's R and drawdown math,
   the parity comparison, and the script end to end with a stub loader.
 
-**Parity on real bars: not run yet.** Entry-by-entry parity needs Alpaca
-bars, which the cloud session that built this could not reach. Run it where a
-key is set:
+**Parity on real bars (run 2026-09-24 on SIP bars).** Given the bars
+TradingView had, the port reproduces 1,229 of the 1,397 single-stock entries
+in the round 1 exports (88.0%) on the same bar, side and setup, and 1,241 of
+1,432 with SPY:
 
 ```bash
-python scripts/backtest_market_map.py --profile v1.0.0 --feed sip \
-    --start 2025-10-14 --end 2026-09-24 --warmup-days 1 \
+python scripts/backtest_market_map.py --profile v1.0.0 --feed sip --extended-hours \
+    --start 2025-10-14 --end 2026-09-24 \
     --parity "TradingView/IMM_v1.0.0_*.csv"
 ```
 
-It matches entries on timestamp, side and setup, prints the match rate and
-every mismatch with a cause: a knock-on (one side was in a trade, cooling down
-or at a limit because of an earlier difference), a grade that came out
-differently (RVOL and relative strength depend on the feed), a different
-setup on the same bar, or no signal at all (levels, VWAP or EMAs saw
-different prices). Matched trades also report grade, size, exit-reason and
-exit-time agreement and the median difference in RVOL, RS, gap and risk in
-ATR; a gap difference points at ATR. Do not tune the port to raise the match
-rate; explain the difference. `--warmup-days 1` starts the state on
-2025-10-13, which looks like the exports' first chart session: none of the
-four single-stock exports trades that day, consistent with the script having
-no 9:30 open price (and so no relative strength) on the chart's first bar.
+| Ticker | TradingView entries matched | Port entries that match | Grade / size agree | Exit reason / time agree | Median \|difference\|: RVOL, RS %, gap ATR, risk ATR |
+|---|---|---|---|---|---|
+| AAPL | 280 / 326 (85.9%) | 87.0% | 92% / 92% | 94% / 92% | 0.097, 0.019, 0.013, 0.001 |
+| META | 291 / 334 (87.1%) | 88.2% | 96% / 96% | 95% / 89% | 0.087, 0.030, 0.009, 0.002 |
+| MU | 338 / 368 (91.8%) | 92.1% | 96% / 96% | 96% / 93% | 0.063, 0.031, 0.007, 0.001 |
+| NBIS | 320 / 369 (86.7%) | 84.9% | 97% / 97% | 95% / 88% | 0.081, 0.071, 0.007, 0.003 |
+| SPY | 12 / 35 (34.3%) | 57.1% | 100% / 100% | 92% / 83% | 0.132, 0, 0.007, 0.002 |
+
+- **The exports were made with extended hours on.** The command as first
+  written here (regular hours, `--warmup-days 1`) matched 68.4%. Its misses
+  were mostly ORB and VWAP setups in the opening window where EMA 9 and 20
+  sat the other way round: premarket bars move them at the open, and with
+  `--extended-hours` those entries match. The one-day warm-up was wrong too.
+  In the first two weeks the exports' RVOL fits a full 10-session history
+  (median gap 9% with the default 20-day warm-up, as for the rest of the
+  year, against 17% with one day), so the charts had history before
+  2025-10-14.
+- **One porting bug, fixed.** A stop moved to breakeven or trailed to a level
+  that bar's close is already through fills at that close minus 2 ticks. The
+  port used to wait for the next bar. 80 matched trades show it, and fixing
+  it raised exit-time agreement from 82–88% to 88–93% on the four stocks.
+- **What is left is the feed.** Of the 110 entries TradingView took where the
+  port had no signal or a different setup, 80 hinge on a condition missed by
+  under 0.01 ATR (a close against a level, VWAP or the other EMA) and 14 more
+  by under 0.03 ATR. The other 16 trace to a VWAP 0.04–0.08 ATR apart, or to
+  an earlier bar where the feeds disagreed: a 9:30 close 2 cents above the
+  prior-day high, so the level broke later, or an opening-range high set by
+  a sub-penny print. SIP and TradingView bars differ in three ways:
+  - Closes: TradingView's fill equals the SIP close plus 2 ticks within a
+    cent only a third of the time.
+  - Extremes: SIP includes sub-penny and odd-lot prints. On matched trades
+    its bar reaches past TradingView's in 58% of run-ups and 81% of drawdowns,
+    so the port's stops and breakeven triggers trip a little sooner.
+  - Opening volume: SIP's 9:30 minute carries derivatively priced prints at
+    the opening price (1.77M AAPL shares on 2026-01-16), which pulls the
+    first hour's VWAP toward the open.
+
+  Port-only entries are the same near-misses the other way round, plus bars
+  where TradingView was cooling down or at a daily limit after a trade the
+  port did not take. The report calls those "no tradingview entry" because it
+  cannot see TradingView's cooldown.
+- **SPY trades on RVOL alone.** Its relative strength against itself is 0, so
+  B needs RVOL ≥ 1.5. The feed's RVOL gap (median 0.13) decides most entries:
+  19 of the 23 misses are grades.
+- **The ATR source barely matters.** `--atr-source minutes` changes one entry
+  in 1,432 and barely moves risk ATR. It narrows the gap ATR difference only
+  on SPY (0.007 to 0.002), which pays the largest dividend of the five;
+  Alpaca's daily bars are dividend-adjusted, which may be why. The ATR implied
+  by the exports' stop exits is within about 0.1–0.8% of either source.
+
+The comparison matches entries on timestamp, side and setup, prints the match
+rate and every mismatch with a cause: a knock-on (one side was in a trade,
+cooling down or at a limit because of an earlier difference), a grade that
+came out differently (RVOL and relative strength depend on the feed), a
+different setup on the same bar, or no signal at all (levels, VWAP or EMAs
+saw different prices). Matched trades also report grade, size, exit-reason
+and exit-time agreement and the median difference in RVOL, RS, gap and risk
+in ATR; a gap difference points at ATR. Do not tune the port to raise the
+match rate; explain the difference.
 
 **Findings from the port.** A long and a short can never fire on the same
 bar: every long setup needs the close above VWAP and every short below it, so
 the "skip the bar when both fire" rule is kept but never triggers. Options
-pricing (`--options`) waits until parity has been run.
+pricing (`--options`) is not built; parity, which it was waiting for, is
+above.
 
 ## What is and isn't proven
 

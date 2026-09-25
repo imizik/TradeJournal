@@ -15,8 +15,8 @@ Usage:
     python scripts/backtest_market_map.py MU META AAPL NBIS SPY --days 365
     python scripts/backtest_market_map.py AMD LLY --days 180 --set allow_shorts=true
     # parity with the committed v1.0.0 Strategy Tester exports (see docs/pine/README.md)
-    python scripts/backtest_market_map.py --profile v1.0.0 --feed sip --start 2025-10-14 \\
-        --end 2026-09-24 --warmup-days 1 --parity "TradingView/IMM_v1.0.0_*.csv"
+    python scripts/backtest_market_map.py --profile v1.0.0 --feed sip --extended-hours \\
+        --start 2025-10-14 --end 2026-09-24 --parity "TradingView/IMM_v1.0.0_*.csv"
 """
 
 from __future__ import annotations
@@ -136,7 +136,10 @@ def load_bars(
             bars = regular_session(bars)
         chart[symbol] = resample(bars, timeframe)
     if options.atr_source == "daily":
-        raw_daily = loader.daily_bars(symbols, atr_first, options.end)
+        # ATR is the prior day's, so the last day's own bar is never read. Asking
+        # for it anyway makes SIP refuse the whole request on that same evening
+        # ("recent SIP data" is a 403, which comes back as no bars at all).
+        raw_daily = loader.daily_bars(symbols, atr_first, options.end - timedelta(days=1))
         daily = {symbol: daily_from_alpaca(raw_daily.get(symbol, [])) for symbol in symbols}
     return chart, daily
 

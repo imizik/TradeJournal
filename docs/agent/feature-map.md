@@ -171,7 +171,9 @@ reason, and ruff lints them without importing them.
   `backend/tests/test_pine_market_map.py` but never compiled in CI;
   TradingView is the only place it runs. Its Python port
   (`app/engine/market_map.py`) is tested on synthetic bars and against the
-  exports' execution fingerprints, not yet entry by entry on real bars.
+  exports' execution fingerprints; entry-by-entry parity on real bars is a
+  manual `--parity` run (88% of the single-stock round 1 entries on SIP bars,
+  `docs/pine/README.md`), not a test.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig
