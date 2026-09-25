@@ -32,6 +32,7 @@ import hashlib
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
@@ -39,6 +40,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, SQLModel, select
 
 from app.models import Account, Fill
+from app.engine.email_parser import ParsedFill
+from app.routers.fills import _import_fills_from_gmail
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
@@ -85,6 +88,28 @@ def test_full_migration_chain_applies_to_postgres(migrated):
     tables = set(inspect(migrated).get_table_names())
     expected = set(SQLModel.metadata.tables) - {"alembic_version"}
     assert expected <= tables, f"missing after migration: {sorted(expected - tables)}"
+
+
+def test_gmail_fill_keeps_new_york_clock_on_postgres(migrated, monkeypatch):
+    inspector = inspect(migrated)
+    for table, column in (("fill", "executed_at"), ("trade", "opened_at"), ("trade", "closed_at")):
+        column_type = next(item["type"] for item in inspector.get_columns(table) if item["name"] == column)
+        assert column_type.timezone is False, f"{table}.{column} must store a naive New York clock"
+
+    source_time = datetime(2026, 7, 14, 9, 30, tzinfo=ZoneInfo("America/New_York"))
+    parsed = ParsedFill(
+        ticker="AAPL", side="buy", contracts=Decimal("1"), price=Decimal("100"),
+        executed_at=source_time, instrument_type="stock", raw_email_id="parity:gmail:time",
+        account_last4="7701", account_type="individual",
+    )
+    monkeypatch.setattr("app.engine.gmail_poller.poll_new_fills", lambda **_kwargs: [parsed])
+    with Session(migrated) as session:
+        assert _import_fills_from_gmail(session, start_enrichment=False)["saved"] == 1
+    with migrated.connect() as connection:
+        stored = connection.execute(
+            text("SELECT executed_at FROM fill WHERE raw_email_id = 'parity:gmail:time'")
+        ).scalar_one()
+    assert stored == datetime(2026, 7, 14, 9, 30)
 
 
 def test_migrated_postgres_schema_matches_the_models(migrated):

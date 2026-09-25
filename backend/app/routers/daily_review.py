@@ -29,6 +29,7 @@ class DailyReviewIndexItem(BaseModel):
     trade_count: int
     saved: bool
     generated_at: datetime | None = None
+    source_data_stale: bool = False
 
 
 @router.get("", response_model=list[DailyReviewIndexItem])
@@ -51,6 +52,7 @@ async def list_daily_reviews(session: Session = Depends(get_session)):
             "trade_count": len(trade_ids_by_day[review_day]),
             "saved": review_day in records_by_day,
             "generated_at": records_by_day[review_day].updated_at if review_day in records_by_day else None,
+            "source_data_stale": bool(json.loads(records_by_day[review_day].review_json).get("source_data_stale")) if review_day in records_by_day else False,
         }
         for review_day in sorted(trade_ids_by_day.keys(), reverse=True)
     ]

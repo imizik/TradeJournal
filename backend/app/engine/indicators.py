@@ -375,8 +375,9 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
             is_above_vwap = 1 if entry_price < vwap else 0
 
     # ---- is_vwap_reclaim: true reclaim — prev bar on wrong side, entry bar on right side ----
-    is_vwap_reclaim = 0
-    if vwap and entry_price and prev_bar_close is not None:
+    is_vwap_reclaim: Optional[int] = None
+    if vwap is not None and entry_price is not None and prev_bar_close is not None:
+        is_vwap_reclaim = 0
         if is_long and prev_bar_close < vwap and entry_price > vwap:
             is_vwap_reclaim = 1
         elif is_short and prev_bar_close > vwap and entry_price < vwap:
@@ -415,9 +416,9 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         chase_score += range_pts
         chase_parts += 1
 
-    chase_score = round(min(100.0, chase_score), 1) if chase_parts > 0 else 0.0
+    chase_score = round(min(100.0, chase_score), 1) if chase_parts > 0 else None
     # Derive binary flag from score
-    is_chase = 1 if chase_score >= 40 else 0
+    is_chase = (1 if chase_score >= 40 else 0) if chase_score is not None else None
 
     # ---- Trend aligned: price vs EMA stack + MACD histogram direction ----
     is_trend: Optional[int] = None
@@ -428,43 +429,43 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
             is_trend = 1 if (entry_price < ema9 and ema9 < ema20 and macd_hist < 0) else 0
 
     # ---- Late move: entering near day high on long, near day low on short ----
-    is_late = 0
-    if is_long and dist_day_high is not None and dist_day_high > -0.5:
-        is_late = 1
-    if is_short and dist_day_low is not None and dist_day_low < 0.5:
-        is_late = 1
+    is_late: Optional[int] = None
+    if is_long and dist_day_high is not None:
+        is_late = 1 if dist_day_high > -0.5 else 0
+    if is_short and dist_day_low is not None:
+        is_late = 1 if dist_day_low < 0.5 else 0
 
     # ---- Opening range breakout ----
-    is_or_break = 0
-    if or5_high and or5_low and entry_price:
-        if is_long and entry_price > or5_high:
-            is_or_break = 1
-        elif is_short and entry_price < or5_low:
-            is_or_break = 1
+    is_or_break: Optional[int] = None
+    if is_long and or5_high is not None and entry_price is not None:
+        is_or_break = 1 if entry_price > or5_high else 0
+    elif is_short and or5_low is not None and entry_price is not None:
+        is_or_break = 1 if entry_price < or5_low else 0
 
     # ---- Premarket breakout ----
-    is_pm_break = 0
-    if pm_high and pm_low and entry_price:
-        if is_long and entry_price > pm_high:
-            is_pm_break = 1
-        elif is_short and entry_price < pm_low:
-            is_pm_break = 1
+    is_pm_break: Optional[int] = None
+    if is_long and pm_high is not None and entry_price is not None:
+        is_pm_break = 1 if entry_price > pm_high else 0
+    elif is_short and pm_low is not None and entry_price is not None:
+        is_pm_break = 1 if entry_price < pm_low else 0
 
     # ---- Near resistance (call entry near HOD or prev-day high) ----
-    is_near_res = 0
+    is_near_res: Optional[int] = None
     if is_long:
-        if dist_day_high is not None and dist_day_high > -0.5:
-            is_near_res = 1
-        elif dist_prev_high is not None and dist_prev_high > -0.5:
-            is_near_res = 1
+        if dist_day_high is not None or dist_prev_high is not None:
+            is_near_res = 1 if (
+                (dist_day_high is not None and dist_day_high > -0.5)
+                or (dist_prev_high is not None and dist_prev_high > -0.5)
+            ) else 0
 
     # ---- Near support (put entry near LOD or prev-day low) ----
-    is_near_sup = 0
+    is_near_sup: Optional[int] = None
     if is_short:
-        if dist_day_low is not None and dist_day_low < 0.5:
-            is_near_sup = 1
-        elif dist_prev_low is not None and dist_prev_low < 0.5:
-            is_near_sup = 1
+        if dist_day_low is not None or dist_prev_low is not None:
+            is_near_sup = 1 if (
+                (dist_day_low is not None and dist_day_low < 0.5)
+                or (dist_prev_low is not None and dist_prev_low < 0.5)
+            ) else 0
 
     # ---- Overnight: fill outside RTH 09:30–16:00 ET ----
     fill_mins = fill.executed_at.hour * 60 + fill.executed_at.minute
@@ -534,11 +535,11 @@ def compute_setup_score(
     *,
     is_trend_aligned: Optional[int],
     is_above_vwap: Optional[int],
-    is_vwap_reclaim: int,
-    is_or_break: int,
-    is_pm_break: int,
-    chase_score: float,
-    is_late: int,
+    is_vwap_reclaim: Optional[int],
+    is_or_break: Optional[int],
+    is_pm_break: Optional[int],
+    chase_score: Optional[float],
+    is_late: Optional[int],
     is_near_res: Optional[int],
     is_near_sup: Optional[int],
     rsi: Optional[float],
@@ -563,7 +564,7 @@ def compute_setup_score(
        -10  late move
        -10  near resistance (for longs) / near support (for shorts)
 
-    Returns None if no positive signal data is available at all.
+    Returns None if no scored signal evidence is available at all.
     """
     score = 50.0  # start at neutral
     data_points = 0
@@ -572,21 +573,24 @@ def compute_setup_score(
         data_points += 1
         score += 25 if is_trend_aligned else -5
 
-    if is_vwap_reclaim:
+    if is_vwap_reclaim is not None:
         data_points += 1
-        score += 20
+        if is_vwap_reclaim:
+            score += 20
 
     if is_above_vwap is not None:
         data_points += 1
         score += 15 if is_above_vwap else -5
 
-    if is_or_break:
+    if is_or_break is not None:
         data_points += 1
-        score += 15
+        if is_or_break:
+            score += 15
 
-    if is_pm_break:
+    if is_pm_break is not None:
         data_points += 1
-        score += 10
+        if is_pm_break:
+            score += 10
 
     if macd_hist is not None:
         data_points += 1
@@ -599,9 +603,9 @@ def compute_setup_score(
         score += 5 if healthy else 0
 
     # Negative conditions
-    if chase_score >= 60:
+    if chase_score is not None and chase_score >= 60:
         score -= 25
-    elif chase_score >= 40:
+    elif chase_score is not None and chase_score >= 40:
         score -= 15
 
     if is_late:

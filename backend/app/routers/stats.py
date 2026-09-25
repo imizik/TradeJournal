@@ -68,6 +68,8 @@ async def get_stats(
         if t.ai_review:
             try:
                 review = json.loads(t.ai_review)
+                if review.get("source_data_stale"):
+                    continue
                 for flag in review.get("flags", []):
                     flag_counts[flag] += 1
             except (json.JSONDecodeError, AttributeError):

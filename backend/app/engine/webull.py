@@ -467,7 +467,10 @@ def _build_fill_from_payload(session: Session, event_id: str, payload: dict[str,
         side=side,
         contracts=float(filled_qty),
         price=float(price),
-        executed_at=executed_at_et,
+        # Fill.executed_at is a timezone-free New York wall clock. Passing an
+        # aware datetime to PostgreSQL's timestamp column converts it through
+        # the server timezone and shifts all point-in-time enrichment.
+        executed_at=executed_at_et.replace(tzinfo=None),
         raw_email_id=raw_email_id,
         option_type=option_type,
         strike=float(strike) if strike is not None else None,

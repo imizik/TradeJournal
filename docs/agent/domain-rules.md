@@ -25,6 +25,17 @@ patterns that can create N+1 calls.
 - Stock `price` is per share.
 - `raw_email_id` is the dedupe key for imported fills. Manual fills use
   `manual:` prefixes, Webull fills use `webull:{event_id}`.
+- `fill.executed_at` is stored as a timezone-free America/New_York wall
+  clock. Normalize aware Gmail and Webull source times to that clock before
+  persistence; PostgreSQL otherwise converts them through its server timezone
+  before writing the `timestamp without time zone` column. Historical rows
+  can mix this convention with UTC clock values, so repair only against
+  verified source messages; `backend/scripts/repair_gmail_fill_times.py`
+  plans and applies that guarded correction. The fresh PostgreSQL migration
+  path declares the same timezone-free type as the model and production.
+  A repair retains saved AI trade and daily reviews but marks analyses based
+  on affected trades as stale until regenerated; stale AI flags are excluded
+  from summary counts.
 - Manual fills are backed up to `backend/data/manual_fills.json` and restored
   on startup and after a destructive resync.
 - The FIFO sort key is
@@ -110,6 +121,8 @@ is verifiable rather than hopeful.
 
 - Every enrichment field is nullable. Guard before display, calculation, or
   putting it in an AI prompt.
+- Market setup flags remain NULL when the bar or comparison level needed to
+  decide them is missing. Zero means an observed negative, not missing data.
 - "At fill" daily indicators — both the Polygon columns on `fill` and the
   Alpaca fields on `fill_market_context` — intentionally use the last completed
   daily bar **strictly before** the fill date. The fill day's own daily value is

@@ -249,6 +249,11 @@ function AiReview({ raw }: { raw: string }) {
     const review = JSON.parse(raw);
     return (
       <div className="space-y-3 text-sm">
+        {review.source_data_stale && (
+          <p className="rounded border border-amber-500/50 bg-amber-950/30 p-3 text-amber-200">
+            This saved analysis used older fill times or market context. Regenerate it after enrichment finishes.
+          </p>
+        )}
         {review.strategy && (
           <div className="rounded bg-blue-900/30 px-3 py-2">
             <span className="text-xs font-medium text-blue-300">{review.strategy}</span>
