@@ -206,6 +206,11 @@ jobs:
           # is set is the one that gets billed.
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Without a token the action exchanges an OIDC token for the Claude
+          # GitHub App's, which needs `id-token: write` and failed every sweep
+          # here. The job token already carries pull-requests: write, which is
+          # all `gh pr comment` needs.
+          github_token: ${{ github.token }}
           claude_args: >-
             --allowedTools "Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(git log:*),Bash(git diff:*),Read,Grep,Glob"
           prompt: |
