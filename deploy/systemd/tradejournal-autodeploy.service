@@ -1,0 +1,19 @@
+[Unit]
+Description=Install the newest verified TradeJournal build
+Wants=network-online.target
+After=network-online.target
+# Opt-in: skipped until an operator creates this file.
+ConditionPathExists=/etc/tradejournal/autodeploy.env
+
+[Service]
+Type=oneshot
+# Root, like an operator's sudo session: it installs releases and switches
+# services through /usr/local/sbin/tradejournal-deploy.
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/autodeploy.py run
+Environment=PYTHONDONTWRITEBYTECODE=1
+TimeoutStartSec=30min
+UMask=0077
+# Rolling back to a release without this unit stops it. Only this script is
+# signalled then: the controller it started finishes switching releases
+# instead of dying halfway through.
+KillMode=process

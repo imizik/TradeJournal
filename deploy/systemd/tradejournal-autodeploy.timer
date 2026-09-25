@@ -1,0 +1,10 @@
+[Unit]
+Description=Check for a verified TradeJournal build every five minutes
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30
+Unit=tradejournal-autodeploy.service
+
+[Install]
+WantedBy=timers.target

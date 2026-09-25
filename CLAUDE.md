@@ -48,6 +48,17 @@ instead. `docs/agent/verification.md` lists the gaps honestly; use it.
 CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
 the local verification script does not run those checks.
 
+A Claude Code cloud session starts from a bare clone with no `backend/.venv`
+or `frontend/node_modules`. Run `bash scripts/setup.sh` before any check, or
+every check fails on missing tools rather than on the change.
+
+**Merging to `main` deploys to production.** Once CI and the Deployment
+package pass on the merge commit, the VPS installs it by itself within about
+15 minutes. On weekdays between 09:25 and 16:15 New York time it waits for the
+close unless the PR carries the `deploy-now` label. Schema changes wait for a
+person. A PR is ready to merge only when it is ready to go live; see
+[automatic deployment](deploy/README.md#automatic-deployment).
+
 ## Operating style
 
 - Read only what the task needs. Use these docs to orient rather than

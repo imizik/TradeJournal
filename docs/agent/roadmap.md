@@ -34,8 +34,9 @@ place. What each of them proves is documented where it is enforced, not here.
   broadening it means a dialect-parametrized engine fixture, worth doing only
   if a dialect bug slips through where they do not look.
 - **Deployment.** Native Ubuntu services and timers on a VPS, with PostgreSQL
-  on loopback. Installation, rollback and the private-access rules are in
-  [the deploy README](../../deploy/README.md).
+  on loopback. A `main` commit that passes every check installs itself
+  outside market hours. Installation, automatic deployment, rollback and the
+  private-access rules are in [the deploy README](../../deploy/README.md).
 - **Parallel agents.** Two agents work this repository daily on separate
   branches. Generated artifacts are gitignored so branches do not fight over
   them, and `test_schema_migrations.py` fails on two Alembic heads, which is

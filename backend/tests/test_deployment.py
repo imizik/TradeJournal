@@ -496,3 +496,57 @@ def test_backups_preserve_optional_ingress_credentials(tmp_path, monkeypatch):
     backup.archive_state(archive)
     with tarfile.open(archive) as bundle:
         assert bundle.extractfile("config/tradingview.env").read() == b"fixture-credentials"
+
+
+def test_prune_keeps_the_newest_releases_and_never_current_or_previous(control, tmp_path, monkeypatch):
+    monkeypatch.setattr(control, "STATE", tmp_path / "state")
+    ages = {"previous-build": 4, "current-build": 3, "older-build": 2, "newest-build": 1}
+    for name, days_old in ages.items():
+        release = control.release_path(name)
+        release.mkdir()
+        stamp = 1_790_000_000 - days_old * 86_400
+        os.utime(release, (stamp, stamp))
+        (control.STATE / "frontend-cache" / name).mkdir(parents=True)
+    (control.ROOT / "releases/.install-staging").mkdir()
+    (control.ROOT / "releases/Not_A_Release").mkdir()
+    control.atomic_link(control.release_path("current-build"), control.ROOT / "current")
+    control.atomic_link(control.release_path("previous-build"), control.ROOT / "previous")
+
+    control.prune(1)
+
+    remaining = sorted(path.name for path in (control.ROOT / "releases").iterdir())
+    assert remaining == [".install-staging", "Not_A_Release", "current-build", "newest-build", "previous-build"]
+    assert not (control.STATE / "frontend-cache/older-build").exists()
+    assert (control.STATE / "frontend-cache/current-build").exists()
+
+
+def test_busy_controller_exits_with_the_code_autodeploy_retries(control, monkeypatch):
+    import fcntl
+    import sys
+
+    monkeypatch.setattr(control.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(sys, "argv", ["tradejournal-deploy", "status"])
+    monkeypatch.setattr(control.os, "umask", lambda _mask: 0o022)
+    autodeploy = load("autodeploy")
+    with (control.ROOT / "deployment.lock").open("a+b") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(SystemExit) as exit_info:
+            control.main()
+    assert exit_info.value.code == control.BUSY == autodeploy.CONTROLLER_BUSY
+
+
+def test_deployment_pauses_the_autodeploy_timer_but_never_its_running_service(control, monkeypatch):
+    stopped = []
+
+    def systemctl(command, **_kwargs):
+        if command[1] == "show":
+            return SimpleNamespace(stdout="loaded\n", check_returncode=lambda: None)
+        return None
+
+    monkeypatch.setattr(control.subprocess, "run", systemctl)
+    monkeypatch.setattr(control, "run", lambda *args: stopped.append(args[-1]))
+    control.stop_services()
+    assert "tradejournal-autodeploy.timer" in stopped
+    assert "tradejournal-autodeploy.service" not in stopped
+    assert "tradejournal-autodeploy.timer" in control.TIMERS
+    assert "tradejournal-autodeploy.service" in control.OPTIONAL_UNITS
