@@ -149,6 +149,8 @@ reason, and ruff lints them without importing them.
 - `docs/tradingview-signal-loop-plan.md` — staged plan for the signal loop
 - `docs/strategy-lab-metrics.md` — metric definitions
 - `docs/strategy-lab-pine-metadata.md` — the `sl1|key=value|...` convention
+- `docs/pine/README.md` — the Isaac Market Map strategy/alert script, the
+  journal evidence behind each rule, and TradingView setup
 
 ## Where things are NOT
 
@@ -158,7 +160,9 @@ reason, and ruff lints them without importing them.
   decision support and never places orders.
 - No component-level frontend tests; the Playwright smoke tests are the only
   frontend coverage, and they are smoke depth.
-- Pine indicator source is not implemented (Step 5); the Signals page is.
+- The Pine script (`docs/pine/isaac_market_map.pine`) is contract-tested by
+  `backend/tests/test_pine_market_map.py` but never compiled or backtested
+  in CI; TradingView is the only place it runs.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig

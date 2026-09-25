@@ -187,7 +187,7 @@ the indicator context, and the stored assessment. Both views refresh every
 30 seconds while visible, immediately when returning to the tab, and through
 **Refresh now**. Pending/running alerts are counted separately from skipped
 and failed analysis; details show the recorded skip/error reason. The Pine
-indicator remains future Step 5.
+source is `docs/pine/isaac_market_map.pine`; see [its README](docs/pine/README.md).
 
 ## Durable Jobs
 
