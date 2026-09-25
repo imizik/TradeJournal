@@ -31,7 +31,11 @@ patterns that can create N+1 calls.
   before writing the `timestamp without time zone` column. Historical rows
   can mix this convention with UTC clock values, so repair only against
   verified source messages; `backend/scripts/repair_gmail_fill_times.py`
-  plans and applies that guarded correction.
+  plans and applies that guarded correction. The fresh PostgreSQL migration
+  path declares the same timezone-free type as the model and production.
+  A repair retains saved AI trade and daily reviews but marks analyses based
+  on affected trades as stale until regenerated; stale AI flags are excluded
+  from summary counts.
 - Manual fills are backed up to `backend/data/manual_fills.json` and restored
   on startup and after a destructive resync.
 - The FIFO sort key is

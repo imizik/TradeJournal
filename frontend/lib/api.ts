@@ -124,6 +124,7 @@ export type FillWriteInput = {
 };
 
 export type DailyReview = {
+  source_data_stale?: boolean;
   summary: string;
   day_grade: string;
   key_takeaways: string[];
@@ -153,6 +154,7 @@ export type DailyReviewIndexItem = {
   trade_count: number;
   saved: boolean;
   generated_at: string | null;
+  source_data_stale: boolean;
 };
 
 export type FillMarketContext = {

@@ -564,7 +564,7 @@ def compute_setup_score(
        -10  late move
        -10  near resistance (for longs) / near support (for shorts)
 
-    Returns None if no positive signal data is available at all.
+    Returns None if no scored signal evidence is available at all.
     """
     score = 50.0  # start at neutral
     data_points = 0
@@ -573,21 +573,24 @@ def compute_setup_score(
         data_points += 1
         score += 25 if is_trend_aligned else -5
 
-    if is_vwap_reclaim:
+    if is_vwap_reclaim is not None:
         data_points += 1
-        score += 20
+        if is_vwap_reclaim:
+            score += 20
 
     if is_above_vwap is not None:
         data_points += 1
         score += 15 if is_above_vwap else -5
 
-    if is_or_break:
+    if is_or_break is not None:
         data_points += 1
-        score += 15
+        if is_or_break:
+            score += 15
 
-    if is_pm_break:
+    if is_pm_break is not None:
         data_points += 1
-        score += 10
+        if is_pm_break:
+            score += 10
 
     if macd_hist is not None:
         data_points += 1

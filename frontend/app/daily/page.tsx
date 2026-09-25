@@ -18,7 +18,7 @@ function monthLabel(value: string) {
 
 export default async function DailyReviewPage() {
   const days = await api.dailyReviews();
-  const savedCount = days.filter((day) => day.saved).length;
+  const savedCount = days.filter((day) => day.saved && !day.source_data_stale).length;
   const groups = groupByMonth(days);
 
   return (
@@ -64,10 +64,10 @@ export default async function DailyReviewPage() {
                       </div>
                       <span
                         className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                          day.saved ? "bg-emerald-900/40 text-emerald-300" : "bg-muted text-muted-foreground"
+                          day.source_data_stale ? "bg-amber-900/40 text-amber-300" : day.saved ? "bg-emerald-900/40 text-emerald-300" : "bg-muted text-muted-foreground"
                         }`}
                       >
-                        {day.saved ? "Saved" : "Open"}
+                        {day.source_data_stale ? "Needs refresh" : day.saved ? "Saved" : "Open"}
                       </span>
                     </div>
                     {day.generated_at && (

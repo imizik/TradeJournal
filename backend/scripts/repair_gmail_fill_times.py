@@ -38,7 +38,7 @@ from app.engine.email_parser import parse_option_email  # noqa: E402
 from app.engine.gmail_poller import _get_service, _message_body  # noqa: E402
 from app.engine.reconstructor import FillInput, reconstruct  # noqa: E402
 from app.models import (  # noqa: E402
-    Account, FILL_LIGHT, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics,
+    Account, DailyReviewRecord, FILL_LIGHT, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -288,6 +288,25 @@ def apply_plan(path: Path) -> dict:
         changed_trade_ids.update(session.exec(
             select(TradeFill.trade_id).where(TradeFill.fill_id.in_(changed_fill_ids))
         ).all())
+        affected_days = set()
+        for trade_id in changed_trade_ids:
+            for trade in (before_trades[trade_id], stored_trades[trade_id]):
+                for timestamp in (trade.opened_at, trade.closed_at):
+                    if timestamp is not None:
+                        affected_days.add(timestamp.date())
+            persisted = stored_trades[trade_id]
+            if persisted.ai_review:
+                review = json.loads(persisted.ai_review)
+                if isinstance(review, dict):
+                    review["source_data_stale"] = True
+                    persisted.ai_review = json.dumps(review)
+        if affected_days:
+            reviews = session.exec(select(DailyReviewRecord).where(DailyReviewRecord.day.in_(affected_days))).all()
+            for saved in reviews:
+                review = json.loads(saved.review_json)
+                if isinstance(review, dict):
+                    review["source_data_stale"] = True
+                    saved.review_json = json.dumps(review)
         for row in changes:
             fill = by_id[row["id"]]
             for column in Fill.__table__.columns:

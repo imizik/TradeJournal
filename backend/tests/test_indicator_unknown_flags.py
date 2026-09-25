@@ -36,3 +36,4 @@ def test_observed_non_breakout_is_false():
     assert flags["is_premarket_breakout"] == 0
     assert flags["is_late_move"] == 0
     assert flags["is_near_resistance_on_call_entry"] == 0
+    assert flags["setup_quality_score"] is not None

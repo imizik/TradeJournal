@@ -68,7 +68,14 @@ export default function DailyAiPanel({
         ) : status === "loading" ? (
           <p>Generating review from trade, fill, and enrichment context...</p>
         ) : review ? (
-          <DailyReviewResult review={review} generatedAt={generatedAt} />
+          <div className="space-y-4">
+            {review.source_data_stale && (
+              <p className="rounded border border-amber-500/50 bg-amber-950/30 p-3 text-amber-200">
+                Saved analysis used older fill times or market context. Regenerate it after enrichment finishes.
+              </p>
+            )}
+            <DailyReviewResult review={review} generatedAt={generatedAt} />
+          </div>
         ) : (
           <p>
             No analysis has been generated yet. The review will use trades, fills, realized P&L, and any enriched

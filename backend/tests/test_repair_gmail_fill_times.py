@@ -10,7 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.engine.email_parser import ParsedFill
 from app.engine.reconstructor import reconstruct
-from app.models import Account, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
+from app.models import Account, DailyReviewRecord, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 from app.routers.fills import _normalize_executed_at
 from app.routers.fills import _import_fills_from_gmail
 from scripts import repair_gmail_fill_times as repair
@@ -120,6 +120,10 @@ def test_apply_repairs_time_and_invalidates_derived_context_without_losing_notes
             trade_id=trade.id, data_source="alpaca_iex", fetched_at=datetime.now(),
             inputs_fingerprint="stale",
         ))
+        session.add(DailyReviewRecord(
+            day=datetime(2026, 7, 14).date(),
+            review_json='{"summary":"keep this saved analysis"}', trade_count=1,
+        ))
         session.commit()
         fill_ids = [f.id for f in fills]
         trade_id = trade.id
@@ -154,7 +158,11 @@ def test_apply_repairs_time_and_invalidates_derived_context_without_losing_notes
         saved = session.get(Trade, trade_id)
         assert saved.opened_at == datetime(2026, 7, 14, 9, 30)
         assert saved.entry_time_bucket == "open"
-        assert saved.ai_review == '{"note":"keep"}'
+        assert json.loads(saved.ai_review) == {"note": "keep", "source_data_stale": True}
+        daily = session.exec(select(DailyReviewRecord)).one()
+        assert json.loads(daily.review_json) == {
+            "summary": "keep this saved analysis", "source_data_stale": True,
+        }
 
 
 def test_apply_rejects_changed_source_before_writing(monkeypatch, tmp_path):
