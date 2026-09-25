@@ -1,0 +1,19 @@
+[Unit]
+Description=Send a phone alert when TradeJournal stops working
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/etc/tradejournal/alerts.env
+
+[Service]
+Type=oneshot
+User=tradejournal
+Group=tradejournal
+EnvironmentFile=/etc/tradejournal/alerts.env
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/alerts.py check
+TimeoutStartSec=3min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tradejournal

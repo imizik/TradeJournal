@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import http.server
 import json
 import os
 from pathlib import Path
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -183,6 +185,35 @@ def main():
             "verify",
             latest_backup.resolve(),
         )
+        # Phone alerts: the sandboxed unit reads the API and systemd, then
+        # delivers to a loopback stand-in for ntfy.
+        received = []
+
+        class Capture(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                received.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                self.send_response(200)
+                self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        capture = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Capture)
+        threading.Thread(target=capture.serve_forever, daemon=True).start()
+        alerts_env = control.CONFIG / "alerts.env"
+        alerts_env.write_text(f"NTFY_URL=http://127.0.0.1:{capture.server_port}/tj-smoke\n")
+        alerts_env.chmod(0o600)
+        control.run("systemctl", "stop", "tradejournal-alerts.timer")
+        control.run("systemctl", "start", "tradejournal-alerts.service")
+        alert_state = control.STATE / "alerts/state.json"
+        state = json.loads(alert_state.read_text())
+        # This runner has no Gmail token: noticed, but inside its grace period.
+        assert not state["conditions"]["gmail"]["alerted"] and received == [], (state, received)
+        state["conditions"]["gmail"]["since"] -= 3600
+        alert_state.write_text(json.dumps(state))
+        control.run("systemctl", "start", "tradejournal-alerts.service")
+        assert [(message["topic"], message["title"]) for message in received] == [("tj-smoke", "Gmail needs reconnecting")], received
+        capture.shutdown()
         # The backend/frontend must not acquire a wildcard listener.
         sockets = control.run("ss", "-ltnH", capture_output=True, text=True).stdout
         for port in (3000, 8080, 8090):
@@ -241,7 +272,7 @@ def main():
         assert request("/stats")["total_trades"] == 6
         assert job_status() == "succeeded"
         assert webhook()["dup"] is True
-        print("Native deployment smoke passed: install, migration, proxy, workers, restricted ingress, webhook dedupe, analysis, token-safe proxy logs, backup, timers, API restart, crash restart, upgrade, rollback, persistent state and full restart")
+        print("Native deployment smoke passed: install, migration, proxy, workers, restricted ingress, webhook dedupe, analysis, token-safe proxy logs, backup, timers, phone alerts, API restart, crash restart, upgrade, rollback, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)
         subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, control.INGRESS_SERVICE]]], check=False)

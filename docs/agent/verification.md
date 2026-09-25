@@ -308,6 +308,9 @@ Be honest about this when reporting work:
   a live check is the `gcloud pubsub topics publish` plumbing test in
   `deploy/README.md`, then a real execution email. The browser tests run
   with no market-data credentials, so quote-dependent UI shows its empty state.
+  Phone alerts reach a loopback stand-in for ntfy in the deployment workflow;
+  delivery through ntfy.sh and the dead-man's-switch ping are proved only by
+  `deploy/alerts.py test` and a real alert on the server.
   The live-quote providers are the clearest case: `test_quotes_provider.py`
   and `test_tradier.py` pin the dispatch, the batching, the response shapes and
   the fallback, and prove nothing at all about whether a quote is *correct* or

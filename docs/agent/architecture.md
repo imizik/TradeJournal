@@ -72,7 +72,9 @@ to loopback; Neon remains a pre-cutover recovery source. The cutover and
 recovery checks are recorded in [the deployment guide](../../deploy/README.md).
 The package also enables a daily verified application backup, an encrypted
 offsite backup timer when R2 credentials are configured, a five-minute
-Gmail-import timer and an 08:00/17:00 New York Sync Everything timer. The
+Gmail-import timer, an 08:00/17:00 New York Sync Everything timer, and a
+two-minute check that sends phone alerts through ntfy when any of them, the API
+or real-time Gmail stops working. The
 Gmail timer rebuilds trades only when it imported new fills and never starts
 market-data enrichment; with real-time import enabled it is the safety net. Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
