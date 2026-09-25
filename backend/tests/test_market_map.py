@@ -220,6 +220,11 @@ EXITS = {
     # to breakeven after that bar, so the exit is 9:45, not 9:40.
     "be": ([103.5, 101.0], {}, {}, "09:45", 101.78, "be"),
     "trail": ([105.5, 102.0], {}, {}, "09:45", 103.48, "trail"),
+    # The 9:40 bar moves the stop and then closes through it. The order gets
+    # one attempt at that close (process_orders_on_close) and fills there,
+    # not at the 9:45 open (overridden lower so the two cannot agree).
+    "be_at_close": ([101.5, 101.0], {2: {"high": 103.5}, 3: {"open": 101.0}}, {}, "09:40", 101.48, "be"),
+    "trail_at_close": ([103.0, 102.4], {2: {"high": 105.5}, 3: {"open": 102.5}}, {}, "09:40", 102.98, "trail"),
     "time": ([102.0] * 6, {}, {}, "10:05", 101.98, "time"),
     "eod": ([103.0] * 76, {}, {}, "15:50", 102.98, "eod"),
     "target": ([106.5], {}, {"target_r": 2.0}, "09:40", 105.9, "target"),
@@ -300,6 +305,28 @@ def test_cooldown_is_fifteen_minutes_from_the_bar_the_exit_is_noticed(side: int)
         ("14:20", "entered"),
     ]
     assert result.trades[0].exit_reason == "stop"
+
+
+@pytest.mark.parametrize("side", [1, -1], ids=["long", "short"])
+def test_a_stop_filled_at_the_close_is_noticed_on_the_next_bar(side: int) -> None:
+    # Entry at 14:00. The 14:05 bar reaches +1.1R, which moves the stop to
+    # breakeven, and closes under it, so it fills at that close. Like a
+    # market close, the script only sees it on the 14:10 bar: the cooldown
+    # runs to 14:15 + 15 = 14:30, and the 14:25 bar is the first allowed.
+    closes = [100.0] * 54 + [101.7, 101.5] + [104.1 + 0.1 * k for k in range(19)]
+    bars = quiet_day() + session(DAY, closes, first_open=100.0, overrides={55: {"high": 104.0}})
+    result = run(bars, only("enable_hod"), side=side)
+
+    first = result.trades[0]
+    assert (first.exit_reason, hhmm(first.exit_time)) == ("be", "14:05")
+    assert first.exit_price == pytest.approx(price(101.48, side))
+    assert _outcomes(result)[:5] == [
+        ("14:00", "entered"),
+        ("14:10", "cooldown"),
+        ("14:15", "cooldown"),
+        ("14:20", "cooldown"),
+        ("14:25", "entered"),
+    ]
 
 
 def test_two_full_stop_losses_end_the_day() -> None:

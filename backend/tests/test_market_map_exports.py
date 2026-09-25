@@ -8,11 +8,15 @@ every trade in every export, using the port's own functions and inputs:
 
 - slippage and the breakeven stop: a breakeven exit fills exactly 2 ticks
   under the entry bar's close, which is 4 ticks under the entry fill, or
-  worse when the bar gaps through it (filled at the open), never better;
+  worse when the stop is already through the price it fills at (a gap open,
+  or the close of the bar that moved it there), never better;
 - the time stop and the 15:55 flatten, measured in bars;
 - the v1.0.0 grade, size and window rules, from each entry's own sl1 fields;
 - the cooldown: from the exit bar for stop-type exits, one bar later for
-  market closes, because the script notices those on the next bar;
+  market closes, because the script notices those on the next bar. A stop
+  filled at a bar's close is noticed on the next bar too, but the export
+  cannot tell it from an intrabar fill, so stop-type exits keep the earlier
+  bound;
 - the daily entry and loss limits.
 
 Entry-by-entry parity on real bars is `scripts/backtest_market_map.py --parity`.
@@ -159,7 +163,8 @@ def test_the_cooldown_runs_from_the_bar_the_exit_is_noticed() -> None:
             if following.entry.date() != current.exit.date():
                 continue
             market_close = current.reason in ("time", "eod")
-            # Stop fills are seen on their own bar; market closes on the next one.
+            # Intrabar stop fills are seen on their own bar; market closes (and
+            # stops filled at a close, indistinguishable here) on the next one.
             earliest = current.exit + cooldown + (STEP if market_close else timedelta(0))
             assert following.entry >= earliest, f"{current.ticker} {current.exit} -> {following.entry}"
             at_minimum[market_close] += following.entry == earliest

@@ -255,6 +255,32 @@ def test_the_script_backtests_writes_csvs_and_checks_parity(tmp_path, capsys) ->
     assert f"MU: {len(exported)}/{len(exported)} TradingView entries matched (100.0%)" in parity.read_text()
 
 
+class RecentSipLoader(StubLoader):
+    """SIP answers a daily request that reaches the evening of `DAY` with a 403
+    ("recent SIP data"), which the Alpaca client returns as no bars at all."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.daily_ends = []
+
+    def daily_bars(self, symbols, start, end):
+        self.daily_ends.append(end)
+        return {} if end >= DAY else super().daily_bars(symbols, start, end)
+
+
+def test_daily_bars_stop_the_day_before_the_end_so_sip_serves_them(tmp_path) -> None:
+    # ATR is the prior day's, so the last day's own daily bar is never read.
+    # Asking for it anyway on that evening left the run with no ATR and no trades.
+    script = _load_script()
+    loader = RecentSipLoader()
+    args = ["MU", "--start", DAY.isoformat(), "--end", DAY.isoformat(), "--warmup-days", "1", "--out", str(tmp_path)]
+
+    assert script.main(args, loader_factory=lambda: loader) == 0
+    assert loader.daily_ends == [DAY - timedelta(days=1)]
+    (run_dir,) = tmp_path.iterdir()
+    assert "hod_break" in (run_dir / "report.txt").read_text()
+
+
 def test_the_script_warns_when_the_feed_is_iex(tmp_path, capsys) -> None:
     script = _load_script()
     loader = StubLoader()

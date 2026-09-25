@@ -5,7 +5,7 @@ the Pine default, named as the Pine input in snake_case, and the per-bar
 logic keeps the Pine's order of evaluation, because several rules depend on
 it (a retest level set on this bar cannot fire until the next one; an exit
 is counted and its cooldown started on the bar the script notices it, which
-for a market close is the next bar and can be the next session).
+for a fill at a bar's close is the next bar and can be the next session).
 
 Pine's `na` is represented as `math.nan`. Comparisons with NaN are false in
 Python exactly as comparisons with `na` are false in Pine, so the conditions
@@ -17,7 +17,9 @@ Execution follows the Pine `strategy()` settings:
   market entries and `strategy.close` fill at that close.
 - `strategy.exit` stop (and optional limit) orders placed on a bar's close
   are checked intrabar from the next bar. A bar that opens through the stop
-  fills at the open. A stop moved on a bar takes effect on the bar after.
+  fills at the open. A stop moved on a bar takes effect on the bar after,
+  except at that bar's own close: the setting gives new orders one attempt
+  there, so a stop moved to or past the close fills at the close.
 - `slippage = 2`: two ticks against the trade on market and stop fills.
 
 Pure: no network, no database. The caller supplies bars.
@@ -894,6 +896,13 @@ def run_market_map(
                 )
                 order_reason = trade_stage
                 order_mfe_r = mfe_r
+                # process_orders_on_close gives the orders placed on this close one
+                # more attempt at the close: a stop moved to or past the close fills
+                # there, and the script notices on the next bar, as with a market
+                # close. (The target has been on the book since the entry bar, so a
+                # close through it was already filled intrabar.)
+                if position is not None and trade_side * (c - order_stop) <= 0:
+                    close_position(i, bar, c - trade_side * slip, order_reason, mfe_r)
 
         prev_day = day_key
         prev_is_rth = is_rth

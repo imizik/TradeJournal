@@ -124,6 +124,12 @@ is verifiable rather than hopeful.
   start (`_daily_cache_covers`), because one file per ticker serves every
   caller's window. Stale coverage is the usual cause of missing
   RSI/EMA/MACD/ATR on recent trades — check it before touching indicator math.
+- On the SIP feed (`ALPACA_DATA_FEED=sip`; production uses IEX) the account
+  serves full history but refuses any request that reaches the last 15
+  minutes with a 403 ("recent SIP data"), which `_alpaca_get` returns as no
+  bars at all. A daily request ending today counts, even after the close, so
+  `scripts/backtest_market_map.py` stops its daily request the day before
+  `--end`.
 - Sequence metrics on `fill_market_context` derive from `trade` rows, so trades
   must be rebuilt **before** Alpaca enrichment runs.
 - Greeks PnL attribution on `trade_path_metrics`
