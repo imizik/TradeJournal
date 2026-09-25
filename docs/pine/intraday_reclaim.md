@@ -168,4 +168,25 @@ edges are thin.
 - Any conclusion before the ambiguous-bar counts from the table's Fill check
   row, and the replay checks.
 
+### Rerun on NASDAQ data (supersedes the BATS numbers)
+
+The BATS runs above used one exchange's volume, and VWAP is the setup. The
+same settings on NASDAQ:MU and NASDAQ:META are in
+`backend/TradingView/IR_v0.1.0_NASDAQ_*_2026-09-25.csv`.
+
+| | Trades | R | Per trade | PF | Max DD | +1 tick/side | 1st half | 2nd half |
+|---|---|---|---|---|---|---|---|---|
+| MU | 359 | +24.5 | +0.068 | 1.14 | 17.3 | +19.8 | +30.5 | −6.0 |
+| META | 349 | +28.4 | +0.081 | 1.16 | 10.3 | +22.1 | +6.0 | +22.4 |
+| Both | 708 | +52.9 | +0.075 | 1.15 | 19.3 | +41.9 | | |
+
+**The feed changed most of the trades.** Only 171 of MU's and 102 of META's
+entries match their BATS runs (same minute and side). Every number from here
+on uses NASDAQ data only.
+
+**Mechanics are still clean.** One stop fill landed 0.28R past the stop on a
+gap; everything else was within 0.1R.
+
+**MU's second half is still negative, just less so.**
+
 **Next:** v0.2 changes only the exit, and only after the replay checks pass.
