@@ -15,8 +15,8 @@ framework" in docs/pine/research-framework.md:
 
 R is net PnL divided by the actual risk, quantity x |fill - frozen stop|, so
 every trade counts equally whatever size the capital cap allowed. Runs with a
-different strategy, version, variant, timeframe or settings are reported
-separately and never pooled.
+different strategy, version, variant, timeframe, settings or data feed
+(BATS vs NASDAQ) are reported separately and never pooled.
 
 Usage (from backend/):
     python scripts/pine_research_report.py "TradingView/IR_*.csv"
@@ -129,7 +129,7 @@ def load_trades(paths: list[str], source_timezone: str) -> tuple[list[Trade], li
                 Trade(
                     config=(
                         f"{ids['prefix']} v{features.get('ver')} {features.get('variant')} "
-                        f"tf={ids['timeframe']} {features.get('cfg')}"
+                        f"tf={ids['timeframe']} {features.get('cfg')} feed={ids['exchange']}"
                     ),
                     ticker=ids["ticker"],
                     side=parsed.direction,
