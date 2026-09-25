@@ -9,7 +9,9 @@
 > with backend test coverage. The opt-in Ubuntu ingress service, deployment
 > preflight and HTTPS proxy template are implemented; live VPS/DNS/TLS setup
 > must be verified separately. Signals refreshes every 30 seconds while visible
-> and on tab return, with browser coverage. Pine (Step 5), a real TradingView
+> and on tab return, with browser coverage. Pine (Step 5) is written as a
+> v6 `strategy()` in `docs/pine/isaac_market_map.pine` and contract-tested,
+> but not yet compiled or run in TradingView; a real TradingView
 > alert/verdict test and optional notifications remain.
 > See [production setup](../deploy/README.md#tradingview-webhooks).
 
@@ -266,6 +268,12 @@ dependency without asking. Keep it opt-in via env.
 
 ## Pine indicator spec — "Isaac Market Map"
 
+> **As built:** a `strategy()` rather than an `indicator()`, so the same rules
+> backtest in the Strategy Tester and export `sl1` metadata to Strategy Lab.
+> Its alerts are its entries. It adds grading, sizing and trade management
+> drawn from the journal's edge audit. Weekly high/low, 15/30m ranges, ATR
+> zones and a gap-fill line are not drawn. See [its README](pine/README.md).
+
 One Pine **v6 indicator** (`indicator(..., overlay=true)`). Two responsibilities: draw objective structure, and fire JSON alerts. (Any competent Pine author or the pine-script skill can implement from this spec — the JSON contract above is the only thing that must match exactly.)
 
 **Draw (objective, no discretion):**
@@ -335,6 +343,6 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 2. model + guarded Alembic migration (complete)
 3. persistence/read engine + tests (complete)
 4. restricted ingress, private read router, bounded worker, and configuration (complete)
-5. Pine v6 indicator (`docs/pine/isaac_market_map.pine`)
+5. Pine v6 strategy with alerts (`docs/pine/isaac_market_map.pine`; written, contract-tested, not yet compiled)
 6. frontend `/signals` list/detail and automatic refresh (complete)
 7. docs (`CLAUDE.md`, `docs/agent/`) update (ongoing per completed slice)

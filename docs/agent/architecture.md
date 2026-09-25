@@ -45,6 +45,8 @@ than reaching for it. `app.engine.indicators` was held out by one lazy
 `MinuteBarLoader` and its caller decides where bars come from and who pays for
 them. `trade_path` and `auditor` are the same shape and are the remaining
 targets, listed in the test.
+`app.engine.market_map` was written that way from the start:
+`scripts/backtest_market_map.py` fetches the bars and hands them in.
 
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend by
 default. The ingress is opt-in:

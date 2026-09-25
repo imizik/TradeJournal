@@ -90,6 +90,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py`, `app/routers/daily_review.py` | `POST /trades/{id}/review`; `GET /daily-review`, `/daily-review/{day}`, `POST /daily-review`; job `daily_review` | — (Anthropic) |
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
+| Isaac Market Map backtester | `app/engine/market_map.py` (the Pine's rules, pure), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
 | TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/components/SignalsRefresh.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail**; both refresh every 30s while visible and on tab return | `frontend/e2e/signals.spec.ts`: new alerts, verdicts/details, hidden-tab pause, navigation cleanup, slow refresh and skip/error reasons against disposable SQLite |
 | Automatic deployment | `deploy/autodeploy.py`, `.github/workflows/release.yml`, `deploy/control.py` (`prune`, lock exit 75), `deploy/systemd/tradejournal-autodeploy.*`, `deploy/autodeploy.env.example` | merge to `main`; on the VPS `sudo … autodeploy.py status` ([automatic deployment](../../deploy/README.md#automatic-deployment)) | `test_autodeploy.py`, `test_deployment.py`; the Ubuntu smoke upgrades through the real unit against a local stand-in for GitHub. The live Release workflow runs only on `main` |
@@ -129,6 +130,10 @@ you change it (`verification.md`, "What is NOT covered yet").
 - `check_database.py` — read-only preflight: which database, schema ready?
 - `setup_roles.py` — create the app and ingress roles, then prove they are
   limited by connecting as each one (`environments.md`)
+- `backtest_market_map.py` — Isaac Market Map over many tickers from Alpaca
+  bars: cohort report in R, Strategy Lab CSVs, `--parity` against exports
+- `imm_export_cohorts.py`, `playbook_cohorts.py` — the cohort evidence
+  `docs/pine/README.md` cites
 
 `backend/compare_fills*.py` are ad hoc scratch scripts, not stable app code.
 
@@ -150,6 +155,8 @@ reason, and ruff lints them without importing them.
 - `docs/tradingview-signal-loop-plan.md` — staged plan for the signal loop
 - `docs/strategy-lab-metrics.md` — metric definitions
 - `docs/strategy-lab-pine-metadata.md` — the `sl1|key=value|...` convention
+- `docs/pine/README.md` — the Isaac Market Map strategy/alert script, the
+  journal evidence behind each rule, and TradingView setup
 
 ## Where things are NOT
 
@@ -159,7 +166,11 @@ reason, and ruff lints them without importing them.
   decision support and never places orders.
 - No component-level frontend tests; the Playwright smoke tests are the only
   frontend coverage, and they are smoke depth.
-- Pine indicator source is not implemented (Step 5); the Signals page is.
+- The Pine script (`docs/pine/isaac_market_map.pine`) is contract-tested by
+  `backend/tests/test_pine_market_map.py` but never compiled in CI;
+  TradingView is the only place it runs. Its Python port
+  (`app/engine/market_map.py`) is tested on synthetic bars and against the
+  exports' execution fingerprints, not yet entry by entry on real bars.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig

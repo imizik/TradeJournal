@@ -119,7 +119,10 @@ is verifiable rather than hopeful.
   zoneinfo. Fills enriched before that fix during EST months are one hour early;
   a forced re-enrich corrects them from cache.
 - Alpaca daily cache validity must cover the requested date **range**, not
-  merely be young by file age. Stale coverage is the usual cause of missing
+  merely be young by file age: the last cached bar must reach the latest
+  completed session and the first must start within a week of the requested
+  start (`_daily_cache_covers`), because one file per ticker serves every
+  caller's window. Stale coverage is the usual cause of missing
   RSI/EMA/MACD/ATR on recent trades — check it before touching indicator math.
 - Sequence metrics on `fill_market_context` derive from `trade` rows, so trades
   must be rebuilt **before** Alpaca enrichment runs.
