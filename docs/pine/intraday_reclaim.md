@@ -189,4 +189,11 @@ gap; everything else was within 0.1R.
 
 **MU's second half is still negative, just less so.**
 
+**Fill check (ambiguous bars):** 0 ambiguous target bars on MU and on META.
+That count covers only the trades on the 1-minute bars the chart had loaded
+(34 on MU, 39 on META), not the deep-backtest year. Over the year, 27 of the
+240 target exits came within a minute of the fill. If every one of those had
+really been a stop, the NASDAQ total would fall from +52.9R to −14.1R. That
+is a bound, not an estimate: the loaded sample had none.
+
 **Next:** v0.2 changes only the exit, and only after the replay checks pass.
