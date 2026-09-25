@@ -1,0 +1,143 @@
+name: Release
+
+# Publishes the smoke-tested server package for a main commit as a GitHub
+# release, which the VPS polls and installs (deploy/autodeploy.py). The server
+# is private to the tailnet, so nothing here can push to it -- it pulls, and
+# needs no credential to do so because the repository is public.
+#
+# A release exists only for a main commit on which BOTH CI and Deployment
+# package passed. main has no branch protection, so a red pull request can
+# still merge; this is the gate that keeps it off the server.
+#
+# workflow_run fires once per completed workflow. Whichever of the pair
+# finishes first finds the other still running and stops; the second one
+# publishes.
+
+on:
+  workflow_run:
+    workflows: [CI, Deployment package]
+    types: [completed]
+
+permissions:
+  contents: write # create and prune build-* releases
+  actions: read # read both workflows' runs and download the package
+
+# Per commit, so the two completions of one commit run in turn and cannot
+# both publish. A shared group would let a later commit's run cancel this
+# commit's pending one.
+concurrency:
+  group: release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+env:
+  ARTIFACT: tradejournal-ubuntu-24.04-x86_64
+  # The VPS keeps its own installed copies for rollback; these are for
+  # reinstalling something older than that.
+  KEEP_RELEASES: 10
+
+jobs:
+  publish:
+    name: Publish verified build
+    # workflow_run runs with this repository's write token even when a fork's
+    # pull request triggered it. Act only on pushes to main here, and never
+    # check out or execute the commit's code in this job.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - name: Require CI and the package smoke test to have passed
+        id: gate
+        run: |
+          set -euo pipefail
+          TAG="build-${SHA:0:12}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          # A draft means an earlier run stopped between creating and
+          # publishing. Pollers cannot see drafts, so replace it.
+          DRAFT=$(gh release view "$TAG" -R "$REPO" --json isDraft --jq .isDraft 2>/dev/null || echo none)
+          if [ "$DRAFT" = "false" ]; then
+            echo "$TAG is already published."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "$DRAFT" = "true" ]; then
+            gh release delete "$TAG" -R "$REPO" --yes
+          fi
+
+          # A newer commit supersedes this one; its own runs publish it. This
+          # also keeps a late re-run of an old commit from becoming the newest
+          # release, although the VPS independently refuses to move backwards.
+          HEAD=$(gh api "repos/$REPO/commits/main" --jq .sha)
+          if [ "$HEAD" != "$SHA" ]; then
+            echo "main has moved on to ${HEAD:0:12}; not publishing ${SHA:0:12}."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The newest run of each workflow for this commit. A re-run keeps its
+          # run id, so status and conclusion describe its latest attempt.
+          latest() {
+            gh api "repos/$REPO/actions/workflows/$1/runs?head_sha=$SHA&event=push&branch=main&per_page=1" \
+              --jq '.workflow_runs[0] | "\(.id) \(.status) \(.conclusion)"'
+          }
+          read -r CI_ID CI_STATUS CI_CONCLUSION <<<"$(latest ci.yml)"
+          read -r PACKAGE_ID PACKAGE_STATUS PACKAGE_CONCLUSION <<<"$(latest deployment.yml)"
+          echo "CI run $CI_ID: $CI_STATUS/$CI_CONCLUSION. Package run $PACKAGE_ID: $PACKAGE_STATUS/$PACKAGE_CONCLUSION."
+
+          if [ "$CI_STATUS" != "completed" ] || [ "$PACKAGE_STATUS" != "completed" ]; then
+            echo "Waiting for the other workflow on ${SHA:0:12}; its completion publishes."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$CI_CONCLUSION" != "success" ] || [ "$PACKAGE_CONCLUSION" != "success" ]; then
+            echo "::warning::${SHA:0:12} is not deployable: CI $CI_CONCLUSION, package $PACKAGE_CONCLUSION. The server stays on its current build."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "package_run=$PACKAGE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download the smoke-tested package
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          gh run download "${{ steps.gate.outputs.package_run }}" -R "$REPO" -n "$ARTIFACT" -D dist
+          (cd dist && sha256sum --check SHA256SUMS)
+          ls -l dist
+
+      - name: Publish the release
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          TAG="${{ steps.gate.outputs.tag }}"
+          # The merged pull request's title reads better on a phone than
+          # "Merge pull request #N from ...". The VPS uses the first line.
+          TITLE=$(gh api "repos/$REPO/commits/$SHA/pulls" --jq '.[0].title // empty')
+          [ -n "$TITLE" ] || TITLE=$(gh api "repos/$REPO/commits/$SHA" --jq '.commit.message | split("\n")[0]')
+          printf '%s\n\nCommit %s passed CI and the Deployment package smoke test (%s/%s/actions/runs/%s).\nThe VPS installs the newest build-* release by itself; see deploy/README.md.\n' \
+            "$TITLE" "$SHA" "$GITHUB_SERVER_URL" "$REPO" "${{ steps.gate.outputs.package_run }}" > notes.md
+          # Draft first: assets upload one at a time, and a poller must never
+          # see a release carrying only some of them.
+          gh release create "$TAG" dist/* -R "$REPO" --draft --prerelease \
+            --target "$SHA" --title "Build ${SHA:0:12}" --notes-file notes.md
+          gh release edit "$TAG" -R "$REPO" --draft=false
+          echo "Published $TAG: $TITLE"
+
+      - name: Prune old builds
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/releases?per_page=100" \
+            --jq '.[] | select(.draft | not) | select(.tag_name | startswith("build-")) | "\(.published_at) \(.tag_name)"' \
+            | sort -r | tail -n +$((KEEP_RELEASES + 1)) \
+            | while read -r _ TAG; do
+                gh release delete "$TAG" -R "$REPO" --yes --cleanup-tag
+                echo "Removed $TAG"
+              done

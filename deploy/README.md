@@ -47,7 +47,14 @@ services against disposable Postgres. Only a successful smoke test uploads
 `tradejournal-ubuntu-24.04-x86_64` (retained for 14 days). Choose a successful
 run for the exact reviewed commit; after merging, prefer the `main` run.
 
-Download its artifact from Actions. It contains:
+For every `main` commit on which both that workflow and CI pass, the Release
+workflow (`.github/workflows/release.yml`) republishes the same files as a
+`build-<commit>` GitHub pre-release and keeps the newest ten. Those downloads
+need no sign-in, and they are what [automatic deployment](#automatic-deployment)
+installs. A red commit is never published, even though `main` has no branch
+protection and can merge one.
+
+Download its artifact from Actions, or from that release. It contains:
 
 - `<release-id>.tar.gz`: standalone frontend, bundled Node 22, backend source
   and migrations, and a resolved Python 3.12 wheelhouse.
@@ -369,6 +376,8 @@ recovery.
 A pipeline and its failed step arrive as one message, and an interrupted
 import says to run *Rebuild trades*. Messages pass through ntfy.sh, so they
 carry only a title and the first line of an error, never fills or P&L.
+[Automatic deployment](#automatic-deployment) reports each deploy, hold and
+failure to the same topic.
 
 Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
 owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a
@@ -504,6 +513,8 @@ automatically replayed.
 sudo tradejournal-deploy migrate NEW_RELEASE_ID --confirm-database 'HOST/DATABASE'
 sudo tradejournal-deploy activate NEW_RELEASE_ID --confirm-database 'HOST/DATABASE'
 sudo tradejournal-deploy status
+# Keep the newest three installed releases plus current and previous:
+sudo tradejournal-deploy prune --keep 3
 # API-only restart leaves the four worker services running:
 sudo systemctl restart tradejournal-api
 sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -u tradejournal-worker@gmail -f
@@ -525,11 +536,76 @@ start; use a forward fix or an explicitly planned database restore. Shared
 runtime state and configuration do not roll back with code. Retain known-good
 artifacts off the VPS. Do not delete the shared job-lock directory or files.
 
+Each release is about 1 GB on the disk PostgreSQL shares, and nothing but
+`prune` removes one. Automatic deployment prunes after every successful
+switch; `prune` never removes the current or previous release, and an older
+build can be reinstalled from its GitHub release or Actions artifact. A
+controller command that finds another one holding the deployment lock exits
+with status 75 instead of waiting.
+
 All six units are enabled for boot and restart on process failure. A provider
 error that is caught inside a still-running worker is not a process crash;
 inspect job failures/logs. Webull's reconnect cap remains unchanged. On the
 first real VPS, verify a reboot, browser access, OAuth, and the desired live
 integrations. No real VPS or Tailscale enrollment is created by this PR.
+
+## Automatic deployment
+
+The server installs green `main` builds by itself, so a merge goes live
+without anyone connecting to it. GitHub cannot reach the server, which is
+private to the tailnet, so `tradejournal-autodeploy.timer` pulls instead:
+every five minutes `deploy/autodeploy.py` asks GitHub's public API for the
+newest `build-*` release (published only after CI and the Ubuntu smoke test
+passed on that commit), checks the download against its `SHA256SUMS`, installs
+the bundled controller and the release, then activates it with the usual
+health checks and rollback. It needs no GitHub credential. A merge normally
+goes live 10–15 minutes after it lands.
+
+A newer build waits, and is installed later or by a person, while:
+
+- it is 09:25–16:15 New York time on a weekday. An activation restarts
+  everything for about a minute, and a TradingView alert arriving then is
+  lost. Adding the `deploy-now` label to the pull request, before or after
+  merging, releases it on the next check;
+- a sync or enrichment job is running, or the API is not answering;
+- it adds or removes an Alembic revision. The release is installed but not
+  activated, and the phone is told. `run --allow-migration` (below) takes and
+  verifies a backup, migrates and activates;
+- it is not ahead of the running commit on `main`. The deployer never moves
+  the server backwards, and never replaces a build deployed by hand from a
+  branch;
+- it is the build an operator rolled back from, or its install or activation
+  failed. A later merge deploys normally.
+
+Turn it on by creating `/etc/tradejournal/autodeploy.env` from
+`deploy/autodeploy.env.example`, root owned with mode 0600. Its
+`AUTODEPLOY_CONFIRM_DATABASE` is the exact identity that `sudo
+tradejournal-deploy identity` prints, the same confirmation an operator would
+type. Each deploy, hold and failure is sent once per build to the
+[phone alerts](#phone-alerts) topic in `alerts.env`, through the same sender;
+an `NTFY_URL` in `autodeploy.env` sends them to a different topic instead. The
+timer is enabled by every activation; without that file its service is
+skipped.
+
+```bash
+sudo install -m 0600 /opt/tradejournal/current/deploy/autodeploy.env.example /etc/tradejournal/autodeploy.env
+sudoedit /etc/tradejournal/autodeploy.env
+AUTODEPLOY=/opt/tradejournal/current/deploy/autodeploy.py
+PY=/opt/tradejournal/current/backend/.venv/bin/python
+sudo $PY $AUTODEPLOY status
+# Skip the market-hours wait for the newest build:
+sudo $PY $AUTODEPLOY run --now
+# Apply a held schema change: verified backup, migrate, activate:
+sudo $PY $AUTODEPLOY run --now --allow-migration
+sudo journalctl -u tradejournal-autodeploy --since today
+```
+
+To pause it, set `AUTODEPLOY_ENABLED=false`. Manual `migrate`, `activate` and
+`rollback` stop the timer while they run, and a rollback stays rolled back.
+The deployer runs as root because the controller it calls needs root; its
+unit uses `KillMode=process`, so a controller it started always finishes a
+release switch. Its decisions are kept in
+`/var/lib/tradejournal/autodeploy/state.json`.
 
 ## Verification boundaries
 
@@ -539,8 +615,13 @@ preflight failure, opt-in service lifecycle and forced runtime bindings. Browser
 smoke tests exercise the same-origin proxy with seeded data. The Ubuntu
 workflow additionally installs the built artifact, migrates fresh Postgres,
 executes queued work, restarts the API without restarting its worker, checks
-crash recovery, upgrades/rolls back releases, preserves state, and stops and
-starts the entire service set. It also runs a restricted PostgreSQL ingress
+crash recovery, upgrades through the real autodeploy unit, rolls back, checks
+that the deployer then leaves the rollback alone, prunes, preserves state, and
+stops and starts the entire service set. The upgrade polls a local stand-in
+for GitHub's releases API; the live Release workflow and the VPS polling
+GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
+covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
+schema holds, checksums, and notifications sent once per build. It also runs a restricted PostgreSQL ingress
 role, real webhook duplicate/auth checks, stale-alert analysis, a separate OS
 user, and the shipped Caddy routing/error-log filter over local HTTP fixtures.
 It checks boot enablement; it does not verify public DNS/ACME certificates, reboot

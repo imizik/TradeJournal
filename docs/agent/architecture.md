@@ -76,7 +76,10 @@ Gmail-import timer, an 08:00/17:00 New York Sync Everything timer, and a
 two-minute check that sends phone alerts through ntfy when any of them, the API
 or real-time Gmail stops working. The
 Gmail timer rebuilds trades only when it imported new fills and never starts
-market-data enrichment; with real-time import enabled it is the safety net. Backup retention, prerequisites
+market-data enrichment; with real-time import enabled it is the safety net.
+When `/etc/tradejournal/autodeploy.env` exists, a five-minute timer installs
+the newest `main` build that passed every CI check. It pulls from GitHub,
+because nothing outside the tailnet can reach the server. Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
 ## Data flow

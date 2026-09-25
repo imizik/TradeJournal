@@ -7,6 +7,7 @@ import http.server
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -14,6 +15,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 import control
@@ -22,6 +24,8 @@ from build import package
 URL = "postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_deployment"
 IDENTITY = "127.0.0.1:5432/tj_deployment"
 INGRESS_TOKEN = "ci-only-webhook-token-never-use-in-production"
+# The commit the repackaged second build claims, as a newer merge would.
+NEXT_COMMIT = "5" * 40
 
 
 def request(path, method="GET"):
@@ -104,6 +108,90 @@ def check_webhook_proxy(release):
                 control.run("systemctl", "start", control.INGRESS_SERVICE)
                 control.ingress_health()
         assert INGRESS_TOKEN not in log.read_text()
+
+
+class FakeGitHub(http.server.ThreadingHTTPServer):
+    """GitHub's releases API and asset downloads, plus an ntfy endpoint.
+
+    Serves one published build of NEXT_COMMIT from local files, so the shipped
+    autodeploy unit can run its real download, install and activation path.
+    """
+
+    def __init__(self, files):
+        self.files = files
+        self.notes = []
+        super().__init__(("127.0.0.1", 0), FakeGitHubHandler)
+
+    @property
+    def url(self):
+        return f"http://127.0.0.1:{self.server_port}"
+
+
+class FakeGitHubHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        path = urllib.parse.urlsplit(self.path).path
+        files = self.server.files
+        if path == "/repos/smoke/tradejournal/releases":
+            body = json.dumps([{
+                "tag_name": f"build-{NEXT_COMMIT[:12]}", "draft": False, "published_at": "2026-01-01T00:00:00Z",
+                "target_commitish": NEXT_COMMIT, "body": "Deployment smoke build\n",
+                "assets": [{"name": name, "browser_download_url": f"{self.server.url}/download/{name}"} for name in files],
+            }]).encode()
+        elif path.startswith("/repos/smoke/tradejournal/compare/"):
+            body = json.dumps({"status": "ahead"}).encode()
+        elif path.startswith("/download/") and path.removeprefix("/download/") in files:
+            source = files[path.removeprefix("/download/")]
+            self.send_response(200)
+            self.send_header("Content-Length", str(source.stat().st_size))
+            self.end_headers()
+            with source.open("rb") as handle:
+                shutil.copyfileobj(handle, self.wfile)
+            return
+        else:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_POST(self):
+        # ntfy's JSON form, as deploy/alerts.py publishes it.
+        message = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.server.notes.append((message["title"], message["message"]))
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *_args):
+        pass
+
+
+def publish(second, second_archive):
+    """Lay out the build the way the Release workflow publishes it."""
+    controller = second_archive.parent / "tradejournal-deploy.py"
+    shutil.copyfile(second / "deploy/control.py", controller)
+    files = {path.name: path for path in (second_archive, controller)}
+    sums = second_archive.parent / "SHA256SUMS"
+    sums.write_text("".join(f"{digest(path)}  {name}\n" for name, path in files.items()))
+    github = FakeGitHub({**files, "SHA256SUMS": sums})
+    threading.Thread(target=github.serve_forever, daemon=True).start()
+    config = control.CONFIG / "autodeploy.env"
+    config.write_text(
+        f"AUTODEPLOY_ENABLED=true\nAUTODEPLOY_REPOSITORY=smoke/tradejournal\nAUTODEPLOY_CONFIRM_DATABASE={IDENTITY}\n"
+        f"AUTODEPLOY_HOLD_WINDOW=off\nAUTODEPLOY_API_URL={github.url}\nNTFY_URL={github.url}/ntfy\n"
+    )
+    config.chmod(0o600)
+    return github
+
+
+def autodeploy_pass():
+    """Run the unit the timer starts; return the decision it recorded."""
+    # A oneshot start returns when the pass ends, and fails if the pass failed.
+    # A Gmail check can hold the sync lane for a moment; the pass then reports
+    # that it is waiting and records nothing, and the caller tries again.
+    control.run("systemctl", "start", f"{control.AUTODEPLOY}.service")
+    state = control.STATE / "autodeploy/state.json"
+    return json.loads(state.read_text()) if state.exists() else {}
 
 
 def enable_ingress(release, cli):
@@ -255,16 +343,36 @@ def main():
             for relative in ("release.json", "frontend/public/deployment.json"):
                 metadata = json.loads((second / relative).read_text())
                 metadata["release_id"] = second.name
+                metadata["commit"] = NEXT_COMMIT
                 (second / relative).write_text(json.dumps(metadata))
             second_archive = package(second, scratch)
-            cli("install", second_archive, "--sha256", digest(second_archive))
-            cli("activate", second.name, "--confirm-database", IDENTITY)
+            # Upgrade the unattended way: the shipped autodeploy unit polls a
+            # stand-in for GitHub, verifies checksums, installs the controller
+            # and the release, and activates it.
+            github = publish(second, second_archive)
+            try:
+                for _ in range(12):
+                    if autodeploy_pass().get("outcome") == "deployed":
+                        break
+                    time.sleep(5)
+                assert control.current().name == second.name
+                assert Path("/usr/local/sbin/tradejournal-deploy").read_bytes() == (second / "deploy/control.py").read_bytes()
+                assert sentinel.read_text() == "persistent\n"
+                assert webhook()["dup"] is True
+                cli("rollback", "--confirm-database", IDENTITY)
+                assert control.current() == release
+                # The next pass must not put back the build an operator left.
+                assert autodeploy_pass()["outcome"] == "rolled-back"
+                assert control.current() == release
+                assert [title for title, _ in github.notes] == ["TradeJournal updated", "TradeJournal update paused"]
+            finally:
+                github.shutdown()
+                (control.CONFIG / "autodeploy.env").unlink()
             assert sentinel.read_text() == "persistent\n"
             assert webhook()["dup"] is True
-            cli("rollback", "--confirm-database", IDENTITY)
-            assert control.current() == release
-            assert sentinel.read_text() == "persistent\n"
-            assert webhook()["dup"] is True
+            # Only two releases exist, both current or previous: nothing to remove.
+            cli("prune", "--keep", "0")
+            assert release.is_dir() and control.release_path(second.name).is_dir()
         # Boot wiring is inspected; a stop/start tests full process recovery.
         # This is deliberately not labelled a physical VPS reboot test.
         control.stop_services()
@@ -272,10 +380,10 @@ def main():
         assert request("/stats")["total_trades"] == 6
         assert job_status() == "succeeded"
         assert webhook()["dup"] is True
-        print("Native deployment smoke passed: install, migration, proxy, workers, restricted ingress, webhook dedupe, analysis, token-safe proxy logs, backup, timers, phone alerts, API restart, crash restart, upgrade, rollback, persistent state and full restart")
+        print("Native deployment smoke passed: install, migration, proxy, workers, restricted ingress, webhook dedupe, analysis, token-safe proxy logs, backup, timers, phone alerts, API restart, crash restart, unattended upgrade, rollback that stays rolled back, prune, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)
-        subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, control.INGRESS_SERVICE]]], check=False)
+        subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, control.INGRESS_SERVICE, control.AUTODEPLOY]]], check=False)
         control.stop_services()
 
 

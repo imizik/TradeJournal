@@ -17,7 +17,12 @@ async function openWithClock(page: Page, url = "/signals") {
   await page.clock.install();
   await page.goto(url);
   await page.waitForLoadState("networkidle");
-  await page.clock.pauseAt(new Date());
+  // The installed clock keeps running until it is paused, so a time read in
+  // this process can already be in the page's past when pauseAt arrives
+  // ("Cannot fast-forward to the past"). Pause a second ahead of the page's own
+  // clock instead; the page's only timer is the 30s refresh.
+  const now = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(now + 1_000);
 }
 
 async function tick(page: Page) {

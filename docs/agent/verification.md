@@ -14,6 +14,10 @@ bash scripts/verify.sh --frontend
 bash scripts/verify.sh --e2e   # browser smoke tests only (slowest)
 ```
 
+A Claude Code cloud session clones the repository without `backend/.venv` or
+`frontend/node_modules`, so run `setup.sh` there first. Its sandbox ships a
+Chromium that `verify.sh` finds on its own (see [browser tests](#browser-tests)).
+
 `verify.sh` runs every check even after one fails, so one run reports every
 problem. It exits non-zero if any check failed.
 
@@ -47,6 +51,15 @@ over local HTTP. Public DNS and certificate issuance are not covered.
 See [deployment verification](../../deploy/README.md#verification-boundaries).
 It checks boot enablement but does not reboot a real VPS or test Tailscale/live
 integrations. Agent verification is not the only signal.
+
+These checks also decide what reaches production. When CI and the Deployment
+package both pass on a `main` commit, `.github/workflows/release.yml` publishes
+that build, and the VPS installs it outside New York market hours; see
+[automatic deployment](../../deploy/README.md#automatic-deployment). A red
+commit is never published. The decisions the VPS makes are covered by
+`backend/tests/test_autodeploy.py`, and the smoke upgrades through the real
+unit against a local stand-in for GitHub. The Release workflow itself and the
+live GitHub polling run only after a merge.
 
 Review is a separate layer and proves nothing about correctness. Codex reviews
 pull requests through the `chatgpt-codex-connector` GitHub App, which is

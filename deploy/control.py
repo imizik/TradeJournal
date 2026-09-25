@@ -26,14 +26,19 @@ CONFIG = Path("/etc/tradejournal")
 UNITS = Path("/etc/systemd/system")
 SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail")]]
 AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-alerts"]
-TIMERS = [f"{name}.timer" for name in AUTOMATION_SERVICES]
-OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS]
+# Its timer pauses with the others during an operation. Its service is never
+# stopped from here: that service is what runs the controller unattended.
+AUTODEPLOY = "tradejournal-autodeploy"
+TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
+OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
 INGRESS_SERVICE = "tradejournal-ingress"
 OPTIONAL_UNITS.append(f"{INGRESS_SERVICE}.service")
 # The alert check keeps running through a deployment, so a release that fails
 # to come back up still reaches the phone.
 ALERT_UNITS = {"tradejournal-alerts.timer", "tradejournal-alerts.service"}
 BACKUPS = Path("/var/backups/tradejournal")
+# EX_TEMPFAIL: another operation holds the lock. autodeploy.py retries later.
+BUSY = 75
 
 
 def run(*command, **kwargs):
@@ -280,6 +285,30 @@ def activate(release: Path, confirmation: str) -> None:
     print(f"Active release: {release.name}")
 
 
+def prune(keep: int) -> None:
+    """Remove installed releases beyond the newest `keep`, never current or previous.
+
+    Each release is about 1 GB and the disk is shared with PostgreSQL. Older
+    builds remain reinstallable from GitHub releases and Actions artifacts.
+    """
+    protected = {path for path in (current(), current("previous")) if path}
+    releases = []
+    for path in (ROOT / "releases").iterdir():
+        try:
+            release_path(path.name)
+        except ValueError:
+            continue  # Hidden .install- staging directories and anything foreign.
+        if path.is_dir() and not path.is_symlink():
+            releases.append(path.resolve())
+    releases.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in releases[keep:]:
+        if path in protected:
+            continue
+        shutil.rmtree(path)
+        shutil.rmtree(STATE / "frontend-cache" / path.name, ignore_errors=True)
+        print(f"Removed {path.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="action", required=True)
@@ -292,6 +321,7 @@ def main() -> None:
         if action != "identity":
             sub.add_argument("--confirm-database", required=True)
     commands.add_parser("rollback").add_argument("--confirm-database", required=True)
+    commands.add_parser("prune").add_argument("--keep", type=int, required=True)
     commands.add_parser("status")
     args = parser.parse_args()
     if os.geteuid() != 0:
@@ -299,7 +329,10 @@ def main() -> None:
     os.umask(0o022)
     ROOT.mkdir(parents=True, exist_ok=True)
     with (ROOT / "deployment.lock").open("a+b") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            parser.exit(BUSY, "Another deployment operation is running; try again when it finishes\n")
         if args.action == "install":
             install(args.archive, args.sha256)
         elif args.action == "rollback":
@@ -307,6 +340,10 @@ def main() -> None:
             if previous is None:
                 parser.error("No previous release is recorded")
             activate(previous, args.confirm_database)
+        elif args.action == "prune":
+            if args.keep < 0:
+                parser.error("--keep must not be negative")
+            prune(args.keep)
         elif args.action == "status":
             print(f"Current: {current()}\nPrevious: {current('previous')}")
             run("systemctl", "--no-pager", "status", *SERVICES)
