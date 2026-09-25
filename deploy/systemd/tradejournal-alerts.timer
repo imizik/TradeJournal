@@ -1,0 +1,10 @@
+[Unit]
+Description=Check TradeJournal for phone alerts every two minutes
+
+[Timer]
+OnActiveSec=2m
+OnUnitInactiveSec=2m
+Unit=tradejournal-alerts.service
+
+[Install]
+WantedBy=timers.target

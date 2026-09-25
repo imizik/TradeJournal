@@ -25,7 +25,7 @@ STATE = Path("/var/lib/tradejournal")
 CONFIG = Path("/etc/tradejournal")
 UNITS = Path("/etc/systemd/system")
 SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail")]]
-AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline"]
+AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-alerts"]
 # Its timer pauses with the others during an operation. Its service is never
 # stopped from here: that service is what runs the controller unattended.
 AUTODEPLOY = "tradejournal-autodeploy"
@@ -33,6 +33,9 @@ TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.tim
 OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
 INGRESS_SERVICE = "tradejournal-ingress"
 OPTIONAL_UNITS.append(f"{INGRESS_SERVICE}.service")
+# The alert check keeps running through a deployment, so a release that fails
+# to come back up still reaches the phone.
+ALERT_UNITS = {"tradejournal-alerts.timer", "tradejournal-alerts.service"}
 BACKUPS = Path("/var/backups/tradejournal")
 # EX_TEMPFAIL: another operation holds the lock. autodeploy.py retries later.
 BUSY = 75
@@ -180,6 +183,8 @@ def install_units(release: Path) -> None:
 def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
     for service in [INGRESS_SERVICE, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+        if service in ALERT_UNITS:
+            continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
         if result.stdout.strip() == "not-found":
             continue

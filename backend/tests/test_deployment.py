@@ -321,11 +321,21 @@ def test_every_managed_unit_ships_with_the_release():
     assert "tradejournal-worker@gmail" in control.SERVICES
     assert "tradejournal-sync-pipeline.timer" in control.TIMERS
     assert "tradejournal-offsite-backup.timer" in control.TIMERS
+    assert "tradejournal-alerts.timer" in control.TIMERS
     for name in control.OPTIONAL_UNITS:
         assert (systemd / name).is_file(), name
     timer = (systemd / "tradejournal-sync-pipeline.timer").read_text()
     assert "OnCalendar=*-*-* 08:00:00 America/New_York" in timer
     assert "OnCalendar=*-*-* 17:00:00 America/New_York" in timer
+
+
+def test_deployment_stop_leaves_the_alert_check_running(control, monkeypatch):
+    stopped = []
+    monkeypatch.setattr(control.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout="loaded\n", check_returncode=lambda: None))
+    monkeypatch.setattr(control, "run", lambda *command, **kw: stopped.append(command[-1]))
+    control.stop_services()
+    assert "tradejournal-backup.timer" in stopped and "tradejournal-api" in stopped
+    assert not control.ALERT_UNITS & set(stopped)
 
 
 def test_sync_pipeline_waits_out_a_running_sync(monkeypatch):
@@ -344,6 +354,165 @@ def test_sync_pipeline_gives_up_after_its_retry_window(monkeypatch, capsys):
     monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
     automation.sync_pipeline(retry_seconds=0)
     assert "skipped" in capsys.readouterr().out
+
+
+@pytest.fixture
+def alerts(tmp_path, monkeypatch):
+    module = load("alerts")
+    monkeypatch.setattr(module, "STATE_FILE", tmp_path / "alerts" / "state.json")
+    monkeypatch.setattr(module, "ENV_FILE", tmp_path / "missing.env")
+    return module
+
+
+def job_run(job_type, status, finished_at, error=None, label=None):
+    return {"job_type": job_type, "status": status, "finished_at": finished_at, "created_at": finished_at,
+            "error_summary": error, "label": label or job_type}
+
+
+def test_alert_waits_out_its_grace_then_fires_once_and_recovers_once(alerts):
+    down = {"api": alerts.Problem("TradeJournal isn't responding", "refused", 300, "TradeJournal is responding again")}
+    notices, state = alerts.evaluate(down, {}, now=1000)
+    assert notices == []
+    notices, state = alerts.evaluate(down, state, now=1299)
+    assert notices == []
+    notices, state = alerts.evaluate(down, state, now=1300)
+    assert [n["title"] for n in notices] == ["TradeJournal isn't responding"]
+    notices, state = alerts.evaluate(down, state, now=1500)
+    assert notices == []
+    notices, state = alerts.evaluate({"api": None}, state, now=2800)
+    assert notices == [{"keys": ["api"], "recovered": True, "title": "TradeJournal is responding again",
+                        "message": "Resolved after 30 minutes."}]
+    assert state["conditions"] == {}
+
+
+def test_a_blip_shorter_than_the_grace_is_never_mentioned(alerts):
+    down = {"gmail": alerts.gmail_problem({"status": "degraded", "message": "reconnecting"})}
+    _, state = alerts.evaluate(down, {}, now=0)
+    notices, state = alerts.evaluate({"gmail": None}, state, now=120)
+    assert notices == [] and state["conditions"] == {}
+
+
+def test_unknown_conditions_keep_their_state(alerts):
+    failed = {"tradejournal-backup.service": alerts.Problem("Nightly backup failed", "x", 0, "Nightly backup is working again")}
+    _, state = alerts.evaluate(failed, {}, now=0)
+    # After a reboot systemd forgets the failure; that is not a recovery.
+    rebooted = alerts.unit_problems({"tradejournal-backup.service": {
+        "Id": "tradejournal-backup.service", "LoadState": "loaded", "ActiveState": "inactive",
+        "Result": "success", "ExecMainExitTimestampMonotonic": "0"}})
+    assert "tradejournal-backup.service" not in rebooted
+    notices, state = alerts.evaluate(rebooted, state, now=60)
+    assert notices == [] and state["conditions"]["tradejournal-backup.service"]["alerted"]
+    ran = alerts.unit_problems({"tradejournal-backup.service": {
+        "LoadState": "loaded", "ActiveState": "inactive", "Result": "success", "ExecMainExitTimestampMonotonic": "91"}})
+    notices, _ = alerts.evaluate(ran, state, now=86400)
+    assert [n["title"] for n in notices] == ["Nightly backup is working again"]
+
+
+def test_failed_units_and_stopped_timers_are_problems(alerts):
+    observed = alerts.unit_problems({
+        "tradejournal-offsite-backup.service": {"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code"},
+        "tradejournal-backup.timer": {"LoadState": "loaded", "ActiveState": "inactive"},
+        "tradejournal-sync-pipeline.timer": {"LoadState": "loaded", "ActiveState": "active"},
+        "tradejournal-gmail-sync.timer": {"LoadState": "not-found", "ActiveState": "inactive"},
+    })
+    assert observed["tradejournal-offsite-backup.service"].title == "Offsite backup failed"
+    assert observed["tradejournal-backup.timer"].grace == alerts.TIMER_GRACE
+    assert observed["tradejournal-sync-pipeline.timer"] is None
+    assert "tradejournal-gmail-sync.timer" not in observed
+
+
+def test_job_failures_before_alerts_started_are_history(alerts):
+    since = alerts.timestamp("2026-09-24T00:00:00Z")
+    runs = [job_run("daily_review", "failed", "2026-09-23T12:00:00Z", "old news")]
+    assert alerts.job_problems(runs, since, gmail_down=False) == {}
+    runs.insert(0, job_run("daily_review", "failed", "2026-09-24T09:00:00Z", "Anthropic said no\ntraceback", "Daily review generation"))
+    problem = alerts.job_problems(runs, since, gmail_down=False)["job:daily_review"]
+    assert (problem.title, problem.message, problem.grace) == ("Daily review generation failed", "Anthropic said no", 0)
+    runs.insert(0, job_run("daily_review", "succeeded", "2026-09-24T10:00:00Z"))
+    assert alerts.job_problems(runs, since, gmail_down=False) == {"job:daily_review": None}
+
+
+def test_listeners_and_running_jobs_are_not_judged_as_jobs(alerts):
+    runs = [job_run("gmail_sync", "running", None), job_run("webull_listener", "failed", "2026-09-24T09:00:00Z"),
+            job_run("gmail_listener", "failed", "2026-09-24T09:00:00Z")]
+    assert alerts.job_problems(runs, 0, gmail_down=False) == {}
+
+
+def test_gmail_job_failures_defer_to_the_gmail_alert(alerts):
+    runs = [job_run("gmail_sync", "failed", "2026-09-24T09:00:00Z", "Gmail authorization is required.")]
+    assert alerts.job_problems(runs, 0, gmail_down=True) == {}
+    assert alerts.job_problems(runs, 0, gmail_down=False)["job:gmail_sync"].grace == alerts.GMAIL_GRACE
+
+
+def test_interrupted_import_asks_for_a_rebuild(alerts):
+    error = "Worker interrupted; partial work may be committed. Review and start a new run."
+    runs = [job_run("full_pipeline", "failed", "2026-09-24T09:00:00Z", error),
+            job_run("polygon_enrich", "failed", "2026-09-24T09:00:00Z", error)]
+    observed = alerts.job_problems(runs, 0, gmail_down=False)
+    assert "Rebuild trades" in observed["job:full_pipeline"].message
+    assert "Rebuild" not in observed["job:polygon_enrich"].message
+
+
+def test_a_pipeline_and_its_failed_step_arrive_as_one_message(alerts):
+    runs = [job_run("full_pipeline", "failed", "2026-09-24T12:00:05Z", "rebuild broke", "Full sync pipeline"),
+            job_run("trade_rebuild", "failed", "2026-09-24T12:00:04Z", "rebuild broke", "Rebuild trades / FIFO matching")]
+    notices, state = alerts.evaluate(alerts.job_problems(runs, 0, gmail_down=False), {}, now=0)
+    assert len(notices) == 1
+    assert notices[0]["title"] == "2 sync jobs failed"
+    assert sorted(notices[0]["keys"]) == ["job:full_pipeline", "job:trade_rebuild"]
+    assert "• Full sync pipeline failed: rebuild broke" in notices[0]["message"]
+    recovered = {"job:full_pipeline": None, "job:trade_rebuild": None}
+    notices, _ = alerts.evaluate(recovered, state, now=60)
+    assert [n["title"] for n in notices] == ["2 sync jobs are working again"]
+
+
+def test_undelivered_alert_is_retried_and_reported_to_the_dead_mans_switch(alerts, monkeypatch):
+    problem = alerts.Problem("Offsite backup failed", "x", 0, "Offsite backup is working again")
+    monkeypatch.setattr(alerts, "observe", lambda since: {"tradejournal-offsite-backup.service": problem})
+    pings, sent = [], []
+
+    def offline(config, title, message, *, recovered=False):
+        raise OSError("ntfy unreachable")
+
+    monkeypatch.setattr(alerts, "publish", offline)
+    monkeypatch.setattr(alerts, "ping", lambda config, healthy: pings.append(healthy))
+    assert alerts.check({}, now=100) is False
+    assert alerts.read_state()["conditions"]["tradejournal-offsite-backup.service"]["alerted"] is False
+    monkeypatch.setattr(alerts, "publish", lambda config, title, message, **kw: sent.append(title))
+    assert alerts.check({}, now=220) is True
+    assert alerts.check({}, now=340) is True
+    assert sent == ["Offsite backup failed"] and pings == [False, True, True]
+    assert alerts.read_state()["watching_since"] == 100
+
+
+def test_notification_is_posted_as_json_to_the_ntfy_server(alerts, monkeypatch):
+    requests = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr(alerts, "urlopen", lambda request, timeout: requests.append(request) or Response())
+    config = {"NTFY_URL": "https://ntfy.sh/tradejournal-secret", "NTFY_TOKEN": "tk", "ALERT_APP_URL": "https://vps.example.ts.net"}
+    alerts.publish(config, "Gmail needs reconnecting", "Reconnect Gmail.")
+    request = requests[0]
+    assert request.full_url == "https://ntfy.sh/" and request.get_method() == "POST"
+    assert request.get_header("Authorization") == "Bearer tk"
+    assert json.loads(request.data) == {"topic": "tradejournal-secret", "title": "Gmail needs reconnecting",
+                                        "message": "Reconnect Gmail.", "priority": 4, "tags": ["warning"],
+                                        "click": "https://vps.example.ts.net"}
+
+
+def test_systemctl_show_blocks_are_parsed_per_unit(alerts, monkeypatch):
+    output = ("Id=tradejournal-backup.service\nLoadState=loaded\nActiveState=failed\n\n"
+              "Id=tradejournal-backup.timer\nLoadState=loaded\nActiveState=active\n")
+    monkeypatch.setattr(alerts.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout=output))
+    units = alerts.systemd_units()
+    assert units["tradejournal-backup.service"]["ActiveState"] == "failed"
+    assert units["tradejournal-backup.timer"]["ActiveState"] == "active"
 
 
 @pytest.fixture
@@ -527,6 +696,7 @@ def test_busy_controller_exits_with_the_code_autodeploy_retries(control, monkeyp
     monkeypatch.setattr(control.os, "geteuid", lambda: 0)
     monkeypatch.setattr(sys, "argv", ["tradejournal-deploy", "status"])
     monkeypatch.setattr(control.os, "umask", lambda _mask: 0o022)
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
     autodeploy = load("autodeploy")
     with (control.ROOT / "deployment.lock").open("a+b") as held:
         fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)

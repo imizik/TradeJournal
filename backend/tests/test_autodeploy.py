@@ -23,8 +23,11 @@ THURSDAY_5PM_NEW_YORK = datetime(2026, 9, 24, 21, 0, tzinfo=timezone.utc)
 SATURDAY_10AM_NEW_YORK = datetime(2026, 9, 26, 14, 0, tzinfo=timezone.utc)
 
 
+DEPLOY = Path(__file__).resolve().parents[2] / "deploy"
+
+
 def load():
-    path = Path(__file__).resolve().parents[2] / "deploy" / "autodeploy.py"
+    path = DEPLOY / "autodeploy.py"
     spec = importlib.util.spec_from_file_location("deployment_autodeploy", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -109,6 +112,8 @@ class Server:
 
 @pytest.fixture
 def autodeploy(tmp_path, monkeypatch):
+    # It imports its phone-notification sender from deploy/alerts.py.
+    monkeypatch.syspath_prepend(str(DEPLOY))
     module = load()
     monkeypatch.setattr(module, "ROOT", tmp_path / "opt")
     monkeypatch.setattr(module, "STATE", tmp_path / "state")
@@ -130,7 +135,7 @@ def settings(autodeploy, hold="09:25-16:15"):
         hold=autodeploy.parse_hold(hold),
         keep=3,
         api_url="https://api.github.test",
-        ntfy_url="https://ntfy.test/topic",
+        ntfy={"NTFY_URL": "https://ntfy.test/topic"},
     )
 
 
@@ -346,6 +351,7 @@ def test_download_accepts_only_files_matching_the_published_checksums(autodeploy
 
 
 def test_settings_come_from_a_root_only_file(autodeploy, tmp_path, monkeypatch):
+    monkeypatch.setattr(autodeploy, "ALERTS_CONFIG", tmp_path / "alerts.env")
     config = tmp_path / "autodeploy.env"
     assert autodeploy.load_settings(config) is None
     config.write_text("AUTODEPLOY_ENABLED=true\n")
@@ -361,4 +367,29 @@ def test_settings_come_from_a_root_only_file(autodeploy, tmp_path, monkeypatch):
         "AUTODEPLOY_CONFIRM_DATABASE=127.0.0.1:5432/tradejournal\nAUTODEPLOY_HOLD_WINDOW=off\nNTFY_URL=\n"
     )
     loaded = autodeploy.load_settings(config)
-    assert (loaded.enabled, loaded.hold, loaded.keep, loaded.api_url, loaded.ntfy_url) == (True, None, 3, "https://api.github.com", None)
+    assert (loaded.enabled, loaded.hold, loaded.keep, loaded.api_url, loaded.ntfy) == (True, None, 3, "https://api.github.com", {})
+
+    # With no topic of its own it reports on the phone alerts' topic...
+    (tmp_path / "alerts.env").write_text("NTFY_URL=https://ntfy.sh/alerts-topic\nNTFY_TOKEN=tk_secret\nALERT_APP_URL=https://server.ts.net\n")
+    assert autodeploy.load_settings(config).ntfy == {
+        "NTFY_URL": "https://ntfy.sh/alerts-topic", "NTFY_TOKEN": "tk_secret", "ALERT_APP_URL": "https://server.ts.net",
+    }
+    # ...and a topic of its own wins, without mixing in the alerts' token.
+    config.write_text(config.read_text().replace("NTFY_URL=\n", "NTFY_URL=https://ntfy.sh/deploys\n"))
+    assert autodeploy.load_settings(config).ntfy == {"NTFY_URL": "https://ntfy.sh/deploys"}
+
+
+def test_notifications_use_the_alert_sender_and_never_break_a_deploy(autodeploy, monkeypatch):
+    sent = []
+    monkeypatch.setattr(autodeploy, "publish", lambda config, title, message, recovered: sent.append((config["NTFY_URL"], title, recovered)))
+    autodeploy.notify(settings(autodeploy), "TradeJournal updated", "Now running", good_news=True)
+    autodeploy.notify(settings(autodeploy), "TradeJournal update failed", "Rolled back")
+    assert sent == [("https://ntfy.test/topic", "TradeJournal updated", True), ("https://ntfy.test/topic", "TradeJournal update failed", False)]
+
+    def unreachable(*_args, **_kwargs):
+        raise autodeploy.URLError("ntfy.sh unreachable")
+
+    monkeypatch.setattr(autodeploy, "publish", unreachable)
+    autodeploy.notify(settings(autodeploy), "TradeJournal updated", "Now running", good_news=True)
+    no_topic = autodeploy.Settings(**{**settings(autodeploy).__dict__, "ntfy": {}})
+    autodeploy.notify(no_topic, "TradeJournal updated", "Now running")  # no topic: silently nothing

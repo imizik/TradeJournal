@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from datetime import datetime, time, timezone
 import fcntl
 import hashlib
+from http.client import HTTPException
 import json
 import os
 from pathlib import Path
@@ -39,10 +40,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
+from alerts import publish
 from dotenv import dotenv_values
 
 ROOT = Path("/opt/tradejournal")
 CONFIG = Path("/etc/tradejournal/autodeploy.env")
+# Phone alerts' ntfy settings, used unless autodeploy.env names its own topic.
+ALERTS_CONFIG = Path("/etc/tradejournal/alerts.env")
+NTFY_KEYS = ("NTFY_URL", "NTFY_TOKEN", "ALERT_APP_URL")
 STATE = Path("/var/lib/tradejournal/autodeploy")
 CONTROLLER = Path("/usr/local/sbin/tradejournal-deploy")
 BACKUPS = Path("/var/backups/tradejournal")
@@ -73,7 +78,7 @@ class Settings:
     hold: tuple[time, time] | None
     keep: int
     api_url: str
-    ntfy_url: str | None
+    ntfy: dict[str, str]
 
 
 @dataclass(frozen=True)
@@ -108,6 +113,11 @@ def load_settings(path: Path = CONFIG) -> Settings | None:
         return None
     _root_only(path)
     values = dotenv_values(path, interpolate=False)
+    ntfy = {key: values[key] for key in NTFY_KEYS if values.get(key)}
+    if "NTFY_URL" not in ntfy and ALERTS_CONFIG.exists():
+        # One topic for everything this server tells the phone.
+        alerts = dotenv_values(ALERTS_CONFIG, interpolate=False)
+        ntfy = {key: alerts[key] for key in NTFY_KEYS if alerts.get(key)}
     repository = values.get("AUTODEPLOY_REPOSITORY") or ""
     confirm = values.get("AUTODEPLOY_CONFIRM_DATABASE") or ""
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", repository) or not confirm:
@@ -119,7 +129,7 @@ def load_settings(path: Path = CONFIG) -> Settings | None:
         hold=parse_hold(values.get("AUTODEPLOY_HOLD_WINDOW")),
         keep=int(values.get("AUTODEPLOY_KEEP_RELEASES") or 3),
         api_url=(values.get("AUTODEPLOY_API_URL") or GITHUB).rstrip("/"),
-        ntfy_url=values.get("NTFY_URL") or None,
+        ntfy=ntfy,
     )
 
 
@@ -259,16 +269,13 @@ def api_healthy() -> bool:
         return False
 
 
-def notify(settings: Settings, title: str, message: str, *, priority: str = "default", tags: str = "") -> None:
-    if not settings.ntfy_url:
+def notify(settings: Settings, title: str, message: str, *, good_news: bool = False) -> None:
+    """Through the phone alerts' sender, so both land on one topic alike."""
+    if not settings.ntfy.get("NTFY_URL"):
         return
-    headers = {"Title": title, "Priority": priority}
-    if tags:
-        headers["Tags"] = tags
     try:
-        with urlopen(Request(settings.ntfy_url, data=message.encode(), headers=headers, method="POST"), timeout=15):
-            pass
-    except (URLError, TimeoutError) as exc:
+        publish(settings.ntfy, title, message, recovered=good_news)
+    except (OSError, HTTPException) as exc:
         print(f"Phone notification not delivered: {exc}", flush=True)
 
 
@@ -293,10 +300,10 @@ def save_state(state: dict) -> None:
     pending.replace(STATE / "state.json")
 
 
-def record(settings: Settings, state: dict, build: Build, outcome: str, detail: str, *, title: str, priority: str = "default", tags: str = "") -> None:
+def record(settings: Settings, state: dict, build: Build, outcome: str, detail: str, *, title: str) -> None:
     """Remember a decision about a build; notify only the first time it is made."""
     if (state.get("commit"), state.get("outcome")) != (build.commit, outcome):
-        notify(settings, title, detail, priority=priority, tags=tags)
+        notify(settings, title, detail, good_news=outcome == "deployed")
     state.update(commit=build.commit, release=build.release_id, outcome=outcome, detail=detail, at=datetime.now(timezone.utc).isoformat(timespec="seconds"))
     if outcome == "deployed":
         state["deployed"] = build.commit
@@ -341,11 +348,11 @@ def deploy(settings: Settings, *, now: datetime, ignore_hold: bool = False, allo
                 install_controller(source)
                 controller("install", archive, "--sha256", digest)
         except Failed as exc:
-            record(settings, state, build, "failed", f"{short} ({build.title}) could not be installed; the server is unchanged.\n{exc}", title="TradeJournal update failed", priority="high", tags="x")
+            record(settings, state, build, "failed", f"{short} ({build.title}) could not be installed; the server is unchanged.\n{exc}", title="TradeJournal update failed")
             raise
     if schema_changes(ROOT / "current", release):
         if not allow_migration:
-            record(settings, state, build, "needs-migration", f"{short} ({build.title}) changes the database, so it is installed but not live. Ask Claude to apply it; that takes a backup first.", title="TradeJournal update waiting", tags="hourglass")
+            record(settings, state, build, "needs-migration", f"{short} ({build.title}) changes the database, so it is installed but not live. Ask Claude to apply it; that takes a backup first.", title="TradeJournal update waiting")
             return f"Holding {short}: it changes the database schema"
         backup(ROOT / "current")
         try:
@@ -353,19 +360,19 @@ def deploy(settings: Settings, *, now: datetime, ignore_hold: bool = False, allo
         except Failed as exc:
             # migrate checks the owner connection before it stops anything.
             if api_healthy():
-                record(settings, state, build, "failed", f"The database migration for {short} was refused before anything stopped.\n{exc}", title="TradeJournal update failed", priority="high", tags="x")
+                record(settings, state, build, "failed", f"The database migration for {short} was refused before anything stopped.\n{exc}", title="TradeJournal update failed")
             else:
-                record(settings, state, build, "failed", f"The database migration for {short} failed and the app is stopped.\n{exc}", title="TradeJournal is DOWN", priority="urgent", tags="rotating_light")
+                record(settings, state, build, "failed", f"The database migration for {short} failed and the app is stopped.\n{exc}", title="TradeJournal is DOWN")
             raise
     try:
         controller("activate", build.release_id, "--confirm-database", settings.confirm_database)
     except Failed as exc:
         if api_healthy():
-            record(settings, state, build, "failed", f"{short} ({build.title}) failed its health checks, so the server went back to {running['commit'][:12]}.\n{exc}", title="TradeJournal update failed", priority="high", tags="x")
+            record(settings, state, build, "failed", f"{short} ({build.title}) failed its health checks, so the server went back to {running['commit'][:12]}.\n{exc}", title="TradeJournal update failed")
         else:
-            record(settings, state, build, "failed", f"{short} failed to start and the previous release did not come back either.\n{exc}", title="TradeJournal is DOWN", priority="urgent", tags="rotating_light")
+            record(settings, state, build, "failed", f"{short} failed to start and the previous release did not come back either.\n{exc}", title="TradeJournal is DOWN")
         raise
-    record(settings, state, build, "deployed", f"{build.title}\nNow running {short}.", title="TradeJournal updated", tags="white_check_mark")
+    record(settings, state, build, "deployed", f"{build.title}\nNow running {short}.", title="TradeJournal updated")
     try:
         controller("prune", "--keep", settings.keep)
     except (Failed, Waiting) as exc:
