@@ -70,6 +70,10 @@ PURE_MODULES = {
     "app.engine.tradingview",
     "app.engine.tradingview_alerts",
     "app.engine.indicators",
+    # The Isaac Market Map port and its reports. The backtest script fetches
+    # the bars; these only compute on what they are handed.
+    "app.engine.market_map",
+    "app.engine.market_map_report",
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.

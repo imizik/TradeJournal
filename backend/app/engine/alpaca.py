@@ -39,6 +39,7 @@ ALPACA_OPTIONS_FEED = os.environ.get("ALPACA_OPTIONS_FEED", "indicative")
 
 DATA_URL = "https://data.alpaca.markets"
 DAILY_CACHE_TTL_DAYS = 30
+DAILY_CACHE_START_TOLERANCE_DAYS = 7
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "alpaca_cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -201,7 +202,14 @@ def _latest_required_daily_bar_date(end: date) -> date:
     return requested
 
 
-def _daily_cache_covers(path: Path, end: date) -> bool:
+def _daily_cache_covers(path: Path, end: date, start: date | None = None) -> bool:
+    """Whether the cached bars reach `end` and, when given, begin near `start`.
+
+    The cache is one file per ticker shared by every caller, so a file
+    written for a 90-day window must not answer a 400-day request. The start
+    tolerance absorbs weekends and holidays at the front; a ticker that
+    listed after `start` refetches on each such request.
+    """
     if not _daily_cache_valid(path):
         return False
     try:
@@ -211,8 +219,11 @@ def _daily_cache_covers(path: Path, end: date) -> bool:
     if not bars:
         return False
 
-    last_date = max((d for d in (_bar_et_date(bar) for bar in bars) if d is not None), default=None)
-    if last_date is None:
+    dates = [d for d in (_bar_et_date(bar) for bar in bars) if d is not None]
+    if not dates:
+        return False
+    last_date = max(dates)
+    if start is not None and min(dates) > start + timedelta(days=DAILY_CACHE_START_TOLERANCE_DAYS):
         return False
 
     requested_latest_complete = _latest_required_daily_bar_date(end)
@@ -234,7 +245,7 @@ def fetch_daily_bars(tickers: list[str], start: date, end: date) -> dict[str, li
 
     for ticker in tickers:
         cp = _daily_cache_path(ticker)
-        if _daily_cache_covers(cp, end):
+        if _daily_cache_covers(cp, end, start):
             result[ticker] = json.loads(cp.read_text())
         else:
             missing.append(ticker)
