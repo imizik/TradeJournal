@@ -11,12 +11,14 @@ const string MIDDAY_A_HALF = "A only, half size"
 const string MIDDAY_ALLOW = "Allow"
 
 string groupCore = "Core"
-indicatorVersion = input.string("1.0.0", "Indicator version (bump on every signal-affecting change)", group = groupCore)
+indicatorVersion = input.string("1.1.0", "Indicator version (bump on every signal-affecting change)", group = groupCore)
 benchmarkSymbol = input.symbol("AMEX:SPY", "Relative strength benchmark", group = groupCore)
 orMinutes = input.int(5, "Opening range minutes", minval = 1, maxval = 60, group = groupCore)
 atrLength = input.int(14, "Daily ATR length", minval = 2, group = groupCore)
 rvolDays = input.int(10, "RVOL lookback sessions", minval = 2, maxval = 30, group = groupCore)
 rvolMin = input.float(1.5, "RVOL needed for grade A", minval = 0.1, step = 0.1, group = groupCore)
+minRsPct = input.float(1.5, "Min relative strength vs benchmark on the trade's side (%)", minval = 0, step = 0.25, group = groupCore)
+allowShorts = input.bool(false, "Allow shorts", group = groupCore)
 riskPerTrade = input.float(100, "Backtest risk per full-size trade ($)", minval = 1, group = groupCore)
 
 string groupWindows = "Windows (ET, HHMM)"
@@ -24,7 +26,7 @@ openWindowEnd = input.int(1015, "Open window ends", group = groupWindows)
 powerWindowStart = input.int(1400, "Power window starts", group = groupWindows)
 lastEntryTime = input.int(1545, "No entries after", group = groupWindows)
 flatTime = input.int(1555, "Flatten at", group = groupWindows)
-middayMode = input.string(MIDDAY_A_HALF, "Midday entries", options = [MIDDAY_OFF, MIDDAY_A_HALF, MIDDAY_ALLOW], group = groupWindows)
+middayMode = input.string(MIDDAY_OFF, "Midday entries", options = [MIDDAY_OFF, MIDDAY_A_HALF, MIDDAY_ALLOW], group = groupWindows)
 
 string groupRisk = "Risk"
 maxHeatAtr = input.float(0.4, "Max stop distance (x daily ATR)", minval = 0.05, step = 0.05, group = groupRisk)
@@ -50,7 +52,8 @@ allowAvoid = input.bool(false, "Trade avoid-list tickers (capped at B, half size
 string groupSetups = "Setups"
 enableOrb = input.bool(true, "Opening range break", group = groupSetups)
 enableLevelBreaks = input.bool(true, "Prior-day high/low break", group = groupSetups)
-enableRetest = input.bool(true, "Retest of a broken level", group = groupSetups)
+enableRetest = input.bool(true, "Retest of a broken prior-day level", group = groupSetups)
+enableOrbRetest = input.bool(false, "Retest of a broken opening range", group = groupSetups)
 enableHod = input.bool(true, "Power-window HOD/LOD break", group = groupSetups)
 enableVwap = input.bool(true, "VWAP reclaim/loss", group = groupSetups)
 enableOrbFail = input.bool(true, "Failed opening range break", group = groupSetups)
@@ -301,7 +304,7 @@ vwapLoss = isRth and barOfSession >= 2 and close < sessionVwap and close[1] >= s
 
 string longSetup = ""
 float longLevel = na
-if enableRetest and retestLongSignal and ema9 > ema20
+if retestLongSignal and (retestLongSetup == "orb_retest" ? enableOrbRetest : enableRetest) and ema9 > ema20
     longSetup := retestLongSetup
     longLevel := retestLongRef
 else if enableOrb and orbUpCross and longTrend
@@ -322,7 +325,7 @@ else if enableOrbFail and orbFailLong
 
 string shortSetup = ""
 float shortLevel = na
-if enableRetest and retestShortSignal and ema9 < ema20
+if retestShortSignal and (retestShortSetup == "orb_retest" ? enableOrbRetest : enableRetest) and ema9 < ema20
     shortSetup := retestShortSetup
     shortLevel := retestShortRef
 else if enableOrb and orbDownCross and shortTrend
@@ -341,8 +344,8 @@ else if enableOrbFail and orbFailShort
     shortSetup := "orb_fail"
     shortLevel := recentHigh
 
-f_grade(string setup, bool rvolAligned, bool rsAligned) =>
-    string base = setup == "orb_fail" ? (rvolAligned or rsAligned ? "B" : "C") : rvolAligned and rsAligned ? "A" : rvolAligned or rsAligned ? "B" : "C"
+f_grade(string setup, bool rvolAligned, bool rsStrong) =>
+    string base = not rsStrong ? "C" : setup == "orb_fail" ? "B" : rvolAligned ? "A" : "B"
     tier == "avoid" and base == "A" ? "B" : base
 
 f_windowAllows(string grade) =>
@@ -444,11 +447,11 @@ canEnter = tradeSide == 0 and strategy.position_size == 0 and orComplete and m <
 int entrySide = 0
 string entrySetup = ""
 float entryLevel = na
-if canEnter and longSetup != "" and shortSetup == ""
+if canEnter and longSetup != "" and (shortSetup == "" or not allowShorts)
     entrySide := 1
     entrySetup := longSetup
     entryLevel := longLevel
-else if canEnter and shortSetup != "" and longSetup == ""
+else if canEnter and allowShorts and shortSetup != "" and longSetup == ""
     entrySide := -1
     entrySetup := shortSetup
     entryLevel := shortLevel
@@ -456,11 +459,12 @@ else if canEnter and shortSetup != "" and longSetup == ""
 if entrySide != 0
     bool rvolAligned = not na(rvol) and rvol >= rvolMin
     bool rsAligned = not na(rsVsBench) and (entrySide == 1 ? rsVsBench > 0 : rsVsBench < 0)
+    bool rsStrong = not na(rsVsBench) and entrySide * rsVsBench >= minRsPct
     bool gapAligned = na(gapAtr) or (entrySide == 1 ? gapAtr > -0.25 : gapAtr < 0.25)
     bool vwapAligned = entrySide == 1 ? close > sessionVwap : close < sessionVwap
     bool emaAligned = entrySide == 1 ? ema9 > ema20 : ema9 < ema20
     int score = (vwapAligned ? 1 : 0) + (emaAligned ? 1 : 0) + (rvolAligned ? 1 : 0) + (rsAligned ? 1 : 0) + (gapAligned ? 1 : 0)
-    string grade = f_grade(entrySetup, rvolAligned, rsAligned)
+    string grade = f_grade(entrySetup, rvolAligned, rsStrong)
     if f_windowAllows(grade)
         string sizeTag = grade == "A" and window != "midday" and tier != "avoid" ? "full" : "half"
         string sideText = entrySide == 1 ? "long" : "short"

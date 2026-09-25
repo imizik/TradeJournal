@@ -22,7 +22,7 @@ Two sources, both in the repository:
 
 | Finding | Number | Rule in the script |
 |---|---|---|
-| Open (9:30–10) and close (14–16) make money; midday loses on 63% of volume | PF 1.25 / 1.63 vs 0.92 | Signals in the open window and the power window. Midday allows only grade A, at half size (`Midday entries`) |
+| Open (9:30–10) and close (14–16) make money; midday loses on 63% of volume | PF 1.25 / 1.63 vs 0.92 | Signals in the open window and the power window only. Midday is off by default (`Midday entries`) |
 | Winners barely go against you; losers do | Winner heat p90 0.38 ATR, loser p90 1.06 ATR | Stop is the structure level, capped at **0.4 × daily ATR** (`Max stop distance`) |
 | Green trades ridden back to red | 308 trades, peak +$75k, realized −$60k | Stop moves to **breakeven at +0.75R**, and a trail starts at +1.5R |
 | Theta ate the directional edge | Delta+gamma +$74k, theta −$72k | **Time stop**: out after 30 min unless the trade reached +0.5R |
@@ -58,10 +58,15 @@ side of VWAP and EMA 9/20 stacked the same way.
 Priority when several fire on one bar: retest, ORB, prior-day level, HOD/LOD,
 VWAP, failed ORB. If a long and a short fire on the same bar, both are skipped.
 
-**Grade.** A = RVOL ≥ 1.5 at the same time of day **and** relative strength vs
-SPY on the trade's side. B = one of the two. C = neither, and C never signals.
-A failed ORB is counter-trend (PF 1.02 vs 1.13 trend-aligned in the audit), so
-it can never be graded A.
+**Grade (v1.1).** Every signal needs relative strength vs the benchmark of at
+least **1.5% on the trade's side** since the 9:30 open (`Min relative strength`).
+With it, A = RVOL ≥ 1.5 at the same time of day (full size), B = RVOL below
+that (half size). Without it the signal is C, and C never trades. A failed ORB
+is counter-trend, so it is never graded A. v1.0.0 needed only RS above 0; see
+the round 1 results below for why that changed.
+
+**Defaults (v1.1).** Longs only (`Allow shorts` off), no midday entries,
+opening-range retests off, prior-day retests on.
 
 **Limits.** At most 3 entries a day. No more entries after 2 full-stop losses.
 No entries after 15:45.
@@ -78,6 +83,46 @@ extension from VWAP in ATR, risk in ATR, time stop, and entries today.
 
 The backend's scalp scorer still gives its own verdict from live Alpaca data.
 The Pine fields are the reasoning at the moment of the signal.
+
+## Backtest round 1 (v1.0.0)
+
+Strategy Tester exports for MU, META, AAPL, NBIS and SPY on 5m, over the last
+365 days (Oct 2025 – Sep 2026), are in `backend/TradingView/IMM_v1.0.0_*.csv`.
+`backend/scripts/imm_export_cohorts.py` reproduces every number here.
+
+**Overall: 1,432 trades, −32.8R, PF 0.94.** Roughly breakeven. What the
+cohorts showed:
+
+| Cohort | n | R | PF | Every quarter? |
+|---|---|---|---|---|
+| All shorts | 737 | −61.1 | 0.81 | No: negative even when filtered by RS |
+| All longs | 695 | +28.3 | 1.10 | No: Q4 2025 negative |
+| RS on the trade's side ≥ 1.5% | 549 | +55.4 | 1.29 | No: shorts drag it |
+| **Longs with RS ≥ 1.5%** | **270** | **+64.4** | **1.85** | **Yes: PF 1.16 / 1.43 / 2.94 / 1.89, and every ticker positive** |
+| RS 0–1.5% (the old grade allowed these) | 856 | −91.6 | 0.77 | — |
+| Longs with RS ≥ 1.5%, midday | 18 | −2.9 | 0.64 | small n, but agrees with the journal audit |
+| `orb_retest` long, all | 44 | −8.2 | 0.64 | — |
+| SPY (RS against itself is always 0) | 35 | −8.0 | 0.54 | — |
+
+v1.1.0 changes the defaults to match: RS ≥ 1.5% gate, longs only, midday off,
+opening-range retest off. In the longs-with-RS cohort, RVOL added little (every
+bucket below 2.0 was positive), so it now decides size rather than whether
+to trade.
+
+**These results are in-sample.** The filter was found by slicing this
+same year, which was a bull tape (SPY 658 → 760) in which shorts were always
+going to struggle. Treat "longs only" as a regime setting, not a law.
+The honest tests still to come:
+
+1. Re-export v1.1.0 on the same tickers and confirm it reproduces the
+   cohort. The trade sequence changes when cooldowns and daily limits apply
+   to different trades, so the result won't match exactly.
+2. Run it on tickers that weren't in this round (for example AMD, LLY, TSLA,
+   GOOG) and on the prior year, using the Python backtester.
+3. Forward: paper-trade the alerts before trading them live.
+
+SPY cannot produce signals under the RS gate, because its strength against
+itself is 0. Trade SPX/SPXW from a separate strategy, not this one.
 
 ## Set it up in TradingView
 
