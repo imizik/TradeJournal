@@ -16,7 +16,7 @@ import statistics
 from collections import defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from app.engine.market_map import ET, MarketMapConfig, Signal, Trade
@@ -282,11 +282,14 @@ def _fmt(value: float) -> str:
 
 
 def compare_to_export(
-    trades: list[Trade], signals: list[Signal], exported: list[ExportedTrade]
+    trades: list[Trade], signals: list[Signal], exported: list[ExportedTrade], start: date, end: date
 ) -> ParityReport:
     """Match the port's entries to an export on (timestamp, side, setup) and explain the rest.
 
-    Only the days both sides cover are compared. A mismatch is attributed to
+    Compared: the days the backtest ran (`start` to `end`) that fall inside
+    the export's span, first entry to last. The backtest's span is passed in,
+    not read off its output, so a port that misses every entry on a day, or
+    signals nothing at all, reports those entries as missing. A mismatch is attributed to
     the first cause the evidence supports: a knock-on from an earlier
     difference (one side was in a trade, cooling down or at a daily limit), a
     grade that came out differently (RVOL and relative strength depend on the
@@ -294,11 +297,10 @@ def compare_to_export(
     levels, VWAP or EMAs saw different prices).
     """
     closed = [t for t in trades if t.closed]
-    python_days = {_stamp(t.entry_time)[:10] for t in closed} | {_stamp(s.time)[:10] for s in signals}
-    if not python_days or not exported:
+    if not exported:
         return ParityReport()
-    first = max(min(python_days), exported[0].entry_stamp[:10])
-    last = min(max(python_days), exported[-1].entry_stamp[:10])
+    first = max(start.isoformat(), exported[0].entry_stamp[:10])
+    last = min(end.isoformat(), exported[-1].entry_stamp[:10])
 
     def in_range(stamp: str) -> bool:
         return first <= stamp[:10] <= last

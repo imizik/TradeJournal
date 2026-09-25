@@ -109,10 +109,16 @@ def load_bars(
     timeframe: int,
     progress: Callable[[str], None] = lambda _: None,
 ) -> tuple[dict[str, list[Bar]], dict[str, list]]:
-    """Chart bars and daily bars per symbol, from the warm-up start to `end`."""
+    """Chart bars and daily bars per symbol, from the warm-up start to `end`.
+
+    Daily history reaches `ATR_WARMUP_DAYS` further back than the chart
+    bars, whichever source builds it, so ATR is seeded before the first
+    reported session.
+    """
     first = options.start - timedelta(days=options.warmup_days)
+    atr_first = first - timedelta(days=ATR_WARMUP_DAYS)
     minutes: dict[str, list[dict]] = {symbol: [] for symbol in symbols}
-    days = _weekdays(first, options.end)
+    days = _weekdays(atr_first if options.atr_source == "minutes" else first, options.end)
     for index, day in enumerate(days, start=1):
         for symbol, raw in loader.minute_bars(symbols, day).items():
             if symbol in minutes:
@@ -120,17 +126,24 @@ def load_bars(
         if index % 20 == 0 or index == len(days):
             progress(f"  minute bars: {index}/{len(days)} days")
     chart: dict[str, list[Bar]] = {}
+    daily: dict[str, list] = {}
     for symbol, raw in minutes.items():
         bars = bars_from_alpaca(raw)
+        if options.atr_source == "minutes":
+            daily[symbol] = daily_from_bars(bars)
+        bars = [bar for bar in bars if bar.time.astimezone(ET).date() >= first]
         if not options.extended_hours:
             bars = regular_session(bars)
         chart[symbol] = resample(bars, timeframe)
-    if options.atr_source == "minutes":
-        daily = {symbol: daily_from_bars(bars_from_alpaca(raw)) for symbol, raw in minutes.items()}
-    else:
-        raw_daily = loader.daily_bars(symbols, first - timedelta(days=ATR_WARMUP_DAYS), options.end)
+    if options.atr_source == "daily":
+        raw_daily = loader.daily_bars(symbols, atr_first, options.end)
         daily = {symbol: daily_from_alpaca(raw_daily.get(symbol, [])) for symbol in symbols}
     return chart, daily
+
+
+def atr_ready(daily: list, start: date, length: int) -> bool:
+    """Whether at least `length` completed daily bars precede `start`."""
+    return sum(1 for bar in daily if bar.day < start) >= length
 
 
 def run_backtest(
@@ -151,6 +164,12 @@ def run_backtest(
                     f"WARNING: {symbol} daily closes differ from minute closes by >2% on {len(mismatched)} days "
                     f"(first {mismatched[0]}); a split or adjustment would distort ATR. Try --atr-source minutes."
                 )
+    for symbol in symbols:
+        if not atr_ready(daily[symbol], options.start, config.atr_length):
+            progress(
+                f"WARNING: {symbol} has fewer than {config.atr_length} daily bars before {options.start}; "
+                "early sessions have no ATR and cannot trade."
+            )
     results = {}
     for ticker in tickers:
         result = run_market_map(ticker, chart[ticker], daily[ticker], chart[benchmark], config)
@@ -290,7 +309,7 @@ def main(argv: list[str] | None = None, loader_factory: Callable[[], BarLoader] 
             if ticker not in results:
                 continue
             exported = load_tradingview_export(Path(path).read_text(encoding="utf-8-sig"))
-            parity = compare_to_export(results[ticker].trades, results[ticker].signals, exported)
+            parity = compare_to_export(results[ticker].trades, results[ticker].signals, exported, start, end)
             sections.append(parity_text(ticker, parity))
         parity_report = "\n\n".join(sections)
         print("\n== Parity with Strategy Tester exports\n" + parity_report)

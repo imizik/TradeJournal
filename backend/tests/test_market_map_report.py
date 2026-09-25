@@ -137,7 +137,7 @@ def test_the_report_groups_by_every_requested_dimension() -> None:
 def test_parity_with_its_own_export_is_complete() -> None:
     result = _three_trade_run()
     exported = load_tradingview_export(tradingview_csv(result.trades, result.config))
-    report = compare_to_export(result.trades, result.signals, exported)
+    report = compare_to_export(result.trades, result.signals, exported, DAY, NEXT_DAY)
 
     assert report.matched == report.tradingview_entries == len(result.closed_trades)
     assert report.match_rate == 1.0 and report.mismatches == []
@@ -159,13 +159,34 @@ def test_parity_names_a_cause_for_every_mismatch() -> None:
         ExportedTrade(f"{DAY.isoformat()} 10:00", f"{DAY.isoformat()} 10:05", "long", "orb_break", {}),
         *exported[2:],
     ]
-    report = compare_to_export(result.trades, result.signals, sorted(altered, key=lambda e: e.entry_stamp))
+    report = compare_to_export(
+        result.trades, result.signals, sorted(altered, key=lambda e: e.entry_stamp), DAY, NEXT_DAY
+    )
 
     causes = {(m.source, m.stamp): m.cause for m in report.mismatches}
     assert causes[("python", second.entry_stamp)] == "knock-on"
     assert causes[("tradingview", stamp)] == "knock-on"
     assert causes[("tradingview", f"{DAY.isoformat()} 10:00")] == "no signal (prices)"
     assert report.matched == len(exported) - 1
+
+
+
+def test_parity_counts_every_export_entry_even_when_the_port_signals_nothing() -> None:
+    result = _three_trade_run()
+    exported = load_tradingview_export(tradingview_csv(result.trades, result.config))
+    report = compare_to_export([], [], exported, DAY, NEXT_DAY)
+
+    assert (report.tradingview_entries, report.matched, report.python_entries) == (len(exported), 0, 0)
+    assert {m.cause for m in report.mismatches} == {"no signal (prices)"}
+
+
+def test_parity_only_compares_days_the_backtest_ran() -> None:
+    result = _three_trade_run()
+    exported = load_tradingview_export(tradingview_csv(result.trades, result.config))
+    report = compare_to_export(result.trades, result.signals, exported, NEXT_DAY, NEXT_DAY)
+
+    assert report.tradingview_entries == sum(e.entry_stamp.startswith(NEXT_DAY.isoformat()) for e in exported)
+    assert report.match_rate == 1.0
 
 
 # --- the script, end to end with a stub loader ---------------------------------------
@@ -266,3 +287,21 @@ def test_export_names_give_ticker_and_version() -> None:
     assert script.export_ticker("TradingView/IMM_v1.0.0_NASDAQ_MU_2026-09-24.csv") == "MU"
     assert script.export_version("TradingView/IMM_v1.0.0_NASDAQ_MU_2026-09-24.csv") == "1.0.0"
     assert script.find_exports("TradingView/IMM_v1.0.0_*.csv")
+
+
+def test_minute_atr_loads_history_before_the_warm_up_and_warns_when_short(tmp_path, capsys) -> None:
+    script = _load_script()
+    loader = StubLoader()
+    args = ["MU", "--start", DAY.isoformat(), "--end", DAY.isoformat(), "--warmup-days", "1",
+            "--atr-source", "minutes", "--out", str(tmp_path)]
+    script.main(args, loader_factory=lambda: loader)
+
+    assert min(loader.requested_days) <= DAY - timedelta(days=1 + script.ATR_WARMUP_DAYS - 3)
+    # The stub has one prior session of minutes, so ATR cannot be seeded.
+    assert "fewer than 14 daily bars before" in capsys.readouterr().err
+
+
+def test_atr_ready_counts_completed_days_before_the_start() -> None:
+    script = _load_script()
+    assert script.atr_ready(daily_history(DAY, days=14), DAY, 14)
+    assert not script.atr_ready(daily_history(DAY, days=13), DAY, 14)
