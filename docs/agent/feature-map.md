@@ -149,8 +149,11 @@ reason, and ruff lints them without importing them.
 - `docs/tradingview-signal-loop-plan.md` — staged plan for the signal loop
 - `docs/strategy-lab-metrics.md` — metric definitions
 - `docs/strategy-lab-pine-metadata.md` — the `sl1|key=value|...` convention
-- `docs/pine/README.md` — the Isaac Market Map strategy/alert script, the
+- `docs/pine/README.md` — the Isaac Market Map strategy/alert script (parked), the
   journal evidence behind each rule, and TradingView setup
+- `docs/pine/research-framework.md` — the Pine research spec that replaced it
+- `docs/pine/intraday_reclaim.md` — the spec's first build, how each rule was
+  read, and the run → export → `scripts/pine_research_report.py` workflow
 
 ## Where things are NOT
 
@@ -160,9 +163,11 @@ reason, and ruff lints them without importing them.
   decision support and never places orders.
 - No component-level frontend tests; the Playwright smoke tests are the only
   frontend coverage, and they are smoke depth.
-- The Pine script (`docs/pine/isaac_market_map.pine`) is contract-tested by
-  `backend/tests/test_pine_market_map.py` but never compiled or backtested
-  in CI; TradingView is the only place it runs.
+- The Pine scripts (`docs/pine/isaac_market_map.pine`,
+  `docs/pine/intraday_reclaim.pine`) are contract-tested by
+  `backend/tests/test_pine_market_map.py` and
+  `backend/tests/test_pine_intraday_reclaim.py` but never compiled or
+  backtested in CI; TradingView is the only place they run.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig

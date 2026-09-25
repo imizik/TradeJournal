@@ -1,5 +1,10 @@
 # Isaac Market Map
 
+> **Parked (September 25, 2026).** Pine research moved to the
+> [research framework](research-framework.md); its first build is
+> [intraday_reclaim.md](intraday_reclaim.md). This script stays because it is
+> still the only one that sends v1 alerts to the webhook ingress.
+
 `isaac_market_map.pine` is Step 5 of the
 [TradingView signal loop](../tradingview-signal-loop-plan.md): one Pine v6
 `strategy()` that both backtests in TradingView's Strategy Tester and sends

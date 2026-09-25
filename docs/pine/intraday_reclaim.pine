@@ -1,0 +1,423 @@
+//@version=6
+strategy("Intraday Reclaim v0.1", shorttitle = "IR 0.1", overlay = true, pyramiding = 0, process_orders_on_close = false, calc_on_every_tick = false, calc_on_order_fills = false, initial_capital = 100000, margin_long = 0, margin_short = 0, commission_value = 0, slippage = 1, max_labels_count = 500)
+
+// Intraday reclaim/rejection: the first build in docs/pine/research-framework.md.
+// "Rule n" below is the numbered list in that document's "First build" section;
+// docs/pine/intraday_reclaim.md records how each rule was read.
+
+const string STRATEGY_KEY = "intraday_reclaim"
+const string VERSION = "0.1.0"
+const string ALERT_SCHEMA = "tj.pine.research.0"
+const string TZ = "America/New_York"
+const string DIR_BOTH = "Both"
+const string DIR_LONG = "Long only"
+const string DIR_SHORT = "Short only"
+
+// Baseline preset: the framework's proposed research defaults, not values
+// fitted to the journal. Changing any of them makes a new version.
+const int BASE_EMA_LENGTH = 9
+const int BASE_ATR_LENGTH = 14
+const float BASE_STOP_BUFFER_ATR = 0.1
+const float BASE_CHASE_LIMIT_ATR = 1.0
+const int BASE_CONFIRM_BARS = 3
+const float BASE_TARGET_R = 1.5
+const int BASE_MAX_HOLD_MIN = 20
+const int BASE_ENTRY_START = 935
+const int BASE_ENTRY_END = 1500
+const int BASE_MAX_ENTRIES = 2
+const int BASE_MAX_LOSSES = 2
+const float BASE_MAX_SESSION_LOSS_R = 2.0
+
+string groupPreset = "Preset"
+usePreset = input.bool(true, "Use the v0.1 baseline preset (the inputs below are ignored)", group = groupPreset)
+variantInput = input.string("custom", "Variant label when the preset is off", group = groupPreset)
+directionMode = input.string(DIR_BOTH, "Direction", options = [DIR_BOTH, DIR_LONG, DIR_SHORT], group = groupPreset)
+riskBudget = input.float(100, "Simulated risk per trade ($)", minval = 1, group = groupPreset)
+
+string groupSetup = "Setup"
+emaLengthInput = input.int(BASE_EMA_LENGTH, "EMA length", minval = 1, group = groupSetup)
+atrLengthInput = input.int(BASE_ATR_LENGTH, "ATR length (chart timeframe)", minval = 1, group = groupSetup)
+confirmBarsInput = input.int(BASE_CONFIRM_BARS, "Confirmation window (bars)", minval = 1, group = groupSetup)
+chaseLimitInput = input.float(BASE_CHASE_LIMIT_ATR, "Max distance from VWAP at confirmation (ATR)", minval = 0.1, step = 0.1, group = groupSetup)
+entryStartInput = input.int(BASE_ENTRY_START, "Entries from (ET, HHMM)", group = groupSetup)
+entryEndInput = input.int(BASE_ENTRY_END, "Entries until (ET, HHMM)", group = groupSetup)
+
+string groupRisk = "Risk and exits"
+stopBufferInput = input.float(BASE_STOP_BUFFER_ATR, "Stop buffer beyond the setup extreme (ATR)", minval = 0, step = 0.05, group = groupRisk)
+targetRInput = input.float(BASE_TARGET_R, "Target (R)", minval = 0.1, step = 0.1, group = groupRisk)
+maxHoldInput = input.int(BASE_MAX_HOLD_MIN, "Maximum hold (minutes)", minval = 1, group = groupRisk)
+maxEntriesInput = input.int(BASE_MAX_ENTRIES, "Max entries per session", minval = 1, group = groupRisk)
+maxLossesInput = input.int(BASE_MAX_LOSSES, "No new entries after this many losing trades", minval = 1, group = groupRisk)
+maxSessionLossInput = input.float(BASE_MAX_SESSION_LOSS_R, "No new entries after a session loss of (R)", minval = 0.5, step = 0.5, group = groupRisk)
+
+string groupOutput = "Output"
+alertAllEvents = input.bool(false, "Also alert on armed, cancelled and filled", group = groupOutput)
+logEvents = input.bool(true, "Write every event to Pine Logs", group = groupOutput)
+showTable = input.bool(true, "Show status table", group = groupOutput)
+
+emaLength = usePreset ? BASE_EMA_LENGTH : emaLengthInput
+atrLength = usePreset ? BASE_ATR_LENGTH : atrLengthInput
+confirmBars = usePreset ? BASE_CONFIRM_BARS : confirmBarsInput
+chaseLimitAtr = usePreset ? BASE_CHASE_LIMIT_ATR : chaseLimitInput
+entryStart = usePreset ? BASE_ENTRY_START : entryStartInput
+entryEnd = usePreset ? BASE_ENTRY_END : entryEndInput
+stopBufferAtr = usePreset ? BASE_STOP_BUFFER_ATR : stopBufferInput
+targetR = usePreset ? BASE_TARGET_R : targetRInput
+maxHoldMin = usePreset ? BASE_MAX_HOLD_MIN : maxHoldInput
+maxEntries = usePreset ? BASE_MAX_ENTRIES : maxEntriesInput
+maxLosses = usePreset ? BASE_MAX_LOSSES : maxLossesInput
+maxSessionLossR = usePreset ? BASE_MAX_SESSION_LOSS_R : maxSessionLossInput
+
+allowLong = directionMode != DIR_SHORT
+allowShort = directionMode != DIR_LONG
+directionText = directionMode == DIR_LONG ? "long" : directionMode == DIR_SHORT ? "short" : "both"
+customLabel = str.match(variantInput, "^[A-Za-z0-9._-]{1,32}$") != "" ? variantInput : "custom"
+variant = (usePreset ? "baseline" : customLabel) + (directionMode == DIR_BOTH ? "" : "-" + directionText)
+// Every order and alert carries this, so a run can't be misattributed later.
+cfg = "ema" + str.tostring(emaLength) + "_atr" + str.tostring(atrLength) + "_buf" + str.tostring(stopBufferAtr) + "_chase" + str.tostring(chaseLimitAtr) + "_win" + str.tostring(confirmBars) + "_tgt" + str.tostring(targetR) + "_hold" + str.tostring(maxHoldMin) + "_t" + str.tostring(entryStart) + "-" + str.tostring(entryEnd) + "_ent" + str.tostring(maxEntries) + "_loss" + str.tostring(maxLosses) + "_dd" + str.tostring(maxSessionLossR) + "_dir" + directionText + "_risk" + str.tostring(riskBudget)
+
+f_minutes(int hhmm) =>
+    math.floor(hhmm / 100) * 60 + hhmm % 100
+
+f_num(float value) =>
+    na(value) ? "null" : str.tostring(value, "#.######")
+
+f_int(int value) =>
+    na(value) ? "null" : str.tostring(value, "#")
+
+f_text(string value) =>
+    '"' + value + '"'
+
+f_textOrNull(string value) =>
+    value == "" ? "null" : f_text(value)
+
+f_kv(string key, string value) =>
+    '"' + key + '":' + value
+
+f_sl1(string key, string value) =>
+    "|" + key + "=" + value
+
+f_signedR(float value) =>
+    na(value) ? "n/a" : (value >= 0 ? "+" : "") + str.tostring(value, "#.##") + "R"
+
+tickerSymbol = str.upper(syminfo.ticker)
+exchangeName = str.upper(syminfo.prefix)
+timeframeText = timeframe.period
+
+// Rule 1: session VWAP resets on the first regular-hours bar. The session
+// flags follow the exchange calendar, so early closes need no clock time.
+closeMinute = hour(time_close, TZ) * 60 + minute(time_close, TZ)
+entryStartMin = f_minutes(entryStart)
+entryEndMin = f_minutes(entryEnd)
+inRth = session.ismarket
+firstRthBar = session.isfirstbar_regular
+lastRthBar = session.islastbar_regular
+
+sessionVwap = ta.vwap(hlc3, firstRthBar)
+emaFast = ta.ema(close, emaLength)
+atrValue = ta.atr(atrLength)
+
+var bool sawSessionStart = false
+if firstRthBar
+    sawSessionStart := true
+
+// Unsupported or missing data means no trade, never a guess.
+supportedChart = timeframe.isminutes and timeframe.multiplier <= 5 and chart.is_standard
+supportedSymbol = syminfo.type == "stock" or syminfo.type == "fund" or syminfo.type == "dr"
+dataReady = sawSessionStart and not na(sessionVwap) and not na(emaFast) and not na(atrValue) and atrValue > 0 and nz(volume) > 0
+blockedReason = not supportedChart ? "chart: use 1-5 minute standard candles" : not supportedSymbol ? "symbol type " + syminfo.type : not dataReady ? "no session data yet" : ""
+
+var int entriesToday = 0
+var int lossesToday = 0
+var float sessionR = 0.0
+var bool halted = false
+
+var int armDir = 0
+var int armBar = na
+var float triggerLevel = na
+var float setupHigh = na
+var float setupLow = na
+var string setupId = ""
+var string lastCancel = ""
+
+var int tradeDir = 0
+var string tradeSetupId = ""
+var float tradeSignalClose = na
+var float tradeStop = na
+var float tradeTarget = na
+var float tradeRiskPlan = na
+var float tradeFill = na
+var int tradeFillTime = na
+var bool pendingEntry = false
+var string pendingCloseReason = ""
+var int bookedTrades = 0
+
+var int runTrades = 0
+var float runR = 0.0
+var float runWinR = 0.0
+var float runLossR = 0.0
+var float runPeakR = 0.0
+var float runMaxDrawdownR = 0.0
+var int runAmbiguous = 0
+var float runStopFirstR = 0.0
+
+bool armedLongNow = false
+bool armedShortNow = false
+bool cancelledLongNow = false
+bool cancelledShortNow = false
+
+f_setupId(int dir, int armCloseMs) =>
+    "ir:" + VERSION + ":" + exchangeName + ":" + tickerSymbol + ":" + timeframeText + ":" + str.tostring(armCloseMs, "#") + ":" + (dir == 1 ? "long" : "short")
+
+// Rule 8: research alerts. No "v" key, so the v1 webhook ingress rejects them
+// until an explicit integration step.
+f_event(string eventName, string reason, int dir, string sid, float triggerPrice, float entryRef, float fillPrice, float stopPrice, float targetPrice, float riskPerShare, float qty, float exitPrice, float rValue, float entrySlipR, float exitOvershootR, float holdMin) =>
+    string json = "{"
+    json += f_kv("schema", f_text(ALERT_SCHEMA)) + ","
+    json += f_kv("strategy", f_text(STRATEGY_KEY)) + ","
+    json += f_kv("version", f_text(VERSION)) + ","
+    json += f_kv("variant", f_text(variant)) + ","
+    json += f_kv("cfg", f_text(cfg)) + ","
+    json += f_kv("event", f_text(eventName)) + ","
+    json += f_kv("reason", f_textOrNull(reason)) + ","
+    json += f_kv("setup_id", f_text(sid)) + ","
+    json += f_kv("ticker", f_text(tickerSymbol)) + ","
+    json += f_kv("exchange", f_text(exchangeName)) + ","
+    json += f_kv("timeframe", f_text(timeframeText)) + ","
+    json += f_kv("bar_close_ms", f_int(time_close)) + ","
+    json += f_kv("side", f_text(dir == 1 ? "long" : "short")) + ","
+    json += f_kv("trigger", f_num(triggerPrice)) + ","
+    json += f_kv("entry_ref", f_num(entryRef)) + ","
+    json += f_kv("fill", f_num(fillPrice)) + ","
+    json += f_kv("stop", f_num(stopPrice)) + ","
+    json += f_kv("target", f_num(targetPrice)) + ","
+    json += f_kv("risk_ps", f_num(riskPerShare)) + ","
+    json += f_kv("qty", f_num(qty)) + ","
+    json += f_kv("exit_price", f_num(exitPrice)) + ","
+    json += f_kv("r", f_num(rValue)) + ","
+    json += f_kv("entry_slip_r", f_num(entrySlipR)) + ","
+    json += f_kv("exit_overshoot_r", f_num(exitOvershootR)) + ","
+    json += f_kv("hold_min", f_num(holdMin))
+    json + "}"
+
+f_emit(string payload, bool sendAlert) =>
+    if logEvents
+        log.info("{0}", payload)
+    if sendAlert
+        alert(payload, alert.freq_all)
+    true
+
+// Strategy Lab metadata (docs/strategy-lab-pine-metadata.md). Entry keys and
+// exit keys must never overlap.
+f_entryComment(string sid, int barsToConfirm, float triggerPrice, float stopPrice, float riskPerShare, float vwapDistAtr) =>
+    string metadata = "sl1"
+    metadata += f_sl1("ver", VERSION)
+    metadata += f_sl1("variant", variant)
+    metadata += f_sl1("cfg", cfg)
+    metadata += f_sl1("setup_id", sid)
+    metadata += f_sl1("bars_to_confirm", f_int(barsToConfirm))
+    metadata += f_sl1("signal_close", f_num(close))
+    metadata += f_sl1("trigger", f_num(triggerPrice))
+    metadata += f_sl1("stop", f_num(stopPrice))
+    metadata += f_sl1("target_r", f_num(targetR))
+    metadata += f_sl1("risk_ps", f_num(riskPerShare))
+    metadata += f_sl1("atr", f_num(atrValue))
+    metadata += f_sl1("vwap_dist_atr", f_num(vwapDistAtr))
+    metadata += f_sl1("tick", f_num(syminfo.mintick))
+    metadata
+
+f_exitComment(string reason) =>
+    "sl1" + f_sl1("exit_reason", reason)
+
+// 1. Book the trade the broker emulator closed since the last bar. This runs
+// before the session reset so a trade flattened at the close counts toward
+// the session it belongs to.
+if strategy.closedtrades > bookedTrades
+    int k = strategy.closedtrades - 1
+    float entryPrice = strategy.closedtrades.entry_price(k)
+    float exitPrice = strategy.closedtrades.exit_price(k)
+    float closedQty = math.abs(strategy.closedtrades.size(k))
+    float pnl = strategy.closedtrades.profit(k)
+    // Rule 5: R is the actual fill to the frozen stop.
+    float riskActual = tradeDir * (entryPrice - tradeStop)
+    float riskUsed = riskActual > 0 ? riskActual : tradeRiskPlan
+    float rValue = pnl / (closedQty * riskUsed)
+    string reason = pendingCloseReason != "" ? pendingCloseReason : tradeDir * (exitPrice - tradeTarget) >= 0 ? "target" : "stop"
+    float overshootR = reason == "stop" ? tradeDir * (tradeStop - exitPrice) / riskUsed : na
+    int exitBar = strategy.closedtrades.exit_bar_index(k)
+    // Rule 6: a target fill on a bar whose range also reached the stop is
+    // ambiguous. Count it, and keep a stop-first total beside the real one.
+    bool touchedStop = tradeDir == 1 ? low <= tradeStop : high >= tradeStop
+    bool ambiguous = reason == "target" and exitBar == bar_index and touchedStop
+    int entryTime = strategy.closedtrades.entry_time(k)
+    int exitTime = strategy.closedtrades.exit_time(k)
+    float holdMin = (exitTime - entryTime) / 60000.0
+    if pendingEntry
+        // Opened and closed on the same bar.
+        pendingEntry := false
+        tradeFill := entryPrice
+        tradeFillTime := entryTime
+        f_emit(f_event("filled", "", tradeDir, tradeSetupId, na, tradeSignalClose, entryPrice, tradeStop, tradeTarget, riskUsed, closedQty, na, na, tradeDir * (entryPrice - tradeSignalClose) / tradeRiskPlan, na, na), alertAllEvents)
+    sessionR += rValue
+    if pnl < 0
+        lossesToday += 1
+    // Rule 7.
+    if lossesToday >= maxLosses or sessionR <= -maxSessionLossR
+        halted := true
+    runTrades += 1
+    runR += rValue
+    runStopFirstR += ambiguous ? -1.0 : rValue
+    runAmbiguous += ambiguous ? 1 : 0
+    if rValue > 0
+        runWinR += rValue
+    else
+        runLossR -= rValue
+    runPeakR := math.max(runPeakR, runR)
+    runMaxDrawdownR := math.max(runMaxDrawdownR, runPeakR - runR)
+    f_emit(f_event("closed", reason, tradeDir, tradeSetupId, na, tradeSignalClose, entryPrice, tradeStop, tradeTarget, riskUsed, closedQty, exitPrice, rValue, na, overshootR, holdMin), true)
+    string tip = tradeSetupId + "\nentry " + str.format_time(entryTime, "HH:mm", TZ) + " @ " + str.tostring(entryPrice, format.mintick) + "\nstop " + str.tostring(tradeStop, format.mintick) + " · target " + str.tostring(tradeTarget, format.mintick) + "\nexit " + str.format_time(exitTime, "HH:mm", TZ) + " @ " + str.tostring(exitPrice, format.mintick) + " (" + reason + ")\nhold " + str.tostring(holdMin, "#") + " min" + (ambiguous ? "\nthe stop was inside the exit bar too" : "")
+    label.new(exitBar, exitPrice, reason + " " + f_signedR(rValue), style = label.style_label_left, color = rValue > 0 ? color.new(color.green, 20) : color.new(color.red, 20), textcolor = color.white, size = size.small, tooltip = tip)
+    strategy.cancel(tradeDir == 1 ? "L exit" : "S exit")
+    tradeDir := 0
+    pendingCloseReason := ""
+    bookedTrades := strategy.closedtrades
+
+if firstRthBar
+    entriesToday := 0
+    lossesToday := 0
+    sessionR := 0.0
+    halted := false
+
+// 2. The entry filled at this bar's open. Rule 6: move the target to 1.5R
+// from the actual fill. The stop stays frozen.
+if pendingEntry and strategy.position_size != 0
+    pendingEntry := false
+    tradeFill := strategy.opentrades.entry_price(0)
+    tradeFillTime := strategy.opentrades.entry_time(0)
+    float fillRisk = tradeDir * (tradeFill - tradeStop)
+    if fillRisk > 0
+        tradeTarget := math.round_to_mintick(tradeFill + tradeDir * targetR * fillRisk)
+        strategy.exit(tradeDir == 1 ? "L exit" : "S exit", from_entry = tradeDir == 1 ? "L" : "S", stop = tradeStop, limit = tradeTarget, comment = f_exitComment("stop"), comment_profit = f_exitComment("target"), comment_loss = f_exitComment("stop"))
+    f_emit(f_event("filled", "", tradeDir, tradeSetupId, na, tradeSignalClose, tradeFill, tradeStop, tradeTarget, fillRisk > 0 ? fillRisk : tradeRiskPlan, math.abs(strategy.position_size), na, na, tradeDir * (tradeFill - tradeSignalClose) / tradeRiskPlan, na, na), alertAllEvents)
+else if pendingEntry
+    pendingEntry := false
+
+// 3. Rule 6: session exit on the last regular bar, filled at its close;
+// otherwise the maximum hold, filled at the next bar's open.
+if strategy.position_size != 0 and pendingCloseReason == ""
+    if lastRthBar or not inRth
+        strategy.close_all(comment = f_exitComment("session"), immediately = true)
+        pendingCloseReason := "session"
+        f_emit(f_event("exit_signal", "session", tradeDir, tradeSetupId, na, na, tradeFill, tradeStop, tradeTarget, na, na, close, na, na, na, na), true)
+    else if time_close - tradeFillTime >= maxHoldMin * 60000
+        strategy.close(tradeDir == 1 ? "L" : "S", comment = f_exitComment("time"))
+        pendingCloseReason := "time"
+        f_emit(f_event("exit_signal", "time", tradeDir, tradeSetupId, na, na, tradeFill, tradeStop, tradeTarget, na, na, close, na, na, na, na), true)
+
+canTrade = blockedReason == "" and not halted and entriesToday < maxEntries
+
+// 4. Rules 3-5: confirm, cancel or expire the armed setup. Cancelling wins
+// when a bar would do both, and a setup triggers at most once.
+if armDir != 0 and bar_index > armBar
+    setupHigh := math.max(setupHigh, high)
+    setupLow := math.min(setupLow, low)
+    bool lostVwap = armDir == 1 ? close < sessionVwap : close > sessionVwap
+    bool brokeTrigger = armDir == 1 ? close > triggerLevel : close < triggerLevel
+    float vwapDistAtr = armDir * (close - sessionVwap) / atrValue
+    string cancelReason = ""
+    if not canTrade
+        cancelReason := halted ? "halted" : entriesToday >= maxEntries ? "entry_limit" : "no_data"
+    else if lastRthBar or firstRthBar or not inRth
+        cancelReason := "session_end"
+    else if lostVwap
+        cancelReason := "vwap"
+    else if brokeTrigger and (closeMinute < entryStartMin or closeMinute > entryEndMin)
+        cancelReason := "window"
+    else if brokeTrigger and vwapDistAtr > chaseLimitAtr
+        cancelReason := "chase"
+    else if brokeTrigger
+        float stopPrice = math.round_to_mintick(armDir == 1 ? setupLow - stopBufferAtr * atrValue : setupHigh + stopBufferAtr * atrValue)
+        float riskPerShare = armDir * (close - stopPrice)
+        int qty = riskPerShare > 0 ? math.min(math.floor(riskBudget / riskPerShare), math.floor(strategy.equity / close)) : 0
+        if qty < 1
+            cancelReason := "size"
+        else
+            float targetPrice = math.round_to_mintick(close + armDir * targetR * riskPerShare)
+            string entryId = armDir == 1 ? "L" : "S"
+            strategy.entry(entryId, armDir == 1 ? strategy.long : strategy.short, qty = qty, comment = f_entryComment(setupId, bar_index - armBar, triggerLevel, stopPrice, riskPerShare, vwapDistAtr))
+            strategy.exit(entryId + " exit", from_entry = entryId, stop = stopPrice, limit = targetPrice, comment = f_exitComment("stop"), comment_profit = f_exitComment("target"), comment_loss = f_exitComment("stop"))
+            tradeDir := armDir
+            tradeSetupId := setupId
+            tradeSignalClose := close
+            tradeStop := stopPrice
+            tradeTarget := targetPrice
+            tradeRiskPlan := riskPerShare
+            tradeFill := na
+            tradeFillTime := na
+            pendingEntry := true
+            pendingCloseReason := ""
+            entriesToday += 1
+            f_emit(f_event("triggered", "", armDir, setupId, triggerLevel, close, na, stopPrice, targetPrice, riskPerShare, qty, na, na, na, na, na), true)
+            label.new(bar_index, armDir == 1 ? low : high, (armDir == 1 ? "L " : "S ") + str.tostring(qty) + " · risk " + str.tostring(riskPerShare, format.mintick), style = armDir == 1 ? label.style_label_up : label.style_label_down, color = armDir == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0), textcolor = color.white, size = size.small, tooltip = setupId + "\nstop " + str.tostring(stopPrice, format.mintick) + " · target " + str.tostring(targetPrice, format.mintick) + "\nfills at the next bar's open")
+            armDir := 0
+    else if bar_index - armBar >= confirmBars
+        cancelReason := "expired"
+    if cancelReason != ""
+        cancelledLongNow := armDir == 1
+        cancelledShortNow := armDir == -1
+        lastCancel := cancelReason + " " + str.format_time(time_close, "HH:mm", TZ)
+        f_emit(f_event("cancelled", cancelReason, armDir, setupId, triggerLevel, close, na, na, na, na, na, na, na, na, na, na), alertAllEvents)
+        armDir := 0
+
+// 5. Rule 2: arm on a completed reclaim (long) or rejection (short) of VWAP.
+// Only while flat, never on the session's first or last bar, and never after
+// the entry window.
+flatNow = strategy.position_size == 0 and not pendingEntry
+canArm = canTrade and flatNow and armDir == 0 and inRth and not firstRthBar and not lastRthBar and closeMinute <= entryEndMin
+longArm = canArm and allowLong and close[1] <= sessionVwap[1] and close > sessionVwap and close > emaFast
+shortArm = canArm and allowShort and close[1] >= sessionVwap[1] and close < sessionVwap and close < emaFast
+if longArm or shortArm
+    armDir := longArm ? 1 : -1
+    armBar := bar_index
+    triggerLevel := longArm ? high : low
+    setupHigh := high
+    setupLow := low
+    setupId := f_setupId(armDir, time_close)
+    armedLongNow := longArm
+    armedShortNow := shortArm
+    f_emit(f_event("armed", "", armDir, setupId, triggerLevel, close, na, na, na, na, na, na, na, na, na, na), alertAllEvents)
+
+inTrade = strategy.position_size != 0
+plot(sessionVwap, "Session VWAP", color = color.new(color.orange, 0), linewidth = 2)
+plot(emaFast, "EMA", color = color.new(color.aqua, 20))
+plot(armDir != 0 ? triggerLevel : na, "Armed trigger", color = color.new(color.yellow, 0), style = plot.style_linebr)
+plot(inTrade ? tradeStop : na, "Frozen stop", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
+plot(inTrade ? tradeTarget : na, "Target", color = color.new(color.lime, 0), linewidth = 2, style = plot.style_linebr)
+plotshape(armedLongNow, title = "Armed long", style = shape.triangleup, location = location.belowbar, color = color.new(color.teal, 30), size = size.tiny)
+plotshape(armedShortNow, title = "Armed short", style = shape.triangledown, location = location.abovebar, color = color.new(color.maroon, 30), size = size.tiny)
+plotshape(cancelledLongNow, title = "Cancelled long", style = shape.xcross, location = location.belowbar, color = color.new(color.gray, 0), size = size.tiny)
+plotshape(cancelledShortNow, title = "Cancelled short", style = shape.xcross, location = location.abovebar, color = color.new(color.gray, 0), size = size.tiny)
+
+var table status = table.new(position.top_right, 2, 7, bgcolor = color.new(color.black, 20), border_width = 1)
+if showTable and barstate.islast
+    string stateText = blockedReason != "" ? "no trade: " + blockedReason : inTrade ? (tradeDir == 1 ? "in long" : "in short") + (pendingCloseReason != "" ? ", closing: " + pendingCloseReason : "") : pendingEntry ? "entry pending" : armDir != 0 ? (armDir == 1 ? "armed long" : "armed short") + ", bar " + str.tostring(bar_index - armBar) + "/" + str.tostring(confirmBars) : not canTrade ? "done for the session" : "flat" + (lastCancel != "" ? " · last cancel: " + lastCancel : "")
+    float openR = inTrade and not na(tradeFill) and tradeDir * (tradeFill - tradeStop) > 0 ? (close - tradeFill) / (tradeFill - tradeStop) : na
+    string levelsText = inTrade ? "stop " + str.tostring(tradeStop, format.mintick) + " · target " + str.tostring(tradeTarget, format.mintick) + " · open " + f_signedR(openR) : armDir != 0 ? "trigger " + str.tostring(triggerLevel, format.mintick) : "-"
+    string sessionText = str.tostring(entriesToday) + "/" + str.tostring(maxEntries) + " entries · " + str.tostring(lossesToday) + " losses · " + f_signedR(sessionR)
+    string profitFactorText = runLossR > 0 ? str.tostring(runWinR / runLossR, "#.##") : "n/a"
+    string runText = str.tostring(runTrades) + " trades · " + f_signedR(runR) + " · PF " + profitFactorText + " · max DD " + str.tostring(runMaxDrawdownR, "#.#") + "R"
+    string fillCheckText = str.tostring(runAmbiguous) + " ambiguous target bars · stop-first " + f_signedR(runStopFirstR)
+    table.cell(status, 0, 0, "Intraday Reclaim", text_color = color.silver)
+    table.cell(status, 1, 0, VERSION + " · " + variant, text_color = usePreset ? color.lime : color.orange)
+    table.cell(status, 0, 1, "State", text_color = color.silver)
+    table.cell(status, 1, 1, stateText, text_color = blockedReason != "" ? color.red : color.white)
+    table.cell(status, 0, 2, "Levels", text_color = color.silver)
+    table.cell(status, 1, 2, levelsText, text_color = color.white)
+    table.cell(status, 0, 3, "Session", text_color = color.silver)
+    table.cell(status, 1, 3, sessionText, text_color = halted ? color.red : color.white)
+    table.cell(status, 0, 4, "Run", text_color = color.silver)
+    table.cell(status, 1, 4, runText, text_color = runR >= 0 ? color.lime : color.red)
+    table.cell(status, 0, 5, "Fill check", text_color = color.silver)
+    table.cell(status, 1, 5, fillCheckText, text_color = color.white)
+    table.cell(status, 0, 6, "Config", text_color = color.silver)
+    table.cell(status, 1, 6, cfg, text_color = color.gray, text_size = size.tiny)
