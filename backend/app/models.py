@@ -87,7 +87,7 @@ class Fill(SQLModel, table=True):
     side: str                    # "buy_to_open" | "sell_to_close" | "buy_to_close" | "sell_to_open" | "buy" | "sell"
     contracts: float = Field(sa_column=Column(DECIMAL_18_6, nullable=False))
     price: float = Field(sa_column=Column(DECIMAL_18_6, nullable=False))
-    executed_at: datetime = Field(index=True)  # tz-aware America/New_York
+    executed_at: datetime = Field(index=True)  # naive America/New_York wall clock
     raw_email_id: str = Field(index=True, unique=True)  # Gmail message ID for traceability
     # options only
     option_type: Optional[str] = None   # "call" | "put"
