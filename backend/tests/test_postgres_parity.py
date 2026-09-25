@@ -91,6 +91,11 @@ def test_full_migration_chain_applies_to_postgres(migrated):
 
 
 def test_gmail_fill_keeps_new_york_clock_on_postgres(migrated, monkeypatch):
+    inspector = inspect(migrated)
+    for table, column in (("fill", "executed_at"), ("trade", "opened_at"), ("trade", "closed_at")):
+        column_type = next(item["type"] for item in inspector.get_columns(table) if item["name"] == column)
+        assert column_type.timezone is False, f"{table}.{column} must store a naive New York clock"
+
     source_time = datetime(2026, 7, 14, 9, 30, tzinfo=ZoneInfo("America/New_York"))
     parsed = ParsedFill(
         ticker="AAPL", side="buy", contracts=Decimal("1"), price=Decimal("100"),
