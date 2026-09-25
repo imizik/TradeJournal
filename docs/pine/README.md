@@ -118,7 +118,8 @@ The honest tests still to come:
    cohort. The trade sequence changes when cooldowns and daily limits apply
    to different trades, so the result won't match exactly.
 2. Run it on tickers that weren't in this round (for example AMD, LLY, TSLA,
-   GOOG) and on the prior year, using the Python backtester.
+   GOOG) and on the prior year, using the
+   [Python backtester](#backtesting-in-python).
 3. Forward: paper-trade the alerts before trading them live.
 
 SPY cannot produce signals under the RS gate, because its strength against
@@ -152,6 +153,99 @@ already carries `sl1` metadata, so runs can be split by setup, grade, window,
 tier, RVOL and exit reason (`stop`, `be`, `trail`, `time`, `eod`, `target`,
 `overnight_exit`). `backend/tests/test_pine_market_map.py` imports a
 reconstructed export through the real importer.
+
+## Backtesting in Python
+
+`backend/scripts/backtest_market_map.py` runs the same rules over Alpaca bars
+for many tickers in one command, so nobody has to export Strategy Tester
+results chart by chart:
+
+```bash
+cd backend
+python scripts/backtest_market_map.py MU META AAPL NBIS SPY --days 365
+python scripts/backtest_market_map.py AMD LLY TSLA GOOG --days 365 --set allow_shorts=true
+```
+
+It prints a cohort report grouped by ticker, setup, side, grade, window, exit
+reason and tier (n, total R, average R, win %, PF, max drawdown in R, then
+dollars) and writes it, plus one TradingView-shaped "List of trades" CSV per
+ticker, to `backend/data/market_map/<run>/`. The CSVs carry the same `sl1`
+entry and exit comments as the Pine, so they import on `/strategy-lab` with
+source timezone `America/New_York`. R is net PnL over the risk budget for the
+trade's size, the same definition `imm_export_cohorts.py` uses, so Python and
+Strategy Tester numbers are on one scale.
+
+**The port.** `backend/app/engine/market_map.py` is the Pine, bar for bar,
+with every input as a `MarketMapConfig` field. `--profile v1.0.0` selects the
+v1.0.0 inputs and grading that produced the round 1 exports; `--set
+field=value` overrides any field. It is pure (no network, no database); the
+script fetches bars with the cached clients in `app/engine/alpaca.py` and
+resamples 1-minute bars to `--timeframe` (default 5). Execution matches the
+`strategy()` settings: signals and entries on bar close, stop orders checked
+intrabar from the next bar (a bar that opens through the stop fills at the
+open), a stop moved on a bar takes effect on the next, 2 ticks of slippage on
+market and stop fills.
+
+**Data differences to expect.** The default IEX feed prints a small share of
+volume, so RVOL (A vs B, full vs half) will not match TradingView; the script
+warns, and `--feed sip` fixes it where the key allows. Daily ATR comes from
+Alpaca daily bars, which are split-adjusted while minute bars are raw; the
+script warns when their closes disagree, and `--atr-source minutes` builds
+ATR from regular-session minute bars instead. Bars are regular hours only
+unless `--extended-hours` is given; the round 1 exports look regular-hours
+only (their history fits TradingView's bar limit only without extended hours).
+
+**What is verified.**
+
+- `backend/tests/test_market_map.py`, on synthetic bars: every setup on both
+  sides, every exit reason (`stop`, a gap through the stop, `be`, `trail`,
+  `time`, `eod`, `target`, `overnight_exit`), the stop moving a bar late, the
+  cooldown boundary, both daily limits, grades, midday modes, tiers, and the
+  stop cap and floor. Every Pine input is checked against its
+  `MarketMapConfig` default by reading the Pine source. Planted defects
+  (breakeven at 0.5R, as a default and in the logic; a 10-minute cooldown;
+  counting breakeven exits as losses; no slippage on stops; a network import)
+  each fail it.
+- `backend/tests/test_market_map_exports.py` checks the execution model
+  against every one of the 1,432 trades in the round 1 exports: breakeven
+  exits fill exactly 4 ticks under the entry fill or worse on a gap, never
+  better (254 exact, 51 gaps); every time stop lasts 30 minutes; every `eod`
+  is the 15:50 bar; grade, size and window follow the v1.0.0 rules on all
+  1,432; the next entry comes at least 15 minutes after a stop-type exit and
+  20 after a market close (the script only notices those on the next bar, and
+  TradingView shows both boundaries); no day has more than 3 entries or an
+  entry after 2 full-stop losses.
+- `backend/tests/test_market_map_report.py`: the CSVs import through the real
+  Strategy Lab importer with no warnings, the report's R and drawdown math,
+  the parity comparison, and the script end to end with a stub loader.
+
+**Parity on real bars: not run yet.** Entry-by-entry parity needs Alpaca
+bars, which the cloud session that built this could not reach. Run it where a
+key is set:
+
+```bash
+python scripts/backtest_market_map.py --profile v1.0.0 --feed sip \
+    --start 2025-10-14 --end 2026-09-24 --warmup-days 1 \
+    --parity "TradingView/IMM_v1.0.0_*.csv"
+```
+
+It matches entries on timestamp, side and setup, prints the match rate and
+every mismatch with a cause: a knock-on (one side was in a trade, cooling down
+or at a limit because of an earlier difference), a grade that came out
+differently (RVOL and relative strength depend on the feed), a different
+setup on the same bar, or no signal at all (levels, VWAP or EMAs saw
+different prices). Matched trades also report grade, size, exit-reason and
+exit-time agreement and the median difference in RVOL, RS, gap and risk in
+ATR; a gap difference points at ATR. Do not tune the port to raise the match
+rate; explain the difference. `--warmup-days 1` starts the state on
+2025-10-13, which looks like the exports' first chart session: none of the
+four single-stock exports trades that day, consistent with the script having
+no 9:30 open price (and so no relative strength) on the chart's first bar.
+
+**Findings from the port.** A long and a short can never fire on the same
+bar: every long setup needs the close above VWAP and every short below it, so
+the "skip the bar when both fire" rule is kept but never triggers. Options
+pricing (`--options`) waits until parity has been run.
 
 ## What is and isn't proven
 
