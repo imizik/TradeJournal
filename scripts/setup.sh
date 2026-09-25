@@ -45,6 +45,15 @@ fi
 echo "==> Frontend dependencies"
 if command -v npm >/dev/null 2>&1; then
   (cd "$ROOT/frontend" && npm install --no-audit --no-fund --silent)
+  # The browser tests need a Chromium matching this Playwright version. A cloud
+  # sandbox has one preinstalled that verify.sh finds on its own; anywhere else
+  # download it once (a no-op when already present). Not fatal: every other
+  # check still runs without it.
+  if ! ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome >/dev/null 2>&1; then
+    echo "==> Browser for the browser tests"
+    (cd "$ROOT/frontend" && npx --no-install playwright install --only-shell chromium) \
+      || echo "    could not download Chromium - browser tests will fail until 'npx playwright install chromium' succeeds in frontend/."
+  fi
 else
   echo "    npm not found on PATH - skipping. Frontend checks will not run."
 fi

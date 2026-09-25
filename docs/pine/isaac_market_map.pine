@@ -1,0 +1,567 @@
+//@version=6
+strategy("Isaac Market Map", shorttitle = "IMM", overlay = true, pyramiding = 0, process_orders_on_close = true, calc_on_every_tick = false, initial_capital = 25000, margin_long = 0, margin_short = 0, commission_value = 0, slippage = 2, max_bars_back = 500, max_labels_count = 300)
+
+const string TZ = "America/New_York"
+const int PREMARKET_OPEN = 240
+const int RTH_OPEN = 570
+const int RTH_CLOSE = 960
+const int MAX_SESSION_BARS = 400
+const string MIDDAY_OFF = "Off"
+const string MIDDAY_A_HALF = "A only, half size"
+const string MIDDAY_ALLOW = "Allow"
+
+string groupCore = "Core"
+indicatorVersion = input.string("1.1.0", "Indicator version (bump on every signal-affecting change)", group = groupCore)
+benchmarkSymbol = input.symbol("AMEX:SPY", "Relative strength benchmark", group = groupCore)
+orMinutes = input.int(5, "Opening range minutes", minval = 1, maxval = 60, group = groupCore)
+atrLength = input.int(14, "Daily ATR length", minval = 2, group = groupCore)
+rvolDays = input.int(10, "RVOL lookback sessions", minval = 2, maxval = 30, group = groupCore)
+rvolMin = input.float(1.5, "RVOL needed for grade A", minval = 0.1, step = 0.1, group = groupCore)
+minRsPct = input.float(1.5, "Min relative strength vs benchmark on the trade's side (%)", minval = 0, step = 0.25, group = groupCore)
+allowShorts = input.bool(false, "Allow shorts", group = groupCore)
+riskPerTrade = input.float(100, "Backtest risk per full-size trade ($)", minval = 1, group = groupCore)
+
+string groupWindows = "Windows (ET, HHMM)"
+openWindowEnd = input.int(1015, "Open window ends", group = groupWindows)
+powerWindowStart = input.int(1400, "Power window starts", group = groupWindows)
+lastEntryTime = input.int(1545, "No entries after", group = groupWindows)
+flatTime = input.int(1555, "Flatten at", group = groupWindows)
+middayMode = input.string(MIDDAY_OFF, "Midday entries", options = [MIDDAY_OFF, MIDDAY_A_HALF, MIDDAY_ALLOW], group = groupWindows)
+
+string groupRisk = "Risk"
+maxHeatAtr = input.float(0.4, "Max stop distance (x daily ATR)", minval = 0.05, step = 0.05, group = groupRisk)
+minRiskAtr = input.float(0.08, "Min stop distance (x daily ATR)", minval = 0.01, step = 0.01, group = groupRisk)
+levelBufferAtr = input.float(0.05, "Stop buffer beyond level (x daily ATR)", minval = 0, step = 0.01, group = groupRisk)
+breakevenAtR = input.float(0.75, "Stop to breakeven at (R)", minval = 0.1, step = 0.05, group = groupRisk)
+trailStartR = input.float(1.5, "Start trailing at (R)", minval = 0.5, step = 0.1, group = groupRisk)
+trailOffsetR = input.float(1.0, "Trail distance (R)", minval = 0.1, step = 0.1, group = groupRisk)
+targetR = input.float(0.0, "Fixed target (R, 0 = trail only)", minval = 0, step = 0.5, group = groupRisk)
+timeStopMin = input.int(30, "Time stop (minutes)", minval = 1, group = groupRisk)
+timeStopMinR = input.float(0.5, "Time stop unless MFE reached (R)", minval = 0, step = 0.1, group = groupRisk)
+cooldownMin = input.int(15, "Cooldown after an exit (minutes)", minval = 0, group = groupRisk)
+maxEntriesPerDay = input.int(3, "Max entries per day", minval = 1, group = groupRisk)
+maxLossesPerDay = input.int(2, "Stop for the day after losses", minval = 1, group = groupRisk)
+holdPowerOvernight = input.bool(false, "Experiment: hold A-grade power-window winners overnight", group = groupRisk)
+overnightExitTime = input.int(1000, "Overnight holds exit by", group = groupRisk)
+
+string groupTickers = "Tickers"
+coreTickers = input.string("LLY,MU,AMD,META,SPY,TSLA,GS,CAT,AMZN,NFLX,COIN", "Core", group = groupTickers)
+avoidTickers = input.string("SNDK,NVDA,SLV,CVNA,MSFT,MSTR,CRWV,JPM", "Avoid", group = groupTickers)
+allowAvoid = input.bool(false, "Trade avoid-list tickers (capped at B, half size)", group = groupTickers)
+
+string groupSetups = "Setups"
+enableOrb = input.bool(true, "Opening range break", group = groupSetups)
+enableLevelBreaks = input.bool(true, "Prior-day high/low break", group = groupSetups)
+enableRetest = input.bool(true, "Retest of a broken prior-day level", group = groupSetups)
+enableOrbRetest = input.bool(false, "Retest of a broken opening range", group = groupSetups)
+enableHod = input.bool(true, "Power-window HOD/LOD break", group = groupSetups)
+enableVwap = input.bool(true, "VWAP reclaim/loss", group = groupSetups)
+enableOrbFail = input.bool(true, "Failed opening range break", group = groupSetups)
+retestBars = input.int(12, "Retest valid for (bars)", minval = 1, group = groupSetups)
+retestTolAtr = input.float(0.1, "Retest touch tolerance (x daily ATR)", minval = 0, step = 0.01, group = groupSetups)
+failBars = input.int(3, "Failed break within (bars)", minval = 1, group = groupSetups)
+
+string groupDisplay = "Display"
+showLevels = input.bool(true, "Show levels", group = groupDisplay)
+showTable = input.bool(true, "Show status table", group = groupDisplay)
+logPayloads = input.bool(true, "Write alert payloads to Pine Logs", group = groupDisplay)
+
+if not timeframe.isintraday
+    runtime.error("Isaac Market Map needs an intraday chart.")
+
+f_minutes(int hhmm) =>
+    math.floor(hhmm / 100) * 60 + hhmm % 100
+
+f_inList(string listText, string ticker) =>
+    bool found = false
+    for item in str.split(str.replace_all(listText, " ", ""), ",")
+        if str.upper(item) == ticker
+            found := true
+    found
+
+f_num(float value) =>
+    na(value) ? "null" : str.tostring(value, "#.######")
+
+f_bool(bool value) =>
+    value ? "true" : "false"
+
+f_text(string value) =>
+    '"' + value + '"'
+
+f_kv(string key, string value) =>
+    '"' + key + '":' + value
+
+f_sl1(string key, string value) =>
+    "|" + key + "=" + value
+
+openWindowEndMin = f_minutes(openWindowEnd)
+powerStartMin = f_minutes(powerWindowStart)
+lastEntryMin = f_minutes(lastEntryTime)
+flatMin = f_minutes(flatTime)
+overnightExitMin = f_minutes(overnightExitTime)
+
+tickerSymbol = str.upper(syminfo.ticker)
+timeframeText = str.upper(timeframe.period)
+symbolValid = str.length(tickerSymbol) <= 32 and str.match(tickerSymbol, "^[A-Z0-9][A-Z0-9._-]*$") != ""
+tier = f_inList(avoidTickers, tickerSymbol) ? "avoid" : f_inList(coreTickers, tickerSymbol) ? "core" : "neutral"
+
+m = hour(time, TZ) * 60 + minute(time, TZ)
+closeMinute = hour(time_close, TZ) * 60 + minute(time_close, TZ)
+dayKey = year(time, TZ) * 10000 + month(time, TZ) * 100 + dayofmonth(time, TZ)
+isRth = m >= RTH_OPEN and m < RTH_CLOSE
+isPremarket = m >= PREMARKET_OPEN and m < RTH_OPEN
+newDay = dayKey != dayKey[1]
+newRthSession = isRth and (not isRth[1] or newDay)
+window = not isRth ? "closed" : m < openWindowEndMin ? "open" : m < powerStartMin ? "midday" : "power"
+
+sessionVwap = ta.vwap(hlc3, newRthSession)
+ema9 = ta.ema(close, 9)
+ema20 = ta.ema(close, 20)
+recentHigh = ta.highest(high, failBars + 1)
+recentLow = ta.lowest(low, failBars + 1)
+atrDaily = request.security(syminfo.tickerid, "D", ta.atr(atrLength)[1], lookahead = barmerge.lookahead_on)
+[benchOpen, benchClose] = request.security(benchmarkSymbol, timeframe.period, [open, close])
+
+var float pmHigh = na
+var float pmLow = na
+var float pdh = na
+var float pdl = na
+var float pdc = na
+var float sessionHigh = na
+var float sessionLow = na
+var float sessionClose = na
+var float rthOpenPrice = na
+var float benchSessionOpen = na
+var float orHigh = na
+var float orLow = na
+var int barOfSession = -1
+var float cumVolume = 0.0
+var array<float> todayCumVolume = array.new<float>(MAX_SESSION_BARS, na)
+var matrix<float> cumVolumeHistory = matrix.new<float>()
+var int entriesToday = 0
+var int lossesToday = 0
+var bool orBrokeUp = false
+var bool orBrokeDown = false
+var int orBreakUpBar = na
+var int orBreakDownBar = na
+var bool orFailShortDone = false
+var bool orFailLongDone = false
+var bool pdhBroke = false
+var bool pdlBroke = false
+var float retestLongLevel = na
+var int retestLongBar = na
+var string retestLongName = ""
+var float retestShortLevel = na
+var int retestShortBar = na
+var string retestShortName = ""
+
+var int tradeSide = 0
+var float tradeEntry = na
+var float tradeStop = na
+var float tradeRisk = na
+var float tradeBest = na
+var float tradeBeTrigger = na
+var int tradeEntryBar = na
+var int tradeEntryTime = na
+var int tradeEntryDay = na
+var string tradeStage = "stop"
+var string tradeWindow = ""
+var string tradeGrade = ""
+var bool tradeOvernight = false
+var int cooldownUntil = 0
+
+if newDay
+    pmHigh := na
+    pmLow := na
+if isPremarket
+    pmHigh := na(pmHigh) ? high : math.max(pmHigh, high)
+    pmLow := na(pmLow) ? low : math.min(pmLow, low)
+
+if newRthSession
+    if not na(sessionHigh)
+        pdh := sessionHigh
+        pdl := sessionLow
+        pdc := sessionClose
+        matrix.add_row(cumVolumeHistory, 0, array.copy(todayCumVolume))
+        while matrix.rows(cumVolumeHistory) > rvolDays
+            matrix.remove_row(cumVolumeHistory, matrix.rows(cumVolumeHistory) - 1)
+    array.fill(todayCumVolume, na)
+    rthOpenPrice := open
+    benchSessionOpen := benchOpen
+    sessionHigh := na
+    sessionLow := na
+    orHigh := na
+    orLow := na
+    barOfSession := -1
+    cumVolume := 0.0
+    entriesToday := 0
+    lossesToday := 0
+    orBrokeUp := false
+    orBrokeDown := false
+    orFailShortDone := false
+    orFailLongDone := false
+    pdhBroke := false
+    pdlBroke := false
+    retestLongLevel := na
+    retestShortLevel := na
+
+priorSessionHigh = sessionHigh
+priorSessionLow = sessionLow
+if isRth
+    barOfSession += 1
+    sessionHigh := na(sessionHigh) ? high : math.max(sessionHigh, high)
+    sessionLow := na(sessionLow) ? low : math.min(sessionLow, low)
+    sessionClose := close
+    cumVolume += nz(volume)
+    if barOfSession < MAX_SESSION_BARS
+        array.set(todayCumVolume, barOfSession, cumVolume)
+    if m < RTH_OPEN + orMinutes
+        orHigh := na(orHigh) ? high : math.max(orHigh, high)
+        orLow := na(orLow) ? low : math.min(orLow, low)
+
+f_rvol(int index, float current) =>
+    float total = 0.0
+    int count = 0
+    int rows = matrix.rows(cumVolumeHistory)
+    if index >= 0 and index < MAX_SESSION_BARS and rows > 0
+        for row = 0 to rows - 1
+            float past = matrix.get(cumVolumeHistory, row, index)
+            if not na(past) and past > 0
+                total += past
+                count += 1
+    count > 0 and current > 0 ? current / (total / count) : na
+
+orComplete = isRth and m >= RTH_OPEN + orMinutes and not na(orHigh)
+rvol = isRth ? f_rvol(barOfSession, cumVolume) : na
+rsVsBench = isRth and rthOpenPrice > 0 and benchSessionOpen > 0 and benchClose > 0 ? (close / rthOpenPrice - benchClose / benchSessionOpen) * 100 : na
+gapAtr = atrDaily > 0 and not na(pdc) ? (rthOpenPrice - pdc) / atrDaily : na
+longTrend = close > sessionVwap and ema9 > ema20
+shortTrend = close < sessionVwap and ema9 < ema20
+
+bool retestLongSignal = false
+string retestLongSetup = ""
+float retestLongRef = na
+if not na(retestLongLevel)
+    if bar_index - retestLongBar > retestBars or close < retestLongLevel - levelBufferAtr * atrDaily
+        retestLongLevel := na
+    else if bar_index > retestLongBar and low <= retestLongLevel + retestTolAtr * atrDaily and close > retestLongLevel and close > sessionVwap
+        retestLongSignal := true
+        retestLongSetup := retestLongName
+        retestLongRef := retestLongLevel
+        retestLongLevel := na
+
+bool retestShortSignal = false
+string retestShortSetup = ""
+float retestShortRef = na
+if not na(retestShortLevel)
+    if bar_index - retestShortBar > retestBars or close > retestShortLevel + levelBufferAtr * atrDaily
+        retestShortLevel := na
+    else if bar_index > retestShortBar and high >= retestShortLevel - retestTolAtr * atrDaily and close < retestShortLevel and close < sessionVwap
+        retestShortSignal := true
+        retestShortSetup := retestShortName
+        retestShortRef := retestShortLevel
+        retestShortLevel := na
+
+bool orbFailShort = orBrokeUp and not orFailShortDone and bar_index > orBreakUpBar and bar_index - orBreakUpBar <= failBars and close < orHigh and close < sessionVwap
+bool orbFailLong = orBrokeDown and not orFailLongDone and bar_index > orBreakDownBar and bar_index - orBreakDownBar <= failBars and close > orLow and close > sessionVwap
+if orbFailShort
+    orFailShortDone := true
+if orbFailLong
+    orFailLongDone := true
+
+bool orbUpCross = orComplete and not orBrokeUp and close > orHigh
+bool orbDownCross = orComplete and not orBrokeDown and close < orLow
+if orbUpCross
+    orBrokeUp := true
+    orBreakUpBar := bar_index
+    retestLongLevel := orHigh
+    retestLongBar := bar_index
+    retestLongName := "orb_retest"
+if orbDownCross
+    orBrokeDown := true
+    orBreakDownBar := bar_index
+    retestShortLevel := orLow
+    retestShortBar := bar_index
+    retestShortName := "orb_retest"
+
+bool pdhCross = isRth and barOfSession > 0 and not pdhBroke and not na(pdh) and close > pdh and close[1] <= pdh
+bool pdlCross = isRth and barOfSession > 0 and not pdlBroke and not na(pdl) and close < pdl and close[1] >= pdl
+if pdhCross
+    pdhBroke := true
+    retestLongLevel := pdh
+    retestLongBar := bar_index
+    retestLongName := "pdh_retest"
+if pdlCross
+    pdlBroke := true
+    retestShortLevel := pdl
+    retestShortBar := bar_index
+    retestShortName := "pdl_retest"
+
+hodBreak = isRth and barOfSession > 0 and not na(priorSessionHigh) and close > priorSessionHigh
+lodBreak = isRth and barOfSession > 0 and not na(priorSessionLow) and close < priorSessionLow
+vwapReclaim = isRth and barOfSession >= 2 and close > sessionVwap and close[1] <= sessionVwap[1] and close[2] <= sessionVwap[2]
+vwapLoss = isRth and barOfSession >= 2 and close < sessionVwap and close[1] >= sessionVwap[1] and close[2] >= sessionVwap[2]
+
+string longSetup = ""
+float longLevel = na
+if retestLongSignal and (retestLongSetup == "orb_retest" ? enableOrbRetest : enableRetest) and ema9 > ema20
+    longSetup := retestLongSetup
+    longLevel := retestLongRef
+else if enableOrb and orbUpCross and longTrend
+    longSetup := "orb_break"
+    longLevel := orHigh
+else if enableLevelBreaks and pdhCross and longTrend
+    longSetup := "pdh_break"
+    longLevel := pdh
+else if enableHod and hodBreak and window == "power" and longTrend
+    longSetup := "hod_break"
+    longLevel := math.max(sessionVwap, ema20)
+else if enableVwap and vwapReclaim and ema9 > ema20
+    longSetup := "vwap_reclaim"
+    longLevel := sessionVwap
+else if enableOrbFail and orbFailLong
+    longSetup := "orb_fail"
+    longLevel := recentLow
+
+string shortSetup = ""
+float shortLevel = na
+if retestShortSignal and (retestShortSetup == "orb_retest" ? enableOrbRetest : enableRetest) and ema9 < ema20
+    shortSetup := retestShortSetup
+    shortLevel := retestShortRef
+else if enableOrb and orbDownCross and shortTrend
+    shortSetup := "orb_break"
+    shortLevel := orLow
+else if enableLevelBreaks and pdlCross and shortTrend
+    shortSetup := "pdl_break"
+    shortLevel := pdl
+else if enableHod and lodBreak and window == "power" and shortTrend
+    shortSetup := "lod_break"
+    shortLevel := math.min(sessionVwap, ema20)
+else if enableVwap and vwapLoss and ema9 < ema20
+    shortSetup := "vwap_loss"
+    shortLevel := sessionVwap
+else if enableOrbFail and orbFailShort
+    shortSetup := "orb_fail"
+    shortLevel := recentHigh
+
+f_grade(string setup, bool rvolAligned, bool rsStrong) =>
+    string base = not rsStrong ? "C" : setup == "orb_fail" ? "B" : rvolAligned ? "A" : "B"
+    tier == "avoid" and base == "A" ? "B" : base
+
+f_windowAllows(string grade) =>
+    grade == "C" ? false : window != "midday" ? true : middayMode == MIDDAY_ALLOW ? true : middayMode == MIDDAY_A_HALF ? grade == "A" : false
+
+f_risk(float level, int side) =>
+    float structureStop = side == 1 ? level - levelBufferAtr * atrDaily : level + levelBufferAtr * atrDaily
+    float raw = side == 1 ? close - structureStop : structureStop - close
+    float minRisk = minRiskAtr * atrDaily
+    float maxRisk = maxHeatAtr * atrDaily
+    na(raw) ? maxRisk : math.min(math.max(raw, minRisk), maxRisk)
+
+f_levelsJson(float stopPrice, float beTrigger, float trailStart) =>
+    string json = "{"
+    json += f_kv("entry_ref", f_num(close)) + ","
+    json += f_kv("stop", f_num(stopPrice)) + ","
+    json += f_kv("be_trigger", f_num(beTrigger)) + ","
+    json += f_kv("trail_start", f_num(trailStart)) + ","
+    json += f_kv("pdh", f_num(pdh)) + ","
+    json += f_kv("pdl", f_num(pdl)) + ","
+    json += f_kv("pdc", f_num(pdc)) + ","
+    json += f_kv("pm_high", f_num(pmHigh)) + ","
+    json += f_kv("pm_low", f_num(pmLow)) + ","
+    json += f_kv("or_high", f_num(orHigh)) + ","
+    json += f_kv("or_low", f_num(orLow)) + ","
+    json += f_kv("hod", f_num(sessionHigh)) + ","
+    json += f_kv("lod", f_num(sessionLow)) + ","
+    json += f_kv("vwap", f_num(sessionVwap)) + ","
+    json += f_kv("ema9", f_num(ema9)) + ","
+    json += f_kv("ema20", f_num(ema20)) + ","
+    json += f_kv("atr_daily", f_num(atrDaily))
+    json + "}"
+
+f_contextJson(string grade, string sizeTag, int score, float extAtr, float riskAtr, string dteHint) =>
+    string json = "{"
+    json += f_kv("grade", f_text(grade)) + ","
+    json += f_kv("size", f_text(sizeTag)) + ","
+    json += f_kv("score", f_num(score)) + ","
+    json += f_kv("window", f_text(window)) + ","
+    json += f_kv("tier", f_text(tier)) + ","
+    json += f_kv("dte_hint", f_text(dteHint)) + ","
+    json += f_kv("rvol", f_num(rvol)) + ","
+    json += f_kv("rs_vs_spy", f_num(rsVsBench)) + ","
+    json += f_kv("above_vwap", f_bool(close > sessionVwap)) + ","
+    json += f_kv("ema9_over_ema20", f_bool(ema9 > ema20)) + ","
+    json += f_kv("gap_atr", f_num(gapAtr)) + ","
+    json += f_kv("ext_atr", f_num(extAtr)) + ","
+    json += f_kv("risk_atr", f_num(riskAtr)) + ","
+    json += f_kv("time_stop_min", f_num(timeStopMin)) + ","
+    json += f_kv("entries_today", f_num(entriesToday))
+    json + "}"
+
+f_alertJson(string setup, string side, float stopPrice, float beTrigger, float trailStart, string grade, string sizeTag, int score, float extAtr, float riskAtr, string dteHint) =>
+    string barTimeText = str.tostring(time_close, "#")
+    string alertId = "v1:" + indicatorVersion + ":" + tickerSymbol + ":" + timeframeText + ":" + barTimeText + ":" + setup + ":" + side
+    string json = "{"
+    json += f_kv("v", "1") + ","
+    json += f_kv("indicator_version", f_text(indicatorVersion)) + ","
+    json += f_kv("alert_id", f_text(alertId)) + ","
+    json += f_kv("symbol", f_text(tickerSymbol)) + ","
+    json += f_kv("timeframe", f_text(timeframeText)) + ","
+    json += f_kv("setup", f_text(setup)) + ","
+    json += f_kv("side", f_text(side)) + ","
+    json += f_kv("price", f_num(close)) + ","
+    json += f_kv("bar_time_ms", barTimeText) + ","
+    json += f_kv("levels", f_levelsJson(stopPrice, beTrigger, trailStart)) + ","
+    json += f_kv("context", f_contextJson(grade, sizeTag, score, extAtr, riskAtr, dteHint))
+    json + "}"
+
+f_entryComment(string setup, string side, string grade, string sizeTag, int score, float extAtr, float riskAtr) =>
+    string metadata = "sl1"
+    metadata += f_sl1("setup", setup)
+    metadata += f_sl1("side", side)
+    metadata += f_sl1("grade", grade)
+    metadata += f_sl1("size", sizeTag)
+    metadata += f_sl1("score", f_num(score))
+    metadata += f_sl1("window", window)
+    metadata += f_sl1("tier", tier)
+    metadata += f_sl1("rvol", f_num(rvol))
+    metadata += f_sl1("rs_vs_spy", f_num(rsVsBench))
+    metadata += f_sl1("gap_atr", f_num(gapAtr))
+    metadata += f_sl1("ext_atr", f_num(extAtr))
+    metadata += f_sl1("risk_atr", f_num(riskAtr))
+    metadata
+
+f_exitComment(string reason, float mfeR) =>
+    "sl1" + f_sl1("exit_reason", reason) + f_sl1("mfe_r", f_num(mfeR))
+
+if tradeSide != 0 and strategy.position_size == 0 and bar_index > tradeEntryBar
+    int lastClosed = strategy.closedtrades - 1
+    if lastClosed >= 0 and strategy.closedtrades.profit(lastClosed) < 0 and tradeStage == "stop"
+        lossesToday += 1
+    cooldownUntil := time_close + cooldownMin * 60000
+    tradeSide := 0
+    tradeOvernight := false
+
+canEnter = tradeSide == 0 and strategy.position_size == 0 and orComplete and m < lastEntryMin and time_close >= cooldownUntil and entriesToday < maxEntriesPerDay and lossesToday < maxLossesPerDay and atrDaily > 0 and symbolValid and (tier != "avoid" or allowAvoid)
+
+int entrySide = 0
+string entrySetup = ""
+float entryLevel = na
+if canEnter and longSetup != "" and (shortSetup == "" or not allowShorts)
+    entrySide := 1
+    entrySetup := longSetup
+    entryLevel := longLevel
+else if canEnter and allowShorts and shortSetup != "" and longSetup == ""
+    entrySide := -1
+    entrySetup := shortSetup
+    entryLevel := shortLevel
+
+if entrySide != 0
+    bool rvolAligned = not na(rvol) and rvol >= rvolMin
+    bool rsAligned = not na(rsVsBench) and (entrySide == 1 ? rsVsBench > 0 : rsVsBench < 0)
+    bool rsStrong = not na(rsVsBench) and entrySide * rsVsBench >= minRsPct
+    bool gapAligned = na(gapAtr) or (entrySide == 1 ? gapAtr > -0.25 : gapAtr < 0.25)
+    bool vwapAligned = entrySide == 1 ? close > sessionVwap : close < sessionVwap
+    bool emaAligned = entrySide == 1 ? ema9 > ema20 : ema9 < ema20
+    int score = (vwapAligned ? 1 : 0) + (emaAligned ? 1 : 0) + (rvolAligned ? 1 : 0) + (rsAligned ? 1 : 0) + (gapAligned ? 1 : 0)
+    string grade = f_grade(entrySetup, rvolAligned, rsStrong)
+    if f_windowAllows(grade)
+        string sizeTag = grade == "A" and window != "midday" and tier != "avoid" ? "full" : "half"
+        string sideText = entrySide == 1 ? "long" : "short"
+        float risk = f_risk(entryLevel, entrySide)
+        float stopPrice = close - entrySide * risk
+        float beTrigger = close + entrySide * breakevenAtR * risk
+        float trailStart = close + entrySide * trailStartR * risk
+        float extAtr = entrySide * (close - sessionVwap) / atrDaily
+        float riskAtr = risk / atrDaily
+        bool overnightCandidate = holdPowerOvernight and window == "power" and grade == "A"
+        string dteHint = overnightCandidate ? "4_7dte" : "0dte"
+        float quantity = math.max(1, math.floor((sizeTag == "full" ? riskPerTrade : riskPerTrade / 2) / risk))
+        strategy.entry(entrySide == 1 ? "L" : "S", entrySide == 1 ? strategy.long : strategy.short, qty = quantity, comment = f_entryComment(entrySetup, sideText, grade, sizeTag, score, extAtr, riskAtr))
+        tradeSide := entrySide
+        tradeEntry := close
+        tradeStop := stopPrice
+        tradeRisk := risk
+        tradeBest := close
+        tradeBeTrigger := beTrigger
+        tradeEntryBar := bar_index
+        tradeEntryTime := time_close
+        tradeEntryDay := dayKey
+        tradeStage := "stop"
+        tradeWindow := window
+        tradeGrade := grade
+        tradeOvernight := false
+        entriesToday += 1
+        string payload = f_alertJson(entrySetup, sideText, stopPrice, beTrigger, trailStart, grade, sizeTag, score, extAtr, riskAtr, dteHint)
+        alert(payload, alert.freq_once_per_bar_close)
+        if logPayloads
+            log.info("{0}", payload)
+        label.new(bar_index, entrySide == 1 ? low : high, entrySetup + " " + grade + (sizeTag == "half" ? " ½" : ""), style = entrySide == 1 ? label.style_label_up : label.style_label_down, color = entrySide == 1 ? color.new(color.teal, 0) : color.new(color.maroon, 0), textcolor = color.white, size = size.small)
+
+if tradeSide != 0
+    if bar_index > tradeEntryBar
+        tradeBest := tradeSide == 1 ? math.max(tradeBest, high) : math.min(tradeBest, low)
+    float mfeR = tradeSide * (tradeBest - tradeEntry) / tradeRisk
+    if mfeR >= breakevenAtR and tradeStage == "stop"
+        tradeStop := tradeEntry
+        tradeStage := "be"
+    if mfeR >= trailStartR
+        float trailCandidate = tradeBest - tradeSide * trailOffsetR * tradeRisk
+        if tradeSide * (trailCandidate - tradeStop) > 0
+            tradeStop := trailCandidate
+            tradeStage := "trail"
+    string entryId = tradeSide == 1 ? "L" : "S"
+    float minutesInTrade = (time_close - tradeEntryTime) / 60000.0
+    bool atFlatTime = isRth and closeMinute >= flatMin
+    bool keepOvernight = holdPowerOvernight and tradeWindow == "power" and tradeGrade == "A" and mfeR >= timeStopMinR
+    if atFlatTime and not tradeOvernight and keepOvernight
+        tradeOvernight := true
+    string closeReason = ""
+    if tradeOvernight and isRth and not atFlatTime and dayKey != tradeEntryDay and m >= overnightExitMin
+        closeReason := "overnight_exit"
+    else if not tradeOvernight and (atFlatTime or not isRth)
+        closeReason := "eod"
+    else if not tradeOvernight and minutesInTrade >= timeStopMin and mfeR < timeStopMinR
+        closeReason := "time"
+    if closeReason != ""
+        strategy.close(entryId, comment = f_exitComment(closeReason, mfeR))
+    else
+        float limitPrice = targetR > 0 ? tradeEntry + tradeSide * targetR * tradeRisk : na
+        strategy.exit("X", from_entry = entryId, stop = tradeStop, limit = limitPrice, comment = f_exitComment(tradeStage, mfeR), comment_profit = f_exitComment("target", mfeR))
+
+plot(sessionVwap, "VWAP", color = color.new(color.orange, 0), linewidth = 2)
+plot(ema9, "EMA 9", color = color.new(color.aqua, 30))
+plot(ema20, "EMA 20", color = color.new(color.purple, 30))
+plot(showLevels and isRth ? pdh : na, "PDH", color = color.new(color.green, 20), style = plot.style_linebr)
+plot(showLevels and isRth ? pdl : na, "PDL", color = color.new(color.red, 20), style = plot.style_linebr)
+plot(showLevels and isRth ? pdc : na, "PDC", color = color.new(color.gray, 20), style = plot.style_linebr)
+plot(showLevels and isRth ? pmHigh : na, "Premarket high", color = color.new(color.lime, 50), style = plot.style_linebr)
+plot(showLevels and isRth ? pmLow : na, "Premarket low", color = color.new(color.fuchsia, 50), style = plot.style_linebr)
+plot(showLevels and orComplete ? orHigh : na, "OR high", color = color.new(color.yellow, 0), style = plot.style_linebr)
+plot(showLevels and orComplete ? orLow : na, "OR low", color = color.new(color.yellow, 0), style = plot.style_linebr)
+plot(tradeSide != 0 ? tradeStop : na, "Active stop", color = color.new(color.red, 0), linewidth = 2, style = plot.style_linebr)
+plot(tradeSide != 0 and tradeStage == "stop" ? tradeBeTrigger : na, "Breakeven trigger", color = color.new(color.blue, 0), style = plot.style_linebr)
+bgcolor(window == "midday" ? color.new(color.gray, 92) : na, title = "Midday")
+
+var table status = table.new(position.top_right, 2, 9, bgcolor = color.new(color.black, 20), border_width = 1)
+if showTable and barstate.islast
+    string trendText = ema9 > ema20 ? "EMA 9 > 20" : "EMA 9 < 20"
+    string cooldownText = time_close < cooldownUntil ? str.tostring(math.ceil((cooldownUntil - time_close) / 60000.0)) + "m" : "ready"
+    table.cell(status, 0, 0, "Ticker", text_color = color.silver)
+    table.cell(status, 1, 0, tickerSymbol + " · " + tier, text_color = tier == "avoid" ? color.red : tier == "core" ? color.lime : color.white)
+    table.cell(status, 0, 1, "Window", text_color = color.silver)
+    table.cell(status, 1, 1, window, text_color = window == "midday" ? color.orange : color.white)
+    table.cell(status, 0, 2, "Trend", text_color = color.silver)
+    table.cell(status, 1, 2, trendText, text_color = ema9 > ema20 ? color.lime : color.red)
+    table.cell(status, 0, 3, "VWAP", text_color = color.silver)
+    table.cell(status, 1, 3, close > sessionVwap ? "above" : "below", text_color = close > sessionVwap ? color.lime : color.red)
+    table.cell(status, 0, 4, "RVOL", text_color = color.silver)
+    table.cell(status, 1, 4, na(rvol) ? "n/a" : str.tostring(rvol, "#.##"), text_color = not na(rvol) and rvol >= rvolMin ? color.lime : color.white)
+    table.cell(status, 0, 5, "RS vs bench", text_color = color.silver)
+    table.cell(status, 1, 5, na(rsVsBench) ? "n/a" : str.tostring(rsVsBench, "#.##") + "%", text_color = not na(rsVsBench) and rsVsBench > 0 ? color.lime : color.red)
+    table.cell(status, 0, 6, "Gap", text_color = color.silver)
+    table.cell(status, 1, 6, na(gapAtr) ? "n/a" : str.tostring(gapAtr, "#.##") + " ATR", text_color = color.white)
+    table.cell(status, 0, 7, "Today", text_color = color.silver)
+    table.cell(status, 1, 7, str.tostring(entriesToday) + "/" + str.tostring(maxEntriesPerDay) + " entries · " + str.tostring(lossesToday) + " L", text_color = lossesToday >= maxLossesPerDay ? color.red : color.white)
+    table.cell(status, 0, 8, "Cooldown", text_color = color.silver)
+    table.cell(status, 1, 8, cooldownText, text_color = cooldownText == "ready" ? color.lime : color.orange)

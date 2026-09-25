@@ -25,6 +25,39 @@ def test_daily_cache_must_cover_latest_completed_bar(tmp_path, monkeypatch):
     assert alpaca._daily_cache_covers(cache_file, date(2026, 5, 17)) is True
 
 
+
+def test_daily_cache_written_for_a_shorter_window_does_not_answer_a_longer_one(tmp_path, monkeypatch):
+    # A 90-day cache from market packets must not satisfy a year-long
+    # backtest's request; a front gap of a long weekend still counts as covered.
+    cache_file = tmp_path / "MU.json"
+    cache_file.write_text(json.dumps([_bar("2026-02-17"), _bar("2026-05-15")]))
+    monkeypatch.setattr(alpaca, "_latest_completed_daily_bar_date", lambda: date(2026, 5, 15))
+
+    assert alpaca._daily_cache_covers(cache_file, date(2026, 5, 15), date(2025, 5, 15)) is False
+    assert alpaca._daily_cache_covers(cache_file, date(2026, 5, 15), date(2026, 2, 14)) is True
+    assert alpaca._daily_cache_covers(cache_file, date(2026, 5, 15)) is True
+
+
+
+def test_fetch_daily_bars_refetches_when_the_cache_starts_too_late(tmp_path, monkeypatch):
+    cache_file = tmp_path / "MU.json"
+    cache_file.write_text(json.dumps([_bar("2026-02-17"), _bar("2026-05-15")]))
+    monkeypatch.setattr(alpaca, "_latest_completed_daily_bar_date", lambda: date(2026, 5, 15))
+    monkeypatch.setattr(alpaca, "_daily_cache_path", lambda ticker: cache_file)
+    requests = []
+
+    def fake_fetch(path, params):
+        requests.append(params["start"])
+        return {"MU": [_bar("2025-05-15"), _bar("2026-05-15")]}
+
+    monkeypatch.setattr(alpaca, "_fetch_all_pages", fake_fetch)
+
+    assert len(alpaca.fetch_daily_bars(["MU"], date(2026, 2, 16), date(2026, 5, 15))["MU"]) == 2
+    assert requests == []
+    alpaca.fetch_daily_bars(["MU"], date(2025, 5, 15), date(2026, 5, 15))
+    assert requests == ["2025-05-15"]
+
+
 def test_alpaca_fill_selection_retries_partial_context_rows():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
@@ -61,6 +94,8 @@ def test_alpaca_fill_selection_retries_partial_context_rows():
                 fill_id=complete_fill.id,
                 data_source="alpaca_iex",
                 fetched_at=datetime.utcnow(),
+                entry_underlying_price=150,
+                entry_vwap=149,
                 entry_rsi_14=50,
                 entry_ema_9=100,
                 entry_ema_20=95,

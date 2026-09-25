@@ -16,6 +16,9 @@ from app.database import get_session
 from app.engine.jobs import (
     JOB_ALPACA_ENRICH,
     JOB_TRADE_PATH,
+    _alpaca_fill_ids,
+    _polygon_fill_ids,
+    _trade_path_ids,
     create_alpaca_enrichment_job,
     create_trade_path_job,
     job_status,
@@ -119,7 +122,9 @@ async def trade_path_status(session: Session = Depends(get_session)):
 async def get_coverage(session: Session = Depends(get_session)):
     """
     Returns enrichment coverage counts for fills and closed trades.
-    Cheap — three COUNT queries.
+
+    *_missing counts absent rows; *_incomplete counts rows that exist but
+    still have gaps the scheduled pipeline will retry.
     """
     from sqlalchemy import func
 
@@ -137,18 +142,24 @@ async def get_coverage(session: Session = Depends(get_session)):
         select(func.count(TradePathMetrics.trade_id))
     ).one()
 
+    polygon_missing = max(0, total_fills - poly_enriched)
+    alpaca_missing = max(0, total_fills - alpaca_enriched)
+    path_missing = max(0, total_closed - path_done)
     return {
         "fills": {
             "total": total_fills,
             "polygon_enriched": poly_enriched,
-            "polygon_missing": max(0, total_fills - poly_enriched),
+            "polygon_missing": polygon_missing,
+            "polygon_incomplete": max(0, len(_polygon_fill_ids(session, "all", False)) - polygon_missing),
             "alpaca_enriched": alpaca_enriched,
-            "alpaca_missing": max(0, total_fills - alpaca_enriched),
+            "alpaca_missing": alpaca_missing,
+            "alpaca_incomplete": max(0, len(_alpaca_fill_ids(session, "all", False)) - alpaca_missing),
         },
         "trades": {
             "total_closed": total_closed,
             "path_metrics_done": path_done,
-            "path_metrics_missing": max(0, total_closed - path_done),
+            "path_metrics_missing": path_missing,
+            "path_metrics_incomplete": max(0, len(_trade_path_ids(session, "all", False)) - path_missing),
         },
     }
 

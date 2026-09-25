@@ -43,7 +43,8 @@ Things worth knowing before you touch a page:
   listener creates. `POST
   /sync/pipeline/run` (`_run_pipeline`) runs six
   stages: Gmail sync, fill check, trade rebuild (only when new fills arrived),
-  then Polygon, Alpaca and trade-path enrichment over everything missing.
+  then Polygon, Alpaca and trade-path enrichment over everything missing,
+  including rows whose fields are still empty (`domain-rules.md`).
   Daily review is deliberately not one of them. Status endpoints read
   `job_run` rows, never process memory (`architecture.md`).
 - `/accounts` (`app/accounts/page.tsx`) is a static placeholder: not in the
@@ -74,11 +75,11 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Gmail fetch and import | `app/engine/gmail_poller.py`, `app/routers/fills.py` | `POST /fills/import`, `POST /fills/resync-all` (destructive, needs `confirm`) | `test_gmail_poller.py`, `test_fill_import.py`, `test_environment_guard.py` |
 | Gmail OAuth | `app/routers/auth.py` | `GET /auth/gmail/start`, `/auth/gmail/start/browser`, `/auth/gmail/callback` | `test_gmail_auth.py`, `test_cors.py` |
 | Real-time Gmail import (Pub/Sub pull) | `app/engine/gmail_listener.py` (lane `gmail`), history cursor in `app/engine/gmail_poller.py`, `_import_gmail_changes` and `queue_gmail_push_pipeline` in `app/routers/sync.py`; setup in [deploy/README.md](../../deploy/README.md#real-time-gmail-import) | jobs `gmail_listener`, `gmail_push`, `gmail_watch_renew`; `POST /gmail/watch`, `GET /gmail/watch/status`, `POST /gmail/push` (same coalesced queue; nothing public calls it) | `test_gmail_listener.py` (fake subscriber), `test_gmail_realtime.py` (cursor, targeted fetch, coalescing) |
-| Phone alerts (ntfy) | `deploy/alerts.py`, `deploy/systemd/tradejournal-alerts.*`; setup in [deploy/README.md](../../deploy/README.md#phone-alerts) | reads `GET /health`, `/gmail/health`, `/webull/events/status`, `/sync/runs` and `systemctl show` | `test_deployment.py` (grace periods, one alert per problem, recovery, merged pipeline failures, reboot); the deployment workflow runs the real unit against a loopback ntfy stand-in; live ntfy delivery is not tested |
+| Phone alerts (ntfy) | `deploy/alerts.py`, `deploy/systemd/tradejournal-alerts.*`; setup in [deploy/README.md](../../deploy/README.md#phone-alerts) | reads `GET /health`, `/gmail/health`, `/sync/runs` and `systemctl show` | `test_deployment.py` (grace periods, one alert per problem, recovery, merged pipeline failures, reboot); the deployment workflow runs the real unit against a loopback ntfy stand-in; live ntfy delivery is not tested |
 | Gmail status banner and live refresh | `app/engine/gmail_health.py`; `components/GmailStatusBanner.tsx`, `lib/useGmailHealth.ts`, status line in `components/Nav.tsx` | `GET /gmail/health` (polled every 30s while visible; `data_version` drives `router.refresh()`) | `test_gmail_realtime.py` (health states); rendering is not in the browser suite |
-| Polygon enrichment, greeks, indicators | `app/engine/enricher.py`, `app/engine/indicators.py` | `POST /fills/enrich?range=`, `GET /fills/enrich/status`; job `polygon_enrich` | `test_enricher.py` (incl. the discovered rate limit), `test_indicators_rvol.py` |
+| Polygon enrichment, greeks, indicators | `app/engine/enricher.py`, `app/engine/indicators.py` | `POST /fills/enrich?range=`, `GET /fills/enrich/status`; job `polygon_enrich` | `test_enricher.py` (incl. the discovered rate limit), `test_indicators_rvol.py`, `test_enrichment_gap_repair.py` (which empty fields are retried) |
 | Alpaca fill context | `app/engine/alpaca.py`, `app/engine/alpaca_enricher.py`, `app/engine/behavior.py` (sequence metrics) | `POST /market-context/enrich?range=&force=`, `GET /market-context/enrich/status`, `/market-context/fill/{id}`, `/market-context/fills/bulk?ids=`, `/market-context/coverage`; job `alpaca_enrich` | `test_alpaca_context_repair.py`, `test_indicators_rvol.py` (the injected cache-only bar loader) |
-| Trade path metrics (MFE, MAE, exit efficiency) | `app/engine/trade_path.py` | `POST /market-context/trade-path/compute`, `GET /market-context/trade-path/status`, `/market-context/trade/{id}`, `/market-context/trade-path/bulk?ids=`; job `trade_path` | — (live Alpaca fetch; `test_seed_snapshot.py` stubs it) |
+| Trade path metrics (MFE, MAE, exit efficiency) | `app/engine/trade_path.py` | `POST /market-context/trade-path/compute`, `GET /market-context/trade-path/status`, `/market-context/trade/{id}`, `/market-context/trade-path/bulk?ids=`; job `trade_path` | `test_enrichment_gap_repair.py` (row selection, keep-existing merge); live Alpaca fetch untested, `test_seed_snapshot.py` stubs it |
 | Trade audit | `app/engine/auditor.py` | `GET /market-context/audit/{trade_id}` | `test_seed_snapshot.py` (Alpaca stubbed, cache emptied) |
 | Durable jobs, Sync Center | `app/engine/jobs.py`, `app/jobs/run.py`, `app/routers/sync.py`; `app/engine/api_wait.py` (per-job pacing and backoff telemetry) | `GET /sync/summary`, `/sync/jobs`, `/sync/runs`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run?range=&force=`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` | `test_sync_progress.py`, `test_environment_guard.py` (the destructive guard) |
 | Trades, tags | `app/routers/trades.py` | `GET /trades`, `/trades/{id}`, `/trades/{id}/fills`, `/trades/fills/bulk?ids=`; `POST /trades/{id}/tags` | browser tests; `test_seed_dev_data.py` |
@@ -90,8 +91,10 @@ you change it (`verification.md`, "What is NOT covered yet").
 | AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py`, `app/routers/daily_review.py` | `POST /trades/{id}/review`; `GET /daily-review`, `/daily-review/{day}`, `POST /daily-review`; job `daily_review` | — (Anthropic) |
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
+| Isaac Market Map backtester | `app/engine/market_map.py` (the Pine's rules, pure), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
-| TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail** | no automated coverage — verified by hand against a live alert |
+| TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/components/SignalsRefresh.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail**; both refresh every 30s while visible and on tab return | `frontend/e2e/signals.spec.ts`: new alerts, verdicts/details, hidden-tab pause, navigation cleanup, slow refresh and skip/error reasons against disposable SQLite |
+| Production TradingView ingress | `deploy/ingress.py`, `deploy/launch.py`, `deploy/control.py`, `deploy/systemd/tradejournal-ingress.service`, `deploy/Caddyfile.tradingview.example` | [VPS webhook setup](../../deploy/README.md#tradingview-webhooks) | `test_deployment.py`; Ubuntu deployment smoke covers real role/service/proxy behavior, public DNS/TLS remains an operator check |
 | TradingView alerts | `app/engine/tradingview.py`, `tradingview_alerts.py`, `tradingview_analysis.py`; `app/routers/tradingview_*.py`; `app/tradingview_ingress.py`, `app/tradingview_database.py` | private `GET /tradingview/alerts`, `/tradingview/alerts/{alert_id}`; public ingress on `:8090` `POST /tradingview/webhook`, `GET /health` | `test_tradingview.py`, `_routes`, `_alert_model`, `_alert_persistence`, `_alert_migration`, `_analysis`; `test_import_boundaries.py` (what the ingress may import) |
 | Schema | `app/models.py`, `alembic/versions/`, `app/schema.py` | — | `test_schema_migrations.py`, `test_schema_authority.py`, `test_postgres_parity.py`, `test_postgres_migration_paths.py` |
 | Which database am I on | `app/environment.py`, `app/database.py`, `app/routers/health.py` | `GET /health` | `test_environment_guard.py`, `test_check_database.py` |
@@ -127,6 +130,10 @@ you change it (`verification.md`, "What is NOT covered yet").
 - `check_database.py` — read-only preflight: which database, schema ready?
 - `setup_roles.py` — create the app and ingress roles, then prove they are
   limited by connecting as each one (`environments.md`)
+- `backtest_market_map.py` — Isaac Market Map over many tickers from Alpaca
+  bars: cohort report in R, Strategy Lab CSVs, `--parity` against exports
+- `imm_export_cohorts.py`, `playbook_cohorts.py` — the cohort evidence
+  `docs/pine/README.md` cites
 
 `backend/compare_fills*.py` are ad hoc scratch scripts, not stable app code.
 
@@ -148,6 +155,8 @@ reason, and ruff lints them without importing them.
 - `docs/tradingview-signal-loop-plan.md` — staged plan for the signal loop
 - `docs/strategy-lab-metrics.md` — metric definitions
 - `docs/strategy-lab-pine-metadata.md` — the `sl1|key=value|...` convention
+- `docs/pine/README.md` — the Isaac Market Map strategy/alert script, the
+  journal evidence behind each rule, and TradingView setup
 
 ## Where things are NOT
 
@@ -157,7 +166,11 @@ reason, and ruff lints them without importing them.
   decision support and never places orders.
 - No component-level frontend tests; the Playwright smoke tests are the only
   frontend coverage, and they are smoke depth.
-- Pine indicator source is not implemented (Step 5); the Signals page is.
+- The Pine script (`docs/pine/isaac_market_map.pine`) is contract-tested by
+  `backend/tests/test_pine_market_map.py` but never compiled in CI;
+  TradingView is the only place it runs. Its Python port
+  (`app/engine/market_map.py`) is tested on synthetic bars and against the
+  exports' execution fingerprints, not yet entry by entry on real bars.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig

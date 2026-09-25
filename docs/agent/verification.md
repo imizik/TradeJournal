@@ -41,7 +41,10 @@ jobs on every pull request. Postgres parity, migration-path and role checks
 are additional to the local script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
-Postgres. See [deployment verification](../../deploy/README.md#verification-boundaries).
+Postgres. It also exercises the optional ingress, its restricted DB/OS roles,
+duplicate delivery, stale-alert analysis and Caddy routing/token-log filtering
+over local HTTP. Public DNS and certificate issuance are not covered.
+See [deployment verification](../../deploy/README.md#verification-boundaries).
 It checks boot enablement but does not reboot a real VPS or test Tailscale/live
 integrations. Agent verification is not the only signal.
 
@@ -155,6 +158,14 @@ How a run works:
    started on 3099. Dedicated ports so a dev session on 8080/3000 is untouched.
 3. Tests assert that seeded values reach the DOM.
 
+`frontend/e2e/signals.spec.ts` also inserts synthetic alerts and changes their
+analysis state through `frontend/e2e/fixtures/signals.py`, which is pinned to
+that same disposable SQLite file. It verifies list/detail refresh, visibility
+pause/resume, navigation cleanup, slow requests and recorded skip/error reasons.
+The browser clock is advanced rather than waiting 30 seconds per poll. This
+proves rendering and private reads; it does not exercise TradingView delivery
+or a live Alpaca verdict.
+
 Notes that will save you time:
 
 - **Servers are never reused** (`reuseExistingServer: false`). `NEXT_PUBLIC_*`
@@ -166,15 +177,15 @@ Notes that will save you time:
   fetches at port 8099. The Sync Center test asserts the browser reaches the proxy
   without directly contacting a backend port. Direct-API local development
   still needs `FRONTEND_PUBLIC_URL` in the backend's CORS allowlist.
-- **A sandbox with a preinstalled browser** whose build does not match this
-  Playwright version can point at it. The variable wants the executable, not
-  the directory, and the build number changes, so resolve it:
-  ```bash
-  PLAYWRIGHT_CHROMIUM_PATH=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome | head -1) \
-    bash scripts/verify.sh
-  ```
-  Without this the run fails with `browserType.launch: Executable doesn't
-  exist`, which reads like a missing install rather than a version mismatch.
+- **The browser is installed by `scripts/setup.sh`** (`npx playwright install
+  --only-shell chromium`), except in a sandbox that ships one under
+  `/opt/pw-browsers` -- a Claude Code cloud session does. That build rarely
+  matches this Playwright version, so `verify.sh` points
+  `PLAYWRIGHT_CHROMIUM_PATH` at it automatically when the variable is unset.
+  Set the variable yourself (to the executable, not the directory) to use a
+  different browser. `browserType.launch: Executable doesn't exist` means no
+  browser was found, which reads like a missing install but can also be a
+  version mismatch.
 - Asserted numbers come from `EXPECTED` in `seed_dev_data.py`, which
   `backend/tests/test_seed_dev_data.py` independently verifies the
   reconstructor still produces. If the fixture changes, that test fails first,

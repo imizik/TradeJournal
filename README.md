@@ -175,15 +175,19 @@ so exact decimal text and original scalar types remain distinguishable.
 and an ingress database role restricted to `tradingview_alert`. The ingress
 never runs migrations. Cloud scale-to-zero still needs an always-on worker or
 durable task dispatcher.
+The Ubuntu deployment includes an opt-in ingress service with a separate OS
+user, restricted database-role preflight and a dedicated HTTPS proxy template;
+see [production webhook setup](deploy/README.md#tradingview-webhooks).
 
 The exact payload, bounds, identity format, and future migration policy are in
 [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).
 The Signals page at `/signals` lists every alert with its verdict, confidence
 and analysis status, and links to a per-alert view of the indicator levels,
-the indicator context, and the stored assessment. Alerts whose status is
-`skipped` are counted as "Unanalyzed": they arrived while the worker was down
-and aged past `TRADINGVIEW_ALERT_MAX_AGE_SECONDS`, so they keep the signal but
-never receive a verdict. The Pine indicator remains future Step 5.
+the indicator context, and the stored assessment. Both views refresh every
+30 seconds while visible, immediately when returning to the tab, and through
+**Refresh now**. Pending/running alerts are counted separately from skipped
+and failed analysis; details show the recorded skip/error reason. The Pine
+source is `docs/pine/isaac_market_map.pine`; see [its README](docs/pine/README.md).
 
 ## Durable Jobs
 

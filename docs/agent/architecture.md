@@ -20,6 +20,13 @@ webhook can reach the database without exposing the private API. Private API
 keys and unrestricted database credentials must never appear in its
 environment.
 
+On Ubuntu, `tradejournal-ingress.service` is opt-in and runs as its own OS
+user, with `/etc/tradejournal/tradingview.env` instead of the local dotenv.
+Deployment checks its database target and effective role privileges before
+activation. The dedicated Caddy template forwards only the webhook path to
+8090; the private Tailscale/frontend/API routes stay private. See
+[production setup](../../deploy/README.md#tradingview-webhooks).
+
 That separation is enforced on the import graph, not only described here.
 `backend/tests/test_import_boundaries.py` fails if anything the ingress
 imports, through any chain, lies outside a six-module allowlist
@@ -38,6 +45,8 @@ than reaching for it. `app.engine.indicators` was held out by one lazy
 `MinuteBarLoader` and its caller decides where bars come from and who pays for
 them. `trade_path` and `auditor` are the same shape and are the remaining
 targets, listed in the test.
+`app.engine.market_map` was written that way from the start:
+`scripts/backtest_market_map.py` fetches the bars and hands them in.
 
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend by
 default. The ingress is opt-in:

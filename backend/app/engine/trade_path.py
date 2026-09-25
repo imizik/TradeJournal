@@ -47,15 +47,97 @@ def trade_inputs_fingerprint(trade: Trade, fills: list[Fill]) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
+_ENTRY_SIDES = ("buy_to_open", "sell_to_open", "buy")
+
+
+def trades_needing_path_metrics(session: Session, trades: list[Trade]) -> list:
+    """Ids of closed trades with no path metrics or with gaps a rerun can fill.
+
+    A row computed the day a trade closed has no underlying path (minute bars
+    are not final until 20:05 ET); a row computed before Polygon finished has
+    no greeks attribution; rows from before a column existed lack it entirely.
+    Only gaps whose inputs are present now are selected, so permanent ones are
+    not recomputed on every scheduled run.
+    """
+    closed = [t for t in trades if t.status in ("closed", "expired") and t.opened_at and t.closed_at]
+    if not closed:
+        return []
+    metrics_by_trade = {
+        row.trade_id: row
+        for row in session.exec(
+            select(TradePathMetrics).where(TradePathMetrics.trade_id.in_([t.id for t in closed]))
+        ).all()
+    }
+
+    selected = []
+    to_check: dict = {}
+    for trade in closed:
+        metrics = metrics_by_trade.get(trade.id)
+        if metrics is None:
+            selected.append(trade.id)
+        elif metrics.underlying_mfe_pct is None and _window_days(trade):
+            selected.append(trade.id)  # bars can arrive after the first run
+        else:
+            atr_gap = metrics.underlying_mfe_pct is not None and metrics.mfe_atr_multiple is None
+            attr_gap = trade.instrument_type == "option" and metrics.attr_delta_pnl is None and trade.realized_pnl is not None
+            if atr_gap or attr_gap:
+                to_check[trade.id] = (atr_gap, attr_gap)
+    if not to_check:
+        return selected
+
+    from app.models import TradeFill
+    rows = session.exec(
+        select(
+            TradeFill.trade_id,
+            Fill.side,
+            Fill.executed_at,
+            Fill.delta_at_fill,
+            Fill.underlying_price_at_fill,
+            FillMarketContext.entry_atr_14,
+        )
+        .join(Fill, Fill.id == TradeFill.fill_id)
+        .outerjoin(FillMarketContext, FillMarketContext.fill_id == Fill.id)
+        .where(TradeFill.trade_id.in_(list(to_check)))
+    ).all()
+    fills_by_trade: dict = defaultdict(list)
+    for row in rows:
+        fills_by_trade[row.trade_id].append(row)
+
+    for trade_id, (atr_gap, attr_gap) in to_check.items():
+        fills = fills_by_trade.get(trade_id, [])
+        entries = [f for f in fills if f.side in _ENTRY_SIDES]
+        exits = [f for f in fills if f.side not in _ENTRY_SIDES]
+        if not entries:
+            continue
+        entry = min(entries, key=lambda f: f.executed_at)
+        last_exit = max(exits, key=lambda f: f.executed_at) if exits else None
+        atr_ready = atr_gap and entry.entry_atr_14 is not None
+        attr_ready = (
+            attr_gap
+            and last_exit is not None
+            and entry.delta_at_fill is not None
+            and entry.underlying_price_at_fill is not None
+            and last_exit.underlying_price_at_fill is not None
+        )
+        if atr_ready or attr_ready:
+            selected.append(trade_id)
+    return selected
+
+
 def compute_path_metrics_for_trades(
     trades: list[Trade],
     session: Session,
     on_progress=None,
     force: bool = False,
+    keep_existing: bool = False,
 ) -> int:
     """
     Compute and upsert TradePathMetrics for closed/expired trades.
     Returns count of trades processed.
+
+    keep_existing: a recomputed row keeps any stored value this run could not
+    produce (a failed or missing bar fetch), provided the trade's fills are
+    unchanged. The scheduled gap repair uses it.
     """
     closed = [t for t in trades if t.status in ("closed", "expired") and t.opened_at and t.closed_at]
     if not closed:
@@ -84,6 +166,15 @@ def compute_path_metrics_for_trades(
     ctx_rows = session.exec(select(FillMarketContext).where(FillMarketContext.fill_id.in_(fill_ids))).all() if fill_ids else []
     ctx_by_fill = {str(row.fill_id): row for row in ctx_rows}
 
+    previous_by_trade = (
+        {
+            row.trade_id: row
+            for row in session.exec(select(TradePathMetrics).where(TradePathMetrics.trade_id.in_(trade_ids))).all()
+        }
+        if keep_existing
+        else {}
+    )
+
     # Pre-fetch every minute-bar (ticker, day) the trades will need, batched by
     # day. fetch_minute_bars_for_date() takes up to 50 tickers per call and
     # caches per ticker/date, so this collapses what used to be one serial
@@ -101,6 +192,11 @@ def compute_path_metrics_for_trades(
             metrics = _compute(trade, fills, ctx_by_fill, bar_store)
             if metrics:
                 metrics.inputs_fingerprint = trade_inputs_fingerprint(trade, fills)
+                previous = previous_by_trade.get(trade.id)
+                if previous is not None and previous.inputs_fingerprint == metrics.inputs_fingerprint:
+                    for column in TradePathMetrics.__table__.columns:
+                        if getattr(metrics, column.name) is None:
+                            setattr(metrics, column.name, getattr(previous, column.name))
                 session.merge(metrics)
                 processed += 1
         except Exception as e:
@@ -170,7 +266,7 @@ def _compute(
     ctx_by_fill: dict[str, FillMarketContext],
     bar_store: dict[tuple[str, str], list],
 ) -> Optional[TradePathMetrics]:
-    entry_fills = [f for f in fills if f.side in ("buy_to_open", "sell_to_open", "buy")]
+    entry_fills = [f for f in fills if f.side in _ENTRY_SIDES]
     exit_fills = [f for f in fills if f not in entry_fills]
 
     if not entry_fills:

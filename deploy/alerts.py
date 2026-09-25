@@ -30,7 +30,7 @@ API_GRACE = 5 * 60
 GMAIL_GRACE = 10 * 60
 TIMER_GRACE = 15 * 60
 
-# Listeners report through their own checks, not as failed jobs.
+# Listeners are not finite jobs. Gmail's has its own check; Webull is dormant.
 LISTENER_JOBS = {"gmail_listener", "webull_listener"}
 GMAIL_JOBS = {"gmail_sync", "gmail_push", "gmail_watch_renew"}
 # An interrupted import can leave fills saved without the rebuild that follows.
@@ -107,20 +107,6 @@ def gmail_problem(health: dict) -> Problem | None:
     return Problem(title, str(health.get("message")), GMAIL_GRACE, "Robinhood import is live again")
 
 
-def webull_problem(status: dict, watching_since: float) -> dict[str, Problem | None]:
-    job = status.get("job") or {}
-    if job.get("status") in {"queued", "running", "succeeded"}:
-        return {"webull": None}
-    finished = timestamp(job.get("finished_at")) or timestamp(job.get("updated_at"))
-    if job.get("status") == "failed" and finished is not None and finished >= watching_since:
-        return {"webull": Problem(
-            "Webull connection stopped",
-            f"Webull fills won't import until the listener is started again. {first_line(job.get('error'))}",
-            recovered="Webull is connected again",
-        )}
-    return {}  # never started, or it failed before alerts were watching
-
-
 def job_problems(runs: list[dict], watching_since: float, gmail_down: bool) -> dict[str, Problem | None]:
     """Judge each job type by its newest finished run; /sync/runs is newest first."""
     latest: dict[str, dict] = {}
@@ -192,7 +178,6 @@ def observe(watching_since: float) -> dict[str, Problem | None]:
     try:
         get("/health")
         gmail = get("/gmail/health")
-        webull = get("/webull/events/status")
         runs = get("/sync/runs?limit=200")
     except (OSError, ValueError, HTTPException) as exc:
         # Everything below comes from the API, so its answers are unknown now.
@@ -205,7 +190,6 @@ def observe(watching_since: float) -> dict[str, Problem | None]:
     else:
         observed["api"] = None
         observed["gmail"] = gmail_problem(gmail)
-        observed.update(webull_problem(webull, watching_since))
         observed.update(job_problems(runs, watching_since, gmail_down=observed["gmail"] is not None))
     observed.update(unit_problems(systemd_units()))
     return observed
@@ -228,7 +212,7 @@ def evaluate(observed: dict[str, Problem | None], state: dict, now: float) -> tu
                 })
             conditions.pop(key, None)
             continue
-        entry = entry or {"since": now}
+        entry = entry or {"since": now, "alerted": False}
         entry.update(title=problem.title, message=problem.message, recovered=problem.recovered or f"{problem.title}: resolved")
         if not entry.get("alerted") and now - entry["since"] >= problem.grace:
             entry["alerted"] = True
