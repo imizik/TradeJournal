@@ -133,10 +133,9 @@ of slippage, it won't survive option spreads.
 
 ## Round 1 (v0.1.0 baseline, MU)
 
-The run is BATS:MU on 1m, September 24, 2025 – September 24, 2026. The export
-is `backend/TradingView/IR_v0.1.0_BATS_MU_2026-09-24.csv`. A second upload
-labelled META was a byte-for-byte copy of it, so the META transfer check has
-not run yet.
+The runs are BATS:MU and BATS:META (the transfer check, nothing changed) on
+1m, September 24, 2025 – September 24, 2026. The exports are
+`backend/TradingView/IR_v0.1.0_BATS_*_2026-09-24.csv`.
 
 **Mechanics are clean:**
 - 0 holds past 20 minutes; every time exit is at exactly 20.
@@ -158,10 +157,15 @@ at +2.
 Both sides went negative in the second half: longs +14.6R → −11.2R, shorts
 +18.3R → −1.4R.
 
+**META transfer check:** 351 trades, **+23.3R, +0.067R a trade, PF 1.13**,
+max drawdown 14.2R, and +17.0R at +1 tick a side. It held up across both
+halves: +12.6R, then +10.7R. So the MU decay is MU, not the rules, but both
+edges are thin.
+
 **Hold off on:**
 - Time-of-day slices: 09:35–10:00 made +16.6R, 10–11 lost 4.4R. They are
   in-sample and noisy, not a filter.
-- Any conclusion before the META export and the ambiguous-bar count from the
-  table's Fill check row.
+- Any conclusion before the ambiguous-bar counts from the table's Fill check
+  row, and the replay checks.
 
 **Next:** v0.2 changes only the exit, and only after the replay checks pass.
