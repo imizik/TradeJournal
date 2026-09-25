@@ -92,8 +92,10 @@ def parse_setup_id(setup_id: str) -> dict[str, str] | None:
 def load_trades(paths: list[str], source_timezone: str) -> tuple[list[Trade], list[str]]:
     trades: list[Trade] = []
     problems: list[str] = []
+    seen: dict[tuple[str, str], str] = {}
     for path in paths:
         name = Path(path).name
+        duplicates: dict[str, int] = defaultdict(int)
         result = parse_tradingview_csv(Path(path).read_bytes(), source_timezone)
         for rejected in result.rejected_trades:
             reasons = "; ".join(issue.message for issue in rejected.issues)
@@ -106,6 +108,13 @@ def load_trades(paths: list[str], source_timezone: str) -> tuple[list[Trade], li
                 what = ", ".join(missing) if missing else "a valid setup_id" if ids is None else "net PnL"
                 problems.append(f"{name}: trade {parsed.trade_number} has no {what}; skipped")
                 continue
+            # The same trade in two files (a re-export, or one run saved under
+            # two names) would be counted twice.
+            identity = (str(features["setup_id"]), parsed.entry_at_raw)
+            if identity in seen:
+                duplicates[seen[identity]] += 1
+                continue
+            seen[identity] = name
             direction = 1 if parsed.direction == "long" else -1
             fill = float(parsed.entry_price)
             exit_price = float(parsed.exit_price)
@@ -143,6 +152,8 @@ def load_trades(paths: list[str], source_timezone: str) -> tuple[list[Trade], li
                     tick=float(features.get("tick") or 0.01),
                 )
             )
+        for original, count in duplicates.items():
+            problems.append(f"{name}: {count} trades duplicate {original}; skipped")
     return trades, problems
 
 

@@ -131,4 +131,37 @@ The options boundary in the framework applies in full. A short signal is a
 bearish underlying simulation, not a put. If a result only survives at 1 tick
 of slippage, it won't survive option spreads.
 
+## Round 1 (v0.1.0 baseline, MU)
+
+The run is BATS:MU on 1m, September 24, 2025 – September 24, 2026. The export
+is `backend/TradingView/IR_v0.1.0_BATS_MU_2026-09-24.csv`. A second upload
+labelled META was a byte-for-byte copy of it, so the META transfer check has
+not run yet.
+
+**Mechanics are clean:**
+- 0 holds past 20 minutes; every time exit is at exactly 20.
+- 0 sessions over 2 entries.
+- Entries fall between 09:35 and 14:56.
+- The worst stop fill landed 0.06R past the stop.
+
+**Overall:** 374 trades over 216 sessions, **+20.2R, +0.054R a trade, PF
+1.10**, max drawdown 24.1R. That becomes +14.6R at +1 tick a side and +9.1R
+at +2.
+
+**It decayed:**
+
+| Half | Trades | R | PF |
+|---|---|---|---|
+| Sep 24 – Mar 23 | 187 | +32.8 | 1.37 |
+| Mar 24 – Sep 24 | 187 | −12.6 | 0.88 |
+
+Both sides went negative in the second half: longs +14.6R → −11.2R, shorts
++18.3R → −1.4R.
+
+**Hold off on:**
+- Time-of-day slices: 09:35–10:00 made +16.6R, 10–11 lost 4.4R. They are
+  in-sample and noisy, not a filter.
+- Any conclusion before the META export and the ambiguous-bar count from the
+  table's Fill check row.
+
 **Next:** v0.2 changes only the exit, and only after the replay checks pass.

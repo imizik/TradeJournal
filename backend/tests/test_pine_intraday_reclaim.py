@@ -271,3 +271,14 @@ def test_every_event_is_research_json_that_the_v1_ingress_rejects() -> None:
         assert body["event"] == event
         with pytest.raises(TradingViewContractError):
             parse_alert_bytes(payload.encode())
+
+
+def test_report_skips_a_run_exported_twice(tmp_path: Path) -> None:
+    report = _load_report()
+    for name in ("IR_NASDAQ_MU.csv", "IR_NASDAQ_META.csv"):
+        (tmp_path / name).write_bytes(_export_csv())
+
+    trades, problems = report.load_trades(sorted(str(p) for p in tmp_path.glob("IR_*.csv")), "America/New_York")
+
+    assert len(trades) == len(SAMPLE_TRADES)
+    assert problems == [f"IR_NASDAQ_MU.csv: {len(SAMPLE_TRADES)} trades duplicate IR_NASDAQ_META.csv; skipped"]
