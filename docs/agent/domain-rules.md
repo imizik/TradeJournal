@@ -40,7 +40,8 @@ patterns that can create N+1 calls.
   timezone attached, matching the `trade.closed_at` column. Passing an aware
   datetime to PostgreSQL shifts the saved clock to UTC. The guarded
   `backend/scripts/repair_expired_trade_times.py` corrects only rows that
-  exactly match that historical shift, and invalidates their path metrics.
+  exactly match that historical shift, refreshes affected same-day sequence
+  fields on fills, and invalidates the expired trades' path metrics.
 - Manual fills are backed up to `backend/data/manual_fills.json` and restored
   on startup and after a destructive resync.
 - The FIFO sort key is

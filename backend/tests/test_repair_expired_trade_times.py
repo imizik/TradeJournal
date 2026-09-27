@@ -8,7 +8,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.engine.reconstructor import reconstruct
-from app.models import Account, DailyReviewRecord, Fill, Trade, TradePathMetrics
+from app.models import Account, DailyReviewRecord, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 from scripts import repair_expired_trade_times as repair
 
 
@@ -30,21 +30,38 @@ def test_expiration_repair_preserves_saved_reviews_and_rejects_unrelated_times(m
             )
             session.add(fill)
             fills.append(fill)
+        late_fill = Fill(
+            id=uuid.uuid4(), account_id=account_id, ticker="AAPL",
+            instrument_type="stock", side="buy", contracts=1, price=Decimal("50"),
+            executed_at=datetime(2025, 7, 18, 17), raw_email_id="manual:late",
+        )
+        session.add(late_fill)
+        fills.append(late_fill)
         session.flush()
         rebuilt = reconstruct([repair._fill_input(fill) for fill in fills], today=date(2026, 1, 1))
         for item in rebuilt.trades:
             trade = Trade(**vars(item), ai_review='{"note":"keep"}')
-            if item.expiration == expirations[0]:
+            if item.status == "open":
+                pass
+            elif item.expiration == expirations[0]:
                 trade.closed_at = datetime(2025, 7, 18, 20)
             elif item.expiration == expirations[1]:
                 trade.closed_at = datetime(2025, 12, 19, 21)
             else:
                 trade.closed_at = datetime(2025, 8, 15, 18)
             session.add(trade)
-            session.add(TradePathMetrics(
-                trade_id=trade.id, data_source="alpaca_iex",
-                fetched_at=datetime.now(), inputs_fingerprint="saved",
-            ))
+            if item.status == "expired":
+                session.add(TradePathMetrics(
+                    trade_id=trade.id, data_source="alpaca_iex",
+                    fetched_at=datetime.now(), inputs_fingerprint="saved",
+                ))
+        for link in rebuilt.trade_fills:
+            session.add(TradeFill(trade_id=link.trade_id, fill_id=link.fill_id, role=link.role))
+        session.add(FillMarketContext(
+            fill_id=late_fill.id, data_source="alpaca_iex", fetched_at=datetime.now(),
+            entry_underlying_price=123, trades_closed_today_before=0,
+        ))
+        late_fill_id = late_fill.id
         session.add(DailyReviewRecord(
             day=expirations[0], review_json='{"summary":"keep"}', trade_count=1,
         ))
@@ -67,6 +84,11 @@ def test_expiration_repair_preserves_saved_reviews_and_rejects_unrelated_times(m
             "note": "keep", "source_data_stale": True,
         }
         assert json.loads(trades[expirations[2]].ai_review) == {"note": "keep"}
+        assert json.loads(trades[None].ai_review) == {"note": "keep", "source_data_stale": True}
+        late_context = session.get(FillMarketContext, late_fill_id)
+        assert late_context.entry_underlying_price == 123
+        assert late_context.trades_closed_today_before == 1
+        assert late_context.minutes_since_last_exit == 60
         assert {path.trade_id for path in session.exec(select(TradePathMetrics)).all()} == {
             trades[expirations[2]].id,
         }

@@ -6,8 +6,8 @@ Run from backend/ after a verified backup and with import writers paused:
 
 Only expired trades whose stored close is exactly the UTC-clock rendering of
 16:00 on their expiration date are changed. Other timestamps are left alone.
-Saved reviews are retained and marked stale; affected path metrics are removed
-for recomputation.
+Saved reviews are retained and marked stale; affected same-day fill sequence
+fields are recomputed in place, and path metrics are removed for recomputation.
 """
 
 from __future__ import annotations
@@ -26,9 +26,10 @@ from sqlmodel import Session, select
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.database import engine  # noqa: E402
+from app.engine.behavior import SequenceState  # noqa: E402
 from app.engine.reconstructor import FillInput, reconstruct  # noqa: E402
 from app.models import (  # noqa: E402
-    DailyReviewRecord, FILL_LIGHT, Fill, Trade, TradePathMetrics,
+    DailyReviewRecord, FILL_LIGHT, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -66,6 +67,7 @@ def repair(*, apply: bool = False) -> dict[str, int]:
 
         # A stored timestamp is not enough evidence by itself: confirm the
         # candidate still belongs to the current FIFO reconstruction.
+        fills: list[Fill] = []
         if candidates:
             fills = session.exec(select(Fill).options(*FILL_LIGHT)).all()
             rebuilt = {
@@ -92,13 +94,35 @@ def repair(*, apply: bool = False) -> dict[str, int]:
             return result
 
         ids = [trade.id for trade, _ in candidates]
+        boundaries = {(trade.account_id, trade.expiration): target for trade, target in candidates}
+        sequence_fills = [
+            fill for fill in fills
+            if (boundary := boundaries.get((fill.account_id, fill.executed_at.date()))) is not None
+            and fill.executed_at >= boundary
+        ]
+        sequence_fill_ids = [fill.id for fill in sequence_fills]
+        linked_ids = set(session.exec(
+            select(TradeFill.trade_id).where(TradeFill.fill_id.in_(sequence_fill_ids))
+        ).all()) if sequence_fill_ids else set()
+        analysis_ids = set(ids) | linked_ids
+        analysis_trades = session.exec(select(Trade).where(Trade.id.in_(analysis_ids))).all()
         days = {
             day
-            for trade, _ in candidates
-            for day in (trade.opened_at.date(), trade.expiration)
+            for trade in analysis_trades
+            for day in (trade.opened_at.date(), trade.closed_at.date() if trade.closed_at else None)
+            if day is not None
         }
         for trade, target in candidates:
             trade.closed_at = target
+            days.add(target.date())
+        session.flush()
+        sequence = SequenceState(session)
+        for fill in sequence_fills:
+            context = session.get(FillMarketContext, fill.id)
+            if context is not None:
+                for key, value in sequence.compute(fill).items():
+                    setattr(context, key, value)
+        for trade in analysis_trades:
             if trade.ai_review:
                 review = json.loads(trade.ai_review)
                 if isinstance(review, dict):
