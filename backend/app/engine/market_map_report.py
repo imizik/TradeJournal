@@ -18,8 +18,9 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Protocol
 
-from app.engine.market_map import ET, MarketMapConfig, Signal, Trade
+from app.engine.market_map import ET, Signal, Trade
 
 GROUP_KEYS: dict[str, Callable[[Trade], str]] = {
     "ticker": lambda t: t.ticker,
@@ -105,8 +106,21 @@ def _money(value: float) -> str:
     return f"{value:.2f}"
 
 
-def tradingview_csv(trades: Iterable[Trade], config: MarketMapConfig) -> str:
-    """Closed trades as a Strategy Tester "List of trades" export, exit row first."""
+class _HasCapital(Protocol):
+    initial_capital: float
+
+
+def tradingview_csv(
+    trades: Iterable[Trade],
+    config: _HasCapital,
+    entry_text: Callable[[Trade], str] = entry_comment,
+    exit_text: Callable[[Trade], str] = exit_comment,
+) -> str:
+    """Closed trades as a Strategy Tester "List of trades" export, exit row first.
+
+    Another strategy's trades work too when they carry the same fields and
+    bring their own `sl1` comments, as `app.engine.vwap_reclaim` does.
+    """
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(TV_HEADER)
@@ -133,10 +147,10 @@ def tradingview_csv(trades: Iterable[Trade], config: MarketMapConfig) -> str:
         ]
         side = "long" if trade.side == 1 else "short"
         writer.writerow(
-            [number, f"Exit {side}", _stamp(trade.exit_time), exit_comment(trade), f"{trade.exit_price:.2f}", *common]
+            [number, f"Exit {side}", _stamp(trade.exit_time), exit_text(trade), f"{trade.exit_price:.2f}", *common]
         )
         writer.writerow(
-            [number, f"Entry {side}", _stamp(trade.entry_time), entry_comment(trade), f"{trade.entry_price:.2f}", *common]
+            [number, f"Entry {side}", _stamp(trade.entry_time), entry_text(trade), f"{trade.entry_price:.2f}", *common]
         )
     return out.getvalue()
 

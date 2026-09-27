@@ -74,6 +74,8 @@ PURE_MODULES = {
     # the bars; these only compute on what they are handed.
     "app.engine.market_map",
     "app.engine.market_map_report",
+    # The VWAP reclaim/rejection research strategy, on the same terms.
+    "app.engine.vwap_reclaim",
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.
