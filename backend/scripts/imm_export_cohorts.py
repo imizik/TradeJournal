@@ -4,7 +4,8 @@ Cohort report, in R, for Isaac Market Map Strategy Tester exports.
 Reads TradingView "List of trades" CSVs exported from
 `docs/pine/isaac_market_map.pine`, pairs entry and exit rows, reads the `sl1`
 metadata on both, and prints results grouped by ticker, setup, side, grade,
-window, exit reason, entry time, relative strength and quarter. R is net PnL
+window, exit reason, entry time, relative strength (alone and by side) and
+quarter. R is net PnL
 divided by the backtest risk for the trade's size (full = the risk input,
 half = half of it), so it assumes the script's default $100 risk input.
 
@@ -100,6 +101,15 @@ def relative_strength(trade: dict) -> str:
     return ">= 3.0%"
 
 
+def side_strength(trade: dict) -> str:
+    """Side, and whether relative strength on the trade's side reached v1.1.0's 1.5% gate."""
+    value = trade.get("rs_vs_spy")
+    if value in (None, "null"):
+        return f"{trade.get('side')}, RS n/a"
+    aligned = float(value) * (1 if trade.get("side") == "long" else -1)
+    return f"{trade.get('side')}, RS {'>=' if aligned >= 1.5 else '<'} 1.5%"
+
+
 def quarter(trade: dict) -> str:
     return f"{trade['stamp'][:4]}Q{(int(trade['stamp'][5:7]) - 1) // 3 + 1}"
 
@@ -116,12 +126,14 @@ def main() -> None:
         raise SystemExit(f"No paired trades found in {args.pattern}")
     print(f"{len(paths)} exports, ALL {summarize(trades)}")
     print_groups("Ticker", trades, lambda t: t["ticker"])
+    print_groups("Side", trades, lambda t: t.get("side", "?"))
     print_groups("Setup and side", trades, lambda t: f"{t.get('setup')} {t.get('side')}")
     print_groups("Grade and size", trades, lambda t: f"{t.get('grade')} {t.get('size')}")
     print_groups("Window", trades, lambda t: t.get("window", "?"))
     print_groups("Exit reason", trades, lambda t: t.get("exit_reason", "?"))
     print_groups("Entry time", trades, entry_time)
     print_groups("Relative strength on the trade's side", trades, relative_strength)
+    print_groups("Side and relative strength", trades, side_strength)
     print_groups("Quarter", trades, quarter)
 
 

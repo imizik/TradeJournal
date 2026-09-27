@@ -63,7 +63,9 @@ least **1.5% on the trade's side** since the 9:30 open (`Min relative strength`)
 With it, A = RVOL ≥ 1.5 at the same time of day (full size), B = RVOL below
 that (half size). Without it the signal is C, and C never trades. A failed ORB
 is counter-trend, so it is never graded A. v1.0.0 needed only RS above 0; see
-the round 1 results below for why that changed.
+the round 1 results below for why that changed, and the
+[out-of-sample test](#out-of-sample-test-v110) for why the change has not
+held up.
 
 **Defaults (v1.1).** Longs only (`Allow shorts` off), no midday entries,
 opening-range retests off, prior-day retests on.
@@ -112,18 +114,75 @@ to trade.
 **These results are in-sample.** The filter was found by slicing this
 same year, which was a bull tape (SPY 658 → 760) in which shorts were always
 going to struggle. Treat "longs only" as a regime setting, not a law.
-The honest tests still to come:
+The honest tests:
 
 1. Re-export v1.1.0 on the same tickers and confirm it reproduces the
    cohort. The trade sequence changes when cooldowns and daily limits apply
-   to different trades, so the result won't match exactly.
-2. Run it on tickers that weren't in this round (for example AMD, LLY, TSLA,
-   GOOG) and on the prior year, using the
-   [Python backtester](#backtesting-in-python).
+   to different trades, so the result won't match exactly. Not re-exported
+   yet; the Python backtester's version is the in-sample row below (281
+   trades, +54.6R, PF 1.67).
+2. Run it on tickers that weren't in this round and on the prior year.
+   **Done, and it fails:** see [Out-of-sample test](#out-of-sample-test-v110).
 3. Forward: paper-trade the alerts before trading them live.
 
 SPY cannot produce signals under the RS gate, because its strength against
 itself is 0. Trade SPX/SPXW from a separate strategy, not this one.
+
+## Out-of-sample test (v1.1.0)
+
+**The v1.1.0 filter does not hold up on data it was not picked from.** Run on
+2026-09-25 with the [Python backtester](#backtesting-in-python) on SIP bars
+with extended hours, the round 1 chart setting, using v1.1.0 defaults:
+
+| Slice | Tickers | Dates | Trades | R | PF | Win % | Quarters positive |
+|---|---|---|---|---|---|---|---|
+| In-sample | MU, META, AAPL, NBIS | 2025-10-14 to 2026-09-24 | 281 | +54.6 | 1.67 | 40.6% | 4 of 4 |
+| New tickers | AMD, LLY, TSLA, GOOG | 2025-10-14 to 2026-09-24 | 233 | −2.4 | 0.97 | 30.5% | 3 of 4 |
+| Prior year | MU, META, AAPL, NBIS | 2024-10-14 to 2025-10-13 | 244 | −31.7 | 0.69 | 29.9% | 0 of 5 |
+| Both new | AMD, LLY, TSLA, GOOG | 2024-10-14 to 2025-10-13 | 200 | −15.0 | 0.80 | 35.0% | 0 of 5 |
+
+Even in-sample, NBIS supplies +41.6R of the +54.6R, and MU is PF 1.15.
+
+The v1.0.0 rules trade every setup on both sides, so the same slices under
+v1.0.0 show whether the cohort v1.1.0 keeps still beats the rest:
+
+| Slice (v1.0.0 rules) | Longs, RS ≥ 1.5% | Longs, RS < 1.5% | Shorts, RS ≥ 1.5% | Shorts, RS < 1.5% |
+|---|---|---|---|---|
+| In-sample | 276, +58.6R, PF 1.73 | 402, −43.0R, 0.77 | 287, −10.8R, 0.90 | 431, −59.9R, 0.70 |
+| New tickers | 212, −2.2R, 0.97 | 480, −3.0R, 0.99 | 174, +3.8R, 1.06 | 502, +28.7R, 1.15 |
+| Prior year | 258, −41.7R, 0.65 | 483, −29.7R, 0.87 | 216, −23.3R, 0.75 | 496, +22.1R, 1.11 |
+| Both new | 179, −10.0R, 0.85 | 551, −18.1R, 0.93 | 195, +10.9R, 1.16 | 553, −52.7R, 0.81 |
+
+- The in-sample row reproduces round 1 (PF 1.73 against the exports' 1.85),
+  so the engine is not the difference. Out of sample the RS ≥ 1.5% longs do
+  no better than the other longs, and in the prior year they do worse.
+- It is not one bad regime. The prior year includes the April 2025 selloff,
+  but its calmer Q3 was negative too, and the new tickers in this year's
+  bull tape only broke even.
+- All setups together (v1.0.0) score PF 0.89–1.05 in every slice: no edge on
+  the underlying, before theta and spreads make options results worse.
+- One lead, not a rule: `orb_retest` short, which v1.1.0 turns off, is the
+  only setup with PF above 1 in all four slices (1.41 / 1.27 / 1.69 / 1.28,
+  +17.2R over 117 trades). The sample is small and it was found by scanning
+  14 setups, so it has to hold up forward before anything is built on it.
+
+So the backtests do not support trading the alerts as a signal on their own.
+Paper-trade them (test 3 above) before any live use, and hold any new rule to
+the same bar: choose it on one slice, then it has to pass the other three.
+
+To reproduce a slice (change the tickers and dates for the others, and add
+`--profile v1.0.0` for the second table):
+
+```bash
+cd backend
+python scripts/backtest_market_map.py AMD LLY TSLA GOOG --start 2024-10-14 --end 2025-10-13 \
+    --feed sip --extended-hours --out data/market_map/oos
+python scripts/imm_export_cohorts.py "data/market_map/oos/*/IMM_py_*.csv"
+```
+
+The cohort report's "Side and relative strength" group gives the second
+table's cells, "Quarter" the quarters and "Setup and side" the `orb_retest`
+row.
 
 ## Set it up in TradingView
 
@@ -319,8 +378,8 @@ above.
 - **Not proven:** that it compiles, that the setups make money, or that
   backtesting on the underlying says much about options (no theta, IV or
   spread; slippage is a flat 2 ticks). Exits are single-leg, but you scale
-  out in practice. None of the rules above has been tested out-of-sample yet.
-  The Strategy Tester runs are that test.
+  out in practice. Out of sample, in the Python backtester, the v1.1.0 rules
+  lose money (see [Out-of-sample test](#out-of-sample-test-v110)).
 - **Not enforceable from a chart:** averaging down, caution when the day is
   green (audit: PF 1.00 when up more than $200 vs 1.31 when down), and holding
   1–3 DTE overnight. Those stay journal rules.
