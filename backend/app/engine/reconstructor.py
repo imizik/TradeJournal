@@ -259,7 +259,9 @@ def _finalize(ot: _OpenTrade, status: str) -> TradeOutput:
 
     if status == "expired":
         expired_worthless = True
-        closed_at = datetime(ot.expiration.year, ot.expiration.month, ot.expiration.day, _CLOSE_HOUR, 0, 0, tzinfo=ET)
+        # Persisted trade times are New York wall clocks without tzinfo. An
+        # aware value is converted to a UTC clock by PostgreSQL's naive column.
+        closed_at = datetime(ot.expiration.year, ot.expiration.month, ot.expiration.day, _CLOSE_HOUR, 0, 0)
         if ot.total_exit_contracts > _ZERO:
             # Partially exited before expiration: ot.realized_pnl holds FIFO pnl from exits.
             # Remaining lots (still in ot.lots) expired worthless — add that loss.

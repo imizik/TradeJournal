@@ -36,6 +36,11 @@ patterns that can create N+1 calls.
   A repair retains saved AI trade and daily reviews but marks analyses based
   on affected trades as stale until regenerated; stale AI flags are excluded
   from summary counts.
+- Synthetic option expiration closes use 16:00 New York wall time with no
+  timezone attached, matching the `trade.closed_at` column. Passing an aware
+  datetime to PostgreSQL shifts the saved clock to UTC. The guarded
+  `backend/scripts/repair_expired_trade_times.py` corrects only rows that
+  exactly match that historical shift, and invalidates their path metrics.
 - Manual fills are backed up to `backend/data/manual_fills.json` and restored
   on startup and after a destructive resync.
 - The FIFO sort key is

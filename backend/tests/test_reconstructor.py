@@ -138,9 +138,8 @@ def test_expired_worthless():
     assert t.expired_worthless is True
     assert t.realized_pnl == D("-500.000000")
     assert t.pnl_pct == D("-1.0000")
-    assert t.closed_at is not None
-    assert t.closed_at.hour == 16
-    assert t.closed_at.date() == exp
+    assert t.closed_at == datetime(2026, 3, 25, 16)
+    assert t.closed_at.tzinfo is None
 
 
 def test_different_strikes_separate_trades():
