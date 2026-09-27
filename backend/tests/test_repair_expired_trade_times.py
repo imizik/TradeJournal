@@ -48,6 +48,9 @@ def test_expiration_repair_preserves_saved_reviews_and_rejects_unrelated_times(m
         session.add(DailyReviewRecord(
             day=expirations[0], review_json='{"summary":"keep"}', trade_count=1,
         ))
+        session.add(DailyReviewRecord(
+            day=date(2025, 7, 14), review_json='{"summary":"entry day"}', trade_count=3,
+        ))
         session.commit()
 
     monkeypatch.setattr(repair, "engine", engine)
@@ -67,9 +70,9 @@ def test_expiration_repair_preserves_saved_reviews_and_rejects_unrelated_times(m
         assert {path.trade_id for path in session.exec(select(TradePathMetrics)).all()} == {
             trades[expirations[2]].id,
         }
-        assert json.loads(session.exec(select(DailyReviewRecord)).one().review_json) == {
-            "summary": "keep", "source_data_stale": True,
-        }
+        reviews = {record.day: json.loads(record.review_json) for record in session.exec(select(DailyReviewRecord)).all()}
+        assert reviews[expirations[0]] == {"summary": "keep", "source_data_stale": True}
+        assert reviews[date(2025, 7, 14)] == {"summary": "entry day", "source_data_stale": True}
 
     with Session(engine) as session:
         trade = session.get(Trade, trades[expirations[0]].id)

@@ -92,7 +92,11 @@ def repair(*, apply: bool = False) -> dict[str, int]:
             return result
 
         ids = [trade.id for trade, _ in candidates]
-        days = {trade.expiration for trade, _ in candidates}
+        days = {
+            day
+            for trade, _ in candidates
+            for day in (trade.opened_at.date(), trade.expiration)
+        }
         for trade, target in candidates:
             trade.closed_at = target
             if trade.ai_review:
