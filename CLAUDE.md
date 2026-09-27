@@ -49,8 +49,11 @@ CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
 the local verification script does not run those checks.
 
 A Claude Code cloud session starts from a bare clone with no `backend/.venv`
-or `frontend/node_modules`. Run `bash scripts/setup.sh` before any check, or
-every check fails on missing tools rather than on the change.
+or `frontend/node_modules`. There, `.claude/hooks/session-start.sh` runs
+`bash scripts/setup.sh` before the session begins and leaves one line saying
+how it went. Anywhere else (Codex, a local checkout), or when that line says
+setup failed or was skipped, run `bash scripts/setup.sh` yourself before any
+check, or every check fails on missing tools rather than on the change.
 
 **Merging to `main` deploys to production.** Once CI and the Deployment
 package pass on the merge commit, the VPS installs it by itself within about

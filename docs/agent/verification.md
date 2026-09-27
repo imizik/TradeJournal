@@ -15,8 +15,12 @@ bash scripts/verify.sh --e2e   # browser smoke tests only (slowest)
 ```
 
 A Claude Code cloud session clones the repository without `backend/.venv` or
-`frontend/node_modules`, so run `setup.sh` there first. Its sandbox ships a
-Chromium that `verify.sh` finds on its own (see [browser tests](#browser-tests)).
+`frontend/node_modules`, so `.claude/hooks/session-start.sh` runs `setup.sh`
+there before the session starts: about a minute from a bare clone, seconds
+when the container already has them. It skips setup when a non-SQLite database
+is configured rather than migrate one unattended, and says so. Codex and local
+checkouts run `setup.sh` by hand. The cloud sandbox ships a Chromium that
+`verify.sh` finds on its own (see [browser tests](#browser-tests)).
 
 `verify.sh` runs every check even after one fails, so one run reports every
 problem. It exits non-zero if any check failed.

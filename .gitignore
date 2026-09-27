@@ -49,11 +49,15 @@ backend/token.json
 backend/pubsub-subscriber.json
 .DS_Store
 
-# Claude Code internal. Skills are shared project tooling -- a skill that only
-# exists on one machine cannot help the cold agent that clones this repo -- so
-# .claude/skills/ is tracked and everything else under .claude/ is not.
+# Claude Code internal. Skills and the SessionStart hook are shared project
+# tooling -- something that only exists on one machine cannot help the cold
+# agent that clones this repo -- so .claude/skills/, .claude/hooks/ and
+# .claude/settings.json are tracked and everything else under .claude/ is not.
+# Personal settings belong in .claude/settings.local.json, which stays ignored.
 .claude/*
 !.claude/skills/
+!.claude/hooks/
+!.claude/settings.json
 
 # Installers
 *.exe
