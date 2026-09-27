@@ -74,8 +74,9 @@ PURE_MODULES = {
     # the bars; these only compute on what they are handed.
     "app.engine.market_map",
     "app.engine.market_map_report",
-    # The VWAP reclaim/rejection research strategy, on the same terms.
+    # The research strategies from the Pine research framework, on the same terms.
     "app.engine.vwap_reclaim",
+    "app.engine.nbis_swing",
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.

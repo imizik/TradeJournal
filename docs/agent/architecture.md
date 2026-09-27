@@ -46,8 +46,9 @@ than reaching for it. `app.engine.indicators` was held out by one lazy
 them. `trade_path` and `auditor` are the same shape and are the remaining
 targets, listed in the test.
 `app.engine.market_map` was written that way from the start:
-`scripts/backtest_market_map.py` fetches the bars and hands them in. So was
-`app.engine.vwap_reclaim`, with `scripts/backtest_vwap_reclaim.py`.
+`scripts/backtest_market_map.py` fetches the bars and hands them in. So were
+`app.engine.vwap_reclaim` and `app.engine.nbis_swing`, with their
+`scripts/backtest_*.py`.
 
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend by
 default. The ingress is opt-in:

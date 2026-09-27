@@ -93,6 +93,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Strategy Lab | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
 | Isaac Market Map backtester | `app/engine/market_map.py` (the Pine's rules, pure), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
 | VWAP reclaim research backtester | `app/engine/vwap_reclaim.py` (the rules and R statistics, pure), `scripts/backtest_vwap_reclaim.py` (Alpaca bars, CLI) | — (`python scripts/backtest_vwap_reclaim.py MU META --days 365 --feed sip`) | `test_vwap_reclaim.py` (synthetic one-minute bars, the CSV through the Strategy Lab importer, the script with a stub loader); results in `docs/pine/vwap-reclaim.md` |
+| NBIS recovery swing research backtester | `app/engine/nbis_swing.py` (the rules, pure; statistics from `vwap_reclaim`), `scripts/backtest_nbis_swing.py` (Alpaca bars, CLI) | — (`python scripts/backtest_nbis_swing.py NBIS --days 365 --feed sip`) | `test_nbis_swing.py` (synthetic 15-minute bars, the CSV through the Strategy Lab importer, the script with a stub loader); results in `docs/pine/nbis-swing.md` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
 | TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/components/SignalsRefresh.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail**; both refresh every 30s while visible and on tab return | `frontend/e2e/signals.spec.ts`: new alerts, verdicts/details, hidden-tab pause, navigation cleanup, slow refresh and skip/error reasons against disposable SQLite |
 | Automatic deployment | `deploy/autodeploy.py`, `.github/workflows/release.yml`, `deploy/control.py` (`prune`, lock exit 75), `deploy/systemd/tradejournal-autodeploy.*`, `deploy/autodeploy.env.example` | merge to `main`; on the VPS `sudo … autodeploy.py status` ([automatic deployment](../../deploy/README.md#automatic-deployment)) | `test_autodeploy.py`, `test_deployment.py`; the Ubuntu smoke upgrades through the real unit against a local stand-in for GitHub. The live Release workflow runs only on `main` |
@@ -136,6 +137,8 @@ you change it (`verification.md`, "What is NOT covered yet").
   bars: cohort report in R, Strategy Lab CSVs, `--parity` against exports
 - `backtest_vwap_reclaim.py` — the VWAP reclaim/rejection research strategy
   over Alpaca bars: the framework's acceptance measures in R, Strategy Lab CSVs
+- `backtest_nbis_swing.py` — the NBIS recovery swing research strategy, with
+  the intraday-only comparison on the same entries
 - `imm_export_cohorts.py`, `playbook_cohorts.py` — the cohort evidence
   `docs/pine/README.md` cites
 
@@ -163,6 +166,8 @@ reason, and ruff lints them without importing them.
   journal evidence behind each rule, and TradingView setup
 - `docs/pine/vwap-reclaim.md` — the VWAP reclaim/rejection research strategy
   (v0.1): rules, execution model and backtest results; no Pine yet
+- `docs/pine/nbis-swing.md` — the NBIS recovery swing research strategy
+  (v0.1): rules, the two choices the framework leaves open, backtest results
 
 ## Where things are NOT
 
