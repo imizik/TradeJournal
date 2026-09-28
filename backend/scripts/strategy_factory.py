@@ -225,6 +225,9 @@ def command_run(args: argparse.Namespace, store: BarStore, progress: Callable[[s
         ev, run_dir = run_one(candidate, store, args.ledger, args.out, not args.no_exam, progress)
         print(report(ev))
         print(f"\nWrote {run_dir} and a line in {args.ledger}", file=sys.stderr)
+    count = prior_candidates(read_ledger(args.ledger))
+    print(f"\nThe ledger counts {count} candidates at confirmation; the next one there needs "
+          f"t >= {required_t(count + 1):.2f}.")
     return 0
 
 

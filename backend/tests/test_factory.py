@@ -766,6 +766,7 @@ def test_a_real_edge_passes_every_gate(dip_family):
     assert (record["verdict"], record["reached_confirmation"], record["bar_t"]) == ("passed", True, pytest.approx(required_t(10)))
     assert set(record["periods"]) == {"discovery", "confirm_a", "confirm_b", "confirm", "confirm_x3", "holdout"}
     assert "Verdict: passed every gate" in report(ev)
+    assert "Its bar at confirmation: t >= 2.58, with 9 other candidates counted there before it." in report(ev)
 
 
 def test_an_edge_that_stops_in_the_holdout_fails_the_exam(dip_family):

@@ -617,8 +617,8 @@ def report(ev: Evaluation) -> str:
     lines += [
         "",
         f"Verdict: {VERDICTS[ev.verdict]}",
-        f"Candidates at the confirmation stage so far: {ev.candidates} "
-        f"(the next one needs t >= {required_t(ev.candidates + 1):.2f}).",
+        f"Its bar at confirmation: t >= {ev.needed_t:.2f}, with {ev.prior_candidates} other candidates "
+        f"counted there before it.",
     ]
     for period, table in ev.by_ticker.items():
         lines += ["", f"By ticker, {LABELS.get(period, period).strip()}:"]

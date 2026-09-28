@@ -117,7 +117,9 @@ def test_run_judges_a_spec_records_it_and_skips_a_repeat(script, tmp_path, capsy
     assert "Verdict: failed the screen" in (run_dir / "report.txt").read_text()
     rows = (run_dir / "trades.csv").read_text().splitlines()
     assert rows[0].startswith("ticker,period,side,signal_time") and len(rows) - 1 == record["periods"]["discovery"]["n"]
-    assert "Verdict: failed the screen" in capsys.readouterr().out
+    printed = capsys.readouterr().out
+    assert "Verdict: failed the screen" in printed
+    assert f"The ledger counts 0 candidates at confirmation; the next one there needs t >= {required_t(1):.2f}." in printed
 
     assert script.main(args, source_factory=StubSource) == 0
     assert "already in the ledger: failed_screen" in capsys.readouterr().out
