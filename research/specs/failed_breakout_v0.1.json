@@ -1,0 +1,5 @@
+{
+  "name": "Failed breakout short v0.1",
+  "family": "failed_breakout",
+  "notes": "The framework's META module, never built before: short a failed break of the prior day's high once a close under the rejection bar's low confirms it within three bars, stop 0.1 ATR over the rejection high, with the baseline's 1.5R target, 20-minute hold and session limits. Run on the full universe, not META alone."
+}

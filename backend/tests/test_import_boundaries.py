@@ -74,6 +74,13 @@ PURE_MODULES = {
     # the bars; these only compute on what they are handed.
     "app.engine.market_map",
     "app.engine.market_map_report",
+    # The strategy factory: bars, rules, the learned filter and the gates. The
+    # script reads the bar cache and the ledger; these compute on what they are
+    # handed, and the gates reach data only through the loader they are given.
+    "app.engine.factory_data",
+    "app.engine.factory_rules",
+    "app.engine.factory_model",
+    "app.engine.factory_gates",
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.
