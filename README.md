@@ -7,6 +7,7 @@ Local-first trade journal and reconciliation system for Robinhood/Webull trade h
 - `frontend/` - Next.js 16, React 19, App Router, Tailwind
 - `backend/` - FastAPI, SQLModel, Alembic, SQLite by default, Postgres via `DATABASE_URL`
 - `docs/agent/` - architecture, domain rules, verification, environments, feature map, roadmap
+- `research/` - strategy factory specs and the ledger of every idea it has judged (`docs/strategy-factory.md`)
 - `scripts/` - `setup.sh` and `verify.sh`
 
 ## Quick Start

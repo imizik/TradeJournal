@@ -242,11 +242,11 @@ def command_ledger(args: argparse.Namespace) -> int:
                 edge_t = stats.get("edge_t")
                 numbers.append(f"{name} {stats['n']} trades {stats['mean_r']:+.3f}R"
                                + (f" t={edge_t:.2f}" if edge_t is not None else ""))
-        print(f"{record['id']:18s} {record['verdict']:20s} {record['name']}")
+        print(f"{record['id']:20s} {record['verdict']:20s} {record['name']}")
         if numbers or record.get("summary"):
-            print(f"{'':18s} {'; '.join(numbers) or record.get('summary')}")
+            print(f"{'':20s} {'; '.join(numbers) or record.get('summary')}")
     count = prior_candidates(records)
-    print(f"\n{len(records)} candidates in the ledger, {count} reached confirmation; "
+    print(f"\n{len(records)} lines, {len({r['id'] for r in records})} distinct ideas, {count} reached confirmation; "
           f"the next one there needs t >= {required_t(count + 1):.2f}.")
     return 0
 
