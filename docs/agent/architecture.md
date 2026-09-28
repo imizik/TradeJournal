@@ -39,6 +39,9 @@ The allowlists at the top of that file are the policy. Changing them is an
 architecture change: make it deliberately, in the same commit as the import
 that needs it, and say why.
 
+`app.engine.metric_versions` is also checked as pure: it defines calculation
+identities and exposure direction, with no data fetching or database access.
+
 A module leaves the impure set by taking what it needs as an argument rather
 than reaching for it. `app.engine.indicators` was held out by one lazy
 `fetch_minute_bars_for_date` import for a cache-only read; it now accepts a

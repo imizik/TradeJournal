@@ -70,6 +70,7 @@ PURE_MODULES = {
     "app.engine.tradingview",
     "app.engine.tradingview_alerts",
     "app.engine.indicators",
+    "app.engine.metric_versions",  # identities and pure exposure direction only
     # The Isaac Market Map port and its reports. The backtest script fetches
     # the bars; these only compute on what they are handed.
     "app.engine.market_map",

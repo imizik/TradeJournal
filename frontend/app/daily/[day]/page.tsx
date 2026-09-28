@@ -676,7 +676,7 @@ function buildActiveFlags(ctx: FillMarketContext): { label: string; cls: string 
   if (ctx.is_vwap_reclaim === 1) flags.push({ label: "VWAP Reclaim", cls: "bg-emerald-900/40 text-emerald-300" });
   if (ctx.is_opening_range_breakout === 1) flags.push({ label: "OR Breakout", cls: "bg-emerald-900/40 text-emerald-300" });
   if (ctx.is_premarket_breakout === 1) flags.push({ label: "PM Breakout", cls: "bg-emerald-900/40 text-emerald-300" });
-  if (ctx.is_overnight === 1) flags.push({ label: "Overnight", cls: "bg-muted text-muted-foreground" });
+  if (ctx.is_overnight === 1) flags.push({ label: "Outside regular hours", cls: "bg-muted text-muted-foreground" });
   return flags;
 }
 

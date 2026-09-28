@@ -158,6 +158,8 @@ export type DailyReviewIndexItem = {
 };
 
 export type FillMarketContext = {
+  calculation_version: string | null;
+  entry_context_as_of: string | null;
   fill_id: string;
   data_source: string;
   fetched_at: string;
@@ -221,6 +223,9 @@ export type FillMarketContext = {
 };
 
 export type TradePathMetrics = {
+  calculation_version: string | null;
+  option_path_quality: string | null;
+  option_peak_total_pnl: number | null;
   trade_id: string;
   data_source: string;
   fetched_at: string;

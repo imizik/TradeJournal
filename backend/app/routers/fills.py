@@ -23,7 +23,7 @@ from app.engine.jobs import (
 from app.engine.reconstructor import FillInput, reconstruct
 from app.engine.job_runtime import submit_job
 from app.environment import require_destructive_confirmation
-from app.models import Account, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
+from app.models import Account, DailyReviewRecord, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
 
 MANUAL_FILLS_BACKUP = Path(__file__).parent.parent.parent / "data" / "manual_fills.json"
 
@@ -355,6 +355,13 @@ def _rebuild_trades(
     preserve_path_metrics=False is the destructive path (e.g. a resync that
     re-imports fills with brand-new ids, which invalidates every row anyway).
     """
+    old_trades = session.exec(select(Trade)).all()
+    saved_annotations = {t.id: (t.ai_review, t.roll_group_id, {
+        column.name: getattr(t, column.name) for column in Trade.__table__.columns
+    }) for t in old_trades}
+    saved_tags = [(t.trade_id, t.tag_id) for t in session.exec(select(TradeTag)).all()]
+    for trade in old_trades:
+        session.expunge(trade)
     saved_metrics: list[dict] = []
     if preserve_path_metrics:
         columns = list(TradePathMetrics.__table__.columns.keys())
@@ -367,6 +374,52 @@ def _rebuild_trades(
 
     _clear_derived_trade_data(session)
     rebuilt, anomalies = _persist_rebuild(session, anomalies_label=anomalies_label)
+
+    session.flush()
+    current_trades = {t.id: t for t in session.exec(select(Trade)).all()}
+    affected_days = set()
+    for trade_id, (review, roll_group, old_values) in saved_annotations.items():
+        trade = current_trades.get(trade_id)
+        changed = trade is None or any(old_values[key] != getattr(trade, key) for key in (
+            "ticker", "instrument_type", "option_type", "strike", "expiration", "account_id",
+            "opened_at", "closed_at", "status", "contracts", "avg_entry_premium", "avg_exit_premium", "realized_pnl",
+        ))
+        if changed:
+            for value in (old_values["opened_at"], old_values["closed_at"],
+                          trade.opened_at if trade else None, trade.closed_at if trade else None):
+                if value:
+                    affected_days.add(value.date())
+        if trade is None:
+            continue
+        trade.roll_group_id = roll_group
+        if review and changed:
+            try:
+                parsed = json.loads(review)
+                if isinstance(parsed, dict):
+                    parsed["source_data_stale"] = True
+                    review = json.dumps(parsed)
+            except (ValueError, TypeError):
+                pass  # Preserve an older free-form review verbatim.
+        trade.ai_review = review
+        session.add(trade)
+    for trade_id, trade in current_trades.items():
+        if trade_id not in saved_annotations:
+            for value in (trade.opened_at, trade.closed_at):
+                if value:
+                    affected_days.add(value.date())
+    if affected_days:
+        for saved in session.exec(select(DailyReviewRecord).where(DailyReviewRecord.day.in_(affected_days))).all():
+            try:
+                review = json.loads(saved.review_json)
+                if isinstance(review, dict):
+                    review["source_data_stale"] = True
+                    saved.review_json = json.dumps(review)
+                    session.add(saved)
+            except (ValueError, TypeError):
+                pass
+    for trade_id, tag_id in saved_tags:
+        if trade_id in current_trades:
+            session.add(TradeTag(trade_id=trade_id, tag_id=tag_id))
 
     if preserve_path_metrics and saved_metrics:
         session.flush()

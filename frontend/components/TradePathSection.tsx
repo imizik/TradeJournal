@@ -162,6 +162,14 @@ export default function TradePathSection({ metrics }: Props) {
         </div>
       </div>
 
+      <p className="text-xs text-muted-foreground">
+        {metrics.calculation_version == null
+          ? "Historical calculation. Recompute before comparing setups."
+          : "Observed minute-bar estimates. Fill-minute extremes are excluded; missing bars can hide larger moves."}
+      </p>
+      {metrics.option_path_quality?.startsWith("unavailable") && (
+        <p className="text-xs text-muted-foreground">Option path unavailable: {metrics.option_path_quality.replace("unavailable_", "").replaceAll("_", " ")}.</p>
+      )}
       {hasOptionPath && (
         <div className="border-t border-border pt-4">
           <div className="mb-3 flex items-center justify-between">
@@ -174,6 +182,11 @@ export default function TradePathSection({ metrics }: Props) {
           </div>
           <div className="grid grid-cols-2 gap-x-8">
             <div>
+              <Row
+                label="Peak Total P&L"
+                value={fmtMoney(metrics.option_peak_total_pnl)}
+                valueClass={mfeColor(metrics.option_peak_total_pnl)}
+              />
               <Row
                 label="Peak Open P&L"
                 value={fmtMoney(metrics.option_peak_unrealized_pnl)}

@@ -216,11 +216,13 @@ def _polygon_fill_ids(session: Session, range_value: str, force: bool) -> list[u
 
 
 def _alpaca_fill_ids(session: Session, range_value: str, force: bool) -> list[uuid.UUID]:
+    from app.engine.metric_versions import CONTEXT_VERSION
     query = select(Fill.id)
     if not force:
         complete_context_fill_ids = set(
             session.exec(
                 select(FillMarketContext.fill_id)
+                .where(FillMarketContext.calculation_version == CONTEXT_VERSION)
                 .where(FillMarketContext.entry_rsi_14 != None)  # noqa: E711
                 .where(FillMarketContext.entry_ema_9 != None)  # noqa: E711
                 .where(FillMarketContext.entry_ema_20 != None)  # noqa: E711

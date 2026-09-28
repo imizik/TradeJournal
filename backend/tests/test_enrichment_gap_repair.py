@@ -133,7 +133,15 @@ def _trade(session, *, instrument_type="option", held=timedelta(minutes=30), fil
 def _metrics(trade: Trade, **values) -> TradePathMetrics:
     complete = {"underlying_mfe_pct": 1.0, "mfe_atr_multiple": 0.5, "attr_delta_pnl": 10.0}
     complete.update(values)
-    return TradePathMetrics(trade_id=trade.id, data_source="alpaca_iex", fetched_at=datetime.utcnow(), **complete)
+    from sqlalchemy.orm import object_session
+    session = object_session(trade)
+    session.flush()
+    links = session.exec(select(TradeFill).where(TradeFill.trade_id == trade.id)).all()
+    fills = [session.get(Fill, link.fill_id) for link in links]
+    contexts = {str(f.id): session.get(FillMarketContext, f.id) for f in fills}
+    complete.setdefault("inputs_fingerprint", trade_path.trade_inputs_fingerprint(trade, fills))
+    complete.setdefault("market_inputs_fingerprint", trade_path.market_inputs_fingerprint(fills, contexts))
+    return TradePathMetrics(calculation_version="position-path-v2", trade_id=trade.id, data_source="alpaca_iex", fetched_at=datetime.utcnow(), **complete)
 
 
 def _option_round_trip(session, *, entry_delta=0.5, exit_underlying=101.0):
@@ -177,7 +185,9 @@ def test_recomputed_path_row_keeps_stored_values_when_fills_are_unchanged(sessio
     fills = _option_round_trip(session)
     trade = _trade(session, fills=fills)
     fingerprint = trade_path.trade_inputs_fingerprint(trade, list(fills))
-    session.add(_metrics(trade, attr_delta_pnl=None, post_exit_mfe_30m=0.8, inputs_fingerprint=fingerprint))
+    stored_metrics = _metrics(trade, attr_delta_pnl=None, post_exit_mfe_30m=0.8, inputs_fingerprint=fingerprint)
+    stored_metrics.market_inputs_fingerprint = trade_path.market_inputs_fingerprint(list(fills), {})
+    session.add(stored_metrics)
     session.commit()
 
     def recompute_without_bars(trade, fills, ctx_by_fill, bar_store):

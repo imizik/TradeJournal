@@ -92,6 +92,7 @@ def test_alpaca_fill_selection_retries_partial_context_rows():
         session.add(
             FillMarketContext(
                 fill_id=complete_fill.id,
+                calculation_version="entry-context-v2",
                 data_source="alpaca_iex",
                 fetched_at=datetime.utcnow(),
                 entry_underlying_price=150,
