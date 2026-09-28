@@ -46,41 +46,56 @@ above the daily EMA, exit reason, R, sessions held, intraday R).
 
 ## Results
 
-Run on 2026-09-27 on SIP bars.
+Run on 2026-09-28 on SIP bars. The daily EMA 20 is built from the same raw
+regular-session minute bars as the 15-minute chart: Alpaca's daily bars are
+dividend-adjusted (older prices sit below raw ones for any dividend payer)
+and carry 51 stale bars at the halted price for NBIS before its October 2024
+relisting, which moved its first weeks' results (58 trades, +25.6R, before
+the fix).
 
 | NBIS | Oct 2025 – Sep 2026 | Oct 2024 – Oct 2025 |
 |---|---|---|
-| **As specified** | 79 trades, +6.7R, PF 1.13 | 58 trades, +25.6R, PF 2.02 |
-| Without the best trade | +1.5R | +21.6R |
-| Intraday-only exits, same entries | −5.2R, PF 0.83 | +17.0R, PF 2.34 |
-| Costs stressed to 3 bp | +5.5R, PF 1.10 | +25.4R, PF 2.02 |
-| Daily-EMA reading | 33 trades, +4.3R, PF 1.23 | 21 trades, +4.1R, PF 1.51 |
-| Every-bar baseline, same exits (avg R) | −0.056 against the strategy's +0.084 | +0.090 against +0.441 |
+| **As specified** | 79 trades, +6.7R, PF 1.13 | 51 trades, +20.2R, PF 1.90 |
+| Without the best trade | +1.5R | +16.2R |
+| Intraday-only exits, same entries | −5.2R, PF 0.83 | +13.6R, PF 2.28 |
+| Costs stressed to 3 bp | +5.5R, PF 1.10 | +20.1R, PF 1.90 |
+| Daily-EMA reading | 33 trades, +4.3R, PF 1.23 | 16 trades, +3.5R, PF 1.66 |
+| Every-bar baseline, same exits (avg R) | −0.056 against the strategy's +0.084 | +0.090 against +0.396 |
 
-The same rules, unchanged, on MU, META, AAPL, AMD, LLY, TSLA and GOOG:
-−4.9R (PF 0.99) over 494 trades in the recent year, +84.1R (PF 1.28) over
-468 in the prior one, where every ticker was positive.
+**The wider test decides it: v0.1 is not a strategy yet.** The same frozen
+rules on 17 more liquid names (MU, META, AAPL, AMD, LLY, TSLA, GOOG, AMZN,
+NFLX, NVDA, MSFT, AVGO, COIN, GS, CAT, MRVL, PLTR) over three years, the
+first of which nobody had looked at. Ticker-years with a stock split are left
+out (NVDA and AVGO before mid-2024, NFLX in 2025–26):
 
-- **It is the first framework idea to survive costs.** Stops sit below four
-  15-minute bars, so 1 bp a side is a small share of R: tripling costs moves
-  NBIS from +6.7R to +5.5R and from +25.6R to +25.4R.
-- **Holding overnight added value in both years**, for NBIS and for the other
-  seven names, against exiting the same entries at the close. The price is
-  gap risk: the worst NBIS trade is −4.0R, and META's worst −6.7R.
-- **The setup beats buying at random.** With the same exits, an entry on
-  every possible bar averages −0.056R on NBIS in the recent year; the
-  strategy's entries average +0.084R. Across the eight names and two years it
-  beats that baseline in 12 of 16 cases, but none by more than 1.4 standard
-  errors on its own.
-- **It is thin where it matters most.** The recent NBIS year is +1.5R without
-  its best trade, and the recent year is breakeven on the other names. The
-  strong prior year includes the April 2025 selloff and recovery, the regime
-  a buy-the-reclaim rule suits best.
+| Year | Ticker-years | Trades | R | PF | Positive | Beat the every-bar baseline | Edge over baseline | Intraday-only R |
+|---|---|---|---|---|---|---|---|---|
+| Oct 2023 – Oct 2024 | 15 | 960 | +67.1 | 1.10 | 7 | 10 | +0.072R | −30.3 |
+| Oct 2024 – Oct 2025 | 16 | 1,058 | +130.4 | 1.19 | 12 | 12 | +0.119R | +49.9 |
+| Oct 2025 – Sep 2026 | 17 | 1,325 | −22.2 | 0.98 | 8 | 11 | +0.066R | −41.3 |
+| All | 48 | 3,343 | +175.3 | 1.08 | 27 | 33 | +0.084R | −21.7 |
 
-So v0.1 is a lead worth forward-testing, not a proven edge. The framework's
-next step is to freeze this specification and collect new signals (its
-suggested first checkpoint is 30–50 signals across at least 20 sessions)
-before building on it.
+- **The entry timing is the one consistent thing.** In every year the
+  strategy's entries beat an entry on every possible bar with the same
+  exits, by +0.07 to +0.12R a trade; pooled that is 2.7 standard errors,
+  which overstates it because the names move together.
+- **The strategy as a whole is thin.** +0.05R a trade and PF 1.08 across all
+  48 ticker-years, a loss in the most recent year, and that is on the stock,
+  before the theta and spread of an options version.
+- **Holding up to two sessions beat the intraday-only exit on the same
+  entries in all three years.**
+- **Costs do not decide it.** The stops sit below four 15-minute bars, so
+  tripling slippage moves NBIS by about 1R a year.
+- NBIS is positive in both of its years, but it is one of several names that
+  are (PLTR, MRVL, LLY and TSLA have comparable years), and choosing it
+  because it did well would be choosing on the result.
+
+By the framework's acceptance rule this does not pass: it relies on the
+regime (the 2024–25 selloff and recovery suited a buy-the-reclaim rule) and is
+flat to negative otherwise. What it does show is an entry signal that is
+better than chance. The framework's next steps apply to that: change one
+exit at a time (v0.2) or add one filter at a time (v0.3), choosing each
+change on one year and keeping it only if it also holds on the other two.
 
 ## What is verified
 
@@ -92,7 +107,8 @@ the arming bar never triggering; an arm lasting two sessions; one trigger per
 arm; the daily-EMA reading; the target, the stop, the two-session exit, an
 overnight gap through the stop, and the intraday-only exit on the same entry;
 the Strategy Lab CSV through the real importer; and the script end to end
-with a stub loader. Planted defects (the arming bar triggering, no disarm, no
+with a stub loader, including that its daily EMA comes from the minute bars
+and not from adjusted daily bars. Planted defects (the arming bar triggering, no disarm, no
 stop buffer, a three-bar stop window, a two-bar breakout, today's daily EMA,
 one session too long, a 1.5R target, gaps filling at the stop, arms that
 never expire) each fail it.

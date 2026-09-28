@@ -231,16 +231,23 @@ class StubLoader:
         self.bars = scenario([101.5, 102.0, 102.5, 103.0, 103.5, 104.0])
 
     def minute_bars(self, symbols, day):
+        # The script builds daily bars from minute bars, so earlier weekdays
+        # are flat sessions at 100: the daily EMA 20 is about 100.2 on DAY.
+        bars = [b for b in self.bars if b.time.astimezone(ET).date() == day]
+        if not bars and day < PRIOR2:
+            bars = bars15(day, [100.0] * 26)
         rows = [
             {"t": b.time.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"), "o": b.open,
              "h": b.high, "l": b.low, "c": b.close, "v": b.volume}
-            for b in self.bars if b.time.astimezone(ET).date() == day
+            for b in bars
         ]
         return {symbol: rows for symbol in symbols}
 
     def daily_bars(self, symbols, start, end):
-        rows = [{"t": at(d.day, 0).isoformat(), "o": d.open, "h": d.high, "l": d.low, "c": d.close}
-                for d in daily_history()]
+        # Adjusted daily bars that disagree with the minute bars (as dividend
+        # adjustment or stale relisting history do): the script must not use
+        # them, or the daily EMA is 1 and nothing arms.
+        rows = [{"t": at(d.day, 0).isoformat(), "o": 1.0, "h": 1.0, "l": 1.0, "c": 1.0} for d in daily_history()]
         return {symbol: rows for symbol in symbols}
 
 

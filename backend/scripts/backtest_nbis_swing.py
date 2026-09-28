@@ -68,7 +68,11 @@ def run_backtest(
     warmup_days: int,
     progress: Callable[[str], None] = lambda _: None,
 ) -> dict[str, SwingResult]:
-    options = RunOptions(start, end, warmup_days, extended_hours=False, atr_source="daily")
+    # The daily EMA comes from the same raw regular-session minute bars as the
+    # 15-minute chart. Alpaca's daily bars are split- and dividend-adjusted
+    # (older prices sit below raw ones for any dividend payer) and carry stale
+    # history for relisted symbols (NBIS: 51 flat bars at the halted price).
+    options = RunOptions(start, end, warmup_days, extended_hours=False, atr_source="minutes")
     chart, daily = load_bars(loader, tickers, options, config.timeframe_minutes, progress)
     results = {}
     for ticker in tickers:
