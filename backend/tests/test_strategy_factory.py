@@ -264,13 +264,15 @@ def test_week_stops_when_the_budget_is_used_and_dry_run_only_prints(script, tmp_
 def test_the_live_ledger_is_written_only_on_the_factory_branch(script, tmp_path, monkeypatch):
     spec_path = write_spec(tmp_path / "spec.json")
     out = ["--out", str(tmp_path / "out")]
+    # The default ledger points at a scratch file, so a broken guard cannot write the committed one.
+    live = tmp_path / "live.jsonl"
+    monkeypatch.setattr(script, "LEDGER", live)
     monkeypatch.setattr(script, "_git", lambda *args: "claude/elsewhere")
     with pytest.raises(SystemExit, match="The live ledger is on branch factory/ledger"):
         script.main([*out, "run", str(spec_path)], source_factory=StubSource)
     with pytest.raises(SystemExit, match="The live ledger is on branch factory/ledger"):
         script.main([*out, "week"], source_factory=StubSource, proposer=lambda s, t: (ANSWER, ""))
-    live = tmp_path / "live.jsonl"
-    monkeypatch.setattr(script, "LEDGER", live)
+    assert not live.exists()
     monkeypatch.setattr(script, "_git", lambda *args: "factory/ledger" if "--abbrev-ref" in args else "abc1234")
     assert script.main([*out, "run", str(spec_path)], source_factory=StubSource) == 0
     assert len(read_lines(live)) == 1
