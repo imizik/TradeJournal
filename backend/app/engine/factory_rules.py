@@ -780,6 +780,25 @@ def canonical(spec: Spec) -> dict[str, Any]:
     }
 
 
+def from_canonical(data: Mapping[str, Any], name: str = "", notes: str = "") -> Spec:
+    """The spec a ledger line describes, rebuilt exactly from its canonical form."""
+    model = data.get("model")
+    return Spec(
+        name=name or data["family"],
+        family=data["family"],
+        params=tuple(sorted(data["params"].items())),
+        timeframe=int(data["timeframe"]),
+        exits=Exits(**data["exits"]),
+        costs=Costs(**data["costs"]),
+        window=tuple(data["window"]) if data.get("window") else None,
+        limits=Limits(**data["limits"]),
+        filters=tuple(RuleFilter(**item) for item in data.get("filters") or []),
+        model=None if not model else ModelSpec(model["kind"], tuple(model["features"]), float(model["l2"])),
+        tickers=tuple(data["tickers"]),
+        notes=notes,
+    )
+
+
 def spec_id(spec: Spec) -> str:
     """A short, stable id for the rules: the same rules get the same id whatever they are called."""
     text = json.dumps(canonical(spec), sort_keys=True, separators=(",", ":"))

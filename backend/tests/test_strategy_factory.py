@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 
+from app.engine.factory_brief import SYSTEM_PROMPT
 from app.engine.factory_data import NYSE_EARLY_CLOSES
 from app.engine.factory_gates import required_t
 from app.engine.factory_rules import parse_spec, spec_id
@@ -58,18 +59,27 @@ def walk(seed: int, first: date, last: date) -> dict[date, list[dict]]:
 
 
 class StubSource:
+    """A random walk for any ticker asked for, one bar every 15 minutes."""
+
     feed = "sip"
+    seeds = {"AAA": 0, "BBB": 1, "SPY": 2}
 
     def __init__(self, last: date = LAST):
-        self.data = {ticker: walk(seed, FIRST, last) for seed, ticker in enumerate(("AAA", "BBB", "SPY"))}
+        self.last = last
+        self.data: dict[str, dict[date, list[dict]]] = {}
         self.calls = 0
 
+    def _walk(self, ticker: str) -> dict[date, list[dict]]:
+        if ticker not in self.data:
+            self.data[ticker] = walk(self.seeds.get(ticker, sum(map(ord, ticker))), FIRST, self.last)
+        return self.data[ticker]
+
     def days(self, ticker: str) -> list[date]:
-        return sorted(self.data.get(ticker, {}))
+        return sorted(self._walk(ticker))
 
     def minute_bars(self, ticker: str, day: date) -> list[dict]:
         self.calls += 1
-        return self.data.get(ticker, {}).get(day, [])
+        return self._walk(ticker).get(day, [])
 
 
 def write_spec(path: Path, **extra) -> Path:
@@ -115,7 +125,8 @@ def test_run_judges_a_spec_records_it_and_skips_a_repeat(script, tmp_path, capsy
     assert record["reached_confirmation"] is False and record["bar_t"] is None
     (run_dir,) = (out / "runs").iterdir()
     assert "Verdict: failed the screen" in (run_dir / "report.txt").read_text()
-    rows = (run_dir / "trades.csv").read_text().splitlines()
+    assert not (run_dir / "trades_confirm.csv").exists()
+    rows = (run_dir / "trades_discovery.csv").read_text().splitlines()
     assert rows[0].startswith("ticker,period,side,signal_time") and len(rows) - 1 == record["periods"]["discovery"]["n"]
     printed = capsys.readouterr().out
     assert "Verdict: failed the screen" in printed
@@ -172,3 +183,146 @@ def test_the_committed_ledger_is_well_formed():
         assert {"id", "name", "source", "verdict", "reached_confirmation"} <= set(record), record
         assert record["source"] in ("factory", "hand research")
     assert sum(r["source"] == "hand research" for r in records) == 9
+
+
+# --- the weekly loop -------------------------------------------------------------------
+
+
+def weekly_paths(tmp_path: Path) -> tuple[dict[str, Path], list[str]]:
+    paths = {name: tmp_path / name for name in ("ledger.jsonl", "out", "reports", "specs")}
+    args = ["--ledger", str(paths["ledger.jsonl"]), "--out", str(paths["out"]), "--reports", str(paths["reports"]),
+            "--specs", str(paths["specs"])]
+    return paths, args
+
+
+def weekly_idea(title: str, spec: dict) -> dict:
+    return {"title": title, "hypothesis": f"{title}: a reason.", "builds_on": "re-d5194badb1", "change": "one thing",
+            "from_evidence": False, "spec_json": json.dumps(spec)}
+
+
+ANSWER = {
+    "ideas": [weekly_idea("Daily EMA reclaim", {"family": "recovery_swing", "params": {"reclaim_level": "daily_ema"}}),
+              weekly_idea("Cheap", {"family": "recovery_swing", "costs": {"slippage_bps": 0}})],
+    "lessons": "Nothing has passed yet.",
+    "wanted": ["an opening-range family"],
+}
+
+
+def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
+    paths, args = weekly_paths(tmp_path)
+    asked: list[tuple[str, str]] = []
+
+    def proposer(system: str, text: str):
+        asked.append((system, text))
+        return ANSWER, "a stub model, 10 tokens in and 5 out"
+
+    assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
+    ((system, text),) = asked
+    assert system == SYSTEM_PROMPT and "Propose up to 3 new candidates this week." in text
+    assert '"recovery_swing"' in text and "## Discovery evidence" in text
+    today = datetime.now(ET).date()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    (record,) = read_lines(paths["ledger.jsonl"])
+    assert (record["name"], record["batch"], record["source"]) == ("Daily EMA reclaim", monday, "factory")
+    saved = json.loads((paths["specs"] / today.isoformat() / "daily-ema-reclaim.json").read_text())
+    assert spec_id(parse_spec(saved)) == record["id"] and "tickers" not in saved
+    markdown = (paths["reports"] / f"{today}.md").read_text()
+    assert "### 1. Daily EMA reclaim" in markdown and "- Cheap: it changes the costs." in markdown
+    assert "Nothing has passed yet." in markdown and "- an opening-range family" in markdown
+    assert "Idea model: a stub model, 10 tokens in and 5 out." in markdown
+    week = json.loads((paths["reports"] / f"{today}.json").read_text())
+    assert week["answer"] == ANSWER and week["passed"] is False and week["summary"].startswith("1 idea judged")
+    assert (paths["out"] / "evidence").is_dir()  # cached for next week
+
+    # The same week again: one of three used, and the same idea is now in the ledger.
+    asked.clear()
+    assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
+    assert "Propose up to 2 new candidates this week." in asked[0][1]
+    assert len(read_lines(paths["ledger.jsonl"])) == 1
+    assert "- Daily EMA reclaim: the same rules are already in the ledger." in (paths["reports"] / f"{today}.md").read_text()
+
+
+def test_week_stops_when_the_budget_is_used_and_dry_run_only_prints(script, tmp_path, capsys):
+    paths, args = weekly_paths(tmp_path)
+
+    def proposer(system: str, text: str):
+        raise AssertionError("the idea model should not be asked")
+
+    assert script.main([*args, "week", "--dry-run"], source_factory=StubSource, proposer=proposer) == 0
+    printed = capsys.readouterr().out
+    assert printed.startswith(SYSTEM_PROMPT) and "Propose up to 3 new candidates" in printed
+    assert not paths["reports"].exists() and not paths["ledger.jsonl"].exists()
+    today = datetime.now(ET).date()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    paths["ledger.jsonl"].write_text("".join(json.dumps({"id": f"x{k}", "name": "x", "source": "factory", "verdict":
+                                                         "failed_screen", "reached_confirmation": False,
+                                                         "batch": monday}) + "\n" for k in range(3)))
+    assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
+    assert "budget of 3 candidates is already used" in capsys.readouterr().out
+
+
+def test_the_live_ledger_is_written_only_on_the_factory_branch(script, tmp_path, monkeypatch):
+    spec_path = write_spec(tmp_path / "spec.json")
+    out = ["--out", str(tmp_path / "out")]
+    monkeypatch.setattr(script, "_git", lambda *args: "claude/elsewhere")
+    with pytest.raises(SystemExit, match="The live ledger is on branch factory/ledger"):
+        script.main([*out, "run", str(spec_path)], source_factory=StubSource)
+    with pytest.raises(SystemExit, match="The live ledger is on branch factory/ledger"):
+        script.main([*out, "week"], source_factory=StubSource, proposer=lambda s, t: (ANSWER, ""))
+    live = tmp_path / "live.jsonl"
+    monkeypatch.setattr(script, "LEDGER", live)
+    monkeypatch.setattr(script, "_git", lambda *args: "factory/ledger" if "--abbrev-ref" in args else "abc1234")
+    assert script.main([*out, "run", str(spec_path)], source_factory=StubSource) == 0
+    assert len(read_lines(live)) == 1
+
+
+def test_notify_sends_the_latest_summary_or_a_failure(script, tmp_path, monkeypatch):
+    reports = tmp_path / "reports"
+    reports.mkdir()
+    for day, summary, passed in (("2026-09-27", "an older week", True), ("2026-10-04", "3 ideas judged, none passed.", False)):
+        (reports / f"{day}.json").write_text(json.dumps({"day": day, "summary": summary, "passed": passed, "answer": {}}))
+    sent: list[tuple] = []
+
+    def sender(*args):
+        sent.append(args)
+
+    monkeypatch.delenv("FACTORY_NTFY_URL", raising=False)
+    with pytest.raises(SystemExit, match="FACTORY_NTFY_URL is not set"):
+        script.main(["--reports", str(reports), "notify"], sender=sender)
+    monkeypatch.setenv("FACTORY_NTFY_URL", "https://ntfy.example/topic-x")
+    monkeypatch.setenv("FACTORY_NTFY_TOKEN", "a-token")
+    assert script.main(["--reports", str(reports), "notify"], sender=sender) == 0
+    assert sent[-1] == ("https://ntfy.example/topic-x", "a-token", "Strategy factory, week of 2026-10-04",
+                        "3 ideas judged, none passed.", None, 3, ["chart_with_upwards_trend"])
+    (reports / "2026-10-11.json").write_text(json.dumps({"day": "2026-10-11", "summary": "1 of 3 ideas passed.",
+                                                         "passed": True, "answer": {}}))
+    assert script.main(["--reports", str(reports), "notify"], sender=sender) == 0
+    assert (sent[-1][2], sent[-1][5], sent[-1][6]) == ("Strategy factory, week of 2026-10-11", 5, ["tada"])
+    assert script.main(["--reports", str(reports), "notify", "--failure", "fetching bars failed"], sender=sender) == 0
+    assert sent[-1][2:4] == ("Strategy factory: the weekly run failed", "fetching bars failed") and sent[-1][5] == 4
+
+
+def test_publish_posts_ntfy_json_and_links_to_github(script, monkeypatch):
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        return Response()
+
+    monkeypatch.setattr(script, "urlopen", fake_urlopen)
+    script.publish("https://ntfy.sh/topic-x", "a-token", "Title", "Body", "https://github.com/x", 3, ["tag"])
+    request = captured["request"]
+    assert request.full_url == "https://ntfy.sh/" and request.get_header("Authorization") == "Bearer a-token"
+    assert json.loads(request.data) == {"topic": "topic-x", "title": "Title", "message": "Body", "priority": 3,
+                                        "tags": ["tag"], "click": "https://github.com/x"}
+    monkeypatch.setattr(script, "_git", lambda *args: "git@github.com:someone/TradeJournal.git")
+    assert script.github_url(script.RESEARCH / "reports" / "2026-10-04.md") == (
+        "https://github.com/someone/TradeJournal/blob/factory/ledger/research/reports/2026-10-04.md")
+    assert script.github_url(Path("/somewhere/else.md")) is None

@@ -1,20 +1,29 @@
 """
-The strategy factory: judge a candidate strategy automatically and record it.
+The strategy factory: judge candidate strategies automatically and record them.
 
-A candidate is a JSON spec in `research/specs/` (a family of entry rules from
+A candidate is a JSON spec (a family of entry rules from
 `app/engine/factory_rules.py` plus its settings, exits, costs and filters,
-and optionally a learned filter). `run` puts it through the gates in
+and optionally a learned filter). `run` puts one through the gates in
 `app/engine/factory_gates.py` (a screen on the discovery period, confirmation
 on later data with a bar that rises with every candidate tried, a one-time
-exam on the locked holdout) and appends the result to
-`research/ledger.jsonl`. See docs/strategy-factory.md.
+exam on the locked holdout) and appends the result to `research/ledger.jsonl`.
+`week` is the weekly loop: the idea model proposes up to three candidates from
+a brief (`app/engine/factory_brief.py`), they are judged, and the week's
+report goes to `research/reports/`; `notify` sends its summary to the phone.
+See docs/strategy-factory.md.
 
-Bars are Alpaca SIP minute bars from the local cache (`prepare` fills it and
-needs the API key; `run` and `ledger` never touch the network).
+The live ledger is on branch factory/ledger, in the factory checkout
+(`scripts/factory_week.sh` runs there weekly); `run` and `week` refuse to write
+the default ledger from any other branch. Bars are Alpaca SIP minute bars from
+the local cache: `prepare` fills it and needs the Alpaca key, `week` calls
+Claude and needs the Anthropic key, `notify` needs FACTORY_NTFY_URL, and `run`
+and `ledger` never touch the network.
 
 Usage:
     python scripts/strategy_factory.py prepare
     python scripts/strategy_factory.py run ../research/specs/recovery_swing_v0.1.json
+    python scripts/strategy_factory.py week [--dry-run]
+    python scripts/strategy_factory.py notify
     python scripts/strategy_factory.py ledger
 """
 
@@ -26,20 +35,36 @@ import io
 import json
 import os
 import pickle
+import re
 import subprocess
 import sys
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
+from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = BACKEND_ROOT.parent
 sys.path.insert(0, str(BACKEND_ROOT))
 
+from app.engine.factory_brief import (  # noqa: E402
+    IDEAS_SCHEMA,
+    LESSON_WEEKS,
+    SYSTEM_PROMPT,
+    WEEKLY_BUDGET,
+    brief,
+    evidence,
+    lessons_from,
+    review,
+    spec_file,
+    weekly_report,
+)
 from app.engine.factory_data import FEATURES, Series, session_bars  # noqa: E402
 from app.engine.factory_gates import (  # noqa: E402
     Evaluation,
+    discovery_trades,
     evaluate,
     ledger_record,
     period_of,
@@ -48,13 +73,26 @@ from app.engine.factory_gates import (  # noqa: E402
     required_t,
     signal_day,
 )
-from app.engine.factory_rules import CORE_UNIVERSE, MARKET, Spec, parse_spec, spec_id  # noqa: E402
+from app.engine.factory_rules import (  # noqa: E402
+    CORE_UNIVERSE,
+    FAMILIES,
+    MARKET,
+    Spec,
+    Trade,
+    from_canonical,
+    parse_spec,
+    spec_id,
+)
 from app.engine.market_map import ET, Bar, bars_from_alpaca, resample  # noqa: E402
 
-LEDGER = REPO_ROOT / "research" / "ledger.jsonl"
+RESEARCH = REPO_ROOT / "research"
+LEDGER = RESEARCH / "ledger.jsonl"
+FACTORY_BRANCH = "factory/ledger"
 DATA_START = date(2023, 6, 1)
 CACHE_VERSION = 1
+EVIDENCE_VERSION = 1
 DEFAULT_OUT = BACKEND_ROOT / "data" / "factory"
+IDEA_MODEL = "claude-opus-5"
 
 
 class MinuteSource(Protocol):
@@ -139,7 +177,7 @@ class BarStore:
         return Series.build(ticker, bars, timeframe) if bars else None
 
 
-# --- the ledger -------------------------------------------------------------------
+# --- the ledger and the repository -----------------------------------------------
 
 
 def read_ledger(path: Path) -> list[dict]:
@@ -154,24 +192,55 @@ def append_ledger(path: Path, record: dict) -> None:
         handle.write(json.dumps(record, sort_keys=False) + "\n")
 
 
+def _git(*command: str) -> str:
+    return subprocess.run(["git", *command], cwd=REPO_ROOT, capture_output=True, text=True, check=True).stdout.strip()
+
+
 def code_version() -> str:
     try:
-        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=BACKEND_ROOT, capture_output=True,
-                              text=True, check=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain", "--", "app/engine", "scripts/strategy_factory.py"],
-                               cwd=BACKEND_ROOT, capture_output=True, text=True, check=True).stdout.strip()
+        head = _git("rev-parse", "--short", "HEAD")
+        dirty = _git("status", "--porcelain", "--", "backend/app/engine", "backend/scripts/strategy_factory.py")
     except (OSError, subprocess.CalledProcessError):
         return "unknown"
     return head + ("-dirty" if dirty else "")
 
 
-def trades_csv(ev: Evaluation) -> str:
+def check_live_ledger(args: argparse.Namespace) -> None:
+    """The live ledger is on the factory branch. Main keeps an older copy, and
+    writing to it from anywhere else would fork the count the bar rests on."""
+    if args.ledger != LEDGER:
+        return
+    try:
+        branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    except (OSError, subprocess.CalledProcessError):
+        branch = ""
+    if branch != FACTORY_BRANCH:
+        raise SystemExit(
+            f"The live ledger is on branch {FACTORY_BRANCH}, in the factory checkout "
+            f"(docs/strategy-factory.md); this checkout is on {branch or 'no branch'}. "
+            f"Run there, or pass --ledger for a scratch ledger."
+        )
+
+
+def github_url(path: Path, branch: str = FACTORY_BRANCH) -> str | None:
+    """The GitHub page of a file in this repository on `branch`, or None when
+    the file is outside the repository or origin is not on GitHub."""
+    try:
+        relative = path.resolve().relative_to(REPO_ROOT.resolve())
+        remote = _git("remote", "get-url", "origin")
+    except (ValueError, OSError, subprocess.CalledProcessError):
+        return None
+    match = re.search(r"github\.com[:/](.+?)(?:\.git)?$", remote)
+    return f"https://github.com/{match.group(1)}/blob/{branch}/{relative}" if match else None
+
+
+def trades_csv(trades: list[Trade]) -> str:
     out = io.StringIO()
     writer = csv.writer(out)
     names = list(FEATURES)
     writer.writerow(["ticker", "period", "side", "signal_time", "entry_time", "entry_price", "stop", "target",
                      "exit_time", "exit_price", "exit_reason", "r", "sessions_held", *names])
-    for t in sorted(ev.trades, key=lambda t: (t.entry_time, t.ticker)):
+    for t in sorted(trades, key=lambda t: (t.entry_time, t.ticker)):
         writer.writerow([
             t.ticker, period_of(signal_day(t)), "long" if t.side == 1 else "short",
             t.signal_time.astimezone(ET).isoformat(), t.entry_time.astimezone(ET).isoformat(), t.entry_price,
@@ -186,24 +255,29 @@ def load_spec(path: Path) -> Spec:
     return parse_spec(json.loads(path.read_text()))
 
 
-# --- commands ---------------------------------------------------------------------
+# --- judging ----------------------------------------------------------------------
 
 
 def run_one(spec: Spec, store: BarStore, ledger: Path, out: Path, exam: bool,
-            progress: Callable[[str], None]) -> tuple[Evaluation, Path]:
+            progress: Callable[[str], None], batch: str | None = None) -> tuple[Evaluation, dict, Path]:
     records = read_ledger(ledger)
     ev = evaluate(spec, store.load, prior_candidates(records, excluding=spec_id(spec)), exam=exam, progress=progress)
     now = datetime.now(ET)
-    record = ledger_record(ev, now, code_version(), store.last_day(MARKET))
+    record = ledger_record(ev, now, code_version(), store.last_day(MARKET), batch)
     append_ledger(ledger, record)
     run_dir = out / "runs" / f"{now:%Y%m%d-%H%M%S}-{ev.id}"
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "report.txt").write_text(report(ev) + "\n")
-    (run_dir / "trades.csv").write_text(trades_csv(ev))
-    return ev, run_dir
+    # One file per period, so mining for ideas can keep to the discovery trades.
+    for period in ("discovery", "confirm", "holdout"):
+        chosen = [t for t in ev.trades if (period_of(signal_day(t)) or "").startswith(period)]
+        if chosen:
+            (run_dir / f"trades_{period}.csv").write_text(trades_csv(chosen))
+    return ev, record, run_dir
 
 
 def command_run(args: argparse.Namespace, store: BarStore, progress: Callable[[str], None]) -> int:
+    check_live_ledger(args)
     spec = load_spec(args.spec)
     records = read_ledger(args.ledger)
     # Hand-research lines share an id with the spec they describe, so a spec
@@ -222,13 +296,189 @@ def command_run(args: argparse.Namespace, store: BarStore, progress: Callable[[s
                   f"Use --rerun to run it again.")
             continue
         progress(f"{candidate.name} ({identifier})")
-        ev, run_dir = run_one(candidate, store, args.ledger, args.out, not args.no_exam, progress)
+        ev, _, run_dir = run_one(candidate, store, args.ledger, args.out, not args.no_exam, progress)
         print(report(ev))
         print(f"\nWrote {run_dir} and a line in {args.ledger}", file=sys.stderr)
     count = prior_candidates(read_ledger(args.ledger))
     print(f"\nThe ledger counts {count} candidates at confirmation; the next one there needs "
           f"t >= {required_t(count + 1):.2f}.")
     return 0
+
+
+# --- the weekly loop -----------------------------------------------------------------
+
+Proposer = Callable[[str, str], tuple[dict[str, Any], str]]
+
+
+def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
+    """Ask the idea model for this week's candidates; returns its answer and a usage note."""
+    import anthropic
+
+    model = os.environ.get("FACTORY_MODEL", IDEA_MODEL)
+    client = anthropic.Anthropic()
+    try:
+        # Streaming, because adaptive thinking on a long brief can outlast a plain request.
+        with client.beta.messages.stream(
+            model=model,
+            max_tokens=64000,
+            system=system,
+            messages=[{"role": "user", "content": text}],
+            thinking={"type": "adaptive"},
+            output_config={"effort": "high", "format": {"type": "json_schema", "schema": IDEAS_SCHEMA}},
+            # A policy decline is re-run on Anthropic's recommended fallback model.
+            betas=["server-side-fallback-2026-07-01"],
+            extra_body={"fallbacks": "default"},
+        ) as stream:
+            message = stream.get_final_message()
+    except anthropic.AuthenticationError as exc:
+        raise SystemExit(f"The Anthropic key was refused: {exc}") from exc
+    except anthropic.RateLimitError as exc:
+        raise SystemExit(f"The Anthropic API is rate-limiting this key; try again later: {exc}") from exc
+    except anthropic.APIStatusError as exc:
+        raise SystemExit(f"The Anthropic API returned {exc.status_code}: {exc}") from exc
+    except anthropic.APIConnectionError as exc:
+        raise SystemExit(f"Could not reach the Anthropic API: {exc}") from exc
+    if message.stop_reason == "refusal":
+        category = getattr(message.stop_details, "category", None) if message.stop_details else None
+        raise SystemExit(f"The idea model declined this week's brief (category {category}); nothing was run.")
+    if message.stop_reason == "max_tokens":
+        raise SystemExit("The idea model ran out of room before answering; nothing was run.")
+    answer = json.loads(next(block.text for block in message.content if block.type == "text"))
+    usage = message.usage
+    return answer, f"{message.model}, {usage.input_tokens:,} tokens in and {usage.output_tokens:,} out"
+
+
+def gather_evidence(records: list[dict], store: BarStore, out: Path,
+                    progress: Callable[[str], None]) -> dict[str, dict]:
+    """Discovery evidence for each family at its defaults and for the three most
+    recent ideas the factory judged, cached by id (discovery data never changes)."""
+    wanted: dict[str, Spec] = {name: parse_spec({"family": name}) for name in FAMILIES}
+    judged = [r for r in records if r.get("source") == "factory" and not (r.get("spec") or {}).get("model")]
+    defaults = {spec_id(spec) for spec in wanted.values()}
+    recent: dict[str, dict] = {}
+    for record in reversed(judged):
+        if record["id"] not in defaults and record["id"] not in recent:
+            recent[record["id"]] = record
+        if len(recent) == 3:
+            break
+    for identifier, record in reversed(list(recent.items())):
+        wanted[identifier] = from_canonical(record["spec"], record["name"])
+    found: dict[str, dict] = {}
+    for key, spec in wanted.items():
+        path = out / "evidence" / f"{spec_id(spec)}-v{EVIDENCE_VERSION}.json"
+        if path.exists():
+            found[key] = json.loads(path.read_text())
+            continue
+        progress(f"  discovery evidence for {key}")
+        found[key] = {"name": spec.name, **evidence(discovery_trades(spec, store.load))}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(found[key], indent=1))
+    return found
+
+
+def recent_lessons(reports: Path, weeks: int = LESSON_WEEKS) -> list[tuple[str, str]]:
+    lessons = []
+    for path in sorted(reports.glob("*.md"))[-weeks:]:
+        text = lessons_from(path.read_text())
+        if text:
+            lessons.append((path.stem, text))
+    return lessons
+
+
+def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[str], None],
+                 proposer: Proposer) -> int:
+    check_live_ledger(args)
+    today = datetime.now(ET).date()
+    monday = (today - timedelta(days=today.weekday())).isoformat()
+    records = read_ledger(args.ledger)
+    used = sum(1 for record in records if record.get("batch") == monday)
+    budget = WEEKLY_BUDGET - used
+    if budget <= 0:
+        print(f"This week's budget of {WEEKLY_BUDGET} candidates is already used; nothing to do.")
+        return 0
+    progress("gathering discovery evidence")
+    found = gather_evidence(records, store, args.out, progress)
+    count = prior_candidates(records)
+    text = brief(today, records, found, recent_lessons(args.reports), budget, required_t(count + 1), count)
+    if args.dry_run:
+        print(SYSTEM_PROMPT + "\n\n" + text)
+        return 0
+
+    progress(f"asking the idea model for up to {budget} candidates")
+    answer, usage = proposer(SYSTEM_PROMPT, text)
+    proposals = review(answer, {record["id"] for record in records}, budget)
+    run_records: dict[str, dict] = {}
+    spec_dir = args.specs / today.isoformat()
+    for proposal in proposals:
+        if proposal.spec is None:
+            progress(f"refused: {proposal.title}: {proposal.problem}")
+            continue
+        name, data = spec_file(proposal)
+        spec_dir.mkdir(parents=True, exist_ok=True)
+        (spec_dir / name).write_text(json.dumps(data, indent=2) + "\n")
+        parent = proposal.spec.parent()
+        queue = ([parent] if parent is not None and spec_id(parent) not in {r["id"] for r in read_ledger(args.ledger)}
+                 else []) + [proposal.spec]
+        for candidate in queue:
+            progress(f"judging {candidate.name} ({spec_id(candidate)})")
+            try:
+                _, record, _ = run_one(candidate, store, args.ledger, args.out, True, progress, batch=monday)
+            except (ValueError, RuntimeError) as exc:
+                proposal.problem = f"it could not be judged: {exc}"
+                progress(proposal.problem)
+                break
+            run_records[record["id"]] = record
+    after = read_ledger(args.ledger)
+    count = prior_candidates(after)
+    ledger_note = (f"The ledger holds {len({r['id'] for r in after})} ideas; {count} have reached confirmation, "
+                   f"so the next one there needs t >= {required_t(count + 1):.2f}.")
+    footer = f"Idea model: {usage}. Code {code_version()}; bars through {store.last_day(MARKET)}."
+    markdown, summary = weekly_report(today, proposals, run_records, answer, ledger_note, footer)
+    args.reports.mkdir(parents=True, exist_ok=True)
+    (args.reports / f"{today.isoformat()}.md").write_text(markdown)
+    passed = any(record["verdict"] in ("passed", "awaiting_exam", "passed_confirmation") for record in run_records.values())
+    (args.reports / f"{today.isoformat()}.json").write_text(json.dumps(
+        {"day": today.isoformat(), "summary": summary, "passed": passed, "answer": answer}, indent=2) + "\n")
+    print(markdown)
+    return 0
+
+
+def publish(url: str, token: str | None, title: str, message: str, click: str | None, priority: int,
+            tags: list[str]) -> None:
+    """ntfy's JSON form, the way deploy/alerts.py sends the server's alerts."""
+    target = urlsplit(url)
+    body: dict[str, Any] = {"topic": target.path.strip("/"), "title": title, "message": message,
+                            "priority": priority, "tags": tags}
+    if click:
+        body["click"] = click
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(f"{target.scheme}://{target.netloc}/", data=json.dumps(body).encode(), headers=headers,
+                      method="POST")
+    with urlopen(request, timeout=15):
+        pass
+
+
+def command_notify(args: argparse.Namespace, sender: Callable[..., None] = publish) -> int:
+    url = os.environ.get("FACTORY_NTFY_URL")
+    if not url:
+        raise SystemExit("FACTORY_NTFY_URL is not set (backend/.env); nothing was sent.")
+    token = os.environ.get("FACTORY_NTFY_TOKEN") or None
+    if args.failure:
+        sender(url, token, "Strategy factory: the weekly run failed", args.failure, None, 4, ["warning"])
+        return 0
+    latest = sorted(args.reports.glob("*.json"))
+    if not latest:
+        raise SystemExit(f"No weekly report in {args.reports}; nothing was sent.")
+    week = json.loads(latest[-1].read_text())
+    report_path = latest[-1].with_suffix(".md")
+    sender(url, token, f"Strategy factory, week of {week['day']}", week["summary"], github_url(report_path),
+           5 if week["passed"] else 3, ["tada"] if week["passed"] else ["chart_with_upwards_trend"])
+    return 0
+
+
+# --- other commands ------------------------------------------------------------------
 
 
 def command_ledger(args: argparse.Namespace) -> int:
@@ -277,16 +527,27 @@ def command_prepare(args: argparse.Namespace, progress: Callable[[str], None]) -
     return 0
 
 
-def main(argv: list[str] | None = None, source_factory: Callable[[], MinuteSource] | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    source_factory: Callable[[], MinuteSource] | None = None,
+    proposer: Proposer | None = None,
+    sender: Callable[..., None] | None = None,
+) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[1])
     parser.add_argument("--feed", choices=("iex", "sip"), default="sip", help="the Alpaca feed (default sip)")
     parser.add_argument("--ledger", type=Path, default=LEDGER)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--reports", type=Path, default=RESEARCH / "reports")
+    parser.add_argument("--specs", type=Path, default=RESEARCH / "specs", help="where the weekly run saves its specs")
     sub = parser.add_subparsers(dest="command", required=True)
     run = sub.add_parser("run", help="judge a spec and record it in the ledger")
     run.add_argument("spec", type=Path)
     run.add_argument("--rerun", action="store_true", help="run a spec that is already in the ledger again")
     run.add_argument("--no-exam", action="store_true", help="stop after confirmation, holdout untouched")
+    week = sub.add_parser("week", help="the weekly loop: propose, judge, report (needs the Anthropic key)")
+    week.add_argument("--dry-run", action="store_true", help="print the brief the idea model would get, and stop")
+    notify = sub.add_parser("notify", help="send the latest weekly summary to the phone (needs FACTORY_NTFY_URL)")
+    notify.add_argument("--failure", help="send this failure message instead")
     sub.add_parser("ledger", help="list the ledger and the current bar")
     prepare = sub.add_parser("prepare", help="fetch the minute bars the factory needs (needs the Alpaca key)")
     prepare.add_argument("--tickers", nargs="+", default=[*CORE_UNIVERSE, MARKET])
@@ -294,6 +555,13 @@ def main(argv: list[str] | None = None, source_factory: Callable[[], MinuteSourc
     args = parser.parse_args(argv)
 
     os.environ["ALPACA_DATA_FEED"] = args.feed
+    real_run = {"prepare": True, "week": proposer is None, "notify": sender is None}.get(args.command, False)
+    if real_run:
+        # Keys and the ntfy topic live in backend/.env. Tests inject a proposer
+        # and a sender instead, so they never read it.
+        from app.environment import load_env_files
+
+        load_env_files()
 
     def progress(line: str) -> None:
         print(line, file=sys.stderr, flush=True)
@@ -302,7 +570,11 @@ def main(argv: list[str] | None = None, source_factory: Callable[[], MinuteSourc
         return command_ledger(args)
     if args.command == "prepare":
         return command_prepare(args, progress)
+    if args.command == "notify":
+        return command_notify(args, sender or publish)
     store = BarStore((source_factory or AlpacaCache)(), args.out, progress)
+    if args.command == "week":
+        return command_week(args, store, progress, proposer or claude_proposer)
     return command_run(args, store, progress)
 
 

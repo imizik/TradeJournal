@@ -3,16 +3,25 @@
 A pipeline that judges trading ideas automatically and records every one it
 judges. Searching many variations always turns up a few that look good by
 luck, so the factory's main job is to throw those out before anyone trades
-them. This is step 1 of 3: the rules engine, the gates and the ledger. Step 2
-is a weekly agent that proposes the next ideas from the ledger; step 3 paper
-trades whatever passes.
+them. Step 1 is the rules engine, the gates and the ledger; step 2 is
+[the weekly loop](#the-weekly-loop), where Claude proposes the next ideas
+from the ledger every Sunday; step 3, paper trading whatever passes, is not
+built yet.
 
 The code: `backend/app/engine/factory_data.py` (bars, splits, indicators,
 features), `factory_rules.py` (entry families, the execution model, specs),
 `factory_model.py` (the learned filter), `factory_gates.py` (statistics,
-gates, ledger records), and `backend/scripts/strategy_factory.py` (the bar
-cache, the ledger file, the commands). Specs live in `research/specs/`, the
-ledger in `research/ledger.jsonl`.
+gates, ledger records), `factory_brief.py` (the weekly brief, the review of
+proposals, the weekly report), `backend/scripts/strategy_factory.py` (the bar
+cache, the ledger file, the commands) and `scripts/factory_week.sh` (the
+weekly run). Specs live in `research/specs/`, the ledger in
+`research/ledger.jsonl`, the weekly reports in `research/reports/`.
+
+**The live ledger is on branch `factory/ledger`**, which the weekly run
+commits to and pushes, and which is never merged: main's copy of `research/`
+is the state when the factory was merged. `run` and `week` refuse to write the
+default ledger from any other branch, so the count the bar rests on cannot
+fork; pass `--ledger` for a scratch ledger.
 
 ## How a candidate is judged
 
@@ -59,7 +68,7 @@ ledger in `research/ledger.jsonl`.
 ## Running it
 
 ```bash
-cd backend
+cd /Users/user/TradeJournal-factory/backend   # the factory checkout, on factory/ledger
 python scripts/strategy_factory.py prepare    # fetch missing SIP minute bars; needs the Alpaca key
 python scripts/strategy_factory.py run ../research/specs/failed_breakout_v0.1.json
 python scripts/strategy_factory.py ledger     # every candidate, its verdict, and the current bar
@@ -69,9 +78,64 @@ python scripts/strategy_factory.py ledger     # every candidate, its verdict, an
 and timeframe from the local SIP minute cache once, into
 `backend/data/factory/bars/`. A spec already in the ledger is not run again
 (`--rerun` forces it, and it is still counted once). `--no-exam` stops before
-the holdout. Each run writes `report.txt` and `trades.csv` (every trade with
-its entry features) to `backend/data/factory/runs/<time>-<id>/`, and a line
-to the ledger.
+the holdout. Each run writes `report.txt` and one trades file per period it
+was allowed to see (`trades_discovery.csv`, `trades_confirm.csv`,
+`trades_holdout.csv`, every trade with its entry features) to
+`backend/data/factory/runs/<time>-<id>/`, and a line to the ledger.
+
+## The weekly loop
+
+Every Sunday at 10:00 (New York time on this Mac) launchd runs
+`scripts/factory_week.sh` in the factory checkout, `/Users/user/TradeJournal-factory`:
+
+1. Merge `origin/main` into `factory/ledger`, so new families and fixes
+   arrive by themselves.
+2. `prepare`: fetch the week's SIP minute bars.
+3. `week`: write the brief, ask the idea model for up to three candidates,
+   check them, judge the ones that pass the checks, and write
+   `research/reports/<date>.md`. The brief holds the rules below, the catalog
+   of families, settings and features, every idea in the ledger with its
+   results, discovery-period evidence (average R by side, time of day, exit,
+   and fifths of each feature, for each family at its defaults and the three
+   latest ideas), and the model's lessons from the last four weeks.
+4. Commit `research/` to `factory/ledger` and push it.
+5. `notify`: send the report's summary to the phone through the same ntfy
+   topic as the server's alerts, linking to the report on GitHub. A candidate
+   that passes arrives at high priority. If any step fails, the failure is
+   sent instead.
+
+The idea model is Claude Opus 5 (`FACTORY_MODEL` overrides it) through the
+Anthropic API key in `backend/.env`, with adaptive thinking and a JSON answer:
+each idea's title, hypothesis, what it builds on and changes, and whether it
+came from the evidence; its lessons; and building blocks it wants. A week
+costs well under a dollar. The model never runs anything: `factory_brief.review`
+refuses a proposal that picks its own tickers, changes the costs, has more
+than two filters, repeats anything in the ledger or this week's batch, or
+does not fit the budget, and the report lists every refusal with its reason.
+
+- **Budget:** three new candidates a week, counted from ledger lines tagged
+  with the week (`batch`). A learned filter whose rules are new counts two.
+  Hand-run `run` candidates are not counted.
+- **Exam numbers** reach the brief only as passed or failed.
+- **Evidence** comes from discovery data only (`factory_gates.discovery_trades`),
+  cached per idea in `backend/data/factory/evidence/`.
+- **New building blocks** (a family, a feature) are not written by the loop.
+  The model lists what it wants, and a person decides whether to build it.
+
+```bash
+cd /Users/user/TradeJournal-factory
+bash scripts/factory_week.sh                                  # run the week now
+backend/.venv/bin/python backend/scripts/strategy_factory.py week --dry-run   # print the brief only
+launchctl bootout gui/$(id -u)/com.tradejournal.strategy-factory             # pause the schedule
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradejournal.strategy-factory.plist  # resume
+tail -f ~/Library/Logs/tradejournal-strategy-factory.log
+```
+
+The Mac has to be awake for launchd to start the run; one missed while it
+slept runs at the next wake. The run needs `ANTHROPIC_API_KEY`, the Alpaca
+keys and `FACTORY_NTFY_URL` (with `FACTORY_NTFY_TOKEN` when the topic has one)
+in the main checkout's `backend/.env`, which the factory checkout links to,
+as it links `backend/.venv` and `backend/data/alpaca_cache`.
 
 ## Writing a spec
 

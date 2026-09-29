@@ -22,6 +22,7 @@ import pytest
 
 from app.engine import factory_gates
 from app.engine.factory_data import (
+    FEATURES,
     FeatureContext,
     Series,
     Split,
@@ -39,6 +40,7 @@ from app.engine.factory_gates import (
     Stats,
     clustered_mean,
     confirm_gate,
+    discovery_trades,
     evaluate,
     exam_gate,
     ledger_record,
@@ -795,6 +797,17 @@ def test_a_failed_confirmation_leaves_the_holdout_locked(dip_family, monkeypatch
     assert ev.verdict == "failed_confirmation" and ev.reached_confirmation and ev.candidates == 1
     assert None not in {through for _, through in loader.requests}
     assert max(through for _, through in loader.requests) == PERIODS["confirm_b"][1]
+
+
+def test_discovery_evidence_reads_only_discovery_data(dip_family):
+    loader = StubLoader({"AAA": pattern(START, END, every_fifth), "BBB": pattern(START, END, every_fifth)})
+    trades = discovery_trades(dip_family, loader)
+    assert {through for _, through in loader.requests} == {PERIODS["discovery"][1]}
+    days = {t.signal_time.astimezone(ET).date() for t in trades}
+    assert min(days) >= PERIODS["discovery"][0] and max(days) <= PERIODS["discovery"][1]
+    assert all(t.closed and set(t.features) == set(FEATURES) for t in trades)
+    learned = parse_spec({"family": "dip_buyer", "tickers": ["AAA", "BBB"], "model": {"kind": "logistic"}})
+    assert len(discovery_trades(learned, loader)) == len(trades)  # read through its rules without the model
 
 
 def test_a_learned_filter_trains_on_discovery_only_and_must_beat_its_parent(dip_family):
