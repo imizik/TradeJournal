@@ -551,6 +551,8 @@ class FillMarketContext(SQLModel, table=True):
     fill_id: uuid.UUID = Field(primary_key=True, foreign_key="fill.id")
     data_source: str                        # alpaca_iex | alpaca_sip
     fetched_at: datetime
+    calculation_version: Optional[str] = None
+    entry_context_as_of: Optional[datetime] = None  # last completed minute end, NY wall time
 
     # Underlying price at fill time (from minute bars)
     entry_underlying_price: Optional[float] = None
@@ -641,6 +643,10 @@ class TradePathMetrics(SQLModel, table=True):
     trade_id: uuid.UUID = Field(primary_key=True, foreign_key="trade.id")
     data_source: str
     fetched_at: datetime
+    calculation_version: Optional[str] = None
+    market_inputs_fingerprint: Optional[str] = None
+    option_path_quality: Optional[str] = None
+    option_peak_total_pnl: Optional[float] = Field(default=None, sa_column=Column(DECIMAL_18_6, nullable=True))
 
     hold_duration_bucket: Optional[str] = None  # scalp|intraday|swing|multi-day
     exit_time_bucket: Optional[str] = None       # premarket|open|mid|close|afterhours

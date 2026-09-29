@@ -9,7 +9,7 @@ function n(val: number | null | undefined, d = 4) {
 }
 
 function DiscrepancyBadge({ items }: { items: string[] }) {
-  if (items.length === 0) return <span className="text-xs text-emerald-400">✓ no discrepancies</span>;
+  if (items.length === 0) return <span className="text-xs text-muted-foreground">See coverage and independent comparisons below.</span>;
   return (
     <div className="space-y-1">
       {items.map((d, i) => (
@@ -59,7 +59,8 @@ function FillAuditBlock({ fill }: { fill: AuditFill }) {
 
       {/* Entry bar */}
       <div>
-        <p className="text-xs font-medium text-muted-foreground mb-1">Entry bar</p>
+        <p className="text-xs font-medium text-muted-foreground mb-1">Last completed bar</p>
+        {fill.context_as_of && <p className="text-xs text-muted-foreground">Observable through {fill.context_as_of.slice(11, 16)} ET</p>}
         {barFound ? (
           <div className="space-y-0.5 text-xs">
             <div className="flex justify-between">
@@ -80,7 +81,7 @@ function FillAuditBlock({ fill }: { fill: AuditFill }) {
             )}
           </div>
         ) : (
-          <span className="text-xs text-red-400">✗ no bar found within 5 minutes</span>
+          <span className="text-xs text-muted-foreground">No completed bar evidence available</span>
         )}
       </div>
 
@@ -124,7 +125,7 @@ function FillAuditBlock({ fill }: { fill: AuditFill }) {
               const r = fill.recomputed[key as keyof typeof fill.recomputed];
               if (s == null && r == null) return null;
               const diff = s != null && r != null ? Math.abs(s - r) : null;
-              const warn = diff != null && diff > 0.05;
+              const warn = diff != null && diff > 0.000001;
               return (
                 <div key={key} className={`flex justify-between ${warn ? "text-amber-400" : ""}`}>
                   <span className="text-muted-foreground shrink-0">{key}</span>
@@ -185,7 +186,7 @@ function PathAuditBlock({ path }: { path: AuditPath }) {
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Stored</span>
-          <span className={mfeDiff != null && mfeDiff > 0.1 ? "text-amber-400" : ""}>{stored.mfe_pct?.toFixed(3) ?? "-"}%{mfeDiff != null && mfeDiff > 0.1 && " ⚠"}</span>
+          <span className={mfeDiff != null && mfeDiff > 0.000001 ? "text-amber-400" : ""}>{stored.mfe_pct?.toFixed(3) ?? "-"}%{mfeDiff != null && mfeDiff > 0.000001 && " ⚠"}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">MFE bar (ET)</span>
@@ -201,7 +202,7 @@ function PathAuditBlock({ path }: { path: AuditPath }) {
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">Stored</span>
-          <span className={maeDiff != null && maeDiff > 0.1 ? "text-amber-400" : ""}>{stored.mae_pct?.toFixed(3) ?? "-"}%{maeDiff != null && maeDiff > 0.1 && " ⚠"}</span>
+          <span className={maeDiff != null && maeDiff > 0.000001 ? "text-amber-400" : ""}>{stored.mae_pct?.toFixed(3) ?? "-"}%{maeDiff != null && maeDiff > 0.000001 && " ⚠"}</span>
         </div>
         <div className="flex justify-between">
           <span className="text-muted-foreground">MAE bar (ET)</span>
@@ -259,6 +260,43 @@ function IndicatorAuditBlock({ ind }: { ind: AuditIndicators }) {
           <p className="text-muted-foreground mb-0.5">EMA formula</p>
           <p className="font-mono text-foreground/60 break-all">{ind.ema_formula}</p>
         </div>
+      )}
+    </div>
+  );
+}
+
+function IndependentChecks({ audit }: { audit: TradeAudit }) {
+  const [expanded, setExpanded] = useState(false);
+  const checks = audit.validation?.checks ?? [];
+  const counts = checks.reduce<Record<string, number>>((acc, c) => {
+    acc[c.status] = (acc[c.status] ?? 0) + 1;
+    return acc;
+  }, {});
+  const ordered = [...checks].sort((a, b) => Number(a.status === "matched") - Number(b.status === "matched"));
+  const shown = expanded ? ordered : ordered.slice(0, 12);
+  const display = (v: string | number | null | undefined) => v == null ? "—" : typeof v === "number" ? v.toFixed(6).replace(/\.?0+$/, "") : v;
+  return (
+    <div className="rounded border border-border p-3 space-y-2 text-xs">
+      <p className="font-semibold">Independent reference checks</p>
+      <p className="text-muted-foreground">Broker reconciliation has not been performed. Matching calculations reproduce these cached inputs; minute-bar extremes are estimates.</p>
+      <p>Matched {counts.matched ?? 0} · Mismatch {counts.mismatch ?? 0} · Stale {counts.stale ?? 0} · Unavailable {counts.unavailable ?? 0} · Error {counts.error ?? 0}</p>
+      {checks.length === 0 && <p className="text-muted-foreground">No reference checks available.</p>}
+      {shown.map((c, index) => (
+        <div key={`${c.fill_id ?? "trade"}:${c.field}:${index}`} className="border-t border-border pt-1">
+          <div className="flex justify-between gap-2">
+            <span className="break-all">{c.field}</span>
+            <span className={c.status === "matched" ? "text-emerald-400" : c.status === "unavailable" ? "text-muted-foreground" : "text-amber-400"}>{c.status}</span>
+          </div>
+          <p className="font-mono break-all">{display(c.stored)} → {display(c.reference)}</p>
+          {c.fill_id && <p className="text-muted-foreground">Fill {c.fill_id.slice(-8)}</p>}
+          {c.reason && <p className="text-muted-foreground">{c.reason}</p>}
+        </div>
+      ))}
+      {checks.length > 12 && <button onClick={() => setExpanded(!expanded)} className="text-violet-300">{expanded ? "Show fewer checks" : `Show all ${checks.length} checks`}</button>}
+      {audit.validation?.option && (
+        <p className="text-muted-foreground">
+          Option evidence: {audit.validation.option.reason ?? `${audit.validation.option.bars ?? 0} observed holding minutes; peak ${audit.validation.option.peak_minute ?? "unavailable"}`}
+        </p>
       )}
     </div>
   );
@@ -341,6 +379,7 @@ export default function AuditPanel({ tradeId }: Props) {
 
           {audit && (
             <>
+              <IndependentChecks audit={audit} />
               {/* Direction badge */}
               {audit.direction && (
                 <div className="flex items-center gap-2">
