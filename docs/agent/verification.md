@@ -354,3 +354,14 @@ TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh # also ingress on 8090
 
 The TradingView ingress is opt-in; ordinary work does not need it. Everything
 binds to `127.0.0.1`. Only ever tunnel `8090`; the private API has no auth.
+
+## Historical metric evidence
+
+The read-only audit and `backend/scripts/validate_trade_metrics.py` compare
+supplied fills and cached bars with independent Decimal/scalar calculations.
+See [historical metric correctness](../trade-metric-correctness.md#independent-validation-and-review)
+for the snapshot format, report command, coverage and source-verification limits.
+`backend/tests/test_metric_reference.py` includes seeded random financial paths
+and deliberate input mutations, in addition to hand-calculated cases. A local
+match on cached inputs does not establish broker completeness, executable
+quotes or predictive value. Missing/stale results are not counted as matches.

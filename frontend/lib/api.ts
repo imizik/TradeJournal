@@ -362,6 +362,8 @@ export type AuditFillBar = {
 };
 
 export type AuditFill = {
+  context_as_of?: string | null;
+  checks?: ValidationCheck[];
   fill_id: string;
   is_entry: boolean;
   side: string;
@@ -425,6 +427,14 @@ export type AuditIndicators = {
 };
 
 export type TradeAudit = {
+  reference_revision?: string;
+  validation?: {
+    checks: ValidationCheck[];
+    broker_verification: string;
+    limits?: string[];
+    option?: { values: Record<string, number | null>; reason: string | null; bars?: number; peak_minute?: string | null; samples?: { timestamp: string; quantity: number; cost_basis: number; realized: number; favorable: number; adverse: number; total: number }[] } | null;
+    underlying?: { samples?: { timestamp: string; high: number; low: number }[] } | null;
+  };
   trade_id: string;
   ticker: string;
   instrument_type: string;
@@ -438,6 +448,17 @@ export type TradeAudit = {
   fills: AuditFill[];
   path: AuditPath | null;
   indicators: AuditIndicators | null;
+};
+
+export type ValidationCheck = {
+  field: string;
+  fill_id?: string;
+  stored?: number | string | null;
+  reference?: number | string | null;
+  difference?: number | null;
+  status: "matched" | "mismatch" | "stale" | "unavailable" | "error";
+  kind?: string;
+  reason?: string | null;
 };
 
 export type TradingViewAnalysisStatus =

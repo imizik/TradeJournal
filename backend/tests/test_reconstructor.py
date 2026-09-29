@@ -372,3 +372,15 @@ def test_same_minute_open_and_close_orders_deterministically():
         assert trade.expired_worthless is False
         # 18 * (59 - 54) + 2 * (68 - 54) = 90 + 28
         assert trade.realized_pnl == D("118.000000")
+
+
+def test_short_option_expiration_keeps_credit_and_signed_partial_close_pnl():
+    exp = date(2026, 3, 25)
+    for partial in (False, True):
+        fills = [_fill("sell_to_open", "2", price="200", executed_at=_dt(9, 45), expiration=exp)]
+        if partial:
+            fills.append(_fill("buy_to_close", "1", price="50", executed_at=_dt(10, 45), expiration=exp))
+        t = reconstruct(fills, today=date(2026, 3, 29)).trades[0]
+        assert t.status == "expired"
+        assert t.realized_pnl == D("350.000000") if partial else t.realized_pnl == D("400.000000")
+        assert t.pnl_pct == D("0.8750") if partial else t.pnl_pct == D("1.0000")

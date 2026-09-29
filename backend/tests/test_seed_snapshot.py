@@ -32,6 +32,7 @@ import json
 import os
 import re
 import sys
+from collections import Counter
 from datetime import date, datetime
 from pathlib import Path
 
@@ -128,32 +129,10 @@ def _decimal(value) -> str | None:
 
 
 def _capture(database_url: str) -> dict:
-    """
-    Capture the reconstruction with market data stubbed out.
+    """Capture independent audit output against an explicitly empty cache.
 
-    `compute_audit` -> `_audit_path` calls `fetch_minute_bars_for_date` without
-    its `cache_only` flag, so auditing a closed trade makes a live Alpaca
-    request. That is why this function had no test: it cannot run offline, and
-    in CI it would be slow at best and flaky at worst.
-
-    Stubbing it to return no bars pins the branch that matters here -- the
-    "Not enough data to compute path" path, which is what a cold cache produces
-    anyway -- and keeps the snapshot a property of the fixture rather than of
-    whatever the market did while the suite ran.
-
-    CACHE_DIR is redirected to an empty directory for the same reason, and it
-    is the less obvious half. `_audit_fill` and `_audit_indicators` read the
-    cache straight off disk rather than through the stubbed function, so on a
-    machine that has run the real app against AAPL, NVDA or TSLA -- any normal
-    developer clone -- those files would populate bars, indicator fields and
-    formulas that this cold-cache snapshot expects to be absent. The suite
-    would then pass or fail on untracked user data.
-
-    This was missed on the first pass because the container that wrote the
-    snapshot had an empty cache, so the defect was invisible exactly where it
-    was created. Verified by planting sixty days of NVDA bars: without the
-    redirect the snapshot flips to "No daily bars up to fill date"; with it,
-    the planted file is ignored.
+    The audit performs no provider calls. Redirecting cache reads ensures the
+    snapshot cannot depend on unrelated local market history.
     """
     from unittest.mock import patch
 
@@ -162,7 +141,6 @@ def _capture(database_url: str) -> dict:
 
     engine = create_engine(database_url)
     with (
-        patch("app.engine.auditor.fetch_minute_bars_for_date", return_value={}),
         patch("app.engine.auditor.CACHE_DIR", EMPTY_CACHE_DIR),
     ):
         return _capture_with(engine)
@@ -249,7 +227,7 @@ def _relative_dates(value):
 def _normalize_audit(audit: dict) -> dict:
     """
     The audit minus what cannot be stable: the random trade id, and absolute
-    dates. Everything else is kept, including the nulls -- enrichment fields
+    dates. Detailed comparisons become coverage totals; financial values and nulls stay -- enrichment fields
     are nullable by design and `CLAUDE.md` lists them as needing extra care, so
     a null quietly becoming a zero is a regression this should catch.
     """
@@ -257,6 +235,14 @@ def _normalize_audit(audit: dict) -> dict:
         key: value for key, value in audit.items()
         if key not in {"trade_id", "opened_at_et", "closed_at_et", "expiration"}
     }
+    # Detailed field comparisons are covered by test_metric_reference. Keep
+    # coverage totals and independent accounting in this small golden fixture.
+    validation = normalized.get("validation", {})
+    normalized["validation"] = {"broker_verification": validation.get("broker_verification"),
+        "counts": dict(Counter(c["status"] for c in validation.get("checks", []))),
+        "accounting": validation.get("accounting"), "limits": validation.get("limits")}
+    for fill in normalized.get("fills", []):
+        fill["check_counts"] = dict(Counter(c["status"] for c in fill.pop("checks", [])))
     normalized["opened_days_from_today"] = _days_from_today(audit.get("opened_at_et"))
     normalized["closed_days_from_today"] = _days_from_today(audit.get("closed_at_et"))
     for fill_audit in normalized.get("fills") or []:

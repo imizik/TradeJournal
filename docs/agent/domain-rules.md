@@ -42,6 +42,9 @@ patterns that can create N+1 calls.
   `backend/scripts/repair_expired_trade_times.py` corrects only rows that
   exactly match that historical shift, refreshes affected same-day sequence
   fields on fills, and invalidates the expired trades' path metrics.
+- Worthless expiration subtracts remaining long-option cost basis but credits
+  remaining short-option premium. Previously realized partial closes retain
+  their result in both cases.
 - Manual fills are backed up to `backend/data/manual_fills.json` and restored
   on startup and after a destructive resync.
 - The FIFO sort key is
@@ -176,6 +179,9 @@ is verifiable rather than hopeful.
   use the open cost basis at each sampled minute. Underlying exit efficiency
   and first-order greeks attribution are left null for scale-ins/outs rather
   than applying the maximum position to every move.
+- The audit is read-only against existing cache files and independent reference
+  math. Missing evidence cannot pass; old versions stay stale even if values
+  match. Same-cache agreement is not broker/source verification.
 - Greeks PnL attribution on `trade_path_metrics`
   (`attr_delta/gamma/theta/vega/residual_pnl`, plus `entry_iv`/`exit_iv`)
   depends on Polygon-enriched entry/exit greeks: run Polygon enrichment before

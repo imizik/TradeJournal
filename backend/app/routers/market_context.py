@@ -167,8 +167,8 @@ async def get_coverage(session: Session = Depends(get_session)):
 @router.get("/audit/{trade_id}")
 async def get_trade_audit(trade_id: uuid.UUID, session: Session = Depends(get_session)):
     """
-    Synchronously re-derives all computed values for a single trade from cached bar data.
-    Returns a structured audit report for UI display.
+    Compare covered metrics with independent math on existing cached bars.
+    Missing/stale/error evidence remains explicit; never fetches provider data.
     """
     from app.engine.auditor import compute_audit
 
