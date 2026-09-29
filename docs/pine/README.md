@@ -192,8 +192,10 @@ row.
    the open. The round 1 exports were made with extended hours on. Pick one
    setting and keep it, and give the Python backtester the same one
    (`--extended-hours`).
-2. **Check compile first.** This file has never been compiled; there is no
-   Pine compiler in this repository's CI. Fix whatever the editor flags.
+2. **Check compile first.** v1.0.0 compiled and ran in the Strategy Tester
+   (the round 1 exports below); nothing in this repository shows the v1.1.0
+   changes have been through the editor, and there is no Pine compiler in
+   CI. Fix whatever the editor flags.
 3. Open **Pine Logs**. Each entry logs its exact JSON. Check that one line
    has `bar_time_ms` as a plain integer and the `alert_id` ends in
    `:<setup>:<long|short>`.

@@ -130,6 +130,11 @@ you change it (`verification.md`, "What is NOT covered yet").
 - `seed_dev_data.py` — the fixed fills behind the browser tests and the snapshot
 - `migrate_sqlite_to_postgres.py` — SQLite → PostgreSQL copy
 - `check_database.py` — read-only preflight: which database, schema ready?
+- `repair_gmail_fill_times.py` — plans, checks and applies the guarded repair of
+  Gmail fill times stored as UTC clocks, verified against the source emails
+  (`domain-rules.md`, fills and trades)
+- `repair_expired_trade_times.py` — the guarded repair of expiration closes
+  saved as UTC clocks instead of 16:00 New York wall time
 - `setup_roles.py` — create the app and ingress roles, then prove they are
   limited by connecting as each one (`environments.md`)
 - `backtest_market_map.py` — Isaac Market Map over many tickers from Alpaca
@@ -155,7 +160,10 @@ reason, and ruff lints them without importing them.
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
   and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
   judgement half is `.claude/skills/docs-drift/SKILL.md`, and the scheduled
-  agent that runs it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
+  agent meant to run it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
+  Its first run (2026-09-26) stalled at its first command, waiting for a
+  permission approval no one was there to give, so the pass still needs a
+  person or an approved routine.
 
 ## Reference documents
 
