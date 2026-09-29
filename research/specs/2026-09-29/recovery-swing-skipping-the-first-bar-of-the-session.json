@@ -1,0 +1,9 @@
+{
+  "name": "Recovery swing, skipping the first bar of the session",
+  "family": "recovery_swing",
+  "window": [
+    1000,
+    1600
+  ],
+  "notes": "The recovery swing's edge is real but is diluted by triggers on the 09:45 bar, where the 'reclaim' is really just an overnight gap through the level rather than an intraday reclaim; barring fills before 10:00 should lift average R per trade and the margin over random entries enough to clear the screen. Builds on re-d5194badb1 (NBIS recovery swing v0.1, failed screen at t=0.73 with avg R +0.04): The entry window only: fills allowed from 10:00 instead of any time, which removes the first 15-minute bar of each session. Everything else (trigger, stop, 2R target, two sessions) is unchanged. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}

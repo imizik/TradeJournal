@@ -1,0 +1,8 @@
+{
+  "name": "Recovery swing triggered on the daily EMA, not the intraday EMA",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema"
+  },
+  "notes": "The setup is defined by price losing the prior day's daily EMA, so the meaningful confirmation is price closing back above that same daily level; reclaiming a 15-minute EMA is a much weaker, noisier event, and switching the trigger level should give fewer but cleaner trades with a bigger margin over random entries. Builds on re-d5194badb1 (NBIS recovery swing v0.1, failed screen): The trigger level only: reclaim_level goes from the chart EMA to the daily EMA. Arming, breakout confirmation, stop and exits are unchanged, and it is run on the whole universe rather than on NBIS alone as in the earlier hand test."
+}

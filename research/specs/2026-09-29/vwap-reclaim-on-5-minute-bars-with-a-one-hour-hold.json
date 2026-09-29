@@ -1,0 +1,11 @@
+{
+  "name": "VWAP reclaim on 5-minute bars with a one-hour hold",
+  "family": "vwap_reclaim",
+  "timeframe": 5,
+  "exits": {
+    "target_r": 1.5,
+    "max_sessions": 1,
+    "max_minutes": 60
+  },
+  "notes": "The VWAP reclaim signal genuinely beats random entries (+0.046R, t=3.06 on discovery) but loses money because a 1-minute stop is so tight that fixed costs of 0.06-0.08R swamp it; running the identical logic on 5-minute bars makes each trade's risk roughly three times larger, so the same signal keeps its edge while costs shrink to a small fraction of R. Builds on vw-3d24a7243d (VWAP reclaim v0.1, failed screen: beat random but average R negative after costs): The entry timeframe, from 1-minute to 5-minute bars, with the time stop scaled to keep the same number of bars in the trade (20 minutes becomes 60). Target, stop rule, window and session limits are unchanged."
+}
