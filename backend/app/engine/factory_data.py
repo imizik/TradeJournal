@@ -281,6 +281,9 @@ FEATURES: dict[str, str] = {
     "spy_trend": "SPY against its prior daily EMA 20, in SPY's daily ATR",
     "spy_day": "SPY against its session open, in SPY's daily ATR",
     "risk": "the signal close to the stop, in ATR(14) of the chart bars",
+    "vwap_distance": "the signal close against the session VWAP, in ATR(14) of the chart bars",
+    "vol_ratio": "the daily ATR(5) over the daily ATR(20): above 1 when the last week moved more than the month",
+    "spy_vol": "SPY's daily ATR(14) as a percent of its close: the market's volatility level",
 }
 
 RVOL_SESSIONS = 10
@@ -301,6 +304,8 @@ class _Daily:
         self.series = series
         self.ema = daily_ema(series, 20)
         self.atr = daily_atr(series, 14)
+        self.atr_week = daily_atr(series, 5)
+        self.atr_month = daily_atr(series, 20)
         self.closes = [bar.close for bar in series.daily]
         self.opens = [bar.open for bar in series.daily]
 
@@ -313,6 +318,7 @@ class FeatureContext:
         self.daily = _Daily(series)
         self.market = _Daily(market) if market is not None else None
         self.chart_atr = atr(series.high, series.low, series.close, 14)
+        self.vwap = session_vwap(series)
         self.rvol = _time_of_day_rvol(series)
 
     def at(self, i: int, side: int, stop: float) -> dict[str, float]:
@@ -335,6 +341,9 @@ class FeatureContext:
             "spy_trend": NA,
             "spy_day": NA,
             "risk": _ratio(abs(close - stop), self.chart_atr[i]),
+            "vwap_distance": side * _ratio(close - self.vwap[i], self.chart_atr[i]),
+            "vol_ratio": _ratio(prior(d.atr_week, session), prior(d.atr_month, session)),
+            "spy_vol": NA,
         }
         m = self.market
         if m is not None:
@@ -346,6 +355,7 @@ class FeatureContext:
                 market_base = prior(m.closes, market_session, LOOKBACK_SESSIONS)
                 values["spy_trend"] = side * _ratio(market_close - prior(m.ema, market_session), market_atr)
                 values["spy_day"] = side * _ratio(market_close - m.opens[market_session], market_atr)
+                values["spy_vol"] = 100 * _ratio(market_atr, prior(m.closes, market_session))
                 own = _ratio(close, base) - 1
                 market = _ratio(market_close, market_base) - 1
                 values["rel_strength"] = side * 100 * (own - market)

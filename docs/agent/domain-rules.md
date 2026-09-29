@@ -285,6 +285,11 @@ is verifiable rather than hopeful.
   idea; the weekly brief reduces them to passed or failed.
 - A spec is judged as written. Changing it after seeing its confirmation
   results makes a new candidate with a new id, and it pays the higher bar.
+- A building block added later must leave every earlier spec's id and trades
+  as they were: a new setting stays out of `canonical` while unset
+  (`LATER_EXITS`), and a model that names no features reads the original ten
+  (`MODEL_DEFAULT_FEATURES`), never the whole growing list.
+  `test_strategy_factory.py` pins the committed specs' ids.
 - Weekly proposals trade the core universe at the default costs; the review
   refuses a proposal that picks tickers or changes costs.
 
