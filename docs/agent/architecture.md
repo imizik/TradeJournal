@@ -217,6 +217,13 @@ assessment, including why Tradier is not a candidate for the historical side.
 
 ## Frontend
 
+The private Charts workspace (`/charts`) reads Tradier candles and batched
+watchlist quotes through `/charts/workspace`. Its 15-second visible-tab polling
+shares bounded memory caches across panels; it is not a tick stream. Chart
+calculations and temporary bars are separate from historical enrichment, and
+execution markers are read-only journal views. Layouts and horizontal levels
+are saved in the browser. See [chart boundaries](../charts-workspace.md).
+
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when
 `NEXT_PUBLIC_API_URL` is unset. Table logic is shared through

@@ -8,13 +8,14 @@ Backend paths are relative to `backend/`, frontend paths to `frontend/`.
 
 ## The screens
 
-The sidebar (`components/Nav.tsx`) has seven entries plus a **Sync** button
+The sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button
 at its foot that opens a drawer on any page. Everything else is reached from
 one of these by a row link or a button.
 
 | Sidebar | Route | Page | Loads | Then, from the browser |
 |---|---|---|---|---|
 | Dashboard | `/` | `app/page.tsx` | `GET /stats`, `/trades`, `/accounts`, `/trades/fills/bulk`, `/quotes?tickers=`, `POST /quotes/positions` | `DashboardActions`: `GET /sync/summary`, `/sync/jobs`, `/sync/runs`, `/health`, `/auth/gmail/start`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` |
+| Charts | `/charts` | `app/charts/page.tsx`, `components/charts/` | — | `GET /charts/workspace` every 15s while visible; Tradier candles/quotes, linked timeframes and fill markers; settings and price levels saved in this browser |
 | Daily Review | `/daily` → `/daily/{YYYY-MM-DD}` | `app/daily/page.tsx`, `app/daily/[day]/page.tsx` | `GET /daily-review`; per day `/daily-review/{day}`, `/trades`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/accounts`, quotes | `DailyAiPanel`: `POST /daily-review` |
 | Trades | `/trades` → `/trades/{id}` | `app/trades/page.tsx`, `app/trades/[id]/page.tsx`, `components/TradesTable.tsx` | list: `GET /trades?status=&ticker=&account=&type=`, `/accounts`. Detail (client page): `/trades/{id}`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/market-context/trade/{id}` | `AuditPanel`: `GET /market-context/audit/{id}`; review button: `POST /trades/{id}/review` |
 | Analytics | `/analytics` | `app/analytics/page.tsx` | `GET /stats` | — |
@@ -69,6 +70,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 
 | Working on | Start at | Routes | Proof |
 |---|---|---|---|
+| Charts workspace | `app/engine/chart_feed.py`, `app/engine/chart_math.py`, `app/routers/charts.py`; `frontend/components/charts/` | private `GET /charts/workspace`; `/charts` page | `tests/test_charts.py`, `frontend/e2e/charts.spec.ts`; live access probe `scripts/check_chart_feed.py`; [provider decision and boundaries](../charts-workspace.md) |
 | Background job ownership and recovery | `app/engine/job_runtime.py`, `app/jobs/worker.py`; commands in [background-jobs.md](background-jobs.md) | Sync Center, Gmail push, enrichment and Webull start routes | `tests/test_job_runtime.py` (competing processes, API restarts, worker death, queue consumption and fill dedupe/FIFO); external providers stubbed |
 | PnL, FIFO, trade shape | `app/engine/reconstructor.py` | `POST /rebuild`; runs after every fill write and in `trade_rebuild` | `tests/test_reconstructor.py`; `test_seed_dev_data.py` (`EXPECTED`); `test_seed_snapshot.py` (golden snapshot over the seed) |
 | Robinhood email parsing | `app/engine/email_parser.py` | — | `test_email_parser.py` |

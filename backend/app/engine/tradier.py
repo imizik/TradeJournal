@@ -10,10 +10,11 @@ position and its underlying come back in ONE request. Equities and OCC option
 symbols mix freely in that list.
 
 Rate limit: Tradier documents 120 requests/minute for `/markets`, per access
-token, and every response carries `X-Ratelimit-Available`. Peak usage in this
-application is under ten calls a minute, so there is nothing to pace and no
-budget to discover -- this module reads the header, logs when the remaining
-allowance gets low, and backs off only on an actual 429. Do NOT grow the
+token, and every response carries `X-Ratelimit-Available`. Position quote
+polling uses few calls per minute. The chart workspace uses a separate cache
+and bounded request budget in chart_feed.py, sharing this token allowance.
+This module reads the header, logs when the remaining allowance gets low,
+and backs off only on an actual 429. Do NOT grow the
 Polygon-style learned limiter here; that design exists because Polygon's real
 budget depends on an unknown plan, and Tradier's does not.
 

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, FileText, BarChart2, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight, Menu, X } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight, Menu, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -11,6 +11,7 @@ import type { GmailHealth } from "@/lib/api";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
