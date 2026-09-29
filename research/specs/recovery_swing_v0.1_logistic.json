@@ -1,0 +1,6 @@
+{
+  "name": "NBIS recovery swing v0.1 with a learned filter",
+  "family": "recovery_swing",
+  "model": {"kind": "logistic"},
+  "notes": "Meta-labeling on the v0.1 entries: a logistic regression on all ten entry features, trained on the discovery period's v0.1 trades, takes a trade when its chance of ending positive is at least the training base rate. Features, penalty and threshold were chosen before any result was seen."
+}

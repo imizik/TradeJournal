@@ -1,0 +1,5 @@
+{
+  "name": "NBIS recovery swing v0.1",
+  "family": "recovery_swing",
+  "notes": "The Pine research framework's NBIS module with its proposed defaults, unchanged: arm under the prior day's daily EMA 20, trigger on a 15-minute EMA 20 reclaim that clears the prior three highs, stop 0.1 ATR under the last four lows, 2R target or two sessions. Tested by hand on 2023-2026 before the factory existed (branch claude/nbis-recovery-swing)."
+}
