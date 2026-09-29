@@ -1,0 +1,5 @@
+{
+  "name": "VWAP reclaim/rejection v0.1",
+  "family": "vwap_reclaim",
+  "notes": "The framework's first build with its proposed defaults, on the full universe. It failed by hand on eight tickers in 2024-2026 (costs exceed the signal); here it is judged on the discovery period, which it was never run on."
+}

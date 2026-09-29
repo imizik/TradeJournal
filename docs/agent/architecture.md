@@ -53,7 +53,10 @@ than reaching for it. `app.engine.indicators` was held out by one lazy
 them. `trade_path` remains a target listed in the test; `auditor` now delegates
 to independent math with a read-only cache adapter.
 `app.engine.market_map` was written that way from the start:
-`scripts/backtest_market_map.py` fetches the bars and hands them in.
+`scripts/backtest_market_map.py` fetches the bars and hands them in. So were
+the strategy factory's `app.engine.factory_*` modules: `factory_gates.evaluate`
+reaches bars only through the loader `scripts/strategy_factory.py` passes it,
+which is also what keeps each stage from loading data it may not see.
 
 `startdev.sh` / `startdev.ps1` launch the private backend and frontend by
 default. The ingress is opt-in:
