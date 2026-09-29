@@ -501,6 +501,28 @@ def command_ledger(args: argparse.Namespace) -> int:
     return 0
 
 
+def days_to_fetch(cached: dict[str, list[date]], through: date) -> dict[date, list[str]]:
+    """The tickers missing each weekday up to `through`.
+
+    A ticker that listed after DATA_START (NBIS) starts at its first cached
+    day. A weekday inside the market's cached range with no market bars was a
+    holiday: nothing is cached for it, so without this it would be asked for
+    again every week.
+    """
+    market = set(cached.get(MARKET, []))
+    market_last = max(market) if market else None
+    wanted: dict[date, list[str]] = {}
+    for ticker, days in cached.items():
+        have = set(days)
+        day = min(have) if have else DATA_START
+        while day <= through:
+            closed = market_last is not None and day <= market_last and day not in market
+            if day.weekday() < 5 and day not in have and not closed:
+                wanted.setdefault(day, []).append(ticker)
+            day += timedelta(days=1)
+    return dict(sorted(wanted.items()))
+
+
 def command_prepare(args: argparse.Namespace, progress: Callable[[str], None]) -> int:
     from app.engine import alpaca
 
@@ -508,22 +530,12 @@ def command_prepare(args: argparse.Namespace, progress: Callable[[str], None]) -
         raise SystemExit("ALPACA_API_KEY and ALPACA_API_SECRET are not set; prepare fetches bars and needs them.")
     cache = AlpacaCache()
     through = args.through or (datetime.now(ET).date() - timedelta(days=1))
-    for ticker in args.tickers:
-        have = cache.days(ticker)
-        cached = set(have)
-        # A ticker that listed after DATA_START (NBIS) starts at its first cached day,
-        # so the days before its listing are not asked for again each time.
-        day = have[0] if have else DATA_START
-        wanted = []
-        while day <= through:
-            if day.weekday() < 5 and day not in cached:
-                wanted.append(day)
-            day += timedelta(days=1)
-        progress(f"{ticker}: {len(wanted)} weekdays to fetch")
-        for index, day in enumerate(wanted, start=1):
-            alpaca.fetch_minute_bars_for_date([ticker], day)
-            if index % 50 == 0:
-                progress(f"  {index}/{len(wanted)}")
+    wanted = days_to_fetch({ticker: cache.days(ticker) for ticker in dict.fromkeys([*args.tickers, MARKET])}, through)
+    progress(f"{len(wanted)} days to fetch, {sum(map(len, wanted.values()))} ticker-days")
+    for index, (day, tickers) in enumerate(wanted.items(), start=1):
+        alpaca.fetch_minute_bars_for_date(tickers, day)  # one request per day for every ticker missing it
+        if index % 20 == 0:
+            progress(f"  {index}/{len(wanted)}")
     return 0
 
 

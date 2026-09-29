@@ -328,3 +328,16 @@ def test_publish_posts_ntfy_json_and_links_to_github(script, monkeypatch):
     assert script.github_url(script.RESEARCH / "reports" / "2026-10-04.md") == (
         "https://github.com/someone/TradeJournal/blob/factory/ledger/research/reports/2026-10-04.md")
     assert script.github_url(Path("/somewhere/else.md")) is None
+
+
+def test_prepare_asks_for_each_missing_day_once_and_skips_market_holidays(script):
+    fri, mon, tue, wed, fri2, mon2 = (date(2025, 1, 3), date(2025, 1, 6), date(2025, 1, 7), date(2025, 1, 8),
+                                      date(2025, 1, 10), date(2025, 1, 13))
+    cached = {
+        "SPY": [fri, mon, tue, wed, fri2],  # closed on Thursday 2025-01-09, a national day of mourning
+        "AAA": [fri, mon, wed, fri2],  # missing Tuesday, and the holiday
+        "NEW": [wed],  # listed on Wednesday
+    }
+    assert script.days_to_fetch(cached, mon2) == {tue: ["AAA"], fri2: ["NEW"], mon2: ["SPY", "AAA", "NEW"]}
+    assert script.days_to_fetch({"SPY": [], "AAA": []}, date(2023, 6, 2)) == {
+        date(2023, 6, 1): ["SPY", "AAA"], date(2023, 6, 2): ["SPY", "AAA"]}
