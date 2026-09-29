@@ -558,6 +558,52 @@ def test_a_bad_spec_is_refused(bad):
         parse_spec(bad)
 
 
+@pytest.mark.parametrize("bad", [
+    {"filters": [None]},
+    {"filters": {"feature": "rvol", "min": 1}},
+    {"filters": 5},
+    {"filters": [{"feature": "rvol", "low": 1.5}]},  # the ledger's stored form is not the spec format
+    {"filters": [{"feature": "rvol"}]},
+    {"filters": [{"feature": "rvol", "min": 2, "max": 1}]},
+    {"filters": [{"feature": "rvol", "min": "1.5"}]},
+    {"params": "fast"},
+    {"params": {"ema_length": "20"}},
+    {"params": {"ema_length": 0}},
+    {"params": {"atr_buffer": -0.1}},
+    {"params": {"reclaim_level": 1}},
+    {"exits": {"target_r": "2"}},
+    {"exits": {"max_sessions": 1.5}},
+    {"exits": {"stop_r": 1}},
+    {"exits": [2.0]},
+    {"window": "0930"},
+    {"window": [900, 1000]},
+    {"window": [1060, 1100]},
+    {"window": [1500, 1000]},
+    {"limits": {"max_entries": 0}},
+    {"costs": {"slippage_bps": -1}},
+    {"model": {"features": "gap"}},
+    {"model": {"features": ["gap", "gap"]}},
+    {"model": {"kind": "logistic", "l2": 0}},
+    {"model": [1]},
+    {"tickers": []},
+    {"tickers": 5},
+    {"timeframe": "15"},
+    {"timeframe": 7},
+])
+def test_a_malformed_spec_is_refused_with_a_reason(bad):
+    with pytest.raises(ValueError):
+        parse_spec({"family": "recovery_swing", **bad})
+
+
+def test_numbers_are_normalized_so_the_same_rules_get_the_same_id():
+    loose = parse_spec({"family": "recovery_swing", "exits": {"target_r": 2, "max_sessions": 2.0},
+                        "params": {"atr_buffer": 0, "stop_bars": 4.0}, "filters": [{"feature": "trend", "min": 0}]})
+    tidy = parse_spec({"family": "recovery_swing", "exits": {"target_r": 2.0, "max_sessions": 2},
+                       "params": {"atr_buffer": 0.0, "stop_bars": 4}, "filters": [{"feature": "trend", "min": 0.0}]})
+    assert spec_id(loose) == spec_id(tidy)
+    assert loose.exits.max_sessions == 2 and isinstance(loose.exits.target_r, float)
+
+
 def test_the_id_is_the_rules_not_the_name():
     base = parse_spec({"family": "recovery_swing"})
     assert spec_id(parse_spec({"family": "recovery_swing", "name": "x", "notes": "y"})) == spec_id(base)

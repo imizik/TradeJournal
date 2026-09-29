@@ -184,7 +184,8 @@ def _brief_stats(stats: Mapping[str, Any]) -> dict[str, Any]:
 
 def spec_changes(spec: Mapping[str, Any]) -> dict[str, Any]:
     """What a canonical spec (as the ledger stores it) changes from its family's
-    defaults, in the spec format (the window as HHMM)."""
+    defaults, in the spec format a proposal is written in: the window as HHMM,
+    filter bounds as min and max."""
     base = canonical(parse_spec({"family": spec["family"]}))
     changes: dict[str, Any] = {}
     for key, value in spec.items():
@@ -195,6 +196,10 @@ def spec_changes(spec: Mapping[str, Any]) -> dict[str, Any]:
         elif key != "family" and base.get(key) != value:
             if key == "window" and value:
                 value = [minute // 60 * 100 + minute % 60 for minute in value]
+            elif key == "filters":
+                value = [{"feature": item["feature"],
+                          **{bound: item[stored] for bound, stored in (("min", "low"), ("max", "high"))
+                             if item.get(stored) is not None}} for item in value]
             changes[key] = value
     return changes
 
@@ -361,7 +366,7 @@ def review(answer: Mapping[str, Any], known: set[str], budget: int) -> list[Prop
             if not same_costs:
                 p.problem = "it changes the costs"
                 continue
-        if len(data.get("filters") or []) > MAX_FILTERS:
+        if isinstance(data.get("filters"), (list, tuple)) and len(data["filters"]) > MAX_FILTERS:
             p.problem = f"it has more than {MAX_FILTERS} filters"
             continue
         if not p.title or not p.hypothesis:
@@ -376,7 +381,7 @@ def review(answer: Mapping[str, Any], known: set[str], budget: int) -> list[Prop
         ) if part)
         try:
             spec = parse_spec(data)
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, AttributeError, KeyError) as exc:  # parse_spec raises ValueError; the rest are a net
             p.problem = f"its spec is invalid: {exc}"
             continue
         identifier = spec_id(spec)
