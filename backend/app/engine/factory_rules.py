@@ -13,12 +13,15 @@ NBIS swing backtests use:
   next bar's open, slipped by the larger of a tick count and basis points.
   An order still unfilled at a session's end expires unless the exits allow
   holding overnight.
-- The stop is frozen at the signal. If the open (or the slipped fill) is
+- The stop is set at the signal. If the open (or the slipped fill) is
   already through it, there is no trade. R is the price risk from the fill
-  to the stop, and the target is `target_r` R from the fill.
+  to that stop, and the target is `target_r` R from the fill.
 - The stop and the target rest from the fill. A bar that opens through
   either fills at that open (overnight gaps included); when one bar reaches
   both, the stop fills first. Stops and closing exits slip; targets do not.
+- The stop moves only when the exits say so (`breakeven_r`, `trail_r`), and
+  only after a bar closes, for the bars after it: a bar's own high and low
+  come in an unknown order. It never moves back.
 - At a bar's close the trade leaves if it has held `max_minutes`, or at the
   last bar of its `max_sessions`-th session (the entry session is the first).
 - Candidates hold one position at a time per ticker, and the session loss
@@ -70,9 +73,24 @@ class Context:
 
 @dataclass(frozen=True)
 class Exits:
+    """How a trade leaves. `breakeven_r` moves the stop to the entry once the
+    best price so far is that many R in favour; `trail_r` keeps it that many R
+    behind the best price. None leaves the stop where the signal put it."""
+
     target_r: float | None = 2.0
     max_sessions: int = 1
     max_minutes: int | None = None
+    breakeven_r: float | None = None
+    trail_r: float | None = None
+
+    @property
+    def moves_stop(self) -> bool:
+        return self.breakeven_r is not None or self.trail_r is not None
+
+
+# Exits added after the first specs were judged. Left out of a spec's
+# canonical form while unset, so the ids of every earlier spec stand.
+LATER_EXITS = ("breakeven_r", "trail_r")
 
 
 @dataclass(frozen=True)
@@ -115,7 +133,7 @@ class Trade:
     entry_index: int
     entry_time: datetime
     entry_price: float
-    stop: float
+    stop: float  # where the signal put the stop; R is measured from it
     target: float | None
     exit_index: int | None = None
     exit_time: datetime | None = None
@@ -124,6 +142,11 @@ class Trade:
     sessions_held: int = 1
     both_hit: bool = False
     features: dict[str, float] = field(default_factory=dict)
+    # Kept only when the exits move the stop: the best price through the last
+    # completed bar, and where the stop rests now and which rule put it there.
+    best: float = NA
+    moved_stop: float | None = None
+    moved_by: str = ""
 
     @property
     def closed(self) -> bool:
@@ -175,13 +198,37 @@ def _close(trade: Trade, series: Series, i: int, price: float, reason: str) -> N
     trade.sessions_held = series.session[i] - series.session[trade.entry_index] + 1
 
 
+def _move_stop(trade: Trade, extreme: float, exits: Exits) -> None:
+    """After a bar the trade survives, with `extreme` that bar's high (a
+    long's) or low (a short's): where the stop rests for the bars after it.
+    The tighter of the entry, once the best price so far is `breakeven_r` R in
+    favour, and `trail_r` R behind the best price; never back."""
+    side = trade.side
+    trade.best = extreme if math.isnan(trade.best) else (max if side == 1 else min)(trade.best, extreme)
+    risk = trade.risk
+    levels = []
+    if exits.breakeven_r is not None:
+        trigger = round(trade.entry_price + side * exits.breakeven_r * risk, 10)
+        if side * (trade.best - trigger) >= 0:
+            levels.append((trade.entry_price, "breakeven"))
+    if exits.trail_r is not None:
+        levels.append((round(trade.best - side * exits.trail_r * risk, 10), "trail"))
+    for level, rule in levels:
+        current = trade.stop if trade.moved_stop is None else trade.moved_stop
+        if side * (level - current) > 0:
+            trade.moved_stop, trade.moved_by = level, rule
+
+
 def _step(series: Series, trade: Trade, i: int, exits: Exits, costs: Costs) -> bool:
     """Bar `i` for an open trade: the resting stop and target, then the
-    closing exits. True when the trade closed."""
-    side, stop, target = trade.side, trade.stop, trade.target
+    closing exits, then the stop for the next bar when the exits move it.
+    True when the trade closed. A moved stop's exit is named for the rule
+    that moved it."""
+    side, target = trade.side, trade.target
+    stop, stopped = (trade.stop, "stop") if trade.moved_stop is None else (trade.moved_stop, trade.moved_by)
     o, h, lo, c = series.open[i], series.high[i], series.low[i], series.close[i]
     if side * (o - stop) <= 0:
-        _close(trade, series, i, o - side * costs.slip(o), "stop")
+        _close(trade, series, i, o - side * costs.slip(o), stopped)
         return True
     if target is not None and side * (o - target) >= 0:
         _close(trade, series, i, o, "target")
@@ -190,7 +237,7 @@ def _step(series: Series, trade: Trade, i: int, exits: Exits, costs: Costs) -> b
     target_hit = target is not None and (h >= target if side == 1 else lo <= target)
     if stop_hit:
         trade.both_hit = target_hit
-        _close(trade, series, i, stop - side * costs.slip(stop), "stop")
+        _close(trade, series, i, stop - side * costs.slip(stop), stopped)
         return True
     if target_hit:
         _close(trade, series, i, target, "target")
@@ -204,6 +251,8 @@ def _step(series: Series, trade: Trade, i: int, exits: Exits, costs: Costs) -> b
         if closes_at - trade.entry_time >= timedelta(minutes=exits.max_minutes):
             _close(trade, series, i, c - side * costs.slip(c), "time")
             return True
+    if exits.moves_stop:
+        _move_stop(trade, h if side == 1 else lo, exits)
     return False
 
 
@@ -666,6 +715,13 @@ class RuleFilter:
         return f"{self.feature} " + " and ".join(b for b in bounds if b)
 
 
+# A model that names no features reads these, the ten the factory started
+# with. Features added since must be named, so a saved spec keeps its meaning
+# as the list grows.
+MODEL_DEFAULT_FEATURES = ("minutes", "rvol", "gap", "day_move", "trend", "trend_slope", "rel_strength",
+                          "spy_trend", "spy_day", "risk")
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     """A learned filter on the family's own trades (meta-labeling): trained on
@@ -674,7 +730,7 @@ class ModelSpec:
     taken when it is at least the training base rate."""
 
     kind: str = "logistic"
-    features: tuple[str, ...] = tuple(FEATURES)
+    features: tuple[str, ...] = MODEL_DEFAULT_FEATURES
     l2: float = 1.0
 
 
@@ -787,13 +843,19 @@ def parse_spec(data: Mapping[str, Any]) -> Spec:
     rules = cls(**_settings(cls, data.get("params")))
     rules.validate()
     defaults = cls.defaults
-    raw_exits = {"target_r": None, "max_sessions": 1, "max_minutes": None, **defaults.get("exits", {}),
-                 **_object(data.get("exits"), "exits", {"target_r", "max_sessions", "max_minutes"})}
+    raw_exits = {"target_r": None, "max_sessions": 1, "max_minutes": None, "breakeven_r": None, "trail_r": None,
+                 **defaults.get("exits", {}),
+                 **_object(data.get("exits"), "exits",
+                           {"target_r", "max_sessions", "max_minutes", "breakeven_r", "trail_r"})}
     exits = Exits(
         target_r=_float(raw_exits["target_r"], "target_r", minimum=0.01, optional=True),
         max_sessions=_int(raw_exits["max_sessions"], "max_sessions"),
         max_minutes=_int(raw_exits["max_minutes"], "max_minutes", optional=True),
+        breakeven_r=_float(raw_exits["breakeven_r"], "breakeven_r", minimum=0.1, optional=True),
+        trail_r=_float(raw_exits["trail_r"], "trail_r", minimum=0.1, optional=True),
     )
+    if exits.breakeven_r is not None and exits.target_r is not None and exits.breakeven_r >= exits.target_r:
+        raise ValueError("breakeven_r must be below target_r; at or beyond it the target fills first")
     raw_limits = {"max_entries": None, "max_losses": None, "max_loss_r": None, **defaults.get("limits", {}),
                   **_object(data.get("limits"), "limits", {"max_entries", "max_losses", "max_loss_r"})}
     limits = Limits(
@@ -827,7 +889,7 @@ def parse_spec(data: Mapping[str, Any]) -> Spec:
         raw = _object(data["model"], "model", {"kind", "features", "l2"})
         if raw.get("kind", "logistic") != "logistic":
             raise ValueError("model kind must be 'logistic'")
-        chosen = raw.get("features") or list(FEATURES)
+        chosen = raw.get("features") or list(MODEL_DEFAULT_FEATURES)
         if not isinstance(chosen, (list, tuple)) or not all(isinstance(name, str) for name in chosen):
             raise ValueError("model features must be a list of feature names")
         if set(chosen) - set(FEATURES) or len(set(chosen)) != len(chosen):
@@ -861,11 +923,13 @@ def parse_spec(data: Mapping[str, Any]) -> Spec:
 
 def canonical(spec: Spec) -> dict[str, Any]:
     """Everything that decides the trades, in a stable form. The name and notes are left out."""
+    exits = {name: value for name, value in asdict(spec.exits).items()
+             if value is not None or name not in LATER_EXITS}
     return {
         "family": spec.family,
         "params": dict(spec.params),
         "timeframe": spec.timeframe,
-        "exits": asdict(spec.exits),
+        "exits": exits,
         "costs": asdict(spec.costs),
         "window": list(spec.window) if spec.window else None,
         "limits": asdict(spec.limits),

@@ -203,6 +203,7 @@ def test_the_brief_holds_the_rules_the_catalog_the_ledger_and_the_evidence():
     assert "t >= 2.64: 11 candidates" in text and '"hand-x"' in text and '"trades": 3' in text
     assert "## Your lessons from earlier weeks\n2026-09-27: be careful" in text
     assert '"reclaim_level": "ema"' in text  # the catalog's settings
+    assert '"trail_r": R or null' in text and '"vwap_distance"' in text  # the moving stops and the newer features
     assert "Trade the core universe and the default costs" in SYSTEM_PROMPT
 
 

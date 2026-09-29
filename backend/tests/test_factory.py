@@ -53,6 +53,7 @@ from app.engine.factory_gates import (
 from app.engine.factory_model import LogisticModel, fit_logistic
 from app.engine.factory_rules import (
     FAMILIES,
+    MODEL_DEFAULT_FEATURES,
     AtrStop,
     Context,
     Costs,
@@ -65,6 +66,8 @@ from app.engine.factory_rules import (
     Trade,
     VwapReclaim,
     baseline_signals,
+    canonical,
+    from_canonical,
     parse_spec,
     run_candidate,
     run_each,
@@ -186,8 +189,30 @@ def test_features_read_only_the_past():
     assert values["spy_day"] == pytest.approx(1.0)
     assert values["rel_strength"] == pytest.approx(100 * (0.035 - 0.01))
     assert context.at(i, -1, stop=105.5)["trend"] == pytest.approx(-3.5)
+    # VWAP through the signal bar: typical prices 307/3 on 3,000 shares and 309.5/3 on 1,000.
+    vwap = (307 / 3 * 3000 + 309.5 / 3 * 1000) / 4000
+    assert values["vwap_distance"] == pytest.approx((103.5 - vwap) / context.chart_atr[i])
+    assert context.at(i, -1, stop=105.5)["vwap_distance"] == pytest.approx(-values["vwap_distance"])
+    assert values["vol_ratio"] == pytest.approx(1.0)  # every flat session ranges 1.0
+    assert values["spy_vol"] == pytest.approx(1.0)  # SPY's daily ATR 1.0 on a 100 close
     later = Series.build("X", bars + today[:2] + [bar(day, 600, 103.5, 150, 50, 60, 99999)], 15)
     assert FeatureContext(later, spy).at(i, 1, stop=101.5) == values
+
+
+def test_vol_ratio_compares_the_last_week_with_the_month_through_the_prior_session():
+    days = weekdays(date(2025, 1, 6), 31)
+    calm = [b for day in days[:25] for b in flat(day, 13, 30, up=1.0, down=0.0)]  # a daily range of 1
+    wild = [b for day in days[25:30] for b in flat(day, 13, 30, up=2.0, down=1.0)]  # a daily range of 3
+    series = Series.build("X", calm + wild + flat(days[30], 2, 30), 30)
+    week = month = 1.0
+    for _ in range(5):  # Wilder's averages over the five wild sessions
+        week, month = (4 * week + 3) / 5, (19 * month + 3) / 20
+    context = FeatureContext(series, None)
+    assert context.at(len(series) - 1, 1, stop=99.0)["vol_ratio"] == pytest.approx(week / month)
+    assert context.at(len(calm), 1, stop=99.0)["vol_ratio"] == pytest.approx(1.0)  # the first wild session reads the calm ones
+    assert math.isnan(context.at(len(series) - 1, 1, stop=99.0)["spy_vol"])  # no market, no market features
+    spy = Series.build("SPY", [b for day in days for b in flat(day, 13, 30, price=400.0, up=2.0, down=0.0)], 30)
+    assert FeatureContext(series, spy).at(len(series) - 1, 1, stop=99.0)["spy_vol"] == pytest.approx(0.5)
 
 
 # --- the execution model ----------------------------------------------------------
@@ -321,6 +346,106 @@ def test_run_each_takes_overlapping_signals():
     trades = run_each(series, [Signal(0, 1, 99.0), Signal(1, 1, 99.0), Signal(1, -1, 101.0)], Exits(2.0), TICK)
     assert [(t.entry_index, t.side, t.exit_reason) for t in trades] == [(1, 1, "session"), (2, 1, "session"),
                                                                         (2, -1, "session")]
+
+
+# --- moving the stop ------------------------------------------------------------------
+#
+# The long signalled at 09:30 with its stop at 99.2 again: filled at 100.01,
+# 1R is 0.81, so +0.5R is 100.415 and +1R is 100.82.
+
+LONG = {0: (1, 99.2)}
+
+
+def test_breakeven_moves_the_stop_to_the_entry_after_the_bar_that_reached_it():
+    after = [(100.0, 100.9, 99.5, 100.5), (100.5, 100.6, 99.9, 100.0), (100.0, 100.2, 99.8, 100.1)]
+    series = Series.build("X", one_day(after), 15)
+    (moved,) = run_candidate(series, Scripted(dict(LONG)), Exits(None, breakeven_r=1.0), TICK)
+    assert (moved.exit_index, moved.exit_reason, moved.exit_price) == (2, "breakeven", pytest.approx(100.0))
+    assert moved.r == pytest.approx(-0.01 / 0.81)  # the entry, less a tick of slippage
+    (held,) = run_candidate(series, Scripted(dict(LONG)), Exits(None), TICK)
+    assert (held.exit_index, held.exit_reason, held.moved_stop) == (3, "session", None)
+    short_of_it = [(100.0, 100.8, 99.5, 100.5)] + after[1:]  # a high 0.02 under +1R moves nothing
+    (kept,) = run_candidate(Series.build("X", one_day(short_of_it), 15), Scripted(dict(LONG)),
+                            Exits(None, breakeven_r=1.0), TICK)
+    assert (kept.exit_reason, kept.moved_stop) == ("session", None)
+
+
+def test_the_bar_that_reaches_the_trigger_still_rests_on_the_old_stop():
+    # Its high reaches +1R and its low trades back under the entry, in an order the bar does not tell.
+    after = [(100.0, 100.9, 99.9, 100.2), (100.2, 100.3, 100.1, 100.2)]
+    (trade,) = run_candidate(Series.build("X", one_day(after), 15), Scripted(dict(LONG)),
+                             Exits(None, breakeven_r=1.0), TICK)
+    assert (trade.exit_index, trade.exit_reason, trade.moved_stop, trade.moved_by) == (2, "session", 100.01, "breakeven")
+
+
+def test_a_gap_through_a_moved_stop_fills_at_the_open():
+    after = [(100.0, 100.9, 99.5, 100.5), (99.8, 100.0, 99.6, 99.9)]
+    (trade,) = run_candidate(Series.build("X", one_day(after), 15), Scripted(dict(LONG)),
+                             Exits(None, breakeven_r=1.0), TICK)
+    assert (trade.exit_index, trade.exit_reason, trade.exit_price) == (2, "breakeven", pytest.approx(99.79))
+
+
+def test_a_trailing_stop_follows_the_best_price():
+    # 0.81 under the highest high so far: 100.19 after 101.0, 100.69 after 101.5, and there it stays.
+    after = [(100.0, 101.0, 99.8, 100.9), (100.9, 101.5, 100.6, 101.4), (101.4, 101.45, 101.0, 101.2),
+             (101.2, 101.3, 100.5, 100.6)]
+    series = Series.build("X", one_day(after), 15)
+    (trade,) = run_candidate(series, Scripted(dict(LONG)), Exits(None, trail_r=1.0), TICK)
+    assert (trade.exit_index, trade.exit_reason, trade.exit_price) == (4, "trail", pytest.approx(100.68))
+    assert trade.best == 101.5 and trade.r == pytest.approx((100.68 - 100.01) / 0.81)
+    # Random entries go through the same exits.
+    (each,) = run_each(series, [Signal(0, 1, 99.2)], Exits(None, trail_r=1.0), TICK)
+    assert (each.exit_index, each.exit_reason, each.exit_price) == (4, "trail", trade.exit_price)
+
+
+def test_with_both_rules_the_tighter_stop_wins_and_never_moves_back():
+    # +0.5R puts the stop at the entry; a 2R trail (1.62) passes the entry only once the high is over 101.63.
+    after = [(100.0, 100.5, 99.8, 100.4), (100.4, 101.0, 100.3, 100.9), (100.9, 102.0, 100.8, 101.9),
+             (101.9, 101.95, 100.2, 100.3)]
+    exits = Exits(None, breakeven_r=0.5, trail_r=2.0)
+    (early,) = run_candidate(Series.build("X", one_day(after[:2]), 15), Scripted(dict(LONG)), exits, TICK)
+    assert (early.exit_reason, early.moved_stop, early.moved_by) == ("session", 100.01, "breakeven")
+    (trade,) = run_candidate(Series.build("X", one_day(after), 15), Scripted(dict(LONG)), exits, TICK)
+    assert (trade.exit_index, trade.exit_reason, trade.exit_price) == (4, "trail", pytest.approx(100.37))
+
+
+def test_a_short_moves_its_stop_down():
+    # Short at 99.99 with the stop at 100.8: 1R is 0.81, so -1R is 99.18. The trail sits 0.81 over the
+    # lowest low: 99.81 after 99.0, then 99.41 after 98.6.
+    after = [(100.0, 100.2, 99.0, 99.1), (99.1, 99.5, 98.6, 98.7), (98.7, 99.45, 98.65, 99.4)]
+    series = Series.build("X", one_day(after), 15)
+    (trailed,) = run_candidate(series, Scripted({0: (-1, 100.8)}), Exits(None, trail_r=1.0), TICK)
+    assert (trailed.exit_index, trailed.exit_reason, trailed.exit_price) == (3, "trail", pytest.approx(99.42))
+    assert trailed.best == 98.6 and trailed.r == pytest.approx((99.99 - 99.42) / 0.81)
+    (even,) = run_candidate(series, Scripted({0: (-1, 100.8)}), Exits(None, breakeven_r=1.0), TICK)
+    assert (even.exit_reason, even.moved_stop, even.moved_by) == ("session", 99.99, "breakeven")
+
+
+def test_moved_stops_only_tighten_and_a_rule_that_never_moves_them_changes_nothing():
+    rng = random.Random(7)
+    price, bars = 100.0, []
+    for day in weekdays(DAY, 20):
+        for k in range(26):
+            o = price
+            c = o + rng.gauss(0, 0.3)
+            bars.append(bar(day, 570 + 15 * k, o, max(o, c) + abs(rng.gauss(0, 0.2)), min(o, c) - abs(rng.gauss(0, 0.2)), c))
+            price = c
+    series = Series.build("X", bars, 15)
+    signals = [Signal(i, side, series.close[i] - side * 0.8) for i in range(0, len(series) - 1, 5)
+               for side in (1, -1)]
+
+    def outcomes(trades: list[Trade]) -> list[tuple]:
+        return [(t.entry_index, t.side, t.exit_index, t.exit_price, t.exit_reason) for t in trades]
+
+    plain = run_each(series, signals, Exits(1.5, max_sessions=2), TICK)
+    assert outcomes(run_each(series, signals, Exits(1.5, max_sessions=2, trail_r=50.0), TICK)) == outcomes(plain)
+    moved = run_each(series, signals, Exits(1.5, max_sessions=2, breakeven_r=0.5, trail_r=1.0), TICK)
+    assert {"breakeven", "trail"} <= {t.exit_reason for t in moved}
+    for t in moved:
+        if t.moved_stop is not None:
+            assert t.side * (t.moved_stop - t.stop) > 0 and t.side * (t.best - t.moved_stop) > 0
+        if t.exit_reason in ("breakeven", "trail"):
+            assert t.exit_reason == t.moved_by and t.side * (t.moved_stop - t.exit_price) >= 0.01 - 1e-9
 
 
 def test_baseline_signals_use_the_stop_rule_the_window_and_the_stride():
@@ -575,6 +700,11 @@ def test_a_bad_spec_is_refused(bad):
     {"exits": {"max_sessions": 1.5}},
     {"exits": {"stop_r": 1}},
     {"exits": [2.0]},
+    {"exits": {"breakeven_r": 0}},
+    {"exits": {"trail_r": -1}},
+    {"exits": {"trail_r": "1"}},
+    {"exits": {"breakeven_r": 2.0}},  # at the family's 2R target, which would always fill first
+    {"exits": {"breakeven_r": 3, "target_r": 2}},
     {"window": "0930"},
     {"window": [900, 1000]},
     {"window": [1060, 1100]},
@@ -602,6 +732,25 @@ def test_numbers_are_normalized_so_the_same_rules_get_the_same_id():
                        "params": {"atr_buffer": 0.0, "stop_bars": 4}, "filters": [{"feature": "trend", "min": 0.0}]})
     assert spec_id(loose) == spec_id(tidy)
     assert loose.exits.max_sessions == 2 and isinstance(loose.exits.target_r, float)
+
+
+def test_moving_stops_are_rules_and_leave_every_earlier_id_alone():
+    base = parse_spec({"family": "recovery_swing"})
+    assert set(canonical(base)["exits"]) == {"target_r", "max_sessions", "max_minutes"}
+    moved = parse_spec({"family": "recovery_swing", "exits": {"target_r": None, "breakeven_r": 1, "trail_r": 1.5}})
+    assert moved.exits == Exits(None, max_sessions=2, breakeven_r=1.0, trail_r=1.5)
+    assert canonical(moved)["exits"] == {"target_r": None, "max_sessions": 2, "max_minutes": None,
+                                         "breakeven_r": 1.0, "trail_r": 1.5}
+    assert spec_id(moved) != spec_id(base)
+    for spec in (base, moved):
+        assert spec_id(from_canonical(canonical(spec))) == spec_id(spec)
+
+
+def test_a_model_without_a_list_reads_the_first_ten_features():
+    learned = parse_spec({"family": "recovery_swing", "model": {"kind": "logistic"}})
+    assert learned.model.features == MODEL_DEFAULT_FEATURES == tuple(FEATURES)[:10]
+    named = parse_spec({"family": "recovery_swing", "model": {"features": ["vwap_distance", "vol_ratio", "spy_vol"]}})
+    assert named.model.features == ("vwap_distance", "vol_ratio", "spy_vol")
 
 
 def test_the_id_is_the_rules_not_the_name():
@@ -815,6 +964,15 @@ def test_a_real_edge_passes_every_gate(dip_family):
     assert set(record["periods"]) == {"discovery", "confirm_a", "confirm_b", "confirm", "confirm_x3", "holdout"}
     assert "Verdict: passed every gate" in report(ev)
     assert "Its bar at confirmation: t >= 2.58, with 9 other candidates counted there before it." in report(ev)
+
+
+def test_moving_stops_go_through_the_evaluation_and_the_ledger(dip_family):
+    spec = parse_spec({"name": "dip buyer, trailed", "family": "dip_buyer", "tickers": ["AAA", "BBB"],
+                       "exits": {"target_r": None, "trail_r": 1.0}})
+    ev = evaluate(spec, StubLoader({"AAA": pattern(START, END, every_fifth), "BBB": pattern(START, END, every_fifth)}), 0)
+    assert "no target, stop trailing 1R behind the best price, flat by the close" in report(ev)
+    record = ledger_record(ev, datetime(2026, 9, 28, tzinfo=ET), "abc123", date(2026, 6, 30))
+    assert record["spec"]["exits"]["trail_r"] == 1.0 and record["id"] == spec_id(spec) != spec_id(dip_family)
 
 
 def test_an_edge_that_stops_in_the_holdout_fails_the_exam(dip_family):
