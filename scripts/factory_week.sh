@@ -26,6 +26,17 @@ fail() {
   exit 1
 }
 
+# Commit and push what the week wrote under research/. Candidates judged
+# before a failure are in the ledger and count toward the bar, so they are
+# kept whether or not the week finished.
+record() {
+  git add research || return 1
+  if ! git diff --cached --quiet; then
+    git commit -q -m "$1" || return 1
+  fi
+  git push -q origin factory/ledger
+}
+
 cd "$ROOT" || exit 1
 mkdir -p "$(dirname "$LOCK")"
 if ! mkdir "$LOCK" 2>/dev/null; then
@@ -35,7 +46,8 @@ fi
 trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 
 [ "$(git rev-parse --abbrev-ref HEAD)" = "factory/ledger" ] || fail "the factory checkout at $ROOT is not on branch factory/ledger"
-git diff --quiet && git diff --cached --quiet || fail "the factory checkout has uncommitted changes; the run did not start"
+# Untracked files count too: whatever is under research/ gets committed with the week.
+[ -z "$(git status --porcelain)" ] || fail "the factory checkout has uncommitted or untracked files (git status); the run did not start"
 
 say "code: merge main"
 git fetch -q origin || fail "git fetch failed"
@@ -48,14 +60,14 @@ say "bars: fetch the week"
 "${FACTORY[@]}" prepare || fail "fetching bars from Alpaca failed"
 
 say "ideas: propose and judge"
-"${FACTORY[@]}" week || fail "the weekly run failed while proposing or judging; see ~/Library/Logs/tradejournal-strategy-factory.log"
+if ! "${FACTORY[@]}" week; then
+  record "Strategy factory: week of $(date +%F), incomplete" \
+    || fail "the weekly run failed, and what it had judged could not be committed and pushed"
+  fail "the weekly run failed while proposing or judging; anything it judged is pushed; see ~/Library/Logs/tradejournal-strategy-factory.log"
+fi
 
 say "record: commit and push"
-git add research
-if ! git diff --cached --quiet; then
-  git commit -q -m "Strategy factory: week of $(date +%F)" || fail "committing the week's results failed"
-fi
-git push -q origin factory/ledger || fail "pushing factory/ledger failed; the results are committed locally"
+record "Strategy factory: week of $(date +%F)" || fail "committing or pushing the week's results failed"
 
 say "phone: send the summary"
 "${FACTORY[@]}" notify || fail "the summary did not send"

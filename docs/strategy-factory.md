@@ -102,7 +102,9 @@ Every Sunday at 10:00 (New York time on this Mac) launchd runs
 5. `notify`: send the report's summary to the phone through the same ntfy
    topic as the server's alerts, linking to the report on GitHub. A candidate
    that passes arrives at high priority. If any step fails, the failure is
-   sent instead.
+   sent instead. When `week` fails partway, whatever it judged is committed
+   and pushed first (marked incomplete), since those candidates count toward
+   the bar; a checkout with uncommitted or untracked files does not start.
 
 The idea model is Claude Opus 5 (`FACTORY_MODEL` overrides it) through the
 Anthropic API key in `backend/.env`, with adaptive thinking and a JSON answer:
@@ -118,7 +120,12 @@ does not fit the budget, and the report lists every refusal with its reason.
   Hand-run `run` candidates are not counted.
 - **Exam numbers** reach the brief only as passed or failed.
 - **Evidence** comes from discovery data only (`factory_gates.discovery_trades`),
-  cached per idea in `backend/data/factory/evidence/`.
+  cached per idea and per engine version (a hash of the engine modules) in
+  `backend/data/factory/evidence/`, so a code change recomputes it.
+- **Malformed proposals** are refused with the reason: `parse_spec` checks
+  every field's shape and type, and normalizes numbers so 2 and 2.0 are the
+  same rules with the same id. One candidate that cannot be judged is
+  reported and does not stop the others.
 - **New building blocks** (a family, a feature) are not written by the loop.
   The model lists what it wants, and a person decides whether to build it.
 

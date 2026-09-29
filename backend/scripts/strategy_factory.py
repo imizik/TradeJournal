@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
+import importlib
 import io
 import json
 import os
@@ -90,7 +92,8 @@ LEDGER = RESEARCH / "ledger.jsonl"
 FACTORY_BRANCH = "factory/ledger"
 DATA_START = date(2023, 6, 1)
 CACHE_VERSION = 1
-EVIDENCE_VERSION = 1
+# The engine code discovery evidence depends on; a change to any of it recomputes the evidence.
+EVIDENCE_MODULES = ("factory_data", "factory_rules", "factory_gates", "factory_brief", "market_map")
 DEFAULT_OUT = BACKEND_ROOT / "data" / "factory"
 IDEA_MODEL = "claude-opus-5"
 
@@ -348,10 +351,18 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
     return answer, f"{message.model}, {usage.input_tokens:,} tokens in and {usage.output_tokens:,} out"
 
 
+def engine_fingerprint() -> str:
+    digest = hashlib.sha256()
+    for name in EVIDENCE_MODULES:
+        digest.update(Path(importlib.import_module(f"app.engine.{name}").__file__).read_bytes())
+    return digest.hexdigest()[:10]
+
+
 def gather_evidence(records: list[dict], store: BarStore, out: Path,
                     progress: Callable[[str], None]) -> dict[str, dict]:
     """Discovery evidence for each family at its defaults and for the three most
-    recent ideas the factory judged, cached by id (discovery data never changes)."""
+    recent ideas the factory judged. Discovery data never changes, so it is
+    cached by id and by the engine code that computed it."""
     wanted: dict[str, Spec] = {name: parse_spec({"family": name}) for name in FAMILIES}
     judged = [r for r in records if r.get("source") == "factory" and not (r.get("spec") or {}).get("model")]
     defaults = {spec_id(spec) for spec in wanted.values()}
@@ -364,14 +375,18 @@ def gather_evidence(records: list[dict], store: BarStore, out: Path,
     for identifier, record in reversed(list(recent.items())):
         wanted[identifier] = from_canonical(record["spec"], record["name"])
     found: dict[str, dict] = {}
+    fingerprint = engine_fingerprint()
     for key, spec in wanted.items():
-        path = out / "evidence" / f"{spec_id(spec)}-v{EVIDENCE_VERSION}.json"
+        identifier = spec_id(spec)
+        path = out / "evidence" / f"{identifier}-{fingerprint}.json"
         if path.exists():
             found[key] = json.loads(path.read_text())
             continue
         progress(f"  discovery evidence for {key}")
         found[key] = {"name": spec.name, **evidence(discovery_trades(spec, store.load))}
         path.parent.mkdir(parents=True, exist_ok=True)
+        for stale in path.parent.glob(f"{identifier}-*.json"):
+            stale.unlink()
         path.write_text(json.dumps(found[key], indent=1))
     return found
 
@@ -423,8 +438,8 @@ def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[
             progress(f"judging {candidate.name} ({spec_id(candidate)})")
             try:
                 _, record, _ = run_one(candidate, store, args.ledger, args.out, True, progress, batch=monday)
-            except (ValueError, RuntimeError) as exc:
-                proposal.problem = f"it could not be judged: {exc}"
+            except Exception as exc:  # one candidate that cannot be judged must not stop the week
+                proposal.problem = f"it could not be judged: {type(exc).__name__}: {exc}"
                 progress(proposal.problem)
                 break
             run_records[record["id"]] = record
@@ -567,7 +582,8 @@ def main(
     args = parser.parse_args(argv)
 
     os.environ["ALPACA_DATA_FEED"] = args.feed
-    real_run = {"prepare": True, "week": proposer is None, "notify": sender is None}.get(args.command, False)
+    real_run = {"prepare": True, "week": proposer is None and not getattr(args, "dry_run", False),
+                "notify": sender is None}.get(args.command, False)
     if real_run:
         # Keys and the ntfy topic live in backend/.env. Tests inject a proposer
         # and a sender instead, so they never read it.

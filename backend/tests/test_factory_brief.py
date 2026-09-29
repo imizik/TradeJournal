@@ -48,11 +48,14 @@ def test_spec_changes_are_what_differs_from_the_family_defaults():
     assert spec_changes(canonical(parse_spec({"family": "vwap_reclaim"}))) == {}
     changed = parse_spec({"family": "vwap_reclaim", "params": {"confirm_bars": 2}, "window": [1000, 1500],
                           "filters": [{"feature": "rvol", "min": 1.5}]})
-    assert spec_changes(canonical(changed)) == {
+    shown = spec_changes(canonical(changed))
+    assert shown == {
         "params": {"confirm_bars": 2},
-        "window": [1000, 1500],  # back in HHMM, the way a spec is written
-        "filters": [{"feature": "rvol", "low": 1.5, "high": None}],
+        "window": [1000, 1500],  # back in HHMM and min/max, the way a spec is written
+        "filters": [{"feature": "rvol", "min": 1.5}],
     }
+    # What the model sees can be copied into a new spec as it is.
+    assert spec_id(parse_spec({"family": "vwap_reclaim", **shown})) == spec_id(changed)
 
 
 def test_a_spec_rebuilds_exactly_from_its_ledger_form():
@@ -136,6 +139,12 @@ def test_review_accepts_a_good_idea_and_refuses_the_rest():
                                    "Builds on vw-3d24a7243d: five-minute bars")
     learned = review({"ideas": [answer["ideas"][9]]}, set(), budget=3)[0]
     assert learned.runs == 2 and learned.problem == ""
+    malformed = review({"ideas": [idea("Null filter", {"family": "vwap_reclaim", "filters": [None]}),
+                                  idea("Number filters", {"family": "vwap_reclaim", "filters": 5}),
+                                  idea("A list", "[1, 2]")]}, set(), 3)
+    assert [p.problem for p in malformed] == ["its spec is invalid: a filter must be a JSON object",
+                                              "its spec is invalid: filters must be a list",
+                                              "its spec is not a JSON object"]
 
 
 def test_a_saved_spec_parses_back_to_the_same_rules():

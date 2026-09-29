@@ -172,9 +172,12 @@ def test_the_ledger_command_prints_the_count_and_the_bar(script, capsys):
 def test_the_committed_specs_parse_and_keep_their_ids():
     specs = {path.stem: parse_spec(json.loads(path.read_text())) for path in sorted((RESEARCH / "specs").glob("*.json"))}
     assert {"recovery_swing_v0.1", "recovery_swing_v0.1_logistic", "vwap_reclaim_v0.1", "failed_breakout_v0.1"} <= set(specs)
-    # The ledger's hand-research line for the NBIS swing shares this id, so it is counted once.
+    # The ledger's hand-research line for the NBIS swing shares this id, so it is counted once, and
+    # every judged spec keeps the id the ledger recorded for it.
     assert spec_id(specs["recovery_swing_v0.1"]) == "re-d5194badb1"
     assert spec_id(specs["recovery_swing_v0.1_logistic"].parent()) == "re-d5194badb1"
+    assert [spec_id(specs[name]) for name in ("recovery_swing_v0.1_logistic", "vwap_reclaim_v0.1", "failed_breakout_v0.1")] == [
+        "re-5c58b4e869", "vw-3d24a7243d", "fa-72fca93262"]
 
 
 def test_the_committed_ledger_is_well_formed():
@@ -341,3 +344,30 @@ def test_prepare_asks_for_each_missing_day_once_and_skips_market_holidays(script
     assert script.days_to_fetch(cached, mon2) == {tue: ["AAA"], fri2: ["NEW"], mon2: ["SPY", "AAA", "NEW"]}
     assert script.days_to_fetch({"SPY": [], "AAA": []}, date(2023, 6, 2)) == {
         date(2023, 6, 1): ["SPY", "AAA"], date(2023, 6, 2): ["SPY", "AAA"]}
+
+
+def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, monkeypatch):
+    paths, args = weekly_paths(tmp_path)
+    computed: list[str] = []
+    real = script.discovery_trades
+
+    def counting(spec, load):
+        computed.append(spec.family)
+        return real(spec, load)
+
+    monkeypatch.setattr(script, "discovery_trades", counting)
+    dry = [*args, "week", "--dry-run"]
+
+    def unused(system: str, text: str):
+        raise AssertionError("a dry run asks no one")
+
+    assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
+    assert sorted(computed) == ["failed_breakout", "recovery_swing", "vwap_reclaim"]
+    assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
+    assert len(computed) == 3  # cached
+    fingerprint = script.engine_fingerprint()
+    assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {f"{fingerprint}.json"}
+    monkeypatch.setattr(script, "engine_fingerprint", lambda: "changed000")
+    assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
+    assert len(computed) == 6
+    assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {"changed000.json"}
