@@ -20,7 +20,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | File | For |
 |---|---|
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
-| `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView |
+| `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory |
 | `docs/agent/verification.md` | How to prove a change works |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |

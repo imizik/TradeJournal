@@ -83,6 +83,7 @@ PURE_MODULES = {
     "app.engine.factory_rules",
     "app.engine.factory_model",
     "app.engine.factory_gates",
+    "app.engine.factory_brief",
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.

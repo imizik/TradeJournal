@@ -92,6 +92,12 @@ the newest `main` build that passed every CI check. It pulls from GitHub,
 because nothing outside the tailnet can reach the server. Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
+One scheduled process runs off the server: the strategy factory's weekly run
+(`scripts/factory_week.sh`, started by launchd on the development Mac in a
+checkout on branch `factory/ledger`). It reads the local market-data cache,
+calls Alpaca, the Anthropic API and ntfy, touches no database, and writes only
+to that branch, which is never merged (`docs/strategy-factory.md`).
+
 ## Data flow
 
 ```
@@ -157,8 +163,8 @@ work. API status endpoints read `job_run`, never process-local state.
 
 `JOB_EXECUTION_MODE=embedded` (default) dispatches API-owned threads through
 the shared ownership runtime. `external` leaves committed requests for
-`python -m app.jobs.worker --lane sync`, plus separate `polygon` and `webull`
-workers. This is a single-host design with shared local process locks, not a
+`python -m app.jobs.worker --lane sync`, plus separate `polygon`, `webull` and
+`gmail` workers. This is a single-host design with shared local process locks, not a
 distributed or Cloud Run queue. API restarts do not invalidate live owners;
 dead owners become failed and require an explicit new run. See
 [background-jobs.md](background-jobs.md) for configuration, recovery and the

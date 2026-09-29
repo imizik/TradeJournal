@@ -705,8 +705,76 @@ def _hhmm(value: int) -> int:
     return value // 100 * 60 + value % 100
 
 
+def _object(value: Any, what: str, allowed: set[str], optional: bool = True) -> dict[str, Any]:
+    if value is None and optional:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{what} must be a JSON object")
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(f"{what} has no {sorted(unknown)}; it takes {sorted(allowed)}")
+    return dict(value)
+
+
+def _float(value: Any, what: str, minimum: float | None = None, optional: bool = False) -> float | None:
+    if value is None and optional:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"{what} must be a number")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{what} must be at least {minimum:g}")
+    return float(value)
+
+
+def _int(value: Any, what: str, minimum: int = 1, optional: bool = False) -> int | None:
+    number = _float(value, what, minimum, optional)
+    if number is None:
+        return None
+    if not number.is_integer():
+        raise ValueError(f"{what} must be a whole number")
+    return int(number)
+
+
+def _settings(cls: type, raw: Mapping[str, Any]) -> dict[str, Any]:
+    """A family's settings, each of its default's type; whole-number settings are counts of at least 1."""
+    defaults = {f.name: f.default for f in fields(cls)}
+    settings = _object(raw, f"{cls.__name__} params", set(defaults))
+    for name, value in settings.items():
+        default = defaults[name]
+        if isinstance(default, bool):
+            if not isinstance(value, bool):
+                raise ValueError(f"{name} must be true or false")
+        elif isinstance(default, int):
+            settings[name] = _int(value, name)
+        elif isinstance(default, float):
+            settings[name] = _float(value, name, minimum=0.0)
+        elif isinstance(default, str) and not isinstance(value, str):
+            raise ValueError(f"{name} must be text")
+    return settings
+
+
+def _window(value: Any) -> tuple[int, int] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError("window must be [HHMM, HHMM] or null")
+    start, end = (_int(v, "window", minimum=0) for v in value)
+    for hhmm in (start, end):
+        if hhmm % 100 >= 60 or not 930 <= hhmm <= 1600:
+            raise ValueError(f"window times must be HHMM within the session, got {hhmm}")
+    if start > end:
+        raise ValueError("window must start before it ends")
+    return _hhmm(start), _hhmm(end)
+
+
 def parse_spec(data: Mapping[str, Any]) -> Spec:
-    """A spec from its JSON form, with the family's defaults filled in."""
+    """A spec from its JSON form, with the family's defaults filled in.
+
+    Every field is checked for shape and type, so a malformed spec (as an idea
+    model can write) is refused with a reason rather than failing later, and
+    numbers are normalized so 2 and 2.0 give the same id."""
+    if not isinstance(data, Mapping):
+        raise ValueError("a spec must be a JSON object")
     known = {"name", "notes", "family", "params", "timeframe", "exits", "costs", "window", "limits",
              "filters", "model", "tickers"}
     unknown = set(data) - known
@@ -716,37 +784,64 @@ def parse_spec(data: Mapping[str, Any]) -> Spec:
     if family not in FAMILIES:
         raise ValueError(f"family must be one of {sorted(FAMILIES)}, got {family!r}")
     cls = FAMILIES[family]
-    params = dict(data.get("params") or {})
-    names = {f.name for f in fields(cls)}
-    if set(params) - names:
-        raise ValueError(f"{family} has no settings {sorted(set(params) - names)}; it has {sorted(names)}")
-    rules = cls(**params)
+    rules = cls(**_settings(cls, data.get("params")))
     rules.validate()
     defaults = cls.defaults
-    exits = Exits(**{**{"target_r": None, "max_sessions": 1, "max_minutes": None},
-                     **defaults.get("exits", {}), **(data.get("exits") or {})})
-    if exits.max_sessions < 1:
-        raise ValueError("max_sessions must be at least 1")
-    window = data["window"] if "window" in data else defaults.get("window")
-    limits = Limits(**{**defaults.get("limits", {}), **(data.get("limits") or {})})
+    raw_exits = {"target_r": None, "max_sessions": 1, "max_minutes": None, **defaults.get("exits", {}),
+                 **_object(data.get("exits"), "exits", {"target_r", "max_sessions", "max_minutes"})}
+    exits = Exits(
+        target_r=_float(raw_exits["target_r"], "target_r", minimum=0.01, optional=True),
+        max_sessions=_int(raw_exits["max_sessions"], "max_sessions"),
+        max_minutes=_int(raw_exits["max_minutes"], "max_minutes", optional=True),
+    )
+    raw_limits = {"max_entries": None, "max_losses": None, "max_loss_r": None, **defaults.get("limits", {}),
+                  **_object(data.get("limits"), "limits", {"max_entries", "max_losses", "max_loss_r"})}
+    limits = Limits(
+        max_entries=_int(raw_limits["max_entries"], "max_entries", optional=True),
+        max_losses=_int(raw_limits["max_losses"], "max_losses", optional=True),
+        max_loss_r=_float(raw_limits["max_loss_r"], "max_loss_r", minimum=0.01, optional=True),
+    )
+    raw_costs = {**asdict(Costs()), **_object(data.get("costs"), "costs", {"slippage_ticks", "slippage_bps", "tick_size"})}
+    costs = Costs(
+        slippage_ticks=_float(raw_costs["slippage_ticks"], "slippage_ticks", minimum=0.0),
+        slippage_bps=_float(raw_costs["slippage_bps"], "slippage_bps", minimum=0.0),
+        tick_size=_float(raw_costs["tick_size"], "tick_size", minimum=0.0001),
+    )
+    raw_filters = data.get("filters") or []
+    if not isinstance(raw_filters, (list, tuple)):
+        raise ValueError("filters must be a list")
     filters = []
-    for item in data.get("filters") or []:
+    for item in raw_filters:
+        item = _object(item, "a filter", {"feature", "min", "max"}, optional=False)
         if item.get("feature") not in FEATURES:
             raise ValueError(f"filter feature must be one of {sorted(FEATURES)}, got {item.get('feature')!r}")
-        filters.append(RuleFilter(item["feature"], item.get("min"), item.get("max")))
+        low = _float(item.get("min"), "a filter's min", optional=True)
+        high = _float(item.get("max"), "a filter's max", optional=True)
+        if low is None and high is None:
+            raise ValueError("a filter needs a min, a max or both")
+        if low is not None and high is not None and low > high:
+            raise ValueError("a filter's min is above its max")
+        filters.append(RuleFilter(item["feature"], low, high))
     model = None
     if data.get("model"):
-        raw = dict(data["model"])
+        raw = _object(data["model"], "model", {"kind", "features", "l2"})
         if raw.get("kind", "logistic") != "logistic":
             raise ValueError("model kind must be 'logistic'")
-        chosen = tuple(raw.get("features") or FEATURES)
-        if set(chosen) - set(FEATURES):
-            raise ValueError(f"model features must come from {sorted(FEATURES)}")
-        model = ModelSpec("logistic", chosen, float(raw.get("l2", 1.0)))
-    tickers = data.get("tickers") or "core"
-    tickers = CORE_UNIVERSE if tickers == "core" else tuple(t.upper() for t in tickers)
-    timeframe = int(data.get("timeframe") or defaults["timeframe"])
-    if timeframe <= 0 or 30 % timeframe:
+        chosen = raw.get("features") or list(FEATURES)
+        if not isinstance(chosen, (list, tuple)) or not all(isinstance(name, str) for name in chosen):
+            raise ValueError("model features must be a list of feature names")
+        if set(chosen) - set(FEATURES) or len(set(chosen)) != len(chosen):
+            raise ValueError(f"model features must be distinct names from {sorted(FEATURES)}")
+        model = ModelSpec("logistic", tuple(chosen), _float(raw.get("l2", 1.0), "l2", minimum=0.0001))
+    tickers = data.get("tickers")
+    if tickers is None or tickers == "core":
+        tickers = CORE_UNIVERSE
+    elif isinstance(tickers, (list, tuple)) and tickers and all(isinstance(t, str) and t for t in tickers):
+        tickers = tuple(t.upper() for t in tickers)
+    else:
+        raise ValueError('tickers must be "core" or a list of symbols')
+    timeframe = _int(data.get("timeframe") or defaults["timeframe"], "timeframe")
+    if 30 % timeframe:
         raise ValueError("timeframe must divide 30 minutes (1, 2, 3, 5, 10, 15, 30)")
     return Spec(
         name=str(data.get("name") or family),
@@ -754,8 +849,8 @@ def parse_spec(data: Mapping[str, Any]) -> Spec:
         params=tuple(sorted(asdict(rules).items())),
         timeframe=timeframe,
         exits=exits,
-        costs=Costs(**(data.get("costs") or {})),
-        window=None if window is None else (_hhmm(int(window[0])), _hhmm(int(window[1]))),
+        costs=costs,
+        window=_window(data["window"] if "window" in data else defaults.get("window")),
         limits=limits,
         filters=tuple(filters),
         model=model,
@@ -778,6 +873,25 @@ def canonical(spec: Spec) -> dict[str, Any]:
         "model": None if spec.model is None else {**asdict(spec.model), "features": list(spec.model.features)},
         "tickers": list(spec.tickers),
     }
+
+
+def from_canonical(data: Mapping[str, Any], name: str = "", notes: str = "") -> Spec:
+    """The spec a ledger line describes, rebuilt exactly from its canonical form."""
+    model = data.get("model")
+    return Spec(
+        name=name or data["family"],
+        family=data["family"],
+        params=tuple(sorted(data["params"].items())),
+        timeframe=int(data["timeframe"]),
+        exits=Exits(**data["exits"]),
+        costs=Costs(**data["costs"]),
+        window=tuple(data["window"]) if data.get("window") else None,
+        limits=Limits(**data["limits"]),
+        filters=tuple(RuleFilter(**item) for item in data.get("filters") or []),
+        model=None if not model else ModelSpec(model["kind"], tuple(model["features"]), float(model["l2"])),
+        tickers=tuple(data["tickers"]),
+        notes=notes,
+    )
 
 
 def spec_id(spec: Spec) -> str:

@@ -440,6 +440,25 @@ def _random_entries(
     return out
 
 
+def discovery_trades(spec: Spec, load: Loader) -> list[Trade]:
+    """A spec's closed discovery-period trades with their features, loading
+    discovery data only. A spec with a model is read through its rules
+    without it, since its own trades come from a model fitted to these."""
+    spec = spec.parent() or spec
+    rules = spec.rules()
+    through = PERIODS["discovery"][1]
+    market = load(MARKET, spec.timeframe, through)
+    trades: list[Trade] = []
+    for ticker in spec.tickers:
+        series = load(ticker, spec.timeframe, through)
+        if series is None or len(series) == 0:
+            continue
+        features = FeatureContext(series, market)
+        trades += run_candidate(series, rules.start(series), spec.exits, spec.costs, spec.window, spec.limits,
+                                _acceptor(spec, features, None), features)
+    return _in(trades, ["discovery"])
+
+
 def _by_ticker(trades: Sequence[Trade], random: Mapping) -> dict[str, Stats]:
     groups: dict[str, list[Trade]] = defaultdict(list)
     for trade in trades:
@@ -522,8 +541,10 @@ def _plain(value: object) -> object:
     return value
 
 
-def ledger_record(ev: Evaluation, recorded: datetime, code: str, cache_through: date | None) -> dict:
-    """One line of the ledger: what was tried, on what, and what became of it."""
+def ledger_record(ev: Evaluation, recorded: datetime, code: str, cache_through: date | None,
+                  batch: str | None = None) -> dict:
+    """One line of the ledger: what was tried, on what, and what became of it.
+    `batch` is the week (its Monday) for candidates the weekly run proposed."""
     gates = [gate for gate in (ev.screen, ev.confirm, ev.exam) if gate is not None]
     return _plain({
         "id": ev.id,
@@ -542,6 +563,7 @@ def ledger_record(ev: Evaluation, recorded: datetime, code: str, cache_through: 
         "reached_confirmation": ev.reached_confirmation,
         "bar_t": ev.needed_t if ev.reached_confirmation else None,
         "verdict": ev.verdict,
+        **({"batch": batch} if batch else {}),
     })
 
 

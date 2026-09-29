@@ -22,6 +22,7 @@ import pytest
 
 from app.engine import factory_gates
 from app.engine.factory_data import (
+    FEATURES,
     FeatureContext,
     Series,
     Split,
@@ -39,6 +40,7 @@ from app.engine.factory_gates import (
     Stats,
     clustered_mean,
     confirm_gate,
+    discovery_trades,
     evaluate,
     exam_gate,
     ledger_record,
@@ -556,6 +558,52 @@ def test_a_bad_spec_is_refused(bad):
         parse_spec(bad)
 
 
+@pytest.mark.parametrize("bad", [
+    {"filters": [None]},
+    {"filters": {"feature": "rvol", "min": 1}},
+    {"filters": 5},
+    {"filters": [{"feature": "rvol", "low": 1.5}]},  # the ledger's stored form is not the spec format
+    {"filters": [{"feature": "rvol"}]},
+    {"filters": [{"feature": "rvol", "min": 2, "max": 1}]},
+    {"filters": [{"feature": "rvol", "min": "1.5"}]},
+    {"params": "fast"},
+    {"params": {"ema_length": "20"}},
+    {"params": {"ema_length": 0}},
+    {"params": {"atr_buffer": -0.1}},
+    {"params": {"reclaim_level": 1}},
+    {"exits": {"target_r": "2"}},
+    {"exits": {"max_sessions": 1.5}},
+    {"exits": {"stop_r": 1}},
+    {"exits": [2.0]},
+    {"window": "0930"},
+    {"window": [900, 1000]},
+    {"window": [1060, 1100]},
+    {"window": [1500, 1000]},
+    {"limits": {"max_entries": 0}},
+    {"costs": {"slippage_bps": -1}},
+    {"model": {"features": "gap"}},
+    {"model": {"features": ["gap", "gap"]}},
+    {"model": {"kind": "logistic", "l2": 0}},
+    {"model": [1]},
+    {"tickers": []},
+    {"tickers": 5},
+    {"timeframe": "15"},
+    {"timeframe": 7},
+])
+def test_a_malformed_spec_is_refused_with_a_reason(bad):
+    with pytest.raises(ValueError):
+        parse_spec({"family": "recovery_swing", **bad})
+
+
+def test_numbers_are_normalized_so_the_same_rules_get_the_same_id():
+    loose = parse_spec({"family": "recovery_swing", "exits": {"target_r": 2, "max_sessions": 2.0},
+                        "params": {"atr_buffer": 0, "stop_bars": 4.0}, "filters": [{"feature": "trend", "min": 0}]})
+    tidy = parse_spec({"family": "recovery_swing", "exits": {"target_r": 2.0, "max_sessions": 2},
+                       "params": {"atr_buffer": 0.0, "stop_bars": 4}, "filters": [{"feature": "trend", "min": 0.0}]})
+    assert spec_id(loose) == spec_id(tidy)
+    assert loose.exits.max_sessions == 2 and isinstance(loose.exits.target_r, float)
+
+
 def test_the_id_is_the_rules_not_the_name():
     base = parse_spec({"family": "recovery_swing"})
     assert spec_id(parse_spec({"family": "recovery_swing", "name": "x", "notes": "y"})) == spec_id(base)
@@ -795,6 +843,17 @@ def test_a_failed_confirmation_leaves_the_holdout_locked(dip_family, monkeypatch
     assert ev.verdict == "failed_confirmation" and ev.reached_confirmation and ev.candidates == 1
     assert None not in {through for _, through in loader.requests}
     assert max(through for _, through in loader.requests) == PERIODS["confirm_b"][1]
+
+
+def test_discovery_evidence_reads_only_discovery_data(dip_family):
+    loader = StubLoader({"AAA": pattern(START, END, every_fifth), "BBB": pattern(START, END, every_fifth)})
+    trades = discovery_trades(dip_family, loader)
+    assert {through for _, through in loader.requests} == {PERIODS["discovery"][1]}
+    days = {t.signal_time.astimezone(ET).date() for t in trades}
+    assert min(days) >= PERIODS["discovery"][0] and max(days) <= PERIODS["discovery"][1]
+    assert all(t.closed and set(t.features) == set(FEATURES) for t in trades)
+    learned = parse_spec({"family": "dip_buyer", "tickers": ["AAA", "BBB"], "model": {"kind": "logistic"}})
+    assert len(discovery_trades(learned, loader)) == len(trades)  # read through its rules without the model
 
 
 def test_a_learned_filter_trains_on_discovery_only_and_must_beat_its_parent(dip_family):

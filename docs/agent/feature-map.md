@@ -92,7 +92,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
 | Isaac Market Map backtester | `app/engine/market_map.py` (the Pine's rules, pure), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
-| Strategy factory | `app/engine/factory_data.py` (bars, splits, features), `factory_rules.py` (entry families, the shared execution model, specs), `factory_model.py` (learned filter), `factory_gates.py` (gates, ledger records) — all pure; `scripts/strategy_factory.py` (bar cache, ledger file, CLI); specs in `research/specs/`, results in `research/ledger.jsonl` | — (`python scripts/strategy_factory.py run ../research/specs/<spec>.json`, then `ledger`) | `test_factory.py` (synthetic bars: execution model, families, gates, the data lock end to end), `test_strategy_factory.py` (the script with a stub minute source); see `docs/strategy-factory.md` |
+| Strategy factory | `app/engine/factory_data.py` (bars, splits, features), `factory_rules.py` (entry families, the shared execution model, specs), `factory_model.py` (learned filter), `factory_gates.py` (gates, ledger records), `factory_brief.py` (the weekly brief, proposal review, weekly report) — all pure; `scripts/strategy_factory.py` (bar cache, ledger file, CLI, the Claude call, ntfy); `../scripts/factory_week.sh` (the weekly run, from launchd); specs in `research/specs/`, results in `research/ledger.jsonl`; the live ledger and the weekly reports are on branch `factory/ledger`, never merged | — (`python scripts/strategy_factory.py run ../research/specs/<spec>.json`, then `ledger`; weekly: phone summary) | `test_factory.py` (synthetic bars: execution model, families, gates, the data lock end to end), `test_factory_brief.py` (catalog, digest, evidence, review, report), `test_strategy_factory.py` (the script with a stub minute source and a stub idea model); see `docs/strategy-factory.md` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
 | TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/components/SignalsRefresh.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail**; both refresh every 30s while visible and on tab return | `frontend/e2e/signals.spec.ts`: new alerts, verdicts/details, hidden-tab pause, navigation cleanup, slow refresh and skip/error reasons against disposable SQLite |
 | Automatic deployment | `deploy/autodeploy.py`, `.github/workflows/release.yml`, `deploy/control.py` (`prune`, lock exit 75), `deploy/systemd/tradejournal-autodeploy.*`, `deploy/autodeploy.env.example` | merge to `main`; on the VPS `sudo … autodeploy.py status` ([automatic deployment](../../deploy/README.md#automatic-deployment)) | `test_autodeploy.py`, `test_deployment.py`; the Ubuntu smoke upgrades through the real unit against a local stand-in for GitHub. The live Release workflow runs only on `main` |
@@ -130,6 +130,11 @@ you change it (`verification.md`, "What is NOT covered yet").
 - `seed_dev_data.py` — the fixed fills behind the browser tests and the snapshot
 - `migrate_sqlite_to_postgres.py` — SQLite → PostgreSQL copy
 - `check_database.py` — read-only preflight: which database, schema ready?
+- `repair_gmail_fill_times.py` — plans, checks and applies the guarded repair of
+  Gmail fill times stored as UTC clocks, verified against the source emails
+  (`domain-rules.md`, fills and trades)
+- `repair_expired_trade_times.py` — the guarded repair of expiration closes
+  saved as UTC clocks instead of 16:00 New York wall time
 - `setup_roles.py` — create the app and ingress roles, then prove they are
   limited by connecting as each one (`environments.md`)
 - `backtest_market_map.py` — Isaac Market Map over many tickers from Alpaca
@@ -138,7 +143,10 @@ you change it (`verification.md`, "What is NOT covered yet").
   `docs/pine/README.md` cites
 - `strategy_factory.py` — judges a strategy spec through the factory's gates
   and appends the result to `research/ledger.jsonl`; `prepare` fetches the SIP
-  minute bars it needs (the only step that calls Alpaca)
+  minute bars it needs (the only step that calls Alpaca); `week` is the weekly
+  loop (it calls Claude) and `notify` sends its summary to the phone. The
+  repository-level `scripts/factory_week.sh` runs them every Sunday from
+  launchd in the factory checkout (`docs/strategy-factory.md`)
 
 `backend/compare_fills*.py` are ad hoc scratch scripts, not stable app code.
 
@@ -152,7 +160,10 @@ reason, and ruff lints them without importing them.
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
   and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
   judgement half is `.claude/skills/docs-drift/SKILL.md`, and the scheduled
-  agent that runs it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
+  agent meant to run it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
+  Its first run (2026-09-26) stalled at its first command, waiting for a
+  permission approval no one was there to give, so the pass still needs a
+  person or an approved routine.
 
 ## Reference documents
 
