@@ -80,7 +80,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Polygon enrichment, greeks, indicators | `app/engine/enricher.py`, `app/engine/indicators.py` | `POST /fills/enrich?range=`, `GET /fills/enrich/status`; job `polygon_enrich` | `test_enricher.py` (incl. the discovered rate limit), `test_indicators_rvol.py`, `test_enrichment_gap_repair.py` (which empty fields are retried) |
 | Alpaca fill context | `app/engine/alpaca.py`, `app/engine/alpaca_enricher.py`, `app/engine/behavior.py` (sequence metrics) | `POST /market-context/enrich?range=&force=`, `GET /market-context/enrich/status`, `/market-context/fill/{id}`, `/market-context/fills/bulk?ids=`, `/market-context/coverage`; job `alpaca_enrich` | `test_alpaca_context_repair.py`, `test_indicators_rvol.py` (the injected cache-only bar loader) |
 | Trade path metrics (MFE, MAE, exit efficiency) | `app/engine/trade_path.py` | `POST /market-context/trade-path/compute`, `GET /market-context/trade-path/status`, `/market-context/trade/{id}`, `/market-context/trade-path/bulk?ids=`; job `trade_path` | `test_enrichment_gap_repair.py` (row selection, keep-existing merge); live Alpaca fetch untested, `test_seed_snapshot.py` stubs it |
-| Trade audit | `app/engine/auditor.py` | `GET /market-context/audit/{trade_id}` | `test_seed_snapshot.py` (Alpaca stubbed, cache emptied) |
+| Trade audit | `app/engine/auditor.py`, `app/engine/metric_reference.py`, `app/engine/metric_validation.py` | `GET /market-context/audit/{trade_id}`; offline `scripts/validate_trade_metrics.py` emits JSON/Markdown/HTML | `test_seed_snapshot.py` (cache emptied), `tests/test_metric_reference.py`, `frontend/e2e/trade-metric-quality.spec.ts` |
 | Durable jobs, Sync Center | `app/engine/jobs.py`, `app/jobs/run.py`, `app/routers/sync.py`; `app/engine/api_wait.py` (per-job pacing and backoff telemetry) | `GET /sync/summary`, `/sync/jobs`, `/sync/runs`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run?range=&force=`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` | `test_sync_progress.py`, `test_environment_guard.py` (the destructive guard) |
 | Trades, tags | `app/routers/trades.py` | `GET /trades`, `/trades/{id}`, `/trades/{id}/fills`, `/trades/fills/bulk?ids=`; `POST /trades/{id}/tags` | browser tests; `test_seed_dev_data.py` |
 | Fills CRUD | `app/routers/fills.py` | `GET`/`POST /fills`, `GET`/`PUT /fills/{id}` | browser tests |
@@ -212,5 +212,6 @@ reason, and ruff lints them without importing them.
   `get_fill_contexts`.
 - **Caches** live at `backend/data/polygon_cache/` and
   `backend/data/alpaca_cache/`. Deleting a file forces a re-fetch. The audit
-  and the golden snapshot read the Alpaca cache; `test_seed_snapshot.py` points
+  reads existing files without fetching and separates missing/stale evidence from matches.
+  The golden snapshot reads the Alpaca cache; `test_seed_snapshot.py` points
   it at an empty directory so a developer's cache cannot leak into the result.

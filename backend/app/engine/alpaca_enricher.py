@@ -33,6 +33,7 @@ from app.engine.indicators import (
     _pct_diff,
 )
 from app.engine.behavior import SequenceState
+from app.engine.metric_versions import CONTEXT_VERSION
 from app.models import Fill, FillMarketContext
 
 log = logging.getLogger(__name__)
@@ -193,8 +194,8 @@ def _build_context(
     vs_ema9 = _pct_diff(entry_price, ema9)
     vs_ema20 = _pct_diff(entry_price, ema20)
 
-    # Gap: today's open vs prev close — approximate with OR-5 high as "open"
-    today_open = intraday.get("opening_range_5m_high")  # use first bar open if available
+    # Require the actual first RTH bar; never substitute a later range high.
+    today_open = intraday.get("today_open")
     entry_gap_pct = _pct_diff(today_open, prev.get("close"))
 
     # Previous day distance
@@ -230,6 +231,8 @@ def _build_context(
             is_otm = 1 if moneyness_pct < 0 else 0
 
     return FillMarketContext(
+        calculation_version=CONTEXT_VERSION,
+        entry_context_as_of=intraday.get("entry_context_as_of"),
         fill_id=fill.id,
         data_source=f"alpaca_{ALPACA_DATA_FEED}",
         fetched_at=datetime.utcnow(),

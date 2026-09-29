@@ -42,6 +42,9 @@ patterns that can create N+1 calls.
   `backend/scripts/repair_expired_trade_times.py` corrects only rows that
   exactly match that historical shift, refreshes affected same-day sequence
   fields on fills, and invalidates the expired trades' path metrics.
+- Worthless expiration subtracts remaining long-option cost basis but credits
+  remaining short-option premium. Previously realized partial closes retain
+  their result in both cases.
 - Manual fills are backed up to `backend/data/manual_fills.json` and restored
   on startup and after a destructive resync.
 - The FIFO sort key is
@@ -151,6 +154,34 @@ is verifiable rather than hopeful.
   `--end`.
 - Sequence metrics on `fill_market_context` derive from `trade` rows, so trades
   must be rebuilt **before** Alpaca enrichment runs.
+- Entry context uses only completed minute bars (`bar start + 1 minute <= fill
+  time`). The underlying price is the last completed close, a historical proxy,
+  not an execution-time quote; `entry_context_as_of` records that bar's end in
+  New York wall time. Opening ranges are unknown until 09:35/09:45;
+  the gap requires the actual 09:30 open, never an opening-range extreme.
+  Bought puts and sold calls have bearish underlying exposure. Unknown option
+  direction stays null. Context uses the reconstructor's 15:00 close bucket;
+  the legacy `is_overnight` field means outside regular hours, not an overnight hold.
+- `calculation_version` distinguishes corrected context/path math from legacy
+  rows. The additive migration leaves legacy versions null. Unforced work
+  selects obsolete versions within its requested range; it does not backfill
+  the entire production database merely by applying a schema migration.
+- Option excursions use minute bars for windows up to `MAX_PATH_WINDOW_DAYS`,
+  with FIFO open quantity and cost basis changing at each fill. Fill minutes
+  and bars outside the holding interval are excluded. Multi-day daily highs
+  are not substituted. These are observed estimates; missing minutes can hide
+  larger moves, and bar extremes are not executable quotes. Long windows and
+  missing bars remain unavailable. Option paths wait until the closing session
+  is final, and pre-final option cache files are refreshed.
+- Peak **open** PnL excludes realized exits. Peak **total** PnL includes realized
+  partial exits plus the remaining open PnL; capture and giveback use this total,
+  including final realized PnL as an observed endpoint. Option MFE/MAE percentages
+  use the open cost basis at each sampled minute. Underlying exit efficiency
+  and first-order greeks attribution are left null for scale-ins/outs rather
+  than applying the maximum position to every move.
+- The audit is read-only against existing cache files and independent reference
+  math. Missing evidence cannot pass; old versions stay stale even if values
+  match. Same-cache agreement is not broker/source verification.
 - Greeks PnL attribution on `trade_path_metrics`
   (`attr_delta/gamma/theta/vega/residual_pnl`, plus `entry_iv`/`exit_iv`)
   depends on Polygon-enriched entry/exit greeks: run Polygon enrichment before
@@ -195,6 +226,12 @@ is verifiable rather than hopeful.
   `trade_path_metrics`, rebuilds, then re-inserts only rows whose
   `inputs_fingerprint` still matches. Use
   `_rebuild_trades(..., preserve_path_metrics=True)` for incremental rebuilds.
+- Normal rebuilds preserve saved trade reviews, roll groups and tag links for
+  surviving stable trade ids. Changed trade summaries mark saved trade/daily
+  reviews `source_data_stale`; removed ids are not reassigned to another trade.
+  Path fingerprints include contract identity and fill enrichment. A separate
+  market-input fingerprint invalidates paths when context changes; failed runs
+  may retain values only from the same calculation version and input hashes.
 - Only destructive resync paths, which re-import fills with new ids, may call
   `_clear_derived_trade_data` + `_persist_rebuild` directly.
 
@@ -215,8 +252,9 @@ is verifiable rather than hopeful.
   be permanent are excluded so they are not retried forever: fills older than
   the Polygon history window, option prices with no implied volatility, path
   windows over `MAX_PATH_WINDOW_DAYS`, and attribution/ATR whose inputs are
-  still empty. Unforced runs pass `keep_existing`, so a failed fetch never
-  replaces a stored value with nothing. `GET /market-context/coverage`
+  still empty. Unforced runs pass `keep_existing`, so a failed fetch retains
+  compatible stored values; old versions are never mixed into corrected rows.
+  `GET /market-context/coverage`
   reports these rows as `*_incomplete`.
 - Daily review is intentionally **not** part of "Sync Everything" or the Gmail
   push pipeline. It runs only on explicit request. Do not re-add it.

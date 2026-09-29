@@ -105,6 +105,7 @@ class _OpenTrade:
     option_type: str | None
     strike: Decimal | None
     expiration: date | None
+    opening_side: str = "buy_to_open"
     lots: deque[_Lot] = field(default_factory=deque)
     trade_fills: list[TradeFillOutput] = field(default_factory=list)
     total_entry_contracts: Decimal = _ZERO
@@ -188,6 +189,7 @@ def _handle_open(fill: FillInput, key: ContractKey, open_trades: dict[ContractKe
             option_type=fill.option_type,
             strike=fill.strike,
             expiration=fill.expiration,
+            opening_side=fill.side,
             opened_at=fill.executed_at,
         )
 
@@ -262,14 +264,11 @@ def _finalize(ot: _OpenTrade, status: str) -> TradeOutput:
         # Persisted trade times are New York wall clocks without tzinfo. An
         # aware value is converted to a UTC clock by PostgreSQL's naive column.
         closed_at = datetime(ot.expiration.year, ot.expiration.month, ot.expiration.day, _CLOSE_HOUR, 0, 0)
-        if ot.total_exit_contracts > _ZERO:
-            # Partially exited before expiration: ot.realized_pnl holds FIFO pnl from exits.
-            # Remaining lots (still in ot.lots) expired worthless — add that loss.
-            remaining_cost = sum(lot.contracts * lot.price for lot in ot.lots)
-            realized_pnl = ot.realized_pnl - remaining_cost
-        else:
-            # Nothing was sold — full position expired worthless.
-            realized_pnl = -total_paid
+        # Worthless remaining long contracts lose their cost; short contracts
+        # retain the opening credit. Partial closes already have signed FIFO PnL.
+        remaining_cost = sum(lot.contracts * lot.price for lot in ot.lots)
+        expiration_sign = Decimal("1") if ot.opening_side == "sell_to_open" else Decimal("-1")
+        realized_pnl = ot.realized_pnl + expiration_sign * remaining_cost
         pnl_pct = realized_pnl / total_paid if total_paid else Decimal("-1")
 
     hold_mins: int | None = None
