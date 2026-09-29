@@ -5,7 +5,7 @@ from app.engine.indicators import compute_flags
 
 
 def test_missing_market_inputs_are_unknown_instead_of_false():
-    fill = SimpleNamespace(side="buy_to_open", executed_at=datetime(2026, 9, 24, 12, 46), expiration=None)
+    fill = SimpleNamespace(instrument_type="option", option_type="call", side="buy_to_open", executed_at=datetime(2026, 9, 24, 12, 46), expiration=None)
     flags = compute_flags(fill, {}, {})
 
     for name in (
@@ -20,7 +20,7 @@ def test_missing_market_inputs_are_unknown_instead_of_false():
 
 
 def test_observed_non_breakout_is_false():
-    fill = SimpleNamespace(side="buy_to_open", executed_at=datetime(2026, 9, 24, 12, 46), expiration=None)
+    fill = SimpleNamespace(instrument_type="option", option_type="call", side="buy_to_open", executed_at=datetime(2026, 9, 24, 12, 46), expiration=None)
     flags = compute_flags(fill, {
         "entry_underlying_price": 100,
         "entry_vwap": 101,

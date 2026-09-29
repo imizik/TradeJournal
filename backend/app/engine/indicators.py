@@ -13,6 +13,7 @@ from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
+from app.engine.metric_versions import underlying_direction
 
 log = logging.getLogger(__name__)
 
@@ -147,8 +148,9 @@ def analyze_minute_bars(bars: list[dict], fill_dt: datetime) -> dict:
     fill_dt_et = fill_dt.replace(tzinfo=ET)
     fill_dt_utc = fill_dt_et.astimezone(UTC)
 
-    # Bars at or before fill time
-    bars_to_fill = df[df.index <= fill_dt_utc]
+    # Minute timestamps mark the start. The fill minute is not yet observable.
+    df = df[df.index + pd.Timedelta(minutes=1) <= fill_dt_utc]
+    bars_to_fill = df
     if bars_to_fill.empty:
         return {}
 
@@ -179,8 +181,8 @@ def analyze_minute_bars(bars: list[dict], fill_dt: datetime) -> dict:
     premarket_low = _series_min(pm_bars, "low")
 
     # Opening range bars
-    or5_bars = df[(df.index >= rth_open) & (df.index < or5_end)]
-    or15_bars = df[(df.index >= rth_open) & (df.index < or15_end)]
+    or5_bars = df[(df.index >= rth_open) & (df.index < or5_end)] if fill_dt_utc >= or5_end else df.iloc[:0]
+    or15_bars = df[(df.index >= rth_open) & (df.index < or15_end)] if fill_dt_utc >= or15_end else df.iloc[:0]
     or5_high = _series_max(or5_bars, "high")
     or5_low = _series_min(or5_bars, "low")
     or15_high = _series_max(or15_bars, "high")
@@ -208,6 +210,8 @@ def analyze_minute_bars(bars: list[dict], fill_dt: datetime) -> dict:
         day_range_used = round((entry_price - day_low) / (day_high - day_low) * 100, 2)
 
     return {
+        "entry_context_as_of": (bars_to_fill.index[-1] + pd.Timedelta(minutes=1)).tz_convert(ET).tz_localize(None).to_pydatetime(),
+        "today_open": float(df.loc[rth_open, "open"]) if rth_open in df.index else None,
         "entry_underlying_price": round(entry_price, 4),
         "entry_vwap": vwap,
         "entry_vs_vwap_pct": _pct_diff(entry_price, vwap),
@@ -314,7 +318,7 @@ def compute_rvol_time_adjusted(
             datetime(d.year, d.month, d.day, 9, 30, tzinfo=ET)
         ).tz_convert("UTC")
         target = rth_open + pd.Timedelta(minutes=mins_since_open)
-        seg = df[(df.index >= rth_open) & (df.index <= target)]
+        seg = df[(df.index >= rth_open) & (df.index + pd.Timedelta(minutes=1) <= target)]
         return float(seg["volume"].sum()) if not seg.empty else None
 
     today_cum = _cum_vol(fill_date)
@@ -362,8 +366,9 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
     pm_high = intraday.get("premarket_high")
     pm_low = intraday.get("premarket_low")
 
-    is_long = fill.side in ("buy_to_open", "buy")
-    is_short = fill.side in ("sell_to_open", "sell")
+    direction = underlying_direction(fill)
+    is_long = direction is True
+    is_short = direction is False
 
     # ---- is_above_vwap: price on the correct side of VWAP at entry ----
     # (replaces the old mislabeled is_vwap_reclaim logic)
@@ -376,7 +381,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
 
     # ---- is_vwap_reclaim: true reclaim — prev bar on wrong side, entry bar on right side ----
     is_vwap_reclaim: Optional[int] = None
-    if vwap is not None and entry_price is not None and prev_bar_close is not None:
+    if direction is not None and vwap is not None and entry_price is not None and prev_bar_close is not None:
         is_vwap_reclaim = 0
         if is_long and prev_bar_close < vwap and entry_price > vwap:
             is_vwap_reclaim = 1
@@ -388,7 +393,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
     chase_score = 0
     chase_parts = 0
 
-    if rsi is not None:
+    if direction is not None and rsi is not None:
         # RSI: 0 pts at 50, 25 pts at 70, 40 pts at 80+
         if is_long:
             rsi_pts = max(0.0, min(40.0, (rsi - 50) * 2.0)) if rsi > 50 else 0.0
@@ -397,7 +402,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         chase_score += rsi_pts
         chase_parts += 1
 
-    if vs_vwap is not None:
+    if direction is not None and vs_vwap is not None:
         # VWAP extension: 0 pts at 0%, 30 pts at 3%+
         if is_long:
             vwap_pts = max(0.0, min(30.0, vs_vwap * 10.0)) if vs_vwap > 0 else 0.0
@@ -406,7 +411,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         chase_score += vwap_pts
         chase_parts += 1
 
-    if day_range_used is not None:
+    if direction is not None and day_range_used is not None:
         # Day range: 0 pts below 60%, 30 pts at 95%+
         if is_long:
             range_pts = max(0.0, min(30.0, (day_range_used - 60.0) * (30.0 / 35.0))) if day_range_used > 60 else 0.0
@@ -476,7 +481,7 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         entry_time_bucket = "premarket"
     elif fill_mins < 10 * 60:
         entry_time_bucket = "open"
-    elif fill_mins < 14 * 60:
+    elif fill_mins < 15 * 60:
         entry_time_bucket = "mid"
     elif fill_mins < 16 * 60:
         entry_time_bucket = "close"
@@ -509,8 +514,8 @@ def compute_flags(fill, intraday: dict, daily_indic: dict) -> dict:
         is_late=is_late,
         is_near_res=is_near_res if is_long else None,
         is_near_sup=is_near_sup if is_short else None,
-        rsi=rsi,
-        macd_hist=macd_hist,
+        rsi=rsi if direction is not None else None,
+        macd_hist=macd_hist if direction is not None else None,
     )
 
     return {

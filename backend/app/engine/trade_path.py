@@ -2,24 +2,27 @@
 Trade path metrics: MFE, MAE, exit efficiency, giveback.
 
 Uses cached minute bars (already fetched by the Alpaca fill enricher).
-Operates on closed/expired trades only. Does NOT make any Alpaca API calls
-if the bars are already cached; if a date is missing it just skips.
+Operates on closed/expired trades only. Underlying bars are prefetched in
+batches and reused from cache; per-trade computation reads that store.
 
 Underlying path is computed for all instrument types.
-Option-specific path (option_mfe_pct etc.) is left for Phase 5.
+Option paths use finalized minute bars and the actual changing FIFO exposure.
 """
 
 import hashlib
 import logging
+import json
 from collections import defaultdict
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Optional
 from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from app.engine.alpaca import ALPACA_DATA_FEED, fetch_minute_bars_for_date, fetch_option_bars
+from app.engine.alpaca import ALPACA_DATA_FEED, fetch_minute_bars_for_date, fetch_option_bars, _minute_session_complete
 from app.engine.occ import occ_symbol
+from app.engine.metric_versions import PATH_VERSION, underlying_direction
 from app.engine.indicators import bars_to_df, _f
 from app.models import FILL_LIGHT, Fill, FillMarketContext, Trade, TradePathMetrics
 
@@ -28,6 +31,13 @@ log = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 MAX_PATH_WINDOW_DAYS = 10
+
+
+def _fingerprint_value(value) -> str:
+    # Persisted NUMERIC values gain trailing zeroes; that is not an input change.
+    if isinstance(value, (int, float, Decimal)) and not isinstance(value, bool):
+        return str(Decimal(str(value)).normalize())
+    return str(value)
 
 
 def trade_inputs_fingerprint(trade: Trade, fills: list[Fill]) -> str:
@@ -40,11 +50,25 @@ def trade_inputs_fingerprint(trade: Trade, fills: list[Fill]) -> str:
     TradePathMetrics row can be reused or must be recomputed.
     """
     parts = sorted(
-        "{}|{}|{}|{}|{}".format(f.id, f.side, f.contracts, f.price, f.executed_at.isoformat())
+        "|".join(_fingerprint_value(getattr(f, key)) for key in (
+            "id", "account_id", "ticker", "instrument_type", "option_type", "strike", "expiration",
+            "side", "contracts", "price", "executed_at", "underlying_price_at_fill",
+            "delta_at_fill", "gamma_at_fill", "theta_at_fill", "vega_at_fill", "iv_at_fill",
+        ))
         for f in fills
     )
     blob = "{}::{}".format(trade.status, "||".join(parts))
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def market_inputs_fingerprint(fills: list[Fill], contexts: dict) -> str:
+    values = []
+    for fill in sorted(fills, key=lambda f: str(f.id)):
+        ctx = contexts.get(str(fill.id))
+        values.append((str(fill.id), {
+            key: _fingerprint_value(value) for key, value in ctx.model_dump(exclude={"fetched_at"}).items()
+        } if ctx else None))
+    return hashlib.sha256(json.dumps(values, sort_keys=True, default=str).encode()).hexdigest()
 
 
 _ENTRY_SIDES = ("buy_to_open", "sell_to_open", "buy")
@@ -69,11 +93,25 @@ def trades_needing_path_metrics(session: Session, trades: list[Trade]) -> list:
         ).all()
     }
 
+    from app.models import TradeFill
+    links = session.exec(select(TradeFill).where(TradeFill.trade_id.in_([t.id for t in closed]))).all()
+    fill_ids = [link.fill_id for link in links]
+    source_fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids))).all() if fill_ids else []
+    fill_by_id = {f.id: f for f in source_fills}
+    context_rows = session.exec(select(FillMarketContext).where(FillMarketContext.fill_id.in_(fill_ids))).all() if fill_ids else []
+    contexts = {str(c.fill_id): c for c in context_rows}
+    sources = defaultdict(list)
+    for link in links:
+        sources[link.trade_id].append(fill_by_id[link.fill_id])
     selected = []
     to_check: dict = {}
     for trade in closed:
         metrics = metrics_by_trade.get(trade.id)
         if metrics is None:
+            selected.append(trade.id)
+        elif (metrics.calculation_version != PATH_VERSION
+              or metrics.inputs_fingerprint != trade_inputs_fingerprint(trade, sources[trade.id])
+              or metrics.market_inputs_fingerprint != market_inputs_fingerprint(sources[trade.id], contexts)):
             selected.append(trade.id)
         elif metrics.underlying_mfe_pct is None and _window_days(trade):
             selected.append(trade.id)  # bars can arrive after the first run
@@ -85,7 +123,6 @@ def trades_needing_path_metrics(session: Session, trades: list[Trade]) -> list:
     if not to_check:
         return selected
 
-    from app.models import TradeFill
     rows = session.exec(
         select(
             TradeFill.trade_id,
@@ -114,6 +151,7 @@ def trades_needing_path_metrics(session: Session, trades: list[Trade]) -> list:
         atr_ready = atr_gap and entry.entry_atr_14 is not None
         attr_ready = (
             attr_gap
+            and len(entries) == 1 and len(exits) == 1
             and last_exit is not None
             and entry.delta_at_fill is not None
             and entry.underlying_price_at_fill is not None
@@ -144,8 +182,8 @@ def compute_path_metrics_for_trades(
         return 0
 
     if not force:
-        existing = set(session.exec(select(TradePathMetrics.trade_id)).all())
-        closed = [t for t in closed if t.id not in existing]
+        selected = set(trades_needing_path_metrics(session, closed))
+        closed = [t for t in closed if t.id in selected]
 
     if not closed:
         return 0
@@ -192,9 +230,21 @@ def compute_path_metrics_for_trades(
             metrics = _compute(trade, fills, ctx_by_fill, bar_store)
             if metrics:
                 metrics.inputs_fingerprint = trade_inputs_fingerprint(trade, fills)
+                metrics.calculation_version = PATH_VERSION
+                metrics.market_inputs_fingerprint = market_inputs_fingerprint(fills, ctx_by_fill)
                 previous = previous_by_trade.get(trade.id)
-                if previous is not None and previous.inputs_fingerprint == metrics.inputs_fingerprint:
+                if (previous is not None and previous.inputs_fingerprint == metrics.inputs_fingerprint
+                        and previous.calculation_version == PATH_VERSION
+                        and previous.market_inputs_fingerprint == metrics.market_inputs_fingerprint):
+                    # Retain a valid option calculation as one group when a
+                    # repeat fetch fails, including its quality description.
+                    keep_option = (metrics.option_path_quality != "observed_1min"
+                                   and previous.option_path_quality == "observed_1min")
                     for column in TradePathMetrics.__table__.columns:
+                        if column.name.startswith("option_") or column.name == "time_to_option_mfe_minutes":
+                            if keep_option:
+                                setattr(metrics, column.name, getattr(previous, column.name))
+                            continue
                         if getattr(metrics, column.name) is None:
                             setattr(metrics, column.name, getattr(previous, column.name))
                 session.merge(metrics)
@@ -272,9 +322,9 @@ def _compute(
     if not entry_fills:
         return None
 
-    entry_fill = min(entry_fills, key=lambda f: f.executed_at)
+    entry_fill = min(entry_fills, key=lambda f: (f.executed_at, str(f.id)))
     entry_ctx = ctx_by_fill.get(str(entry_fill.id))
-    option_path = _compute_option_path(trade, entry_fill)
+    option_path = _compute_option_path(trade, entry_fill, fills)
 
     # Entry underlying price: prefer Alpaca context, then Polygon fill enrichment, then stock price
     entry_price = (
@@ -288,11 +338,15 @@ def _compute(
         if option_path:
             metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
             _apply_option_path(metrics, option_path)
-            _apply_attribution(metrics, trade, entry_fill, exit_fills)
+            _apply_attribution(metrics, trade, entry_fill, exit_fills, len(entry_fills))
             return metrics
         return None
 
     bullish = _is_bullish(trade, entry_fill)
+    if bullish is None:
+        metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_unknown_direction")
+        _apply_option_path(metrics, option_path)
+        return metrics
 
     # Collect minute bars across all dates in the trade window
     opened_et = trade.opened_at.replace(tzinfo=ET)
@@ -314,7 +368,7 @@ def _compute(
         )
         metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_skipped_long_window")
         _apply_option_path(metrics, option_path)
-        _apply_attribution(metrics, trade, entry_fill, exit_fills)
+        _apply_attribution(metrics, trade, entry_fill, exit_fills, len(entry_fills))
         return metrics
 
     # Bars for the trade window + 60m of post-exit. Read from the prefetched
@@ -333,17 +387,17 @@ def _compute(
         if option_path:
             metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
             _apply_option_path(metrics, option_path)
-            _apply_attribution(metrics, trade, entry_fill, exit_fills)
+            _apply_attribution(metrics, trade, entry_fill, exit_fills, len(entry_fills))
             return metrics
         return None
 
     full_df = bars_to_df(all_bars)
-    df = full_df[(full_df.index >= opened_utc) & (full_df.index <= closed_utc)]
+    df = full_df[(full_df.index > opened_utc) & (full_df.index + timedelta(minutes=1) <= closed_utc)]
     if df.empty:
         if option_path:
             metrics = _base_metrics(trade, exit_fills, f"alpaca_{ALPACA_DATA_FEED}_option_only")
             _apply_option_path(metrics, option_path)
-            _apply_attribution(metrics, trade, entry_fill, exit_fills)
+            _apply_attribution(metrics, trade, entry_fill, exit_fills, len(entry_fills))
             return metrics
         return None
 
@@ -355,8 +409,8 @@ def _compute(
         favorable = (entry_price - df["low"]) / entry_price * 100
         adverse = (df["high"] - entry_price) / entry_price * 100
 
-    mfe_pct = _f(favorable.max())
-    mae_pct = _f(adverse.max())
+    mfe_pct = _f(max(0, favorable.max()))
+    mae_pct = _f(max(0, adverse.max()))
 
     mfe_idx = favorable.idxmax() if mfe_pct is not None else None
     mae_idx = adverse.idxmax() if mae_pct is not None else None
@@ -365,13 +419,13 @@ def _compute(
     time_to_mae = int((mae_idx - opened_utc).total_seconds() / 60) if mae_idx is not None else None
 
     moved_in_favor_first = None
-    if mfe_idx is not None and mae_idx is not None:
-        moved_in_favor_first = 1 if mfe_idx <= mae_idx else 0
+    if mfe_idx is not None and mae_idx is not None and mfe_idx != mae_idx:
+        moved_in_favor_first = 1 if mfe_idx < mae_idx else 0
 
     # Exit efficiency (underlying-based): what % of MFE did the exit capture?
     exit_efficiency = None
     giveback_pct = None
-    if mfe_pct is not None and mfe_pct > 0:
+    if len(entry_fills) == 1 and len(exit_fills) <= 1 and mfe_pct is not None and mfe_pct > 0:
         exit_price = _get_exit_underlying(exit_fills, trade, ctx_by_fill, df)
         if exit_price is not None:
             realized = (
@@ -417,7 +471,7 @@ def _compute(
                 metrics.mae_atr_multiple = _f(mae_pct / atr_pct)
 
     _apply_option_path(metrics, option_path)
-    _apply_attribution(metrics, trade, entry_fill, exit_fills)
+    _apply_attribution(metrics, trade, entry_fill, exit_fills, len(entry_fills))
     return metrics
 
 
@@ -455,88 +509,105 @@ def _exit_time_bucket(exit_fills: list[Fill]) -> Optional[str]:
         return "premarket"
     if minutes < 10 * 60:
         return "open"
-    if minutes < 14 * 60:
+    if minutes < 15 * 60:
         return "mid"
     if minutes < 16 * 60:
         return "close"
     return "afterhours"
 
 
-def _compute_option_path(trade: Trade, entry_fill: Fill) -> dict | None:
+def _compute_option_path(trade: Trade, entry_fill: Fill, fills: list[Fill]) -> dict | None:
     if trade.instrument_type != "option" or not trade.expiration or trade.strike is None or not trade.option_type:
         return None
-
     symbol = occ_symbol(trade.ticker, trade.expiration, trade.option_type, float(trade.strike))
     if not symbol:
         return None
+    if (trade.closed_at.date() - trade.opened_at.date()).days + 1 > MAX_PATH_WINDOW_DAYS:
+        return {"option_path_quality": "unavailable_long_window"}
+    if not _minute_session_complete(trade.closed_at.date()):
+        return {"option_path_quality": "unavailable_session_incomplete"}
+    opened = trade.opened_at.replace(tzinfo=ET)
+    closed = trade.closed_at.replace(tzinfo=ET)
+    bars = fetch_option_bars([symbol], "1Min", opened, closed).get(symbol, [])
+    return option_position_path(trade, fills, bars)
 
-    opened_et = trade.opened_at.replace(tzinfo=ET)
-    closed_et = trade.closed_at.replace(tzinfo=ET)
-    same_day = opened_et.date() == closed_et.date()
-    timeframe = "1Min" if same_day else "1Day"
-    start = opened_et if same_day else opened_et.date()
-    end = closed_et if same_day else closed_et.date()
 
-    bars = fetch_option_bars([symbol], timeframe, start, end).get(symbol, [])
-    if not bars:
-        return None
+def option_position_path(trade: Trade, fills: list[Fill], bars: list[dict]) -> dict:
+    """Observed minute-bar excursions using actual FIFO exposure at each minute.
 
+    Fill minutes are excluded: minute-granular fills cannot locate executions
+    within their bar. These are observed estimates, never executable quotes.
+    Premiums in fills are total dollars per contract; bars need the 100 multiplier.
+    """
+    from collections import deque
+    ordered = sorted(fills, key=lambda f: (f.executed_at, f.side not in _ENTRY_SIDES, str(f.id)))
+    entries = [f for f in ordered if f.side in _ENTRY_SIDES]
+    if not entries or not bars:
+        return {"option_path_quality": "unavailable_bars"}
+    entered = sum(float(f.contracts) for f in entries)
+    exited = sum(float(f.contracts) for f in ordered if f.side not in _ENTRY_SIDES)
+    if exited > entered + 1e-9 or (trade.status == "closed" and abs(entered - exited) > 1e-9):
+        return {"option_path_quality": "unavailable_fill_allocation"}
     df = bars_to_df(bars)
-    if df.empty:
-        return None
-    if same_day:
-        opened_utc = opened_et.astimezone(UTC)
-        closed_utc = closed_et.astimezone(UTC)
-        df = df[(df.index >= opened_utc) & (df.index <= closed_utc)]
-        if df.empty:
-            return None
-
-    entry_price = float(trade.avg_entry_premium)
-    if entry_price <= 0:
-        return None
-
-    max_price = float(df["high"].max()) * 100
-    min_price = float(df["low"].min()) * 100
-    contracts = float(trade.contracts or 0)
-    long_option = entry_fill.side == "buy_to_open"
-
-    if long_option:
-        peak_unrealized = (max_price - entry_price) * contracts
-        worst_unrealized = (min_price - entry_price) * contracts
-        option_mfe_pct = (max_price - entry_price) / entry_price * 100
-        option_mae_pct = (entry_price - min_price) / entry_price * 100
-        extreme_idx = df["high"].idxmax()
-    else:
-        peak_unrealized = (entry_price - min_price) * contracts
-        worst_unrealized = (entry_price - max_price) * contracts
-        option_mfe_pct = (entry_price - min_price) / entry_price * 100
-        option_mae_pct = (max_price - entry_price) / entry_price * 100
-        extreme_idx = df["low"].idxmin()
-
-    realized = float(trade.realized_pnl or 0)
-    exit_efficiency = None
-    giveback_from_peak = None
-    giveback_pct = None
-    if peak_unrealized > 0:
-        exit_efficiency = realized / peak_unrealized * 100
-        giveback_from_peak = peak_unrealized - realized
-        giveback_pct = giveback_from_peak / peak_unrealized * 100
-
-    time_to_mfe = None
-    if same_day and extreme_idx is not None:
-        time_to_mfe = int((extreme_idx - opened_et.astimezone(UTC)).total_seconds() / 60)
-
+    opened = trade.opened_at.replace(tzinfo=ET).astimezone(UTC)
+    closed = trade.closed_at.replace(tzinfo=ET).astimezone(UTC)
+    df = df[(df.index >= opened) & (df.index + timedelta(minutes=1) <= closed)]
+    fill_times = [f.executed_at.replace(tzinfo=ET).astimezone(UTC) for f in ordered]
+    sign = 1 if entries[0].side == "buy_to_open" else -1
+    lots = deque()
+    realized = 0.0
+    pointer = 0
+    peak_open = worst_open = 0.0
+    peak_total = 0.0
+    mfe = mae = 0.0
+    high_seen, low_seen, peak_time = None, None, None
+    for stamp, bar in df.iterrows():
+        while pointer < len(ordered) and fill_times[pointer] <= stamp:
+            fill = ordered[pointer]
+            qty, price = float(fill.contracts), float(fill.price)
+            if fill.side in _ENTRY_SIDES:
+                lots.append([qty, price])
+            else:
+                while qty > 1e-9 and lots:
+                    used = min(qty, lots[0][0])
+                    realized += sign * (price - lots[0][1]) * used
+                    lots[0][0] -= used
+                    qty -= used
+                    if lots[0][0] < 1e-9:
+                        lots.popleft()
+                if qty > 1e-9:
+                    return {"option_path_quality": "unavailable_fill_allocation"}
+            pointer += 1
+        if not lots or any(stamp <= t < stamp + timedelta(minutes=1) for t in fill_times):
+            continue
+        qty = sum(lot[0] for lot in lots)
+        basis = sum(lot[0] * lot[1] for lot in lots)
+        if basis <= 0:
+            continue
+        high, low = float(bar["high"]) * 100, float(bar["low"]) * 100
+        favorable = sign * ((high if sign > 0 else low) * qty - basis)
+        adverse = sign * ((low if sign > 0 else high) * qty - basis)
+        peak_open, worst_open = max(peak_open, favorable), min(worst_open, adverse)
+        mfe, mae = max(mfe, favorable / basis * 100), max(mae, -adverse / basis * 100)
+        if realized + favorable > peak_total:
+            peak_total, peak_time = realized + favorable, stamp
+        high_seen = high if high_seen is None else max(high_seen, high)
+        low_seen = low if low_seen is None else min(low_seen, low)
+    if high_seen is None:
+        return {"option_path_quality": "unavailable_holding_bars"}
+    final = float(trade.realized_pnl) if trade.realized_pnl is not None else None
+    if final is not None and final > peak_total:
+        peak_total, peak_time = final, closed
+    giveback = max(0, peak_total - final) if final is not None else None
     return {
-        "option_mfe_pct": _f(option_mfe_pct),
-        "option_mae_pct": _f(option_mae_pct),
-        "option_max_price_seen": _f(max_price),
-        "option_min_price_seen": _f(min_price),
-        "time_to_option_mfe_minutes": time_to_mfe,
-        "option_exit_efficiency": _f(exit_efficiency),
-        "option_giveback_pct": _f(giveback_pct),
-        "option_peak_unrealized_pnl": _f(peak_unrealized),
-        "option_worst_unrealized_pnl": _f(worst_unrealized),
-        "option_giveback_from_peak": _f(giveback_from_peak),
+        "option_path_quality": "observed_1min",
+        "option_mfe_pct": _f(mfe), "option_mae_pct": _f(mae),
+        "option_max_price_seen": _f(high_seen), "option_min_price_seen": _f(low_seen),
+        "option_peak_unrealized_pnl": _f(peak_open), "option_worst_unrealized_pnl": _f(worst_open),
+        "option_peak_total_pnl": _f(peak_total), "option_giveback_from_peak": _f(giveback),
+        "option_exit_efficiency": _f(final / peak_total * 100) if final is not None and peak_total > 0 else None,
+        "option_giveback_pct": _f(giveback / peak_total * 100) if giveback is not None and peak_total > 0 else None,
+        "time_to_option_mfe_minutes": int((peak_time - opened).total_seconds() / 60) if peak_time else None,
     }
 
 
@@ -552,6 +623,7 @@ def _apply_attribution(
     trade: Trade,
     entry_fill: Fill,
     exit_fills: list[Fill],
+    entry_count: int = 1,
 ) -> None:
     """First-order greeks PnL attribution for option trades.
 
@@ -561,6 +633,8 @@ def _apply_attribution(
     and the entry/exit fills' Polygon-enriched underlying prices and IVs. The
     residual absorbs higher-order terms, path effects, and spread/slippage.
     """
+    if entry_count != 1 or len(exit_fills) != 1:
+        return
     if trade.instrument_type != "option" or not exit_fills:
         return
     if trade.realized_pnl is None or not trade.opened_at or not trade.closed_at:
@@ -659,14 +733,8 @@ def _compute_post_exit(
     return results[0], results[1], results[2], time_to_extreme
 
 
-def _is_bullish(trade: Trade, entry_fill: Fill) -> bool:
-    if trade.instrument_type == "stock":
-        return entry_fill.side in ("buy", "buy_to_open")
-    if trade.option_type == "call":
-        return entry_fill.side == "buy_to_open"
-    if trade.option_type == "put":
-        return entry_fill.side == "sell_to_open"
-    return True
+def _is_bullish(trade: Trade, entry_fill: Fill) -> bool | None:
+    return underlying_direction(entry_fill)
 
 
 def _get_exit_underlying(

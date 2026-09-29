@@ -146,7 +146,7 @@ function ScoreBar({ label, value, tip, colorFn }: {
 // ---------------------------------------------------------------------------
 
 const TIPS = {
-  underlying:       "Stock price at the exact minute of your fill, from Alpaca minute bars.",
+  underlying:       "Close of the last completed minute before the fill. Historical proxy, not the execution-time stock quote.",
   vsVwap:           "How far entry was from session VWAP (resets at 9:30). Above = bullish bias. >+2% = stretched / potential chase.",
   rsi14:            "Momentum 0–100. <30 = oversold (reversal zone), >70 = overbought (chase risk). 40–60 = neutral. Best entries: buying 30–50 or selling 50–70.",
   ema9:             "9-day exponential moving average. Short-term trend line. Price above = near-term bullish.",
@@ -177,7 +177,7 @@ const TIPS = {
 
   // Flags
   flagAboveVwap:    "Price was on the correct side of VWAP at entry (above for longs, below for shorts). Confirms intraday bias.",
-  flagVwapReclaim:  "True VWAP reclaim: the bar before entry was on the wrong side of VWAP, but entry bar crossed back. Stronger signal than simply being above VWAP.",
+  flagVwapReclaim:  "True VWAP reclaim: the bar before entry was on the wrong side of VWAP, but last completed bar crossed back. Stronger signal than simply being above VWAP.",
   flagNearRes:      "Entry was within 0.5% of the day high or prior day high — buying near known resistance. Higher failure risk.",
   flagChase:        "Chase score ≥ 40: entry is extended. At least one of: RSI>70, price >2% above VWAP, or >80% of day range used.",
   flagLate:         "Entering when move is mostly over — near HOD on longs, near LOD on shorts. Risk/reward is compressed.",
@@ -219,7 +219,7 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
     { label: "Late Move",       value: ctx.is_late_move,                        tip: TIPS.flagLate },
     { label: "Near Resistance", value: ctx.is_near_resistance_on_call_entry,    tip: TIPS.flagNearRes },
     { label: "Near Support",    value: ctx.is_near_support_on_put_entry,        tip: TIPS.flagNearSup },
-    { label: "Overnight",       value: ctx.is_overnight,                        tip: TIPS.flagOvernight },
+    { label: "Outside regular hours",       value: ctx.is_overnight,                        tip: TIPS.flagOvernight },
   ].filter((f) => f.value !== null);
 
   const activeFlags = flags.filter((f) => f.value === 1);
@@ -262,6 +262,13 @@ export default function AlpacaContextSection({ fills, contexts }: Props) {
         {entryCtx && (
           <div>
             <p className="mb-2 text-xs font-semibold text-blue-400">ENTRY</p>
+            <p className="mb-2 text-xs text-muted-foreground">
+              {entryCtx.calculation_version == null
+                ? "Historical context. Recompute before comparing setups."
+                : entryCtx.entry_context_as_of
+                  ? `Completed bars through ${entryCtx.entry_context_as_of.slice(11, 16)} ET`
+                  : "Intraday context unavailable."}
+            </p>
             <Row label="Underlying" value={fmt$(entryCtx.entry_underlying_price)} tip={TIPS.underlying} />
             <Row label="vs VWAP"   value={fmtPct(entryCtx.entry_vs_vwap_pct)}   valueClass={pctColor(entryCtx.entry_vs_vwap_pct)} tip={TIPS.vsVwap} />
             <Row label="RSI-14"    value={fmtNum(entryCtx.entry_rsi_14, 1)}      tip={TIPS.rsi14} />

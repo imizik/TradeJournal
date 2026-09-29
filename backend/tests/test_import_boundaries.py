@@ -70,6 +70,8 @@ PURE_MODULES = {
     "app.engine.tradingview",
     "app.engine.tradingview_alerts",
     "app.engine.indicators",
+    "app.engine.metric_reference",  # independent stdlib-only calculations
+    "app.engine.metric_versions",  # identities and pure exposure direction only
     # The Isaac Market Map port and its reports. The backtest script fetches
     # the bars; these only compute on what they are handed.
     "app.engine.market_map",
@@ -95,7 +97,7 @@ PURE_MAY_USE = {"sqlmodel", "sqlalchemy", "pydantic", "pandas"}
 
 # Not pure today, and worth knowing why when you touch them:
 #   app.engine.trade_path  -> app.engine.alpaca   live minute-bar fetch
-#   app.engine.auditor     -> app.engine.alpaca   live minute-bar fetch
+#   app.engine.auditor     -> app.engine.alpaca   cache/feed configuration only
 # Moving those reads behind an injected loader would let them join PURE_MODULES,
 # the way app.engine.indicators took a MinuteBarLoader from its caller.
 

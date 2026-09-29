@@ -375,9 +375,11 @@ def fetch_option_bars(
 
     result: dict[str, list] = {}
     missing: list[str] = []
+    end_day = end.astimezone(ET).date() if isinstance(end, datetime) and end.tzinfo else end.date() if isinstance(end, datetime) else end
+    final_at = datetime.combine(end_day, datetime.min.time(), tzinfo=ET).replace(hour=20, minute=5)
     for symbol in normalized:
         cp = _option_bars_cache_path(symbol, timeframe, start, end)
-        if cp.exists():
+        if cp.exists() and datetime.fromtimestamp(cp.stat().st_mtime, ET) >= final_at:
             result[symbol] = json.loads(cp.read_text())
         else:
             missing.append(symbol)
@@ -403,7 +405,7 @@ def fetch_option_bars(
             # Do not cache empty option responses. A 403 entitlement miss also
             # returns no bars via _alpaca_get(), and caching that would hide
             # data after the key/feed is fixed.
-            if symbol_bars:
+            if symbol_bars and _minute_session_complete(end_day):
                 cp = _option_bars_cache_path(symbol, timeframe, start, end)
                 cp.write_text(json.dumps(symbol_bars))
             result[symbol] = symbol_bars

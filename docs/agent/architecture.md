@@ -39,12 +39,19 @@ The allowlists at the top of that file are the policy. Changing them is an
 architecture change: make it deliberately, in the same commit as the import
 that needs it, and say why.
 
+`app.engine.metric_versions` is also checked as pure: it defines calculation
+identities and exposure direction, with no data fetching or database access.
+`app.engine.metric_reference` is checked as pure too: Decimal event ledgers and
+scalar indicator recurrences consume supplied records. `metric_validation`
+reads existing caches; `auditor` adapts model records to that independent math.
+The audit never fetches provider data.
+
 A module leaves the impure set by taking what it needs as an argument rather
 than reaching for it. `app.engine.indicators` was held out by one lazy
 `fetch_minute_bars_for_date` import for a cache-only read; it now accepts a
 `MinuteBarLoader` and its caller decides where bars come from and who pays for
-them. `trade_path` and `auditor` are the same shape and are the remaining
-targets, listed in the test.
+them. `trade_path` remains a target listed in the test; `auditor` now delegates
+to independent math with a read-only cache adapter.
 `app.engine.market_map` was written that way from the start:
 `scripts/backtest_market_map.py` fetches the bars and hands them in. So were
 the strategy factory's `app.engine.factory_*` modules: `factory_gates.evaluate`
