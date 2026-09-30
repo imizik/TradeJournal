@@ -1,0 +1,12 @@
+{
+  "name": "Daily-EMA recovery swing, no trigger on the session's first bar",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema"
+  },
+  "window": [
+    1000,
+    1600
+  ],
+  "notes": "When the first 15-minute bar of the session closes back above the prior day's daily EMA, the 'reclaim' is usually an overnight gap through the level rather than buyers winning it back during the day, so it carries none of the setup's information and a stop under that bar's lows is hit by ordinary opening noise. Taking the same daily-EMA reclaim only once the session has traded should keep the real reclaims and drop the gap-throughs. The trader's own journal points the same way independently: their entries from 09:30 to 09:45 lost money while 09:45 to 10:00 was their best window. Builds on re-d5bbe25d57: The entry window only: fills allowed from 10:00 instead of any time, which removes triggers on the first 15-minute bar (09:30-09:45) of each session. Trigger level (daily EMA), arming, breakout confirmation, stop, 2R target and two-session hold are unchanged. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}
