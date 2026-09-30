@@ -26,6 +26,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
+| `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 
 Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets

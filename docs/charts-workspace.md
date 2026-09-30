@@ -1,5 +1,8 @@
 # Charts workspace
 
+What is built. What comes next, and in what order, is in
+[charts-roadmap.md](charts-roadmap.md).
+
 The private `/charts` page is a stock/ETF chart workspace backed by Tradier.
 It uses TradingView's Apache-licensed Lightweight Charts, not the restricted
 Advanced Charts library. No TradingView subscription or paid data upgrade is
