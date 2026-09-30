@@ -1,0 +1,18 @@
+{
+  "name": "Daily-EMA recovery swing with a one-hour stall exit",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema"
+  },
+  "window": [
+    1000,
+    1600
+  ],
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 2,
+    "stall_minutes": 60,
+    "stall_r": 0
+  },
+  "notes": "The recovery swing bets that a reclaim of the prior day's daily EMA holds. A real reclaim should show itself quickly: buyers who won the level back keep price above the entry. A trade that is still at or below its entry an hour (four 15-minute bars) after the trigger is a reclaim that did not hold, and most of those go on to the full -1.1R stop instead of the 2R target. Leaving such trades at the one-hour mark, usually for a fraction of R, should cut the average loss on failed reclaims while every trade that is working runs on to the unchanged 2R target or two-session exit, where this pattern earns its money. The trader's own journal of about 1,573 real trades points the same way independently: their winners were usually closed within an hour, and trades still open after an hour and closed the same day lost money in every period checked. Random entries get the same stall rule, so this passes only if the signal's trades separate from random ones within that first hour. Builds on re-a9765cdc93: The exit only: add a stall exit at 60 minutes with stall_r 0, so a trade leaves at the close of the bar that brings the hold to one hour unless that close is above the entry. Trigger level (daily EMA), the 10:00 start of the entry window, arming, breakout confirmation, stop, 2R target and two-session hold are unchanged."
+}

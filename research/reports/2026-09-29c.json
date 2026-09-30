@@ -1,0 +1,23 @@
+{
+  "day": "2026-09-29",
+  "summary": "1 idea judged, none passed (1 reached confirmation). Closest: Daily-EMA recovery swing with a one-hour stall exit (failed confirmation). The ledger holds 17 ideas; 11 have reached confirmation, so the next one there needs t >= 2.64.",
+  "passed": false,
+  "answer": {
+    "ideas": [
+      {
+        "title": "Daily-EMA recovery swing with a one-hour stall exit",
+        "hypothesis": "The recovery swing bets that a reclaim of the prior day's daily EMA holds. A real reclaim should show itself quickly: buyers who won the level back keep price above the entry. A trade that is still at or below its entry an hour (four 15-minute bars) after the trigger is a reclaim that did not hold, and most of those go on to the full -1.1R stop instead of the 2R target. Leaving such trades at the one-hour mark, usually for a fraction of R, should cut the average loss on failed reclaims while every trade that is working runs on to the unchanged 2R target or two-session exit, where this pattern earns its money. The trader's own journal of about 1,573 real trades points the same way independently: their winners were usually closed within an hour, and trades still open after an hour and closed the same day lost money in every period checked. Random entries get the same stall rule, so this passes only if the signal's trades separate from random ones within that first hour.",
+        "builds_on": "re-a9765cdc93",
+        "change": "The exit only: add a stall exit at 60 minutes with stall_r 0, so a trade leaves at the close of the bar that brings the hold to one hour unless that close is above the entry. Trigger level (daily EMA), the 10:00 start of the entry window, arming, breakout confirmation, stop, 2R target and two-session hold are unchanged.",
+        "from_evidence": false,
+        "spec_json": "{\"family\": \"recovery_swing\", \"params\": {\"reclaim_level\": \"daily_ema\"}, \"window\": [1000, 1600], \"exits\": {\"target_r\": 2.0, \"max_sessions\": 2, \"stall_minutes\": 60, \"stall_r\": 0}}"
+      }
+    ],
+    "lessons": "Nothing has passed yet. The two one-minute intraday patterns pick entries slightly better than random, but trading costs are larger than that edge, so more target or hold tweaks on one-minute bars are not worth testing. The recovery swing triggered on the daily EMA is the strongest idea so far, at about +0.15 to +0.18R a trade with a t near 1.95 on the discovery period, still short of the screen's t of 2 and well short of the 2.61 confirmation bar. Removing triggers on the session's first bar lifted the average trade but also cut the trade count, so the t barely moved. The remaining gap is more likely to close by shrinking losses on reclaims that fail than by more slicing of entries, which is why this week tests a one-hour stall exit instead of another filter.",
+    "wanted": [
+      "a feature for how far the signal close is above the daily EMA it just reclaimed, measured in the signal bar's own ATR, so a decisive reclaim can be told from a marginal one",
+      "a feature for how many sessions the ticker spent below the daily EMA before the reclaim, to separate a quick shakeout from a long downtrend",
+      "the recovery swing's arming and trigger on 30-minute or daily bars with a multi-session hold, to test the same reclaim idea with more room per trade and fewer trades"
+    ]
+  }
+}
