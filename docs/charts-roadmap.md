@@ -64,7 +64,7 @@ from planned work.
 | C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | done ([PR #90](https://github.com/imizik/TradeJournal/pull/90)) |
 | C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | done ([PR #91](https://github.com/imizik/TradeJournal/pull/91)) |
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | done ([PR #92](https://github.com/imizik/TradeJournal/pull/92)) |
-| C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | done |
+| C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | done ([PR #93](https://github.com/imizik/TradeJournal/pull/93)) |
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | next |
 | C7.2 | Named saved layouts | 7 Layouts | todo |
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | todo |
@@ -359,7 +359,7 @@ frame visible, dimmed and labeled "Loading NVDA…". *Done when:* switching symb
 never shows the empty loading card after the first load, and a test proves the
 chart instance survives a switch.
 
-**C0.4 Server-saved workspace (done).** Save `ChartSettings` (levels, watchlist,
+**C0.4 Server-saved workspace (done in PR #93).** Save `ChartSettings` (levels, watchlist,
 intervals, indicators, layout, drawings once they exist) through a
 workspace-style JSON endpoint modeled on `backend/app/routers/research.py`.
 Use a revision check and keep `localStorage` as an offline fallback. On first
