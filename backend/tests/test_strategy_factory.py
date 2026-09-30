@@ -405,12 +405,12 @@ def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, m
         raise AssertionError("a dry run asks no one")
 
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
-    assert sorted(computed) == ["failed_breakout", "recovery_swing", "vwap_reclaim"]
+    assert sorted(computed) == ["failed_breakout", "opening_range_breakout", "recovery_swing", "vwap_reclaim"]
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
-    assert len(computed) == 3  # cached
+    assert len(computed) == 4  # cached
     fingerprint = script.engine_fingerprint()
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {f"{fingerprint}.json"}
     monkeypatch.setattr(script, "engine_fingerprint", lambda: "changed000")
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
-    assert len(computed) == 6
+    assert len(computed) == 8
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {"changed000.json"}

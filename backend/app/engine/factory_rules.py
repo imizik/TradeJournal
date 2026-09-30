@@ -45,7 +45,18 @@ from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
-from app.engine.factory_data import FEATURES, NA, FeatureContext, Series, atr, ema, prior, daily_ema, session_vwap
+from app.engine.factory_data import (
+    FEATURES,
+    NA,
+    RTH_OPEN,
+    FeatureContext,
+    Series,
+    atr,
+    daily_ema,
+    ema,
+    prior,
+    session_vwap,
+)
 
 # --- signals, trades, and the settings every family shares ----------------------
 
@@ -689,10 +700,94 @@ class _FailedBreakoutRun:
         return signal
 
 
+@dataclass(frozen=True)
+class OpeningRangeBreakout:
+    """The opening range breakout, both sides.
+
+    The opening range is the high and low of the session's first
+    `range_minutes` (a whole number of bars, from 09:30). After it, the first
+    close above its high triggers a long and the first close below its low a
+    short; each side triggers at most once a session, and a break that comes
+    while a position is open, or is refused, still uses it up. Stop: the other
+    side of the range, or its midpoint with `stop_at="mid"`. A session whose
+    first bar is not at 09:30 has no range.
+    """
+
+    range_minutes: int = 5
+    stop_at: str = "range"
+    sides: str = "both"
+
+    defaults = {
+        "timeframe": 5,
+        "exits": {"target_r": None, "max_sessions": 1},
+        "limits": {"max_entries": 2, "max_losses": 2},
+    }
+
+    def validate(self) -> None:
+        _sides(self.sides)
+        if self.stop_at not in ("range", "mid"):
+            raise ValueError("stop_at must be 'range' or 'mid'")
+        if self.range_minutes < 1 or self.range_minutes > 60:
+            raise ValueError("range_minutes must be 1 to 60")
+
+    def baseline_stop(self) -> SwingStop | str:
+        return MATCHED
+
+    def start(self, series: Series) -> _OpeningRangeBreakoutRun:
+        if self.range_minutes % series.timeframe:
+            raise ValueError(f"range_minutes ({self.range_minutes}) must be a whole number of "
+                             f"{series.timeframe}-minute bars")
+        return _OpeningRangeBreakoutRun(self, series)
+
+
+class _OpeningRangeBreakoutRun:
+    def __init__(self, rules: OpeningRangeBreakout, series: Series):
+        self.p = rules
+        self.s = series
+        self.allowed = _sides(rules.sides)
+        self.range_end = RTH_OPEN + rules.range_minutes
+        self.session = -1
+        self.high = self.low = NA
+        self.ready = False
+        self.used: set[int] = set()
+
+    def on_bar(self, i: int, ctx: Context) -> Signal | None:
+        s = self.s
+        if s.session[i] != self.session:
+            self.session = s.session[i]
+            self.high = self.low = NA
+            self.ready = False
+            self.used = set() if s.minute[i] == RTH_OPEN else set(self.allowed)
+        closes = s.close_minute(i)
+        if not self.ready:
+            if self.used == set(self.allowed):
+                return None
+            self.high = s.high[i] if math.isnan(self.high) else max(self.high, s.high[i])
+            self.low = s.low[i] if math.isnan(self.low) else min(self.low, s.low[i])
+            self.ready = closes >= self.range_end
+            return None
+        c = s.close[i]
+        levels = {1: self.high, -1: self.low}
+        stops = {1: self.low, -1: self.high}
+        if self.p.stop_at == "mid":
+            stops = {1: (self.high + self.low) / 2, -1: (self.high + self.low) / 2}
+        for side in self.allowed:
+            if side in self.used or side * (c - levels[side]) <= 0:
+                continue
+            self.used.add(side)
+            if not ctx.flat or ctx.halted:
+                continue
+            proposed = Signal(i, side, stops[side])
+            if ctx.accept(proposed):
+                return proposed
+        return None
+
+
 FAMILIES: dict[str, type] = {
     "recovery_swing": RecoverySwing,
     "vwap_reclaim": VwapReclaim,
     "failed_breakout": FailedBreakout,
+    "opening_range_breakout": OpeningRangeBreakout,
 }
 
 

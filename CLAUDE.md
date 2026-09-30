@@ -54,7 +54,7 @@ every check fails on missing tools rather than on the change.
 
 **Merging to `main` deploys to production.** Once CI and the Deployment
 package pass on the merge commit, the VPS installs it by itself within about
-15 minutes. On weekdays between 09:25 and 16:15 New York time it waits for the
+10 minutes. On weekdays between 09:25 and 16:15 New York time it waits for the
 close unless the PR carries the `deploy-now` label. Schema changes wait for a
 person. A PR is ready to merge only when it is ready to go live; see
 [automatic deployment](deploy/README.md#automatic-deployment).
