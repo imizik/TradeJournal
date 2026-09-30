@@ -10,19 +10,21 @@ exam on the locked holdout) and appends the result to `research/ledger.jsonl`.
 `week` is the weekly loop: the idea model proposes up to three candidates from
 a brief (`app/engine/factory_brief.py`), they are judged, and the week's
 report goes to `research/reports/`; `notify` sends its summary to the phone.
+The idea model is Claude through the API, or, with `--answer`, a Claude Code
+session that answered the brief `--dry-run` wrote (`/factory-week`).
 See docs/strategy-factory.md.
 
 The live ledger is on branch factory/ledger, in the factory checkout
 (`scripts/factory_week.sh` runs there weekly); `run` and `week` refuse to write
 the default ledger from any other branch. Bars are Alpaca SIP minute bars from
 the local cache: `prepare` fills it and needs the Alpaca key, `week` calls
-Claude and needs the Anthropic key, `notify` needs FACTORY_NTFY_URL, and `run`
-and `ledger` never touch the network.
+Claude and needs the Anthropic key (not with `--answer`), `notify` needs
+FACTORY_NTFY_URL, and `run` and `ledger` never touch the network.
 
 Usage:
     python scripts/strategy_factory.py prepare
     python scripts/strategy_factory.py run ../research/specs/recovery_swing_v0.1.json
-    python scripts/strategy_factory.py week [--dry-run]
+    python scripts/strategy_factory.py week [--dry-run [--brief-out FILE]] [--answer FILE] [--budget N]
     python scripts/strategy_factory.py notify
     python scripts/strategy_factory.py ledger
 """
@@ -53,6 +55,7 @@ sys.path.insert(0, str(BACKEND_ROOT))
 
 from app.engine.factory_brief import (  # noqa: E402
     IDEAS_SCHEMA,
+    answer_problem,
     LESSON_WEEKS,
     SYSTEM_PROMPT,
     WEEKLY_BUDGET,
@@ -351,6 +354,45 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
     return answer, f"{message.model}, {usage.input_tokens:,} tokens in and {usage.output_tokens:,} out"
 
 
+def answer_file(path: Path, author: str) -> Proposer:
+    """The idea model's answer from a file a Claude Code session wrote after
+    reading the brief (`/factory-week`), instead of one asked for through the API."""
+
+    def propose(system: str, text: str) -> tuple[dict[str, Any], str]:
+        try:
+            answer = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"Could not read the answer in {path}: {exc}") from exc
+        problem = answer_problem(answer)
+        if problem:
+            raise SystemExit(f"The answer in {path} does not fit the format: {problem}. Nothing was run.")
+        return answer, f"{author} in a Claude Code session, no API call"
+
+    return propose
+
+
+def week_start(day: date) -> date:
+    """The Sunday a day's week starts on. The factory's weeks run Sunday to
+    Saturday, so each Sunday run opens a new one."""
+    return day - timedelta(days=(day.weekday() + 1) % 7)
+
+
+def used_this_week(records: list[dict], day: date) -> int:
+    """Candidates the weekly runs added in `day`'s week. Lines from before the
+    weeks started on Sunday carry their Monday, which falls in the same week."""
+    start = week_start(day)
+    return sum(1 for record in records
+               if record.get("batch") and start <= date.fromisoformat(record["batch"]) < start + timedelta(days=7))
+
+
+def report_stem(reports: Path, day: date) -> str:
+    """A run's report name: its day, then b, c and on for more runs that day, so none is overwritten."""
+    stem, letters = day.isoformat(), iter("bcdefghijklmnopqrstuvwxyz")
+    while (reports / f"{stem}.md").exists():
+        stem = day.isoformat() + next(letters)
+    return stem
+
+
 def engine_fingerprint() -> str:
     digest = hashlib.sha256()
     for name in EVIDENCE_MODULES:
@@ -404,26 +446,31 @@ def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[
                  proposer: Proposer) -> int:
     check_live_ledger(args)
     today = datetime.now(ET).date()
-    monday = (today - timedelta(days=today.weekday())).isoformat()
+    batch = week_start(today).isoformat()
     records = read_ledger(args.ledger)
-    used = sum(1 for record in records if record.get("batch") == monday)
-    budget = WEEKLY_BUDGET - used
+    budget = WEEKLY_BUDGET - used_this_week(records, today) if args.budget is None else args.budget
     if budget <= 0:
-        print(f"This week's budget of {WEEKLY_BUDGET} candidates is already used; nothing to do.")
+        print(f"This week's budget of {WEEKLY_BUDGET} candidates is already used; nothing to do. "
+              "`week --budget N` runs N more anyway.")
         return 0
     progress("gathering discovery evidence")
     found = gather_evidence(records, store, args.out, progress)
     count = prior_candidates(records)
     text = brief(today, records, found, recent_lessons(args.reports), budget, required_t(count + 1), count)
     if args.dry_run:
-        print(SYSTEM_PROMPT + "\n\n" + text)
+        if args.brief_out is not None:
+            args.brief_out.write_text(SYSTEM_PROMPT + "\n\n" + text)
+            print(f"The brief for up to {budget} candidates is in {args.brief_out}.")
+        else:
+            print(SYSTEM_PROMPT + "\n\n" + text)
         return 0
 
     progress(f"asking the idea model for up to {budget} candidates")
     answer, usage = proposer(SYSTEM_PROMPT, text)
     proposals = review(answer, {record["id"] for record in records}, budget)
     run_records: dict[str, dict] = {}
-    spec_dir = args.specs / today.isoformat()
+    stem = report_stem(args.reports, today)
+    spec_dir = args.specs / stem
     for proposal in proposals:
         if proposal.spec is None:
             progress(f"refused: {proposal.title}: {proposal.problem}")
@@ -437,7 +484,7 @@ def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[
         for candidate in queue:
             progress(f"judging {candidate.name} ({spec_id(candidate)})")
             try:
-                _, record, _ = run_one(candidate, store, args.ledger, args.out, True, progress, batch=monday)
+                _, record, _ = run_one(candidate, store, args.ledger, args.out, True, progress, batch=batch)
             except Exception as exc:  # one candidate that cannot be judged must not stop the week
                 proposal.problem = f"it could not be judged: {type(exc).__name__}: {exc}"
                 progress(proposal.problem)
@@ -450,9 +497,9 @@ def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[
     footer = f"Idea model: {usage}. Code {code_version()}; bars through {store.last_day(MARKET)}."
     markdown, summary = weekly_report(today, proposals, run_records, answer, ledger_note, footer)
     args.reports.mkdir(parents=True, exist_ok=True)
-    (args.reports / f"{today.isoformat()}.md").write_text(markdown)
+    (args.reports / f"{stem}.md").write_text(markdown)
     passed = any(record["verdict"] in ("passed", "awaiting_exam", "passed_confirmation") for record in run_records.values())
-    (args.reports / f"{today.isoformat()}.json").write_text(json.dumps(
+    (args.reports / f"{stem}.json").write_text(json.dumps(
         {"day": today.isoformat(), "summary": summary, "passed": passed, "answer": answer}, indent=2) + "\n")
     print(markdown)
     return 0
@@ -554,6 +601,13 @@ def command_prepare(args: argparse.Namespace, progress: Callable[[str], None]) -
     return 0
 
 
+def _at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return value
+
+
 def main(
     argv: list[str] | None = None,
     source_factory: Callable[[], MinuteSource] | None = None,
@@ -571,8 +625,15 @@ def main(
     run.add_argument("spec", type=Path)
     run.add_argument("--rerun", action="store_true", help="run a spec that is already in the ledger again")
     run.add_argument("--no-exam", action="store_true", help="stop after confirmation, holdout untouched")
-    week = sub.add_parser("week", help="the weekly loop: propose, judge, report (needs the Anthropic key)")
+    week = sub.add_parser("week", help="the weekly loop: propose, judge, report (asks Claude through the API "
+                                       "unless given --answer)")
     week.add_argument("--dry-run", action="store_true", help="print the brief the idea model would get, and stop")
+    week.add_argument("--brief-out", type=Path, help="with --dry-run, write the brief to this file instead")
+    week.add_argument("--answer", type=Path, help="the idea model's answer as JSON, written by a Claude Code "
+                                                  "session from the brief (/factory-week); no API call")
+    week.add_argument("--answer-by", default="Claude", help="who wrote --answer, for the report")
+    week.add_argument("--budget", type=_at_least_one, help="candidates this run may add, in place of what is left "
+                                                            "of this week's three (a run you ask for)")
     notify = sub.add_parser("notify", help="send the latest weekly summary to the phone (needs FACTORY_NTFY_URL)")
     notify.add_argument("--failure", help="send this failure message instead")
     sub.add_parser("ledger", help="list the ledger and the current bar")
@@ -582,8 +643,8 @@ def main(
     args = parser.parse_args(argv)
 
     os.environ["ALPACA_DATA_FEED"] = args.feed
-    real_run = {"prepare": True, "week": proposer is None and not getattr(args, "dry_run", False),
-                "notify": sender is None}.get(args.command, False)
+    asks_the_api = proposer is None and not getattr(args, "dry_run", False) and getattr(args, "answer", None) is None
+    real_run = {"prepare": True, "week": asks_the_api, "notify": sender is None}.get(args.command, False)
     if real_run:
         # Keys and the ntfy topic live in backend/.env. Tests inject a proposer
         # and a sender instead, so they never read it.
@@ -602,7 +663,8 @@ def main(
         return command_notify(args, sender or publish)
     store = BarStore((source_factory or AlpacaCache)(), args.out, progress)
     if args.command == "week":
-        return command_week(args, store, progress, proposer or claude_proposer)
+        chosen = proposer or (answer_file(args.answer, args.answer_by) if args.answer else claude_proposer)
+        return command_week(args, store, progress, chosen)
     return command_run(args, store, progress)
 
 

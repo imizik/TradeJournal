@@ -292,6 +292,10 @@ is verifiable rather than hopeful.
   `test_strategy_factory.py` pins the committed specs' ids.
 - Weekly proposals trade the core universe at the default costs; the review
   refuses a proposal that picks tickers or changes costs.
+- Whoever proposes sees only the brief. A Claude Code session answering it
+  (`/factory-week`) must not read the ledger, the reports or the trade files
+  before its answer is judged, and does not propose again after reading
+  results; the next run starts in a fresh session.
 
 ## TradingView live alerts
 

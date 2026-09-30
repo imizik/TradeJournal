@@ -20,7 +20,7 @@ import pytest
 from app.engine.factory_brief import SYSTEM_PROMPT
 from app.engine.factory_data import NYSE_EARLY_CLOSES
 from app.engine.factory_gates import required_t
-from app.engine.factory_rules import parse_spec, spec_id
+from app.engine.factory_rules import canonical, parse_spec, spec_id
 from app.engine.market_map import ET
 
 BACKEND = Path(__file__).resolve().parents[1]
@@ -224,9 +224,9 @@ def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
     assert system == SYSTEM_PROMPT and "Propose up to 3 new candidates this week." in text
     assert '"recovery_swing"' in text and "## Discovery evidence" in text
     today = datetime.now(ET).date()
-    monday = (today - timedelta(days=today.weekday())).isoformat()
     (record,) = read_lines(paths["ledger.jsonl"])
-    assert (record["name"], record["batch"], record["source"]) == ("Daily EMA reclaim", monday, "factory")
+    batch = script.week_start(today).isoformat()
+    assert (record["name"], record["batch"], record["source"]) == ("Daily EMA reclaim", batch, "factory")
     saved = json.loads((paths["specs"] / today.isoformat() / "daily-ema-reclaim.json").read_text())
     assert spec_id(parse_spec(saved)) == record["id"] and "tickers" not in saved
     markdown = (paths["reports"] / f"{today}.md").read_text()
@@ -242,7 +242,9 @@ def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
     assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
     assert "Propose up to 2 new candidates this week." in asked[0][1]
     assert len(read_lines(paths["ledger.jsonl"])) == 1
-    assert "- Daily EMA reclaim: the same rules are already in the ledger." in (paths["reports"] / f"{today}.md").read_text()
+    # A second report the same day gets its own name; the first is kept.
+    assert "- Daily EMA reclaim: the same rules are already in the ledger." in (paths["reports"] / f"{today}b.md").read_text()
+    assert "### 1. Daily EMA reclaim" in (paths["reports"] / f"{today}.md").read_text()
 
 
 def test_week_stops_when_the_budget_is_used_and_dry_run_only_prints(script, tmp_path, capsys):
@@ -255,13 +257,54 @@ def test_week_stops_when_the_budget_is_used_and_dry_run_only_prints(script, tmp_
     printed = capsys.readouterr().out
     assert printed.startswith(SYSTEM_PROMPT) and "Propose up to 3 new candidates" in printed
     assert not paths["reports"].exists() and not paths["ledger.jsonl"].exists()
-    today = datetime.now(ET).date()
-    monday = (today - timedelta(days=today.weekday())).isoformat()
-    paths["ledger.jsonl"].write_text("".join(json.dumps({"id": f"x{k}", "name": "x", "source": "factory", "verdict":
-                                                         "failed_screen", "reached_confirmation": False,
-                                                         "batch": monday}) + "\n" for k in range(3)))
+    paths["ledger.jsonl"].write_text(used_week(script))
     assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
     assert "budget of 3 candidates is already used" in capsys.readouterr().out
+
+
+def used_week(script) -> str:
+    """Three ledger lines from this week's weekly run, as the factory writes them."""
+    batch = script.week_start(datetime.now(ET).date()).isoformat()
+    lines = []
+    for k in range(3):
+        spec = parse_spec({"family": "recovery_swing", "tickers": ["AAA", "BBB"], "params": {"arm_sessions": 3 + k}})
+        lines.append(json.dumps({"id": spec_id(spec), "name": f"used {k}", "source": "factory", "spec": canonical(spec),
+                                 "verdict": "failed_screen", "reached_confirmation": False, "batch": batch}) + "\n")
+    return "".join(lines)
+
+
+def test_the_week_runs_sunday_to_saturday(script):
+    tuesday, sunday = date(2026, 9, 29), date(2026, 10, 4)
+    assert script.week_start(tuesday) == date(2026, 9, 27) and script.week_start(sunday) == sunday
+    # The first weekly run, on a Tuesday, tagged its lines with that week's Monday.
+    first_run = [{"batch": "2026-09-28"}] * 3 + [{"batch": None}, {"name": "by hand"}]
+    assert script.used_this_week(first_run, tuesday) == 3
+    assert script.used_this_week(first_run, date(2026, 10, 3)) == 3
+    assert script.used_this_week(first_run, sunday) == 0  # the scheduled Sunday run starts a new week
+
+
+def test_a_claude_code_session_can_answer_the_brief_instead_of_the_api(script, tmp_path, capsys):
+    paths, args = weekly_paths(tmp_path)
+    paths["ledger.jsonl"].write_text(used_week(script))
+    today = datetime.now(ET).date()
+    # The week's three are used; a run the user asks for can go past them.
+    brief = tmp_path / "brief.md"
+    assert script.main([*args, "week", "--dry-run", "--brief-out", str(brief), "--budget", "2"],
+                       source_factory=StubSource) == 0
+    assert brief.read_text().startswith(SYSTEM_PROMPT) and "Propose up to 2 new candidates this week." in brief.read_text()
+    answer = tmp_path / "answer.json"
+    answer.write_text(json.dumps(ANSWER))
+    assert script.main([*args, "week", "--answer", str(answer), "--answer-by", "Claude Opus 5.5", "--budget", "2"],
+                       source_factory=StubSource) == 0
+    record = read_lines(paths["ledger.jsonl"])[-1]
+    assert (record["name"], record["batch"]) == ("Daily EMA reclaim", script.week_start(today).isoformat())
+    assert "Idea model: Claude Opus 5.5 in a Claude Code session, no API call." in (
+        paths["reports"] / f"{today}.md").read_text()
+    answer.write_text(json.dumps({"ideas": [], "lessons": "none"}))
+    with pytest.raises(SystemExit, match="does not fit the format: answer lacks wanted"):
+        script.main([*args, "week", "--answer", str(answer), "--budget", "1"], source_factory=StubSource)
+    with pytest.raises(SystemExit):
+        script.main([*args, "week", "--budget", "0"], source_factory=StubSource)
 
 
 def test_the_live_ledger_is_written_only_on_the_factory_branch(script, tmp_path, monkeypatch):
