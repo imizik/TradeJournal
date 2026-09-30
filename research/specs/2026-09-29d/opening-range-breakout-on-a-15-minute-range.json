@@ -1,0 +1,8 @@
+{
+  "name": "Opening range breakout on a 15-minute range",
+  "family": "opening_range_breakout",
+  "params": {
+    "range_minutes": 15
+  },
+  "notes": "A 5-minute opening range is one bar of the noisiest trading of the day, so its high and low are not levels anyone defends and its width gives a stop too tight for the open's swings. A 15-minute range lets the opening auction finish inside the range, so a later close beyond it is a break of a level the market actually built, and the stop at the other side has more room, which also shrinks the fixed costs per R that sank the one-minute patterns. This is the classic longer opening range, a standard coarse value chosen before any result for it was seen, though the idea was prompted by the weak first-bar breaks in the 5-minute family's discovery evidence. New idea: The range length only: range_minutes from 5 to 15 (three 5-minute bars). Timeframe, both sides, stop at the other side of the range, hold to the close, no target, no window and the session limits stay at the family defaults. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}

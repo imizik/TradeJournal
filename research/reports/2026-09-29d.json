@@ -1,0 +1,31 @@
+{
+  "day": "2026-09-29",
+  "summary": "2 ideas judged, none passed; all stopped at the screen. Closest: Opening range breakout, skipping breaks on the first bar after the range (failed the screen). The ledger holds 19 ideas; 11 have reached confirmation, so the next one there needs t >= 2.64.",
+  "passed": false,
+  "answer": {
+    "ideas": [
+      {
+        "title": "Opening range breakout, skipping breaks on the first bar after the range",
+        "hypothesis": "With a 5-minute opening range, a close beyond it on the very next 5-minute bar (09:35-09:40) is still part of the opening auction's noise: the range is one bar wide, so the stop is tight and the first swing back through it takes the trade out. A break that comes once the open has settled (from 09:45) is more likely to be real directional flow, and holding it to the close lets it run. On the discovery period the default family's breaks signalled at 09:40 averaged about -0.64R over roughly 1,430 trades while breaks from 09:45 on were positive, and the trader's own journal of about 1,515 option trades independently found entries from 09:30 to 09:45 lost money, 09:45 to 10:00 was the best window, and entries after a 5-minute opening range break beat their other entries in both years and on both sides. Random entries get the same window, stop rule and hold, so this passes only if later breaks themselves beat random entries.",
+        "builds_on": "",
+        "change": "The entry window only: fills allowed from 09:45 to 16:00 instead of any time, so a break on the first bar after the 5-minute range is refused (and, as the family already does, uses up that side for the day). Range length, both sides, stop at the other side of the range, hold to the close, no target and the session limits stay at the family defaults.",
+        "from_evidence": true,
+        "spec_json": "{\"family\": \"opening_range_breakout\", \"window\": [945, 1600]}"
+      },
+      {
+        "title": "Opening range breakout on a 15-minute range",
+        "hypothesis": "A 5-minute opening range is one bar of the noisiest trading of the day, so its high and low are not levels anyone defends and its width gives a stop too tight for the open's swings. A 15-minute range lets the opening auction finish inside the range, so a later close beyond it is a break of a level the market actually built, and the stop at the other side has more room, which also shrinks the fixed costs per R that sank the one-minute patterns. This is the classic longer opening range, a standard coarse value chosen before any result for it was seen, though the idea was prompted by the weak first-bar breaks in the 5-minute family's discovery evidence.",
+        "builds_on": "",
+        "change": "The range length only: range_minutes from 5 to 15 (three 5-minute bars). Timeframe, both sides, stop at the other side of the range, hold to the close, no target, no window and the session limits stay at the family defaults.",
+        "from_evidence": true,
+        "spec_json": "{\"family\": \"opening_range_breakout\", \"params\": {\"range_minutes\": 15}}"
+      }
+    ],
+    "lessons": "Nothing has passed yet, and one candidate (the daily-EMA recovery swing with a one-hour stall exit) reached confirmation and failed there: strong in the first half, flat in the second, and it did not survive tripled costs. The one-minute intraday patterns pick entries slightly better than random but lose to costs, so they are not worth more tweaks. The new opening range breakout family breaks even on its defaults over about 7,100 discovery trades, but that average hides a sharp split by time: breaks on the first bar after the 5-minute range lose heavily, while later breaks are positive. The trader's own journal points the same way, with the first fifteen minutes their worst window and 09:45-10:00 their best. The confirmation bar is t >= 2.64 and rises with each arrival, so only ideas with a mechanical reason are worth sending.",
+    "wanted": [
+      "An opening-range width feature (the range's height in daily ATR), since narrow ranges are the classic condition for breakouts that follow through and wide ones for breaks that fail.",
+      "A target set in multiples of the opening range's width rather than in R, so a breakout's goal scales with the range it broke out of.",
+      "A time-of-day exit (flat by a clock time such as 11:00 or 12:00), to test the trader's finding that their winners closed within about an hour and trades held into the afternoon lost money, without a per-trade max_minutes that shifts with entry time."
+    ]
+  }
+}
