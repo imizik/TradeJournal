@@ -72,6 +72,34 @@ cd backend
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
   which can show regular-session closes after hours.
+- Streamed trades and REST refreshes that only change the newest candle (or add
+  one) go through Lightweight Charts' `series.update`, so zoom, scroll and the
+  crosshair stay where they are. A full `setData` reset happens when the symbol,
+  interval or session changes, when older history changes (a REST correction),
+  or when the 1,200-candle window slides. `barChange` in `lib/charts.ts` decides.
+- Intraday charts show a **next-bar countdown** computed from the browser clock
+  and the same session-anchored buckets the backend uses (`nySession`/`barClock`
+  mirror `session_part`); it adds no provider calls. It shows a number only while
+  updates are running, data is not delayed or stale (refresh within 45 seconds,
+  no error or partial refresh), the clock is inside the selected session, and
+  the newest candle belongs to the current session segment. Otherwise it says
+  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. There is
+  no holiday calendar: a holiday reads as Waiting for bars, not as closed.
+- **Full screen** covers the app navigation, hides the side panels (the
+  watchlist can be toggled back), and gives the main chart the screen height
+  below a sticky toolbar with an Exit button; Escape also exits. Smaller charts
+  have a saved S/M/L height and a per-chart expand toggle.
+- **Symbol search** (Cmd/Ctrl+K) lists the typed ticker, the last eight symbols
+  and the watchlist; arrows move, Enter charts, Escape closes. Watchlist rows
+  take Up/Down/Home/End, and Alt+Up/Down steps the charted symbol through the
+  watchlist. Intervals are workspace settings and carry over. Search never calls
+  a provider; only the resulting symbol change loads data.
+- **Link time ranges** (off by default) makes panning or zooming one chart set
+  the same visible *time* window on the other four. Coarser charts keep at least
+  a dozen candles around that moment; finer charts that cannot fit the span at
+  their minimum bar spacing center on it. The chart being moved owns the link
+  for 250 ms and programmatic range changes are not re-broadcast, which prevents
+  feedback loops.
 
 ## Data and calculation boundaries
 
@@ -131,7 +159,11 @@ stale timestamps, access failure, private routes and option fill markers.
 `frontend/e2e/charts.spec.ts` verifies rendered canvases, linked symbols, saved
 levels, streamed price/candle updates, hidden/paused polling, non-overlapping slow refreshes, errors, missing
 credentials and phone layout using stubbed provider responses and a disposable
-SQLite backend. A canvas comparison checks that VWAP does not paint across an
+SQLite backend. It also drives a fake clock through the countdown and each of
+its named states, checks that ticks update in place without resetting zoom
+while a corrected older bar does reset, pans linked charts and checks they
+settle on the same time window, and exercises full screen on desktop and phone
+and keyboard symbol navigation. A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_stream.py` checks session buckets, invalid event
 filters, and a single upstream subscription shared across tabs.

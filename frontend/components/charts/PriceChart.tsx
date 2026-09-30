@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, IPriceLine, Time, UTCTimestamp } from "lightweight-charts";
-import { Expand, LocateFixed } from "lucide-react";
-import { INTERVALS, barAt, etTime, price } from "@/lib/charts";
-import type { ChartBar, ChartPanelData, CrosshairLink, Indicators, Interval, PriceLevel } from "@/lib/charts";
+import { Expand, LocateFixed, Maximize2, Minimize2, Timer } from "lucide-react";
+import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, countdown, etTime, price } from "@/lib/charts";
+import type { BarClock, ChartBar, ChartPanelData, CrosshairLink, Indicators, Interval, PriceLevel, RangeLink } from "@/lib/charts";
 
 const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
 const tickFormats = {
@@ -14,24 +14,51 @@ const tickFormats = {
   [TickMarkType.DayOfMonth]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }),
 };
 type Overlay = keyof typeof COLORS;
+const MIN_BAR_SPACING = 2;
+const CLOCK_TEXT = { paused: "Paused", delayed: "Delayed data", stale: "Stale data", closed: "Market closed", waiting: "Waiting for bars" };
+// Whitespace alone still joins line segments in Lightweight Charts. Hide the
+// outgoing segment at the session boundary. RTH timestamps always lie within
+// one UTC date, even across New York DST changes.
+function linePoint(bars: ChartBar[], index: number, name: Overlay) {
+  const b = bars[index];
+  if (b[name] === null) return { time: b.time as UTCTimestamp };
+  const next = bars[index + 1];
+  const gapAfter = name === "vwap" && next && (next.vwap === null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
+  return { time: b.time as UTCTimestamp, value: b[name] as number, ...(gapAfter ? { color: "transparent" } : {}) };
+}
+const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close });
+const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? "#2bc9a43d" : "#ee617a3d" });
+const shadePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: 1, color: b.extended ? "#6b84bd10" : "transparent" });
+const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
+/** Browser tests register a map here to inspect chart ranges; production never defines it. */
+type ChartRegistry = Map<string, IChartApi>;
+
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
   lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; levels: IPriceLine[];
 };
 
-export default function PriceChart({ id, symbol, interval, panel, indicators, levels, link, main = false, drawing = false, onDraw, onInterval, onFocus }: {
-  id: string; symbol: string; interval: Interval; panel?: ChartPanelData; indicators: Indicators; levels: PriceLevel[];
-  link: CrosshairLink; main?: boolean; drawing?: boolean; onDraw(price: number): void;
-  onInterval(interval: Interval): void; onFocus?(): void;
+export default function PriceChart({ id, symbol, interval, session, panel, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, onDraw, onInterval, onFocus, onExpand }: {
+  id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; indicators: Indicators; levels: PriceLevel[];
+  link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock?: BarClock | null; height: number;
+  main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
+  onInterval(interval: Interval): void; onFocus?(): void; onExpand?(): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const bundle = useRef<Bundle | null>(null);
   const barsRef = useRef<ChartBar[]>([]);
+  const resets = useRef(0);
+  const linking = useRef(linkRange);
+  // Programmatic range changes (data resets, applying a linked range) must not
+  // be re-broadcast; only user pans and zooms drive the other charts.
+  const quietUntil = useRef(0);
+  const quiet = () => { quietUntil.current = performance.now() + 60; };
   const actions = useRef({ drawing, onDraw });
   const initial = useRef(true);
   const [hover, setHover] = useState<ChartBar | null>(null);
   useEffect(() => { actions.current = { drawing, onDraw }; }, [drawing, onDraw]);
+  useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   useEffect(() => {
     if (!container.current) return;
@@ -45,7 +72,7 @@ export default function PriceChart({ id, symbol, interval, panel, indicators, le
       grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
       rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 } },
-      timeScale: { borderColor: "#263141", timeVisible: !daily, secondsVisible: false, rightOffset: 4, minBarSpacing: 2,
+      timeScale: { borderColor: "#263141", timeVisible: !daily, secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
           return kind <= TickMarkType.DayOfMonth ? tickFormats[kind as keyof typeof tickFormats].format(time * 1000) : etTime(time);
@@ -92,37 +119,75 @@ export default function PriceChart({ id, symbol, interval, panel, indicators, le
       const value = candles.coordinateToPrice(event.point.y);
       if (value !== null && value > 0) actions.current.onDraw(Math.round(value * 100) / 100);
     });
-    return () => { stopLink(); markers.detach(); chart.remove(); bundle.current = null; };
-  }, [id, symbol, interval, indicators.rsi, link, main]);
+    const step = INTERVAL_SECONDS[interval];
+    const stopRange = rangeLink.listen(id, (range) => {
+      if (!linking.current || !barsRef.current.length) return;
+      // Sync by time. A coarser chart keeps a readable minimum of candles
+      // around the same moment instead of collapsing to one bar.
+      const middle = (range.from + range.to) / 2;
+      const half = Math.max((range.to - range.from) / 2, step * 6);
+      const scale = chart.timeScale();
+      const index = (t: number) => scale.timeToIndex(Math.round(t) as UTCTimestamp, true);
+      const [from, centre, to] = [index(middle - half), index(middle), index(middle + half)];
+      if (from === null || centre === null || to === null) return;
+      // A fine interval on a narrow chart cannot always fit the whole span
+      // (minimum bar spacing); it then shows as much as fits around the same
+      // moment rather than snapping to its right edge.
+      const width = Math.max(4, Math.min(to - from, scale.width() / MIN_BAR_SPACING));
+      quiet();
+      scale.setVisibleLogicalRange({ from: centre - width / 2, to: centre + width / 2 });
+    });
+    const onRange = (range: { from: Time; to: Time } | null) => {
+      if (!linking.current || !range || performance.now() < quietUntil.current) return;
+      if (typeof range.from === "number" && typeof range.to === "number") rangeLink.emit({ from: range.from, to: range.to }, id);
+    };
+    chart.timeScale().subscribeVisibleTimeRangeChange(onRange);
+    const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
+    registry?.set(id, chart);
+    return () => { stopLink(); stopRange(); registry?.delete(id); markers.detach(); chart.remove(); bundle.current = null; };
+  }, [id, symbol, interval, indicators.rsi, link, rangeLink, main]);
 
+  useEffect(() => {
+    const range = bundle.current?.chart.timeScale().getVisibleRange();
+    if (main && linkRange && range) rangeLink.emit({ from: range.from as number, to: range.to as number }, id);
+  }, [main, linkRange, rangeLink, id]);
+
+  // Session changes swap the panel data wholesale; recreate-free resets still
+  // go through setData, so the key only needs to exist for barChange's sake.
+  const dataKey = `${symbol}|${interval}|${session}`;
+  const drawnKey = useRef("");
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
     const bars = panel?.bars ?? [];
+    const prior = barsRef.current;
     barsRef.current = bars;
+    const change = drawnKey.current === dataKey && current.candles.data().length ? barChange(prior, bars) : "reset";
+    drawnKey.current = dataKey;
+    if (change === "same") return;
+    if (change !== "reset") {
+      // Latest-bar path: series.update keeps zoom, scroll and crosshair, and
+      // follows the live edge only when the user is already looking at it.
+      const last = bars.length - 1;
+      if (change === "append") for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+      current.candles.update(candlePoint(bars[last]));
+      current.volume.update(volumePoint(bars[last]));
+      current.shade.update(shadePoint(bars[last]));
+      for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
+      current.rsi?.update(rsiPoint(bars[last]));
+      return;
+    }
+    resets.current += 1;
+    if (container.current) container.current.dataset.resets = String(resets.current);
     const range = current.chart.timeScale().getVisibleRange();
     const logical = current.chart.timeScale().getVisibleLogicalRange();
     const following = !logical || logical.to >= (current.candles.data().length - 3);
-    current.candles.setData(bars.map((b) => ({ ...b, time: b.time as UTCTimestamp })));
-    current.volume.setData(bars.map((b) => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? "#2bc9a43d" : "#ee617a3d" })));
-    current.volume.applyOptions({ visible: indicators.volume });
-    current.shade.setData(bars.map((b) => ({ time: b.time as UTCTimestamp, value: 1, color: b.extended ? "#6b84bd10" : "transparent" })));
-    for (const name of Object.keys(COLORS) as Overlay[]) {
-      current.lines[name].setData(bars.map((b, index) => {
-        if (b[name] === null) return { time: b.time as UTCTimestamp };
-        const next = bars[index + 1];
-        // Whitespace alone still joins line segments in Lightweight Charts.
-        // Hide the outgoing segment at the session boundary. RTH timestamps
-        // always lie within one UTC date, even across New York DST changes.
-        const gapAfter = name === "vwap" && next && (next.vwap === null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
-        return { time: b.time as UTCTimestamp, value: b[name] as number, ...(gapAfter ? { color: "transparent" } : {}) };
-      }));
-      current.lines[name].applyOptions({ visible: indicators[name] });
-    }
-    current.rsi?.setData(bars.map((b) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi }));
-    current.markers.setMarkers(indicators.fills ? (panel?.markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
-      position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
-      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : []);
+    quiet();
+    current.candles.setData(bars.map(candlePoint));
+    current.volume.setData(bars.map(volumePoint));
+    current.shade.setData(bars.map(shadePoint));
+    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
+    current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && initial.current) {
       current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - (main ? 110 : 65)), to: bars.length + 4 });
       initial.current = false;
@@ -130,7 +195,21 @@ export default function PriceChart({ id, symbol, interval, panel, indicators, le
       const width = logical.to - logical.from;
       current.chart.timeScale().setVisibleLogicalRange({ from: bars.length + 4 - width, to: bars.length + 4 });
     } else if (range) current.chart.timeScale().setVisibleRange(range);
-  }, [panel, indicators, symbol, interval, main]);
+  }, [panel, dataKey, main, indicators.rsi]);
+
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current) return;
+    current.volume.applyOptions({ visible: indicators.volume });
+    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
+  }, [indicators, symbol, interval, main]);
+
+  const markers = panel?.markers;
+  useEffect(() => {
+    bundle.current?.markers.setMarkers(indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
+      position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
+      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : []);
+  }, [markers, indicators.fills, indicators.rsi, symbol, interval, main]);
 
   useEffect(() => {
     const current = bundle.current;
@@ -140,6 +219,11 @@ export default function PriceChart({ id, symbol, interval, panel, indicators, le
   }, [levels, symbol, interval, indicators.rsi, main]);
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
+  // Main chart: in the header. Smaller charts: end of the values row, so the
+  // header keeps room for its controls at quarter width.
+  const timer = clock && <span role="timer" aria-label={`${main ? "Main" : id} next bar`} title={clock.state === "live" ? "Time until this candle closes" : undefined}
+    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${clock.state === "live" ? "bg-sky-400/10 text-sky-300" : clock.state === "closed" || clock.state === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
+    <Timer size={11} />{clock.state === "live" ? countdown(clock.remaining) : CLOCK_TEXT[clock.state]}</span>;
   return (
     <section aria-label={`${symbol} ${interval} chart`} className={`relative min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
@@ -149,19 +233,24 @@ export default function PriceChart({ id, symbol, interval, panel, indicators, le
           </select>
           {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex min-w-0 items-center gap-1">
+          {main && timer}
           <button title="Go to latest candles" aria-label={`Latest candles ${id}`} onClick={() => { const current = bundle.current; if (current) { const n = barsRef.current.length; current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - (main ? 110 : 65)), to: n + 4 }); } }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
+          {onExpand && <button title={expanded ? "Shrink chart" : "Expand chart"} aria-label={`${expanded ? "Shrink" : "Expand"} ${interval} chart`} aria-pressed={!!expanded} onClick={onExpand} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200">{expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
         </div>
       </div>
-      <div className="flex h-6 items-center gap-2 overflow-hidden whitespace-nowrap px-3 font-mono text-[10px] text-slate-500" aria-label={`${id} candle values`}>
+      <div className="flex h-6 min-w-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
+        <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
         {bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && <span>Vol {bar.volumePending ? "pending" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume)}</span>}</> : <span>No candles in this window</span>}
+        </div>
+        {!main && timer}
       </div>
       {main && <div className="flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
         {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
-      <div ref={container} data-testid={`canvas-${id}`} className={`${main ? "h-[410px]" : "h-[245px]"} ${drawing ? "cursor-crosshair" : ""}`} />
+      <div ref={container} data-testid={`canvas-${id}`} style={{ height }} className={drawing ? "cursor-crosshair" : ""} />
       {!panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}
       {drawing && <div className="pointer-events-none absolute left-3 top-24 rounded bg-blue-500/90 px-3 py-1.5 text-xs text-white">Click a price to save a level</div>}
     </section>
