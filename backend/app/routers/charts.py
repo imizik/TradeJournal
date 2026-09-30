@@ -11,6 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
@@ -118,7 +119,7 @@ def workspace(
     if len(symbols) > 30 or not frames or len(frames) > 5 or any(f not in INTERVALS for f in frames):
         raise HTTPException(422, "Choose up to 5 supported intervals and 30 watchlist symbols.")
     try:
-        data = chart_feed.workspace(symbol, frames, symbols, session)
+        data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar)
     except ChartFeedError as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
 

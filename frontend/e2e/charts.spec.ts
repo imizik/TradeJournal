@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { ChartData, ChartBar, Interval } from "../lib/charts";
+import type { ChartData, ChartBar, Interval, MarketDay } from "../lib/charts";
 
 // Provider responses are deliberately stubbed: browser checks prove interaction,
 // not brokerage entitlement. Backend tests exercise normalization and real routes.
@@ -310,6 +310,87 @@ for (const scenario of clockCases) {
     await expect(page.getByRole("timer", { name: "Main next bar" })).not.toHaveText(/\d:\d\d/);
   });
 }
+
+// Tradier's calendar for November 2026 (EST): Thanksgiving closed, the next day closes at 13:00.
+const et = (clock: string) => Date.parse(`${clock}-05:00`) / 1000;
+const THANKSGIVING: MarketDay = { date: "2026-11-26", status: "closed", source: "tradier", description: "Market is closed for Thanksgiving Day", sessions: [], note: null };
+const HALF_DAY: MarketDay = { date: "2026-11-27", status: "open", source: "tradier", description: "Market closes early at 13:00", note: null, sessions: [
+  { part: "pre", start: et("2026-11-27T04:00:00"), end: et("2026-11-27T09:30:00") },
+  { part: "regular", start: et("2026-11-27T09:30:00"), end: et("2026-11-27T13:00:00") },
+  { part: "post", start: et("2026-11-27T13:00:00"), end: et("2026-11-27T17:00:00") }] };
+
+test("a holiday from the market calendar reads Market closed and names the closure", async ({ page }) => {
+  const at = et("2026-11-26T10:32:15");
+  await openAt(page, at, (url) => ({ ...currentFixture(url, at), market: THANKSGIVING }));
+  // The clock rule alone would count down here: it is a Thursday morning with fresh bars.
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Market closed");
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("Market closed");
+  await expect(page.getByLabel("Market hours")).toHaveText("Market is closed for Thanksgiving Day");
+});
+
+test("an early close ends the regular session at 13:00 and the last bar's countdown respects it", async ({ page }) => {
+  let now = et("2026-11-27T12:58:00");
+  await openAt(page, now, (url) => ({ ...currentFixture(url, now), market: HALF_DAY }));
+  await expect(page.getByLabel("Market hours")).toHaveText("Early close 1:00 PM ET");
+  // 12:58:05. Every bucket, including the 12:30 hourly one, ends at 13:00.
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("1:55");
+  await expect(page.getByRole("timer", { name: "Panel 2 next bar" })).toHaveText("1:55");
+  await expect(page.getByRole("timer", { name: "Panel 3 next bar" })).toHaveText("1:55");
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:55");
+  now = et("2026-11-27T13:00:05");
+  await page.clock.pauseAt(now * 1000);
+  // Postmarket starts at the early close and anchors its own buckets.
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("4:55");
+  await page.getByRole("button", { name: "Extended hours on" }).click();
+  await expect(page.getByRole("button", { name: "Regular hours only" })).toBeVisible();
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Market closed");
+});
+
+test("without a market calendar the countdown keeps clock hours and says so", async ({ page }) => {
+  const note = "Market calendar unavailable: holidays and early closes use regular clock hours.";
+  await openAt(page, TUESDAY_1032, (url) => ({ ...currentFixture(url, TUESDAY_1032),
+    market: { date: "2026-09-29", status: "unknown", source: "clock", description: null, note, sessions: [
+      { part: "pre", start: Date.parse("2026-09-29T08:00:00Z") / 1000, end: Date.parse("2026-09-29T13:30:00Z") / 1000 },
+      { part: "regular", start: Date.parse("2026-09-29T13:30:00Z") / 1000, end: Date.parse("2026-09-29T20:00:00Z") / 1000 },
+      { part: "post", start: Date.parse("2026-09-29T20:00:00Z") / 1000, end: Date.parse("2026-09-30T00:00:00Z") / 1000 }] } }));
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:40");
+  await expect(page.getByLabel("Market hours")).toHaveText(note);
+});
+
+test("with no intraday bars today (weekend, holiday, overnight) charts open on the latest completed sessions", async ({ page }) => {
+  const requests: { interval: string | null; before: number }[] = [];
+  const template = fixture("http://test/charts/workspace?intervals=5m").panels["5m"]!.bars[0];
+  const completed = Array.from({ length: 120 }, (_, index) => ({ ...template,
+    time: Date.parse("2026-11-25T14:30:00Z") / 1000 + index * 300,
+    end_time: Date.parse("2026-11-25T14:35:00Z") / 1000 + index * 300, source: "alpaca_sip" as const }));
+  let checkedAt = 0;
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    const data = fixture(route.request().url());
+    checkedAt ||= data.checked_at;
+    data.checked_at = checkedAt;
+    for (const [interval, panel] of Object.entries(data.panels))
+      if (interval !== "1D" && interval !== "1W" && panel) panel.bars = [];
+    return route.fulfill({ json: { ...data, market: THANKSGIVING } });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    requests.push({ interval: query.get("interval"), before: Number(query.get("before")) });
+    return route.fulfill({ json: { symbol: "MRVL", interval: query.get("interval"), session: "extended", before: Number(query.get("before")),
+      limit: 1200, bars: completed, markers: [], older_cursor: completed[0].time, exhausted: false, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null,
+      calendar_note: "Market calendar unavailable: holidays and early closes use regular clock hours." } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByTestId("canvas-Panel 5")).toHaveAttribute("data-bars", "120");
+  // One opening request per intraday panel, starting from now; scrolling may add older pages.
+  const first = new Map<string | null, number>();
+  for (const request of requests) if (!first.has(request.interval)) first.set(request.interval, request.before);
+  expect([...first.keys()].sort()).toEqual(["15m", "1h", "1m", "5m"]);
+  expect([...first.values()].every((before) => before === checkedAt)).toBe(true);
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" }).getByRole("status")).toContainText("Market calendar unavailable");
+});
 
 test("streamed ticks update the latest candle in place and keep zoom; history changes reset", async ({ page }) => {
   await registerCharts(page);

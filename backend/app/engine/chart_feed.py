@@ -14,7 +14,7 @@ import time
 import httpx
 
 from app.engine import tradier
-from app.engine.chart_math import ET, chart_bars, normalize_bars
+from app.engine.chart_math import ET, chart_bars, market_day, normalize_bars
 
 
 class ChartFeedError(Exception):
@@ -87,11 +87,13 @@ class ChartFeed:
                     return saved.data, saved.fetched_at, str(error)
                 raise error from None
 
-    def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str) -> dict:
+    def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None) -> dict:
         now = datetime.now(ET)
         today = now.date()
         problems = []
         fetched = {}
+        # Unavailable calendar data falls back to clock hours, disclosed in `market`.
+        hours = calendar.hours(today) if calendar is not None else None
 
         def read(name, path, params, ttl):
             try:
@@ -138,7 +140,7 @@ class ChartFeed:
 
         panels = {}
         for interval in intervals:
-            bars = chart_bars(minutes, daily, interval, session)
+            bars = chart_bars(minutes, daily, interval, session, {today: hours})
             panels[interval] = {"bars": bars[-1200:], "markers": []}
         if not any(p["bars"] for p in panels.values()) and problems:
             raise ChartFeedError(problems[0])
@@ -147,7 +149,7 @@ class ChartFeed:
             "delayed": "sandbox" in tradier.TRADIER_BASE_URL,
             "refresh_seconds": 15, "checked_at": int(time.time()), "fetched_at": fetched,
             "panels": panels, "quotes": quotes, "issues": list(dict.fromkeys(problems)),
-            "intraday_as_of": minutes[-1]["time"] if minutes else None,
+            "intraday_as_of": minutes[-1]["time"] if minutes else None, "market": market_day(today, hours),
             "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP raw bars (from 2016); today uses Tradier. Intraday prices are unadjusted, so splits can create discontinuities. Daily bars remain Tradier and dividend adjustments are not guaranteed.",
         }
 

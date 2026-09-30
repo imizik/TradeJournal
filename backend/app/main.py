@@ -220,8 +220,9 @@ async def lifespan(_app: FastAPI):
     _maybe_autostart_gmail_watch()
     _maybe_autostart_gmail_listener()
     tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
+    from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_stream import ChartMarketStream
-    chart_market_stream = ChartMarketStream()
+    chart_market_stream = ChartMarketStream(calendar=chart_calendar.cached)
     _app.state.chart_market_stream = chart_market_stream
     try:
         yield

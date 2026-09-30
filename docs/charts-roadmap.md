@@ -61,8 +61,8 @@ from planned work.
 | ID | Item | Phase | Status |
 |---|---|---|---|
 | C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | done ([PR #89](https://github.com/imizik/TradeJournal/pull/89)) |
-| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | next |
-| C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | todo |
+| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | done (PR pending) |
+| C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | next |
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | todo |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | todo |
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | todo |
@@ -205,7 +205,7 @@ must not be treated as established capability.
 | Live equity trades | WebSocket, consolidated; one session per token (live since #82) | IEX only: one venue, wide quotes | — | Tradier |
 | Intraday candles | About 10 days of minutes | IEX live; **historical SIP** back to 2016 (not the latest 15 minutes) | 5 calls/min | Tradier for today and live; Alpaca SIP for every earlier session, stored locally (C0.0) |
 | Daily candles | Years; dividend adjustment not guaranteed | Yes | Yes, cached for enrichment | Tradier (already) |
-| Market calendar | `/v1/markets/calendar`: holidays and early closes (Thanksgiving closed, 11/27 closes 13:00) | `/v2/calendar` | — | Tradier (C0.1) |
+| Market calendar | `/v1/markets/calendar`: holidays and early closes (Thanksgiving closed, 11/27 closes 13:00), back to 2016; next year returns HTTP 400 until published | `/v2/calendar` | — | Tradier (C0.1) |
 | Option chain | One call per expiration: bid/ask/sizes, last, **volume, open interest**, greeks; about 200 ms. SPY nearest expiry: 638 contracts, OI on 498 | Snapshots on the indicative feed, **no open interest** | EOD only | **Tradier** |
 | Expirations | SPY 32, QQQ 30, NVDA 24, SPX 55 (with SPXW); SPY has 14 within 45 days | — | — | Tradier |
 | Greeks / IV | ORATS, **hourly**; `updated_at` read 20:00 the previous evening after hours. Gamma is non-zero on only 120 of 638 SPY contracts (far strikes round to 0) | Indicative | — | Tradier IV; **recompute gamma locally** from live spot (C4.2) |
@@ -334,7 +334,7 @@ warmup, pagination, concurrency and test behavior is in
 C2.4's baseline, C3.3 and C6.1 should read history from here instead
 of fetching their own.
 
-**C0.1 Market calendar.** Cache Tradier calendar results by the covered dates,
+**C0.1 Market calendar (done).** Cache Tradier calendar results by the covered dates,
 refresh the current calendar daily, and send today's session hours with the
 workspace response. `barClock()` in `frontend/lib/charts.ts`, backend resampling
 and stream buckets use the same session definition. Historical pages need the

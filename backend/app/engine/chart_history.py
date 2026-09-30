@@ -19,7 +19,8 @@ from uuid import uuid4
 import httpx
 
 from app.engine import alpaca
-from app.engine.chart_math import ET, chart_bars, indicators, normalize_bars
+from app.engine.chart_calendar import ChartCalendar, chart_calendar
+from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, normalize_bars
 
 FLOOR = date(2016, 1, 1)
 SCHEMA = 1
@@ -43,11 +44,13 @@ class Work:
     token: str | None = None
     candidate: list[dict] = field(default_factory=list)
     touched: float = field(default_factory=time.monotonic)
+    clock_days: set[date] = field(default_factory=set)  # sessions resampled without the calendar
 
 
 class ChartHistory:
-    def __init__(self, root: Path = CACHE_DIR):
+    def __init__(self, root: Path = CACHE_DIR, calendar: ChartCalendar | None = None):
         self.root = root
+        self.calendar = calendar  # None: clock hours, disclosed on every page
         self._lock = threading.RLock()  # history-only; never held by Tradier reads
         self._calls: deque[float] = deque()
         self._cooldown = 0.0
@@ -217,11 +220,15 @@ class ChartHistory:
                 while work.day >= FLOOR and sum(b["time"] < before for b in work.bars) < limit + WARMUP:
                     if time.monotonic() >= deadline:
                         raise HistoryError("History is still loading.", "pending", int(time.time() + 1))
-                    if work.day.weekday() >= 5:
-                        work.day -= timedelta(days=1)
+                    hours = self.calendar.hours(work.day) if self.calendar and work.day.weekday() < 5 else None
+                    if work.day.weekday() >= 5 or (hours is not None and hours["status"] == "closed"):
+                        work.day -= timedelta(days=1)  # holidays cost no Alpaca request
                         continue
+                    if hours is None:
+                        work.clock_days.add(work.day)
                     minutes = self._session(symbol, work.day, work, deadline, attempts)
-                    day_bars = [b for b in chart_bars(minutes, [], interval, session) if b["time"] < before]
+                    # Each session resamples with its own date's hours (half days end at 13:00).
+                    day_bars = [b for b in chart_bars(minutes, [], interval, session, {work.day: hours}) if b["time"] < before]
                     # Full-day resampling supplies VWAP and complete buckets.
                     work.bars = (day_bars + work.bars)[-(limit + WARMUP):]
                     work.day -= timedelta(days=1)
@@ -252,11 +259,13 @@ class ChartHistory:
                 issue = {"code": "pending", "message": "Indicator warmup is still loading.", "retry_at": int(time.time() + 1)}
             if ready:
                 self._work.pop(key, None)
+            shown = {datetime.fromtimestamp(b["time"], ET).date() for b in visible}
             return {"symbol": symbol, "interval": interval, "session": session, "before": before,
                     "limit": limit, "bars": visible, "older_cursor": visible[0]["time"] if visible else (int(datetime.combine(work.day, wall_time(20), ET).timestamp()) if not exhausted else None),
                     "exhausted": exhausted and len(eligible) <= limit, "continuation": None if ready else key,
                     "warmup": "ready" if warmed else "insufficient" if exhausted else "pending",
-                    "source": "alpaca_sip", "price_basis": "raw", "issue": issue}
+                    "source": "alpaca_sip", "price_basis": "raw", "issue": issue,
+                    "calendar_note": CLOCK_NOTE if shown & work.clock_days else None}
 
 
-chart_history = ChartHistory()
+chart_history = ChartHistory(calendar=chart_calendar)

@@ -1,7 +1,7 @@
 """Stream prices cannot invent bars or open a session per browser tab."""
 
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 import json
 
 import httpx
@@ -30,6 +30,25 @@ def test_stream_event_uses_new_york_session_buckets_and_rejects_bad_ticks():
     assert chart_stream.trade_event(event(at=MARKET_TIME - 180), now=MARKET_TIME) is None
     closed = datetime(2026, 9, 29, 20, 1, tzinfo=ET).timestamp()
     assert chart_stream.trade_event(event(at=closed), now=closed) is None
+
+
+def test_stream_buckets_follow_the_calendar_on_early_close_and_holiday():
+    half = {"status": "open", "open": 570, "close": 780}
+    calendar = {date(2026, 11, 27): half, date(2026, 11, 26): {"status": "closed", "open": None, "close": None}}.get
+    before_close = datetime(2026, 11, 27, 12, 58, tzinfo=ET).timestamp()
+    tick = chart_stream.trade_event(event(at=before_close), now=before_close, calendar=calendar)
+    assert tick["session"] == "regular"
+    assert datetime.fromtimestamp(tick["buckets"]["1h"]["time"], ET).strftime("%H:%M") == "12:30"
+    assert datetime.fromtimestamp(tick["buckets"]["1h"]["end_time"], ET).strftime("%H:%M") == "13:00"
+    after_close = datetime(2026, 11, 27, 13, 7, tzinfo=ET).timestamp()
+    post = chart_stream.trade_event(event(at=after_close), now=after_close, calendar=calendar)
+    assert post["session"] == "post" and post["buckets"]["5m"]["extended"] is True
+    assert datetime.fromtimestamp(post["buckets"]["5m"]["time"], ET).strftime("%H:%M") == "13:05"
+    assert chart_stream.trade_event(event(at=after_close), now=after_close)["session"] == "regular"  # clock rule
+    late = datetime(2026, 11, 27, 17, 1, tzinfo=ET).timestamp()
+    assert chart_stream.trade_event(event(at=late), now=late, calendar=calendar) is None
+    holiday = datetime(2026, 11, 26, 10, 0, tzinfo=ET).timestamp()
+    assert chart_stream.trade_event(event(at=holiday), now=holiday, calendar=calendar) is None
 
 
 def test_session_uses_websocket_endpoint_when_provider_returns_http_stream_url(monkeypatch):
@@ -105,11 +124,11 @@ def test_stream_aggregates_one_second_of_prices_without_crossing_symbols(monkeyp
     mrvl, spy = asyncio.Queue(), asyncio.Queue()
     market._clients = {1: ("MRVL", mrvl), 2: ("SPY", spy)}
     original = chart_stream.trade_event
-    monkeypatch.setattr(chart_stream, "trade_event", lambda row: chart_stream_trade_event(row))
+    monkeypatch.setattr(chart_stream, "trade_event", lambda row, **kw: chart_stream_trade_event(row, **kw))
 
-    def chart_stream_trade_event(row):
+    def chart_stream_trade_event(row, **kw):
         # Keep this sample at a fixed market time regardless of the test clock.
-        return original(row, now=MARKET_TIME)
+        return original(row, now=MARKET_TIME, **kw)
 
     market._receive("\n".join(json.dumps(row) for row in (
         event(264.9), event(265.1, at=MARKET_TIME + 0.2), event(264.8, at=MARKET_TIME + 0.4),

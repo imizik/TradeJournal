@@ -38,6 +38,7 @@ def main():
             ("quotes", "/v1/markets/quotes", {"symbols": args.symbol.upper()}),
             ("candles", "/v1/markets/timesales", {"symbol": args.symbol.upper(), "interval": "1min", "session_filter": "all",
              "start": (now - timedelta(days=3)).strftime("%Y-%m-%d 04:00"), "end": now.strftime("%Y-%m-%d %H:%M")}),
+            ("calendar", "/v1/markets/calendar", {"month": now.month, "year": now.year}),
         ]
         for kind, path, params in endpoints:
             try:
@@ -52,6 +53,14 @@ def main():
                         stamp = quote.get("trade_date")
                         report["last"] = quote.get("last")
                         report["last_trade_age_seconds"] = round(datetime.now(ET).timestamp() - float(stamp) / 1000, 2) if stamp else None
+                    elif kind == "calendar":
+                        from app.engine.chart_calendar import parse_month
+                        try:
+                            days = parse_month(data, now.year, now.month)
+                            report["today"] = days[now.date()]
+                            report["early_closes"] = [d["date"] for d in days.values() if d["status"] == "open" and d["close"] < 960]
+                        except ValueError:
+                            report["parsed"] = False
                     else:
                         bars = (data.get("series") or {}).get("data") or []
                         bars = [bars] if isinstance(bars, dict) else bars
