@@ -455,10 +455,88 @@ test("streamed ticks update the latest candle in place and keep zoom; history ch
   const kept = (await logicalRange(page, "main"))!;
   expect(kept.from).toBeCloseTo(20, 0);
   expect(kept.to).toBeCloseTo(70, 0);
-  // A new symbol recreates the chart.
+  // A new symbol keeps the chart, resets its data, and opens on the latest candles.
   await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
   await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toBeVisible();
-  await expect.poll(() => resets(page)).toBe(1);
+  await expect.poll(() => resets(page)).toBe(3);
+  await expect.poll(async () => Math.round((await logicalRange(page, "main"))!.to)).toBe(104); // applied on the next frame
+});
+
+type KeepAliveWindow = typeof window & { __tjCharts: Map<string, { panes(): unknown[] }>; __firstCharts?: Map<string, unknown>; __cardSeen?: boolean };
+test("switching symbol, interval, session and RSI keeps every chart instance and never blanks to the loading card", async ({ page }) => {
+  await registerCharts(page);
+  let gate: Promise<void> | null = null;
+  let open = () => {};
+  const hold = () => { gate = new Promise<void>((resolve) => { open = () => { gate = null; resolve(); }; }); };
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const url = route.request().url();
+    if (new URL(url).searchParams.get("symbol") === "ZZZZ")
+      return route.fulfill({ status: 503, json: { detail: { message: "Tradier has no ZZZZ candles." } } });
+    if (gate) await gate;
+    try { await route.fulfill({ json: fixture(url) }); } catch { /* the page moved on */ }
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  // Record the five chart instances, and watch for the first-load card from here on.
+  const sameCharts = () => page.evaluate(() => {
+    const w = window as unknown as KeepAliveWindow;
+    w.__firstCharts ??= new Map(w.__tjCharts);
+    return w.__tjCharts.size === 5 && [...w.__tjCharts].every(([id, chart]) => w.__firstCharts!.get(id) === chart);
+  });
+  expect(await sameCharts()).toBe(true);
+  await page.evaluate(() => new MutationObserver(() => {
+    if (document.querySelector("[data-testid=chart-workspace]")?.textContent?.includes("Loading shared intraday")) (window as unknown as KeepAliveWindow).__cardSeen = true;
+  }).observe(document.body, { subtree: true, childList: true, characterData: true }));
+  const pending = (label: string) => page.getByRole("status").filter({ hasText: new RegExp(`^${label}$`) });
+
+  // A new symbol: the previous candles stay drawn, dimmed and labeled, until the new ones arrive.
+  hold();
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await expect(pending("Loading NVDA…")).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-pending", "");
+  await expect(page.getByTestId("canvas-main")).toHaveCSS("opacity", "0.4");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("189.12"); // NVDA's own watchlist quote
+  await page.screenshot({ path: test.info().outputPath("symbol-switch-pending.png") });
+  open();
+  await expect(pending("Loading NVDA…")).toHaveCount(0);
+  await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending", "");
+  await expect(page.getByTestId("canvas-main")).toHaveCSS("opacity", "1");
+  await expect(page.getByRole("region", { name: /NVDA .* chart/ })).toHaveCount(5);
+  await page.screenshot({ path: test.info().outputPath("symbol-switch-loaded.png") });
+
+  // Moving an interval into the main chart draws candles already loaded, without waiting for the request.
+  hold();
+  await page.getByRole("button", { name: "Focus 1h chart" }).click();
+  await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue("1h");
+  await expect(page.getByRole("region", { name: "NVDA 1h chart" })).toBeVisible();
+  await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending", "");
+  await expect(page.getByLabel("main candle values")).toContainText("C ");
+  // A new session is new candles: labeled until they arrive.
+  await page.getByRole("button", { name: "Extended hours on" }).click();
+  await expect(pending("Loading regular hours…")).toHaveCount(5);
+  open();
+  await expect(pending("Loading regular hours…")).toHaveCount(0);
+
+  // RSI adds and removes its pane on the same chart.
+  const panes = () => page.evaluate(() => (window as unknown as KeepAliveWindow).__tjCharts.get("main")!.panes().length);
+  expect(await panes()).toBe(2);
+  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
+  await expect.poll(panes).toBe(1);
+  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
+  await expect.poll(panes).toBe(2);
+
+  // A symbol that fails to load clears the charts rather than leaving another symbol's candles under its name.
+  await page.getByLabel("Chart symbol").fill("ZZZZ");
+  await page.getByRole("button", { name: "Load symbol" }).click();
+  await expect(page.getByRole("alert", { name: "Chart data error" })).toContainText("Tradier has no ZZZZ candles.");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "0");
+  await expect(page.getByRole("region", { name: "ZZZZ 1h chart" })).toContainText("No candles available");
+  await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending", "");
+
+  expect(await sameCharts()).toBe(true);
+  expect(await page.evaluate(() => (window as unknown as KeepAliveWindow).__cardSeen ?? false)).toBe(false);
 });
 
 type RenderWindow = typeof window & { __tjRenders?: Map<string, number>; __chartTick?: (value: unknown) => void };

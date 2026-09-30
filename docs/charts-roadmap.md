@@ -63,8 +63,8 @@ from planned work.
 | C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | done ([PR #89](https://github.com/imizik/TradeJournal/pull/89)) |
 | C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | done ([PR #90](https://github.com/imizik/TradeJournal/pull/90)) |
 | C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | done ([PR #91](https://github.com/imizik/TradeJournal/pull/91)) |
-| C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | next |
-| C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | todo |
+| C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | done ([PR #92](https://github.com/imizik/TradeJournal/pull/92)) |
+| C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | next |
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | todo |
 | C7.2 | Named saved layouts | 7 Layouts | todo |
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | todo |
@@ -353,7 +353,7 @@ interval's bar array in `overlayLiveTicks`. *Done when:* a browser test counts
 renders and shows a tick re-renders only the panels whose bars changed, and the
 clock re-renders no chart.
 
-**C0.3 Keep charts alive.** Create each chart once per panel. A symbol, interval
+**C0.3 Keep charts alive (done in PR #92).** Create each chart once per panel. A symbol, interval
 or RSI change swaps data and panes in place. While new data loads, keep the old
 frame visible, dimmed and labeled "Loading NVDA…". *Done when:* switching symbols
 never shows the empty loading card after the first load, and a test proves the
