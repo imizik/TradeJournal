@@ -88,6 +88,7 @@ PURE_MODULES = {
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.
     "app.engine.occ",
+    "app.engine.chart_math",  # chart-only resampling and indicator math
 }
 # Third-party packages a pure module may reach. httpx, yfinance, anthropic,
 # googleapiclient and grpc are deliberately absent: reaching any of them, even
