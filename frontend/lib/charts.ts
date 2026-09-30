@@ -147,38 +147,52 @@ export function parseChartTick(value: unknown): ChartStreamTick | null {
   return tick as ChartStreamTick;
 }
 
-/** Live prices move candles immediately; REST remains authoritative for volume and studies. */
-export function overlayLiveTicks(data: ChartData, ticks: ChartStreamTick[], session: ChartSettings["session"]): ChartData {
-  const fetched = data.fetched_at.intraday ?? 0;
-  const newer = ticks.filter((tick) => tick.symbol === data.symbol && tick.at > fetched && (session === "extended" || tick.session === "regular"));
-  if (!newer.length) return data;
-  const panels = { ...data.panels };
-  let latestMinute = data.intraday_as_of ?? 0;
-  for (const interval of INTERVALS) {
-    if (interval === "1D" || interval === "1W") continue;
-    const panel = panels[interval];
-    if (!panel) continue;
-    let bars = panel.bars;
-    for (const tick of newer) {
-      const bucket = tick.buckets[interval];
-      if (!bucket || !Number.isFinite(bucket.time) || !Number.isFinite(bucket.end_time)) continue;
-      const last = bars.at(-1);
-      if (last && bucket.time < last.time) continue;
-      if (bars === panel.bars) bars = bars.slice();
-      if (last && bucket.time === last.time) {
-        bars[bars.length - 1] = { ...last, high: Math.max(last.high, tick.high), low: Math.min(last.low, tick.low), close: tick.price };
-      } else {
-        bars.push({ ...bucket, source: "tradier", open: tick.open, high: tick.high, low: tick.low, close: tick.price, volume: 0,
-          volumePending: true,
-          ema9: null, ema20: null, ema50: null, ema200: null, vwap: null, rsi: null });
-        if (bars.length > 1200) bars.shift();
-      }
-      latestMinute = Math.max(latestMinute, tick.minute);
+/** What a streamed trade is applied against: the REST snapshot it must be newer than, in the selected session. */
+export type TickScope = { symbol: string; fetched: number; session: ChartSettings["session"] };
+export const liveTick = (tick: ChartStreamTick, scope: TickScope) =>
+  tick.symbol === scope.symbol && tick.at > scope.fetched && (scope.session === "extended" || tick.session === "regular");
+
+/**
+ * Live prices move one panel's candles immediately; REST remains authoritative
+ * for volume and studies. Returns `bars` itself when no tick changes a candle,
+ * so a panel whose candles did not move does not re-render. The 15-second REST
+ * refresh replaces the base, so streamed candles never accumulate.
+ */
+export function applyTicks(bars: ChartBar[], ticks: ChartStreamTick[], interval: Interval, scope: TickScope): ChartBar[] {
+  if (!intradayInterval(interval)) return bars;
+  let out = bars;
+  for (const tick of ticks) {
+    const bucket = tick.buckets[interval];
+    if (!liveTick(tick, scope) || !bucket || !Number.isFinite(bucket.time) || !Number.isFinite(bucket.end_time)) continue;
+    const last = out.at(-1);
+    if (last && bucket.time < last.time) continue;
+    if (last && bucket.time === last.time) {
+      const high = Math.max(last.high, tick.high), low = Math.min(last.low, tick.low);
+      if (high === last.high && low === last.low && tick.price === last.close) continue;
+      if (out === bars) out = bars.slice();
+      out[out.length - 1] = { ...last, high, low, close: tick.price };
+    } else {
+      if (out === bars) out = bars.slice();
+      out.push({ ...bucket, source: "tradier", open: tick.open, high: tick.high, low: tick.low, close: tick.price, volume: 0,
+        volumePending: true,
+        ema9: null, ema20: null, ema50: null, ema200: null, vwap: null, rsi: null });
     }
-    if (bars !== panel.bars) panels[interval] = { ...panel, bars };
   }
-  return { ...data, panels, intraday_as_of: latestMinute || null };
+  return out;
 }
+
+/** The selected symbol's headline price: a newer streamed trade, then a newer extended-hours candle, then the quote. */
+export function shownPrice({ tick, quote, candle, scope }: {
+  tick: ChartStreamTick | undefined; quote: ChartQuote | undefined; candle: ChartBar | undefined; scope: TickScope;
+}): { price: number | null | undefined; source: string; at: number | null | undefined } {
+  if (tick && liveTick(tick, scope)) return { price: tick.price, source: "Live trade", at: tick.at };
+  if (scope.session === "extended" && candle?.extended && candle.time > (quote?.trade_time ?? 0))
+    return { price: candle.close, source: "Extended-hours candle", at: candle.time };
+  return { price: quote?.last, source: "Tradier quote", at: quote?.trade_time };
+}
+
+/** Intraday candles older than 45 seconds read as stale: the countdown and status stop implying freshness. */
+export const staleCandles = (now: number, fetched: number | undefined) => !!fetched && Math.floor(now - fetched) > 45;
 
 export const price = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const etTime = (stamp: number, daily = false) => new Date(stamp * 1000).toLocaleString("en-US", {
