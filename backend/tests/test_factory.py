@@ -195,6 +195,8 @@ def test_features_read_only_the_past():
     assert context.at(i, -1, stop=105.5)["vwap_distance"] == pytest.approx(-values["vwap_distance"])
     assert values["vol_ratio"] == pytest.approx(1.0)  # every flat session ranges 1.0
     assert values["spy_vol"] == pytest.approx(1.0)  # SPY's daily ATR 1.0 on a 100 close
+    assert values["open_trend"] == pytest.approx(2.0)  # opened at 102 over an EMA of 100
+    assert context.at(i, -1, stop=105.5)["open_trend"] == pytest.approx(-2.0)
     later = Series.build("X", bars + today[:2] + [bar(day, 600, 103.5, 150, 50, 60, 99999)], 15)
     assert FeatureContext(later, spy).at(i, 1, stop=101.5) == values
 
@@ -407,6 +409,27 @@ def test_with_both_rules_the_tighter_stop_wins_and_never_moves_back():
     assert (early.exit_reason, early.moved_stop, early.moved_by) == ("session", 100.01, "breakeven")
     (trade,) = run_candidate(Series.build("X", one_day(after), 15), Scripted(dict(LONG)), exits, TICK)
     assert (trade.exit_index, trade.exit_reason, trade.exit_price) == (4, "trail", pytest.approx(100.37))
+
+
+def test_a_stall_check_exits_a_trade_that_is_not_working_once_and_only_once():
+    # The long fills at 100.01 at 09:45 with 1R 0.81, so +0.5R is a close of 100.415. The 30-minute check
+    # falls at the close of the 10:00 bar; the 10:15 bar's weak close comes after it and changes nothing.
+    exits = Exits(None, stall_minutes=30, stall_r=0.5)
+    stalled = [(100.0, 100.4, 99.8, 100.1), (100.1, 100.4, 100.0, 100.3), (100.3, 100.5, 99.9, 100.0)]
+    (trade,) = run_candidate(Series.build("X", one_day(stalled), 15), Scripted(dict(LONG)), exits, TICK)
+    assert (trade.exit_index, trade.exit_reason, trade.exit_price) == (2, "stall", pytest.approx(100.29))
+    working = [(100.0, 100.4, 99.8, 100.1), (100.1, 100.6, 100.0, 100.5), (100.5, 100.6, 99.9, 100.0)]
+    (kept,) = run_candidate(Series.build("X", one_day(working), 15), Scripted(dict(LONG)), exits, TICK)
+    assert (kept.exit_index, kept.exit_reason, kept.stall_checked) == (3, "session", True)
+    # Left out, stall_r is 0: in profit at all passes.
+    (flat_bar,) = run_candidate(Series.build("X", one_day(stalled), 15), Scripted(dict(LONG)),
+                                Exits(None, stall_minutes=30, stall_r=0.0), TICK)
+    assert flat_bar.exit_reason == "session"
+    (short,) = run_candidate(Series.build("X", one_day([(100.0, 100.2, 99.6, 99.9), (99.9, 100.1, 99.7, 99.8), (99.8, 100.0, 99.6, 99.7)]), 15),
+                             Scripted({0: (-1, 100.8)}), exits, TICK)
+    assert (short.exit_index, short.exit_reason) == (2, "stall")  # 0.19 in favour of a short is under +0.5R
+    (each,) = run_each(Series.build("X", one_day(stalled), 15), [Signal(0, 1, 99.2)], exits, TICK)
+    assert (each.exit_index, each.exit_reason) == (2, "stall")  # the random baseline gets the same exit
 
 
 def test_a_short_moves_its_stop_down():
@@ -705,6 +728,11 @@ def test_a_bad_spec_is_refused(bad):
     {"exits": {"trail_r": "1"}},
     {"exits": {"breakeven_r": 2.0}},  # at the family's 2R target, which would always fill first
     {"exits": {"breakeven_r": 3, "target_r": 2}},
+    {"exits": {"stall_r": 0.5}},  # progress without a time to check it
+    {"exits": {"stall_minutes": 0}},
+    {"exits": {"stall_minutes": "60"}},
+    {"exits": {"stall_minutes": 60, "stall_r": 2.0}},  # at the 2R target
+    {"exits": {"stall_minutes": 60, "max_minutes": 60}},
     {"window": "0930"},
     {"window": [900, 1000]},
     {"window": [1060, 1100]},
@@ -744,6 +772,18 @@ def test_moving_stops_are_rules_and_leave_every_earlier_id_alone():
     assert spec_id(moved) != spec_id(base)
     for spec in (base, moved):
         assert spec_id(from_canonical(canonical(spec))) == spec_id(spec)
+
+
+def test_a_stall_check_is_a_rule_that_leaves_every_earlier_id_alone():
+    base = parse_spec({"family": "recovery_swing"})
+    stall = parse_spec({"family": "recovery_swing", "exits": {"stall_minutes": 60}})
+    assert stall.exits == Exits(2.0, max_sessions=2, stall_minutes=60, stall_r=0.0)
+    assert canonical(stall)["exits"] == {"target_r": 2.0, "max_sessions": 2, "max_minutes": None,
+                                         "stall_minutes": 60, "stall_r": 0.0}
+    assert spec_id(stall) == spec_id(parse_spec({"family": "recovery_swing", "exits": {"stall_minutes": 60, "stall_r": 0}}))
+    assert len({spec_id(base), spec_id(stall),
+                spec_id(parse_spec({"family": "recovery_swing", "exits": {"stall_minutes": 60, "stall_r": 0.5}}))}) == 3
+    assert spec_id(from_canonical(canonical(stall))) == spec_id(stall)
 
 
 def test_a_model_without_a_list_reads_the_first_ten_features():
@@ -973,6 +1013,10 @@ def test_moving_stops_go_through_the_evaluation_and_the_ledger(dip_family):
     assert "no target, stop trailing 1R behind the best price, flat by the close" in report(ev)
     record = ledger_record(ev, datetime(2026, 9, 28, tzinfo=ET), "abc123", date(2026, 6, 30))
     assert record["spec"]["exits"]["trail_r"] == 1.0 and record["id"] == spec_id(spec) != spec_id(dip_family)
+    stalled = parse_spec({"name": "dip buyer, stall-checked", "family": "dip_buyer", "tickers": ["AAA", "BBB"],
+                          "exits": {"stall_minutes": 60, "stall_r": 0.5}})
+    ev = evaluate(stalled, StubLoader({"AAA": pattern(START, END, every_fifth), "BBB": pattern(START, END, every_fifth)}), 0)
+    assert "out after 60 minutes unless +0.5R or better" in report(ev)
 
 
 def test_an_edge_that_stops_in_the_holdout_fails_the_exam(dip_family):

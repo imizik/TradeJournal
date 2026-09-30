@@ -175,7 +175,14 @@ by the close), "max_minutes": minutes or null, "breakeven_r": R or null, \
 after each completed bar, to the entry once the best price so far is \
 breakeven_r R in favour, and to trail_r R behind the best price, whichever \
 is tighter; it never moves back. breakeven_r must be below target_r. An \
-exit at a moved stop is named "breakeven" or "trail" in the evidence.
+exit at a moved stop is named "breakeven" or "trail" in the evidence. \
+Also in "exits", "stall_minutes" (minutes or null) and "stall_r" (R, 0 \
+when left out) are a \
+time stop for trades that are not working: at the close of the first bar \
+that brings the hold to stall_minutes the trade leaves unless that close is \
+at least stall_r R in favour; a trade that passes runs on to its other exits \
+untouched. It checks once, stall_r must be below target_r and stall_minutes \
+under max_minutes, and its exits are named "stall".
 - "window": [HHMM, HHMM], the fill times allowed, or null for any time.
 - "limits": {"max_entries", "max_losses", "max_loss_r"} per ticker and \
 session, each null for none.
