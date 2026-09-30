@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
@@ -19,6 +19,7 @@ export default function ChartWorkspace() {
   const [saved, setSaved] = useState(true);
   const [response, setResponse] = useState<{ key: string; data: ChartData } | null>(null);
   const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
+  const [rollover, setRollover] = useState<{ key: string; before: number; pending: Interval[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -41,12 +42,13 @@ export default function ChartWorkspace() {
   const lastRequest = useRef("");
   const historyFlights = useRef(new Map<Interval, AbortController>());
   const visibleTimes = useRef(new Map<Interval, { from: number; to: number }>());
+  const lastWorkspaceDay = useRef<{ key: string; day: string } | null>(null);
   const intervalKey = (settings.layout === "single" ? settings.intervals.slice(0, 1) : settings.intervals).join(",");
   const watchlistKey = settings.watchlist.join(",");
   const requestKey = `${settings.symbol}|${settings.session}|${intervalKey}|${watchlistKey}`;
   const historyKey = `${settings.symbol}|${settings.session}|${intervalKey}`;
   const data = response?.key === requestKey ? response.data : null;
-  const currentOlder = older.key === historyKey ? older.panels : {};
+  const currentOlder = useMemo(() => older.key === historyKey ? older.panels : {}, [older, historyKey]);
   const hasData = !!data;
   const activeStream = stream.key === requestKey ? stream : null;
   const viewData = useMemo(() => {
@@ -72,9 +74,10 @@ export default function ChartWorkspace() {
     historyFlights.current.clear();
     visibleTimes.current.clear();
     setOlder({ key: historyKey, panels: {} });
+    setRollover(null);
   }, [historyKey]);
 
-  const loadOlder = async (interval: Interval, beforeOverride?: number, retry = false) => {
+  const loadOlder = useCallback(async (interval: Interval, beforeOverride?: number, retry = false) => {
     if (interval === "1D" || interval === "1W" || historyFlights.current.has(interval) || !data) return;
     const past = currentOlder[interval];
     if (((past?.exhausted || past?.issue) && !retry) && beforeOverride === undefined) return;
@@ -122,7 +125,14 @@ export default function ChartWorkspace() {
       setOlder((state) => state.key !== historyKey || !state.panels[interval] ? state : ({ ...state,
         panels: { ...state.panels, [interval]: { ...state.panels[interval], loading: false } } }));
     }
-  };
+  }, [data, currentOlder, historyKey, settings.symbol, settings.session]);
+  useEffect(() => {
+    if (!rollover || rollover.key !== historyKey || !data) return;
+    const available = rollover.pending.filter((interval) => !historyFlights.current.has(interval));
+    if (!available.length) return;
+    available.forEach((interval) => { void loadOlder(interval, rollover.before); });
+    setRollover((current) => current === rollover ? { ...current, pending: current.pending.filter((interval) => !available.includes(interval)) } : current);
+  }, [rollover, historyKey, data, older, loadOlder]);
   useEffect(() => {
     if (!ready) return;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); }
@@ -163,7 +173,15 @@ export default function ChartWorkspace() {
       try {
         const result = await fetchChartData({ ...DEFAULT_SETTINGS, symbol: settings.symbol, session: settings.session,
           intervals: intervalKey.split(",") as Interval[], watchlist: watchlistKey ? watchlistKey.split(",") : [], layout: "multi" }, controller.signal);
-        if (alive) { setResponse({ key: requestKey, data: result }); setError(null); }
+        if (alive) {
+          const day = new Date(result.checked_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+          if (lastWorkspaceDay.current?.key === requestKey && lastWorkspaceDay.current.day !== day) {
+            setRollover({ key: historyKey, before: result.checked_at,
+              pending: intervalKey.split(",").filter((interval): interval is Interval => interval !== "1D" && interval !== "1W") });
+          }
+          lastWorkspaceDay.current = { key: requestKey, day };
+          setResponse({ key: requestKey, data: result }); setError(null);
+        }
       } catch (err) {
         if (alive && !controller.signal.aborted) setError(err instanceof Error ? err.message : "Unable to refresh charts.");
       } finally {
@@ -179,7 +197,7 @@ export default function ChartWorkspace() {
     const timer = paused ? undefined : window.setInterval(load, 15_000);
     document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
-  }, [ready, settings.symbol, settings.session, intervalKey, watchlistKey, requestKey, paused]);
+  }, [ready, settings.symbol, settings.session, intervalKey, watchlistKey, requestKey, historyKey, paused]);
 
   useEffect(() => {
     if (!ready || !hasData || paused) return;

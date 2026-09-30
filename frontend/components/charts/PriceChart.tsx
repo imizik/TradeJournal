@@ -221,14 +221,14 @@ export default function PriceChart({ id, symbol, interval, session, panel, indic
     current.shade.setData(bars.map(shadePoint));
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
     current.rsi?.setData(bars.map(rsiPoint));
-    if (bars.length && initial.current) {
+    if (bars.length && (initial.current || !prior.length)) {
       current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - (main ? 110 : 65)), to: bars.length + 4 });
       initial.current = false;
     } else if (bars.length && following && logical) {
       const width = logical.to - logical.from;
       current.chart.timeScale().setVisibleLogicalRange({ from: bars.length + 4 - width, to: bars.length + 4 });
     } else if (logical && movedTo >= 0) current.chart.timeScale().setVisibleLogicalRange({ from: logical.from + moved, to: logical.to + moved });
-    else if (range) current.chart.timeScale().setVisibleRange(range);
+    else if (bars.length && range) current.chart.timeScale().setVisibleRange(range);
   }, [panel, dataKey, main, indicators.rsi]);
 
   useEffect(() => {

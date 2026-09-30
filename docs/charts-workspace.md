@@ -103,6 +103,10 @@ cd backend
   loaded left edge. A 5m chart can navigate six months through pages. The
   candle hover legend says **SIP raw** or **Tradier**. Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier.
+- On a New York date rollover, the refresh removes the completed Tradier day
+  and requests its SIP replacement for the displayed intraday panels without
+  waiting for a pan. A pending or failed replacement is disclosed as history
+  loading or an error; the two providers are never merged within that day.
 - Streamed trades and REST refreshes that only change the newest candle (or add
   one) go through Lightweight Charts' `series.update`, so zoom, scroll and the
   crosshair stay where they are. A full `setData` reset happens when the symbol,

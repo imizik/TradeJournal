@@ -429,6 +429,44 @@ async function deepHistoryStub(page: Page, months = 6) {
   return { bars, base, requests: () => requests, refreshes: () => refreshes };
 }
 
+test("New York midnight replaces the completed Tradier day with SIP without waiting for a pan", async ({ page }) => {
+  const beforeMidnight = Date.parse("2026-09-30T03:59:00Z") / 1000;
+  const afterMidnight = Date.parse("2026-09-30T04:01:00Z") / 1000;
+  let refreshes = 0;
+  const requests: { interval: string | null; before: number }[] = [];
+  const template = fixture("http://test/charts/workspace?intervals=5m").panels["5m"]!.bars[0];
+  const completed = Array.from({ length: 120 }, (_, index) => ({ ...template,
+    time: Date.parse("2026-09-29T13:30:00Z") / 1000 + index * 300,
+    end_time: Date.parse("2026-09-29T13:35:00Z") / 1000 + index * 300,
+    source: "alpaca_sip" as const }));
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    refreshes++;
+    const data = fixture(route.request().url());
+    data.checked_at = refreshes === 1 ? beforeMidnight : afterMidnight;
+    data.fetched_at.intraday = data.checked_at;
+    if (refreshes > 1) for (const [interval, panel] of Object.entries(data.panels))
+      if (interval !== "1D" && interval !== "1W" && panel) panel.bars = [];
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const interval = query.get("interval");
+    const before = Number(query.get("before"));
+    requests.push({ interval, before });
+    return route.fulfill({ json: { symbol: "MRVL", interval, session: "extended", before,
+      limit: 1200, bars: completed, markers: [], older_cursor: completed[0].time,
+      exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip",
+      price_basis: "raw", fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  expect(requests).toHaveLength(0);
+  await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
+  await expect.poll(() => requests.some((request) => request.interval === "5m" && request.before === afterMidnight)).toBe(true);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+});
+
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
   await registerCharts(page);
   await page.addInitScript(() => {
@@ -489,11 +527,15 @@ test("older history failure retries without clearing current candles; a stale re
   const base = Math.floor(Date.now() / 1000);
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: currentFixture(route.request().url(), base) }));
   let calls = 0;
+  let holdNext = false;
   let release: (() => void) | undefined;
   await page.route("**/api/backend/charts/history?**", async (route) => {
     calls++;
     if (calls === 1) return route.fulfill({ status: 503, json: { detail: { message: "History unavailable" } } });
-    if (calls === 3) await new Promise<void>((resolve) => { release = resolve; });
+    if (holdNext) {
+      holdNext = false;
+      await new Promise<void>((resolve) => { release = resolve; });
+    }
     const query = new URL(route.request().url()).searchParams;
     const before = Number(query.get("before"));
     const template = fixture(route.request().url()).panels["5m"]!.bars[0];
@@ -511,8 +553,9 @@ test("older history failure retries without clearing current candles; a stale re
   await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
   await expect.poll(async () => (await logicalRange(page, "main"))?.from ?? 0).toBeGreaterThan(1000);
   await page.waitForTimeout(120);
+  holdNext = true;
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
-  await expect.poll(() => calls).toBe(3);
+  await expect.poll(() => release !== undefined).toBe(true);
   await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
   release?.();
   await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toBeVisible();
