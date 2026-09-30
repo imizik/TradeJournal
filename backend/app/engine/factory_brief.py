@@ -86,8 +86,9 @@ needs a building block that does not exist, do not approximate it: name it \
 under "wanted".
 5. One hypothesis per idea. When building on an earlier candidate, change \
 one thing (the entry, the exit, or one filter) and say which.
-6. Round, coarse values: targets such as 1, 1.5, 2 or 3R; holds such as 20, \
-60 or 120 minutes, or 1 to 3 sessions; timeframes of 1, 5, 15 or 30 minutes; \
+6. Round, coarse values: targets such as 1, 1.5, 2 or 3R; a stop moved at \
+0.5 or 1R or trailing 1 or 2R; holds such as 20, 60 or 120 minutes, or 1 to 3 \
+sessions; timeframes of 1, 5, 15 or 30 minutes; \
 thresholds at round numbers (0, plus or minus 0.5 or 1, rvol 1.5 or 2). \
 Tuning a number to history is overfitting.
 7. The discovery evidence is there to be mined, but an idea drawn from it is \
@@ -129,6 +130,39 @@ IDEAS_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+
+def answer_problem(answer: Any) -> str | None:
+    """Why an answer does not fit IDEAS_SCHEMA, or None. The API holds its
+    answer to the schema; one written in a Claude Code session (`/factory-week`)
+    gets this check instead."""
+    types = {"string": str, "boolean": bool, "array": list}
+
+    def check(value: Any, schema: Mapping[str, Any], where: str) -> str | None:
+        if schema["type"] == "object":
+            if not isinstance(value, Mapping):
+                return f"{where} is not an object"
+            missing = sorted(set(schema["required"]) - set(value))
+            extra = sorted(set(value) - set(schema["properties"]))
+            if missing:
+                return f"{where} lacks {', '.join(missing)}"
+            if extra:
+                return f"{where} has {', '.join(extra)}, which the format does not"
+            for key, part in schema["properties"].items():
+                problem = check(value[key], part, f"{where}.{key}")
+                if problem:
+                    return problem
+            return None
+        if not isinstance(value, types[schema["type"]]):
+            return f"{where} is not a {schema['type']}"
+        if schema["type"] == "array":
+            for k, item in enumerate(value):
+                problem = check(item, schema["items"], f"{where}[{k}]")
+                if problem:
+                    return problem
+        return None
+
+    return check(answer, IDEAS_SCHEMA, "answer")
+
 SPEC_FORMAT = """\
 A spec is a JSON object. Only "family" is required; everything else defaults \
 to that family's values in the catalog.
@@ -136,14 +170,20 @@ to that family's values in the catalog.
 - "params": the family's settings to change, e.g. {"confirm_bars": 2}.
 - "timeframe": bar minutes, dividing 30 (1, 2, 3, 5, 10, 15, 30).
 - "exits": {"target_r": R or null, "max_sessions": sessions held (1 is flat \
-by the close), "max_minutes": minutes or null}.
+by the close), "max_minutes": minutes or null, "breakeven_r": R or null, \
+"trail_r": R or null}. The last two move the stop, and are off unless set: \
+after each completed bar, to the entry once the best price so far is \
+breakeven_r R in favour, and to trail_r R behind the best price, whichever \
+is tighter; it never moves back. breakeven_r must be below target_r. An \
+exit at a moved stop is named "breakeven" or "trail" in the evidence.
 - "window": [HHMM, HHMM], the fill times allowed, or null for any time.
 - "limits": {"max_entries", "max_losses", "max_loss_r"} per ticker and \
 session, each null for none.
 - "filters": up to two of {"feature": name, "min": x, "max": y}, either bound \
 optional; a signal is taken only when the feature is within them.
 - "model": {"kind": "logistic", "features": [...]} adds a learned filter \
-trained on the discovery trades of the same spec without it."""
+trained on the discovery trades of the same spec without it. Name its \
+features; without a list it reads the ten from "minutes" to "risk"."""
 
 
 # --- the catalog ----------------------------------------------------------------

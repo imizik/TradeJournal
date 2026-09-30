@@ -26,6 +26,10 @@ echo "$2 $3 $4" >> "$ROOT/../stub.log"
 case "$2" in
   prepare) exit "${STUB_PREPARE:-0}" ;;
   week)
+    if [ "$3" = --dry-run ]; then
+      [ -n "${STUB_NO_BRIEF:-}" ] || echo "the brief" > "$5"
+      exit 0
+    fi
     mkdir -p "$ROOT/research/reports"
     echo "a report" > "$ROOT/research/reports/week.md"
     echo '{"id": "judged"}' >> "$ROOT/research/ledger.jsonl"
@@ -66,9 +70,9 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
     return work, env
 
 
-def run(work: Path, env: dict, **stub: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", str(work / "scripts" / "factory_week.sh")], cwd=work, env={**env, **stub},
-                          capture_output=True, text=True)
+def run(work: Path, env: dict, *options: str, **stub: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", str(work / "scripts" / "factory_week.sh"), *options], cwd=work,
+                          env={**env, **stub}, capture_output=True, text=True)
 
 
 def calls(work: Path) -> list[str]:
@@ -121,3 +125,36 @@ def test_the_wrong_branch_or_a_failed_fetch_stops_the_run(checkout):
     assert run(work, env).returncode == 1
     assert calls(work)[-1].startswith("notify --failure the factory checkout at")
     assert pushed(work, env) == ["seed"]
+
+
+def test_a_brief_for_a_claude_code_session_is_written_and_nothing_is_recorded(checkout, tmp_path):
+    work, env = checkout
+    brief = tmp_path / "brief.md"
+    result = run(work, env, "--brief", str(brief), "--budget", "2")
+    assert result.returncode == 0, result.stderr
+    assert brief.read_text() == "the brief\n"
+    assert calls(work) == ["prepare", "week --dry-run --brief-out"]  # the stub logs three words
+    assert pushed(work, env) == ["seed"]  # nothing judged, nothing pushed, nothing sent
+
+
+def test_no_brief_when_the_week_is_used_up(checkout, tmp_path):
+    work, env = checkout
+    result = run(work, env, "--brief", str(tmp_path / "brief.md"), STUB_NO_BRIEF="1")
+    assert result.returncode == 3 and "Add --budget N" in result.stderr
+    assert calls(work) == ["prepare", "week --dry-run --brief-out"]
+
+
+def test_an_answer_is_judged_recorded_and_announced(checkout):
+    work, env = checkout
+    result = run(work, env, "--answer", "answer.json", "--answer-by", "Claude", "--budget", "3")
+    assert result.returncode == 0, result.stderr
+    # A relative path is taken from where the command ran, not from the checkout the run moves to.
+    assert calls(work) == ["prepare", f"week --answer {work}/answer.json", "notify"]
+    assert pushed(work, env)[0].startswith("Strategy factory: week of ")
+
+
+def test_an_unknown_option_stops_the_run(checkout):
+    work, env = checkout
+    assert run(work, env, "--brief").returncode == 2  # no file after it
+    assert run(work, env, "--answers", "x").returncode == 2
+    assert calls(work) == []

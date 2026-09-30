@@ -1,5 +1,5 @@
 {
-  "commit": "8bec88320c7fc970964a4c6019541cf1d085525f",
-  "date": "2026-09-23",
-  "note": "Collapsed AGENTS.md to a pointer at CLAUDE.md; rewrote roadmap.md and environments.md for the VPS Postgres cutover and the deployed state."
+  "commit": "2d89686103bb7fe995f27c91051a3f5cd5dda80f",
+  "date": "2026-09-29",
+  "note": "Reconciled 32 code commits (Market Map, fill and expiry time repairs, metric validation, TradingView ingress, autodeploy, phone alerts, the strategy factory): added the factory's rules and weekly process, the gmail worker lane, the two repair scripts and the stalled docs-drift routine; corrected the Neon-era Postgres notes and the Pine compile status."
 }

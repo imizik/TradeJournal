@@ -544,7 +544,7 @@ def _plain(value: object) -> object:
 def ledger_record(ev: Evaluation, recorded: datetime, code: str, cache_through: date | None,
                   batch: str | None = None) -> dict:
     """One line of the ledger: what was tried, on what, and what became of it.
-    `batch` is the week (its Monday) for candidates the weekly run proposed."""
+    `batch` is the week (the Sunday it starts on) for candidates a weekly run proposed."""
     gates = [gate for gate in (ev.screen, ev.confirm, ev.exam) if gate is not None]
     return _plain({
         "id": ev.id,
@@ -601,6 +601,8 @@ def report(ev: Evaluation) -> str:
         f"id {ev.id} | {spec.family}, {spec.timeframe}-minute bars, "
         f"{'/'.join('long' if s == 1 else 'short' for s in family_sides(spec.rules()))} | "
         + (f"target {exits.target_r:g}R, " if exits.target_r is not None else "no target, ")
+        + (f"stop to the entry at +{exits.breakeven_r:g}R, " if exits.breakeven_r is not None else "")
+        + (f"stop trailing {exits.trail_r:g}R behind the best price, " if exits.trail_r is not None else "")
         + held
         + (f", at most {exits.max_minutes} minutes" if exits.max_minutes else "")
         + f" | costs {spec.costs.slippage_ticks:g} tick or {spec.costs.slippage_bps:g} bp a fill",

@@ -270,6 +270,33 @@ is verifiable rather than hopeful.
 - Source timestamps require an explicit IANA timezone and are normalized to UTC.
 - Simulated rows never enter `fill`, `trade`, or `tradefill`.
 
+## Strategy factory
+
+- The live ledger is `research/ledger.jsonl` on branch `factory/ledger`,
+  which is never merged; main's copy is the state when the factory was
+  merged. `scripts/strategy_factory.py` refuses to write the default ledger
+  from any other branch.
+- Every judged candidate stays in the ledger, pass or fail, and counts toward
+  the confirmation bar, as do the hand-research lines. Deleting or rewriting a
+  line lowers the bar for every later idea; never do it.
+- Each stage loads only its own data: the screen through 2024-09-30,
+  confirmation through 2026-03-31, the holdout only for a candidate that
+  passed confirmation. Holdout results are never used to design or tune an
+  idea; the weekly brief reduces them to passed or failed.
+- A spec is judged as written. Changing it after seeing its confirmation
+  results makes a new candidate with a new id, and it pays the higher bar.
+- A building block added later must leave every earlier spec's id and trades
+  as they were: a new setting stays out of `canonical` while unset
+  (`LATER_EXITS`), and a model that names no features reads the original ten
+  (`MODEL_DEFAULT_FEATURES`), never the whole growing list.
+  `test_strategy_factory.py` pins the committed specs' ids.
+- Weekly proposals trade the core universe at the default costs; the review
+  refuses a proposal that picks tickers or changes costs.
+- Whoever proposes sees only the brief. A Claude Code session answering it
+  (`/factory-week`) must not read the ledger, the reports or the trade files
+  before its answer is judged, and does not propose again after reading
+  results; the next run starts in a fresh session.
+
 ## TradingView live alerts
 
 - Wire `v` is the immutable wire-schema version and is distinct from Pine

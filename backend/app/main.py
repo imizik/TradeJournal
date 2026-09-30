@@ -14,7 +14,7 @@ from sqlmodel import Session, delete, select
 from app.database import engine
 from app.schema import ensure_current
 from app.models import Account, FILL_LIGHT, Fill
-from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts
+from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
 from app.routers.fills import (
     _rebuild_trades,
     backup_manual_fills,
@@ -220,9 +220,13 @@ async def lifespan(_app: FastAPI):
     _maybe_autostart_gmail_watch()
     _maybe_autostart_gmail_listener()
     tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
+    from app.engine.chart_stream import ChartMarketStream
+    chart_market_stream = ChartMarketStream()
+    _app.state.chart_market_stream = chart_market_stream
     try:
         yield
     finally:
+        await chart_market_stream.stop()
         from app.engine.job_runtime import execution_mode, shutdown_requested
 
         if execution_mode() == "embedded":
@@ -269,6 +273,7 @@ app.include_router(trades.router, prefix="/trades", tags=["trades"])
 app.include_router(stats.router, prefix="/stats", tags=["stats"])
 app.include_router(rebuild.router, prefix="/rebuild", tags=["rebuild"])
 app.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
+app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])

@@ -90,6 +90,8 @@ export default defineConfig({
         GMAIL_WATCH_AUTOSTART: "false",
         WEBULL_LISTENER_AUTOSTART: "false",
         TRADINGVIEW_ANALYSIS_AUTOSTART: "false",
+        // Chart access tests must stay deterministic even with a local .env.
+        TRADIER_API_KEY: "",
       },
     },
     {

@@ -8,13 +8,14 @@ Backend paths are relative to `backend/`, frontend paths to `frontend/`.
 
 ## The screens
 
-The sidebar (`components/Nav.tsx`) has seven entries plus a **Sync** button
+The sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button
 at its foot that opens a drawer on any page. Everything else is reached from
 one of these by a row link or a button.
 
 | Sidebar | Route | Page | Loads | Then, from the browser |
 |---|---|---|---|---|
 | Dashboard | `/` | `app/page.tsx` | `GET /stats`, `/trades`, `/accounts`, `/trades/fills/bulk`, `/quotes?tickers=`, `POST /quotes/positions` | `DashboardActions`: `GET /sync/summary`, `/sync/jobs`, `/sync/runs`, `/health`, `/auth/gmail/start`; `POST /sync/pipeline/run`, `/sync/jobs/{job_type}/run`, `/sync/advanced/rebuild-all`, `/sync/advanced/resync-all` |
+| Charts | `/charts` | `app/charts/page.tsx`, `components/charts/` | — | `GET /charts/workspace` every 15s while visible; Tradier candles/quotes, linked timeframes and fill markers; settings and price levels saved in this browser |
 | Daily Review | `/daily` → `/daily/{YYYY-MM-DD}` | `app/daily/page.tsx`, `app/daily/[day]/page.tsx` | `GET /daily-review`; per day `/daily-review/{day}`, `/trades`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/accounts`, quotes | `DailyAiPanel`: `POST /daily-review` |
 | Trades | `/trades` → `/trades/{id}` | `app/trades/page.tsx`, `app/trades/[id]/page.tsx`, `components/TradesTable.tsx` | list: `GET /trades?status=&ticker=&account=&type=`, `/accounts`. Detail (client page): `/trades/{id}`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/market-context/trade/{id}` | `AuditPanel`: `GET /market-context/audit/{id}`; review button: `POST /trades/{id}/review` |
 | Analytics | `/analytics` | `app/analytics/page.tsx` | `GET /stats` | — |
@@ -69,6 +70,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 
 | Working on | Start at | Routes | Proof |
 |---|---|---|---|
+| Charts workspace | `app/engine/chart_feed.py`, `app/engine/chart_stream.py`, `app/engine/chart_math.py`, `app/routers/charts.py`; `frontend/components/charts/` | private `GET /charts/workspace` and `/charts/stream`; `/charts` page | `tests/test_charts.py`, `tests/test_chart_stream.py`, `frontend/e2e/charts.spec.ts`; live access probe `scripts/check_chart_feed.py`; [provider decision and boundaries](../charts-workspace.md) |
 | Background job ownership and recovery | `app/engine/job_runtime.py`, `app/jobs/worker.py`; commands in [background-jobs.md](background-jobs.md) | Sync Center, Gmail push, enrichment and Webull start routes | `tests/test_job_runtime.py` (competing processes, API restarts, worker death, queue consumption and fill dedupe/FIFO); external providers stubbed |
 | PnL, FIFO, trade shape | `app/engine/reconstructor.py` | `POST /rebuild`; runs after every fill write and in `trade_rebuild` | `tests/test_reconstructor.py`; `test_seed_dev_data.py` (`EXPECTED`); `test_seed_snapshot.py` (golden snapshot over the seed) |
 | Robinhood email parsing | `app/engine/email_parser.py` | — | `test_email_parser.py` |
@@ -92,7 +94,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
 | Isaac Market Map backtester | `app/engine/market_map.py` (the Pine's rules, pure), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
-| Strategy factory | `app/engine/factory_data.py` (bars, splits, features), `factory_rules.py` (entry families, the shared execution model, specs), `factory_model.py` (learned filter), `factory_gates.py` (gates, ledger records), `factory_brief.py` (the weekly brief, proposal review, weekly report) — all pure; `scripts/strategy_factory.py` (bar cache, ledger file, CLI, the Claude call, ntfy); `../scripts/factory_week.sh` (the weekly run, from launchd); specs in `research/specs/`, results in `research/ledger.jsonl`; the live ledger and the weekly reports are on branch `factory/ledger`, never merged | — (`python scripts/strategy_factory.py run ../research/specs/<spec>.json`, then `ledger`; weekly: phone summary) | `test_factory.py` (synthetic bars: execution model, families, gates, the data lock end to end), `test_factory_brief.py` (catalog, digest, evidence, review, report), `test_strategy_factory.py` (the script with a stub minute source and a stub idea model); see `docs/strategy-factory.md` |
+| Strategy factory | `app/engine/factory_data.py` (bars, splits, features), `factory_rules.py` (entry families, the shared execution model, specs), `factory_model.py` (learned filter), `factory_gates.py` (gates, ledger records), `factory_brief.py` (the weekly brief, proposal review, weekly report) — all pure; `scripts/strategy_factory.py` (bar cache, ledger file, CLI, the Claude call, ntfy); `../scripts/factory_week.sh` (the weekly run, from launchd, or by hand with a Claude Code session as the idea model: `.claude/skills/factory-week/SKILL.md`); specs in `research/specs/`, results in `research/ledger.jsonl`; the live ledger and the weekly reports are on branch `factory/ledger`, never merged | — (`python scripts/strategy_factory.py run ../research/specs/<spec>.json`, then `ledger`; weekly: phone summary) | `test_factory.py` (synthetic bars: execution model, families, gates, the data lock end to end), `test_factory_brief.py` (catalog, digest, evidence, review, report), `test_strategy_factory.py` (the script with a stub minute source and a stub idea model); see `docs/strategy-factory.md` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
 | TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/components/SignalsRefresh.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail**; both refresh every 30s while visible and on tab return | `frontend/e2e/signals.spec.ts`: new alerts, verdicts/details, hidden-tab pause, navigation cleanup, slow refresh and skip/error reasons against disposable SQLite |
 | Automatic deployment | `deploy/autodeploy.py`, `.github/workflows/release.yml`, `deploy/control.py` (`prune`, lock exit 75), `deploy/systemd/tradejournal-autodeploy.*`, `deploy/autodeploy.env.example` | merge to `main`; on the VPS `sudo … autodeploy.py status` ([automatic deployment](../../deploy/README.md#automatic-deployment)) | `test_autodeploy.py`, `test_deployment.py`; the Ubuntu smoke upgrades through the real unit against a local stand-in for GitHub. The live Release workflow runs only on `main` |
@@ -130,6 +132,11 @@ you change it (`verification.md`, "What is NOT covered yet").
 - `seed_dev_data.py` — the fixed fills behind the browser tests and the snapshot
 - `migrate_sqlite_to_postgres.py` — SQLite → PostgreSQL copy
 - `check_database.py` — read-only preflight: which database, schema ready?
+- `repair_gmail_fill_times.py` — plans, checks and applies the guarded repair of
+  Gmail fill times stored as UTC clocks, verified against the source emails
+  (`domain-rules.md`, fills and trades)
+- `repair_expired_trade_times.py` — the guarded repair of expiration closes
+  saved as UTC clocks instead of 16:00 New York wall time
 - `setup_roles.py` — create the app and ingress roles, then prove they are
   limited by connecting as each one (`environments.md`)
 - `backtest_market_map.py` — Isaac Market Map over many tickers from Alpaca
@@ -154,8 +161,18 @@ reason, and ruff lints them without importing them.
 - `docs/agent/last-reconciled.json` — the commit documentation was last
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
   and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
-  judgement half is `.claude/skills/docs-drift/SKILL.md`, and the scheduled
-  agent that runs it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
+  judgement half is `.claude/skills/docs-drift/SKILL.md`. It runs unattended
+  every Saturday: launchd on the development Mac starts
+  `scripts/docs_drift_week.sh` in `/Users/user/TradeJournal-docs`, a checkout
+  kept at `main`. From 20 code commits on, the script has Claude run the pass
+  headless, with the key in the main checkout's `backend/.env` and a $20 cap.
+  Claude may edit only documentation, and anything needing permission is
+  refused rather than waiting for a person. The script then checks the
+  changes and the marker, runs the docs tests, pushes `docs/drift-<date>` and
+  opens a pull request. The phone hears about the pull request, one still
+  waiting for review, or a failure. Proof: `tests/test_docs_drift_script.py`.
+  The desktop scheduled task that ran it before stalled on a permission prompt
+  on its first run (2026-09-26) and is disabled.
 
 ## Reference documents
 

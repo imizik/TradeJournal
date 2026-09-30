@@ -116,8 +116,10 @@ than two filters, repeats anything in the ledger or this week's batch, or
 does not fit the budget, and the report lists every refusal with its reason.
 
 - **Budget:** three new candidates a week, counted from ledger lines tagged
-  with the week (`batch`). A learned filter whose rules are new counts two.
-  Hand-run `run` candidates are not counted.
+  with the week (`batch`). Weeks run Sunday to Saturday, so each scheduled
+  Sunday run opens a new one. A learned filter whose rules are new counts
+  two. Hand-run `run` candidates are not counted. `--budget N` lets a run
+  someone asks for add N more.
 - **Exam numbers** reach the brief only as passed or failed.
 - **Evidence** comes from discovery data only (`factory_gates.discovery_trades`),
   cached per idea and per engine version (a hash of the engine modules) in
@@ -131,7 +133,7 @@ does not fit the budget, and the report lists every refusal with its reason.
 
 ```bash
 cd /Users/user/TradeJournal-factory
-bash scripts/factory_week.sh                                  # run the week now
+bash scripts/factory_week.sh                                  # run the week now, asking the API
 backend/.venv/bin/python backend/scripts/strategy_factory.py week --dry-run   # print the brief only
 launchctl bootout gui/$(id -u)/com.tradejournal.strategy-factory             # pause the schedule
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradejournal.strategy-factory.plist  # resume
@@ -143,6 +145,27 @@ slept runs at the next wake. The run needs `ANTHROPIC_API_KEY`, the Alpaca
 keys and `FACTORY_NTFY_URL` (with `FACTORY_NTFY_TOKEN` when the topic has one)
 in the main checkout's `backend/.env`, which the factory checkout links to,
 as it links `backend/.venv` and `backend/data/alpaca_cache`.
+
+### By hand, with Claude Code as the idea model
+
+Typing `/factory-week` in a Claude Code session runs a week now, with that
+session answering the brief instead of the API, so it runs on the Claude plan
+rather than the API key (`.claude/skills/factory-week/SKILL.md`). The
+session drives the same script in the factory checkout, in two steps:
+
+```bash
+bash scripts/factory_week.sh --brief /tmp/brief.md            # merge main, fetch bars, write the brief, stop
+bash scripts/factory_week.sh --answer /tmp/answer.json --answer-by "Claude Opus 5.5"   # judge, record, push, notify
+```
+
+`--answer` is held to the same JSON format the API is (`answer_problem`), and
+its ideas go through the same review and the same gates. The session must
+propose from the brief alone: reading the ledger, the reports or the trade
+files first would let results the brief withholds (exam numbers) shape the
+ideas, so each run starts in a fresh session. When the week's three are
+used, the brief step exits with status 3, and `--budget N` on both steps
+runs more on request. A second run on the same day writes its report as
+`<day>b.md`, so neither is overwritten.
 
 ## Writing a spec
 
@@ -164,13 +187,17 @@ as it links `backend/.venv` and `backend/data/alpaca_cache`.
 
 Only `family` is required; everything else defaults to the family's research
 framework values. `window` is the fill time (HHMM, inclusive); `max_sessions`
-above 1 holds overnight; `tickers: "core"` is the 18 names below. A `model`
-of `{"kind": "logistic"}` uses all ten features; `features` and `l2` narrow
-it. The id is a hash of everything except the name and notes, so renaming a
-spec does not make it a new idea.
+above 1 holds overnight; `exits` can also move the stop with `breakeven_r`
+and `trail_r` (see [Families](#families)); `tickers: "core"` is the 18 names
+below. A `model` of `{"kind": "logistic"}` uses the first ten features,
+`minutes` to `risk`; `features` picks others (the newer ones must be named)
+and `l2` sets the penalty. The id is a hash of everything except the name and
+notes, so renaming a spec does not make it a new idea. A setting added later
+stays out of the hash while unset, so every earlier id stands.
 
-Features, read at the signal bar from completed data only, signed so that a
-positive value is "with the trade" for longs and shorts alike:
+Features, read at the signal bar from completed data only, the directional
+ones signed so that a positive value is "with the trade" for longs and shorts
+alike:
 
 | Feature | Meaning |
 |---|---|
@@ -184,19 +211,33 @@ positive value is "with the trade" for longs and shorts alike:
 | `spy_trend` | SPY against its prior daily EMA 20, in SPY's daily ATR |
 | `spy_day` | SPY against its session open, in SPY's daily ATR |
 | `risk` | the signal close to the stop, in ATR(14) of the chart bars |
+| `vwap_distance` | the signal close against the session VWAP, in ATR(14) of the chart bars |
+| `vol_ratio` | the daily ATR(5) over the daily ATR(20): above 1 when the last week moved more than the month |
+| `spy_vol` | SPY's daily ATR(14) as a percent of its close: the market's volatility level |
+
+The last three were added for the weekly loop, which asked for them. A
+volatility regime against a longer past, such as a year, would be blank for
+most of the discovery period, since the bars start in June 2023; these two
+need a month.
 
 ## Families
 
 All share one execution model, the one the Market Map port and the research
 backtests use. A signal is decided at a bar's close and entered at the next
 open, slipped by the larger of the tick count and the basis points. The stop
-is frozen at the signal; if the open is already through it there is no
-trade. The stop and a target in R rest from the fill, and a bar that opens
-through either fills at the open (overnight gaps included). When one bar
-reaches both, the stop fills first. Stops and closing exits slip; targets do
-not. The trade leaves at a bar's close once it has held `max_minutes`, or at
-the last bar of its `max_sessions`-th session. One position per ticker, and
-the session limits block new entries for the rest of a session.
+is set at the signal; if the open is already through it there is no trade.
+The stop and a target in R rest from the fill, and a bar that opens through
+either fills at the open (overnight gaps included). When one bar reaches
+both, the stop fills first. Stops and closing exits slip; targets do not.
+The stop moves only when the exits say so, after a bar closes and for the
+bars after it (a bar does not tell whether its high or its low came first),
+and never back: `breakeven_r` puts it at the entry once the best price so
+far is that many R in favour, and `trail_r` keeps it that many R behind the
+best price. An exit there is named `breakeven` or `trail`, and R is still
+measured from the stop the signal set. The trade leaves at a bar's close
+once it has held `max_minutes`, or at the last bar of its `max_sessions`-th
+session. One position per ticker, and the session limits block new entries
+for the rest of a session.
 
 - `recovery_swing`: the NBIS recovery swing, 15-minute bars, long. Arm
   under the prior day's daily EMA 20 for two sessions; trigger once on a
@@ -266,11 +307,14 @@ t ≥ 2.61.
 
 - The data: sessions ending at 13:00, splits and reverse splits (and a crash
   that is not one), EMA and ATR seeding, VWAP resets, and features that do
-  not change when later bars do.
+  not change when later bars do, `vol_ratio` reading only past sessions.
 - The execution model: every exit path (resting stop and target, gaps
   through either, both on one bar, the session count, the time limit), orders
   across the close, one position at a time, the session limits, and the
-  entry window.
+  entry window. Moved stops: to the entry and trailing, from the bar after
+  the one that moved them, never back, through a gap, mirrored for shorts
+  and the same for random entries; a rule that never tightens changes no
+  trade.
 - Each family's arming, triggering, cancelling and expiry, with exact stops
   and fills.
 - Specs and their ids, the logistic fit recovering a known effect, the
@@ -285,7 +329,11 @@ source: the bar cache, the ledger, reruns, a model spec judging its parent
 first, and the committed specs and ledger. Thirty-nine planted defects (a
 fill at the signal close, no stop slippage, the target first, today's daily
 EMA, no chase limit, the holdout loaded early, t not clustered, a bar that
-never rises, the model trained on everything, and more) each fail the tests.
+never rises, the model trained on everything, and more) each fail the tests,
+as do twenty more in the moving stops, the newer features and the ids (a
+stop moved within its own bar or moved back, a short's best price taken from
+its highs, a feature read from the same session, an unset setting in the
+hash, and more).
 
 ## Limits
 

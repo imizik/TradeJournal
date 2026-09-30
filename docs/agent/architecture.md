@@ -92,6 +92,19 @@ the newest `main` build that passed every CI check. It pulls from GitHub,
 because nothing outside the tailnet can reach the server. Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
+Two scheduled processes run off the server, both started by launchd on the
+development Mac and neither touching a database:
+
+- The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
+  on branch `factory/ledger`). It reads the local market-data cache, calls
+  Alpaca, the Anthropic API and ntfy, and writes only to that branch, which
+  is never merged (`docs/strategy-factory.md`).
+- The weekly documentation drift pass (`scripts/docs_drift_week.sh`, in a
+  checkout kept at `main`). Once 20 code commits have landed since the docs
+  were reconciled, Claude runs the `docs-drift` skill headless, allowed to
+  edit only documentation. The script checks the result, pushes a branch and
+  opens a pull request for review. It never merges.
+
 ## Data flow
 
 ```
@@ -157,8 +170,8 @@ work. API status endpoints read `job_run`, never process-local state.
 
 `JOB_EXECUTION_MODE=embedded` (default) dispatches API-owned threads through
 the shared ownership runtime. `external` leaves committed requests for
-`python -m app.jobs.worker --lane sync`, plus separate `polygon` and `webull`
-workers. This is a single-host design with shared local process locks, not a
+`python -m app.jobs.worker --lane sync`, plus separate `polygon`, `webull` and
+`gmail` workers. This is a single-host design with shared local process locks, not a
 distributed or Cloud Run queue. API restarts do not invalidate live owners;
 dead owners become failed and require an explicit new run. See
 [background-jobs.md](background-jobs.md) for configuration, recovery and the
@@ -210,6 +223,15 @@ refreshed hourly, not live. `docs/tradier-integration-plan.md` has the whole
 assessment, including why Tradier is not a candidate for the historical side.
 
 ## Frontend
+
+The private Charts workspace (`/charts`) reads Tradier candles and batched
+watchlist quotes through `/charts/workspace`. One API-owned Tradier WebSocket
+fans out valid trade prices through private `/charts/stream` SSE to visible tabs.
+The 15-second REST refresh reconciles candles, volume and studies and remains
+the fallback when streaming is unavailable. Chart
+calculations and temporary bars are separate from historical enrichment, and
+execution markers are read-only journal views. Layouts and horizontal levels
+are saved in the browser. See [chart boundaries](../charts-workspace.md).
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when

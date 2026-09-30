@@ -19,7 +19,9 @@ still well-formed and no longer true, and that is everything below.
 `backend/tests/test_docs_freshness.py` fails when more than 30 code commits
 have landed since `docs/agent/last-reconciled.json`, and its failure message
 carries the commit range to reconcile. Use that range as `<since>` below; if
-you arrived some other way, the marker file still says where to start.
+you arrived some other way, the marker file still says where to start. Every
+Saturday `scripts/docs_drift_week.sh` runs this pass unattended once 20 code
+commits have landed, and opens a pull request with the result.
 
 ## The method
 

@@ -33,7 +33,7 @@ native PowerShell launcher for the app itself.
 | Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Docs | `cd backend && pytest tests/test_docs_freshness.py -q` | That the drift pass above is overdue: it counts code commits since `docs/agent/last-reconciled.json` and fails past 30. It cannot check that the pass happened, only that someone was asked |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
-| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, and the import boundaries again |
+| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port and the strategy factory on synthetic bars, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
@@ -179,6 +179,14 @@ The browser clock is advanced rather than waiting 30 seconds per poll. This
 proves rendering and private reads; it does not exercise TradingView delivery
 or a live Alpaca verdict.
 
+`frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
+quote responses: five canvases, symbol linking, saved levels, streamed trade updates,
+refresh visibility, pause/error behavior and phone overflow. `backend/tests/test_charts.py`
+and `backend/tests/test_chart_stream.py` verify
+private routes and provider/indicator boundaries. Actual Tradier/Webull access
+is checked separately by `backend/scripts/check_chart_feed.py`; browser fixtures
+do not establish live entitlement or TradingView parity.
+
 Notes that will save you time:
 
 - **Servers are never reused** (`reuseExistingServer: false`). `NEXT_PUBLIC_*`
@@ -217,9 +225,8 @@ TEST_DATABASE_URL=postgresql+psycopg://user@host:5432/scratch pytest tests/test_
 ```
 
 CI runs it against an ephemeral `postgres:16` service container. Deliberately
-not a Neon branch: no secret is needed, and dialect problems reproduce without
-Neon-specific behavior. Per-PR Neon branches earn their place later, for
-deploy previews and connection-level behavior.
+not a hosted branch: no secret is needed, dialect problems reproduce without
+one, and production itself now runs plain PostgreSQL on the VPS.
 
 `TEST_DATABASE_URL` is intentionally a **different variable** from
 `DATABASE_URL`. `conftest.py` pins `DATABASE_URL` to throwaway SQLite so the
@@ -250,9 +257,9 @@ proof the container really is fresh.
 
 What it covers, and why each earns its place:
 
-- **The full Alembic chain on Postgres.** This is the documented Neon
-  provisioning path. It was broken and nobody knew, because SQLite passing
-  proves nothing about it. Two separate revisions failed the first time this
+- **The full Alembic chain on Postgres.** This is how a fresh PostgreSQL
+  database is provisioned, the VPS's included. It was broken and nobody knew,
+  because SQLite passing proves nothing about it. Two separate revisions failed the first time this
   ran (see below).
 - **`ExactDecimal` on NUMERIC.** `tradingview_alert.price` is
   `NUMERIC(28, 12)` on Postgres and `VARCHAR(48)` on SQLite — genuinely
@@ -324,6 +331,13 @@ Be honest about this when reporting work:
   Phone alerts reach a loopback stand-in for ntfy in the deployment workflow;
   delivery through ntfy.sh and the dead-man's-switch ping are proved only by
   `deploy/alerts.py test` and a real alert on the server.
+  The strategy factory's weekly run is tested with a stub idea model, stub
+  bars and a throwaway git repository with a bare remote; the Claude call, the
+  Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
+  proved only by a real weekly run. The documentation drift routine
+  (`scripts/docs_drift_week.sh`) is tested the same way, with stub `claude`,
+  `gh` and `curl`. Whether Claude's pass is any good is judged in review of
+  the pull request it opens.
   The live-quote providers are the clearest case: `test_quotes_provider.py`
   and `test_tradier.py` pin the dispatch, the batching, the response shapes and
   the fallback, and prove nothing at all about whether a quote is *correct* or

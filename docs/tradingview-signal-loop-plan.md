@@ -9,10 +9,10 @@
 > with backend test coverage. The opt-in Ubuntu ingress service, deployment
 > preflight and HTTPS proxy template are implemented; live VPS/DNS/TLS setup
 > must be verified separately. Signals refreshes every 30 seconds while visible
-> and on tab return, with browser coverage. Pine (Step 5) is written as a
-> v6 `strategy()` in `docs/pine/isaac_market_map.pine` and contract-tested,
-> but not yet compiled or run in TradingView; a real TradingView
-> alert/verdict test and optional notifications remain.
+> and on tab return, with browser coverage. Pine (Step 5) is a v6
+> `strategy()` in `docs/pine/isaac_market_map.pine`, contract-tested; v1.0.0
+> ran in TradingView's Strategy Tester (the exports in `backend/TradingView/`),
+> and a real TradingView alert/verdict test and optional notifications remain.
 > See [production setup](../deploy/README.md#tradingview-webhooks).
 
 ## Goal
@@ -343,6 +343,6 @@ escape strings safely; Pine `na` must never produce invalid JSON. Use
 2. model + guarded Alembic migration (complete)
 3. persistence/read engine + tests (complete)
 4. restricted ingress, private read router, bounded worker, and configuration (complete)
-5. Pine v6 strategy with alerts (`docs/pine/isaac_market_map.pine`; written, contract-tested, not yet compiled)
+5. Pine v6 strategy with alerts (`docs/pine/isaac_market_map.pine`; contract-tested, v1.0.0 backtested in TradingView, live alert delivery not yet tested)
 6. frontend `/signals` list/detail and automatic refresh (complete)
 7. docs (`CLAUDE.md`, `docs/agent/`) update (ongoing per completed slice)
