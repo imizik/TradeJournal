@@ -48,10 +48,9 @@ place. What each of them proves is documented where it is enforced, not here.
   share a database, credentials, webhook tokens, Gmail state or
   external-integration identity (`environments.md`).
 - **Review that is required rather than advisory.** An independent reviewer
-  exists — the Codex GitHub App reviews pull requests, and
-  `.github/workflows/claude-review-fallback.yml` sweeps any head commit it
-  leaves alone for twelve minutes — but `main` has no branch protection, so a
-  pull request can still merge with no review at all (`verification.md`).
+  exists — the Codex GitHub App reviews pull requests — but `main` has no
+  branch protection, so a pull request can still merge with no review at all
+  (`verification.md`).
 - **A convention for splitting work** so two agents do not both land in
   `reconstructor.py` in the same afternoon.
 
