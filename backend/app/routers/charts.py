@@ -12,12 +12,64 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.engine.chart_feed import ChartFeedError, chart_feed
+from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
 from app.models import Fill
 
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
+
+
+def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], bool]:
+    panel_bars = [p["bars"] for p in panels if p["bars"]]
+    if not panel_bars:
+        return [], False
+    start = min(b[0]["time"] for b in panel_bars)
+    end = max(b[-1]["end_time"] for b in panel_bars)
+    query = select(Fill.id, Fill.executed_at, Fill.side, Fill.instrument_type, Fill.option_type, Fill.contracts).where(
+        Fill.ticker == symbol,
+        Fill.executed_at >= datetime.fromtimestamp(start, ET).replace(tzinfo=None),
+        Fill.executed_at < datetime.fromtimestamp(end, ET).replace(tzinfo=None),
+    ).order_by(Fill.executed_at.desc(), Fill.id.desc()).limit(1001)
+    rows = db.exec(query).all()
+    fills = []
+    for row in reversed(rows[:1000]):
+        stamp = int(row.executed_at.replace(tzinfo=ET).timestamp())
+        option = f" {row.option_type or 'option'}" if row.instrument_type == "option" else " stock"
+        label = f"{row.side.replace('_', ' ')} {float(row.contracts):g}{option}"
+        fills.append({"id": str(row.id), "time": stamp, "label": label, "buy": row.side.startswith("buy")})
+    for panel in panels:
+        times = [b["time"] for b in panel["bars"]]
+        for fill in fills:
+            index = bisect_right(times, fill["time"]) - 1
+            if index >= 0 and fill["time"] < panel["bars"][index]["end_time"]:
+                panel["markers"].append({**fill, "time": times[index]})
+    return fills, len(rows) > 1000
+
+
+@router.get("/history")
+def history(
+    symbol: str = Query(..., max_length=15),
+    interval: str = Query(...),
+    session: str = Query(..., pattern="^(regular|extended)$"),
+    before: int = Query(..., gt=0),
+    limit: int = Query(1200, ge=1, le=1200),
+    continuation: str | None = Query(None, max_length=64),
+    db: Session = Depends(get_session),
+):
+    symbol = symbol.upper().strip()
+    if not SYMBOL.fullmatch(symbol):
+        raise HTTPException(422, "Use a US stock or ETF ticker.")
+    try:
+        data = chart_history.page(symbol, interval, session, before, limit, continuation)
+    except HistoryError as exc:
+        status = 422 if exc.code == "invalid_request" else 503
+        raise HTTPException(status, {"code": exc.code, "message": str(exc), "retry_at": exc.retry_at}) from None
+    data["markers"] = []
+    fills, truncated = _markers(db, symbol, [data])
+    data["fills_truncated"] = truncated
+    return data
 
 
 @router.get("/stream")
@@ -72,28 +124,5 @@ def workspace(
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
-    panel_bars = [p["bars"] for p in data["panels"].values() if p["bars"]]
-    data["fills"] = []
-    data["fills_truncated"] = False
-    if panel_bars:
-        start = min(b[0]["time"] for b in panel_bars)
-        end = max(b[-1]["end_time"] for b in panel_bars)
-        query = select(Fill.id, Fill.executed_at, Fill.side, Fill.instrument_type, Fill.option_type, Fill.contracts).where(
-            Fill.ticker == symbol,
-            Fill.executed_at >= datetime.fromtimestamp(start, ET).replace(tzinfo=None),
-            Fill.executed_at < datetime.fromtimestamp(end, ET).replace(tzinfo=None),
-        ).order_by(Fill.executed_at.desc(), Fill.id.desc()).limit(1001)
-        rows = db.exec(query).all()
-        data["fills_truncated"] = len(rows) > 1000
-        for row in reversed(rows[:1000]):
-            stamp = int(row.executed_at.replace(tzinfo=ET).timestamp())
-            option = f" {row.option_type or 'option'}" if row.instrument_type == "option" else " stock"
-            label = f"{row.side.replace('_', ' ')} {float(row.contracts):g}{option}"
-            data["fills"].append({"id": str(row.id), "time": stamp, "label": label, "buy": row.side.startswith("buy")})
-        for panel in data["panels"].values():
-            times = [b["time"] for b in panel["bars"]]
-            for fill in data["fills"]:
-                index = bisect_right(times, fill["time"]) - 1
-                if index >= 0 and fill["time"] < panel["bars"][index]["end_time"]:
-                    panel["markers"].append({**fill, "time": times[index]})
+    data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
     return data

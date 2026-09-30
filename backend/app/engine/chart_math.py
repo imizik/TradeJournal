@@ -12,7 +12,7 @@ ET = ZoneInfo("America/New_York")
 INTERVALS = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "4h": 240, "1D": 1440, "1W": 10080}
 
 
-def normalize_bars(rows: list[dict], *, daily: bool = False) -> list[dict]:
+def normalize_bars(rows: list[dict], *, daily: bool = False, source: str = "tradier") -> list[dict]:
     """Reject malformed OHLCV, sort and deduplicate by the provider timestamp."""
     result = {}
     for row in rows:
@@ -35,7 +35,7 @@ def normalize_bars(rows: list[dict], *, daily: bool = False) -> list[dict]:
                 continue
             if stamp <= 0:
                 continue
-            result[stamp] = {"time": stamp, "end_time": end, **prices}
+            result[stamp] = {"time": stamp, "end_time": end, "source": source, **prices}
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
     return [result[k] for k in sorted(result)]
@@ -56,7 +56,7 @@ def session_part(dt: datetime) -> tuple[str, int, int] | None:
 
 def chart_bars(minutes: list[dict], daily: list[dict], interval: str, session: str) -> list[dict]:
     if interval == "1D":
-        return indicators([{**b, "extended": False, "vwap": None} for b in daily])
+        return indicators([{**b, "source": b.get("source", "tradier"), "extended": False, "vwap": None} for b in daily])
     if interval == "1W":
         groups: dict[int, dict] = {}
         for b in daily:
@@ -96,7 +96,7 @@ def chart_bars(minutes: list[dict], daily: list[dict], interval: str, session: s
 
 def _merge(groups: dict, stamp: int, end: int, bar: dict, extended: bool, vwap: float | None):
     if stamp not in groups:
-        groups[stamp] = {**bar, "time": stamp, "end_time": end, "extended": extended, "vwap": vwap}
+        groups[stamp] = {**bar, "source": bar.get("source", "tradier"), "time": stamp, "end_time": end, "extended": extended, "vwap": vwap}
     else:
         b = groups[stamp]
         b.update(high=max(b["high"], bar["high"]), low=min(b["low"], bar["low"]),

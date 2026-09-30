@@ -107,15 +107,15 @@ def test_five_panels_share_history_and_poll_only_recent_data(provider):
     feed, calls, clock, _ = provider
     frames = ["1m", "5m", "15m", "1h", "1D"]
     feed.workspace("SPY", frames, ["QQQ", "SPY"], "extended")
-    assert len(calls) == 4
+    assert len(calls) == 3
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
-    assert len(calls) == 4  # session filtering happens locally, cache key canonical
+    assert len(calls) == 3  # today, daily and quotes; completed minutes use SIP history
     clock[0] += 16
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
-    assert len(calls) == 6  # current minute history + one batch of quotes
+    assert len(calls) == 5  # current minute history + one batch of quotes
     clock[0] += 60
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
-    assert len(calls) == 9  # daily history now due, older minute history still cached
+    assert len(calls) == 8  # daily history now due; no Tradier historical request
 
 
 def test_provider_failure_retains_previous_data_with_original_timestamp(provider):
@@ -203,6 +203,22 @@ def test_fill_markers_use_new_york_time_and_preserve_option_identity(route_clien
     assert len(markers) == 2
     assert markers[0]["time"] == minute("2026-09-29T09:30")["time"]
     assert "put" in markers[0]["label"] and "price" not in markers[0]
+
+
+def test_history_route_identifies_window_and_returns_bounded_old_markers(route_client, monkeypatch):
+    bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
+    before = bars[-1]["end_time"] + 1
+    monkeypatch.setattr(charts.chart_history, "page", lambda symbol, interval, session, cursor, limit, continuation: {
+        "symbol": symbol, "interval": interval, "session": session, "before": cursor, "limit": limit,
+        "bars": bars, "older_cursor": bars[0]["time"], "exhausted": False, "continuation": None,
+        "warmup": "ready", "source": "alpaca_sip", "price_basis": "raw", "issue": None,
+    })
+    response = route_client.get(f"/charts/history?symbol=SPY&interval=5m&session=regular&before={before}")
+    assert response.status_code == 200
+    result = response.json()
+    assert result["before"] == before and result["older_cursor"] == bars[0]["time"]
+    assert [m["id"] for m in result["markers"]] == ["00000000-0000-0000-0000-00000000000c", "00000000-0000-0000-0000-00000000000d"]
+    assert route_client.get(f"/charts/history?symbol=SPY&interval=5m&session=regular&before={before}&limit=1201").status_code == 422
 
 
 @pytest.mark.parametrize("query", ["symbol=../../secret", "intervals=1s", "session=overnight", "intervals=", "watchlist=" + ",".join(f"S{i}" for i in range(31))])

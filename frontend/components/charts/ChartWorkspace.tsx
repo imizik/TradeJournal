@@ -5,17 +5,20 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { barClock, chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, etTime, fetchChartData, INTERVALS, overlayLiveTicks, parseChartTick, price, restoreSettings, SMALL_HEIGHTS, STORAGE_KEY, validSymbol } from "@/lib/charts";
-import type { ChartData, ChartSettings, ChartStreamTick, Indicators, Interval, SmallChartSize } from "@/lib/charts";
+import { barClock, chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, etTime, fetchChartData, fetchChartHistory, INTERVALS, mergeBars, overlayLiveTicks, parseChartTick, price, restoreSettings, retainHistory, SMALL_HEIGHTS, STORAGE_KEY, validSymbol } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, SmallChartSize } from "@/lib/charts";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
+type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean };
+type OlderState = { key: string; panels: Partial<Record<Interval, OlderPanel>> };
 
 export default function ChartWorkspace() {
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState(true);
   const [response, setResponse] = useState<{ key: string; data: ChartData } | null>(null);
+  const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -36,18 +39,90 @@ export default function ChartWorkspace() {
   const inFlight = useRef(false);
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
+  const historyFlights = useRef(new Map<Interval, AbortController>());
+  const visibleTimes = useRef(new Map<Interval, { from: number; to: number }>());
   const intervalKey = (settings.layout === "single" ? settings.intervals.slice(0, 1) : settings.intervals).join(",");
   const watchlistKey = settings.watchlist.join(",");
   const requestKey = `${settings.symbol}|${settings.session}|${intervalKey}|${watchlistKey}`;
+  const historyKey = `${settings.symbol}|${settings.session}|${intervalKey}`;
   const data = response?.key === requestKey ? response.data : null;
+  const currentOlder = older.key === historyKey ? older.panels : {};
   const hasData = !!data;
   const activeStream = stream.key === requestKey ? stream : null;
-  const viewData = useMemo(() => data ? overlayLiveTicks(data, activeStream?.ticks ?? [], settings.session) : null,
-    [data, activeStream, settings.session]);
+  const viewData = useMemo(() => {
+    if (!data) return null;
+    const live = overlayLiveTicks(data, activeStream?.ticks ?? [], settings.session);
+    const panels = { ...live.panels };
+    for (const interval of INTERVALS) {
+      const tail = panels[interval];
+      const past = currentOlder[interval];
+      if (!tail || !past?.bars.length) continue;
+      const bars = mergeBars(retainHistory(past.bars, tail.bars, visibleTimes.current.get(interval) ?? null), tail.bars);
+      const times = new Set(bars.map((bar) => bar.time));
+      panels[interval] = { bars, markers: [...new Map([...past.markers, ...tail.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()] };
+    }
+    return { ...live, panels };
+  }, [data, activeStream, settings.session, currentOlder]);
   const selected = data?.quotes.find((q) => q.symbol === settings.symbol);
   const levels = useMemo(() => settings.levels[settings.symbol] ?? [], [settings.levels, settings.symbol]);
 
   useEffect(() => { setSettings(restoreSettings()); setReady(true); }, []);
+  useEffect(() => {
+    historyFlights.current.forEach((controller) => controller.abort());
+    historyFlights.current.clear();
+    visibleTimes.current.clear();
+    setOlder({ key: historyKey, panels: {} });
+  }, [historyKey]);
+
+  const loadOlder = async (interval: Interval, beforeOverride?: number, retry = false) => {
+    if (interval === "1D" || interval === "1W" || historyFlights.current.has(interval) || !data) return;
+    const past = currentOlder[interval];
+    if (((past?.exhausted || past?.issue) && !retry) && beforeOverride === undefined) return;
+    const before = beforeOverride ?? past?.bars[0]?.time ?? data.panels[interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
+    const controller = new AbortController();
+    historyFlights.current.set(interval, controller);
+    setOlder((state) => state.key !== historyKey ? state : ({ ...state, panels: { ...state.panels,
+      [interval]: { bars: past?.bars ?? [], markers: past?.markers ?? [], exhausted: past?.exhausted ?? false,
+        warmup: past?.warmup ?? "pending", issue: null, loading: true } } }));
+    let continuation: string | null = null;
+    try {
+      while (!controller.signal.aborted) {
+        const page = await fetchChartHistory({ symbol: settings.symbol, interval, session: settings.session, before, continuation, signal: controller.signal });
+        if (controller.signal.aborted) return;
+        setOlder((state) => {
+          if (state.key !== historyKey) return state;
+          const prior = state.panels[interval];
+          const live = data.panels[interval]?.bars ?? [];
+          const combined = mergeBars(prior?.bars ?? [], page.bars);
+          const retained = retainHistory(combined, live, visibleTimes.current.get(interval) ?? null);
+          if (retained.length + live.length > 12000) return { ...state, panels: { ...state.panels, [interval]: {
+            ...(prior ?? { bars: [], markers: [], exhausted: false, warmup: "pending", loading: false }),
+            issue: "Visible candles fill the 12,000-candle limit. Zoom in before loading more.", loading: false } } };
+          const times = new Set(retained.map((bar) => bar.time));
+          const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
+          return { ...state, panels: { ...state.panels, [interval]: { bars: retained, markers,
+            exhausted: page.exhausted, warmup: page.warmup, issue: page.issue?.code === "pending" ? null : page.issue?.message ?? null,
+            loading: !!page.continuation && (!page.issue || page.issue.code === "pending" || page.issue.code === "rate_limited") } } };
+        });
+        if (!page.continuation || (page.issue && !["pending", "rate_limited"].includes(page.issue.code))) break;
+        continuation = page.continuation;
+        const delay = Math.max(250, Math.min(60_000, ((page.issue?.retry_at ?? Math.floor(Date.now() / 1000) + 1) * 1000) - Date.now()));
+        await new Promise<void>((resolve) => {
+          const timer = window.setTimeout(resolve, delay);
+          controller.signal.addEventListener("abort", () => { window.clearTimeout(timer); resolve(); }, { once: true });
+        });
+      }
+    } catch (err) {
+      if (!controller.signal.aborted) setOlder((state) => state.key !== historyKey ? state : ({ ...state, panels: { ...state.panels,
+        [interval]: { bars: state.panels[interval]?.bars ?? [], markers: state.panels[interval]?.markers ?? [],
+          exhausted: false, warmup: state.panels[interval]?.warmup ?? "pending",
+          issue: err instanceof Error ? err.message : "Older candles could not load.", loading: false } } }));
+    } finally {
+      if (historyFlights.current.get(interval) === controller) historyFlights.current.delete(interval);
+      setOlder((state) => state.key !== historyKey || !state.panels[interval] ? state : ({ ...state,
+        panels: { ...state.panels, [interval]: { ...state.panels[interval], loading: false } } }));
+    }
+  };
   useEffect(() => {
     if (!ready) return;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); }
@@ -278,10 +353,12 @@ export default function ChartWorkspace() {
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {viewData ? <>
-            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={viewData.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clockFor(settings.intervals[0])} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)} />
+            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={viewData.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clockFor(settings.intervals[0])} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
+              history={currentOlder[settings.intervals[0]]} onNeedHistory={(before) => void loadOlder(settings.intervals[0], before)} onRetryHistory={() => void loadOlder(settings.intervals[0], undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(settings.intervals[0], range)} />
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {settings.intervals.slice(1).map((interval, index) => <div key={index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} session={settings.session} panel={viewData.panels[interval]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clockFor(interval)}
+                  history={currentOlder[interval]} onNeedHistory={(before) => void loadOlder(interval, before)} onRetryHistory={() => void loadOlder(interval, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(interval, range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => { setExpanded(null); setSettings((s) => {
                     const frames = [...s.intervals]; [frames[0], frames[index + 1]] = [frames[index + 1], frames[0]]; return { ...s, intervals: frames };

@@ -111,18 +111,13 @@ class ChartFeed:
         minutes = []
         daily = []
         if needs_intraday:
-            history = read("history", "/v1/markets/timesales", {
-                "symbol": symbol, "interval": "1min", "session_filter": "all",
-                "start": (today - timedelta(days=9)).strftime("%Y-%m-%d 04:00"),
-                "end": (today - timedelta(days=1)).strftime("%Y-%m-%d 20:00"),
-            }, 1800)
             current = read("intraday", "/v1/markets/timesales", {
                 "symbol": symbol, "interval": "1min", "session_filter": "all",
                 "start": today.strftime("%Y-%m-%d 04:00"),
                 # Stable request key; the provider returns only existing bars.
                 "end": today.strftime("%Y-%m-%d 20:00"),
             }, 15)
-            minutes = normalize_bars(_rows(history, "series", "data") + _rows(current, "series", "data"))
+            minutes = normalize_bars(_rows(current, "series", "data"))
         if needs_daily:
             history = read("daily", "/v1/markets/history", {
                 "symbol": symbol, "interval": "daily",
@@ -153,7 +148,7 @@ class ChartFeed:
             "refresh_seconds": 15, "checked_at": int(time.time()), "fetched_at": fetched,
             "panels": panels, "quotes": quotes, "issues": list(dict.fromkeys(problems)),
             "intraday_as_of": minutes[-1]["time"] if minutes else None,
-            "history_note": "Up to 10 calendar days of intraday data; up to 3 years of daily data. Each chart shows at most 1,200 candles. Daily bars use the regular session. Dividend adjustments are not guaranteed.",
+            "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP raw bars (from 2016); today uses Tradier. Intraday prices are unadjusted, so splits can create discontinuities. Daily bars remain Tradier and dividend adjustments are not guaranteed.",
         }
 
 

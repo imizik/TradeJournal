@@ -3,11 +3,11 @@
 What is built. What comes next, and in what order, is in
 [charts-roadmap.md](charts-roadmap.md).
 
-C0.0 is planned in [charts-deep-history.md](charts-deep-history.md), including
-its warmup rule and acceptance matrix. Those requirements are not implemented
-behavior; the history and indicator descriptions below remain the current code.
+C0.0 deep history follows the [implementation contract](charts-deep-history.md).
+The [roadmap](charts-roadmap.md#status-board) keeps the next item in order.
 
-The private `/charts` page is a stock/ETF chart workspace backed by Tradier.
+The private `/charts` page is a stock/ETF chart workspace backed by Tradier for
+today and Alpaca historical SIP for completed intraday sessions.
 It uses TradingView's Apache-licensed Lightweight Charts, not the restricted
 Advanced Charts library. No TradingView subscription or paid data upgrade is
 required by this feature. The Tradier account still needs production market-data
@@ -39,9 +39,9 @@ The user has free API plans. A read-only market-hours probe at 10:57 ET returned
 
 | Provider | Evidence | Decision |
 |---|---|---|
-| Tradier | HTTP 200 for MRVL/SPY quotes, 4,424 MRVL minute candles over seven calendar days, and 276 daily candles over 400 days. Quote timestamps were current within seconds. Response headers confirmed 120 requests/minute. | Use for this first version. |
+| Tradier | HTTP 200 for MRVL/SPY quotes, 4,424 MRVL minute candles over seven calendar days, and 276 daily candles over 400 days. Quote timestamps were current within seconds. Response headers confirmed 120 requests/minute. | Today, quotes, daily/weekly bars and the live stream. |
 | Webull | The existing app key's v3 stock snapshot request returned HTTP 401: the request IP did not match its configured settings. | This proves an IP restriction, not missing market-data entitlement. No allowlist or account settings were changed. |
-| Alpaca Basic | Existing client defaults to IEX; free real-time coverage is a single venue. | Keep its existing journal/research role. Do not silently substitute IEX into consolidated chart history. |
+| Alpaca Basic | The journal client may default to IEX; its setting is independent of Charts. | Completed intraday sessions request historical SIP with raw adjustment explicitly. No IEX fallback. |
 | Polygon/Massive Basic | Five calls/minute and end-of-day availability. | Keep historical enrichment; unsuitable as this page's live source. |
 
 Webull's [marketing page](https://www.webull.com/open-api) advertises free Level 1
@@ -55,8 +55,8 @@ evaluating Webull further; don't open or alter its IP allowlist for chart testin
 Tradier's [market data](https://docs.tradier.com/docs/market-data) is consolidated;
 [API access](https://docs.tradier.com/docs/faq) is included for brokerage account
 holders. [Historical limits](https://docs.tradier.com/docs/historical-data) are
-short for intraday bars, especially with extended hours. The UI states the
-requested history window instead of promising TradingView history depth.
+short for intraday bars, especially with extended hours. Charts use the 2016
+Alpaca history floor; actual coverage depends on entitlement and available bars.
 On 2026-09-29 the production token created a market-stream session (HTTP 200)
 and connected to Tradier's separate WebSocket endpoint with an SPY subscription.
 The session response's URL was for HTTP streaming, not WebSocket streaming.
@@ -99,11 +99,16 @@ cd backend
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
   which can show regular-session closes after hours.
+- Intraday charts load older SIP/raw pages when the visible range nears the
+  loaded left edge. A 5m chart can navigate six months through pages. The
+  candle hover legend says **SIP raw** or **Tradier**. Today's forming bars and
+  the live stream remain Tradier; daily/weekly bars remain Tradier.
 - Streamed trades and REST refreshes that only change the newest candle (or add
   one) go through Lightweight Charts' `series.update`, so zoom, scroll and the
   crosshair stay where they are. A full `setData` reset happens when the symbol,
-  interval or session changes, when older history changes (a REST correction),
-  or when the 1,200-candle window slides. `barChange` in `lib/charts.ts` decides.
+  interval or session changes, or when an older bar changes. Prepending or
+  evicting historical pages preserves the visible logical range, including its
+  fractional offset. `barChange` in `lib/charts.ts` decides the update path.
 - Intraday charts show a **next-bar countdown** computed from the browser clock
   and the same session-anchored buckets the backend uses (`nySession`/`barClock`
   mirror `session_part`); it adds no provider calls. It shows a number only while
@@ -139,21 +144,39 @@ Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
 demand-driven and bounded to the symbol each tab is viewing.
 
-`backend/app/engine/chart_feed.py` loads the previous nine calendar days of minute
-history (30-minute memory TTL), today's candles (15-second TTL), daily bars
-(60-second TTL), and a single batch of watchlist quotes (15-second TTL). All five
-panels share these reads. A lock coalesces concurrent misses; a bounded 96-entry
-cache and a 60-request/minute chart budget leave headroom under Tradier's 120/min
-token allowance. A visible five-chart workspace on one stable symbol normally
-uses about nine upstream requests per minute after its four-request first load.
+`backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), daily
+bars (60-second TTL), and a single batch of watchlist quotes (15-second TTL).
+All five panels share these reads. A lock coalesces concurrent misses; a bounded
+96-entry cache and a 60-request/minute chart budget leave headroom under
+Tradier's 120/min token allowance. A visible five-chart workspace on one stable
+symbol normally uses about nine upstream requests per minute after its
+three-request first load.
 A 429 stops upstream chart calls for a minute. The existing
 position-quote client remains separate and can still share the token's allowance.
 These are single-API-process caches, matching the current deployment.
-Each panel returns at most the latest 1,200 candles after calculating indicators
-on all fetched history. There is no older-history pagination in this version.
+The private `GET /charts/history` returns up to 1,200 older intraday candles per
+page, with an exclusive `before` timestamp, older cursor, exhaustion,
+source/price basis, markers, warmup state and retryable issue. Its opaque
+continuation is bound to the request and expires after 10 minutes in the
+single API process. A cold batch uses at most eight Alpaca HTTP attempts and
+10 seconds; the frontend resumes pending batches. History errors leave today's
+Tradier countdown and already displayed bars intact.
+
+`backend/app/engine/chart_history.py` keeps complete 04:00–20:00 New York
+sessions in `backend/data/chart_history/v1/stocks/1Min/sip/raw/`, under the
+deployment's persistent data symlink and state backup. Records are validated
+and published atomically only after every provider page succeeds. A completed
+record, including an empty session, has no TTL and costs zero provider calls
+across API restarts. Corrupt records require deliberate repair. The separate
+Alpaca chart budget is 30 actual HTTP attempts per rolling minute in one API
+process; a 429 honors Retry-After. No Alpaca request targets the latest
+15 minutes. The frontend keeps at most 12,000 normalized candles per panel,
+including the current tail, and rereads evicted pages from this disk cache.
 
 No partial intraday data enters the persistent enrichment caches. No feed
-fallback mixes IEX or unofficial quotes into these charts. A failed refresh may
+fallback mixes IEX or unofficial quotes into these charts. Intraday SIP prices
+are raw/unadjusted, so a split may create a discontinuity; daily adjustment
+is still not guaranteed. A failed refresh may
 retain last-known bars with their original fetch timestamps and an explicit
 warning. Missing credentials/data produces an empty setup state, never sample
 prices. Sandbox data is labeled delayed. Last-trade age is displayed separately
@@ -163,13 +186,20 @@ from refresh time; a successful HTTP call is not proof that a quote is fresh.
 minute bars; daily dates map to 09:30 America/New_York. Resampling anchors each
 regular session at 09:30 and keeps premarket (04:00–09:30) and postmarket
 (16:00–20:00) separate. DST conversion uses zoneinfo. This is clock-session
-alignment, not a full exchange holiday/early-close calendar; actual bars still
-come from Tradier. Weekly bars combine daily data with Monday alignment.
+alignment, not a full exchange holiday/early-close calendar; actual bars come
+from the selected provider. Weekly bars combine Tradier daily data with Monday
+alignment.
 
 VWAP uses minute HLC3 × volume, resets each regular session, and is absent outside
 09:30–16:00. It is a bar-based estimate, not trade-level VWAP. EMAs use the first
 close as a seed and remain absent until the length has elapsed. RSI uses Wilder
-averages with 14 changes of warmup. These calculations are chart-only and do not
+averages with 14 changes of warmup. Historical pages use 1,400 preceding
+**resampled candles at the selected interval** as the indicator prefix, then
+discard it from the returned page. This bounds EMA-200 seed influence below
+`(199/201)^1400 < 1e-6`; it does not bound absolute dollar error. VWAP always
+uses the complete source session. During cold loading, unresolved EMA/RSI
+values are null and marked pending; at the 2016 floor, insufficient prefix
+keeps them null. These calculations are chart-only and do not
 change the journal's versioned indicator conventions. Indicators can differ from
 TradingView because of feed, warmup, session, or adjustment differences.
 
@@ -194,6 +224,13 @@ and keyboard symbol navigation. A canvas comparison checks that VWAP does not pa
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_stream.py` checks session buckets, invalid event
 filters, and a single upstream subscription shared across tabs.
+`backend/tests/test_chart_history.py` covers SIP/raw request parameters,
+pagination and retries, completed/empty caches, corrupt data, the
+30-attempt and eight-attempt budgets, concurrency, source stitching and
+requested-interval numerical references. The browser suite scrolls a 5m chart
+six months, checks range stability under pages, a tick and REST refreshes,
+then exercises 12,000-candle eviction, gap refill, retry, stale navigation and
+390px touch paging. These are fixture results, not live Alpaca entitlement.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine
