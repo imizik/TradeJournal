@@ -284,6 +284,8 @@ FEATURES: dict[str, str] = {
     "vwap_distance": "the signal close against the session VWAP, in ATR(14) of the chart bars",
     "vol_ratio": "the daily ATR(5) over the daily ATR(20): above 1 when the last week moved more than the month",
     "spy_vol": "SPY's daily ATR(14) as a percent of its close: the market's volatility level",
+    "open_trend": "the session's open against the prior day's daily EMA 20, in daily ATR: where the day started "
+                  "against the level `trend` measures the signal from",
 }
 
 RVOL_SESSIONS = 10
@@ -344,6 +346,7 @@ class FeatureContext:
             "vwap_distance": side * _ratio(close - self.vwap[i], self.chart_atr[i]),
             "vol_ratio": _ratio(prior(d.atr_week, session), prior(d.atr_month, session)),
             "spy_vol": NA,
+            "open_trend": side * _ratio(session_open - day_ema, day_atr),
         }
         m = self.market
         if m is not None:

@@ -188,7 +188,8 @@ runs more on request. A second run on the same day writes its report as
 Only `family` is required; everything else defaults to the family's research
 framework values. `window` is the fill time (HHMM, inclusive); `max_sessions`
 above 1 holds overnight; `exits` can also move the stop with `breakeven_r`
-and `trail_r` (see [Families](#families)); `tickers: "core"` is the 18 names
+and `trail_r`, and cut a trade that is not working with `stall_minutes` and
+`stall_r` (see [Families](#families)); `tickers: "core"` is the 18 names
 below. A `model` of `{"kind": "logistic"}` uses the first ten features,
 `minutes` to `risk`; `features` picks others (the newer ones must be named)
 and `l2` sets the penalty. The id is a hash of everything except the name and
@@ -214,8 +215,12 @@ alike:
 | `vwap_distance` | the signal close against the session VWAP, in ATR(14) of the chart bars |
 | `vol_ratio` | the daily ATR(5) over the daily ATR(20): above 1 when the last week moved more than the month |
 | `spy_vol` | SPY's daily ATR(14) as a percent of its close: the market's volatility level |
+| `open_trend` | the session's open against the prior day's daily EMA 20, in daily ATR |
 
-The last three were added for the weekly loop, which asked for them. A
+`vwap_distance`, `vol_ratio` and `spy_vol` were added for the weekly loop,
+which asked for them. So was `open_trend`, with the stall check: a
+daily-EMA reclaim on the session's first bar is often just a gap through the
+level, and `open_trend` above 0 says the day opened over it already. A
 volatility regime against a longer past, such as a year, would be blank for
 most of the discovery period, since the bars start in June 2023; these two
 need a month.
@@ -236,7 +241,11 @@ far is that many R in favour, and `trail_r` keeps it that many R behind the
 best price. An exit there is named `breakeven` or `trail`, and R is still
 measured from the stop the signal set. The trade leaves at a bar's close
 once it has held `max_minutes`, or at the last bar of its `max_sessions`-th
-session. One position per ticker, and the session limits block new entries
+session. A stall check is a time stop for losers only: at the close of the
+first bar that brings the hold to `stall_minutes`, the trade leaves unless
+that close is at least `stall_r` R in favour (0 when left out), and a trade
+that passes runs on untouched; the exit is named `stall`. Minutes are clock
+time from the fill, overnight included, as for `max_minutes`. One position per ticker, and the session limits block new entries
 for the rest of a session.
 
 - `recovery_swing`: the NBIS recovery swing, 15-minute bars, long. Arm
@@ -311,7 +320,9 @@ t ≥ 2.61.
 - The execution model: every exit path (resting stop and target, gaps
   through either, both on one bar, the session count, the time limit), orders
   across the close, one position at a time, the session limits, and the
-  entry window. Moved stops: to the entry and trailing, from the bar after
+  entry window. The stall check: out at the checking bar's close when short
+  of its progress, once only, mirrored for shorts, and in the baseline too.
+  Moved stops: to the entry and trailing, from the bar after
   the one that moved them, never back, through a gap, mirrored for shorts
   and the same for random entries; a rule that never tightens changes no
   trade.

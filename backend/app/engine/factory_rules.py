@@ -24,6 +24,10 @@ NBIS swing backtests use:
   come in an unknown order. It never moves back.
 - At a bar's close the trade leaves if it has held `max_minutes`, or at the
   last bar of its `max_sessions`-th session (the entry session is the first).
+- A stall check (`stall_minutes`, `stall_r`) happens once, at the close of
+  the first bar that brings the hold to `stall_minutes`: the trade leaves
+  there unless that close is at least `stall_r` R in favour. A trade that
+  passes runs on to its other exits untouched.
 - Candidates hold one position at a time per ticker, and the session loss
   limits stop new entries for the rest of a session. The baseline takes every
   signal as its own trade.
@@ -75,13 +79,18 @@ class Context:
 class Exits:
     """How a trade leaves. `breakeven_r` moves the stop to the entry once the
     best price so far is that many R in favour; `trail_r` keeps it that many R
-    behind the best price. None leaves the stop where the signal put it."""
+    behind the best price. None leaves the stop where the signal put it.
+    `stall_minutes` checks once, at the close of the bar that brings the hold
+    to it, and exits unless that close is `stall_r` R (0 by default) in
+    favour: a time stop for the trades that are not working."""
 
     target_r: float | None = 2.0
     max_sessions: int = 1
     max_minutes: int | None = None
     breakeven_r: float | None = None
     trail_r: float | None = None
+    stall_minutes: int | None = None
+    stall_r: float | None = None
 
     @property
     def moves_stop(self) -> bool:
@@ -90,7 +99,7 @@ class Exits:
 
 # Exits added after the first specs were judged. Left out of a spec's
 # canonical form while unset, so the ids of every earlier spec stand.
-LATER_EXITS = ("breakeven_r", "trail_r")
+LATER_EXITS = ("breakeven_r", "trail_r", "stall_minutes", "stall_r")
 
 
 @dataclass(frozen=True)
@@ -147,6 +156,7 @@ class Trade:
     best: float = NA
     moved_stop: float | None = None
     moved_by: str = ""
+    stall_checked: bool = False
 
     @property
     def closed(self) -> bool:
@@ -246,11 +256,17 @@ def _step(series: Series, trade: Trade, i: int, exits: Exits, costs: Costs) -> b
     if series.last[i] and held >= exits.max_sessions:
         _close(trade, series, i, c - side * costs.slip(c), "session")
         return True
+    closes_at = series.time[i] + timedelta(minutes=series.timeframe)
     if exits.max_minutes is not None:
-        closes_at = series.time[i] + timedelta(minutes=series.timeframe)
         if closes_at - trade.entry_time >= timedelta(minutes=exits.max_minutes):
             _close(trade, series, i, c - side * costs.slip(c), "time")
             return True
+    if exits.stall_minutes is not None and not trade.stall_checked:
+        if closes_at - trade.entry_time >= timedelta(minutes=exits.stall_minutes):
+            trade.stall_checked = True
+            if side * (c - trade.entry_price) < (exits.stall_r or 0.0) * trade.risk:
+                _close(trade, series, i, c - side * costs.slip(c), "stall")
+                return True
     if exits.moves_stop:
         _move_stop(trade, h if side == 1 else lo, exits)
     return False
@@ -844,18 +860,32 @@ def parse_spec(data: Mapping[str, Any]) -> Spec:
     rules.validate()
     defaults = cls.defaults
     raw_exits = {"target_r": None, "max_sessions": 1, "max_minutes": None, "breakeven_r": None, "trail_r": None,
+                 "stall_minutes": None, "stall_r": None,
                  **defaults.get("exits", {}),
                  **_object(data.get("exits"), "exits",
-                           {"target_r", "max_sessions", "max_minutes", "breakeven_r", "trail_r"})}
+                           {"target_r", "max_sessions", "max_minutes", "breakeven_r", "trail_r",
+                            "stall_minutes", "stall_r"})}
+    stall_minutes = _int(raw_exits["stall_minutes"], "stall_minutes", optional=True)
+    stall_r = _float(raw_exits["stall_r"], "stall_r", optional=True)
+    if stall_minutes is None and stall_r is not None:
+        raise ValueError("stall_r needs stall_minutes: it is the progress the stall check asks for")
+    if stall_minutes is not None and stall_r is None:
+        stall_r = 0.0
     exits = Exits(
         target_r=_float(raw_exits["target_r"], "target_r", minimum=0.01, optional=True),
         max_sessions=_int(raw_exits["max_sessions"], "max_sessions"),
         max_minutes=_int(raw_exits["max_minutes"], "max_minutes", optional=True),
         breakeven_r=_float(raw_exits["breakeven_r"], "breakeven_r", minimum=0.1, optional=True),
         trail_r=_float(raw_exits["trail_r"], "trail_r", minimum=0.1, optional=True),
+        stall_minutes=stall_minutes,
+        stall_r=stall_r,
     )
     if exits.breakeven_r is not None and exits.target_r is not None and exits.breakeven_r >= exits.target_r:
         raise ValueError("breakeven_r must be below target_r; at or beyond it the target fills first")
+    if exits.stall_r is not None and exits.target_r is not None and exits.stall_r >= exits.target_r:
+        raise ValueError("stall_r must be below target_r; a trade that far in favour has already left at the target")
+    if exits.stall_minutes is not None and exits.max_minutes is not None and exits.stall_minutes >= exits.max_minutes:
+        raise ValueError("stall_minutes must be under max_minutes; the time limit would close every trade first")
     raw_limits = {"max_entries": None, "max_losses": None, "max_loss_r": None, **defaults.get("limits", {}),
                   **_object(data.get("limits"), "limits", {"max_entries", "max_losses", "max_loss_r"})}
     limits = Limits(

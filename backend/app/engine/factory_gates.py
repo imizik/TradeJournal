@@ -605,6 +605,8 @@ def report(ev: Evaluation) -> str:
         + (f"stop trailing {exits.trail_r:g}R behind the best price, " if exits.trail_r is not None else "")
         + held
         + (f", at most {exits.max_minutes} minutes" if exits.max_minutes else "")
+        + (f", out after {exits.stall_minutes} minutes unless {exits.stall_r:+g}R or better"
+           if exits.stall_minutes else "")
         + f" | costs {spec.costs.slippage_ticks:g} tick or {spec.costs.slippage_bps:g} bp a fill",
         f"settings: {dict(spec.params)}",
     ]
