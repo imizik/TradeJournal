@@ -65,6 +65,71 @@ test("five charts render, symbols link, and levels survive reload", async ({ pag
   expect(errors).toEqual([]);
 });
 
+test("streamed trades move the selected price and candle, then pause freezes them", async ({ page }) => {
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      closed = false;
+      constructor() {
+        MockEventSource.current = this;
+        queueMicrotask(() => this.emit("status", { state: "connected" }));
+      }
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) {
+        this.listeners.set(type, listener as Listener);
+      }
+      emit(type: string, value: unknown) {
+        if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent);
+      }
+      close() { this.closed = true; }
+    }
+    (window as typeof window & { __chartTick?: (value: unknown) => void }).__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("262.66");
+  const at = Math.floor(Date.now() / 1000) + 2;
+  const buckets = Object.fromEntries((["1m", "3m", "5m", "15m", "30m", "1h", "4h"] as const).map((interval) => {
+    const width = ({ "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400 })[interval];
+    const time = Math.floor(at / width) * width;
+    return [interval, { time, end_time: time + width, extended: true }];
+  }));
+  await page.evaluate((tick) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick(tick),
+    { type: "tick", symbol: "MRVL", at, minute: Math.floor(at / 60) * 60, session: "post", price: 280.25, open: 280.1, high: 280.25, low: 280.1, buckets });
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("280.25");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("Live trade");
+  await expect(page.getByLabel("main candle values")).toContainText("280.25");
+  await expect(page.getByLabel("Panel 2 candle values")).toContainText("Vol pending");
+  await page.getByRole("button", { name: "Pause chart updates" }).click();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("280.25");
+  await page.evaluate((tick) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick(tick),
+    { type: "tick", symbol: "MRVL", at: at + 1, minute: Math.floor(at / 60) * 60, session: "post", price: 290, open: 290, high: 290, low: 290, buckets });
+  await expect(page.getByLabel("Selected symbol quote")).not.toContainText("290.00");
+});
+
+test("newer extended-hours candle is labeled instead of showing an older quote", async ({ page }) => {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    const now = Math.floor(Date.now() / 1000);
+    data.quotes.find((quote) => quote.symbol === data.symbol)!.trade_time = now - 3600;
+    for (const panel of Object.values(data.panels)) {
+      if (!panel) continue;
+      const bar = panel.bars.at(-1)!;
+      bar.time = now - 60;
+      bar.end_time = now;
+      bar.close = 280.25;
+      bar.high = 280.25;
+      bar.extended = true;
+    }
+    await route.fulfill({ json: data });
+  });
+  await page.goto("/charts");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("280.25");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("Extended-hours candle");
+});
+
 test("refreshes once per cycle, stops while hidden or paused, and retains data on errors", async ({ page }) => {
   await page.clock.install();
   let requests = 0;

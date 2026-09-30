@@ -4,8 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
-import { createCrosshairLink, DEFAULT_SETTINGS, etTime, fetchChartData, INTERVALS, price, restoreSettings, STORAGE_KEY, validSymbol } from "@/lib/charts";
-import type { ChartData, ChartSettings, Indicators, Interval } from "@/lib/charts";
+import { chartStreamUrl, createCrosshairLink, DEFAULT_SETTINGS, etTime, fetchChartData, INTERVALS, overlayLiveTicks, parseChartTick, price, restoreSettings, STORAGE_KEY, validSymbol } from "@/lib/charts";
+import type { ChartData, ChartSettings, ChartStreamTick, Indicators, Interval } from "@/lib/charts";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
@@ -19,6 +19,7 @@ export default function ChartWorkspace() {
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const [clock, setClock] = useState(0);
+  const [stream, setStream] = useState<{ key: string; status: "connecting" | "connected" | "fallback"; ticks: ChartStreamTick[] }>({ key: "", status: "fallback", ticks: [] });
   const [symbolInput, setSymbolInput] = useState("");
   const [symbolError, setSymbolError] = useState("");
   const [drawing, setDrawing] = useState(false);
@@ -33,6 +34,10 @@ export default function ChartWorkspace() {
   const watchlistKey = settings.watchlist.join(",");
   const requestKey = `${settings.symbol}|${settings.session}|${intervalKey}|${watchlistKey}`;
   const data = response?.key === requestKey ? response.data : null;
+  const hasData = !!data;
+  const activeStream = stream.key === requestKey ? stream : null;
+  const viewData = useMemo(() => data ? overlayLiveTicks(data, activeStream?.ticks ?? [], settings.session) : null,
+    [data, activeStream, settings.session]);
   const selected = data?.quotes.find((q) => q.symbol === settings.symbol);
   const levels = useMemo(() => settings.levels[settings.symbol] ?? [], [settings.levels, settings.symbol]);
 
@@ -82,6 +87,40 @@ export default function ChartWorkspace() {
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
   }, [ready, settings.symbol, settings.session, intervalKey, watchlistKey, requestKey, paused]);
 
+  useEffect(() => {
+    if (!ready || !hasData || paused) return;
+    let alive = true;
+    let source: EventSource | null = null;
+    const status = (value: "connecting" | "connected" | "fallback") => {
+      if (alive) setStream((prior) => ({ key: requestKey, status: value, ticks: prior.key === requestKey ? prior.ticks : [] }));
+    };
+    const connect = () => {
+      if (document.hidden || source) return;
+      status("connecting");
+      source = new EventSource(chartStreamUrl(settings.symbol));
+      source.addEventListener("status", (event) => {
+        try { status(JSON.parse((event as MessageEvent).data).state === "connected" ? "connected" : "fallback"); }
+        catch { status("fallback"); }
+      });
+      source.addEventListener("tick", (event) => {
+        try {
+          const tick = parseChartTick(JSON.parse((event as MessageEvent).data));
+          if (!alive || !tick || tick.symbol !== settings.symbol) return;
+          setStream((prior) => ({ key: requestKey, status: "connected",
+            ticks: [...(prior.key === requestKey ? prior.ticks : []).filter((old) => old.at > Date.now() / 1000 - 120), tick].slice(-120) }));
+        } catch { /* A malformed event cannot replace the last good REST snapshot. */ }
+      });
+      source.onerror = () => status("fallback");
+    };
+    const visibility = () => {
+      if (document.hidden) { source?.close(); source = null; status("fallback"); }
+      else connect();
+    };
+    connect();
+    document.addEventListener("visibilitychange", visibility);
+    return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
+  }, [ready, hasData, paused, requestKey, settings.symbol]);
+
   const chooseSymbol = (symbol: string) => {
     setSettings((s) => ({ ...s, symbol }));
     setDrawing(false); setSymbolInput(""); setSymbolError(""); setLevelPrice("");
@@ -100,10 +139,20 @@ export default function ChartWorkspace() {
     setSettings((s) => ({ ...s, levels: { ...s.levels, [s.symbol]: [...(s.levels[s.symbol] ?? []), level] } }));
     setDrawing(false); setLevelPrice(""); setLevelLabel(""); setLevelError("");
   };
-  const quoteAge = selected?.trade_time ? Math.max(0, Math.floor(clock - selected.trade_time)) : null;
   const candleAge = data?.fetched_at.intraday ? Math.max(0, Math.floor(clock - data.fetched_at.intraday)) : null;
   const oldData = !!error || !!data?.issues.length || (candleAge !== null && candleAge > 45);
-  const change = selected?.change_percentage;
+  const intradayInterval = settings.intervals.find((interval) => interval !== "1D" && interval !== "1W");
+  const latestCandle = intradayInterval ? viewData?.panels[intradayInterval]?.bars.at(-1) : undefined;
+  const latestTick = activeStream?.ticks.at(-1);
+  const streamedPrice = latestTick && latestTick.at > (data?.fetched_at.intraday ?? 0)
+    && (settings.session === "extended" || latestTick.session === "regular") ? latestTick.price : null;
+  const extendedPrice = settings.session === "extended" && latestCandle?.extended && latestCandle.time > (selected?.trade_time ?? 0) ? latestCandle.close : null;
+  const shownPrice = streamedPrice ?? extendedPrice ?? selected?.last;
+  const priceSource = streamedPrice !== null ? "Live trade" : extendedPrice !== null ? "Extended-hours candle" : "Tradier quote";
+  const shownAt = streamedPrice !== null ? latestTick?.at : extendedPrice !== null ? latestCandle?.time : selected?.trade_time;
+  const priceAge = shownAt ? Math.max(0, Math.floor(clock - shownAt)) : null;
+  const change = shownPrice != null && selected?.previous_close && selected.previous_close > 0
+    ? (shownPrice / selected.previous_close - 1) * 100 : selected?.change_percentage;
 
   return (
     <div className="space-y-4 text-slate-300">
@@ -125,11 +174,11 @@ export default function ChartWorkspace() {
             <Search size={14} className="ml-3 text-slate-500" /><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-28 bg-transparent px-2 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-300" />
             <button type="submit" aria-label="Load symbol" className="mr-1 rounded p-1.5 hover:bg-slate-800"><ArrowUpRight size={14} /></button>
           </form>
-          <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{settings.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(selected?.last)}</span>
-            <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span></div>
+          <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{settings.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(shownPrice)}</span>
+            <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span><span className="text-[10px] text-slate-500">{priceSource}</span></div>
           <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400" role="status">
             <span className={`h-1.5 w-1.5 rounded-full ${paused || oldData || data?.delayed ? "bg-amber-400" : data ? "bg-sky-400" : "bg-slate-600"}`} />
-            {paused ? "Updates paused" : data?.delayed ? "Tradier sandbox · delayed" : "Tradier · 15s refresh"}
+            {paused ? "Updates paused" : data?.delayed ? "Tradier sandbox · delayed" : activeStream?.status === "connected" ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
             {loading && <Loader2 size={12} className="animate-spin" />}
           </div>
         </div>
@@ -152,10 +201,10 @@ export default function ChartWorkspace() {
 
       <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_230px]">
         <div className="min-w-0 space-y-3">
-          {data ? <>
-            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} panel={data.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)} />
+          {viewData ? <>
+            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} panel={viewData.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)} />
             {settings.layout === "multi" && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {settings.intervals.slice(1).map((interval, index) => <PriceChart key={index} id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} panel={data.panels[interval]} indicators={settings.indicators} levels={levels} link={link} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => setSettings((s) => {
+              {settings.intervals.slice(1).map((interval, index) => <PriceChart key={index} id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} panel={viewData.panels[interval]} indicators={settings.indicators} levels={levels} link={link} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => setSettings((s) => {
                 const frames = [...s.intervals]; [frames[0], frames[index + 1]] = [frames[index + 1], frames[0]]; return { ...s, intervals: frames };
               })} />)}
             </div>}
@@ -165,8 +214,8 @@ export default function ChartWorkspace() {
             <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved in this browser."}</p>
           </div>}
           <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-slate-500">
-            <span>{data?.intraday_as_of ? `Last minute candle ${etTime(data.intraday_as_of, true)} ${etTime(data.intraday_as_of)} ET` : "New York time"}{data?.intraday_as_of && " · latest candle may be forming"}</span>
-            <span>{quoteAge !== null ? `Last trade ${quoteAge < 60 ? `${quoteAge}s` : `${Math.floor(quoteAge / 60)}m`} ago` : "No quote timestamp"}</span>
+            <span>{viewData?.intraday_as_of ? `Last minute candle ${etTime(viewData.intraday_as_of, true)} ${etTime(viewData.intraday_as_of)} ET` : "New York time"}{viewData?.intraday_as_of && " · latest candle may be forming"}</span>
+            <span>{priceAge !== null ? `${priceSource} ${priceAge < 60 ? `${priceAge}s` : `${Math.floor(priceAge / 60)}m`} ago` : "No price timestamp"}</span>
           </div>
         </div>
 
@@ -174,7 +223,7 @@ export default function ChartWorkspace() {
           <section className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]" aria-label="Watchlist">
             <div className="flex items-center justify-between border-b border-slate-700/40 px-3 py-3"><h2 className="text-xs font-medium text-slate-200">Watchlist <span className="ml-1 text-slate-500">{settings.watchlist.length}</span></h2>
               <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className="rounded p-1 hover:bg-slate-800 disabled:opacity-30"><Plus size={14} /></button></div>
-            <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Last</span><span className="text-right">Chg%</span></div>
+            <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Quote</span><span className="text-right">Chg%</span></div>
             {settings.watchlist.map((symbol) => {
               const quote = data?.quotes.find((q) => q.symbol === symbol);
               return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
@@ -203,7 +252,7 @@ export default function ChartWorkspace() {
       </div>
 
       <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
-        <p className="max-w-3xl">{data?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Charts refresh while visible; this version does not stream ticks.</p>
+        <p className="max-w-3xl">{data?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>
         <div className="text-right"><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-300">TradingView Lightweight Charts™</a><a href="/lightweight-charts-NOTICE.txt" className="block">Copyright (с) 2025 TradingView, Inc.</a></div>
       </footer>
     </div>
