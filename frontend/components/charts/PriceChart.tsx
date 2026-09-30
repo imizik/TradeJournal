@@ -4,8 +4,10 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, IPriceLine, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, LocateFixed, Maximize2, Minimize2, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, countdown, etTime, price } from "@/lib/charts";
-import type { BarClock, ChartBar, ChartPanelData, CrosshairLink, Indicators, Interval, PriceLevel, RangeLink } from "@/lib/charts";
+import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, intradayInterval, price, staleCandles } from "@/lib/charts";
+import type { ChartBar, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
+import { useClock, useLivePanel } from "@/lib/chartStore";
+import type { LiveFeed } from "@/lib/chartStore";
 
 const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
 const tickFormats = {
@@ -32,6 +34,28 @@ const shadePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: 1, c
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
 /** Browser tests register a map here to inspect chart ranges; production never defines it. */
 type ChartRegistry = Map<string, IChartApi>;
+/** Browser tests register a map here to count each chart's committed renders; production never defines it. */
+type RenderCounts = Map<string, number>;
+/** What the countdown needs besides the clock and the candles. */
+export type ClockFeed = { session: "regular" | "extended"; market?: MarketDay | null; paused: boolean; delayed: boolean; failed: boolean; fetched?: number };
+
+/**
+ * The next-bar countdown owns the one-second clock, so a second passing
+ * re-renders this label and never the chart around it.
+ */
+function Countdown({ label, main, interval, bars, feed }: { label: string; main: boolean; interval: Interval; bars: ChartBar[] | undefined; feed: ClockFeed }) {
+  const { failed, fetched, ...rest } = feed;
+  // Seconds while live, otherwise the named state: primitives, so an unchanged value skips the render.
+  const value = useClock((now) => {
+    const clock = barClock({ now, interval, bars, ...rest, stale: failed || staleCandles(now, fetched) });
+    return clock?.state === "live" ? clock.remaining : clock?.state ?? null;
+  });
+  if (value === null) return null;
+  const live = typeof value === "number";
+  return <span role="timer" aria-label={`${label} next bar`} title={live ? "Time until this candle closes" : undefined}
+    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${live ? "bg-sky-400/10 text-sky-300" : value === "closed" || value === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
+    <Timer size={11} />{live ? countdown(value) : CLOCK_TEXT[value]}</span>;
+}
 
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
@@ -39,9 +63,9 @@ type Bundle = {
   lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; levels: IPriceLine[];
 };
 
-export default function PriceChart({ id, symbol, interval, session, panel, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
-  id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; indicators: Indicators; levels: PriceLevel[];
-  link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock?: BarClock | null; height: number;
+export default function PriceChart({ id, symbol, interval, session, panel: rest, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
+  id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed; height: number;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
@@ -60,6 +84,13 @@ export default function PriceChart({ id, symbol, interval, session, panel, indic
   const actions = useRef({ drawing, onDraw, onNeedHistory, onVisibleRange });
   const initial = useRef(true);
   const [hover, setHover] = useState<ChartBar | null>(null);
+  // `rest` is the REST snapshot plus older history; streamed trades are applied
+  // here, per panel, so a tick re-renders only the charts whose candles moved.
+  const panel = useLivePanel(live, interval, rest);
+  useEffect(() => {
+    const renders = (window as typeof window & { __tjRenders?: RenderCounts }).__tjRenders;
+    renders?.set(id, (renders.get(id) ?? 0) + 1);
+  });
   useEffect(() => { actions.current = { drawing, onDraw, onNeedHistory, onVisibleRange }; }, [drawing, onDraw, onNeedHistory, onVisibleRange]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
@@ -255,9 +286,7 @@ export default function PriceChart({ id, symbol, interval, session, panel, indic
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
   // Main chart: in the header. Smaller charts: end of the values row, so the
   // header keeps room for its controls at quarter width.
-  const timer = clock && <span role="timer" aria-label={`${main ? "Main" : id} next bar`} title={clock.state === "live" ? "Time until this candle closes" : undefined}
-    className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${clock.state === "live" ? "bg-sky-400/10 text-sky-300" : clock.state === "closed" || clock.state === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
-    <Timer size={11} />{clock.state === "live" ? countdown(clock.remaining) : CLOCK_TEXT[clock.state]}</span>;
+  const timer = intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
   return (
     <section aria-label={`${symbol} ${interval} chart`} className={`relative min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 items-center justify-between gap-2 border-b border-slate-700/40 px-3">

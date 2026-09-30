@@ -461,6 +461,75 @@ test("streamed ticks update the latest candle in place and keep zoom; history ch
   await expect.poll(() => resets(page)).toBe(1);
 });
 
+type RenderWindow = typeof window & { __tjRenders?: Map<string, number>; __chartTick?: (value: unknown) => void };
+test("a tick re-renders only the charts whose candles moved, and the clock re-renders no chart", async ({ page }) => {
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      constructor() { MockEventSource.current = this; queueMicrotask(() => this.emit("status", { state: "connected" })); }
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
+      emit(type: string, value: unknown) { this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+      close() {}
+    }
+    const target = window as RenderWindow;
+    target.__tjRenders = new Map();
+    target.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+  // Older history is exhausted, so nothing but the clock and the stream can render a chart.
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"),
+      before: Number(query.get("before")), limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null } });
+  });
+  await openAt(page, TUESDAY_1032, (url) => currentFixture(url, TUESDAY_1032));
+  await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:40");
+  const renders = () => page.evaluate(() => Object.fromEntries((window as RenderWindow).__tjRenders!));
+  const settled = async () => { await page.waitForTimeout(300); return renders(); };
+  const before = await settled();
+  expect(Object.keys(before).sort()).toEqual(["Panel 2", "Panel 3", "Panel 4", "Panel 5", "main"]);
+  const plus = (base: Record<string, number>, changed: string[]) =>
+    Object.fromEntries(Object.entries(base).map(([id, count]) => [id, count + (changed.includes(id) ? 1 : 0)]));
+
+  // Three seconds pass: every countdown moves, and no chart renders.
+  await page.clock.runFor(3000);
+  await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("2:37");
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("0:37");
+  expect(await settled()).toEqual(before);
+
+  // The fixture's newest candles end at 10:32:45 in every interval (5m main, 15m, 1h, 1D, 1m).
+  const end = TUESDAY_1032 + 30;
+  const send = (at: number, value: number, nextMinute = false) => page.evaluate((tick) => (window as RenderWindow).__chartTick!(tick), {
+    type: "tick", symbol: "MRVL", at, minute: Math.floor(at / 60) * 60, session: "regular", price: value, open: value, high: value, low: value,
+    buckets: Object.fromEntries((["1m", "3m", "5m", "15m", "30m", "1h", "4h"] as const).map((interval) => [interval,
+      nextMinute && interval === "1m" ? { time: end, end_time: end + 60, extended: false } : { time: end - STEP[interval], end_time: end, extended: false }])) });
+  const intraday = ["main", "Panel 2", "Panel 3", "Panel 5"];
+
+  // A new price moves every intraday candle; the daily chart is untouched.
+  await send(TUESDAY_1032 + 6, 300.5);
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("300.50");
+  await expect.poll(renders).toEqual(plus(before, intraday));
+  expect(await settled()).toEqual(plus(before, intraday));
+  // The next minute's first trade at the same price opens a 1m candle and changes nothing else.
+  const afterMove = await renders();
+  await send(end + 1, 300.5, true);
+  await expect(page.getByTestId("canvas-Panel 5")).toHaveAttribute("data-bars", "101");
+  await expect(page.getByLabel("Panel 5 candle values")).toContainText("Vol pending");
+  expect(await settled()).toEqual(plus(afterMove, ["Panel 5"]));
+  // A repeat of that trade changes no candle, so no chart renders; the next move renders only the intraday charts again.
+  const afterMinute = await renders();
+  await send(end + 2, 300.5, true);
+  await send(end + 3, 301.25, true);
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("301.25");
+  await expect.poll(renders).toEqual(plus(afterMinute, intraday));
+  expect(await settled()).toEqual(plus(afterMinute, intraday));
+  await expect(page.getByLabel("main candle values")).toContainText("301.25");
+});
+
 function sixMonthBars(months = 6): ChartBar[] {
   const now = new Date();
   const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, now.getUTCDate()));
@@ -566,6 +635,8 @@ test("5m scroll-back crosses six months without moving the viewport during pages
   const state = await deepHistoryStub(page);
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  // A range change within 60 ms of a data reset reads as programmatic and loads nothing.
+  await page.waitForTimeout(120);
   let reached = false;
   for (let index = 0; index < 15; index++) {
     const count = state.requests();
@@ -627,6 +698,7 @@ test("older history failure retries without clearing current candles; a stale re
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.waitForTimeout(120); // past the reset's programmatic-range window
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
   await expect(page.getByRole("button", { name: "Retry history" })).toBeVisible();
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");

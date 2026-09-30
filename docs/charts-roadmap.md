@@ -62,8 +62,8 @@ from planned work.
 |---|---|---|---|
 | C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | done ([PR #89](https://github.com/imizik/TradeJournal/pull/89)) |
 | C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | done ([PR #90](https://github.com/imizik/TradeJournal/pull/90)) |
-| C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | next |
-| C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | todo |
+| C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | done |
+| C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | next |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | todo |
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | todo |
 | C7.2 | Named saved layouts | 7 Layouts | todo |
@@ -345,7 +345,7 @@ session at 13:00 and the last bar's countdown respects it, and browser tests
 cover both with a fixture calendar. Backend tests cover an older half day and
 regular/extended classification; unavailable calendar data is disclosed.
 
-**C0.2 Hot path.** Move the one-second clock into a small component each
+**C0.2 Hot path (done).** Move the one-second clock into a small component each
 countdown owns. Move streamed ticks into a store outside React (a
 `useSyncExternalStore` module such as `frontend/lib/chartStore.ts`) that panels
 subscribe to individually. Apply ticks per panel instead of rebuilding every

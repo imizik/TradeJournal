@@ -96,6 +96,13 @@ cd backend
   indicators, fill markers, and recovery after missed stream events. Live prices
   move the selected intraday candles between refreshes; volume and studies may
   lag by up to one refresh. Daily and weekly candles stay on REST history.
+- Streamed trades and the one-second clock stay out of the workspace's React
+  state. `frontend/lib/chartStore.ts` holds the stream for the current
+  request, and each chart applies the new trades to its own panel
+  (`applyTicks` in `lib/charts.ts`). A trade re-renders only the charts whose
+  candles it moved, plus the quote. The countdowns, the status dot and the
+  price age read a shared one-second clock themselves, so a second passing
+  re-renders those labels and no chart.
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
   which can show regular-session closes after hours.
@@ -268,6 +275,10 @@ requested-interval numerical references. The browser suite scrolls a 5m chart
 six months, checks range stability under pages, a tick and REST refreshes,
 then exercises 12,000-candle eviction, gap refill, retry, stale navigation and
 390px touch paging. These are fixture results, not live Alpaca entitlement.
+A render-count test (through a test-only `window.__tjRenders` map) shows that
+clock seconds re-render no chart, a price change re-renders the four intraday
+charts but not the daily one, a new minute's first trade at an unchanged price
+re-renders only the 1m chart, and a repeated trade re-renders none.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine

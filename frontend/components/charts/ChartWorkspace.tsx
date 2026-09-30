@@ -5,13 +5,48 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { barClock, chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, earlyClose, etTime, fetchChartData, fetchChartHistory, INTERVALS, mergeBars, overlayLiveTicks, parseChartTick, price, restoreSettings, retainHistory, SMALL_HEIGHTS, STORAGE_KEY, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, SmallChartSize } from "@/lib/charts";
+import { chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, earlyClose, etTime, fetchChartData, fetchChartHistory, INTERVALS, liveTick, mergeBars, parseChartTick, price, restoreSettings, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, STORAGE_KEY, validSymbol } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartQuote, ChartSettings, FillMarker, Indicators, Interval, SmallChartSize } from "@/lib/charts";
+import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
+import type { LiveFeed } from "@/lib/chartStore";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
 type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null };
 type OlderState = { key: string; panels: Partial<Record<Interval, OlderPanel>> };
+
+// The pieces of the toolbar and footer that move with every trade or second
+// subscribe themselves, so the workspace above them does not re-render.
+function LiveQuote({ live, quote, candle }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar }) {
+  const tick = useStream(live, (ticks) => ticks.at(-1));
+  const shown = shownPrice({ tick, quote, candle, scope: live });
+  const change = shown.price != null && quote?.previous_close && quote.previous_close > 0
+    ? (shown.price / quote.previous_close - 1) * 100 : quote?.change_percentage;
+  return <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{live.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(shown.price)}</span>
+    <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span><span className="text-[10px] text-slate-500">{shown.source}</span></div>;
+}
+
+function FeedStatus({ live, paused, delayed, hasData, failed, loading }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean }) {
+  const stale = useClock((now) => staleCandles(now, live.fetched));
+  const streaming = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
+  return <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400" role="status">
+    <span className={`h-1.5 w-1.5 rounded-full ${paused || failed || stale || delayed ? "bg-amber-400" : hasData ? "bg-sky-400" : "bg-slate-600"}`} />
+    {paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
+    {loading && <Loader2 size={12} className="animate-spin" />}
+  </div>;
+}
+
+function LiveFooter({ live, quote, candle, asOf }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; asOf?: number | null }) {
+  const minute = useStream(live, (ticks) => asOf === undefined ? 0
+    : ticks.reduce((latest, tick) => liveTick(tick, live) ? Math.max(latest, tick.minute) : latest, asOf ?? 0));
+  const tick = useStream(live, (ticks) => ticks.at(-1));
+  const shown = shownPrice({ tick, quote, candle, scope: live });
+  const age = useClock((now) => shown.at ? Math.max(0, Math.floor(now - shown.at)) : null);
+  return <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-slate-500">
+    <span>{minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET · latest candle may be forming` : "New York time"}</span>
+    <span>{age !== null ? `${shown.source} ${age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`} ago` : "No price timestamp"}</span>
+  </div>;
+}
 
 export default function ChartWorkspace() {
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
@@ -23,8 +58,6 @@ export default function ChartWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
-  const [clock, setClock] = useState(0);
-  const [stream, setStream] = useState<{ key: string; status: "connecting" | "connected" | "fallback"; ticks: ChartStreamTick[] }>({ key: "", status: "fallback", ticks: [] });
   const [symbolInput, setSymbolInput] = useState("");
   const [symbolError, setSymbolError] = useState("");
   const [drawing, setDrawing] = useState(false);
@@ -37,6 +70,7 @@ export default function ChartWorkspace() {
   const [viewport, setViewport] = useState({ width: 1280, height: 900 });
   const link = useMemo(() => createCrosshairLink(), []);
   const rangeLink = useMemo(() => createRangeLink(), []);
+  const stream = useMemo(() => createStreamStore(), []);
   const inFlight = useRef(false);
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
@@ -50,21 +84,24 @@ export default function ChartWorkspace() {
   const data = response?.key === requestKey ? response.data : null;
   const currentOlder = useMemo(() => older.key === historyKey ? older.panels : {}, [older, historyKey]);
   const hasData = !!data;
-  const activeStream = stream.key === requestKey ? stream : null;
-  const viewData = useMemo(() => {
+  const fetchedAt = data?.fetched_at.intraday ?? 0;
+  const live = useMemo<LiveFeed>(() => ({ store: stream, key: requestKey, symbol: settings.symbol, fetched: fetchedAt, session: settings.session }),
+    [stream, requestKey, settings.symbol, fetchedAt, settings.session]);
+  // Today's REST candles joined to older history. Streamed trades are not in
+  // here: each chart applies them to its own panel (lib/chartStore.ts).
+  const panels = useMemo(() => {
     if (!data) return null;
-    const live = overlayLiveTicks(data, activeStream?.ticks ?? [], settings.session);
-    const panels = { ...live.panels };
+    const merged = { ...data.panels };
     for (const interval of INTERVALS) {
-      const tail = panels[interval];
+      const tail = merged[interval];
       const past = currentOlder[interval];
       if (!tail || !past?.bars.length) continue;
       const bars = mergeBars(retainHistory(past.bars, tail.bars, visibleTimes.current.get(interval) ?? null), tail.bars);
       const times = new Set(bars.map((bar) => bar.time));
-      panels[interval] = { bars, markers: [...new Map([...past.markers, ...tail.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()] };
+      merged[interval] = { bars, markers: [...new Map([...past.markers, ...tail.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()] };
     }
-    return { ...live, panels };
-  }, [data, activeStream, settings.session, currentOlder]);
+    return merged;
+  }, [data, currentOlder]);
   const selected = data?.quotes.find((q) => q.symbol === settings.symbol);
   const levels = useMemo(() => settings.levels[settings.symbol] ?? [], [settings.levels, settings.symbol]);
 
@@ -149,13 +186,6 @@ export default function ChartWorkspace() {
     catch { setSaved(false); }
   }, [settings, ready]);
   useEffect(() => {
-    const tick = () => setClock(Date.now() / 1000);
-    tick();
-    const timer = window.setInterval(tick, 1000);
-    return () => window.clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
     const measure = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
     measure();
     window.addEventListener("resize", measure);
@@ -213,9 +243,7 @@ export default function ChartWorkspace() {
     if (!ready || !hasData || paused) return;
     let alive = true;
     let source: EventSource | null = null;
-    const status = (value: "connecting" | "connected" | "fallback") => {
-      if (alive) setStream((prior) => ({ key: requestKey, status: value, ticks: prior.key === requestKey ? prior.ticks : [] }));
-    };
+    const status = (value: "connecting" | "connected" | "fallback") => { if (alive) stream.status(requestKey, value); };
     const connect = () => {
       if (document.hidden || source) return;
       status("connecting");
@@ -228,8 +256,7 @@ export default function ChartWorkspace() {
         try {
           const tick = parseChartTick(JSON.parse((event as MessageEvent).data));
           if (!alive || !tick || tick.symbol !== settings.symbol) return;
-          setStream((prior) => ({ key: requestKey, status: "connected",
-            ticks: [...(prior.key === requestKey ? prior.ticks : []).filter((old) => old.at > Date.now() / 1000 - 120), tick].slice(-120) }));
+          stream.tick(requestKey, tick);
         } catch { /* A malformed event cannot replace the last good REST snapshot. */ }
       });
       source.onerror = () => status("fallback");
@@ -241,7 +268,7 @@ export default function ChartWorkspace() {
     connect();
     document.addEventListener("visibilitychange", visibility);
     return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
-  }, [ready, hasData, paused, requestKey, settings.symbol]);
+  }, [ready, hasData, paused, requestKey, settings.symbol, stream]);
 
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
@@ -294,20 +321,12 @@ export default function ChartWorkspace() {
     setSettings((s) => ({ ...s, levels: { ...s.levels, [s.symbol]: [...(s.levels[s.symbol] ?? []), level] } }));
     setDrawing(false); setLevelPrice(""); setLevelLabel(""); setLevelError("");
   };
-  const candleAge = data?.fetched_at.intraday ? Math.max(0, Math.floor(clock - data.fetched_at.intraday)) : null;
-  const oldData = !!error || !!data?.issues.length || (candleAge !== null && candleAge > 45);
+  const failed = !!error || !!data?.issues.length;
   const intradayInterval = settings.intervals.find((interval) => interval !== "1D" && interval !== "1W");
-  const latestCandle = intradayInterval ? viewData?.panels[intradayInterval]?.bars.at(-1) : undefined;
-  const latestTick = activeStream?.ticks.at(-1);
-  const streamedPrice = latestTick && latestTick.at > (data?.fetched_at.intraday ?? 0)
-    && (settings.session === "extended" || latestTick.session === "regular") ? latestTick.price : null;
-  const extendedPrice = settings.session === "extended" && latestCandle?.extended && latestCandle.time > (selected?.trade_time ?? 0) ? latestCandle.close : null;
-  const shownPrice = streamedPrice ?? extendedPrice ?? selected?.last;
-  const priceSource = streamedPrice !== null ? "Live trade" : extendedPrice !== null ? "Extended-hours candle" : "Tradier quote";
-  const shownAt = streamedPrice !== null ? latestTick?.at : extendedPrice !== null ? latestCandle?.time : selected?.trade_time;
-  const priceAge = shownAt ? Math.max(0, Math.floor(clock - shownAt)) : null;
-  const clockFor = (interval: Interval) => barClock({ now: clock, interval, bars: viewData?.panels[interval]?.bars, session: settings.session,
-    market: data?.market, paused, delayed: !!data?.delayed, stale: oldData });
+  // A newer extended-hours candle can outrank the quote. Streamed trades outrank
+  // both, so the REST candle (without them) is the one that matters here.
+  const latestCandle = intradayInterval ? panels?.[intradayInterval]?.bars.at(-1) : undefined;
+  const clock = { session: settings.session, market: data?.market, paused, delayed: !!data?.delayed, failed, fetched: data?.fetched_at.intraday };
   // Only unusual days get a label: early closes, weekday closures and a missing calendar.
   const market = data?.market;
   const holiday = market?.status === "closed" && ![0, 6].includes(new Date(`${market.date}T12:00:00Z`).getUTCDay());
@@ -320,8 +339,6 @@ export default function ChartWorkspace() {
   const withRow = multi && viewport.width >= 1280 && fillHeight - smallHeight - 70 >= 520;
   const mainHeight = immersive ? Math.max(420, withRow ? fillHeight - smallHeight - 70 : fillHeight) : 410;
   const showAside = !immersive || settings.immersiveWatchlist;
-  const change = shownPrice != null && selected?.previous_close && selected.previous_close > 0
-    ? (shownPrice / selected.previous_close - 1) * 100 : selected?.change_percentage;
 
   return (
     <div data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
@@ -350,14 +367,9 @@ export default function ChartWorkspace() {
             <button type="button" aria-label="Open symbol search" onClick={() => setPalette(true)} className="ml-2 rounded p-1 text-slate-500 hover:text-slate-200"><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-28 bg-transparent px-2 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-300" />
             <button type="submit" aria-label="Load symbol" className="mr-1 rounded p-1.5 hover:bg-slate-800"><ArrowUpRight size={14} /></button>
           </form>
-          <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{settings.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(shownPrice)}</span>
-            <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span><span className="text-[10px] text-slate-500">{priceSource}</span></div>
+          <LiveQuote live={live} quote={selected} candle={latestCandle} />
           {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`rounded px-2 py-1 text-[11px] ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
-          <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400" role="status">
-            <span className={`h-1.5 w-1.5 rounded-full ${paused || oldData || data?.delayed ? "bg-amber-400" : data ? "bg-sky-400" : "bg-slate-600"}`} />
-            {paused ? "Updates paused" : data?.delayed ? "Tradier sandbox · delayed" : activeStream?.status === "connected" ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
-            {loading && <Loader2 size={12} className="animate-spin" />}
-          </div>
+          <FeedStatus live={live} paused={paused} delayed={!!data?.delayed} hasData={hasData} failed={failed} loading={loading} />
         </div>
         <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
           {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`rounded px-2 py-1.5 text-[11px] ${settings.intervals[0] === interval ? "bg-sky-400/15 text-sky-300" : "text-slate-400 hover:bg-slate-800"}`}>{interval}</button>)}
@@ -385,12 +397,12 @@ export default function ChartWorkspace() {
 
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
-          {viewData ? <>
-            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={viewData.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clockFor(settings.intervals[0])} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
+          {panels ? <>
+            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={panels[settings.intervals[0]]} live={live} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clock} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
               history={currentOlder[settings.intervals[0]]} onNeedHistory={(before) => void loadOlder(settings.intervals[0], before)} onRetryHistory={() => void loadOlder(settings.intervals[0], undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(settings.intervals[0], range)} />
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {settings.intervals.slice(1).map((interval, index) => <div key={index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
-                <PriceChart id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} session={settings.session} panel={viewData.panels[interval]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clockFor(interval)}
+                <PriceChart id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} session={settings.session} panel={panels[interval]} live={live} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clock}
                   history={currentOlder[interval]} onNeedHistory={(before) => void loadOlder(interval, before)} onRetryHistory={() => void loadOlder(interval, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(interval, range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => { setExpanded(null); setSettings((s) => {
@@ -403,10 +415,7 @@ export default function ChartWorkspace() {
             <p className="text-sm font-medium text-slate-200">{loading ? `Loading ${settings.symbol} candles…` : "Your chart workspace is ready"}</p>
             <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved in this browser."}</p>
           </div>}
-          <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-slate-500">
-            <span>{viewData?.intraday_as_of ? `Last minute candle ${etTime(viewData.intraday_as_of, true)} ${etTime(viewData.intraday_as_of)} ET` : "New York time"}{viewData?.intraday_as_of && " · latest candle may be forming"}</span>
-            <span>{priceAge !== null ? `${priceSource} ${priceAge < 60 ? `${priceAge}s` : `${Math.floor(priceAge / 60)}m`} ago` : "No price timestamp"}</span>
-          </div>
+          <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={data ? data.intraday_as_of : undefined} />
         </div>
 
         {showAside && <aside className="min-w-0 space-y-3">
