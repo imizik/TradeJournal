@@ -9,8 +9,8 @@ TradingView for normal chart work.
 
 **What this is.** The working plan for that goal. Codex and Claude both work
 from this file. It owns priorities, dependencies and acceptance criteria.
-`docs/charts-workspace.md` describes what is built today. The next item has a
-focused implementation contract in [charts-deep-history.md](charts-deep-history.md).
+`docs/charts-workspace.md` describes what is built today. C0.0's focused
+implementation contract is [charts-deep-history.md](charts-deep-history.md).
 That contract supplies C0.0's detail; do not maintain a competing task list there.
 
 **Two layers, kept independent.** Rendering uses normalized candles and source
@@ -27,7 +27,8 @@ phases have shipped.
 
 **Last reviewed:** 2026-09-30 against `origin/main` at `8fe2141` (PR #87).
 The implementation-readiness review moved everyday chart workflows earlier
-and clarified data correctness. These are planned changes, not shipped features.
+and clarified data correctness. The status board distinguishes shipped work
+from planned work.
 
 ## How to work from this file
 
@@ -59,8 +60,8 @@ and clarified data correctness. These are planned changes, not shipped features.
 
 | ID | Item | Phase | Status |
 |---|---|---|---|
-| C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | next |
-| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | todo |
+| C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | done ([PR #89](https://github.com/imizik/TradeJournal/pull/89)) |
+| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | next |
 | C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | todo |
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | todo |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | todo |
@@ -286,7 +287,7 @@ pulls layouts, recording and alerts forward without renumbering existing IDs.
 
 ### Phase 0 — Foundations (do first)
 
-**C0.0 Deep history.** Implement only this item next. The required API, cache,
+**C0.0 Deep history (done in PR #89).** The required API, cache,
 warmup, pagination, concurrency and test behavior is in
 [the C0.0 implementation contract](charts-deep-history.md). In brief:
 
@@ -330,7 +331,7 @@ warmup, pagination, concurrency and test behavior is in
   regression tests. Report fixture, visual, live-provider and deployment
   observations separately; missing live evidence is not silently called passed.
 
-Once this lands, C2.4's baseline, C3.3 and C6.1 read history from here instead
+C2.4's baseline, C3.3 and C6.1 should read history from here instead
 of fetching their own.
 
 **C0.1 Market calendar.** Cache Tradier calendar results by the covered dates,
@@ -707,8 +708,8 @@ Settled with the user on 2026-09-30. Do not reopen them without the user.
    ETFs. The epic is judged against that.
 5. **No NQ or other futures.** The user does not trade or watch them. No futures
    feed, Webull futures investigation or Databento-style subscription.
-6. **Deep history (C0.0) comes first.** Scroll-back is what replacing TradingView
+6. **Deep history (C0.0) came first.** Scroll-back is what replacing TradingView
    needs soonest, and three later items reuse it.
 7. **Daily-use readiness comes before advanced analytics.** Level alerts and
    historical trade navigation precede G0; options capture starts early, while
-   gamma tools and replay follow the gate. C0.0 remains a single scoped PR.
+   gamma tools and replay follow the gate. C0.0 remained a single scoped PR.

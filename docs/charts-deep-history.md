@@ -1,8 +1,9 @@
 # C0.0 Deep history: implementation contract
 
-Status: **planned, not implemented**. Priority and completion live only in the
-[roadmap](charts-roadmap.md#status-board). This document resolves C0.0's design
-choices for its implementing agent; it does not authorize other roadmap items.
+Status: **implemented in [PR #89](https://github.com/imizik/TradeJournal/pull/89)**.
+Priority and completion live in the [roadmap](charts-roadmap.md#status-board).
+This document records C0.0's implementation contract; it does not authorize
+other roadmap items.
 
 ## Outcome and scope
 
@@ -218,9 +219,8 @@ an older page loading on scroll, and the stream connection. Distinguish a
 connected stream from an observed market-hours trade. Report unavailable or
 deferred checks honestly; never use a fixture screenshot as production proof.
 
-In that implementation PR, mark C0.0 done with its real PR number and C0.1 next,
-update the workspace/feature map, and summarize before/after plus the actual
-verification boundaries. This planning change leaves C0.0 next.
+C0.0's implementation is PR #89; the roadmap marks C0.1 next. The workspace
+and feature map document the implemented behavior and its verification boundaries.
 
 ## Handoff prompt
 
