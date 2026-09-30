@@ -61,7 +61,7 @@ from planned work.
 | ID | Item | Phase | Status |
 |---|---|---|---|
 | C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | done ([PR #89](https://github.com/imizik/TradeJournal/pull/89)) |
-| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | done (PR pending) |
+| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | done ([PR #90](https://github.com/imizik/TradeJournal/pull/90)) |
 | C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | next |
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | todo |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | todo |
@@ -334,7 +334,7 @@ warmup, pagination, concurrency and test behavior is in
 C2.4's baseline, C3.3 and C6.1 should read history from here instead
 of fetching their own.
 
-**C0.1 Market calendar (done).** Cache Tradier calendar results by the covered dates,
+**C0.1 Market calendar (done in PR #90).** Cache Tradier calendar results by the covered dates,
 refresh the current calendar daily, and send today's session hours with the
 workspace response. `barClock()` in `frontend/lib/charts.ts`, backend resampling
 and stream buckets use the same session definition. Historical pages need the
