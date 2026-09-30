@@ -130,6 +130,39 @@ IDEAS_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+
+def answer_problem(answer: Any) -> str | None:
+    """Why an answer does not fit IDEAS_SCHEMA, or None. The API holds its
+    answer to the schema; one written in a Claude Code session (`/factory-week`)
+    gets this check instead."""
+    types = {"string": str, "boolean": bool, "array": list}
+
+    def check(value: Any, schema: Mapping[str, Any], where: str) -> str | None:
+        if schema["type"] == "object":
+            if not isinstance(value, Mapping):
+                return f"{where} is not an object"
+            missing = sorted(set(schema["required"]) - set(value))
+            extra = sorted(set(value) - set(schema["properties"]))
+            if missing:
+                return f"{where} lacks {', '.join(missing)}"
+            if extra:
+                return f"{where} has {', '.join(extra)}, which the format does not"
+            for key, part in schema["properties"].items():
+                problem = check(value[key], part, f"{where}.{key}")
+                if problem:
+                    return problem
+            return None
+        if not isinstance(value, types[schema["type"]]):
+            return f"{where} is not a {schema['type']}"
+        if schema["type"] == "array":
+            for k, item in enumerate(value):
+                problem = check(item, schema["items"], f"{where}[{k}]")
+                if problem:
+                    return problem
+        return None
+
+    return check(answer, IDEAS_SCHEMA, "answer")
+
 SPEC_FORMAT = """\
 A spec is a JSON object. Only "family" is required; everything else defaults \
 to that family's values in the catalog.

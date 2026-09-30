@@ -116,8 +116,10 @@ than two filters, repeats anything in the ledger or this week's batch, or
 does not fit the budget, and the report lists every refusal with its reason.
 
 - **Budget:** three new candidates a week, counted from ledger lines tagged
-  with the week (`batch`). A learned filter whose rules are new counts two.
-  Hand-run `run` candidates are not counted.
+  with the week (`batch`). Weeks run Sunday to Saturday, so each scheduled
+  Sunday run opens a new one. A learned filter whose rules are new counts
+  two. Hand-run `run` candidates are not counted. `--budget N` lets a run
+  someone asks for add N more.
 - **Exam numbers** reach the brief only as passed or failed.
 - **Evidence** comes from discovery data only (`factory_gates.discovery_trades`),
   cached per idea and per engine version (a hash of the engine modules) in
@@ -131,7 +133,7 @@ does not fit the budget, and the report lists every refusal with its reason.
 
 ```bash
 cd /Users/user/TradeJournal-factory
-bash scripts/factory_week.sh                                  # run the week now
+bash scripts/factory_week.sh                                  # run the week now, asking the API
 backend/.venv/bin/python backend/scripts/strategy_factory.py week --dry-run   # print the brief only
 launchctl bootout gui/$(id -u)/com.tradejournal.strategy-factory             # pause the schedule
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradejournal.strategy-factory.plist  # resume
@@ -143,6 +145,27 @@ slept runs at the next wake. The run needs `ANTHROPIC_API_KEY`, the Alpaca
 keys and `FACTORY_NTFY_URL` (with `FACTORY_NTFY_TOKEN` when the topic has one)
 in the main checkout's `backend/.env`, which the factory checkout links to,
 as it links `backend/.venv` and `backend/data/alpaca_cache`.
+
+### By hand, with Claude Code as the idea model
+
+Typing `/factory-week` in a Claude Code session runs a week now, with that
+session answering the brief instead of the API, so it runs on the Claude plan
+rather than the API key (`.claude/skills/factory-week/SKILL.md`). The
+session drives the same script in the factory checkout, in two steps:
+
+```bash
+bash scripts/factory_week.sh --brief /tmp/brief.md            # merge main, fetch bars, write the brief, stop
+bash scripts/factory_week.sh --answer /tmp/answer.json --answer-by "Claude Opus 5.5"   # judge, record, push, notify
+```
+
+`--answer` is held to the same JSON format the API is (`answer_problem`), and
+its ideas go through the same review and the same gates. The session must
+propose from the brief alone: reading the ledger, the reports or the trade
+files first would let results the brief withholds (exam numbers) shape the
+ideas, so each run starts in a fresh session. When the week's three are
+used, the brief step exits with status 3, and `--budget N` on both steps
+runs more on request. A second run on the same day writes its report as
+`<day>b.md`, so neither is overwritten.
 
 ## Writing a spec
 

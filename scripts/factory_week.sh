@@ -7,14 +7,38 @@
 # up to three candidates and judges them, commits the specs, ledger lines and
 # report to the branch, pushes it, and sends the summary to the phone. Any
 # failed step sends the failure to the phone instead. launchd starts it every
-# Sunday (~/Library/LaunchAgents/com.tradejournal.strategy-factory.plist).
+# Sunday (~/Library/LaunchAgents/com.tradejournal.strategy-factory.plist), and
+# the idea model is then Claude through the Anthropic API.
 #
-#   bash scripts/factory_week.sh      run the week now
+# By hand, a Claude Code session can be the idea model instead, on the user's
+# Claude plan (/factory-week): write the brief, answer it, judge the answer.
+#
+#   bash scripts/factory_week.sh                       run the week now (the API)
+#   bash scripts/factory_week.sh --brief FILE          write the brief to FILE and stop
+#   bash scripts/factory_week.sh --answer FILE [--answer-by NAME]
+#                                                      judge the ideas in FILE, record, notify
+#   --budget N (with either)                           N candidates, past this week's three
 #
 # Never touches main or any database. The branch is never merged.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BRIEF=""
+WEEK_ARGS=()
+absolute() { case "$1" in /*) echo "$1" ;; *) echo "$PWD/$1" ;; esac; }  # the run moves to $ROOT
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --brief|--answer|--answer-by|--budget) ;;
+    *) echo "Unknown option $1; see the top of $0." >&2; exit 2 ;;
+  esac
+  [ $# -ge 2 ] || { echo "$1 needs a value; see the top of $0." >&2; exit 2; }
+  case "$1" in
+    --brief) BRIEF="$(absolute "$2")" ;;
+    --answer) WEEK_ARGS+=("$1" "$(absolute "$2")") ;;
+    *) WEEK_ARGS+=("$1" "$2") ;;
+  esac
+  shift 2
+done
 FACTORY=("$ROOT/backend/.venv/bin/python" "$ROOT/backend/scripts/strategy_factory.py")
 LOCK="$ROOT/backend/data/factory/week.lock"
 
@@ -59,8 +83,20 @@ fi
 say "bars: fetch the week"
 "${FACTORY[@]}" prepare || fail "fetching bars from Alpaca failed"
 
+if [ -n "$BRIEF" ]; then
+  say "brief: for a Claude Code session to answer"
+  rm -f "$BRIEF"
+  "${FACTORY[@]}" week --dry-run --brief-out "$BRIEF" ${WEEK_ARGS[@]+"${WEEK_ARGS[@]}"} || fail "writing the brief failed"
+  if [ ! -s "$BRIEF" ]; then
+    echo "No brief was written: this week's candidates are used (see above). Add --budget N to run N more." >&2
+    exit 3
+  fi
+  say "done: the brief is in $BRIEF"
+  exit 0
+fi
+
 say "ideas: propose and judge"
-if ! "${FACTORY[@]}" week; then
+if ! "${FACTORY[@]}" week ${WEEK_ARGS[@]+"${WEEK_ARGS[@]}"}; then
   record "Strategy factory: week of $(date +%F), incomplete" \
     || fail "the weekly run failed, and what it had judged could not be committed and pushed"
   fail "the weekly run failed while proposing or judging; anything it judged is pushed; see ~/Library/Logs/tradejournal-strategy-factory.log"

@@ -10,6 +10,7 @@ import pytest
 
 from app.engine.factory_brief import (
     SYSTEM_PROMPT,
+    answer_problem,
     Proposal,
     brief,
     catalog,
@@ -211,3 +212,17 @@ def test_a_proposal_without_a_spec_has_no_id():
     assert Proposal("t", "h", "", "", False).id == ""
     with pytest.raises(AssertionError):
         spec_file(Proposal("t", "h", "", "", False))
+
+
+def test_an_answer_written_in_a_session_is_held_to_the_format():
+    good = {"ideas": [{"title": "t", "hypothesis": "h", "builds_on": "", "change": "c", "from_evidence": False,
+                       "spec_json": "{}"}], "lessons": "l", "wanted": ["w"]}
+    assert answer_problem(good) is None
+    assert answer_problem([]) == "answer is not an object"
+    assert answer_problem({"ideas": [], "lessons": "l"}) == "answer lacks wanted"
+    assert answer_problem({**good, "extra": 1}) == "answer has extra, which the format does not"
+    idea = {**good["ideas"][0], "from_evidence": "no"}
+    assert answer_problem({**good, "ideas": [idea]}) == "answer.ideas[0].from_evidence is not a boolean"
+    assert answer_problem({**good, "ideas": [{**good["ideas"][0], "spec_json": {}}]}) == (
+        "answer.ideas[0].spec_json is not a string")
+    assert answer_problem({**good, "wanted": [1]}) == "answer.wanted[0] is not a string"
