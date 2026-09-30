@@ -6,6 +6,10 @@ where the evidence for a change comes from.
 
 Backend paths are relative to `backend/`, frontend paths to `frontend/`.
 
+For Charts changes, use the [roadmap's execution order](../charts-roadmap.md#status-board)
+and [C0.0 implementation contract](../charts-deep-history.md). The tables below
+describe shipped code; deep-history pagination remains planned until its PR lands.
+
 ## The screens
 
 The sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button

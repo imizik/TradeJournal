@@ -3,11 +3,35 @@
 What is built. What comes next, and in what order, is in
 [charts-roadmap.md](charts-roadmap.md).
 
+C0.0 is planned in [charts-deep-history.md](charts-deep-history.md), including
+its warmup rule and acceptance matrix. Those requirements are not implemented
+behavior; the history and indicator descriptions below remain the current code.
+
 The private `/charts` page is a stock/ETF chart workspace backed by Tradier.
 It uses TradingView's Apache-licensed Lightweight Charts, not the restricted
 Advanced Charts library. No TradingView subscription or paid data upgrade is
 required by this feature. The Tradier account still needs production market-data
 access. Keys remain on the private backend.
+
+## License and data costs
+
+The frontend lockfile selects **Lightweight Charts 5.2.1**, distributed under
+Apache License 2.0 with a no-charge, royalty-free license grant. Using this
+library in TradeJournal requires no TradingView account, subscription or chart
+license payment. See the version's [LICENSE](https://github.com/tradingview/lightweight-charts/blob/v5.2.1/LICENSE)
+and [attribution instructions](https://github.com/tradingview/lightweight-charts/tree/v5.2.1#license).
+
+Preserve the upstream notices and license. The current source enables
+`attributionLogo` in `PriceChart.tsx`, links TradingView and its notice in the
+workspace footer, and ships `frontend/public/lightweight-charts-NOTICE.txt`
+and `frontend/public/lightweight-charts-LICENSE.txt`. Keep attribution available
+in full screen and on phone layouts when those views change.
+
+This library renders data supplied by our backend; it does not include
+TradingView market data, Pine execution or the TradingView website's complete
+drawing/alert product. Tradier/Alpaca access has separate account/data terms.
+The existing TradingView-to-Signals loop also remains separate: free chart
+rendering alone does not replace a subscription used to run Pine alerts there.
 
 ## Provider decision (2026-09-29)
 
