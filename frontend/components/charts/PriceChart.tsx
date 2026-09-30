@@ -61,10 +61,14 @@ type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
   lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; levels: IPriceLine[];
+  /** The symbol and interval now drawn; a new one opens on its latest candles. */
+  frame: string;
 };
 
-export default function PriceChart({ id, symbol, interval, session, panel: rest, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, interval, session, panel: rest, pending, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
+  pending?: string | null;
   link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed; height: number;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null };
@@ -81,7 +85,7 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ drawing, onDraw, onNeedHistory, onVisibleRange });
+  const actions = useRef({ drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending: !!pending });
   const initial = useRef(true);
   const [hover, setHover] = useState<ChartBar | null>(null);
   // `rest` is the REST snapshot plus older history; streamed trades are applied
@@ -91,15 +95,13 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
     const renders = (window as typeof window & { __tjRenders?: RenderCounts }).__tjRenders;
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
-  useEffect(() => { actions.current = { drawing, onDraw, onNeedHistory, onVisibleRange }; }, [drawing, onDraw, onNeedHistory, onVisibleRange]);
+  useEffect(() => { actions.current = { drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending: !!pending }; }, [drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
+  // One chart for the panel's lifetime. Symbol, interval, session and RSI
+  // changes swap data and panes in place (below), so switching never blanks.
   useEffect(() => {
     if (!container.current) return;
-    setHover(null);
-    barsRef.current = [];
-    requestedGaps.current.clear();
-    const daily = interval === "1D" || interval === "1W";
     const chart = createChart(container.current, {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: "#10151e" }, textColor: "#8593a9", fontSize: 10,
@@ -107,12 +109,11 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
       grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
       rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 } },
-      timeScale: { borderColor: "#263141", timeVisible: !daily, secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
+      timeScale: { borderColor: "#263141", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
           return kind <= TickMarkType.DayOfMonth ? tickFormats[kind as keyof typeof tickFormats].format(time * 1000) : etTime(time);
         } },
-      localization: { timeFormatter: (time: Time) => typeof time === "number" ? `${etTime(time, true)} ${daily ? "" : etTime(time) + " ET"}` : "" },
     });
     const shade = chart.addSeries(HistogramSeries, { priceScaleId: "sessions", priceLineVisible: false, lastValueVisible: false,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }) });
@@ -122,17 +123,8 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
     const lines = {} as Bundle["lines"];
     for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
-    let rsi: Bundle["rsi"];
-    if (indicators.rsi) {
-      rsi = chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
-        autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
-      rsi.createPriceLine({ price: 70, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
-      rsi.createPriceLine({ price: 30, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
-      chart.panes()[1].setHeight(main ? 85 : 60);
-    }
     const markers = createSeriesMarkers(candles, []);
-    bundle.current = { chart, candles, volume, shade, rsi, lines, markers, levels: [] };
-    initial.current = true;
+    bundle.current = { chart, candles, volume, shade, lines, markers, levels: [], frame: "" };
     let syncing = false;
     const stopLink = link.listen((time, source) => {
       if (source === id || syncing) return;
@@ -154,9 +146,9 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
       const value = candles.coordinateToPrice(event.point.y);
       if (value !== null && value > 0) actions.current.onDraw(Math.round(value * 100) / 100);
     });
-    const step = INTERVAL_SECONDS[interval];
     const stopRange = rangeLink.listen(id, (range) => {
       if (!linking.current || !barsRef.current.length) return;
+      const step = INTERVAL_SECONDS[actions.current.interval];
       // Sync by time. A coarser chart keeps a readable minimum of candles
       // around the same moment instead of collapsing to one bar.
       const middle = (range.from + range.to) / 2;
@@ -179,7 +171,8 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
     chart.timeScale().subscribeVisibleTimeRangeChange(onRange);
     let rangeTimer: number | undefined;
     const onLogical = (range: { from: number; to: number } | null) => {
-      if (!range || performance.now() < quietUntil.current || !barsRef.current.length) return;
+      // A frame waiting for its next candles never asks for older ones.
+      if (!range || performance.now() < quietUntil.current || !barsRef.current.length || actions.current.pending) return;
       if (rangeTimer) window.clearTimeout(rangeTimer);
       rangeTimer = window.setTimeout(() => {
         const scale = chart.timeScale();
@@ -200,22 +193,46 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
     chart.timeScale().subscribeVisibleLogicalRangeChange(onLogical);
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
-    return () => { stopLink(); stopRange(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); markers.detach(); chart.remove(); bundle.current = null; };
-  }, [id, symbol, interval, indicators.rsi, link, rangeLink, main]);
+    return () => { stopLink(); stopRange(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); markers.detach(); chart.remove(); bundle.current = null; barsRef.current = []; };
+  }, [id, link, rangeLink, main]);
+
+  // RSI lives in a second pane, added and removed in place; the pane goes with its series.
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current || indicators.rsi === !!current.rsi) return;
+    if (current.rsi) { current.chart.removeSeries(current.rsi); current.rsi = undefined; return; }
+    const rsi = current.chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
+      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
+    rsi.createPriceLine({ price: 70, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
+    rsi.createPriceLine({ price: 30, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
+    current.chart.panes()[1].setHeight(main ? 85 : 60);
+    rsi.setData(barsRef.current.map(rsiPoint));
+    current.rsi = rsi;
+  }, [indicators.rsi, main]);
 
   useEffect(() => {
     const range = bundle.current?.chart.timeScale().getVisibleRange();
     if (main && linkRange && range) rangeLink.emit({ from: range.from as number, to: range.to as number }, id);
   }, [main, linkRange, rangeLink, id]);
 
-  // Session changes swap the panel data wholesale; recreate-free resets still
-  // go through setData, so the key only needs to exist for barChange's sake.
+  // A new symbol or interval opens on its latest candles, as a new chart would;
+  // a session change keeps the viewport where it can. Both reset through setData.
   const dataKey = `${symbol}|${interval}|${session}`;
   const drawnKey = useRef("");
   useEffect(() => {
     const current = bundle.current;
-    if (!current) return;
+    // While the next candles load, the previous frame stays drawn under the label.
+    if (!current || pending) return;
     const bars = panel?.bars ?? [];
+    const frame = `${symbol}|${interval}`;
+    if (current.frame !== frame) {
+      current.frame = frame;
+      initial.current = true;
+      requestedGaps.current.clear();
+      const daily = !intradayInterval(interval);
+      current.chart.applyOptions({ timeScale: { timeVisible: !daily },
+        localization: { timeFormatter: (time: Time) => typeof time === "number" ? `${etTime(time, true)} ${daily ? "" : etTime(time) + " ET"}` : "" } });
+    }
     if (container.current) {
       container.current.dataset.bars = String(bars.length);
       container.current.dataset.markers = String(panel?.markers.length ?? 0);
@@ -260,33 +277,34 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
       current.chart.timeScale().setVisibleLogicalRange({ from: bars.length + 4 - width, to: bars.length + 4 });
     } else if (logical && movedTo >= 0) current.chart.timeScale().setVisibleLogicalRange({ from: logical.from + moved, to: logical.to + moved });
     else if (bars.length && range) current.chart.timeScale().setVisibleRange(range);
-  }, [panel, dataKey, main, indicators.rsi]);
+  }, [panel, pending, dataKey, symbol, interval, main]);
 
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
     current.volume.applyOptions({ visible: indicators.volume });
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
-  }, [indicators, symbol, interval, main]);
+  }, [indicators]);
 
   const markers = panel?.markers;
   useEffect(() => {
+    if (pending) return;
     bundle.current?.markers.setMarkers(indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
       position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
       color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : []);
-  }, [markers, indicators.fills, indicators.rsi, symbol, interval, main]);
+  }, [markers, pending, indicators.fills, main]);
 
   useEffect(() => {
     const current = bundle.current;
-    if (!current) return;
+    if (!current || pending) return; // the next symbol's levels wait for its candles
     current.levels.forEach((line) => current.candles.removePriceLine(line));
     current.levels = levels.map((level) => current.candles.createPriceLine({ price: level.price, title: main ? level.label : "", color: "#659ef0", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true }));
-  }, [levels, symbol, interval, indicators.rsi, main]);
+  }, [levels, pending, main]);
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
   // Main chart: in the header. Smaller charts: end of the values row, so the
   // header keeps room for its controls at quarter width.
-  const timer = intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
+  const timer = !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
   return (
     <section aria-label={`${symbol} ${interval} chart`} className={`relative min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
@@ -305,7 +323,7 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
       </div>
       <div className="flex h-6 min-w-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
-        {bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && <span>Vol {bar.volumePending ? "pending" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume)}</span>}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP · raw/unadjusted" : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP raw" : "Tradier"}</span></> : <span>No candles in this window</span>}
+        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && <span>Vol {bar.volumePending ? "pending" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume)}</span>}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP · raw/unadjusted" : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP raw" : "Tradier"}</span></> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
       </div>
@@ -313,12 +331,13 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
         {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
-      <div ref={container} data-testid={`canvas-${id}`} style={{ height }} className={drawing ? "cursor-crosshair" : ""} />
+      <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} style={{ height }} className={`transition-opacity ${drawing ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
       {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
         {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : history.calendarNote}
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}
       </div>}
-      {!panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}
+      {pending ? <div role="status" className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center"><span className="rounded-md border border-slate-700/60 bg-[#10151e]/90 px-3 py-1.5 text-sm text-slate-200">{pending}</span></div>
+        : !panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}
       {drawing && <div className="pointer-events-none absolute left-3 top-24 rounded bg-blue-500/90 px-3 py-1.5 text-xs text-white">Click a price to save a level</div>}
     </section>
   );

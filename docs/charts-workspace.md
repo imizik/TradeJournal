@@ -103,6 +103,15 @@ cd backend
   candles it moved, plus the quote. The countdowns, the status dot and the
   price age read a shared one-second clock themselves, so a second passing
   re-renders those labels and no chart.
+- Each panel creates its chart once. A new symbol, interval, session or RSI
+  setting swaps data and panes on the same chart. Until a new symbol's or
+  session's candles arrive, every chart keeps its previous frame, dimmed and
+  labeled (*Loading NVDA…*); the full loading card appears only on the first
+  load. A request that fails clears the charts instead of leaving another
+  symbol's candles under the new name. Candles depend only on the symbol and
+  session, so moving an interval into the main chart or editing the watchlist
+  redraws from candles already loaded, and each interval's older history
+  survives the move.
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
   which can show regular-session closes after hours.
@@ -279,6 +288,10 @@ A render-count test (through a test-only `window.__tjRenders` map) shows that
 clock seconds re-render no chart, a price change re-renders the four intraday
 charts but not the daily one, a new minute's first trade at an unchanged price
 re-renders only the 1m chart, and a repeated trade re-renders none.
+A keep-alive test holds the provider response mid-switch and checks that all
+five chart instances survive symbol, interval, session and RSI changes, that
+the old frame stays dimmed under its label, that the loading card never
+appears, and that a failed symbol clears the charts.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine

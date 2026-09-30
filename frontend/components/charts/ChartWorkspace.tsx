@@ -52,10 +52,10 @@ export default function ChartWorkspace() {
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const [saved, setSaved] = useState(true);
-  const [response, setResponse] = useState<{ key: string; data: ChartData } | null>(null);
+  const [response, setResponse] = useState<{ key: string; symbol: string; session: ChartSettings["session"]; data: ChartData } | null>(null);
   const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
   const [rollover, setRollover] = useState<{ key: string; before: number; pending: Interval[] } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ key: string; message: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [paused, setPaused] = useState(false);
   const [symbolInput, setSymbolInput] = useState("");
@@ -80,18 +80,27 @@ export default function ChartWorkspace() {
   const intervalKey = (settings.layout === "single" ? settings.intervals.slice(0, 1) : settings.intervals).join(",");
   const watchlistKey = settings.watchlist.join(",");
   const requestKey = `${settings.symbol}|${settings.session}|${intervalKey}|${watchlistKey}`;
-  const historyKey = `${settings.symbol}|${settings.session}|${intervalKey}`;
+  // Candles depend only on the symbol and session. Intervals and the watchlist
+  // change what is requested, not what an already loaded panel shows.
+  const feedKey = `${settings.symbol}|${settings.session}`;
   const data = response?.key === requestKey ? response.data : null;
-  const currentOlder = useMemo(() => older.key === historyKey ? older.panels : {}, [older, historyKey]);
-  const hasData = !!data;
-  const fetchedAt = data?.fetched_at.intraday ?? 0;
-  const live = useMemo<LiveFeed>(() => ({ store: stream, key: requestKey, symbol: settings.symbol, fetched: fetchedAt, session: settings.session }),
-    [stream, requestKey, settings.symbol, fetchedAt, settings.session]);
+  // This request's response or, while it loads, the last one for the same
+  // symbol and session: reordered intervals and watchlist edits keep their candles.
+  const current = response?.symbol === settings.symbol && response.session === settings.session ? response.data : null;
+  // The newest response of any request, for what is not about the chart's symbol
+  // (watchlist quotes, market hours, notes).
+  const latest = response?.data;
+  const requestFailed = error?.key === requestKey;
+  const currentOlder = useMemo(() => older.key === feedKey ? older.panels : {}, [older, feedKey]);
+  const hasData = !!current;
+  const fetchedAt = current?.fetched_at.intraday ?? 0;
+  const live = useMemo<LiveFeed>(() => ({ store: stream, key: feedKey, symbol: settings.symbol, fetched: fetchedAt, session: settings.session }),
+    [stream, feedKey, settings.symbol, fetchedAt, settings.session]);
   // Today's REST candles joined to older history. Streamed trades are not in
   // here: each chart applies them to its own panel (lib/chartStore.ts).
   const panels = useMemo(() => {
-    if (!data) return null;
-    const merged = { ...data.panels };
+    if (!current) return null;
+    const merged = { ...current.panels };
     for (const interval of INTERVALS) {
       const tail = merged[interval];
       const past = currentOlder[interval];
@@ -101,8 +110,8 @@ export default function ChartWorkspace() {
       merged[interval] = { bars, markers: [...new Map([...past.markers, ...tail.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()] };
     }
     return merged;
-  }, [data, currentOlder]);
-  const selected = data?.quotes.find((q) => q.symbol === settings.symbol);
+  }, [current, currentOlder]);
+  const selected = latest?.quotes.find((q) => q.symbol === settings.symbol);
   const levels = useMemo(() => settings.levels[settings.symbol] ?? [], [settings.levels, settings.symbol]);
 
   useEffect(() => { setSettings(restoreSettings()); setReady(true); }, []);
@@ -110,18 +119,26 @@ export default function ChartWorkspace() {
     historyFlights.current.forEach((controller) => controller.abort());
     historyFlights.current.clear();
     visibleTimes.current.clear();
-    setOlder({ key: historyKey, panels: {} });
+    setOlder({ key: feedKey, panels: {} });
     setRollover(null);
-  }, [historyKey]);
+  }, [feedKey]);
+  // History survives an interval moving between panels; an interval no longer shown lets its history go.
+  useEffect(() => {
+    const shown = new Set<string>(intervalKey.split(","));
+    historyFlights.current.forEach((controller, interval) => { if (!shown.has(interval)) { controller.abort(); historyFlights.current.delete(interval); } });
+    visibleTimes.current.forEach((_, interval) => { if (!shown.has(interval)) visibleTimes.current.delete(interval); });
+    setOlder((state) => Object.keys(state.panels).every((interval) => shown.has(interval)) ? state
+      : { ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([interval]) => shown.has(interval))) });
+  }, [intervalKey]);
 
   const loadOlder = useCallback(async (interval: Interval, beforeOverride?: number, retry = false) => {
-    if (interval === "1D" || interval === "1W" || historyFlights.current.has(interval) || !data) return;
+    if (interval === "1D" || interval === "1W" || historyFlights.current.has(interval) || !current) return;
     const past = currentOlder[interval];
     if (((past?.exhausted || past?.issue) && !retry) && beforeOverride === undefined) return;
-    const before = beforeOverride ?? past?.bars[0]?.time ?? data.panels[interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
+    const before = beforeOverride ?? past?.bars[0]?.time ?? current.panels[interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
     const controller = new AbortController();
     historyFlights.current.set(interval, controller);
-    setOlder((state) => state.key !== historyKey ? state : ({ ...state, panels: { ...state.panels,
+    setOlder((state) => state.key !== feedKey ? state : ({ ...state, panels: { ...state.panels,
       [interval]: { bars: past?.bars ?? [], markers: past?.markers ?? [], exhausted: past?.exhausted ?? false,
         warmup: past?.warmup ?? "pending", issue: null, loading: true } } }));
     let continuation: string | null = null;
@@ -130,9 +147,9 @@ export default function ChartWorkspace() {
         const page = await fetchChartHistory({ symbol: settings.symbol, interval, session: settings.session, before, continuation, signal: controller.signal });
         if (controller.signal.aborted) return;
         setOlder((state) => {
-          if (state.key !== historyKey) return state;
+          if (state.key !== feedKey) return state;
           const prior = state.panels[interval];
-          const live = data.panels[interval]?.bars ?? [];
+          const live = current.panels[interval]?.bars ?? [];
           const combined = mergeBars(prior?.bars ?? [], page.bars);
           const retained = retainHistory(combined, live, visibleTimes.current.get(interval) ?? null);
           if (retained.length + live.length > 12000) return { ...state, panels: { ...state.panels, [interval]: {
@@ -154,16 +171,16 @@ export default function ChartWorkspace() {
         });
       }
     } catch (err) {
-      if (!controller.signal.aborted) setOlder((state) => state.key !== historyKey ? state : ({ ...state, panels: { ...state.panels,
+      if (!controller.signal.aborted) setOlder((state) => state.key !== feedKey ? state : ({ ...state, panels: { ...state.panels,
         [interval]: { bars: state.panels[interval]?.bars ?? [], markers: state.panels[interval]?.markers ?? [],
           exhausted: false, warmup: state.panels[interval]?.warmup ?? "pending",
           issue: err instanceof Error ? err.message : "Older candles could not load.", loading: false } } }));
     } finally {
       if (historyFlights.current.get(interval) === controller) historyFlights.current.delete(interval);
-      setOlder((state) => state.key !== historyKey || !state.panels[interval] ? state : ({ ...state,
+      setOlder((state) => state.key !== feedKey || !state.panels[interval] ? state : ({ ...state,
         panels: { ...state.panels, [interval]: { ...state.panels[interval], loading: false } } }));
     }
-  }, [data, currentOlder, historyKey, settings.symbol, settings.session]);
+  }, [current, currentOlder, feedKey, settings.symbol, settings.session]);
   // Before 04:00, on weekends and on holidays today has no intraday bars yet:
   // open on the latest completed sessions instead of an empty chart.
   useEffect(() => {
@@ -174,12 +191,12 @@ export default function ChartWorkspace() {
     }
   }, [data, intervalKey, currentOlder, loadOlder]);
   useEffect(() => {
-    if (!rollover || rollover.key !== historyKey || !data) return;
+    if (!rollover || rollover.key !== feedKey || !data) return;
     const available = rollover.pending.filter((interval) => !historyFlights.current.has(interval));
     if (!available.length) return;
     available.forEach((interval) => { void loadOlder(interval, rollover.before); });
     setRollover((current) => current === rollover ? { ...current, pending: current.pending.filter((interval) => !available.includes(interval)) } : current);
-  }, [rollover, historyKey, data, older, loadOlder]);
+  }, [rollover, feedKey, data, older, loadOlder]);
   useEffect(() => {
     if (!ready) return;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); }
@@ -203,7 +220,6 @@ export default function ChartWorkspace() {
     let alive = true;
     let busy = false;
     let controller: AbortController | null = null;
-    if (lastRequest.current !== requestKey) setError(null);
     const load = async () => {
       if (!alive || busy || document.hidden) return;
       busy = true;
@@ -215,15 +231,15 @@ export default function ChartWorkspace() {
           intervals: intervalKey.split(",") as Interval[], watchlist: watchlistKey ? watchlistKey.split(",") : [], layout: "multi" }, controller.signal);
         if (alive) {
           const day = new Date(result.checked_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-          if (lastWorkspaceDay.current?.key === requestKey && lastWorkspaceDay.current.day !== day) {
-            setRollover({ key: historyKey, before: result.checked_at,
+          if (lastWorkspaceDay.current?.key === feedKey && lastWorkspaceDay.current.day !== day) {
+            setRollover({ key: feedKey, before: result.checked_at,
               pending: intervalKey.split(",").filter((interval): interval is Interval => interval !== "1D" && interval !== "1W") });
           }
-          lastWorkspaceDay.current = { key: requestKey, day };
-          setResponse({ key: requestKey, data: result }); setError(null);
+          lastWorkspaceDay.current = { key: feedKey, day };
+          setResponse({ key: requestKey, symbol: settings.symbol, session: settings.session, data: result }); setError(null);
         }
       } catch (err) {
-        if (alive && !controller.signal.aborted) setError(err instanceof Error ? err.message : "Unable to refresh charts.");
+        if (alive && !controller.signal.aborted) setError({ key: requestKey, message: err instanceof Error ? err.message : "Unable to refresh charts." });
       } finally {
         busy = false;
         if (alive) { inFlight.current = false; setLoading(false); }
@@ -237,13 +253,13 @@ export default function ChartWorkspace() {
     const timer = paused ? undefined : window.setInterval(load, 15_000);
     document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
-  }, [ready, settings.symbol, settings.session, intervalKey, watchlistKey, requestKey, historyKey, paused]);
+  }, [ready, settings.symbol, settings.session, intervalKey, watchlistKey, requestKey, feedKey, paused]);
 
   useEffect(() => {
     if (!ready || !hasData || paused) return;
     let alive = true;
     let source: EventSource | null = null;
-    const status = (value: "connecting" | "connected" | "fallback") => { if (alive) stream.status(requestKey, value); };
+    const status = (value: "connecting" | "connected" | "fallback") => { if (alive) stream.status(feedKey, value); };
     const connect = () => {
       if (document.hidden || source) return;
       status("connecting");
@@ -256,7 +272,7 @@ export default function ChartWorkspace() {
         try {
           const tick = parseChartTick(JSON.parse((event as MessageEvent).data));
           if (!alive || !tick || tick.symbol !== settings.symbol) return;
-          stream.tick(requestKey, tick);
+          stream.tick(feedKey, tick);
         } catch { /* A malformed event cannot replace the last good REST snapshot. */ }
       });
       source.onerror = () => status("fallback");
@@ -268,7 +284,7 @@ export default function ChartWorkspace() {
     connect();
     document.addEventListener("visibilitychange", visibility);
     return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
-  }, [ready, hasData, paused, requestKey, settings.symbol, stream]);
+  }, [ready, hasData, paused, feedKey, settings.symbol, stream]);
 
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
@@ -321,14 +337,19 @@ export default function ChartWorkspace() {
     setSettings((s) => ({ ...s, levels: { ...s.levels, [s.symbol]: [...(s.levels[s.symbol] ?? []), level] } }));
     setDrawing(false); setLevelPrice(""); setLevelLabel(""); setLevelError("");
   };
-  const failed = !!error || !!data?.issues.length;
+  const failed = requestFailed || !!current?.issues.length;
   const intradayInterval = settings.intervals.find((interval) => interval !== "1D" && interval !== "1W");
   // A newer extended-hours candle can outrank the quote. Streamed trades outrank
   // both, so the REST candle (without them) is the one that matters here.
   const latestCandle = intradayInterval ? panels?.[intradayInterval]?.bars.at(-1) : undefined;
-  const clock = { session: settings.session, market: data?.market, paused, delayed: !!data?.delayed, failed, fetched: data?.fetched_at.intraday };
+  const clock = { session: settings.session, market: latest?.market, paused, delayed: !!latest?.delayed, failed, fetched: current?.fetched_at.intraday };
+  // Until this request's candles arrive, each chart keeps its last frame under
+  // a label naming what is loading. A failed request clears it instead.
+  const loadingWhat = !response || current ? null : response.symbol !== settings.symbol ? settings.symbol
+    : settings.session === "extended" ? "extended hours" : "regular hours";
+  const pendingFor = (interval: Interval) => data || requestFailed || panels?.[interval] ? null : `Loading ${loadingWhat ?? interval}…`;
   // Only unusual days get a label: early closes, weekday closures and a missing calendar.
-  const market = data?.market;
+  const market = latest?.market;
   const holiday = market?.status === "closed" && ![0, 6].includes(new Date(`${market.date}T12:00:00Z`).getUTCDay());
   const marketLabel = market?.note ?? earlyClose(market) ?? (holiday ? market?.description || "Market closed today" : null);
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
@@ -369,7 +390,7 @@ export default function ChartWorkspace() {
           </form>
           <LiveQuote live={live} quote={selected} candle={latestCandle} />
           {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`rounded px-2 py-1 text-[11px] ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
-          <FeedStatus live={live} paused={paused} delayed={!!data?.delayed} hasData={hasData} failed={failed} loading={loading} />
+          <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} />
         </div>
         <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
           {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`rounded px-2 py-1.5 text-[11px] ${settings.intervals[0] === interval ? "bg-sky-400/15 text-sky-300" : "text-slate-400 hover:bg-slate-800"}`}>{interval}</button>)}
@@ -392,17 +413,17 @@ export default function ChartWorkspace() {
         </div>
       </div>
 
-      {error && <div role="alert" aria-label="Chart data error" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">{error}{data && <span className="ml-1">Showing the last successful data.</span>}</div>}
-      {!!data?.issues.length && <div role="alert" aria-label="Chart data warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">Refresh incomplete. {data.issues.join(" ")} Check timestamps before using these charts.</div>}
+      {requestFailed && <div role="alert" aria-label="Chart data error" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">{error.message}{current && <span className="ml-1">Showing the last successful data.</span>}</div>}
+      {!!current?.issues.length && <div role="alert" aria-label="Chart data warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">Refresh incomplete. {current.issues.join(" ")} Check timestamps before using these charts.</div>}
 
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
-          {panels ? <>
-            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={panels[settings.intervals[0]]} live={live} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clock} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
+          {response ? <>
+            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={panels?.[settings.intervals[0]]} pending={pendingFor(settings.intervals[0])} live={live} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clock} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
               history={currentOlder[settings.intervals[0]]} onNeedHistory={(before) => void loadOlder(settings.intervals[0], before)} onRetryHistory={() => void loadOlder(settings.intervals[0], undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(settings.intervals[0], range)} />
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {settings.intervals.slice(1).map((interval, index) => <div key={index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
-                <PriceChart id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} session={settings.session} panel={panels[interval]} live={live} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clock}
+                <PriceChart id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} session={settings.session} panel={panels?.[interval]} pending={pendingFor(interval)} live={live} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clock}
                   history={currentOlder[interval]} onNeedHistory={(before) => void loadOlder(interval, before)} onRetryHistory={() => void loadOlder(interval, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(interval, range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => { setExpanded(null); setSettings((s) => {
@@ -415,7 +436,7 @@ export default function ChartWorkspace() {
             <p className="text-sm font-medium text-slate-200">{loading ? `Loading ${settings.symbol} candles…` : "Your chart workspace is ready"}</p>
             <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved in this browser."}</p>
           </div>}
-          <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={data ? data.intraday_as_of : undefined} />
+          <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={current ? current.intraday_as_of : undefined} />
         </div>
 
         {showAside && <aside className="min-w-0 space-y-3">
@@ -424,7 +445,7 @@ export default function ChartWorkspace() {
               <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className="rounded p-1 hover:bg-slate-800 disabled:opacity-30"><Plus size={14} /></button></div>
             <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Quote</span><span className="text-right">Chg%</span></div>
             {settings.watchlist.map((symbol) => {
-              const quote = data?.quotes.find((q) => q.symbol === symbol);
+              const quote = latest?.quotes.find((q) => q.symbol === symbol);
               return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
                 <button data-watch-row onKeyDown={watchKey} onClick={() => chooseSymbol(symbol)} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className="grid min-w-0 flex-1 grid-cols-[1fr_60px_54px] items-center gap-1 py-3 pl-2.5 pr-1 text-[11px]"><span className="truncate text-left font-medium text-slate-200">{symbol}</span><span className="text-right font-mono text-slate-400">{price(quote?.last)}</span><span className={`text-right font-mono ${quote?.change_percentage != null && quote.change_percentage < 0 ? "text-rose-400" : "text-emerald-400"}`}>{quote?.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${quote.change_percentage.toFixed(2)}`}</span></button>
                 <button aria-label={`Remove ${symbol} from watchlist`} className="mr-2 rounded p-0.5 text-slate-600 hover:text-rose-300" onClick={() => setSettings((s) => ({ ...s, watchlist: s.watchlist.filter((v) => v !== symbol) }))}><X size={12} /></button>
@@ -445,14 +466,14 @@ export default function ChartWorkspace() {
           </section>
 
           <section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
-            {data?.fills.length ? <div className="space-y-3">{data.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{data.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
+            {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
           </section></>}
         </aside>}
       </div>
 
-      {palette && <SymbolPalette current={settings.symbol} recent={settings.recent} watchlist={settings.watchlist} quotes={data?.quotes ?? []} onChoose={chooseSymbol} onClose={() => setPalette(false)} />}
+      {palette && <SymbolPalette current={settings.symbol} recent={settings.recent} watchlist={settings.watchlist} quotes={latest?.quotes ?? []} onChoose={chooseSymbol} onClose={() => setPalette(false)} />}
       {!immersive && <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
-        <p className="max-w-3xl">{data?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>
+        <p className="max-w-3xl">{latest?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>
         <div className="text-right"><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-300">TradingView Lightweight Charts™</a><a href="/lightweight-charts-NOTICE.txt" className="block">Copyright (с) 2025 TradingView, Inc.</a></div>
       </footer>}
     </div>

@@ -169,9 +169,10 @@ quote responses: five canvases, symbol linking, saved levels, streamed trade upd
 refresh visibility, pause/error behavior, phone overflow, the next-bar countdown
 states, in-place candle updates versus resets, linked time ranges, full screen,
 keyboard symbol search, six-month 5m scroll-back under ticks/REST, rollover,
-failure retry, eviction and 390px touch navigation, and render counts proving
+failure retry, eviction and 390px touch navigation, render counts proving
 that a tick re-renders only the charts whose candles moved and the clock
-re-renders none. Lightweight Charts internals and per-chart render counts are
+re-renders none, and chart instances surviving symbol, interval, session and
+RSI switches without the loading card. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
 spec installs; production never defines them. `backend/tests/test_charts.py`
 and `backend/tests/test_chart_history.py` plus `backend/tests/test_chart_stream.py`
