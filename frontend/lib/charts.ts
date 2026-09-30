@@ -60,10 +60,11 @@ export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, nor
 export const STORAGE_KEY = "tradejournal.charts.v1";
 export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(value);
 
-export function restoreSettings(): ChartSettings {
+/** Settings from outside this code (browser storage, the server), with anything malformed replaced by its default. */
+export function sanitizeSettings(input: unknown): ChartSettings {
   try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-    if (!value || typeof value !== "object") return DEFAULT_SETTINGS;
+    const value = JSON.parse(JSON.stringify(input ?? null)); // a detached copy, checked field by field below
+    if (!value || typeof value !== "object" || Array.isArray(value)) return DEFAULT_SETTINGS;
     const levels: Record<string, PriceLevel[]> = {};
     if (value.levels && typeof value.levels === "object") {
       for (const [symbol, rows] of Object.entries(value.levels)) {

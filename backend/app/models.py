@@ -218,6 +218,21 @@ class ResearchWorkspace(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ChartSettingsRecord(SQLModel, table=True):
+    """The Charts workspace every browser shares: levels, watchlist, intervals,
+    indicators and layout, as one JSON document the frontend validates. The
+    symbol on screen stays per device. ``revision`` is bumped on every save and
+    a save based on an older revision is refused, so a phone and a desktop
+    cannot silently overwrite each other. The app uses the ``default`` row."""
+
+    __tablename__ = "chart_settings"
+
+    name: str = Field(primary_key=True)
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = Field(default=0)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class StrategyDefinition(SQLModel, table=True):
     """Named Pine strategy whose code and assumptions evolve through versions."""
 

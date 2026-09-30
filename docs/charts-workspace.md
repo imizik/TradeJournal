@@ -80,8 +80,18 @@ cd backend
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Tradier does not guarantee dividend adjustment.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
-  Levels, watchlist, indicators and intervals persist in **this browser** via
-  versioned localStorage. This is not cross-device synchronization.
+- Levels, watchlist, intervals, session, indicators and layout are saved on the
+  server (`GET`/`PUT /charts/settings`, table `chart_settings`), so the phone
+  and the desktop share them. The symbol on screen and the recent symbols stay
+  per device. Each save names the revision it was based on and the server
+  refuses an older one (HTTP 409) instead of overwriting it; the device then
+  re-applies its own changes on top of the newer copy (levels and the watchlist
+  item by item) and saves again, and the toolbar says it merged. Browser
+  storage keeps a full copy: when the server cannot be reached the charts use
+  it, say *Saved in this browser · server unavailable*, and push the changes
+  when the page regains focus. Other devices' saves arrive on focus and every
+  30 seconds while visible. On the first visit after this shipped, settings
+  saved only in a browser merge into the server copy rather than replacing it.
 - A click on **Draw price level** arms the main chart. Click a price to save it,
   or enter a labeled level in the side panel. Levels appear on every timeframe
   of that symbol and can be deleted individually.
@@ -291,11 +301,16 @@ re-renders only the 1m chart, and a repeated trade re-renders none.
 A keep-alive test holds the provider response mid-switch and checks that all
 five chart instances survive symbol, interval, session and RSI changes, that
 the old frame stays dimmed under its label, that the loading card never
-appears, and that a failed symbol clears the charts.
+appears, and that a failed symbol clears the charts. Settings tests save a
+level in one browser context and read it in a second one through the e2e
+backend, check that a stale save is refused, and use a fake settings server for
+a merged conflict, the first-visit merge of browser-only settings, and an
+unreachable server. `backend/tests/test_charts.py` covers the revision rule,
+malformed and oversized saves.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine
 runtime, raw tick tape, trendline/fibonacci tools, replay, volume profile,
-server-side chart alerts or cross-device layout persistence. The existing
+server-side chart alerts or named layouts. The existing
 TradingView-to-Signals loop still runs separately. Keep TradingView while
 comparing the required indicators and sessions side by side.

@@ -5,12 +5,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, earlyClose, etTime, fetchChartData, fetchChartHistory, INTERVALS, liveTick, mergeBars, parseChartTick, price, restoreSettings, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, STORAGE_KEY, validSymbol } from "@/lib/charts";
+import { chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, earlyClose, etTime, fetchChartData, fetchChartHistory, INTERVALS, liveTick, mergeBars, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartQuote, ChartSettings, FillMarker, Indicators, Interval, SmallChartSize } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
+import { useChartSettings } from "@/lib/chartSync";
 import type { LiveFeed } from "@/lib/chartStore";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
+const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
 type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null };
 type OlderState = { key: string; panels: Partial<Record<Interval, OlderPanel>> };
@@ -49,9 +51,8 @@ function LiveFooter({ live, quote, candle, asOf }: { live: LiveFeed; quote?: Cha
 }
 
 export default function ChartWorkspace() {
-  const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
-  const [ready, setReady] = useState(false);
-  const [saved, setSaved] = useState(true);
+  // Loaded from and saved to the server (lib/chartSync.ts); browser storage is the offline copy.
+  const { settings, setSettings, ready, sync, merged, stored } = useChartSettings();
   const [response, setResponse] = useState<{ key: string; symbol: string; session: ChartSettings["session"]; data: ChartData } | null>(null);
   const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
   const [rollover, setRollover] = useState<{ key: string; before: number; pending: Interval[] } | null>(null);
@@ -114,7 +115,6 @@ export default function ChartWorkspace() {
   const selected = latest?.quotes.find((q) => q.symbol === settings.symbol);
   const levels = useMemo(() => settings.levels[settings.symbol] ?? [], [settings.levels, settings.symbol]);
 
-  useEffect(() => { setSettings(restoreSettings()); setReady(true); }, []);
   useEffect(() => {
     historyFlights.current.forEach((controller) => controller.abort());
     historyFlights.current.clear();
@@ -197,11 +197,6 @@ export default function ChartWorkspace() {
     available.forEach((interval) => { void loadOlder(interval, rollover.before); });
     setRollover((current) => current === rollover ? { ...current, pending: current.pending.filter((interval) => !available.includes(interval)) } : current);
   }, [rollover, feedKey, data, older, loadOlder]);
-  useEffect(() => {
-    if (!ready) return;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); setSaved(true); }
-    catch { setSaved(false); }
-  }, [settings, ready]);
   useEffect(() => {
     const measure = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
     measure();
@@ -369,7 +364,7 @@ export default function ChartWorkspace() {
         <div>{!immersive && <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />Trade Journal / Markets</div>}
           <h1 className={`${immersive ? "text-base" : "text-2xl"} font-semibold tracking-tight text-slate-100`}>Charts</h1></div>
         <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-          <span className="mr-1 hidden items-center gap-1.5 text-[11px] text-slate-500 lg:flex"><Check size={12} />{saved ? "Saved in this browser" : "Browser storage unavailable"}</span>
+          <span role="status" aria-label="Chart settings" className={`mr-1 hidden items-center gap-1.5 text-[11px] lg:flex ${sync === "offline" || merged ? "text-amber-300" : "text-slate-500"}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
           <button className={`${button} hidden sm:inline-flex`} onClick={() => setPalette(true)} aria-label="Search symbols (Ctrl or Cmd+K)" title="Search symbols (⌘K / Ctrl+K)"><Search size={13} /><kbd className="text-[10px] text-slate-500">⌘K</kbd></button>
           {immersive && <button className={button} aria-pressed={settings.immersiveWatchlist} onClick={() => setSettings((s) => ({ ...s, immersiveWatchlist: !s.immersiveWatchlist }))}>{settings.immersiveWatchlist ? "Hide watchlist" : "Watchlist"}</button>}
           <button className={button} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"}>
@@ -434,7 +429,7 @@ export default function ChartWorkspace() {
           </> : <div className="flex min-h-[490px] flex-col items-center justify-center rounded-lg border border-slate-700/50 bg-[#10151e] px-8 text-center">
             {loading ? <Loader2 className="mb-4 animate-spin text-sky-300" size={28} /> : <ChartCandlestick className="mb-4 text-slate-600" size={36} />}
             <p className="text-sm font-medium text-slate-200">{loading ? `Loading ${settings.symbol} candles…` : "Your chart workspace is ready"}</p>
-            <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved in this browser."}</p>
+            <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved to your workspace on every device."}</p>
           </div>}
           <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={current ? current.intraday_as_of : undefined} />
         </div>

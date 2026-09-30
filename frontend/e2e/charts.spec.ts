@@ -1,5 +1,12 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { ChartData, ChartBar, Interval, MarketDay } from "../lib/charts";
+import { fakeChartSettings } from "./fixtures/chartSettings";
+
+// Each test starts from empty server settings of its own; tests tagged
+// @real-settings use the e2e backend's endpoint instead.
+test.beforeEach(async ({ context }, testInfo) => {
+  if (!testInfo.tags.includes("@real-settings")) await fakeChartSettings(context);
+});
 
 // Provider responses are deliberately stubbed: browser checks prove interaction,
 // not brokerage entitlement. Backend tests exercise normalization and real routes.
@@ -1007,4 +1014,133 @@ test("Cmd/Ctrl+K and the watchlist switch symbols by keyboard and keep timeframe
   await page.keyboard.press("Alt+ArrowDown");
   await expect(page.getByRole("region", { name: "SPY 30m chart" })).toBeVisible();
   await expect(page.getByLabel("Panel 2 interval")).toHaveValue("15m");
+});
+
+// ---- Server-saved settings: shared levels and layout, revision conflicts, offline copy ----
+
+const levelsPanel = (page: Page) => page.getByRole("region", { name: "Saved price levels" });
+const syncStatus = (page: Page) => page.getByRole("status", { name: "Chart settings" });
+async function addLevel(page: Page, label: string, value: string) {
+  await page.getByLabel("Level label").fill(label);
+  await page.getByLabel("Level price", { exact: true }).fill(value);
+  await page.getByRole("button", { name: "Save price level" }).click();
+  await expect(levelsPanel(page)).toContainText(label);
+}
+type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | null; revision: number };
+const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
+
+test("a level saved in one browser appears in another, and a stale save is refused", { tag: "@real-settings" }, async ({ page, browser, request }) => {
+  const run = Date.now().toString(36);
+  const [desk, phone, later] = [`Desk ${run}`, `Phone ${run}`, `Late ${run}`];
+  await stub(page);
+  await page.goto("/charts");
+  await addLevel(page, desk, "263.50");
+  const serverLabels = async () => savedLabels(await (await request.get("/api/backend/charts/settings")).json());
+  await expect.poll(serverLabels).toContain(desk);
+  await expect(syncStatus(page)).toHaveText("Saved");
+
+  // A second browser (its own storage, like a phone) opens the same workspace.
+  const other = await browser.newContext();
+  const phonePage = await other.newPage();
+  await stub(phonePage);
+  await phonePage.goto("/charts");
+  await expect(levelsPanel(phonePage)).toContainText(desk);
+  await addLevel(phonePage, phone, "264.10");
+  await expect.poll(serverLabels).toContain(phone);
+  await expect(syncStatus(phonePage)).toHaveText("Saved");
+  const current: SavedLevels = await (await request.get("/api/backend/charts/settings")).json();
+  expect(savedLabels(current)).toEqual(expect.arrayContaining([desk, phone]));
+  expect(current.data).not.toHaveProperty("symbol"); // the symbol on screen stays per device
+
+  // A save based on an older revision is refused and changes nothing.
+  const stale = await request.put("/api/backend/charts/settings", { data: { base_revision: current.revision - 1, data: {} } });
+  expect(stale.status()).toBe(409);
+  expect((await stale.json()).detail.current.revision).toBe(current.revision);
+  expect(await (await request.get("/api/backend/charts/settings")).json()).toEqual(current);
+
+  // The first browser saves again from wherever it is; nothing either browser added is lost.
+  await addLevel(page, later, "265.00");
+  await expect.poll(serverLabels).toEqual(expect.arrayContaining([desk, phone, later]));
+  await expect(levelsPanel(page)).toContainText(phone);
+  await other.close();
+});
+
+test("settings kept in a browser before the server saved them merge with another device's", async ({ page, context }) => {
+  const server = await fakeChartSettings(context, { revision: 3, data: {
+    intervals: ["5m", "15m", "1h", "1D", "1m"], watchlist: ["SPY", "TSLA"], session: "extended", layout: "multi",
+    levels: { MRVL: [{ id: "phone-1", price: 250, label: "Phone level" }] }, smallSize: "normal" } });
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem("seeded")) return;
+    sessionStorage.setItem("seeded", "1");
+    localStorage.setItem("tradejournal.charts.v1", JSON.stringify({ symbol: "NVDA", recent: ["MRVL"],
+      watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT", "COIN"],
+      levels: { MRVL: [{ id: "desk-1", price: 263.5, label: "Desk level" }] } }));
+  });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("NVDA"); // this device's symbol
+  await expect.poll(() => server.saves.length).toBe(1);
+  await expect(syncStatus(page)).toHaveText("Saved");
+  expect(server.saves[0]).toMatchObject({ base: 3, status: 200 });
+  const saved = server.data as { levels: Record<string, { label: string }[]>; watchlist: string[] };
+  expect(saved.levels.MRVL.map((level) => level.label)).toEqual(["Phone level", "Desk level"]);
+  expect(saved.watchlist).toEqual(["SPY", "TSLA", "COIN"]); // the other device's list, plus what this browser added
+  expect(saved).not.toHaveProperty("symbol");
+  expect(saved).not.toHaveProperty("recent");
+  await page.reload();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("NVDA");
+  await page.getByLabel("Chart symbol").fill("MRVL");
+  await page.getByRole("button", { name: "Load symbol" }).click();
+  await expect(levelsPanel(page)).toContainText("Phone level");
+  await expect(levelsPanel(page)).toContainText("Desk level");
+  expect(server.saves).toHaveLength(1);
+});
+
+test("a save refused as stale keeps the other device's change and this one", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await stub(page);
+  await page.goto("/charts");
+  await addLevel(page, "First", "263.50");
+  await expect.poll(() => server.revision).toBe(1);
+  await expect(syncStatus(page)).toHaveText("Saved");
+  // Another device saves revision 2 without this page knowing.
+  const data = server.data as { levels: Record<string, unknown[]>; indicators: Record<string, boolean> };
+  server.data = { ...data, indicators: { ...data.indicators, ema200: true },
+    levels: { MRVL: [...data.levels.MRVL, { id: "other", price: 270, label: "Other device" }] } };
+  server.revision = 2;
+  await addLevel(page, "Second", "264.00");
+  await expect(syncStatus(page)).toHaveText("Merged with changes from another device");
+  await expect(levelsPanel(page)).toContainText("Other device");
+  await expect(page.getByRole("button", { name: "EMA 200", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => server.revision).toBe(3);
+  expect(server.saves.map((save) => [save.base, save.status])).toEqual([[0, 200], [1, 409], [2, 200]]);
+  const levels = (server.data as { levels: Record<string, { label: string }[]> }).levels.MRVL.map((level) => level.label);
+  expect(levels).toEqual(["First", "Other device", "Second"]);
+  await page.getByRole("button", { name: "Volume", exact: true }).click();
+  await expect(syncStatus(page)).toHaveText("Saved");
+});
+
+test("without the server, settings stay in this browser and save when it returns; other devices' changes arrive on focus", async ({ page, context }) => {
+  const server = await fakeChartSettings(context, { offline: true });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(syncStatus(page)).toHaveText("Saved in this browser · server unavailable");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5); // charts do not wait for it
+  await addLevel(page, "Offline level", "262.00");
+  await expect.poll(() => server.saves.length).toBe(1); // tried, refused
+  await page.reload();
+  await expect(levelsPanel(page)).toContainText("Offline level"); // the browser copy
+  await expect.poll(() => server.saves.length).toBe(2); // tried again after the reload, refused
+  await expect(syncStatus(page)).toHaveText("Saved in this browser · server unavailable");
+  server.offline = false;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(syncStatus(page)).toHaveText("Saved");
+  expect(server.saves.map((save) => [save.base, save.status])).toEqual([[0, 503], [0, 503], [0, 200]]);
+  // Another device adds a level; this page picks it up when it regains focus.
+  const data = server.data as { levels: Record<string, unknown[]> };
+  server.data = { ...data, levels: { MRVL: [...data.levels.MRVL, { id: "phone", price: 261, label: "From phone" }] } };
+  server.revision += 1;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(levelsPanel(page)).toContainText("From phone");
+  expect(server.saves).toHaveLength(3);
 });
