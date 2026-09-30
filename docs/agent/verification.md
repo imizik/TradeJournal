@@ -333,7 +333,10 @@ Be honest about this when reporting work:
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
-  proved only by a real weekly run.
+  proved only by a real weekly run. The documentation drift routine
+  (`scripts/docs_drift_week.sh`) is tested the same way, with stub `claude`,
+  `gh` and `curl`. Whether Claude's pass is any good is judged in review of
+  the pull request it opens.
   The live-quote providers are the clearest case: `test_quotes_provider.py`
   and `test_tradier.py` pin the dispatch, the batching, the response shapes and
   the fallback, and prove nothing at all about whether a quote is *correct* or

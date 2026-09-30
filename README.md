@@ -8,7 +8,7 @@ Local-first trade journal and reconciliation system for Robinhood/Webull trade h
 - `backend/` - FastAPI, SQLModel, Alembic, SQLite by default, Postgres via `DATABASE_URL`
 - `docs/agent/` - architecture, domain rules, verification, environments, feature map, roadmap
 - `research/` - strategy factory specs, weekly reports and the ledger of every idea it has judged; the live copy is on branch `factory/ledger` (`docs/strategy-factory.md`)
-- `scripts/` - `setup.sh`, `verify.sh`, and `factory_week.sh` (the strategy factory's weekly run)
+- `scripts/` - `setup.sh`, `verify.sh`, `factory_week.sh` (the strategy factory's weekly run), and `docs_drift_week.sh` (the weekly documentation drift pass)
 
 ## Quick Start
 
