@@ -375,7 +375,7 @@ assumptions are written in `docs/charts-workspace.md`.
 
 **C4.3 Recorder.** Each weekday after the open, snapshot OI and volume per
 strike for SPY, QQQ and SPX, plus the underlyings of open positions and the
-watchlist's top names, for expirations within 45 days. Store one row per
+top ten watchlist names (decided 2026-09-30), for expirations within 45 days. Store one row per
 (underlying, expiration, day) with the strikes packed in a JSON array: about
 1 GB per year at this scope, versus about 11 million rows if every strike were
 its own row. This is a background job under the rules in
@@ -476,12 +476,13 @@ Worth doing once the phases above have shipped, in roughly this order:
 - Webull data, while it is dormant.
 - Separate microservices. Every engine above is a module in the existing backend.
 
-## Open questions
+## Decisions
 
-These are for the user, and they can reorder the board:
+Settled with the user on 2026-09-30. Do not reopen them without the user.
 
-1. Drawings (Phase 1) before automatic levels (Phase 2), or the reverse?
-   Current order: drawings first, because every later layer reuses their
-   selection, hover and hide/lock machinery.
-2. Which underlyings the options recorder covers beyond SPY, QQQ and SPX.
-3. Whether per-panel symbols (C7.1) should move ahead of options.
+1. **Drawings (Phase 1) come before automatic levels (Phase 2).** Every later
+   layer reuses the drawing layer's selection, hover and hide/lock machinery.
+2. **Options recorder scope (C4.3):** SPY, QQQ and SPX, plus the underlyings of
+   open positions and the top ten watchlist names.
+3. **Per-panel symbols (C7.1) stay last.** All panels follow one symbol until
+   Phases 0–6 have shipped.
