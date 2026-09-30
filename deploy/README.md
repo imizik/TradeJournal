@@ -554,12 +554,12 @@ integrations. No real VPS or Tailscale enrollment is created by this PR.
 The server installs green `main` builds by itself, so a merge goes live
 without anyone connecting to it. GitHub cannot reach the server, which is
 private to the tailnet, so `tradejournal-autodeploy.timer` pulls instead:
-every five minutes `deploy/autodeploy.py` asks GitHub's public API for the
+every three minutes `deploy/autodeploy.py` asks GitHub's public API for the
 newest `build-*` release (published only after CI and the Ubuntu smoke test
 passed on that commit), checks the download against its `SHA256SUMS`, installs
 the bundled controller and the release, then activates it with the usual
 health checks and rollback. It needs no GitHub credential. A merge normally
-goes live 10–15 minutes after it lands.
+goes live about 10 minutes after it lands.
 
 A newer build waits, and is installed later or by a person, while:
 

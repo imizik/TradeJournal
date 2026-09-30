@@ -1,8 +1,10 @@
 [Unit]
-Description=Check for a verified TradeJournal build every five minutes
+Description=Check for a verified TradeJournal build every three minutes
 
 [Timer]
-OnCalendar=*:0/5
+# Not faster: the check is unauthenticated (60 GitHub calls an hour), and a
+# build held for market hours costs two calls a pass -- 40 an hour at this rate.
+OnCalendar=*:0/3
 RandomizedDelaySec=30
 Unit=tradejournal-autodeploy.service
 

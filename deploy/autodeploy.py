@@ -2,7 +2,7 @@
 """Install the newest verified main build on this server, unattended.
 
 The server is private to the tailnet, so GitHub cannot push to it; a systemd
-timer runs this every five minutes and pulls instead. The Release workflow
+timer runs this every three minutes and pulls instead. The Release workflow
 publishes a build-<commit> GitHub release only after CI and the Deployment
 package smoke test both passed on that main commit, so a red merge never gets
 here. Installation and activation go through tradejournal-deploy, whose health
