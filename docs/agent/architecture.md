@@ -234,8 +234,10 @@ fans out valid trade prices through private `/charts/stream` SSE to visible tabs
 The 15-second REST refresh reconciles candles, volume and studies and remains
 the fallback when streaming is unavailable. Chart
 calculations and temporary bars are separate from historical enrichment, and
-execution markers are read-only journal views. Layouts and horizontal levels
-are saved in the browser. See [chart boundaries](../charts-workspace.md).
+execution markers are read-only journal views. Layouts, watchlist and
+horizontal levels are one JSON document in `chart_settings` (`/charts/settings`,
+saved only on top of the revision the client last saw), with a browser copy
+for when the server is unreachable. See [chart boundaries](../charts-workspace.md).
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when

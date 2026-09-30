@@ -171,8 +171,12 @@ states, in-place candle updates versus resets, linked time ranges, full screen,
 keyboard symbol search, six-month 5m scroll-back under ticks/REST, rollover,
 failure retry, eviction and 390px touch navigation, render counts proving
 that a tick re-renders only the charts whose candles moved and the clock
-re-renders none, and chart instances surviving symbol, interval, session and
-RSI switches without the loading card. Lightweight Charts internals and per-chart render counts are
+re-renders none, chart instances surviving symbol, interval, session and
+RSI switches without the loading card, and server-saved settings: a level
+shared between two browser contexts through the e2e backend, a refused stale
+save, a merged conflict, the first-visit merge and the offline copy. Chart
+tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
+unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
 spec installs; production never defines them. `backend/tests/test_charts.py`
 and `backend/tests/test_chart_history.py` plus `backend/tests/test_chart_stream.py`

@@ -295,3 +295,36 @@ def test_history_route_identifies_window_and_returns_bounded_old_markers(route_c
 @pytest.mark.parametrize("query", ["symbol=../../secret", "intervals=1s", "session=overnight", "intervals=", "watchlist=" + ",".join(f"S{i}" for i in range(31))])
 def test_route_rejects_unsupported_requests(route_client, query):
     assert route_client.get(f"/charts/workspace?{query}").status_code == 422
+
+
+def test_chart_settings_save_only_on_top_of_the_revision_they_were_based_on(route_client):
+    assert route_client.get("/charts/settings").json() == {"revision": 0, "data": None, "updated_at": None}
+    desktop = {"watchlist": ["SPY"], "levels": {"SPY": [{"id": "a", "price": 500.25, "label": "Desktop"}]}}
+    first = route_client.put("/charts/settings", json={"base_revision": 0, "data": desktop})
+    assert first.status_code == 200 and first.json()["revision"] == 1 and first.json()["data"] == desktop
+    # A second device loads revision 1 and saves: revision 2.
+    phone = {**desktop, "levels": {"SPY": [*desktop["levels"]["SPY"], {"id": "b", "price": 501, "label": "Phone"}]}}
+    assert route_client.put("/charts/settings", json={"base_revision": 1, "data": phone}).json()["revision"] == 2
+    # The first device still thinks it is on revision 1: refused, with the phone's copy to merge.
+    stale = route_client.put("/charts/settings", json={"base_revision": 1, "data": {"watchlist": ["QQQ"]}})
+    assert stale.status_code == 409
+    detail = stale.json()["detail"]
+    assert detail["code"] == "revision_conflict" and detail["current"]["revision"] == 2 and detail["current"]["data"] == phone
+    # So is a second "first save", and a revision from the future.
+    assert route_client.put("/charts/settings", json={"base_revision": 0, "data": {}}).status_code == 409
+    assert route_client.put("/charts/settings", json={"base_revision": 7, "data": {}}).status_code == 409
+    saved = route_client.get("/charts/settings").json()
+    assert saved["revision"] == 2 and saved["data"] == phone and saved["updated_at"]
+
+
+@pytest.mark.parametrize("body", [{"base_revision": -1, "data": {}}, {"base_revision": 0, "data": []}, {"base_revision": 0}, {"data": {}}])
+def test_chart_settings_reject_malformed_saves(route_client, body):
+    assert route_client.put("/charts/settings", json=body).status_code == 422
+    assert route_client.get("/charts/settings").json()["revision"] == 0
+
+
+def test_chart_settings_refuse_oversized_documents(route_client):
+    huge = {"levels": {"SPY": [{"id": str(i), "price": 1, "label": "x" * 30} for i in range(12_000)]}}
+    response = route_client.put("/charts/settings", json={"base_revision": 0, "data": huge})
+    assert response.status_code == 413 and response.json()["detail"]["code"] == "too_large"
+    assert route_client.get("/charts/settings").json()["revision"] == 0

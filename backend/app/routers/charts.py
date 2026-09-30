@@ -1,13 +1,17 @@
-"""Private, read-only chart data and journal execution markers."""
+"""Private chart data, journal execution markers and the saved chart workspace."""
 
 from bisect import bisect_right
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 import json
 import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -16,10 +20,13 @@ from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
-from app.models import Fill
+from app.models import ChartSettingsRecord, Fill
 
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
+SETTINGS = "default"
+# Thirty levels on each of hundreds of symbols fit; a runaway client does not.
+SETTINGS_BYTES = 512_000
 
 
 def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], bool]:
@@ -127,3 +134,55 @@ def workspace(
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
     data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
     return data
+
+
+class ChartSettingsSave(BaseModel):
+    base_revision: int = Field(ge=0)
+    data: dict[str, Any]
+
+
+def _settings(row: ChartSettingsRecord | None) -> dict:
+    if row is None:
+        return {"revision": 0, "data": None, "updated_at": None}
+    return {"revision": row.revision, "data": json.loads(row.data_json), "updated_at": row.updated_at.isoformat()}
+
+
+@router.get("/settings")
+def get_settings(db: Session = Depends(get_session)):
+    """The shared chart workspace; revision 0 and no data until the first save."""
+    return _settings(db.get(ChartSettingsRecord, SETTINGS))
+
+
+@router.put("/settings")
+def save_settings(body: ChartSettingsSave, db: Session = Depends(get_session)):
+    """Save only on top of the revision the client last saw; anything else is a 409 carrying the current copy.
+
+    The frontend owns the document's shape and validates it on every read; the
+    server stores it whole and guarantees that no save silently replaces one it
+    was not based on. The revision check is a single conditional statement, so
+    it holds across processes as well.
+    """
+    text = json.dumps(body.data, separators=(",", ":"))
+    if len(text.encode()) > SETTINGS_BYTES:
+        raise HTTPException(413, {"code": "too_large", "message": "Chart settings are too large to save."})
+    now = datetime.now(UTC).replace(tzinfo=None)
+    try:
+        if body.base_revision == 0:
+            db.add(ChartSettingsRecord(name=SETTINGS, data_json=text, revision=1, updated_at=now))
+            db.commit()
+            saved = True
+        else:
+            result = db.execute(update(ChartSettingsRecord).where(
+                ChartSettingsRecord.name == SETTINGS, ChartSettingsRecord.revision == body.base_revision,
+            ).values(data_json=text, revision=ChartSettingsRecord.revision + 1, updated_at=now))
+            db.commit()
+            saved = result.rowcount == 1
+    except IntegrityError:
+        db.rollback()  # another save created the row first
+        saved = False
+    db.expire_all()
+    current = _settings(db.get(ChartSettingsRecord, SETTINGS))
+    if not saved:
+        raise HTTPException(409, {"code": "revision_conflict",
+                                  "message": "These chart settings changed on another device.", "current": current})
+    return current
