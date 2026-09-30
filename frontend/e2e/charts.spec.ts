@@ -15,7 +15,7 @@ function fixture(url: string): ChartData {
     const bars: ChartBar[] = Array.from({ length: 240 }, (_, i) => {
       const time = 1789392600 + (daily ? i * step : Math.floor(i / slots) * 86400 + (i % slots) * step);
       const close = 245 + i * 0.06 + Math.sin(i / 8) * 2;
-      return { time, end_time: time + step, open: close - 0.3, high: close + 0.8, low: close - 0.7, close, volume: 10000 + i * 240,
+      return { time, end_time: time + step, source: "tradier", open: close - 0.3, high: close + 0.8, low: close - 0.7, close, volume: 10000 + i * 240,
         ema9: close - 0.3, ema20: close - 0.6, ema50: close - 1, ema200: close - 3, vwap: daily ? null : close - 0.8, rsi: 50 + Math.sin(i / 9) * 24, extended: false };
     });
     panels[interval] = { bars, markers: [{ id: "fill-test", time: bars[220].time, label: "buy to open 1 call", buy: true }] };
@@ -378,6 +378,242 @@ test("streamed ticks update the latest candle in place and keep zoom; history ch
   await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
   await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toBeVisible();
   await expect.poll(() => resets(page)).toBe(1);
+});
+
+function sixMonthBars(months = 6): ChartBar[] {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - months, now.getUTCDate()));
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const template = fixture("http://test/charts/workspace?intervals=5m").panels["5m"]!.bars[0];
+  const bars: ChartBar[] = [];
+  for (let day = start.getTime(); day < end; day += 86400_000) {
+    const weekday = new Date(day).getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    for (let slot = 0; slot < 78; slot++) {
+      const time = Math.floor(day / 1000) + 13 * 3600 + 30 * 60 + slot * 300;
+      const close = 230 + bars.length * 0.0027;
+      bars.push({ ...template, time, end_time: time + 300, open: close - 0.1, high: close + 0.2,
+        low: close - 0.2, close, source: "alpaca_sip", ema9: close - 0.2, ema20: close - 0.5,
+        ema50: close - 0.9, ema200: close - 1.3, vwap: close - 0.1, rsi: 50 });
+    }
+  }
+  return bars;
+}
+
+async function deepHistoryStub(page: Page, months = 6) {
+  const bars = sixMonthBars(months);
+  const base = Math.floor(Date.now() / 1000);
+  let requests = 0;
+  let refreshes = 0;
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    refreshes++;
+    const data = currentFixture(route.request().url(), base);
+    const main = data.panels["5m"];
+    if (main) main.bars = main.bars.map((bar) => ({ ...bar, source: "tradier" }));
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    requests++;
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const pageBars = bars.filter((bar) => bar.time < before).slice(-1200);
+    const marker = bars[Math.floor(bars.length / 2)];
+    return route.fulfill({ json: {
+      symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"), before,
+      limit: 1200, bars: pageBars, markers: pageBars.some((bar) => bar.time === marker.time)
+        ? [{ id: "old-fill", time: marker.time, label: "buy to open 1 stock", buy: true }] : [],
+      older_cursor: pageBars[0]?.time ?? null, exhausted: pageBars[0]?.time === bars[0].time,
+      continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null,
+    } });
+  });
+  return { bars, base, requests: () => requests, refreshes: () => refreshes };
+}
+
+test("New York midnight replaces the completed Tradier day with SIP without waiting for a pan", async ({ page }) => {
+  const beforeMidnight = Date.parse("2026-09-30T03:59:00Z") / 1000;
+  const afterMidnight = Date.parse("2026-09-30T04:01:00Z") / 1000;
+  let refreshes = 0;
+  const requests: { interval: string | null; before: number }[] = [];
+  const template = fixture("http://test/charts/workspace?intervals=5m").panels["5m"]!.bars[0];
+  const completed = Array.from({ length: 120 }, (_, index) => ({ ...template,
+    time: Date.parse("2026-09-29T13:30:00Z") / 1000 + index * 300,
+    end_time: Date.parse("2026-09-29T13:35:00Z") / 1000 + index * 300,
+    source: "alpaca_sip" as const }));
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    refreshes++;
+    const data = fixture(route.request().url());
+    data.checked_at = refreshes === 1 ? beforeMidnight : afterMidnight;
+    data.fetched_at.intraday = data.checked_at;
+    if (refreshes > 1) for (const [interval, panel] of Object.entries(data.panels))
+      if (interval !== "1D" && interval !== "1W" && panel) panel.bars = [];
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const interval = query.get("interval");
+    const before = Number(query.get("before"));
+    requests.push({ interval, before });
+    return route.fulfill({ json: { symbol: "MRVL", interval, session: "extended", before,
+      limit: 1200, bars: completed, markers: [], older_cursor: completed[0].time,
+      exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip",
+      price_basis: "raw", fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  expect(requests).toHaveLength(0);
+  await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
+  await expect.poll(() => requests.some((request) => request.interval === "5m" && request.before === afterMidnight)).toBe(true);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+});
+
+test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
+  await registerCharts(page);
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      constructor() { MockEventSource.current = this; queueMicrotask(() => this.emit("status", { state: "connected" })); }
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
+      emit(type: string, value: unknown) { this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+      close() {}
+    }
+    (window as typeof window & { __chartTick?: (value: unknown) => void }).__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+  const state = await deepHistoryStub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  let reached = false;
+  for (let index = 0; index < 15; index++) {
+    const count = state.requests();
+    await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10.25, to: 60.25 }));
+    await page.waitForTimeout(180); // Lightweight Charts publishes its visible time range on the next frame.
+    if ((await visibleRange(page, "main"))!.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
+    await expect.poll(() => state.requests()).toBeGreaterThan(count);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100 + index * 1000);
+    const range = (await visibleRange(page, "main"))!;
+    const logical = (await logicalRange(page, "main"))!;
+    expect(logical.to - logical.from).toBeCloseTo(50, 2);
+    if (index === 0) {
+      await page.evaluate((base) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick({
+        type: "tick", symbol: "MRVL", at: base + 2, minute: Math.floor(base / 60) * 60,
+        session: "regular", price: 301.25, open: 301, high: 301.25, low: 301,
+        buckets: { "5m": { time: base - 270, end_time: base + 30, extended: false } },
+      }), state.base);
+      await expect(page.getByLabel("Selected symbol quote")).toContainText("301.25");
+      expect(await visibleRange(page, "main")).toEqual(range);
+    }
+    await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
+    expect(await visibleRange(page, "main")).toEqual(range);
+    if (range.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
+  }
+  expect(reached).toBe(true);
+  expect(state.requests()).toBeGreaterThanOrEqual(6);
+  expect(state.refreshes()).toBeGreaterThan(1);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
+  const plot = (await page.getByTestId("canvas-main").boundingBox())!;
+  await page.mouse.move(plot.x + plot.width * 0.5, plot.y + plot.height * 0.35);
+  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await page.screenshot({ path: test.info().outputPath("deep-history-desktop.png"), fullPage: true });
+  await page.getByRole("button", { name: "Latest candles main" }).click();
+  await expect.poll(async () => (await visibleRange(page, "main"))?.to ?? 0).toBeGreaterThan(state.bars.at(-1)!.time);
+});
+
+test("older history failure retries without clearing current candles; a stale response cannot cross symbols", async ({ page }) => {
+  await registerCharts(page);
+  const base = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: currentFixture(route.request().url(), base) }));
+  let calls = 0;
+  let holdNext = false;
+  let release: (() => void) | undefined;
+  await page.route("**/api/backend/charts/history?**", async (route) => {
+    calls++;
+    if (calls === 1) return route.fulfill({ status: 503, json: { detail: { message: "History unavailable" } } });
+    if (holdNext) {
+      holdNext = false;
+      await new Promise<void>((resolve) => { release = resolve; });
+    }
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const template = fixture(route.request().url()).panels["5m"]!.bars[0];
+    const bars = Array.from({ length: 1200 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (1200 - i) * 300, end_time: before - (1199 - i) * 300 }));
+    try { await route.fulfill({ json: { symbol: query.get("symbol"), interval: "5m", session: "extended", before, limit: 1200,
+      bars, markers: [], older_cursor: bars[0].time, exhausted: false, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null } }); } catch { /* navigation aborted the old request */ }
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  await expect(page.getByRole("button", { name: "Retry history" })).toBeVisible();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.getByRole("button", { name: "Retry history" }).click();
+  await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
+  await expect.poll(async () => (await logicalRange(page, "main"))?.from ?? 0).toBeGreaterThan(1000);
+  await page.waitForTimeout(120);
+  holdNext = true;
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  await expect.poll(() => release !== undefined).toBe(true);
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  release?.();
+  await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toBeVisible();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByLabel("main candle values")).toContainText("Tradier");
+});
+
+test("history retention stays under 12,000, refills a newer gap, and returns to live", async ({ page }) => {
+  await registerCharts(page);
+  const state = await deepHistoryStub(page, 9);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  let previous = 0;
+  let previousReset = await resets(page);
+  for (let index = 0; index < 25; index++) {
+    await page.waitForTimeout(120);
+    await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+    await page.waitForTimeout(180);
+    if ((await visibleRange(page, "main"))!.from <= state.bars[0].time + 86400 * 5) break;
+    await expect.poll(() => state.requests()).toBeGreaterThan(previous);
+    previous = state.requests();
+    await expect.poll(() => resets(page)).toBeGreaterThan(previousReset);
+    previousReset = await resets(page);
+    expect(Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeLessThanOrEqual(12000);
+  }
+  expect(previous).toBeGreaterThanOrEqual(10);
+  const count = state.requests();
+  const n = Number(await page.getByTestId("canvas-main").getAttribute("data-bars"));
+  await page.evaluate((length) => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: length - 220, to: length - 80 }), n);
+  await expect.poll(() => state.requests()).toBeGreaterThan(count); // reread a page near the retained live tail
+  expect(Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeLessThanOrEqual(12000);
+  await page.getByRole("button", { name: "Latest candles main" }).click();
+  await expect.poll(async () => (await visibleRange(page, "main"))?.to ?? 0).toBeGreaterThan(state.bars.at(-1)!.time);
+});
+
+test.describe("phone deep history", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("touch panning loads an older 5m page without horizontal overflow", async ({ page }) => {
+    await registerCharts(page);
+    const state = await deepHistoryStub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+    await page.getByTestId("canvas-main").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const box = (await page.getByTestId("canvas-main").boundingBox())!;
+    const client = await page.context().newCDPSession(page);
+    const y = Math.round(box.y + box.height / 2);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: Math.round(box.x + 90), y }] });
+    for (let x = 110; x <= 330; x += 20) {
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: Math.round(box.x + x), y }] });
+      await page.waitForTimeout(20);
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect.poll(() => state.requests()).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await page.screenshot({ path: test.info().outputPath("deep-history-phone.png"), fullPage: true });
+  });
 });
 
 test("linked time ranges follow the chart being moved, by time, without feedback", async ({ page }) => {

@@ -224,8 +224,11 @@ assessment, including why Tradier is not a candidate for the historical side.
 
 ## Frontend
 
-The private Charts workspace (`/charts`) reads Tradier candles and batched
-watchlist quotes through `/charts/workspace`. One API-owned Tradier WebSocket
+The private Charts workspace (`/charts`) reads today's Tradier candles and
+batched watchlist quotes through `/charts/workspace`. Completed New York
+intraday sessions load on scroll through `/charts/history` from explicit
+Alpaca SIP/raw minute requests and a persistent complete-session file cache.
+One API-owned Tradier WebSocket
 fans out valid trade prices through private `/charts/stream` SSE to visible tabs.
 The 15-second REST refresh reconciles candles, volume and studies and remains
 the fallback when streaming is unavailable. Chart

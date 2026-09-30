@@ -4,12 +4,20 @@ export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"
 export type Interval = typeof INTERVALS[number];
 export type ChartBar = {
   time: number; end_time: number; open: number; high: number; low: number; close: number; volume: number;
+  source: "alpaca_sip" | "tradier";
   volumePending?: boolean;
   extended: boolean; ema9: number | null; ema20: number | null; ema50: number | null; ema200: number | null;
   vwap: number | null; rsi: number | null;
 };
 export type FillMarker = { id: string; time: number; label: string; buy: boolean };
 export type ChartPanelData = { bars: ChartBar[]; markers: FillMarker[] };
+export type HistoryPage = {
+  symbol: string; interval: Interval; session: ChartSettings["session"]; before: number; limit: number;
+  bars: ChartBar[]; markers: FillMarker[]; older_cursor: number | null; exhausted: boolean;
+  continuation: string | null; warmup: "ready" | "pending" | "insufficient";
+  source: "alpaca_sip"; price_basis: "raw"; fills_truncated: boolean;
+  issue: { code: string; message: string; retry_at: number } | null;
+};
 export type ChartQuote = {
   symbol: string; name: string; last: number | null; change: number | null;
   change_percentage: number | null; volume: number | null; previous_close: number | null; trade_time: number | null;
@@ -84,6 +92,41 @@ export async function fetchChartData(settings: ChartSettings, signal: AbortSigna
   return body;
 }
 
+export async function fetchChartHistory({ symbol, interval, session, before, continuation, signal }: {
+  symbol: string; interval: Interval; session: ChartSettings["session"]; before: number;
+  continuation?: string | null; signal: AbortSignal;
+}): Promise<HistoryPage> {
+  const query = new URLSearchParams({ symbol, interval, session, before: String(before) });
+  if (continuation) query.set("continuation", continuation);
+  const response = await fetch(apiUrl(`/charts/history?${query}`), { cache: "no-store", signal });
+  const body = await response.json();
+  if (!response.ok) throw new Error(body.detail?.message ?? "Unable to load older candles.");
+  return body;
+}
+
+export function mergeBars(older: ChartBar[], current: ChartBar[]): ChartBar[] {
+  const byTime = new Map(older.map((bar) => [bar.time, bar]));
+  for (const bar of current) byTime.set(bar.time, bar);
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
+}
+
+export function retainHistory(bars: ChartBar[], live: ChartBar[], visible: { from: number; to: number } | null, ceiling = 12000): ChartBar[] {
+  const liveTimes = new Set(live.map((bar) => bar.time));
+  const saved = bars.filter((bar) => !liveTimes.has(bar.time));
+  const allowance = Math.max(0, ceiling - live.length);
+  if (saved.length <= allowance) return saved;
+  if (!visible) return saved.slice(-allowance);
+  let start = 0, end = saved.length;
+  while (end - start > allowance) {
+    const left = Math.max(0, visible.from - saved[start].time);
+    const right = Math.max(0, saved[end - 1].time - visible.to);
+    if (left >= right && saved[start].time < visible.from) start++;
+    else if (saved[end - 1].time > visible.to) end--;
+    else break; // The visible range itself fills the ceiling.
+  }
+  return saved.slice(start, end);
+}
+
 export const chartStreamUrl = (symbol: string) => apiUrl(`/charts/stream?symbol=${encodeURIComponent(symbol)}`);
 
 export function parseChartTick(value: unknown): ChartStreamTick | null {
@@ -117,7 +160,7 @@ export function overlayLiveTicks(data: ChartData, ticks: ChartStreamTick[], sess
       if (last && bucket.time === last.time) {
         bars[bars.length - 1] = { ...last, high: Math.max(last.high, tick.high), low: Math.min(last.low, tick.low), close: tick.price };
       } else {
-        bars.push({ ...bucket, open: tick.open, high: tick.high, low: tick.low, close: tick.price, volume: 0,
+        bars.push({ ...bucket, source: "tradier", open: tick.open, high: tick.high, low: tick.low, close: tick.price, volume: 0,
           volumePending: true,
           ema9: null, ema20: null, ema50: null, ema200: null, vwap: null, rsi: null });
         if (bars.length > 1200) bars.shift();
@@ -201,7 +244,7 @@ export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" |
   if (a.time !== b.time) return "reset";
   return sameBar(a, b) ? "same" : "last";
 }
-const BAR_KEYS = ["time", "end_time", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi"] as const;
+const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi"] as const;
 const sameBar = (a: ChartBar, b: ChartBar) => a === b || BAR_KEYS.every((key) => a[key] === b[key]);
 
 export type TimeRange = { from: number; to: number };
