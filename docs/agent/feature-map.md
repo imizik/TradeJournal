@@ -161,11 +161,18 @@ reason, and ruff lints them without importing them.
 - `docs/agent/last-reconciled.json` — the commit documentation was last
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
   and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
-  judgement half is `.claude/skills/docs-drift/SKILL.md`, and the scheduled
-  agent meant to run it weekly is `~/.claude/scheduled-tasks/tradejournal-docs-drift/`.
-  Its first run (2026-09-26) stalled at its first command, waiting for a
-  permission approval no one was there to give, so the pass still needs a
-  person or an approved routine.
+  judgement half is `.claude/skills/docs-drift/SKILL.md`. It runs unattended
+  every Saturday: launchd on the development Mac starts
+  `scripts/docs_drift_week.sh` in `/Users/user/TradeJournal-docs`, a checkout
+  kept at `main`. From 20 code commits on, the script has Claude run the pass
+  headless, with the key in the main checkout's `backend/.env` and a $20 cap.
+  Claude may edit only documentation, and anything needing permission is
+  refused rather than waiting for a person. The script then checks the
+  changes and the marker, runs the docs tests, pushes `docs/drift-<date>` and
+  opens a pull request. The phone hears about the pull request, one still
+  waiting for review, or a failure. Proof: `tests/test_docs_drift_script.py`.
+  The desktop scheduled task that ran it before stalled on a permission prompt
+  on its first run (2026-09-26) and is disabled.
 
 ## Reference documents
 

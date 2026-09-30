@@ -92,11 +92,18 @@ the newest `main` build that passed every CI check. It pulls from GitHub,
 because nothing outside the tailnet can reach the server. Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
-One scheduled process runs off the server: the strategy factory's weekly run
-(`scripts/factory_week.sh`, started by launchd on the development Mac in a
-checkout on branch `factory/ledger`). It reads the local market-data cache,
-calls Alpaca, the Anthropic API and ntfy, touches no database, and writes only
-to that branch, which is never merged (`docs/strategy-factory.md`).
+Two scheduled processes run off the server, both started by launchd on the
+development Mac and neither touching a database:
+
+- The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
+  on branch `factory/ledger`). It reads the local market-data cache, calls
+  Alpaca, the Anthropic API and ntfy, and writes only to that branch, which
+  is never merged (`docs/strategy-factory.md`).
+- The weekly documentation drift pass (`scripts/docs_drift_week.sh`, in a
+  checkout kept at `main`). Once 20 code commits have landed since the docs
+  were reconciled, Claude runs the `docs-drift` skill headless, allowed to
+  edit only documentation. The script checks the result, pushes a branch and
+  opens a pull request for review. It never merges.
 
 ## Data flow
 
