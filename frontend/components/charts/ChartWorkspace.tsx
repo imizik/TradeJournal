@@ -5,12 +5,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { barClock, chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, etTime, fetchChartData, fetchChartHistory, INTERVALS, mergeBars, overlayLiveTicks, parseChartTick, price, restoreSettings, retainHistory, SMALL_HEIGHTS, STORAGE_KEY, validSymbol } from "@/lib/charts";
+import { barClock, chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, earlyClose, etTime, fetchChartData, fetchChartHistory, INTERVALS, mergeBars, overlayLiveTicks, parseChartTick, price, restoreSettings, retainHistory, SMALL_HEIGHTS, STORAGE_KEY, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, SmallChartSize } from "@/lib/charts";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
-type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean };
+type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null };
 type OlderState = { key: string; panels: Partial<Record<Interval, OlderPanel>> };
 
 export default function ChartWorkspace() {
@@ -104,6 +104,7 @@ export default function ChartWorkspace() {
           const times = new Set(retained.map((bar) => bar.time));
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
           return { ...state, panels: { ...state.panels, [interval]: { bars: retained, markers,
+            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null,
             exhausted: page.exhausted, warmup: page.warmup, issue: page.issue?.code === "pending" ? null : page.issue?.message ?? null,
             loading: !!page.continuation && (!page.issue || page.issue.code === "pending" || page.issue.code === "rate_limited") } } };
         });
@@ -126,6 +127,15 @@ export default function ChartWorkspace() {
         panels: { ...state.panels, [interval]: { ...state.panels[interval], loading: false } } }));
     }
   }, [data, currentOlder, historyKey, settings.symbol, settings.session]);
+  // Before 04:00, on weekends and on holidays today has no intraday bars yet:
+  // open on the latest completed sessions instead of an empty chart.
+  useEffect(() => {
+    if (!data) return;
+    for (const interval of intervalKey.split(",") as Interval[]) {
+      if (interval === "1D" || interval === "1W" || data.panels[interval]?.bars.length || currentOlder[interval]) continue;
+      void loadOlder(interval, data.checked_at);
+    }
+  }, [data, intervalKey, currentOlder, loadOlder]);
   useEffect(() => {
     if (!rollover || rollover.key !== historyKey || !data) return;
     const available = rollover.pending.filter((interval) => !historyFlights.current.has(interval));
@@ -297,7 +307,11 @@ export default function ChartWorkspace() {
   const shownAt = streamedPrice !== null ? latestTick?.at : extendedPrice !== null ? latestCandle?.time : selected?.trade_time;
   const priceAge = shownAt ? Math.max(0, Math.floor(clock - shownAt)) : null;
   const clockFor = (interval: Interval) => barClock({ now: clock, interval, bars: viewData?.panels[interval]?.bars, session: settings.session,
-    paused, delayed: !!data?.delayed, stale: oldData });
+    market: data?.market, paused, delayed: !!data?.delayed, stale: oldData });
+  // Only unusual days get a label: early closes, weekday closures and a missing calendar.
+  const market = data?.market;
+  const holiday = market?.status === "closed" && ![0, 6].includes(new Date(`${market.date}T12:00:00Z`).getUTCDay());
+  const marketLabel = market?.note ?? earlyClose(market) ?? (holiday ? market?.description || "Market closed today" : null);
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
   // Immersive: the main chart fills the screen below the toolbar. On a tall,
@@ -338,6 +352,7 @@ export default function ChartWorkspace() {
           </form>
           <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{settings.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(shownPrice)}</span>
             <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span><span className="text-[10px] text-slate-500">{priceSource}</span></div>
+          {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`rounded px-2 py-1 text-[11px] ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
           <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400" role="status">
             <span className={`h-1.5 w-1.5 rounded-full ${paused || oldData || data?.delayed ? "bg-amber-400" : data ? "bg-sky-400" : "bg-slate-600"}`} />
             {paused ? "Updates paused" : data?.delayed ? "Tradier sandbox · delayed" : activeStream?.status === "connected" ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}

@@ -17,6 +17,13 @@ export type HistoryPage = {
   continuation: string | null; warmup: "ready" | "pending" | "insufficient";
   source: "alpaca_sip"; price_basis: "raw"; fills_truncated: boolean;
   issue: { code: string; message: string; retry_at: number } | null;
+  /** Set when a shown session was resampled with clock hours because the calendar was unavailable. */
+  calendar_note?: string | null;
+};
+/** Today's session windows from the backend's market calendar (UTC seconds), the same ones resampling uses. */
+export type MarketDay = {
+  date: string; status: "open" | "closed" | "unknown"; source: string; description: string | null;
+  sessions: { part: "pre" | "regular" | "post"; start: number; end: number }[]; note: string | null;
 };
 export type ChartQuote = {
   symbol: string; name: string; last: number | null; change: number | null;
@@ -27,6 +34,7 @@ export type ChartData = {
   refresh_seconds: number; checked_at: number; fetched_at: Record<string, number>;
   panels: Partial<Record<Interval, ChartPanelData>>; quotes: ChartQuote[]; issues: string[];
   intraday_as_of: number | null; history_note: string; fills: FillMarker[]; fills_truncated: boolean;
+  market?: MarketDay;
 };
 export type ChartStreamTick = {
   type: "tick"; symbol: string; at: number; price: number; open: number; high: number; low: number;
@@ -187,41 +195,57 @@ export const INTERVAL_SECONDS: Record<Interval, number> = { "1m": 60, "3m": 180,
 export const intradayInterval = (interval: Interval) => interval !== "1D" && interval !== "1W";
 
 const nyClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
-/** The same clock-session segments as backend `session_part` (no holiday calendar). */
-export function nySession(now: number): { part: "pre" | "regular" | "post"; start: number; end: number; minute: number; second: number; startsAt: number } | null {
+const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
+export type SessionWindow = MarketDay["sessions"][number];
+/**
+ * The session windows that apply at `now`: the backend's calendar day when it
+ * is for today's New York date, otherwise the clock rule the backend also falls
+ * back to without a calendar (weekdays 04:00, 09:30, 16:00, 20:00).
+ */
+export function sessionsFor(now: number, market?: MarketDay | null): SessionWindow[] {
+  if (market?.date === nyDate.format(new Date(now * 1000))) return market.sessions;
   const parts = Object.fromEntries(nyClock.formatToParts(new Date(now * 1000)).map((p) => [p.type, p.value]));
-  if (parts.weekday === "Sat" || parts.weekday === "Sun") return null;
-  const minute = Number(parts.hour) * 60 + Number(parts.minute);
-  const second = Number(parts.second);
-  const segment = minute >= 240 && minute < 570 ? ["pre", 240, 570] as const : minute >= 570 && minute < 960 ? ["regular", 570, 960] as const
-    : minute >= 960 && minute < 1200 ? ["post", 960, 1200] as const : null;
-  if (!segment) return null;
-  return { part: segment[0], start: segment[1], end: segment[2], minute, second, startsAt: Math.floor(now) - ((minute - segment[1]) * 60 + second) };
+  if (parts.weekday === "Sat" || parts.weekday === "Sun") return [];
+  // Weekday midnights are never DST transitions, so minute offsets are exact.
+  const midnight = Math.floor(now) - (Number(parts.hour) * 3600 + Number(parts.minute) * 60 + Number(parts.second));
+  return ([["pre", 240, 570], ["regular", 570, 960], ["post", 960, 1200]] as const)
+    .map(([part, start, end]) => ({ part, start: midnight + start * 60, end: midnight + end * 60 }));
+}
+export function nySession(now: number, market?: MarketDay | null): SessionWindow | null {
+  return sessionsFor(now, market).find((segment) => segment.start <= now && now < segment.end) ?? null;
 }
 
 export type BarClock = { state: "live"; remaining: number } | { state: "paused" | "delayed" | "stale" | "closed" | "waiting"; remaining?: undefined };
 /**
  * Seconds until the forming intraday bar closes, from the local clock and the
- * backend's session-anchored buckets. Anything that would make the number
- * misleading returns a named state instead, so no provider call is needed.
+ * backend's session windows (holidays and early closes included). Anything
+ * that would make the number misleading returns a named state instead, so no
+ * provider call is needed.
  */
-export function barClock({ now, interval, bars, session, paused, delayed, stale }: {
+export function barClock({ now, interval, bars, session, market, paused, delayed, stale }: {
   now: number; interval: Interval; bars: ChartBar[] | undefined; session: ChartSettings["session"];
-  paused: boolean; delayed: boolean; stale: boolean;
+  market?: MarketDay | null; paused: boolean; delayed: boolean; stale: boolean;
 }): BarClock | null {
   if (!intradayInterval(interval)) return null;
   if (paused) return { state: "paused" };
   if (delayed) return { state: "delayed" };
   if (stale) return { state: "stale" };
-  const clock = nySession(now);
-  if (!clock || (session === "regular" && clock.part !== "regular")) return { state: "closed" };
+  const segment = nySession(now, market);
+  if (!segment || (session === "regular" && segment.part !== "regular")) return { state: "closed" };
   const last = bars?.at(-1);
-  // Holidays and halted symbols look like an open clock with no bars in it.
-  if (!last || last.end_time <= clock.startsAt) return { state: "waiting" };
-  const width = INTERVAL_SECONDS[interval] / 60;
-  const anchor = clock.start + Math.floor((clock.minute - clock.start) / width) * width;
-  const finish = Math.min(anchor + width, clock.end);
-  return { state: "live", remaining: Math.max(0, (finish - clock.minute) * 60 - clock.second) };
+  // A halted symbol, or an open day the calendar missed, has no bars in the segment.
+  if (!last || last.end_time <= segment.start) return { state: "waiting" };
+  const second = Math.floor(now);
+  const width = INTERVAL_SECONDS[interval];
+  // Buckets anchor at the segment start and the last one ends with it (13:00 on a half day).
+  const finish = Math.min(segment.start + (Math.floor((second - segment.start) / width) + 1) * width, segment.end);
+  return { state: "live", remaining: Math.max(0, finish - second) };
+}
+/** "Early close 1:00 PM ET" when today's regular session ends before 16:00. */
+export function earlyClose(market?: MarketDay | null): string | null {
+  const regular = market?.status === "open" ? market.sessions.find((segment) => segment.part === "regular") : undefined;
+  if (!regular || regular.end - regular.start >= 23_400) return null; // 6.5 hours is a full session
+  return `Early close ${etTime(regular.end)} ET`;
 }
 export const countdown = (seconds: number) => {
   const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;

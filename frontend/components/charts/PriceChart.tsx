@@ -43,7 +43,7 @@ export default function PriceChart({ id, symbol, interval, session, panel, indic
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; indicators: Indicators; levels: PriceLevel[];
   link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock?: BarClock | null; height: number;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
-  history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null };
+  history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   onInterval(interval: Interval): void; onFocus?(): void; onExpand?(): void;
 }) {
@@ -285,8 +285,8 @@ export default function PriceChart({ id, symbol, interval, session, panel, indic
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
       <div ref={container} data-testid={`canvas-${id}`} style={{ height }} className={drawing ? "cursor-crosshair" : ""} />
-      {history && (history.loading || history.issue || history.warmup === "insufficient") && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
-        {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : "Earlier indicator history is insufficient."}
+      {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
+        {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : history.calendarNote}
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}
       </div>}
       {!panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}

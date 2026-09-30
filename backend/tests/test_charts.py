@@ -1,6 +1,6 @@
 """Chart data integrity, request sharing, and private journal marker boundaries."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -13,7 +13,7 @@ from sqlmodel import Session, SQLModel, create_engine
 from app.database import get_session
 from app.engine import chart_feed as feed_module
 from app.engine.chart_feed import ChartFeed, ChartFeedError
-from app.engine.chart_math import ET, chart_bars, indicators, normalize_bars
+from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, market_day, normalize_bars, session_part
 from app.models import Account, Fill
 from app.routers import charts
 
@@ -77,6 +77,58 @@ def test_daily_and_weekly_keep_provider_daily_ohlc_and_do_not_use_extended_minut
     assert week["vwap"] is None
 
 
+HALF_DAY = date(2025, 11, 28)  # Tradier: "Market closes early at 13:00"
+HALF_HOURS = {"date": "2025-11-28", "status": "open", "open": 570, "close": 780, "description": "Market closes early at 13:00", "source": "tradier"}
+
+
+def test_older_half_day_ends_regular_session_vwap_and_buckets_at_13_00():
+    raw = [minute(f"2025-11-28T{t}", p, v) for t, p, v in [("09:30", 100, 10), ("12:59", 110, 30), ("13:00", 120, 1000),
+                                                          ("16:59", 130, 5), ("17:00", 140, 5)]]
+    calendar = {HALF_DAY: HALF_HOURS}
+    regular = chart_bars(raw, [], "1h", "regular", calendar)
+    assert [datetime.fromtimestamp(b["time"], ET).strftime("%H:%M") for b in regular] == ["09:30", "12:30"]
+    assert datetime.fromtimestamp(regular[-1]["end_time"], ET).strftime("%H:%M") == "13:00"
+    assert regular[-1]["close"] == 110 and regular[-1]["vwap"] == pytest.approx((100 * 10 + 110 * 30) / 40)
+    extended = chart_bars(raw, [], "1h", "extended", calendar)
+    post = [b for b in extended if b["extended"]]
+    # The 13:00 closing print is postmarket; trading ends four hours after the close.
+    assert [datetime.fromtimestamp(b["time"], ET).strftime("%H:%M") for b in post] == ["13:00", "16:00"]
+    assert datetime.fromtimestamp(post[-1]["end_time"], ET).strftime("%H:%M") == "17:00"
+    assert all(b["vwap"] is None for b in post) and 140 not in [b["close"] for b in extended]
+    # Without the calendar the clock rule would call 13:00-15:59 regular trading.
+    assert chart_bars(raw, [], "1h", "regular")[-1]["close"] == 120
+
+
+def test_calendar_classifies_regular_extended_and_closed_days():
+    def at(clock):
+        return datetime.fromisoformat(f"2025-11-28T{clock}").replace(tzinfo=ET)
+
+    assert session_part(at("04:00"), HALF_HOURS) == ("pre", 240, 570)
+    assert session_part(at("12:59"), HALF_HOURS) == ("regular", 570, 780)
+    assert session_part(at("13:00"), HALF_HOURS) == ("post", 780, 1020)
+    assert session_part(at("17:00"), HALF_HOURS) is None
+    assert session_part(at("13:00")) == ("regular", 570, 960)
+    holiday = {"date": "2025-11-27", "status": "closed", "open": None, "close": None, "description": "Thanksgiving", "source": "tradier"}
+    thursday = [minute("2025-11-27T10:00")]
+    assert chart_bars(thursday, [], "5m", "extended", {date(2025, 11, 27): holiday}) == []
+    assert session_part(datetime(2025, 11, 27, 10, tzinfo=ET), holiday) is None
+
+
+def test_market_day_sends_the_same_windows_to_the_browser():
+    half = market_day(HALF_DAY, HALF_HOURS)
+    def stamp(clock):
+        return int(datetime.fromisoformat(f"2025-11-28T{clock}").replace(tzinfo=ET).timestamp())
+
+    assert half["sessions"] == [{"part": "pre", "start": stamp("04:00"), "end": stamp("09:30")},
+                                {"part": "regular", "start": stamp("09:30"), "end": stamp("13:00")},
+                                {"part": "post", "start": stamp("13:00"), "end": stamp("17:00")}]
+    assert (half["status"], half["source"], half["note"]) == ("open", "tradier", None)
+    closed = market_day(date(2025, 11, 27), {"status": "closed", "open": None, "close": None, "description": "Market is closed for Thanksgiving Day", "source": "tradier"})
+    assert closed["sessions"] == [] and closed["description"] == "Market is closed for Thanksgiving Day"
+    unknown = market_day(date(2025, 11, 27), None)
+    assert unknown["status"] == "unknown" and unknown["note"] == CLOCK_NOTE and len(unknown["sessions"]) == 3
+
+
 @pytest.fixture
 def provider(monkeypatch):
     clock = [1000.0]
@@ -116,6 +168,25 @@ def test_five_panels_share_history_and_poll_only_recent_data(provider):
     clock[0] += 60
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
     assert len(calls) == 8  # daily history now due; no Tradier historical request
+
+
+def test_workspace_uses_todays_calendar_and_discloses_when_it_is_missing(provider):
+    feed, calls, _, _ = provider
+    today = datetime.now(ET).date()
+
+    class Calendar:
+        def hours(self, day):
+            assert day == today
+            return {"date": today.isoformat(), "status": "open", "open": 570, "close": 780, "description": "Market closes early at 13:00", "source": "tradier"}
+
+    data = feed.workspace("SPY", ["5m"], [], "regular", calendar=Calendar())
+    regular = [s for s in data["market"]["sessions"] if s["part"] == "regular"][0]
+    assert datetime.fromtimestamp(regular["end"], ET).strftime("%H:%M") == "13:00"
+    assert data["market"]["note"] is None
+    assert data["panels"]["5m"]["bars"][0]["extended"] is False
+    missing = feed.workspace("SPY", ["5m"], [], "regular")
+    assert missing["market"]["status"] == "unknown" and missing["market"]["note"] == CLOCK_NOTE
+    assert "issues" in missing and not missing["issues"]  # disclosed, not reported as stale data
 
 
 def test_provider_failure_retains_previous_data_with_original_timestamp(provider):
@@ -185,7 +256,7 @@ def route_client(monkeypatch):
 
     app.dependency_overrides[get_session] = session
 
-    def fake_workspace(*_):
+    def fake_workspace(*_, **__):
         return {"panels": {"5m": {"bars": chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular"), "markers": []}}}
 
     monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)

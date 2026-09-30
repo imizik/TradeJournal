@@ -9,7 +9,7 @@ import pytest
 
 from app.engine import alpaca, chart_history as module
 from app.engine.chart_history import ChartHistory, HistoryError, Work
-from app.engine.chart_math import ET, chart_bars, normalize_bars
+from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, normalize_bars
 
 
 def previous_weekday() -> date:
@@ -285,3 +285,68 @@ def test_two_sip_days_stitch_with_tradier_today_without_overlap(history, monkeyp
     assert len({b["time"] for b in stitched}) == 3
     assert [b["time"] for b in stitched] == sorted(b["time"] for b in stitched)
     assert page["older_cursor"] == stitched[0]["time"]
+
+
+class Calendar:
+    """Normalized calendar days by date; anything missing is unavailable."""
+
+    def __init__(self, days: dict[date, dict]):
+        self.days, self.asked = days, []
+
+    def hours(self, day: date) -> dict | None:
+        self.asked.append(day)
+        return self.days.get(day)
+
+
+def open_day(day: date, close: int = 960) -> dict:
+    return {"date": day.isoformat(), "status": "open", "open": 570, "close": close, "description": "", "source": "tradier"}
+
+
+def test_holidays_cost_no_alpaca_request_and_half_days_end_at_13_00(history, monkeypatch):
+    half = previous_weekday()
+    holiday = half - timedelta(days=1)
+    while holiday.weekday() >= 5:
+        holiday -= timedelta(days=1)
+    earlier = holiday - timedelta(days=1)
+    while earlier.weekday() >= 5:
+        earlier -= timedelta(days=1)
+    history.calendar = Calendar({half: open_day(half, 780), earlier: open_day(earlier),
+                                 holiday: {"date": holiday.isoformat(), "status": "closed", "open": None, "close": None, "description": "Holiday", "source": "tradier"}})
+    monkeypatch.setattr(module, "WARMUP", 0)
+    requested = []
+
+    def get(url, *, params, headers, timeout):
+        day = datetime.fromisoformat(params["start"]).astimezone(ET).date()
+        requested.append(day)
+        bars = [raw(day, 9, 30, 100), raw(day, 12, 59, 101), raw(day, 13, 0, 102), raw(day, 15, 59, 103)]
+        return httpx.Response(200, json={"bars": bars, "next_page_token": None}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(module.httpx, "get", get)
+    before = int(datetime.combine(half + timedelta(days=1), wall_time(4), ET).timestamp())
+    page = history.page("SPY", "1h", "regular", before, limit=5)
+    assert holiday not in requested and requested[:2] == [half, earlier]
+    by_day = {}
+    for bar in page["bars"]:
+        by_day.setdefault(datetime.fromtimestamp(bar["time"], ET).date(), []).append(bar)
+    assert [datetime.fromtimestamp(b["end_time"], ET).strftime("%H:%M") for b in by_day[half]] == ["10:30", "13:00"]
+    assert by_day[half][-1]["close"] == 101  # 13:00 onward is postmarket on a half day
+    assert by_day[earlier][-1]["close"] == 103 and holiday not in by_day
+    assert page["calendar_note"] is None
+    # The cached minutes are raw; classification happens per page, so the
+    # same session resamples correctly in extended mode too.
+    extended = history.page("SPY", "1h", "extended", before, limit=5)
+    post = [b for b in extended["bars"] if datetime.fromtimestamp(b["time"], ET).date() == half and b["extended"]]
+    assert [datetime.fromtimestamp(b["time"], ET).strftime("%H:%M") for b in post] == ["13:00", "15:00"]
+    assert len(requested) == 2
+
+
+def test_sessions_resampled_without_the_calendar_are_disclosed(history, monkeypatch):
+    day = previous_weekday()
+    history._publish("SPY", day, [normalized(day, 9, 30)])
+    monkeypatch.setattr(module, "WARMUP", 0)
+    before = int(datetime.combine(day + timedelta(days=1), wall_time(4), ET).timestamp())
+    history.calendar = Calendar({})
+    page = history.page("SPY", "1m", "regular", before, limit=1)
+    assert page["bars"] and page["calendar_note"] == CLOCK_NOTE
+    history.calendar = Calendar({day: open_day(day)})
+    assert history.page("SPY", "1m", "regular", before, limit=1)["calendar_note"] is None

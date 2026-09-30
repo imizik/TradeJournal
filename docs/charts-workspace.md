@@ -103,6 +103,9 @@ cd backend
   loaded left edge. A 5m chart can navigate six months through pages. The
   candle hover legend says **SIP raw** or **Tradier**. Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier.
+- When today has no intraday bars (before 04:00, weekends, holidays), each
+  intraday panel opens on the latest completed SIP sessions instead of an
+  empty chart.
 - On a New York date rollover, the refresh removes the completed Tradier day
   and requests its SIP replacement for the displayed intraday panels without
   waiting for a pan. A pending or failed replacement is disclosed as history
@@ -114,13 +117,17 @@ cd backend
   evicting historical pages preserves the visible logical range, including its
   fractional offset. `barChange` in `lib/charts.ts` decides the update path.
 - Intraday charts show a **next-bar countdown** computed from the browser clock
-  and the same session-anchored buckets the backend uses (`nySession`/`barClock`
-  mirror `session_part`); it adds no provider calls. It shows a number only while
+  and the session windows the workspace response sends as `market` (the same
+  `session_windows` the backend resamples and streams with); it adds no
+  provider calls. It shows a number only while
   updates are running, data is not delayed or stale (refresh within 45 seconds,
   no error or partial refresh), the clock is inside the selected session, and
   the newest candle belongs to the current session segment. Otherwise it says
-  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. There is
-  no holiday calendar: a holiday reads as Waiting for bars, not as closed.
+  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. A
+  holiday reads Market closed, and on an early-close day the regular session
+  and its last buckets end at 13:00. Only unusual days get a label beside the
+  quote: *Early close 1:00 PM ET*, the closure's name on a weekday holiday, or
+  a warning that clock hours apply because the calendar is unavailable.
 - **Full screen** covers the app navigation, hides the side panels (the
   watchlist can be toggled back), and gives the main chart the screen height
   below a sticky toolbar with an Exit button; Escape also exits. Smaller charts
@@ -177,6 +184,22 @@ process; a 429 honors Retry-After. No Alpaca request targets the latest
 15 minutes. The frontend keeps at most 12,000 normalized candles per panel,
 including the current tail, and rereads evicted pages from this disk cache.
 
+`backend/app/engine/chart_calendar.py` adapts Tradier's `/v1/markets/calendar`
+(one request per month, available back to 2016) into normalized open/closed
+days with regular hours. A month fetched after it ended is final and saved in
+`backend/data/chart_calendar/v1/tradier/`, so each past month costs one request
+per deployment; a damaged copy is refetched. The current month is refetched
+once per New York date, and a failed refresh keeps the previous copy. Requests
+share the chart feed's 60/minute Tradier budget and back off 60 seconds per
+month after a failure. Only past and current months are requested; Tradier
+rejects unpublished years. Its premarket/postmarket times (07:00, 19:55) are
+Tradier's order hours, not the consolidated tape, and are not used. The
+workspace sends today's windows as `market`. History pages resample each
+session with its own date's hours and skip calendar-closed dates without an
+Alpaca request. The stream reads only the in-memory copy, never the provider.
+Without a calendar, clock hours apply and `market.note` or the page's
+`calendar_note` discloses it.
+
 No partial intraday data enters the persistent enrichment caches. No feed
 fallback mixes IEX or unofficial quotes into these charts. Intraday SIP prices
 are raw/unadjusted, so a split may create a discontinuity; daily adjustment
@@ -189,13 +212,16 @@ from refresh time; a successful HTTP call is not proof that a quote is fresh.
 `backend/app/engine/chart_math.py` is pure. Provider Unix timestamps identify
 minute bars; daily dates map to 09:30 America/New_York. Resampling anchors each
 regular session at 09:30 and keeps premarket (04:00–09:30) and postmarket
-(16:00–20:00) separate. DST conversion uses zoneinfo. This is clock-session
-alignment, not a full exchange holiday/early-close calendar; actual bars come
-from the selected provider. Weekly bars combine Tradier daily data with Monday
+(16:00–20:00) separate. With calendar data the regular session is the day's
+calendar hours and postmarket runs from the close to four hours after it
+(17:00 after a 13:00 early close; consolidated SIP minutes end there too); a
+closed date has no session. Without calendar data, weekdays use the clock hours
+above and responses say so. DST conversion uses zoneinfo. Actual bars come from
+the selected provider. Weekly bars combine Tradier daily data with Monday
 alignment.
 
 VWAP uses minute HLC3 × volume, resets each regular session, and is absent outside
-09:30–16:00. It is a bar-based estimate, not trade-level VWAP. EMAs use the first
+the regular session (09:30–16:00, or 09:30–13:00 on a half day). It is a bar-based estimate, not trade-level VWAP. EMAs use the first
 close as a seed and remain absent until the length has elapsed. RSI uses Wilder
 averages with 14 changes of warmup. Historical pages use 1,400 preceding
 **resampled candles at the selected interval** as the indicator prefix, then
@@ -228,6 +254,13 @@ and keyboard symbol navigation. A canvas comparison checks that VWAP does not pa
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_stream.py` checks session buckets, invalid event
 filters, and a single upstream subscription shared across tabs.
+`backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
+malformed and incomplete months, completed months on disk, daily refresh,
+failure backoff and the shared budget. The chart tests pin an older half day's
+regular/extended classification, VWAP and buckets, early-close stream buckets,
+holiday skipping in history and the unavailable-calendar disclosure. The
+browser suite drives a fixture holiday, a 13:00 early close in both session
+modes, a missing calendar, and a day with no intraday bars.
 `backend/tests/test_chart_history.py` covers SIP/raw request parameters,
 pagination and retries, completed/empty caches, corrupt data, the
 30-attempt and eight-attempt budgets, concurrency, source stitching and
