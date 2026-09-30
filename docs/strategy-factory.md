@@ -267,6 +267,18 @@ for the rest of a session.
   cancel rule are this module's reading, since the framework leaves both
   open. Stop 0.1 ATR over the rejection bar's high, with the VWAP module's
   exits and limits.
+- `opening_range_breakout`: the classic opening range breakout, added
+  from the trader's own journal. Across 2025-26, option entries made beyond
+  the underlying's five-minute opening range, in the trade's direction,
+  returned about 7 points more per trade than the rest (a day-clustered
+  bootstrap puts the gap at 3.6 to 11.2 points), in both 2025 and 2026 and
+  for calls and puts. Five-minute bars; the range is the session's first
+  `range_minutes` (5); the first close beyond it triggers, once per side per
+  session; stop at the other side of the range (`stop_at="mid"` for its
+  midpoint); no target, flat by the close; at most two entries and two
+  losses a session. These defaults are the textbook version, chosen before
+  any factory run, not fitted to the journal: its trades were options held
+  for minutes, so the journal says where to look, not which settings win.
 
 The first two reproduce the engines they came from (`nbis_swing` and
 `vwap_reclaim` on branch `claude/nbis-recovery-swing`) trade for trade on the
@@ -327,7 +339,9 @@ t ≥ 2.61.
   and the same for random entries; a rule that never tightens changes no
   trade.
 - Each family's arming, triggering, cancelling and expiry, with exact stops
-  and fills.
+  and fills. The opening range: built from whole bars from 09:30, each
+  side once a session (a refused or blocked break used up), none on a
+  session without its 09:30 bar.
 - Specs and their ids, the logistic fit recovering a known effect, the
   statistics and each gate.
 - The evaluation end to end: a synthetic edge passes every gate, one that

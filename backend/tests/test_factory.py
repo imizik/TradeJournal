@@ -60,6 +60,7 @@ from app.engine.factory_rules import (
     Exits,
     FailedBreakout,
     Limits,
+    OpeningRangeBreakout,
     RecoverySwing,
     Signal,
     SwingStop,
@@ -677,6 +678,71 @@ def test_failed_breakdown_is_the_long_mirror_and_off_by_default():
     assert (trade.side, trade.stop) == (1, pytest.approx(98.9))
 
 
+# --- opening range breakout -------------------------------------------------------------
+#
+# 5-minute bars. The 09:30 bar is the range, 99.5 to 100.5. 09:35 stays inside;
+# 09:40 closes 100.8, over the high: long, stop at the range low 99.5, filled
+# at 09:45's open plus a tick.
+
+ORB_DAY = D2
+ORB_RANGE = bar(ORB_DAY, 570, 100.0, 100.5, 99.5, 100.2)
+INSIDE = bar(ORB_DAY, 575, 100.2, 100.4, 99.8, 100.1)
+UP = bar(ORB_DAY, 580, 100.1, 100.9, 100.0, 100.8)
+
+
+def orb(bars: list[Bar], rules: OpeningRangeBreakout = OpeningRangeBreakout(), tf: int = 5,
+        limits: Limits = Limits(2, 2)):
+    series = Series.build("X", bars, tf)
+    return run_candidate(series, rules.start(series), Exits(None), TICK, limits=limits)
+
+
+def test_opening_range_breakout_goes_long_on_the_first_close_over_the_range():
+    (trade,) = orb([ORB_RANGE, INSIDE, UP, *flat(ORB_DAY, 3, 5, 100.8, start=585)])
+    assert (trade.side, trade.signal_time, trade.stop, trade.entry_price) == (1, at(ORB_DAY, 580), 99.5, 100.81)
+    assert trade.exit_reason == "session"
+    (mid,) = orb([ORB_RANGE, INSIDE, UP, *flat(ORB_DAY, 3, 5, 100.8, start=585)], OpeningRangeBreakout(stop_at="mid"))
+    assert mid.stop == pytest.approx(100.0)
+
+
+def test_opening_range_breakout_shorts_the_low_and_each_side_triggers_once():
+    down = bar(ORB_DAY, 580, 100.1, 100.2, 99.2, 99.3)
+    # Short at 09:45's open, stopped at the range high by 09:50; the second close under the low does not re-enter.
+    bars = [ORB_RANGE, INSIDE, down, bar(ORB_DAY, 585, 99.3, 100.6, 99.2, 100.0), bar(ORB_DAY, 590, 99.9, 100.0, 99.0, 99.1),
+            *flat(ORB_DAY, 2, 5, 99.1, start=595)]
+    (trade,) = orb(bars, OpeningRangeBreakout(sides="short"))
+    assert (trade.side, trade.stop, trade.exit_reason) == (-1, 100.5, "stop")
+    # Both sides: after the short is stopped, the later close over the high is the long's first break.
+    reversal = [ORB_RANGE, INSIDE, down, bar(ORB_DAY, 585, 99.3, 100.6, 99.2, 100.0),
+                bar(ORB_DAY, 590, 100.0, 101.0, 99.9, 100.9), *flat(ORB_DAY, 2, 5, 100.9, start=595)]
+    short, long_ = orb(reversal)
+    assert (short.side, long_.side, long_.signal_time) == (-1, 1, at(ORB_DAY, 590))
+    assert [t.side for t in orb(reversal, OpeningRangeBreakout(sides="long"))] == [1]
+
+
+def test_opening_range_breakout_waits_for_the_whole_range_and_needs_the_open():
+    # A 15-minute range is 09:30-09:45: UP's 100.9 high widens it, so nothing closes over it.
+    assert orb([ORB_RANGE, INSIDE, UP, *flat(ORB_DAY, 3, 5, 100.8, start=585)], OpeningRangeBreakout(range_minutes=15)) == []
+    later = bar(ORB_DAY, 585, 100.8, 101.2, 100.7, 101.1)
+    (trade,) = orb([ORB_RANGE, INSIDE, UP, later, *flat(ORB_DAY, 2, 5, 101.1, start=590)],
+                   OpeningRangeBreakout(range_minutes=15))
+    assert (trade.signal_time, trade.stop) == (at(ORB_DAY, 585), 99.5)
+    # No 09:30 bar, no range.
+    assert orb([INSIDE, UP, *flat(ORB_DAY, 3, 5, 100.8, start=585)]) == []
+    # A range that is not whole bars is refused.
+    with pytest.raises(ValueError):
+        orb([ORB_RANGE, INSIDE, UP], OpeningRangeBreakout(range_minutes=5), tf=15)
+
+
+def test_opening_range_breakout_uses_up_a_break_it_cannot_take():
+    # Halted by the session limits, or outside the entry window: the break is used up, no trade later.
+    bars = [ORB_RANGE, INSIDE, UP, *flat(ORB_DAY, 3, 5, 100.8, start=585)]
+    assert orb(bars, limits=Limits(max_entries=0)) == []
+    series = Series.build("X", bars, 5)
+    refused = run_candidate(series, OpeningRangeBreakout().start(series), Exits(None), TICK, window=(600, 900))
+    assert refused == []
+    assert parse_spec({"family": "opening_range_breakout"}).exits == Exits(None, max_sessions=1)
+
+
 # --- specs ----------------------------------------------------------------------------
 
 
@@ -1074,3 +1140,12 @@ def test_a_learned_filter_trains_on_discovery_only_and_must_beat_its_parent(dip_
     assert ev.parent_stats["confirm_a"].mean_r < 1.8
     assert ev.verdict == "passed", report(ev)
     assert ev.parent_id == spec_id(spec.parent())
+
+
+def test_an_opening_range_breakout_spec_goes_through_the_evaluation():
+    # The stub bars are 30-minute, so a 30-minute range is each session's first bar.
+    spec = parse_spec({"family": "opening_range_breakout", "params": {"range_minutes": 30}, "timeframe": 30,
+                       "tickers": ["AAA", "BBB"]})
+    ev = evaluate(spec, StubLoader({"AAA": pattern(START, END, every_fifth), "BBB": pattern(START, END, every_fifth)}), 0)
+    assert ev.verdict in {"failed_screen", "failed_confirmation", "failed_exam", "passed"}
+    assert "opening_range_breakout, 30-minute bars, long/short" in report(ev)
