@@ -1032,6 +1032,9 @@ const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map
 test("a level saved in one browser appears in another, and a stale save is refused", { tag: "@real-settings" }, async ({ page, browser, request }) => {
   const run = Date.now().toString(36);
   const [desk, phone, later] = [`Desk ${run}`, `Phone ${run}`, `Late ${run}`];
+  // The e2e database outlives a run: start from empty settings.
+  const start: SavedLevels = await (await request.get("/api/backend/charts/settings")).json();
+  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: {} } })).ok()).toBe(true);
   await stub(page);
   await page.goto("/charts");
   await addLevel(page, desk, "263.50");
@@ -1095,6 +1098,41 @@ test("settings kept in a browser before the server saved them merge with another
   await expect(levelsPanel(page)).toContainText("Desk level");
   expect(server.saves).toHaveLength(1);
 });
+
+for (const outcome of ["arrive", "fail"] as const) {
+  test(`changes made while saved settings load are kept when they ${outcome}`, async ({ page, context }) => {
+    const server = await fakeChartSettings(context, { revision: 2, data: { levels: { MRVL: [{ id: "phone", price: 250, label: "Phone level" }] } } });
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await context.route("**/api/backend/charts/settings", async (route) => {
+      if (route.request().method() !== "GET") return route.fallback();
+      await held;
+      if (outcome === "fail") server.offline = true;
+      await route.fallback();
+    });
+    await page.addInitScript(() => localStorage.setItem("tradejournal.charts.v1",
+      JSON.stringify({ levels: { MRVL: [{ id: "desk", price: 263.5, label: "Desk level" }] } })));
+    await stub(page);
+    await page.goto("/charts");
+    await expect(syncStatus(page)).toHaveText("Loading saved settings");
+    await expect(levelsPanel(page)).toContainText("Desk level"); // this browser's copy, not the defaults
+    await page.getByRole("button", { name: "EMA 200", exact: true }).click();
+    await addLevel(page, "While loading", "264.00");
+    await expect(syncStatus(page)).toHaveText("Loading saved settings"); // both changes made before the server answered
+    release();
+    await expect(syncStatus(page)).toHaveText(outcome === "arrive" ? "Saved" : "Saved in this browser · server unavailable");
+    await expect(page.getByRole("button", { name: "EMA 200", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(levelsPanel(page)).toContainText("While loading");
+    await expect(levelsPanel(page)).toContainText("Desk level");
+    if (outcome === "fail") return;
+    await expect(levelsPanel(page)).toContainText("Phone level");
+    await expect.poll(() => server.saves.length).toBe(1);
+    expect(server.saves[0]).toMatchObject({ base: 2, status: 200 });
+    const saved = server.data as { levels: Record<string, { label: string }[]>; indicators: Record<string, boolean> };
+    expect(saved.levels.MRVL.map((level) => level.label)).toEqual(["Phone level", "Desk level", "While loading"]);
+    expect(saved.indicators.ema200).toBe(true);
+  });
+}
 
 test("a save refused as stale keeps the other device's change and this one", async ({ page, context }) => {
   const server = await fakeChartSettings(context);
