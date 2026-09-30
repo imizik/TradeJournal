@@ -50,6 +50,7 @@ exit 3
 
 STUB_CURL = """#!/bin/bash
 printf '%s\\n' "$*" >> "$STUB_LOG/curl.log"
+[ -z "${STUB_CURL_FAIL:-}" ]
 """
 
 
@@ -195,6 +196,31 @@ def test_a_pass_waiting_for_review_holds_the_next_one(checkout):
     assert result.returncode == 0
     assert logged(env, "claude.args") == ""
     assert "still waiting for review: https://github.com/example/repo/pull/98" in logged(env, "curl.log")
+    assert_tidy(work, env)
+
+
+def test_a_reminder_that_does_not_send_fails_the_run(checkout):
+    work, env = checkout
+    result = run(work, env, STUB_OPEN_PR="https://github.com/example/repo/pull/98", STUB_CURL_FAIL="1")
+    assert result.returncode == 1 and "did not send" in result.stderr
+    assert logged(env, "claude.args") == ""
+
+
+@pytest.mark.parametrize("refusal", ["commit", "push"])
+def test_a_pass_that_cannot_be_recorded_is_kept(checkout, refusal):
+    work, env = checkout
+    if refusal == "commit":
+        hook = work / ".git" / "hooks" / "pre-commit"
+    else:  # the remote refuses the push; the preflight's dry run never reaches its hook
+        hook = work.parent / "remote.git" / "hooks" / "pre-receive"
+    hook.write_text("#!/bin/sh\nexit 1\n")
+    hook.chmod(0o755)
+    result = run(work, env)
+    assert result.returncode == 1 and f"git {refusal} failed" in result.stderr
+    assert remote_branches(work, env) == ["main"] and "pr create" not in logged(env, "gh.log")
+    (saved,) = Path(env["STUB_LOG"]).glob("tradejournal-docs-drift-*.diff")
+    # Staged (commit refused) or committed (push refused), the whole pass is saved against the commit it read.
+    assert "+A corrected sentence." in saved.read_text() and "last-reconciled.json" in saved.read_text()
     assert_tidy(work, env)
 
 

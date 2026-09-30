@@ -39,6 +39,7 @@ BRANCH_PREFIX="docs/drift-"
 # What a pass may change: existing documentation, and the marker.
 ALLOWED='(docs/.+\.md|docs/agent/last-reconciled\.json|README\.md|AGENTS\.md|CLAUDE\.md)'
 STARTED=""
+START=""
 
 say() { printf '\n==> %s (%s)\n' "$1" "$(date '+%F %T')"; }
 
@@ -85,7 +86,8 @@ tidy() {
 fail() {
   echo "FAILED: $1" >&2
   if [ -n "$STARTED" ]; then
-    git diff > "$SAVED_DIFF" 2>/dev/null
+    # Everything the pass changed against the commit it read, staged and committed included.
+    git diff "$START" > "$SAVED_DIFF" 2>/dev/null
     [ -s "$SAVED_DIFF" ] && echo "The pass's edits are saved in $SAVED_DIFF" >&2
     tidy
   fi
@@ -129,8 +131,8 @@ main() {
   say "code: fetch $REF"
   git fetch -q origin || fail "git fetch failed"
   git checkout -q --detach "$REF" || fail "could not check out $REF"
-  local start since count
-  start="$(git rev-parse HEAD)"
+  local since count
+  START="$(git rev-parse HEAD)"
   since="$(marker)" || fail "could not read docs/agent/last-reconciled.json"
   count="$(git rev-list --count --no-merges "$since..HEAD" -- . ':(exclude)*.md')" \
     || fail "could not count the commits since ${since:0:7}"
@@ -145,8 +147,10 @@ main() {
     || fail "gh could not list the open pull requests"
   if [ -n "$waiting" ]; then
     say "the last pass is still waiting for review: $waiting"
+    # While it waits no pass runs, so a reminder that did not send is a failed run.
     notify "Docs drift pass waiting" \
-      "$count code commits since the docs were reconciled, and the last pass is still waiting for review: $waiting" 3
+      "$count code commits since the docs were reconciled, and the last pass is still waiting for review: $waiting" 3 \
+      || { echo "FAILED: the reminder that $waiting is waiting for review did not send" >&2; exit 1; }
     return 0
   fi
 
@@ -159,16 +163,16 @@ main() {
 
   git checkout -q -b "$branch" || fail "could not create the branch $branch"
   STARTED=1
-  say "pass: Claude reconciles ${since:0:7}..${start:0:7} ($count code commits)"
+  say "pass: Claude reconciles ${since:0:7}..${START:0:7} ($count code commits)"
   local prompt
   prompt="You are running the TradeJournal documentation drift pass unattended: nobody is watching, and nobody can answer a question or approve anything.
 
-Read CLAUDE.md, then .claude/skills/docs-drift/SKILL.md, and do the pass it describes over the range $since..$start ($count code commits). HEAD is $start.
+Read CLAUDE.md, then .claude/skills/docs-drift/SKILL.md, and do the pass it describes over the range $since..$START ($count code commits). HEAD is $START.
 
 For this run:
 - Change only existing documentation: files under docs/, README.md, AGENTS.md and CLAUDE.md. You cannot create files, run tests, commit or push, and anything that would need permission is refused. The script that started you checks your edits, runs the docs tests, commits, pushes and opens the pull request, so skip the skill's verify.sh step and do the rest.
 - Of the shell you have git log, git diff and git show; read files with your own tools.
-- When the pass is done, set docs/agent/last-reconciled.json to {\"commit\": \"$start\", \"date\": \"$(date +%F)\", \"note\": \"<one line: what this pass covered>\"}. If nothing needed changing, still move the marker; that is a good outcome.
+- When the pass is done, set docs/agent/last-reconciled.json to {\"commit\": \"$START\", \"date\": \"$(date +%F)\", \"note\": \"<one line: what this pass covered>\"}. If nothing needed changing, still move the marker; that is a good outcome.
 - Your final message becomes the pull request's description, in Markdown, for a trader who does not read code: what you checked, what you changed and why, anything you deliberately left alone, and that prose accuracy is not machine-verifiable (each claim was re-read against the code it describes). No preamble."
   ANTHROPIC_API_KEY="$key" claude -p "$prompt" --bare --restricted --model "${DOCS_DRIFT_MODEL:-opus}" \
     --tools "Read,Grep,Glob,Edit,Bash" \
@@ -201,14 +205,14 @@ EOF
   changed="$(git status --porcelain --untracked-files=all)"
   outside="$(printf '%s\n' "$changed" | grep -Ev "^ M $ALLOWED\$" | sed 's/^...//' | tr '\n' ' ')"
   [ -z "${outside// /}" ] || fail "the pass changed files it may not: $outside"
-  [ "$(marker)" = "$start" ] || fail "the pass did not set the marker to the commit it read (${start:0:7})"
+  [ "$(marker)" = "$START" ] || fail "the pass did not set the marker to the commit it read (${START:0:7})"
   bash -c "$CHECK" || fail "the docs tests failed after the pass; see the log"
 
   if [ -n "$DRY_RUN" ]; then
     say "dry run: the pull request that would open"
     printf '%s\n' "$body"
     git --no-pager diff --stat
-    git diff > "$SAVED_DIFF"
+    git diff "$START" > "$SAVED_DIFF"
     echo "The diff is saved in $SAVED_DIFF"
     STARTED=""
     tidy
@@ -218,7 +222,7 @@ EOF
   say "record: commit, push, pull request"
   git add -u || fail "git add failed"
   git commit -q -F - <<EOF || fail "git commit failed"
-Documentation drift pass through ${start:0:7}
+Documentation drift pass through ${START:0:7}
 
 Reconciles the documentation with the $count code commits since ${since:0:7},
 run unattended by scripts/docs_drift_week.sh.
