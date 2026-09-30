@@ -225,8 +225,10 @@ assessment, including why Tradier is not a candidate for the historical side.
 ## Frontend
 
 The private Charts workspace (`/charts`) reads Tradier candles and batched
-watchlist quotes through `/charts/workspace`. Its 15-second visible-tab polling
-shares bounded memory caches across panels; it is not a tick stream. Chart
+watchlist quotes through `/charts/workspace`. One API-owned Tradier WebSocket
+fans out valid trade prices through private `/charts/stream` SSE to visible tabs.
+The 15-second REST refresh reconciles candles, volume and studies and remains
+the fallback when streaming is unavailable. Chart
 calculations and temporary bars are separate from historical enrichment, and
 execution markers are read-only journal views. Layouts and horizontal levels
 are saved in the browser. See [chart boundaries](../charts-workspace.md).

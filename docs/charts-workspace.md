@@ -30,6 +30,10 @@ Tradier's [market data](https://docs.tradier.com/docs/market-data) is consolidat
 holders. [Historical limits](https://docs.tradier.com/docs/historical-data) are
 short for intraday bars, especially with extended hours. The UI states the
 requested history window instead of promising TradingView history depth.
+On 2026-09-29 the production token created a market-stream session (HTTP 200)
+and connected to Tradier's separate WebSocket endpoint with an SPY subscription.
+The session response's URL was for HTTP streaming, not WebSocket streaming.
+A market-hours tick has not yet been observed through the new browser relay.
 
 Recheck actual access without booting the API or touching the database:
 
@@ -56,9 +60,18 @@ cd backend
   of that symbol and can be deleted individually.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
-- One browser request per 15-second cycle while visible; pause, explicit
-  refresh, cleanup on navigation and abort on symbol changes. This is **polling,
-  not tick streaming**. The latest candle may still be forming.
+- One private API-owned Tradier WebSocket market stream serves all visible chart
+  tabs. Valid trade prices are batched to at most one event per second and sent
+  to each tab through private server-sent events. Symbol changes update that
+  single upstream subscription. Hidden or paused tabs disconnect; the stream
+  reconnects after provider or network failures.
+- The 15-second visible-tab REST refresh remains the source of truth for volume,
+  indicators, fill markers, and recovery after missed stream events. Live prices
+  move the selected intraday candles between refreshes; volume and studies may
+  lag by up to one refresh. Daily and weekly candles stay on REST history.
+- The selected price says whether it is a streamed trade, an extended-hours
+  candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
+  which can show regular-session closes after hours.
 
 ## Data and calculation boundaries
 
@@ -66,6 +79,10 @@ cd backend
 only the necessary journal marker columns after provider calls finish. It never
 writes fills, derived trades, enrichment or signals. At most the newest 1,000
 fills in the requested history are returned, with truncation disclosed.
+Private `GET /charts/stream` holds an SSE response. Only the backend uses the
+Tradier token and upstream WebSocket. There is one upstream market connection
+per API process; the supported deployment runs one API process. The stream is
+demand-driven and bounded to the symbol each tab is viewing.
 
 `backend/app/engine/chart_feed.py` loads the previous nine calendar days of minute
 history (30-minute memory TTL), today's candles (15-second TTL), daily bars
@@ -112,14 +129,16 @@ applies; rendering a marker does not revalidate the original execution time.
 VWAP, a numeric Wilder RSI reference, malformed bars, shared caches, cooldown,
 stale timestamps, access failure, private routes and option fill markers.
 `frontend/e2e/charts.spec.ts` verifies rendered canvases, linked symbols, saved
-levels, hidden/paused polling, non-overlapping slow refreshes, errors, missing
+levels, streamed price/candle updates, hidden/paused polling, non-overlapping slow refreshes, errors, missing
 credentials and phone layout using stubbed provider responses and a disposable
 SQLite backend. A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
+`backend/tests/test_chart_stream.py` checks session buckets, invalid event
+filters, and a single upstream subscription shared across tabs.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine
-runtime, tick streaming, trendline/fibonacci tools, replay, volume profile,
+runtime, raw tick tape, trendline/fibonacci tools, replay, volume profile,
 server-side chart alerts or cross-device layout persistence. The existing
 TradingView-to-Signals loop still runs separately. Keep TradingView while
 comparing the required indicators and sessions side by side.

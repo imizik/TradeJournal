@@ -1,19 +1,53 @@
 """Private, read-only chart data and journal execution markers."""
 
 from bisect import bisect_right
+import asyncio
 from datetime import datetime
+import json
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlmodel import Session, select
 
 from app.database import get_session
 from app.engine.chart_feed import ChartFeedError, chart_feed
+from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
 from app.models import Fill
 
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
+
+
+@router.get("/stream")
+async def stream(symbol: str, request: Request):
+    """Relay one private market stream to each visible chart tab as SSE."""
+    symbol = symbol.upper().strip()
+    if not SYMBOL.fullmatch(symbol):
+        raise HTTPException(422, "Use a US stock or ETF ticker.")
+    if not tradier.tradier_configured():
+        raise HTTPException(503, "Tradier market streaming is not configured.")
+    market = request.app.state.chart_market_stream
+
+    async def events():
+        client_id, queue = market.subscribe(symbol)
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
+        finally:
+            market.unsubscribe(client_id)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+    })
 
 
 @router.get("/workspace")
