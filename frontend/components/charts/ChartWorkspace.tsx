@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import PriceChart from "./PriceChart";
-import { chartStreamUrl, createCrosshairLink, DEFAULT_SETTINGS, etTime, fetchChartData, INTERVALS, overlayLiveTicks, parseChartTick, price, restoreSettings, STORAGE_KEY, validSymbol } from "@/lib/charts";
-import type { ChartData, ChartSettings, ChartStreamTick, Indicators, Interval } from "@/lib/charts";
+import SymbolPalette from "./SymbolPalette";
+import { barClock, chartStreamUrl, createCrosshairLink, createRangeLink, DEFAULT_SETTINGS, etTime, fetchChartData, INTERVALS, overlayLiveTicks, parseChartTick, price, restoreSettings, SMALL_HEIGHTS, STORAGE_KEY, validSymbol } from "@/lib/charts";
+import type { ChartData, ChartSettings, ChartStreamTick, Indicators, Interval, SmallChartSize } from "@/lib/charts";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
@@ -26,7 +27,12 @@ export default function ChartWorkspace() {
   const [levelPrice, setLevelPrice] = useState("");
   const [levelLabel, setLevelLabel] = useState("");
   const [levelError, setLevelError] = useState("");
+  const [immersive, setImmersive] = useState(false);
+  const [palette, setPalette] = useState(false);
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const [viewport, setViewport] = useState({ width: 1280, height: 900 });
   const link = useMemo(() => createCrosshairLink(), []);
+  const rangeLink = useMemo(() => createRangeLink(), []);
   const inFlight = useRef(false);
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
@@ -53,6 +59,19 @@ export default function ChartWorkspace() {
     const timer = window.setInterval(tick, 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    const measure = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+  useEffect(() => {
+    if (!immersive) return;
+    const prior = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prior; };
+  }, [immersive]);
 
   useEffect(() => {
     if (!ready) return;
@@ -121,9 +140,42 @@ export default function ChartWorkspace() {
     return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
   }, [ready, hasData, paused, requestKey, settings.symbol]);
 
+  // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
-    setSettings((s) => ({ ...s, symbol }));
-    setDrawing(false); setSymbolInput(""); setSymbolError(""); setLevelPrice("");
+    setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
+    setDrawing(false); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(false);
+  };
+  const choose = useRef(chooseSymbol);
+  const keys = useRef({ palette, immersive, watchlist: settings.watchlist, symbol: settings.symbol });
+  useEffect(() => {
+    choose.current = chooseSymbol;
+    keys.current = { palette, immersive, watchlist: settings.watchlist, symbol: settings.symbol };
+  });
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const state = keys.current;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setPalette((v) => !v); return; }
+      if (state.palette) return;
+      if (event.key === "Escape" && state.immersive) { setImmersive(false); return; }
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (event.altKey && (event.key === "ArrowDown" || event.key === "ArrowUp") && state.watchlist.length) {
+        event.preventDefault();
+        const index = state.watchlist.indexOf(state.symbol);
+        const next = index < 0 ? 0 : (index + (event.key === "ArrowDown" ? 1 : -1) + state.watchlist.length) % state.watchlist.length;
+        choose.current(state.watchlist[next]);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  const watchKey = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const rows = [...(event.currentTarget.closest("section")?.querySelectorAll<HTMLButtonElement>("[data-watch-row]") ?? [])];
+    const index = rows.indexOf(event.currentTarget);
+    const to = event.key === "ArrowDown" ? index + 1 : event.key === "ArrowUp" ? index - 1 : event.key === "Home" ? 0 : event.key === "End" ? rows.length - 1 : null;
+    if (to === null || !rows.length) return;
+    event.preventDefault();
+    rows[Math.max(0, Math.min(rows.length - 1, to))].focus();
   };
   const submitSymbol = (event: React.FormEvent) => {
     event.preventDefault();
@@ -151,27 +203,44 @@ export default function ChartWorkspace() {
   const priceSource = streamedPrice !== null ? "Live trade" : extendedPrice !== null ? "Extended-hours candle" : "Tradier quote";
   const shownAt = streamedPrice !== null ? latestTick?.at : extendedPrice !== null ? latestCandle?.time : selected?.trade_time;
   const priceAge = shownAt ? Math.max(0, Math.floor(clock - shownAt)) : null;
+  const clockFor = (interval: Interval) => barClock({ now: clock, interval, bars: viewData?.panels[interval]?.bars, session: settings.session,
+    paused, delayed: !!data?.delayed, stale: oldData });
+  const smallHeight = SMALL_HEIGHTS[settings.smallSize];
+  const multi = settings.layout === "multi";
+  // Immersive: the main chart fills the screen below the toolbar. On a tall,
+  // wide screen the row of smaller charts also fits without scrolling.
+  const fillHeight = viewport.height - 260;
+  const withRow = multi && viewport.width >= 1280 && fillHeight - smallHeight - 70 >= 520;
+  const mainHeight = immersive ? Math.max(420, withRow ? fillHeight - smallHeight - 70 : fillHeight) : 410;
+  const showAside = !immersive || settings.immersiveWatchlist;
   const change = shownPrice != null && selected?.previous_close && selected.previous_close > 0
     ? (shownPrice / selected.previous_close - 1) * 100 : selected?.change_percentage;
 
   return (
-    <div className="space-y-4 text-slate-300">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <div><div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />Trade Journal / Markets</div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-100">Charts</h1></div>
-        <div className="flex items-center gap-2 text-xs">
-          <span className="mr-1 hidden items-center gap-1.5 text-[11px] text-slate-500 sm:flex"><Check size={12} />{saved ? "Saved in this browser" : "Browser storage unavailable"}</span>
+    <div data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
+      ? "fixed inset-0 z-[70] space-y-2 overflow-y-auto overscroll-contain bg-[#0b1017] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] text-slate-300 sm:px-3"
+      : "space-y-4 text-slate-300"}>
+      <header className={`flex flex-wrap items-center justify-between gap-3 ${immersive ? "sticky top-0 z-20 -mx-2 bg-[#0b1017]/95 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-3 sm:px-3" : ""}`}>
+        <div>{!immersive && <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />Trade Journal / Markets</div>}
+          <h1 className={`${immersive ? "text-base" : "text-2xl"} font-semibold tracking-tight text-slate-100`}>Charts</h1></div>
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
+          <span className="mr-1 hidden items-center gap-1.5 text-[11px] text-slate-500 lg:flex"><Check size={12} />{saved ? "Saved in this browser" : "Browser storage unavailable"}</span>
+          <button className={`${button} hidden sm:inline-flex`} onClick={() => setPalette(true)} aria-label="Search symbols (Ctrl or Cmd+K)" title="Search symbols (⌘K / Ctrl+K)"><Search size={13} /><kbd className="text-[10px] text-slate-500">⌘K</kbd></button>
+          {immersive && <button className={button} aria-pressed={settings.immersiveWatchlist} onClick={() => setSettings((s) => ({ ...s, immersiveWatchlist: !s.immersiveWatchlist }))}>{settings.immersiveWatchlist ? "Hide watchlist" : "Watchlist"}</button>}
           <button className={button} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"}>
             {settings.layout === "multi" ? <Maximize2 size={13} /> : <Columns3 size={13} />}{settings.layout === "multi" ? "Focus" : "Five charts"}</button>
           <button className={button} onClick={() => setPaused((v) => !v)} aria-label={paused ? "Resume chart updates" : "Pause chart updates"}>{paused ? <Play size={13} /> : <Pause size={13} />}{paused ? "Resume" : "Pause"}</button>
           <button className={button} disabled={loading} aria-label="Refresh charts" onClick={() => { if (!inFlight.current) refreshNow.current(); }}><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
+          {immersive
+            ? <button className={`${button} border-sky-500/60 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25`} onClick={() => setImmersive(false)} aria-label="Exit full-screen charts"><X size={14} />Exit</button>
+            : <button className={button} onClick={() => setImmersive(true)} aria-label="Enter full-screen charts" title="Full-screen charts"><Expand size={13} /><span className="hidden sm:inline">Full screen</span></button>}
         </div>
       </header>
 
       <div className="rounded-xl border border-slate-700/50 bg-[#141b25]">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-slate-700/40 p-3">
           <form onSubmit={submitSymbol} className="relative flex h-9 items-center rounded-md border border-slate-700 bg-[#10151e]">
-            <Search size={14} className="ml-3 text-slate-500" /><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-28 bg-transparent px-2 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-300" />
+            <button type="button" aria-label="Open symbol search" onClick={() => setPalette(true)} className="ml-2 rounded p-1 text-slate-500 hover:text-slate-200"><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-28 bg-transparent px-2 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-300" />
             <button type="submit" aria-label="Load symbol" className="mr-1 rounded p-1.5 hover:bg-slate-800"><ArrowUpRight size={14} /></button>
           </form>
           <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{settings.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(shownPrice)}</span>
@@ -193,20 +262,31 @@ export default function ChartWorkspace() {
 
       <div className="flex flex-wrap items-center gap-2" aria-label="Chart indicators">
         {INDICATORS.map(([key, label]) => <button key={key} aria-pressed={settings.indicators[key]} onClick={() => setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !s.indicators[key] } }))} className={`rounded-full border px-2.5 py-1 text-[10px] ${settings.indicators[key] ? "border-slate-600 bg-slate-800/60 text-slate-200" : "border-slate-800 text-slate-600"}`}>{label}</button>)}
-        <span className="ml-auto text-[10px] text-slate-500">Linked symbols & crosshairs</span>
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          <button aria-pressed={settings.linkRange} onClick={() => setSettings((s) => ({ ...s, linkRange: !s.linkRange }))} title="Scroll and zoom every chart to the same time window"
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${settings.linkRange ? "border-sky-500/50 bg-sky-400/10 text-sky-200" : "border-slate-800 text-slate-500"}`}><Link2 size={11} />Link time ranges</button>
+          {multi && <div role="group" aria-label="Small chart height" className="flex overflow-hidden rounded-full border border-slate-800 text-[10px]">
+            {(["compact", "normal", "tall"] as SmallChartSize[]).map((size) => <button key={size} aria-pressed={settings.smallSize === size} aria-label={`${size} small charts`} onClick={() => setSettings((s) => ({ ...s, smallSize: size }))}
+              className={`px-2 py-1 ${settings.smallSize === size ? "bg-slate-800 text-slate-200" : "text-slate-500"}`}>{size === "compact" ? "S" : size === "normal" ? "M" : "L"}</button>)}
+          </div>}
+        </div>
       </div>
 
       {error && <div role="alert" aria-label="Chart data error" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">{error}{data && <span className="ml-1">Showing the last successful data.</span>}</div>}
       {!!data?.issues.length && <div role="alert" aria-label="Chart data warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">Refresh incomplete. {data.issues.join(" ")} Check timestamps before using these charts.</div>}
 
-      <div className="grid min-w-0 gap-3 lg:grid-cols-[minmax(0,1fr)_230px]">
+      <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {viewData ? <>
-            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} panel={viewData.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)} />
-            {settings.layout === "multi" && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {settings.intervals.slice(1).map((interval, index) => <PriceChart key={index} id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} panel={viewData.panels[interval]} indicators={settings.indicators} levels={levels} link={link} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => setSettings((s) => {
-                const frames = [...s.intervals]; [frames[0], frames[index + 1]] = [frames[index + 1], frames[0]]; return { ...s, intervals: frames };
-              })} />)}
+            <PriceChart id="main" main symbol={settings.symbol} interval={settings.intervals[0]} session={settings.session} panel={viewData.panels[settings.intervals[0]]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clockFor(settings.intervals[0])} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)} />
+            {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              {settings.intervals.slice(1).map((interval, index) => <div key={index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
+                <PriceChart id={`Panel ${index + 2}`} symbol={settings.symbol} interval={interval} session={settings.session} panel={viewData.panels[interval]} indicators={settings.indicators} levels={levels} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clockFor(interval)}
+                  height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
+                  onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={addLevel} onInterval={(i) => setIntervalAt(index + 1, i)} onFocus={() => { setExpanded(null); setSettings((s) => {
+                    const frames = [...s.intervals]; [frames[0], frames[index + 1]] = [frames[index + 1], frames[0]]; return { ...s, intervals: frames };
+                  }); }} />
+              </div>)}
             </div>}
           </> : <div className="flex min-h-[490px] flex-col items-center justify-center rounded-lg border border-slate-700/50 bg-[#10151e] px-8 text-center">
             {loading ? <Loader2 className="mb-4 animate-spin text-sky-300" size={28} /> : <ChartCandlestick className="mb-4 text-slate-600" size={36} />}
@@ -219,7 +299,7 @@ export default function ChartWorkspace() {
           </div>
         </div>
 
-        <aside className="min-w-0 space-y-3">
+        {showAside && <aside className="min-w-0 space-y-3">
           <section className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]" aria-label="Watchlist">
             <div className="flex items-center justify-between border-b border-slate-700/40 px-3 py-3"><h2 className="text-xs font-medium text-slate-200">Watchlist <span className="ml-1 text-slate-500">{settings.watchlist.length}</span></h2>
               <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className="rounded p-1 hover:bg-slate-800 disabled:opacity-30"><Plus size={14} /></button></div>
@@ -227,14 +307,14 @@ export default function ChartWorkspace() {
             {settings.watchlist.map((symbol) => {
               const quote = data?.quotes.find((q) => q.symbol === symbol);
               return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
-                <button onClick={() => chooseSymbol(symbol)} aria-label={`Chart ${symbol}`} className="grid min-w-0 flex-1 grid-cols-[1fr_60px_54px] items-center gap-1 py-3 pl-2.5 pr-1 text-[11px]"><span className="truncate text-left font-medium text-slate-200">{symbol}</span><span className="text-right font-mono text-slate-400">{price(quote?.last)}</span><span className={`text-right font-mono ${quote?.change_percentage != null && quote.change_percentage < 0 ? "text-rose-400" : "text-emerald-400"}`}>{quote?.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${quote.change_percentage.toFixed(2)}`}</span></button>
+                <button data-watch-row onKeyDown={watchKey} onClick={() => chooseSymbol(symbol)} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className="grid min-w-0 flex-1 grid-cols-[1fr_60px_54px] items-center gap-1 py-3 pl-2.5 pr-1 text-[11px]"><span className="truncate text-left font-medium text-slate-200">{symbol}</span><span className="text-right font-mono text-slate-400">{price(quote?.last)}</span><span className={`text-right font-mono ${quote?.change_percentage != null && quote.change_percentage < 0 ? "text-rose-400" : "text-emerald-400"}`}>{quote?.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${quote.change_percentage.toFixed(2)}`}</span></button>
                 <button aria-label={`Remove ${symbol} from watchlist`} className="mr-2 rounded p-0.5 text-slate-600 hover:text-rose-300" onClick={() => setSettings((s) => ({ ...s, watchlist: s.watchlist.filter((v) => v !== symbol) }))}><X size={12} /></button>
               </div>;
             })}
             {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
           </section>
 
-          <section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
+          {!immersive && <><section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
             <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2><span className="text-[10px] text-slate-600">{levels.length}/30</span></div>
             {levels.map((level) => <div key={level.id} className="mb-2 flex items-center gap-2 text-[11px]"><span className="h-px w-3 bg-blue-400" /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span><span className="font-mono text-blue-300">{price(level.price)}</span><button aria-label={`Delete ${level.label}`} onClick={() => setSettings((s) => ({ ...s, levels: { ...s.levels, [s.symbol]: (s.levels[s.symbol] ?? []).filter((v) => v.id !== level.id) } }))} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
             {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
@@ -247,14 +327,15 @@ export default function ChartWorkspace() {
 
           <section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
             {data?.fills.length ? <div className="space-y-3">{data.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{data.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
-          </section>
-        </aside>
+          </section></>}
+        </aside>}
       </div>
 
-      <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
+      {palette && <SymbolPalette current={settings.symbol} recent={settings.recent} watchlist={settings.watchlist} quotes={data?.quotes ?? []} onChoose={chooseSymbol} onClose={() => setPalette(false)} />}
+      {!immersive && <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
         <p className="max-w-3xl">{data?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>
         <div className="text-right"><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-300">TradingView Lightweight Charts™</a><a href="/lightweight-charts-NOTICE.txt" className="block">Copyright (с) 2025 TradingView, Inc.</a></div>
-      </footer>
+      </footer>}
     </div>
   );
 }

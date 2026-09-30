@@ -181,7 +181,10 @@ or a live Alpaca verdict.
 
 `frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
 quote responses: five canvases, symbol linking, saved levels, streamed trade updates,
-refresh visibility, pause/error behavior and phone overflow. `backend/tests/test_charts.py`
+refresh visibility, pause/error behavior, phone overflow, the next-bar countdown
+states, in-place candle updates versus resets, linked time ranges, full screen and
+keyboard symbol search. Lightweight Charts internals are read through a test-only
+`window.__tjCharts` map the spec installs; production never defines it. `backend/tests/test_charts.py`
 and `backend/tests/test_chart_stream.py` verify
 private routes and provider/indicator boundaries. Actual Tradier/Webull access
 is checked separately by `backend/scripts/check_chart_feed.py`; browser fixtures

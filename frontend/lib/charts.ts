@@ -27,17 +27,20 @@ export type ChartStreamTick = {
 };
 export type PriceLevel = { id: string; price: number; label: string };
 export type Indicators = Record<"ema9" | "ema20" | "ema50" | "ema200" | "vwap" | "volume" | "rsi" | "fills", boolean>;
+export type SmallChartSize = "compact" | "normal" | "tall";
 export type ChartSettings = {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: "regular" | "extended";
   layout: "multi" | "single"; indicators: Indicators; levels: Record<string, PriceLevel[]>;
+  recent: string[]; linkRange: boolean; smallSize: SmallChartSize; immersiveWatchlist: boolean;
 };
 export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {},
+  levels: {}, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false,
 };
+export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
 export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(value);
 
@@ -62,6 +65,10 @@ export function restoreSettings(): ChartSettings {
       layout: value.layout === "single" ? "single" : "multi",
       indicators: Object.fromEntries(Object.entries(DEFAULT_SETTINGS.indicators).map(([key, fallback]) => [key, typeof value.indicators?.[key] === "boolean" ? value.indicators[key] : fallback])) as Indicators,
       levels,
+      recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
+      linkRange: value.linkRange === true,
+      smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
+      immersiveWatchlist: value.immersiveWatchlist === true,
     };
   } catch { return DEFAULT_SETTINGS; }
 }
@@ -131,6 +138,91 @@ export function barAt(bars: ChartBar[], time: number): ChartBar | undefined {
   while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= time) low = mid + 1; else high = mid; }
   const bar = bars[low - 1];
   return bar && time < bar.end_time ? bar : undefined;
+}
+
+export const INTERVAL_SECONDS: Record<Interval, number> = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 };
+export const intradayInterval = (interval: Interval) => interval !== "1D" && interval !== "1W";
+
+const nyClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+/** The same clock-session segments as backend `session_part` (no holiday calendar). */
+export function nySession(now: number): { part: "pre" | "regular" | "post"; start: number; end: number; minute: number; second: number; startsAt: number } | null {
+  const parts = Object.fromEntries(nyClock.formatToParts(new Date(now * 1000)).map((p) => [p.type, p.value]));
+  if (parts.weekday === "Sat" || parts.weekday === "Sun") return null;
+  const minute = Number(parts.hour) * 60 + Number(parts.minute);
+  const second = Number(parts.second);
+  const segment = minute >= 240 && minute < 570 ? ["pre", 240, 570] as const : minute >= 570 && minute < 960 ? ["regular", 570, 960] as const
+    : minute >= 960 && minute < 1200 ? ["post", 960, 1200] as const : null;
+  if (!segment) return null;
+  return { part: segment[0], start: segment[1], end: segment[2], minute, second, startsAt: Math.floor(now) - ((minute - segment[1]) * 60 + second) };
+}
+
+export type BarClock = { state: "live"; remaining: number } | { state: "paused" | "delayed" | "stale" | "closed" | "waiting"; remaining?: undefined };
+/**
+ * Seconds until the forming intraday bar closes, from the local clock and the
+ * backend's session-anchored buckets. Anything that would make the number
+ * misleading returns a named state instead, so no provider call is needed.
+ */
+export function barClock({ now, interval, bars, session, paused, delayed, stale }: {
+  now: number; interval: Interval; bars: ChartBar[] | undefined; session: ChartSettings["session"];
+  paused: boolean; delayed: boolean; stale: boolean;
+}): BarClock | null {
+  if (!intradayInterval(interval)) return null;
+  if (paused) return { state: "paused" };
+  if (delayed) return { state: "delayed" };
+  if (stale) return { state: "stale" };
+  const clock = nySession(now);
+  if (!clock || (session === "regular" && clock.part !== "regular")) return { state: "closed" };
+  const last = bars?.at(-1);
+  // Holidays and halted symbols look like an open clock with no bars in it.
+  if (!last || last.end_time <= clock.startsAt) return { state: "waiting" };
+  const width = INTERVAL_SECONDS[interval] / 60;
+  const anchor = clock.start + Math.floor((clock.minute - clock.start) / width) * width;
+  const finish = Math.min(anchor + width, clock.end);
+  return { state: "live", remaining: Math.max(0, (finish - clock.minute) * 60 - clock.second) };
+}
+export const countdown = (seconds: number) => {
+  const h = Math.floor(seconds / 3600), m = Math.floor(seconds / 60) % 60, s = seconds % 60;
+  return h ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
+};
+
+/**
+ * How a new bar array relates to the one already drawn. Streamed ticks keep
+ * unchanged bar objects, so the prefix check is usually reference equality;
+ * REST refreshes compare values, and any changed older bar forces a reset.
+ */
+export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" | "append" | "reset" {
+  if (!prev.length || !next.length) return prev.length === next.length ? "same" : "reset";
+  const appended = next.length === prev.length + 1;
+  if (!appended && next.length !== prev.length) return "reset";
+  const stable = appended ? prev.length : prev.length - 1;
+  for (let i = stable - 1; i >= 0; i--) if (!sameBar(prev[i], next[i])) return "reset";
+  if (appended) return next[stable].time > prev[stable - 1].time ? "append" : "reset";
+  const a = prev[stable], b = next[stable];
+  if (a.time !== b.time) return "reset";
+  return sameBar(a, b) ? "same" : "last";
+}
+const BAR_KEYS = ["time", "end_time", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi"] as const;
+const sameBar = (a: ChartBar, b: ChartBar) => a === b || BAR_KEYS.every((key) => a[key] === b[key]);
+
+export type TimeRange = { from: number; to: number };
+export type RangeLink = ReturnType<typeof createRangeLink>;
+/**
+ * Shares a visible time range between charts. The chart the user is moving
+ * owns the link briefly; echoes from charts applying its range are dropped,
+ * which is what keeps five subscribers from feeding back into each other.
+ */
+export function createRangeLink(hold = 250) {
+  const listeners = new Map<string, (range: TimeRange) => void>();
+  let owner = "", ownedAt = 0;
+  return {
+    listen(id: string, fn: (range: TimeRange) => void) { listeners.set(id, fn); return () => { listeners.delete(id); }; },
+    emit(range: TimeRange, source: string) {
+      const now = performance.now();
+      if (owner && owner !== source && now - ownedAt < hold) return;
+      owner = source; ownedAt = now;
+      listeners.forEach((fn, id) => { if (id !== source) fn(range); });
+    },
+  };
 }
 
 export type CrosshairLink = ReturnType<typeof createCrosshairLink>;
