@@ -1,10 +1,20 @@
 # Charts epic: roadmap
 
-**What this is.** The working plan for turning `/charts` into the place trading
-happens: a chart that feels as good to use as TradingView, with this journal's
-own knowledge drawn on and beside it. Codex and Claude both work from this file.
-It is a plan, not a specification. `docs/charts-workspace.md` describes what is
-built today; this file says what comes next and why.
+**The goal: replace TradingView.** This app becomes the user's primary charting
+environment for stocks and ETFs. The chart has to be as good to use as
+TradingView's, with this journal's own knowledge drawn on and beside it. Not a
+chart embedded in a journal, and not a companion to keep beside TradingView. Every
+item below is judged by whether it moves the user closer to never opening
+TradingView for normal chart work.
+
+**What this is.** The working plan for that goal. Codex and Claude both work
+from this file. It is a plan, not a specification. `docs/charts-workspace.md`
+describes what is built today; this file says what comes next and why.
+
+**Two layers, kept independent.** Rendering never knows which provider a candle
+came from. Market data (Tradier, Alpaca, our own stored bars, and any future
+provider) is normalized in the backend before anything draws it. Drawings,
+indicators and levels work on normalized bars only.
 
 **Scope.** Chart UX first. Market intelligence (levels, options positioning,
 your own trades) belongs here only where it appears **on or beside the chart**.
@@ -36,7 +46,8 @@ candle updates, Cmd/Ctrl+K search, linked time ranges).
 
 | ID | Item | Phase | Status |
 |---|---|---|---|
-| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | next |
+| C0.0 | Deep history: years of stitched minute history, stored locally, loaded as you scroll back | 0 Foundations | next |
+| C0.1 | Market calendar: holidays and early closes in the countdown and session logic | 0 Foundations | todo |
 | C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | todo |
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | todo |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | todo |
@@ -75,8 +86,9 @@ candle updates, Cmd/Ctrl+K search, linked time ranges).
   Short-dated options dominate, so **intraday levels and SPY/QQQ positioning
   matter more than weekly swing tools**.
 - The open is the best time bucket (53% win rate against 45% midday).
-- No futures are traded, and no connected provider carries futures. **NQ and ES
-  are out of reach; QQQ, SPY and SPX stand in for them.**
+- No futures are traded or watched (confirmed by the user, 2026-09-30). QQQ,
+  SPY and SPX are the index charts. No connected provider carries futures, and
+  none is needed.
 - Webull is dormant by the user's choice (2026-09-24). Leave it out of plans
   until they ask.
 
@@ -95,6 +107,7 @@ TradingView's.
 
 | Area | Today | Why it matters |
 |---|---|---|
+| History depth | About 10 days of minute bars and at most 1,200 candles per panel; you cannot scroll back further | The first thing that sends you back to TradingView |
 | Symbol switch | The chart is destroyed and recreated (`chart.remove()` in `frontend/components/charts/PriceChart.tsx`); the workspace blanks to a loading card until all five intervals return | Switching is TradingView's core loop, and it should never flash |
 | Re-renders | A one-second clock and every streamed tick set state at the top of `frontend/components/charts/ChartWorkspace.tsx`, re-rendering all five panels | Headroom disappears as soon as overlays are added |
 | Levels | Created by a form or a click in draw mode; they cannot be dragged, edited in place, locked or hidden | Direct manipulation is most of what makes a chart feel like a canvas |
@@ -151,7 +164,7 @@ depends on them.
 | Data | Tradier | Alpaca (free, IEX) | Polygon (Basic) | Use |
 |---|---|---|---|---|
 | Live equity trades | WebSocket, consolidated; one session per token (live since #82) | IEX only: one venue, wide quotes | — | Tradier |
-| Intraday candles | About 10 days of minutes | IEX live; **historical SIP** (older than 15 minutes) | 5 calls/min | Tradier live; Alpaca SIP for history (C3.3, C2.4 baseline) |
+| Intraday candles | About 10 days of minutes | IEX live; **historical SIP** back to 2016 (not the latest 15 minutes) | 5 calls/min | Tradier for today and live; Alpaca SIP for every earlier session, stored locally (C0.0) |
 | Daily candles | Years; dividend adjustment not guaranteed | Yes | Yes, cached for enrichment | Tradier (already) |
 | Market calendar | `/v1/markets/calendar`: holidays and early closes (Thanksgiving closed, 11/27 closes 13:00) | `/v2/calendar` | — | Tradier (C0.1) |
 | Option chain | One call per expiration: bid/ask/sizes, last, **volume, open interest**, greeks; about 200 ms. SPY nearest expiry: 638 contracts, OI on 498 | Snapshots on the indicative feed, **no open interest** | EOD only | **Tradier** |
@@ -170,6 +183,25 @@ response headers): the chart feed keeps its 60/minute cap in
 `backend/app/engine/chart_feed.py`; options positioning gets at most
 **30/minute**; position quotes stay under 10; the rest is headroom. Fetch a whole
 expiration once and derive everything from it. Never poll individual strikes.
+
+## Data gaps
+
+What is missing, what it blocks, and the cheapest fix. Check here before
+proposing a new provider.
+
+| Gap | Blocks | Cheapest fix | Where |
+|---|---|---|---|
+| Intraday history beyond about 10 days | Scroll-back, past trades on the chart, relative-volume baseline, replay | Alpaca free historical SIP, stored locally: $0 | C0.0 |
+| Open-interest history | Any comparison of positioning over time | Record our own daily snapshots: $0; cannot be backfilled, so start early | C4.3 |
+| Session calendar | Correct holiday and early-close states | Tradier market calendar: $0, verified | C0.1 |
+| Upcoming earnings accuracy | Earnings markers | Tradier corporate calendar, checked against company announcements | C2.5 |
+| Macro events (CPI, FOMC, NFP) | Event markers | A small hand-kept yearly file | Later |
+| Streamed option trades with bid/ask | Options flow | A regular-hours probe of the existing Tradier stream | Later |
+| Futures (NQ, ES), footprint, depth of book | Nothing the user needs | Not needed: no futures are traded or watched | Not building |
+
+No paid data upgrade is needed for anything in Phases 0–7. Do not upgrade
+Tradier: the chart uses about 9 of its 120 requests a minute, and its limit is
+history depth, which C0.0 solves for free.
 
 ## Rules every item follows
 
@@ -202,7 +234,41 @@ expiration once and derive everything from it. Never poll individual strikes.
 
 Each phase is useful on its own. Stop after any of them and the chart is better.
 
-### Phase 0 — Foundations (small, do first)
+### Phase 0 — Foundations (do first)
+
+**C0.0 Deep history.** The chart stitches two consolidated sources and keeps
+what it fetches:
+
+- **Completed sessions** (every day before today) come from Alpaca historical
+  minute bars with `feed=sip` passed explicitly on every request. Production's
+  `ALPACA_DATA_FEED` is `iex`, a single venue, and **IEX bars must never reach the
+  chart**. The existing per-feed cache layout in `backend/app/engine/alpaca.py`
+  (`1Min/{feed}/{ticker}/{date}.json`) already keeps the two apart; a completed
+  SIP session is stored once and never refetched.
+- **Today and live** stay on Tradier (REST, then the stream), as now. Alpaca's
+  free tier refuses the latest 15 minutes of SIP data anyway.
+- **Each session comes from one provider**, never mixed within a day, and every
+  bar carries its source so the hover legend can say where it came from.
+- **Scroll-back:** when the visible range nears the left edge, the panel asks
+  `GET /charts/history` for the previous page (resampled by `chart_math.py` to the
+  panel's interval) and prepends it without moving the view. The 1,200-candle cap
+  becomes a page size, with a memory ceiling per panel.
+- **Indicators on older pages** are computed with a warmup prefix long enough for
+  EMA 200 to converge, and that rule is written in `docs/charts-workspace.md`.
+- **Budget:** Alpaca historical calls get their own cap in `chart_feed.py`,
+  separate from Tradier's.
+
+*Done when:*
+
+- A 5m chart scrolls back six months smoothly in a browser test with fixture pages.
+- A backend test stitches Alpaca fixture days with a Tradier "today" and finds no
+  duplicate, missing or overlapping minute at the boundary.
+- A test asserts every Alpaca history request carries `feed=sip` and never asks
+  for the latest 15 minutes.
+- A cached completed session costs zero provider calls on the next load.
+
+Once this lands, C2.4's baseline, C3.3 and C6.1 read history from here instead
+of fetching their own.
 
 **C0.1 Market calendar.** Read Tradier's market calendar once a day in
 `backend/app/engine/chart_feed.py`, cache it and send today's session hours with
@@ -306,8 +372,8 @@ tolerance band, and the definitions are written in `docs/charts-workspace.md`.
 each interaction event on fixture bars.
 
 **C2.4 Relative volume.** A baseline of average cumulative volume by minute of
-day over the last 20 sessions, computed nightly per watchlist symbol from Alpaca
-historical SIP minute bars (cached; about 390 numbers per symbol per day). Volume
+day over the last 20 sessions, computed nightly per watchlist symbol from the
+deep-history store (C0.0); about 390 numbers per symbol per day. Volume
 bars are shaded by relative volume, and the legend reads "RVol 2.6× for 10:17".
 Until the baseline exists, say so rather than guessing. *Done when:* the
 calculation matches `compute_rvol_time_adjusted()` on the same inputs, and the
@@ -335,10 +401,9 @@ the average-entry line and label open P&L. Partial exits appear as markers.
 *Done when:* scale-ins and scale-outs from seeded fills render as expected.
 
 **C3.3 Historical chart mode.** "Open on chart" from a trade or fill page opens
-`/charts` at that date and time with the trade's candles. Candles older than
-Tradier's window come from Alpaca historical SIP minute bars through the
-existing `backend/app/engine/alpaca.py` caches, labeled with their source. The
-live stream is off, and a banner shows the date with a "Back to live" button.
+`/charts` scrolled to that date and time, with the trade's arrows on its candles.
+Candles come from the deep-history store (C0.0). A banner shows the date with a
+"Back to live" button.
 *Done when:* a trade from months ago opens with its arrows on the right candles,
 and no Alpaca IEX (single-venue) bars ever mix into consolidated candles.
 
@@ -465,8 +530,9 @@ Worth doing once the phases above have shipped, in roughly this order:
   patterns.
 - An indicator marketplace or a Pine runtime. The fixed studies stay: EMA
   9/20/50/200, VWAP, RSI and volume. Parameter editing only if the user asks.
-- Futures charts, Level 2, footprint or order-flow charts: no provider carries
-  them.
+- Futures charts, Level 2, footprint or order-flow charts: the user neither
+  trades nor watches futures (decided 2026-09-30), and equity depth of book is
+  not needed for options trading.
 - Dealer positioning presented as fact, "bullish/bearish flow" scores, and a
   gamma flip for single names.
 - Polling individual option strikes, or a second Tradier stream session.
@@ -486,3 +552,9 @@ Settled with the user on 2026-09-30. Do not reopen them without the user.
    open positions and the top ten watchlist names.
 3. **Per-panel symbols (C7.1) stay last.** All panels follow one symbol until
    Phases 0–6 have shipped.
+4. **The goal is to replace TradingView** as the primary chart for stocks and
+   ETFs. The epic is judged against that.
+5. **No NQ or other futures.** The user does not trade or watch them. No futures
+   feed, Webull futures investigation or Databento-style subscription.
+6. **Deep history (C0.0) comes first.** Scroll-back is what replacing TradingView
+   needs soonest, and three later items reuse it.
