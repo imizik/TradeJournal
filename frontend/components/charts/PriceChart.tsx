@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, IPriceLine, Time, UTCTimestamp } from "lightweight-charts";
-import { Expand, LocateFixed, Maximize2, Minimize2, Timer } from "lucide-react";
+import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
 import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, intradayInterval, price, staleCandles } from "@/lib/charts";
 import type { ChartBar, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
 import { useClock, useLivePanel } from "@/lib/chartStore";
@@ -65,8 +65,10 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, interval, session, panel: rest, pending, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
+  follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
   pending?: string | null;
   link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed; height: number;
@@ -308,7 +310,11 @@ export default function PriceChart({ id, symbol, interval, session, panel: rest,
   return (
     <section aria-label={`${symbol} ${interval} chart`} className={`relative min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
-        <div className="flex items-center gap-2 text-xs"><span className="font-semibold tracking-wide text-slate-200">{symbol}</span>
+        <div className="flex items-center gap-2 text-xs">{onPickSymbol
+          ? <button aria-label={`${id} symbol`} title={follows ? "Follows the main symbol. Choose a symbol for this chart." : "Holds its own symbol. Change it, or follow the main symbol."} onClick={onPickSymbol}
+            className={`-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold tracking-wide hover:bg-slate-800 ${follows ? "text-slate-200" : "text-sky-200"}`}>
+            {symbol}{follows ? <Link2 size={11} className="text-slate-500" aria-hidden /> : <Pin size={11} className="text-sky-300" aria-hidden />}</button>
+          : <span className="font-semibold tracking-wide text-slate-200">{symbol}</span>}
           <select aria-label={`${main ? "Main" : id} interval`} value={interval} onChange={(e) => onInterval(e.target.value as Interval)} className="rounded border-0 bg-slate-800 px-1.5 py-1 text-[11px] text-slate-300">
             {INTERVALS.map((i) => <option key={i}>{i}</option>)}
           </select>

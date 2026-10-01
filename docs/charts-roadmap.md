@@ -65,8 +65,8 @@ from planned work.
 | C0.2 | Hot path: stop the whole workspace re-rendering every second and every tick | 0 Foundations | done ([PR #91](https://github.com/imizik/TradeJournal/pull/91)) |
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | done ([PR #92](https://github.com/imizik/TradeJournal/pull/92)) |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | done ([PR #93](https://github.com/imizik/TradeJournal/pull/93)) |
-| C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | next |
-| C7.2 | Named saved layouts | 7 Layouts | todo |
+| C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | done |
+| C7.2 | Named saved layouts | 7 Layouts | next |
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | todo |
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | todo |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | todo |
@@ -611,7 +611,7 @@ and compares the recorded decision with the actual trade using correct units.
 
 ### Phase 7 — Layouts
 
-**C7.1 Per-panel symbol link groups.** Each panel follows the main symbol or
+**C7.1 Per-panel symbol link groups (done).** Each panel follows the main symbol or
 holds its own (for example SPY, QQQ and the traded name). Crosshair and time
 range stay linked by time. Each extra symbol costs its own chart-feed loads, so
 cap it at three distinct symbols.

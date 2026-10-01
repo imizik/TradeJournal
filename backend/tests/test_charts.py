@@ -189,6 +189,28 @@ def test_workspace_uses_todays_calendar_and_discloses_when_it_is_missing(provide
     assert "issues" in missing and not missing["issues"]  # disclosed, not reported as stale data
 
 
+def test_three_symbol_layout_from_two_tabs_stays_within_the_chart_budget(provider):
+    """MRVL (five panels) plus SPY and QQQ held by panels, refreshed every 15 s by two tabs."""
+    feed, calls, clock, _ = provider
+    watchlist = ["SPY", "QQQ", "MRVL", "NVDA"]
+    per_minute = []
+    for _minute in range(3):
+        start = len(calls)
+        for _refresh in range(4):
+            for _tab in range(2):
+                feed.workspace("MRVL", ["5m", "15m", "1h", "1D", "1m"], watchlist, "extended")
+                feed.workspace("SPY", ["5m", "1h"], [], "extended", quotes=False)
+                feed.workspace("QQQ", ["15m"], [], "extended", quotes=False)
+            clock[0] += 15.01
+        per_minute.append(len(calls) - start)
+    # Each 15 s: three minute reads and one quote batch; MRVL's daily bars once a minute.
+    # Held symbols never read quotes, and the second tab is served from the shared cache.
+    assert per_minute[1:] == [17, 17]
+    assert max(per_minute) <= 20 < 60  # one third of the chart budget; Tradier allows 120
+    assert sum("quotes" in url for url, _ in calls) == 12
+    assert {params["symbol"] for url, params in calls if "timesales" in url} == {"MRVL", "SPY", "QQQ"}
+
+
 def test_provider_failure_retains_previous_data_with_original_timestamp(provider):
     feed, calls, clock, status = provider
     path, params = "/v1/markets/quotes", {"symbols": "SPY"}
@@ -290,6 +312,35 @@ def test_history_route_identifies_window_and_returns_bounded_old_markers(route_c
     assert result["before"] == before and result["older_cursor"] == bars[0]["time"]
     assert [m["id"] for m in result["markers"]] == ["00000000-0000-0000-0000-00000000000c", "00000000-0000-0000-0000-00000000000d"]
     assert route_client.get(f"/charts/history?symbol=SPY&interval=5m&session=regular&before={before}&limit=1201").status_code == 422
+
+
+def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route_client, monkeypatch):
+    calls = []
+
+    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True):
+        calls.append((symbol, frames, watchlist, quotes))
+        if symbol == "BAD":
+            raise ChartFeedError("Tradier could not load these charts.")
+        bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
+        return {"panels": {f: {"bars": bars, "markers": []} for f in frames}, "fetched_at": {"intraday": 1}, "intraday_as_of": 2,
+                "issues": [], "quotes": [{"symbol": symbol}] if quotes else []}
+
+    monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m,1D&watchlist=NVDA&session=regular&extras=SPY:5m.1h,BRK.B:15m").json()
+    assert calls == [("MRVL", ["5m", "1D"], ["NVDA"], True), ("SPY", ["5m", "1h"], [], False), ("BRK.B", ["15m"], [], False)]
+    assert set(data["extras"]) == {"SPY", "BRK.B"} and set(data["extras"]["SPY"]["panels"]) == {"5m", "1h"}
+    assert data["extras"]["SPY"]["fetched_at"] == {"intraday": 1} and "quotes" not in data["extras"]["SPY"]
+    # Fill markers are per symbol: the seeded SPY fills mark the held SPY panel, not MRVL's.
+    assert len(data["extras"]["SPY"]["panels"]["5m"]["markers"]) == 2 and not data["fills"]
+    # A held symbol that fails leaves the main charts and the other held symbol intact.
+    data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
+    assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
+    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": ["Tradier could not load these charts."]}
+
+
+@pytest.mark.parametrize("extras", ["SPY:5m,QQQ:5m,IWM:5m", "MRVL:5m", "SPY:", "SPY:2m", "SPY:5m.15m.1h.4h.1D.1m", "../x:5m"])
+def test_workspace_route_refuses_more_than_three_symbols_or_bad_held_panels(route_client, extras):
+    assert route_client.get(f"/charts/workspace?symbol=MRVL&intervals=5m&extras={extras}").status_code == 422
 
 
 @pytest.mark.parametrize("query", ["symbol=../../secret", "intervals=1s", "session=overnight", "intervals=", "watchlist=" + ",".join(f"S{i}" for i in range(31))])

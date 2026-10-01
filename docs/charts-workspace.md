@@ -122,6 +122,19 @@ cd backend
   session, so moving an interval into the main chart or editing the watchlist
   redraws from candles already loaded, and each interval's older history
   survives the move.
+- Each smaller chart follows the main symbol or holds its own: click its
+  symbol to pick one from the symbol search, or to follow again. A pin marks a
+  held symbol and a link icon a follower. Charts show three symbols at most
+  (the main one and two held), so SPY, QQQ and the traded name fit side by
+  side; a fourth is refused with a message. Switching the main symbol moves
+  only the followers. **Focus** on a chart holding SPY makes SPY the main
+  symbol and leaves that panel holding the previous one. Held symbols are part
+  of the saved layout, shared across devices; the main symbol stays per device.
+  One workspace request carries every symbol (`extras=SPY:5m.1h,QQQ:15m`;
+  held symbols skip the quote read), and one stream carries their trades
+  (`/charts/stream?symbols=…`). History, retries and day rollover are kept per
+  symbol and interval, and crosshair and time-range links match charts by time.
+  Drawing a level still arms the main chart.
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
   which can show regular-session closes after hours.
@@ -179,7 +192,7 @@ fills in the requested history are returned, with truncation disclosed.
 Private `GET /charts/stream` holds an SSE response. Only the backend uses the
 Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
-demand-driven and bounded to the symbol each tab is viewing.
+demand-driven and bounded to the symbols each tab is viewing (three at most).
 
 `backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), daily
 bars (60-second TTL), and a single batch of watchlist quotes (15-second TTL).
@@ -187,7 +200,8 @@ All five panels share these reads. A lock coalesces concurrent misses; a bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable
 symbol normally uses about nine upstream requests per minute after its
-three-request first load.
+three-request first load; with SPY and QQQ held by panels it uses about 17,
+and a second tab with the same layout adds none.
 A 429 stops upstream chart calls for a minute. The existing
 position-quote client remains separate and can still share the token's allowance.
 These are single-API-process caches, matching the current deployment.
@@ -301,7 +315,15 @@ re-renders only the 1m chart, and a repeated trade re-renders none.
 A keep-alive test holds the provider response mid-switch and checks that all
 five chart instances survive symbol, interval, session and RSI changes, that
 the old frame stays dimmed under its label, that the loading card never
-appears, and that a failed symbol clears the charts. Settings tests save a
+appears, and that a failed symbol clears the charts. Per-panel symbol tests
+hold SPY and QQQ beside the traded name through a main-symbol switch (the held
+chart is neither recreated nor redrawn), route each streamed trade to its own
+symbol's chart, pause and resume all three, keep linked time ranges, refuse a
+fourth symbol, scroll a held chart back through its own history, and focus a
+held chart into the main one. `backend/tests/test_charts.py` bounds a
+three-symbol layout from two tabs to 17 upstream requests a minute, and
+`backend/tests/test_chart_stream.py` routes several symbols per tab over one
+upstream subscription. Settings tests save a
 level in one browser context and read it in a second one through the e2e
 backend, check that a stale save is refused, and use a fake settings server for
 a merged conflict, the first-visit merge of browser-only settings, and an

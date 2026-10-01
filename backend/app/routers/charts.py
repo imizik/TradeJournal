@@ -25,6 +25,8 @@ from app.models import ChartSettingsRecord, Fill
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 SETTINGS = "default"
+# The main symbol plus two held by panels: each costs its own chart-feed reads.
+MAX_SYMBOLS = 3
 # Thirty levels on each of hundreds of symbols fit; a runaway client does not.
 SETTINGS_BYTES = 512_000
 
@@ -81,17 +83,18 @@ def history(
 
 
 @router.get("/stream")
-async def stream(symbol: str, request: Request):
-    """Relay one private market stream to each visible chart tab as SSE."""
-    symbol = symbol.upper().strip()
-    if not SYMBOL.fullmatch(symbol):
-        raise HTTPException(422, "Use a US stock or ETF ticker.")
+async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=60)):
+    """Relay one private market stream to each visible chart tab as SSE, for
+    the tab's main symbol plus any symbols its panels hold (three at most)."""
+    wanted = list(dict.fromkeys(s.strip().upper() for s in f"{symbol},{symbols}".split(",") if s.strip()))
+    if not wanted or len(wanted) > MAX_SYMBOLS or any(not SYMBOL.fullmatch(s) for s in wanted):
+        raise HTTPException(422, f"Stream one to {MAX_SYMBOLS} US stock or ETF tickers.")
     if not tradier.tradier_configured():
         raise HTTPException(503, "Tradier market streaming is not configured.")
     market = request.app.state.chart_market_stream
 
     async def events():
-        client_id, queue = market.subscribe(symbol)
+        client_id, queue = market.subscribe(wanted)
         try:
             while True:
                 if await request.is_disconnected():
@@ -116,23 +119,42 @@ def workspace(
     intervals: str = Query("5m,15m,1h,1D,1m", max_length=80),
     watchlist: str = Query("SPY,QQQ,MRVL,NVDA,AMD,META", max_length=500),
     session: str = Query("extended", pattern="^(regular|extended)$"),
+    extras: str = Query("", max_length=120),
     db: Session = Depends(get_session),
 ):
+    """The main symbol's panels and quotes, plus panels for up to two symbols
+    that panels hold on their own (``extras=SPY:5m.1h,QQQ:15m``)."""
     symbol = symbol.upper().strip()
     symbols = list(dict.fromkeys(s.strip().upper() for s in watchlist.split(",") if s.strip()))
     frames = list(dict.fromkeys(s.strip() for s in intervals.split(",") if s.strip()))
-    if not SYMBOL.fullmatch(symbol) or any(not SYMBOL.fullmatch(s) for s in symbols):
+    held: dict[str, list[str]] = {}
+    for part in filter(None, (p.strip() for p in extras.split(","))):
+        name, _, wanted = part.partition(":")
+        held[name.strip().upper()] = list(dict.fromkeys(i for i in wanted.split(".") if i))
+    if not SYMBOL.fullmatch(symbol) or any(not SYMBOL.fullmatch(s) for s in [*symbols, *held]):
         raise HTTPException(422, "Use a US stock or ETF ticker.")
     if len(symbols) > 30 or not frames or len(frames) > 5 or any(f not in INTERVALS for f in frames):
         raise HTTPException(422, "Choose up to 5 supported intervals and 30 watchlist symbols.")
+    if symbol in held or len(held) > MAX_SYMBOLS - 1 or any(not f or len(f) > 5 or any(i not in INTERVALS for i in f) for f in held.values()):
+        raise HTTPException(422, f"Panels can hold up to {MAX_SYMBOLS - 1} other symbols, each with up to 5 supported intervals.")
     try:
         data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar)
     except ChartFeedError as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
+    data["extras"] = {}
+    for name, wanted in held.items():
+        try:
+            other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False)
+            data["extras"][name] = {key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues")}
+        except ChartFeedError as exc:
+            # A held symbol that cannot load leaves the main charts intact.
+            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)]}
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
     data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
+    for name, other in data["extras"].items():
+        _markers(db, name, list(other["panels"].values()))
     return data
 
 

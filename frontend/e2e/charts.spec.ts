@@ -10,10 +10,10 @@ test.beforeEach(async ({ context }, testInfo) => {
 
 // Provider responses are deliberately stubbed: browser checks prove interaction,
 // not brokerage entitlement. Backend tests exercise normalization and real routes.
-function fixture(url: string): ChartData {
-  const query = new URL(url).searchParams;
-  const symbol = query.get("symbol") ?? "MRVL";
-  const intervals = (query.get("intervals") ?? "5m").split(",") as Interval[];
+// Symbols that panels hold (C7.1) get candles offset by a fixed amount, so a
+// legend shows at a glance which symbol a chart is drawing.
+const HELD_OFFSET: Record<string, number> = { SPY: 400, QQQ: 300 };
+function fixturePanels(intervals: Interval[], offset = 0): ChartData["panels"] {
   const panels: ChartData["panels"] = {};
   for (const interval of intervals) {
     const step = ({ "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 })[interval];
@@ -22,18 +22,30 @@ function fixture(url: string): ChartData {
     const bars: ChartBar[] = Array.from({ length: 240 }, (_, i) => {
       const time = 1789392600 + (daily ? i * step : Math.floor(i / slots) * 86400 + (i % slots) * step);
       const close = 245 + i * 0.06 + Math.sin(i / 8) * 2;
-      return { time, end_time: time + step, source: "tradier", open: close - 0.3, high: close + 0.8, low: close - 0.7, close, volume: 10000 + i * 240,
-        ema9: close - 0.3, ema20: close - 0.6, ema50: close - 1, ema200: close - 3, vwap: daily ? null : close - 0.8, rsi: 50 + Math.sin(i / 9) * 24, extended: false };
+      return { time, end_time: time + step, source: "tradier", open: close - 0.3 + offset, high: close + 0.8 + offset, low: close - 0.7 + offset, close: close + offset, volume: 10000 + i * 240,
+        ema9: close - 0.3 + offset, ema20: close - 0.6 + offset, ema50: close - 1 + offset, ema200: close - 3 + offset, vwap: daily ? null : close - 0.8 + offset, rsi: 50 + Math.sin(i / 9) * 24, extended: false };
     });
-    panels[interval] = { bars, markers: [{ id: "fill-test", time: bars[220].time, label: "buy to open 1 call", buy: true }] };
+    panels[interval] = { bars, markers: offset ? [] : [{ id: "fill-test", time: bars[220].time, label: "buy to open 1 call", buy: true }] };
   }
+  return panels;
+}
+
+function fixture(url: string): ChartData {
+  const query = new URL(url).searchParams;
+  const symbol = query.get("symbol") ?? "MRVL";
+  const panels = fixturePanels((query.get("intervals") ?? "5m").split(",") as Interval[]);
+  const extras = Object.fromEntries((query.get("extras") ?? "").split(",").filter(Boolean).map((part) => {
+    const [name, frames] = part.split(":");
+    return [name, { panels: fixturePanels(frames.split(".") as Interval[], HELD_OFFSET[name] ?? 100),
+      fetched_at: { intraday: Math.floor(Date.now() / 1000) }, intraday_as_of: Math.floor(Date.now() / 1000) - 60, issues: [] }];
+  }));
   const now = Math.floor(Date.now() / 1000);
   const symbols = [...new Set([symbol, ...(query.get("watchlist") ?? "").split(",")].filter(Boolean))];
   return { symbol, session: query.get("session") === "regular" ? "regular" : "extended", provider: "Tradier", delayed: false,
     refresh_seconds: 15, checked_at: now, fetched_at: { intraday: now }, panels,
     quotes: symbols.map((s) => ({ symbol: s, name: `${s} test company`, last: s === "NVDA" ? 189.12 : 262.66,
       change: 2, change_percentage: 1.5, volume: 1200000, previous_close: 260.66, trade_time: now - 2 })),
-    issues: [], intraday_as_of: now - 60, history_note: "Synthetic chart data for browser verification.", fills: [], fills_truncated: false };
+    issues: [], intraday_as_of: now - 60, history_note: "Synthetic chart data for browser verification.", fills: [], fills_truncated: false, extras };
 }
 
 async function stub(page: Page, onRequest?: (url: string) => void) {
@@ -1143,4 +1155,163 @@ test("without the server, settings stay in this browser and save when it returns
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect(levelsPanel(page)).toContainText("From phone");
   expect(server.saves).toHaveLength(3);
+});
+
+// ---- Per-panel symbols (C7.1): SPY, QQQ and the traded name side by side ----
+
+type StreamWindow = typeof window & { __streams: string[]; __emit: (type: string, value: unknown) => void };
+async function mockStreams(page: Page) {
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    const target = window as unknown as StreamWindow;
+    target.__streams = [];
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      closed = false;
+      constructor(url: string) {
+        target.__streams.push(new URL(url, location.href).searchParams.get("symbols") ?? "");
+        MockEventSource.current = this;
+        queueMicrotask(() => this.emit("status", { state: "connected" }));
+      }
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
+      emit(type: string, value: unknown) { if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+      close() { this.closed = true; }
+    }
+    target.__emit = (type, value) => MockEventSource.current?.emit(type, value);
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+}
+const lastFixtureBar = (interval: Interval) => fixturePanels([interval])[interval]!.bars.at(-1)!;
+async function trade(page: Page, symbol: string, value: number) {
+  const at = Math.floor(Date.now() / 1000) + 5;
+  const buckets = Object.fromEntries((["1m", "3m", "5m", "15m", "30m", "1h", "4h"] as const).map((interval) => {
+    const time = lastFixtureBar(interval).time + STEP[interval]; // opens the next candle
+    return [interval, { time, end_time: time + STEP[interval], extended: false }];
+  }));
+  await page.evaluate((tick) => (window as unknown as StreamWindow).__emit("tick", tick),
+    { type: "tick", symbol, at, minute: Math.floor(at / 60) * 60, session: "regular", price: value, open: value, high: value, low: value, buckets });
+}
+async function holdSymbol(page: Page, panel: string, symbol: string) {
+  await page.getByRole("button", { name: `${panel} symbol` }).click();
+  const dialog = page.getByRole("dialog", { name: `Symbol for ${panel}` });
+  await dialog.getByLabel("Search symbols").fill(symbol);
+  await dialog.getByLabel("Search symbols").press("Enter");
+  await expect(dialog).toHaveCount(0);
+}
+const values = (page: Page, id: string) => page.getByLabel(`${id} candle values`);
+
+test("panels hold SPY and QQQ beside the traded name through symbol switches, streaming and pause", async ({ page }) => {
+  await registerCharts(page);
+  await mockStreams(page);
+  const requests: URLSearchParams[] = [];
+  await stub(page, (url) => requests.push(new URL(url).searchParams));
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+
+  await holdSymbol(page, "Panel 3", "SPY");
+  await holdSymbol(page, "Panel 5", "QQQ");
+  await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "QQQ 1m chart" })).toBeVisible();
+  await expect(values(page, "Panel 3")).toContainText(/C 6\d\d\.\d\d/); // SPY's candles, not MRVL's
+  await expect(values(page, "Panel 5")).toContainText(/C 5\d\d\.\d\d/);
+  await expect(values(page, "Panel 2")).toContainText(/C 2\d\d\.\d\d/);
+  expect(requests.at(-1)!.get("intervals")).toBe("5m,15m,1D");
+  expect(requests.at(-1)!.get("extras")).toBe("QQQ:1m,SPY:1h");
+  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("MRVL,QQQ,SPY");
+
+  await page.screenshot({ path: test.info().outputPath("panel-symbols.png") });
+  // A fourth symbol is refused; the panel keeps following MRVL.
+  await holdSymbol(page, "Panel 2", "AAPL");
+  await expect(page.getByRole("alert").filter({ hasText: "Charts show up to three symbols" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "MRVL 15m chart" })).toBeVisible();
+
+  // Switching the main symbol moves the panels that follow it, and only those.
+  const heldResets = await resets(page, "Panel 3");
+  const spyChart = await page.evaluate(() => (window as unknown as { __tjCharts: Map<string, unknown>; __spy?: unknown }).__spy = (window as unknown as { __tjCharts: Map<string, unknown> }).__tjCharts.get("Panel 3"));
+  expect(spyChart).toBeTruthy();
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  for (const name of ["NVDA 5m chart", "NVDA 15m chart", "NVDA 1D chart", "SPY 1h chart", "QQQ 1m chart"])
+    await expect(page.getByRole("region", { name })).toBeVisible();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("189.12");
+  expect(await resets(page, "Panel 3")).toBe(heldResets); // SPY was never redrawn
+  expect(await page.evaluate(() => { const w = window as unknown as { __tjCharts: Map<string, unknown>; __spy: unknown }; return w.__tjCharts.get("Panel 3") === w.__spy; })).toBe(true);
+  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");
+
+  // One stream carries all three; each chart applies only its own symbol's trades.
+  await trade(page, "SPY", 701.25);
+  await expect(values(page, "Panel 3")).toContainText("C 701.25");
+  await expect(values(page, "main")).not.toContainText("701.25");
+  await trade(page, "NVDA", 191.5);
+  await expect(values(page, "main")).toContainText("C 191.50");
+  await expect(values(page, "Panel 3")).toContainText("C 701.25");
+  await expect(values(page, "Panel 5")).not.toContainText("191.50");
+
+  // Pause freezes every symbol; resume reconnects the same three.
+  await page.getByRole("button", { name: "Pause chart updates" }).click();
+  await trade(page, "SPY", 705);
+  await expect(values(page, "Panel 3")).toContainText("C 701.25");
+  await page.getByRole("button", { name: "Resume chart updates" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(3);
+  expect(await page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");
+  await trade(page, "SPY", 706.5);
+  await expect(values(page, "Panel 3")).toContainText("C 706.50");
+
+  // Linked time ranges still match charts by time across symbols.
+  await page.getByRole("button", { name: "Link time ranges" }).click();
+  await page.waitForTimeout(120);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 150, to: 190 }));
+  await page.waitForTimeout(300);
+  const main = (await visibleRange(page, "main"))!;
+  const held = (await visibleRange(page, "Panel 3"))!;
+  const middle = (main.from + main.to) / 2;
+  expect(held.from).toBeLessThanOrEqual(middle);
+  expect(held.to).toBeGreaterThanOrEqual(middle);
+
+  // Following again drops the symbol from requests and the stream.
+  await page.getByRole("button", { name: "Panel 5 symbol" }).click();
+  await page.getByRole("dialog", { name: "Symbol for Panel 5" }).getByRole("option", { name: /Follow the main chart \(NVDA\)/ }).click();
+  await expect(page.getByRole("region", { name: "NVDA 1m chart" })).toBeVisible();
+  await expect.poll(() => requests.at(-1)!.get("extras")).toBe("SPY:1h");
+  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,SPY");
+});
+
+test("a held panel scrolls back its own symbol, and focusing it swaps it with the main chart", async ({ page, context }) => {
+  await registerCharts(page);
+  const server = await fakeChartSettings(context);
+  const history: string[] = [];
+  await stub(page);
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const interval = query.get("interval") as Interval;
+    const before = Number(query.get("before"));
+    history.push(`${query.get("symbol")}:${interval}`);
+    const bars = fixturePanels([interval], HELD_OFFSET[query.get("symbol")!] ?? 0)[interval]!.bars.map((bar) => ({ ...bar,
+      time: bar.time - 60 * 86400, end_time: bar.end_time - 60 * 86400, source: "alpaca_sip" as const })).filter((bar) => bar.time < before); // the 60 days before
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval, session: query.get("session"), before, limit: 1200, bars, markers: [],
+      older_cursor: bars[0]?.time ?? null, exhausted: true, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  await holdSymbol(page, "Panel 3", "SPY");
+  await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
+  await expect.poll(() => (server.data as { panelSymbols?: unknown } | null)?.panelSymbols).toEqual([null, null, "SPY", null, null]);
+
+  // Scrolling the SPY chart asks for SPY's history at its own interval.
+  await page.waitForTimeout(150);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("Panel 3")!.timeScale().setVisibleLogicalRange({ from: 5, to: 40 }));
+  await expect.poll(() => history).toContain("SPY:1h");
+  expect(history.filter((entry) => entry.startsWith("MRVL")).every((entry) => entry !== "MRVL:1h")).toBe(true);
+  await expect(page.getByTestId("canvas-Panel 3")).toHaveAttribute("data-bars", "480");
+
+
+  // Focus: SPY becomes the main chart at 1h, and the panel keeps MRVL at 5m.
+  await page.getByRole("button", { name: "Focus 1h chart" }).click();
+  await expect(page.locator("section", { has: page.getByTestId("canvas-main") })).toHaveAttribute("aria-label", "SPY 1h chart");
+  await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue("1h");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("SPY");
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "SPY 15m chart" })).toBeVisible(); // followers follow SPY now
+  await expect(page.getByRole("region", { name: "Saved price levels" })).toContainText("SPY levels");
+  await expect.poll(() => (server.data as { panelSymbols?: unknown } | null)?.panelSymbols).toEqual([null, null, "MRVL", null, null]);
 });
