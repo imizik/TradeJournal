@@ -1,6 +1,6 @@
 """Chart data integrity, request sharing, and private journal marker boundaries."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time as wall_time, timedelta, timezone
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -134,6 +134,15 @@ def test_market_day_sends_the_same_windows_to_the_browser():
 def provider(monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(feed_module.time, "time", lambda: clock[0])
+    # 10:00 New York today, so today's session has started whenever the suite runs.
+    opened = datetime.combine(datetime.now(ET).date(), wall_time(10), ET)
+
+    class MarketHours(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return opened.astimezone(tz)
+
+    monkeypatch.setattr(feed_module, "datetime", MarketHours)
     monkeypatch.setattr(feed_module.tradier, "TRADIER_API_KEY", "test-secret")
     monkeypatch.setattr(feed_module.tradier, "TRADIER_BASE_URL", "https://api.tradier.com")
     calls = []
@@ -188,6 +197,28 @@ def test_workspace_uses_todays_calendar_and_discloses_when_it_is_missing(provide
     missing = feed.workspace("SPY", ["5m"], [], "regular")
     assert missing["market"]["status"] == "unknown" and missing["market"]["note"] == CLOCK_NOTE
     assert "issues" in missing and not missing["issues"]  # disclosed, not reported as stale data
+
+
+def test_before_four_am_today_is_not_requested_so_quotes_and_daily_bars_still_load(provider, monkeypatch):
+    """Tradier answers a start in the future with HTTP 400 ("start: must be before
+    now"), which used to cool down every chart read from midnight to 04:00 New York."""
+    feed, calls, clock, _ = provider
+    moment = [datetime(2026, 10, 1, 0, 10, tzinfo=ET)]
+
+    class Fixed(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return moment[0].astimezone(tz)
+
+    monkeypatch.setattr(feed_module, "datetime", Fixed)
+    data = feed.workspace("SPY", ["5m", "1D"], ["QQQ"], "extended")
+    assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["history", "quotes"]
+    assert data["panels"]["5m"]["bars"] == [] and data["panels"]["1D"]["bars"] and data["quotes"]
+    assert data["issues"] == [] and data["intraday_as_of"] is None
+    clock[0] += 16
+    moment[0] = datetime(2026, 10, 1, 4, 0, 30, tzinfo=ET)
+    feed.workspace("SPY", ["5m", "1D"], ["QQQ"], "extended")
+    assert calls[2][0].endswith("/timesales") and calls[2][1]["start"] == "2026-10-01 04:00"
 
 
 def test_three_symbol_layout_from_two_tabs_stays_within_the_chart_budget(provider):

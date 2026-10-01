@@ -6,7 +6,7 @@ separate memory cache; nothing is written into the enrichment caches or fills.
 
 from collections import OrderedDict, deque
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time as wall_time, timedelta
 import math
 import threading
 import time
@@ -114,7 +114,11 @@ class ChartFeed:
         needs_daily = any(i in ("1D", "1W") for i in intervals)
         minutes = []
         daily = []
-        if needs_intraday:
+        # Tradier refuses a start in the future (HTTP 400), and that failure would
+        # cool every chart read down, quotes and daily bars included. Before 04:00
+        # New York today has no bars yet: intraday panels come back empty and open
+        # on the latest completed SIP sessions instead.
+        if needs_intraday and now > datetime.combine(today, wall_time(4), ET):
             current = read("intraday", "/v1/markets/timesales", {
                 "symbol": symbol, "interval": "1min", "session_filter": "all",
                 "start": today.strftime("%Y-%m-%d 04:00"),
