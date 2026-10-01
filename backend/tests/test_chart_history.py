@@ -19,6 +19,21 @@ def previous_weekday() -> date:
     return day
 
 
+def completed_session_cursor(day: date, now: datetime | None = None) -> int:
+    # Keep yesterday as the first history session while avoiding a future
+    # next-day 04:00 cursor during New York's midnight-to-04:00 window.
+    next_morning = datetime.combine(day + timedelta(days=1), wall_time(4), ET)
+    return int(min(next_morning, now or datetime.now(ET)).timestamp())
+
+
+@pytest.mark.parametrize("hour, minute", [(0, 1), (3, 59), (4, 1)])
+def test_completed_session_cursor_is_past_at_new_york_midnight(hour: int, minute: int):
+    day = date(2026, 9, 30)
+    now = datetime(2026, 10, 1, hour, minute, tzinfo=ET)
+    cursor = completed_session_cursor(day, now)
+    assert datetime.combine(day, wall_time(20), ET).timestamp() < cursor <= now.timestamp()
+
+
 def raw(day: date, hour: int, minute: int, price: float = 100.0) -> dict:
     stamp = datetime.combine(day, wall_time(hour, minute), ET).astimezone(timezone.utc)
     return {"t": stamp.isoformat(), "o": price, "h": price + 1, "l": price - 1, "c": price, "v": 10}
@@ -40,7 +55,7 @@ def history(tmp_path, monkeypatch):
 
 def test_every_initial_page_and_retry_request_is_sip_raw_and_safe(history, monkeypatch):
     day = previous_weekday()
-    before = int(datetime.combine(day + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(day)
     monkeypatch.setattr(module, "WARMUP", 0)
     calls = []
     replies = [(200, {"bars": [raw(day, 4, 0)], "next_page_token": "next"}),
@@ -123,7 +138,7 @@ def test_empty_success_corruption_and_malformed_are_distinct(history, monkeypatc
 
 def test_simultaneous_miss_coalesces_and_continuation_is_bound(history, monkeypatch):
     day = previous_weekday()
-    before = int(datetime.combine(day + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(day)
     monkeypatch.setattr(module, "WARMUP", 0)
     calls = []
 
@@ -143,7 +158,7 @@ def test_simultaneous_miss_coalesces_and_continuation_is_bound(history, monkeypa
 
 def test_page_reference_uses_1400_requested_interval_candles(history, monkeypatch):
     last_day = previous_weekday()
-    before = int(datetime.combine(last_day + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(last_day)
     sessions = {}
     # Two completed 4h buckets per weekday; the oldest reference bars extend
     # well beyond the 1,400-candle prefix used by a returned page.
@@ -200,7 +215,7 @@ def test_history_wait_does_not_hold_tradier_lock(history, monkeypatch):
     from app.engine import tradier
 
     day = previous_weekday()
-    before = int(datetime.combine(day + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(day)
     entered, release = threading.Event(), threading.Event()
     monkeypatch.setattr(module, "WARMUP", 0)
     monkeypatch.setattr(tradier, "TRADIER_API_KEY", "fixture")
@@ -225,7 +240,7 @@ def test_history_wait_does_not_hold_tradier_lock(history, monkeypatch):
 
 def test_eight_attempt_batch_resumes_paginated_session_without_partial_file(history, monkeypatch):
     day = previous_weekday()
-    before = int(datetime.combine(day + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(day)
     monkeypatch.setattr(module, "WARMUP", 0)
     calls = []
 
@@ -268,7 +283,7 @@ def test_two_sip_days_stitch_with_tradier_today_without_overlap(history, monkeyp
     earlier = latest - timedelta(days=1)
     while earlier.weekday() >= 5:
         earlier -= timedelta(days=1)
-    before = int(datetime.combine(latest + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(latest)
     monkeypatch.setattr(module, "WARMUP", 0)
     history._publish("SPY", earlier, [normalized(earlier, 9, 30)])
     history._publish("SPY", latest, [normalized(latest, 9, 30)])
@@ -322,7 +337,7 @@ def test_holidays_cost_no_alpaca_request_and_half_days_end_at_13_00(history, mon
         return httpx.Response(200, json={"bars": bars, "next_page_token": None}, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(module.httpx, "get", get)
-    before = int(datetime.combine(half + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(half)
     page = history.page("SPY", "1h", "regular", before, limit=5)
     assert holiday not in requested and requested[:2] == [half, earlier]
     by_day = {}
@@ -344,7 +359,7 @@ def test_sessions_resampled_without_the_calendar_are_disclosed(history, monkeypa
     day = previous_weekday()
     history._publish("SPY", day, [normalized(day, 9, 30)])
     monkeypatch.setattr(module, "WARMUP", 0)
-    before = int(datetime.combine(day + timedelta(days=1), wall_time(4), ET).timestamp())
+    before = completed_session_cursor(day)
     history.calendar = Calendar({})
     page = history.page("SPY", "1m", "regular", before, limit=1)
     assert page["bars"] and page["calendar_note"] == CLOCK_NOTE
