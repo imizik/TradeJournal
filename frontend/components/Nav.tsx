@@ -127,7 +127,7 @@ export function Nav() {
       </header>
 
       {menuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
+        <div role="dialog" aria-modal="true" aria-label="Menu" className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMenuOpen(false)} aria-hidden />
           <nav className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col overflow-y-auto border-r bg-card p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
             <div className="mb-6 flex items-start justify-between gap-2">

@@ -67,8 +67,8 @@ from planned work.
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | done ([PR #93](https://github.com/imizik/TradeJournal/pull/93)) |
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | done ([PR #95](https://github.com/imizik/TradeJournal/pull/95)) |
 | C7.2 | Named saved layouts | 7 Layouts | done ([PR #98](https://github.com/imizik/TradeJournal/pull/98)) |
-| C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | next |
-| C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | todo |
+| C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | done ([PR #99](https://github.com/imizik/TradeJournal/pull/99)) |
+| C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | next |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | todo |
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | todo |
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | todo |
@@ -367,13 +367,18 @@ load, migrate any existing `localStorage` state. *Done when:* a level saved in
 one browser context appears in another, and a stale revision is refused rather
 than silently overwritten.
 
-**C0.5 Hotkeys.** Numeric interval entry (`1`, `3`, `5`, `15`, `30`) commits on
+**C0.5 Hotkeys (done in PR #99).** Numeric interval entry (`1`, `3`, `5`, `15`, `30`) commits on
 Enter, so typing `15` does not first select `1m`. `H` (1h), `4` (4h), `D` and `W`
 are immediate interval shortcuts; `Space` and `Shift+Space` step through the
 watchlist; `Alt+R` resets scales; `End` returns to realtime; `?` shows a cheat sheet. Hotkeys are
 ignored while typing in an input. *Done when:* each has a browser test and the
 cheat sheet lists exactly the bindings that exist, including numeric entry and
 Escape to cancel it. Buttons retain equivalent phone access.
+As built: interval keys act on the main chart; Alt+R and End act on every
+chart. A button reached with Tab keeps Space; after a click Space steps the
+watchlist. The existing Alt+Up/Down watchlist steps stay. Touch equivalents
+are the interval buttons, new up/down arrows in the watchlist header, and each
+chart's latest-candles button, which now also restores automatic price scales.
 
 **C0.6 Price basis.** Establish consistent split handling for supported
 stocks/ETFs before calling multi-year charts comparable across intervals. Keep

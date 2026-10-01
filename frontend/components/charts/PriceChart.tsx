@@ -5,7 +5,7 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, IPriceLine, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
 import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, intradayInterval, price, staleCandles } from "@/lib/charts";
-import type { ChartBar, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
+import type { ChartBar, ChartCommand, ChartCommands, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import type { LiveFeed } from "@/lib/chartStore";
 
@@ -32,6 +32,22 @@ const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.op
 const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? "#2bc9a43d" : "#ee617a3d" });
 const shadePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: 1, color: b.extended ? "#6b84bd10" : "transparent" });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
+/**
+ * Reset: the latest candles at the opening zoom, every pane's price scale back
+ * to automatic (dragging an axis turns it off). Realtime: the latest candle at
+ * the current zoom.
+ */
+function moveView(chart: IChartApi, bars: number, main: boolean, command: ChartCommand) {
+  const scale = chart.timeScale();
+  if (command === "reset") {
+    chart.panes().forEach((_, pane) => chart.priceScale("right", pane).applyOptions({ autoScale: true }));
+    scale.setVisibleLogicalRange({ from: Math.max(0, bars - (main ? 110 : 65)), to: bars + 4 });
+    return;
+  }
+  const range = scale.getVisibleLogicalRange();
+  const width = range ? range.to - range.from : main ? 114 : 69;
+  scale.setVisibleLogicalRange({ from: bars + 4 - width, to: bars + 4 });
+}
 /** Browser tests register a map here to inspect chart ranges; production never defines it. */
 type ChartRegistry = Map<string, IChartApi>;
 /** Browser tests register a map here to count each chart's committed renders; production never defines it. */
@@ -65,7 +81,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, link, rangeLink, commands, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
@@ -74,6 +90,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   /** A limitation of what this chart shows, such as capped fill markers. */
   notice?: string | null;
   link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed; height: number;
+  /** Alt+R and End from the workspace: every chart moves its own view. */
+  commands: ChartCommands;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
@@ -195,10 +213,16 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       }, 120);
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(onLogical);
+    // Each chart moves itself; a linked range must not carry one chart's reset to the others.
+    const stopCommands = commands.listen((command) => {
+      if (!barsRef.current.length) return;
+      quiet();
+      moveView(chart, barsRef.current.length, main, command);
+    });
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
-    return () => { stopLink(); stopRange(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); markers.detach(); chart.remove(); bundle.current = null; barsRef.current = []; };
-  }, [id, link, rangeLink, main]);
+    return () => { stopLink(); stopRange(); stopCommands(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); markers.detach(); chart.remove(); bundle.current = null; barsRef.current = []; };
+  }, [id, link, rangeLink, commands, main]);
 
   // RSI lives in a second pane, added and removed in place; the pane goes with its series.
   useEffect(() => {
@@ -324,7 +348,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         </div>
         <div className="flex min-w-0 items-center gap-1">
           {main && timer}
-          <button title="Go to latest candles" aria-label={`Latest candles ${id}`} onClick={() => { const current = bundle.current; if (current) { const n = barsRef.current.length; current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, n - (main ? 110 : 65)), to: n + 4 }); } }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) moveView(bundle.current.chart, barsRef.current.length, main, "reset"); }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
           {onExpand && <button title={expanded ? "Shrink chart" : "Expand chart"} aria-label={`${expanded ? "Shrink" : "Expand"} ${interval} chart`} aria-pressed={!!expanded} onClick={onExpand} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200">{expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
         </div>

@@ -179,7 +179,10 @@ RSI switches without the loading card, and server-saved settings: a level
 shared between two browser contexts through the e2e backend, a refused stale
 save, a merged conflict, the first-visit merge and the offline copy, and
 per-panel symbols (SPY and QQQ beside the traded name through switches,
-streaming, pause, scroll-back and focus). Chart
+streaming, pause, scroll-back and focus), and hotkeys (typed minutes on Enter
+without a 1m detour, immediate intervals, Space watchlist steps, Alt+R and End
+on every chart, keys off in fields and dialogs, the `?` sheet against the exact
+binding list, and the 390px touch equivalents). Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
