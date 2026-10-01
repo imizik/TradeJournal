@@ -202,6 +202,24 @@ cd backend
   take Up/Down/Home/End, and Alt+Up/Down steps the charted symbol through the
   watchlist. Intervals are workspace settings and carry over. Search never calls
   a provider; only the resulting symbol change loads data.
+- **Hotkeys** (`frontend/lib/hotkeys.ts`; `?` or the keyboard button opens the
+  list). Typed minutes (`1`, `3`, `5`, `15`, `30`) show in a small box over the
+  chart and change the main chart's interval only on Enter, so typing 15 never
+  loads 1m first; Backspace erases a digit, Escape or a click elsewhere cancels,
+  and a number with no interval (7) is refused in the box. `H`, `4`, `D` and
+  `W` switch the main chart to 1h, 4h, 1D and 1W at once (4 is a typed digit
+  only after another digit). Space and Shift+Space step through the watchlist,
+  wrapping at both ends; a button reached with Tab still takes Space, but one
+  that was clicked does not, so Space keeps stepping after a click. Alt+R
+  (Option+R) resets every chart to its opening view of the latest candles with
+  automatic price scales; End moves every chart to its latest candle at the
+  current zoom. Neither carries one chart's range to the others when time
+  ranges are linked. Hotkeys are off while focus is in a field or a dialog is
+  open, and Ctrl/Cmd combinations other than Cmd/Ctrl+K are left to the
+  browser. The cheat sheet is drawn from the same table as the keys. By touch,
+  the interval buttons, the watchlist's up/down arrows and each chart's
+  latest-candles button (which now also restores the automatic price scale)
+  do the same things.
 - **Link time ranges** (off by default) makes panning or zooming one chart set
   the same visible *time* window on the other four. Coarser charts keep at least
   a dozen candles around that moment; finer charts that cannot fit the span at
@@ -316,7 +334,15 @@ SQLite backend. It also drives a fake clock through the countdown and each of
 its named states, checks that ticks update in place without resetting zoom
 while a corrected older bar does reset, pans linked charts and checks they
 settle on the same time window, and exercises full screen on desktop and phone
-and keyboard symbol navigation. A canvas comparison checks that VWAP does not paint across an
+and keyboard symbol navigation. Hotkey tests type 1 then 5 then Enter and check
+that no request asked for 1m on the way to 15m, refuse 7, erase with Backspace,
+cancel with Escape (staying in full screen) and with a click, switch with H, 4,
+D and W, stay off in fields, selects and dialogs, step the watchlist with
+Space and Shift+Space from a clicked button while a Tabbed-to button keeps
+Space, reset every chart's range and price scales with Alt+R, return each
+chart to its latest candle at the same zoom with End (also with linked
+ranges), compare the `?` sheet with the exact binding list, and do the same
+by touch at 390px. A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_stream.py` checks session buckets, invalid event
 filters, and a single upstream subscription shared across tabs.
