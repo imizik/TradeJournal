@@ -84,7 +84,15 @@ export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(va
 /** Panels may hold two symbols besides the main one: each costs its own chart-feed reads. */
 export const MAX_HELD_SYMBOLS = 2;
 export const heldSymbols = (panelSymbols: (string | null)[]) => [...new Set(panelSymbols.filter((s): s is string => !!s))];
+/** The most layouts this page lets you save. */
 export const MAX_LAYOUTS = 12;
+/**
+ * Two devices that each save a layout at the limit leave more than `MAX_LAYOUTS`.
+ * Merging and reading keep those (the menu shows the overflow and asks for a
+ * deletion) rather than dropping a layout someone saved; past this a document is
+ * runaway and the tail is ignored.
+ */
+export const MAX_KEPT_LAYOUTS = MAX_LAYOUTS * 2;
 export const LAYOUT_NAME_MAX = 30;
 
 /** Settings from outside this code (browser storage, the server), with anything malformed replaced by its default. */
@@ -121,22 +129,37 @@ export function sanitizeSettings(input: unknown): ChartSettings {
 
 const isInterval = (value: unknown): value is Interval => INTERVALS.includes(value as Interval);
 
-/** Saved layouts from outside this code: a malformed one is dropped, never repaired into something the user did not save. */
+/**
+ * Saved layouts from outside this code. A layout whose arrangement is not exactly
+ * one the page could have saved is dropped whole: repairing it would let a click
+ * apply, and the next save keep, an arrangement nobody made. Only the name is
+ * normalized (spacing, length) and made unique, which changes nothing about what
+ * applying the layout does.
+ */
 function sanitizeLayouts(value: unknown): SavedLayout[] {
   if (!Array.isArray(value)) return [];
   const ids = new Set<string>();
   const out: SavedLayout[] = [];
   for (const row of value) {
-    if (out.length >= MAX_LAYOUTS) break;
-    const name = typeof row?.name === "string" ? layoutName(row.name) : "";
-    if (!name || typeof row.id !== "string" || !row.id || row.id.length > 64 || ids.has(row.id)
-      || !Array.isArray(row.intervals) || row.intervals.length !== 5 || !row.intervals.every(isInterval)) continue;
+    if (out.length >= MAX_KEPT_LAYOUTS) break;
+    if (!row || typeof row !== "object") continue;
+    const name = typeof row.name === "string" ? layoutName(row.name) : "";
+    const arrangement = savedArrangement(row);
+    if (!name || !arrangement || typeof row.id !== "string" || !row.id || row.id.length > 64 || ids.has(row.id)) continue;
     ids.add(row.id);
-    out.push({ id: row.id, name, layout: row.layout === "single" ? "single" : "multi", intervals: row.intervals,
-      panelSymbols: sanitizePanelSymbols(row.panelSymbols), smallSize: row.smallSize === "compact" || row.smallSize === "tall" ? row.smallSize : "normal",
-      linkRange: row.linkRange === true });
+    out.push({ id: row.id, name, ...arrangement });
   }
   return uniqueLayoutNames(out);
+}
+
+/** An arrangement exactly as the page saves one (main panel following, at most two held symbols), or null. */
+function savedArrangement({ layout, intervals, panelSymbols, smallSize, linkRange }: Record<string, unknown>): Arrangement | null {
+  if ((layout !== "multi" && layout !== "single") || (smallSize !== "compact" && smallSize !== "normal" && smallSize !== "tall") || typeof linkRange !== "boolean"
+    || !Array.isArray(intervals) || intervals.length !== 5 || !intervals.every(isInterval)
+    || !Array.isArray(panelSymbols) || panelSymbols.length !== 5 || panelSymbols[0] !== null
+    || !panelSymbols.every((symbol) => symbol === null || (typeof symbol === "string" && validSymbol(symbol)))
+    || heldSymbols(panelSymbols).length > MAX_HELD_SYMBOLS) return null;
+  return { layout, intervals, panelSymbols, smallSize, linkRange };
 }
 
 /** A layout name as saved: single-spaced and short. Empty means unusable. */

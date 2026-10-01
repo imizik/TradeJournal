@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetStateAction } from "react";
 import { apiUrl } from "@/lib/api";
-import { DEFAULT_SETTINGS, MAX_LAYOUTS, STORAGE_KEY, arrangementOf, sanitizeSettings, uniqueLayoutNames } from "@/lib/charts";
+import { DEFAULT_SETTINGS, MAX_KEPT_LAYOUTS, STORAGE_KEY, arrangementOf, sanitizeSettings, uniqueLayoutNames } from "@/lib/charts";
 import type { ChartSettings, Indicators } from "@/lib/charts";
 
 /**
@@ -57,7 +57,7 @@ export function rebase(base: SharedSettings, mine: SharedSettings, theirs: Share
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];
   out.watchlist = mergeItems(base.watchlist, mine.watchlist, theirs.watchlist, (symbol) => symbol).slice(0, 30);
-  out.layouts = uniqueLayoutNames(mergeItems(base.layouts, mine.layouts, theirs.layouts, (layout) => layout.id).slice(0, MAX_LAYOUTS));
+  out.layouts = uniqueLayoutNames(mergeItems(base.layouts, mine.layouts, theirs.layouts, (layout) => layout.id).slice(0, MAX_KEPT_LAYOUTS));
   const levels = { ...theirs.levels };
   for (const symbol of new Set([...Object.keys(base.levels), ...Object.keys(mine.levels)])) {
     const merged = mergeItems(base.levels[symbol] ?? [], mine.levels[symbol] ?? [], theirs.levels[symbol] ?? [], (level) => level.id).slice(0, 30);

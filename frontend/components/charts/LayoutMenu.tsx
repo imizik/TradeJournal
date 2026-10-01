@@ -65,6 +65,7 @@ export default function LayoutMenu({ layouts, current, onApply, onSave, onRename
           <button className={small} aria-label="Close layouts" onClick={onClose}><X size={14} /></button>
         </div>
 
+        {layouts.length > MAX_LAYOUTS && <p className="border-b border-slate-700/60 px-4 py-2 text-[11px] leading-4 text-amber-300">Two devices each saved a layout at the limit, so both are kept. Delete one before saving another.</p>}
         <ul aria-label="Saved layouts list" className="py-1">
           {layouts.map((layout) => {
             const active = sameArrangement(layout, current);

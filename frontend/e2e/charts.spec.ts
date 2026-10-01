@@ -1458,6 +1458,10 @@ test("named layouts save, switch, rename, update and delete without moving the s
   let menu = await openLayouts(page);
   await page.screenshot({ path: test.info().outputPath("layouts-menu.png") });
   await menu.getByRole("button", { name: "Rename Names" }).click();
+  // Symbol search stays closed behind the dialog, and the rename field keeps focus.
+  await page.keyboard.press("Control+k");
+  await expect(page.getByRole("dialog", { name: "Symbol search" })).toHaveCount(0);
+  await expect(menu.getByLabel("Rename Names")).toBeFocused();
   await menu.getByLabel("Rename Names").fill("scalp");
   await menu.getByLabel("Rename Names").press("Enter");
   await expect(menu.getByRole("alert")).toHaveText("A layout named scalp already exists.");
@@ -1588,12 +1592,16 @@ test("a layout save refused as stale keeps the other device's layouts, renames a
   await expect(menu.getByRole("button", { name: "Use layout Alpha" })).toHaveCount(0);
 });
 
-test("saved layouts that are malformed are dropped and duplicate names are told apart", async ({ page, context }) => {
+test("saved layouts that are malformed are dropped whole and duplicate names are told apart", async ({ page, context }) => {
   const names = (name: string, extra: object = {}) => ({ id: `id-${name}`, name, layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: false, ...extra });
   await fakeChartSettings(context, { revision: 1, data: { layouts: [
-    names("Index", { panelSymbols: [null, "SPY", "QQQ", "AAPL", null] }), // a third held symbol is not allowed
-    names("Four intervals", { intervals: ["5m", "15m", "1h", "1D"] }),
-    names("Bad interval", { intervals: ["5m", "15m", "1h", "1D", "2m"] }),
+    names("Index", { panelSymbols: [null, "SPY", "QQQ", null, null] }),
+    // None of these is an arrangement anyone saved, so none is repaired into one.
+    names("Three held", { panelSymbols: [null, "SPY", "QQQ", "AAPL", null] }),
+    names("No held list", { panelSymbols: undefined }), names("Short held list", { panelSymbols: [null, "SPY"] }),
+    names("Main holds", { panelSymbols: ["SPY", null, null, null, null] }), names("Bad symbol", { panelSymbols: [null, "spy!", null, null, null] }),
+    names("Bad mode", { layout: "grid" }), names("No mode", { layout: undefined }), names("Bad size", { smallSize: "huge" }), names("Bad link", { linkRange: "yes" }),
+    names("Four intervals", { intervals: ["5m", "15m", "1h", "1D"] }), names("Bad interval", { intervals: ["5m", "15m", "1h", "1D", "2m"] }),
     names("   "), { ...names("No id"), id: undefined }, "nonsense", null,
     names("Index", { id: "second-index", layout: "single" }),
     names("Copy", { id: "id-Index" }), // reuses an id
@@ -1604,6 +1612,43 @@ test("saved layouts that are malformed are dropped and duplicate names are told 
   await expect(menu.getByRole("list", { name: "Saved layouts list" }).getByRole("listitem")).toHaveCount(2);
   await expect(menu.getByRole("button", { name: "Use layout Index", exact: true })).toContainText("5m | 15m | 1h | 1D | 1m · SPY, QQQ");
   await expect(menu.getByRole("button", { name: "Use layout Index (2)", exact: true })).toContainText(/^Index \(2\)\s*5m$/);
+});
+
+test("two devices that each save a layout at the limit both keep it, and the menu shows the overflow", async ({ page, context }) => {
+  const layout = (n: number, extra: object = {}) => ({ id: `id-${n}`, name: `Layout ${n}`, layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: false, ...extra });
+  const eleven = Array.from({ length: 11 }, (_, n) => layout(n + 1));
+  const server = await fakeChartSettings(context, { revision: 1, data: { layouts: eleven } });
+  await stub(page);
+  await page.goto("/charts");
+  let menu = await openLayouts(page);
+  await expect(menu).toContainText("11/12");
+  await menu.getByRole("button", { name: "Close layouts" }).click();
+
+  // This device saves the twelfth while it cannot reach the server, and another device saves its own twelfth.
+  server.offline = true;
+  await page.getByLabel("Panel 2 interval", { exact: true }).selectOption("30m");
+  await saveLayout(page, "Mine");
+  await expect(syncStatus(page)).toHaveText("Saved in this browser · server unavailable");
+  server.data = { layouts: [...eleven, layout(12, { name: "Theirs", id: "other-12" })] };
+  server.revision += 1;
+  server.offline = false;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(syncStatus(page)).toHaveText("Merged with changes from another device");
+  await expect.poll(() => layoutNames(server).length).toBe(13);
+  expect(layoutNames(server).slice(-2)).toEqual(["Theirs", "Mine"]); // neither is dropped
+
+  // Over the limit the menu says so, refuses another, and lets one go.
+  menu = await openLayouts(page);
+  await expect(menu).toContainText("13/12");
+  await expect(menu.getByRole("button", { name: "Use layout Mine", exact: true })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Use layout Theirs", exact: true })).toBeVisible();
+  await menu.getByLabel("Layout name", { exact: true }).fill("One more");
+  await menu.getByRole("button", { name: "Save layout" }).click();
+  await expect(menu.getByRole("alert")).toContainText("Delete a layout before saving another");
+  await menu.getByRole("button", { name: "Delete Layout 1", exact: true }).click();
+  await menu.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(menu).toContainText("12/12");
+  await expect.poll(() => layoutNames(server).length).toBe(12);
 });
 
 test.describe("phone layouts", () => {
