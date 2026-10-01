@@ -87,7 +87,9 @@ class ChartFeed:
                     return saved.data, saved.fetched_at, str(error)
                 raise error from None
 
-    def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None) -> dict:
+    def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None, quotes: bool = True) -> dict:
+        """One symbol's panels, plus batched quotes unless ``quotes`` is off (a
+        panel holding its own symbol needs only candles)."""
         now = datetime.now(ET)
         today = now.date()
         problems = []
@@ -127,10 +129,10 @@ class ChartFeed:
             }, 60)
             daily = normalize_bars(_rows(history, "history", "day"), daily=True)
 
-        quote_data = read("quotes", "/v1/markets/quotes", {"symbols": ",".join(sorted(set([symbol, *watchlist])))}, 15)
-        quotes = []
+        quote_data = read("quotes", "/v1/markets/quotes", {"symbols": ",".join(sorted(set([symbol, *watchlist])))}, 15) if quotes else {}
+        rows = []
         for q in _rows(quote_data, "quotes", "quote"):
-            quotes.append({
+            rows.append({
                 "symbol": str(q.get("symbol", "")), "name": str(q.get("description") or q.get("symbol") or ""),
                 "last": _number(q.get("last")), "change": _number(q.get("change")),
                 "change_percentage": _number(q.get("change_percentage")),
@@ -148,7 +150,7 @@ class ChartFeed:
             "symbol": symbol, "provider": "Tradier", "session": session,
             "delayed": "sandbox" in tradier.TRADIER_BASE_URL,
             "refresh_seconds": 15, "checked_at": int(time.time()), "fetched_at": fetched,
-            "panels": panels, "quotes": quotes, "issues": list(dict.fromkeys(problems)),
+            "panels": panels, "quotes": rows, "issues": list(dict.fromkeys(problems)),
             "intraday_as_of": minutes[-1]["time"] if minutes else None, "market": market_day(today, hours),
             "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP raw bars (from 2016); today uses Tradier. Intraday prices are unadjusted, so splits can create discontinuities. Daily bars remain Tradier and dividend adjustments are not guaranteed.",
         }

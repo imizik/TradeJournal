@@ -26,8 +26,8 @@ const json = (value: unknown) => JSON.stringify(value);
 
 /** The shared part of the settings in a canonical key order, so equal settings compare equal. */
 export function shared(settings: ChartSettings): SharedSettings {
-  const { intervals, watchlist, session, layout, indicators, levels, linkRange, smallSize, immersiveWatchlist } = settings;
-  return { intervals, watchlist, session, layout, indicators, linkRange, smallSize, immersiveWatchlist,
+  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, linkRange, smallSize, immersiveWatchlist } = settings;
+  return { intervals, panelSymbols, watchlist, session, layout, indicators, linkRange, smallSize, immersiveWatchlist,
     levels: Object.fromEntries(Object.keys(levels).sort().filter((symbol) => levels[symbol].length).map((symbol) => [symbol, levels[symbol]])) };
 }
 const same = (a: SharedSettings, b: SharedSettings) => json(a) === json(b);
@@ -50,7 +50,7 @@ function mergeItems<T>(base: T[], mine: T[], theirs: T[], id: (item: T) => strin
  */
 export function rebase(base: SharedSettings, mine: SharedSettings, theirs: SharedSettings): SharedSettings {
   const out: SharedSettings = { ...theirs, indicators: { ...theirs.indicators } };
-  const scalars = ["intervals", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist"] as const;
+  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist"] as const;
   for (const key of scalars) if (json(mine[key]) !== json(base[key])) Object.assign(out, { [key]: mine[key] });
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];

@@ -119,10 +119,42 @@ def test_one_upstream_connection_serves_tabs_and_updates_symbols(monkeypatch):
     asyncio.run(scenario())
 
 
+def test_tabs_following_several_symbols_share_one_upstream_subscription(monkeypatch):
+    market = chart_stream.ChartMarketStream()
+    layout, other_tab = asyncio.Queue(), asyncio.Queue()
+    # One tab: MRVL with panels holding SPY and QQQ. Another tab: QQQ alone.
+    market._clients = {1: (frozenset({"MRVL", "SPY", "QQQ"}), layout), 2: (frozenset({"QQQ"}), other_tab)}
+    assert market._wanted() == {"MRVL", "SPY", "QQQ"}
+    original = chart_stream.trade_event
+    monkeypatch.setattr(chart_stream, "trade_event", lambda row, **kw: original(row, now=MARKET_TIME, **kw))
+    market._receive("\n".join(json.dumps(row) for row in (
+        event(264.9), event(712.4, symbol="SPY"), event(611.2, symbol="QQQ"), event(99.0, symbol="IWM"))))
+    market._flush()
+    received = [layout.get_nowait()["symbol"] for _ in range(layout.qsize())]
+    assert sorted(received) == ["MRVL", "QQQ", "SPY"]  # IWM was never subscribed
+    assert [other_tab.get_nowait()["symbol"] for _ in range(other_tab.qsize())] == ["QQQ"]
+
+
+def test_stream_route_accepts_up_to_three_symbols(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.routers import charts
+
+    app = FastAPI()
+    app.include_router(charts.router, prefix="/charts")
+    monkeypatch.setattr(charts.tradier, "TRADIER_API_KEY", "")
+    with TestClient(app) as client:
+        for query in ("symbols=MRVL,SPY,QQQ,IWM", "symbols=", "symbol=MRVL&symbols=../x"):
+            assert client.get(f"/charts/stream?{query}").status_code == 422
+        # Valid symbol sets get as far as the provider check.
+        assert client.get("/charts/stream?symbols=MRVL,SPY,QQQ").status_code == 503
+        assert client.get("/charts/stream?symbol=MRVL").status_code == 503
+
+
 def test_stream_aggregates_one_second_of_prices_without_crossing_symbols(monkeypatch):
     market = chart_stream.ChartMarketStream()
     mrvl, spy = asyncio.Queue(), asyncio.Queue()
-    market._clients = {1: ("MRVL", mrvl), 2: ("SPY", spy)}
+    market._clients = {1: (frozenset({"MRVL"}), mrvl), 2: (frozenset({"SPY"}), spy)}
     original = chart_stream.trade_event
     monkeypatch.setattr(chart_stream, "trade_event", lambda row, **kw: chart_stream_trade_event(row, **kw))
 

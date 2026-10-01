@@ -174,7 +174,9 @@ that a tick re-renders only the charts whose candles moved and the clock
 re-renders none, chart instances surviving symbol, interval, session and
 RSI switches without the loading card, and server-saved settings: a level
 shared between two browser contexts through the e2e backend, a refused stale
-save, a merged conflict, the first-visit merge and the offline copy. Chart
+save, a merged conflict, the first-visit merge and the offline copy, and
+per-panel symbols (SPY and QQQ beside the traded name through switches,
+streaming, pause, scroll-back and focus). Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the

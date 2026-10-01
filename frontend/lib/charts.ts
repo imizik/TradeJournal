@@ -29,12 +29,18 @@ export type ChartQuote = {
   symbol: string; name: string; last: number | null; change: number | null;
   change_percentage: number | null; volume: number | null; previous_close: number | null; trade_time: number | null;
 };
-export type ChartData = {
+/** One symbol's candles in a workspace response. */
+export type SymbolPanels = {
+  panels: Partial<Record<Interval, ChartPanelData>>; fetched_at: Record<string, number>;
+  intraday_as_of: number | null; issues: string[];
+};
+export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
-  refresh_seconds: number; checked_at: number; fetched_at: Record<string, number>;
-  panels: Partial<Record<Interval, ChartPanelData>>; quotes: ChartQuote[]; issues: string[];
-  intraday_as_of: number | null; history_note: string; fills: FillMarker[]; fills_truncated: boolean;
+  refresh_seconds: number; checked_at: number; quotes: ChartQuote[];
+  history_note: string; fills: FillMarker[]; fills_truncated: boolean;
   market?: MarketDay;
+  /** Symbols that panels hold on their own (C7.1), without quotes. */
+  extras?: Record<string, SymbolPanels>;
 };
 export type ChartStreamTick = {
   type: "tick"; symbol: string; at: number; price: number; open: number; high: number; low: number;
@@ -46,11 +52,13 @@ export type Indicators = Record<"ema9" | "ema20" | "ema50" | "ema200" | "vwap" |
 export type SmallChartSize = "compact" | "normal" | "tall";
 export type ChartSettings = {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: "regular" | "extended";
+  /** Per panel, aligned with `intervals`: a symbol the panel holds, or null to follow `symbol`. The main panel always follows. */
+  panelSymbols: (string | null)[];
   layout: "multi" | "single"; indicators: Indicators; levels: Record<string, PriceLevel[]>;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize; immersiveWatchlist: boolean;
 };
 export const DEFAULT_SETTINGS: ChartSettings = {
-  symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"],
+  symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
@@ -59,6 +67,9 @@ export const DEFAULT_SETTINGS: ChartSettings = {
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
 export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(value);
+/** Panels may hold two symbols besides the main one: each costs its own chart-feed reads. */
+export const MAX_HELD_SYMBOLS = 2;
+export const heldSymbols = (panelSymbols: (string | null)[]) => [...new Set(panelSymbols.filter((s): s is string => !!s))];
 
 /** Settings from outside this code (browser storage, the server), with anything malformed replaced by its default. */
 export function sanitizeSettings(input: unknown): ChartSettings {
@@ -77,6 +88,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       ...DEFAULT_SETTINGS,
       symbol: typeof value.symbol === "string" && validSymbol(value.symbol) ? value.symbol : DEFAULT_SETTINGS.symbol,
       intervals: Array.isArray(value.intervals) && value.intervals.length === 5 && value.intervals.every((i: Interval) => INTERVALS.includes(i)) ? value.intervals : DEFAULT_SETTINGS.intervals,
+      panelSymbols: sanitizePanelSymbols(value.panelSymbols),
       watchlist: Array.isArray(value.watchlist) ? [...new Set<string>(value.watchlist.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 30) : DEFAULT_SETTINGS.watchlist,
       session: value.session === "regular" ? "regular" : "extended",
       layout: value.layout === "single" ? "single" : "multi",
@@ -90,11 +102,39 @@ export function sanitizeSettings(input: unknown): ChartSettings {
   } catch { return DEFAULT_SETTINGS; }
 }
 
-export async function fetchChartData(settings: ChartSettings, signal: AbortSignal): Promise<ChartData> {
-  const query = new URLSearchParams({
-    symbol: settings.symbol, intervals: (settings.layout === "single" ? settings.intervals.slice(0, 1) : settings.intervals).join(","),
-    watchlist: settings.watchlist.join(","), session: settings.session,
+function sanitizePanelSymbols(value: unknown): (string | null)[] {
+  const kept = new Set<string>();
+  return Array.from({ length: 5 }, (_, index) => {
+    const symbol = Array.isArray(value) ? value[index] : null;
+    if (index === 0 || typeof symbol !== "string" || !validSymbol(symbol)) return null;
+    if (!kept.has(symbol) && kept.size >= MAX_HELD_SYMBOLS) return null;
+    kept.add(symbol);
+    return symbol;
   });
+}
+
+/**
+ * Make panel `index` the main chart. The intervals swap; a symbol the panel
+ * holds becomes the main symbol, and the panel keeps the previous main symbol.
+ * Panels that held the new main symbol now simply follow it.
+ */
+export function focusPanel(settings: ChartSettings, index: number): ChartSettings {
+  const intervals = [...settings.intervals];
+  [intervals[0], intervals[index]] = [intervals[index], intervals[0]];
+  const held = settings.panelSymbols[index];
+  if (!held || held === settings.symbol) return { ...settings, intervals };
+  return { ...settings, intervals, symbol: held,
+    panelSymbols: settings.panelSymbols.map((other, i) => i === index ? settings.symbol : other === held ? null : other),
+    recent: [settings.symbol, ...settings.recent.filter((r) => r !== settings.symbol && r !== held)].slice(0, 8) };
+}
+
+/** `extras` lists the intervals each symbol held by a panel needs. */
+export async function fetchChartData({ symbol, intervals, watchlist, session, extras }: {
+  symbol: string; intervals: Interval[]; watchlist: string[]; session: ChartSettings["session"]; extras: Record<string, Interval[]>;
+}, signal: AbortSignal): Promise<ChartData> {
+  const query = new URLSearchParams({ symbol, intervals: intervals.join(","), watchlist: watchlist.join(","), session });
+  const held = Object.entries(extras).map(([name, frames]) => `${name}:${frames.join(".")}`).join(",");
+  if (held) query.set("extras", held);
   const response = await fetch(apiUrl(`/charts/workspace?${query}`), { cache: "no-store", signal });
   const body = await response.json();
   if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Unable to load chart data.");
@@ -136,7 +176,7 @@ export function retainHistory(bars: ChartBar[], live: ChartBar[], visible: { fro
   return saved.slice(start, end);
 }
 
-export const chartStreamUrl = (symbol: string) => apiUrl(`/charts/stream?symbol=${encodeURIComponent(symbol)}`);
+export const chartStreamUrl = (symbols: string[]) => apiUrl(`/charts/stream?symbols=${encodeURIComponent(symbols.join(","))}`);
 
 export function parseChartTick(value: unknown): ChartStreamTick | null {
   if (!value || typeof value !== "object") return null;
