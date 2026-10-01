@@ -215,7 +215,8 @@ cd backend
   automatic price scales; End moves every chart to its latest candle at the
   current zoom. Neither carries one chart's range to the others when time
   ranges are linked. Hotkeys are off while focus is in a field or a dialog is
-  open, and Ctrl/Cmd combinations other than Cmd/Ctrl+K are left to the
+  open, including the app's Sync drawer and phone menu (marked modal while
+  open), and Ctrl/Cmd combinations other than Cmd/Ctrl+K are left to the
   browser. The cheat sheet is drawn from the same table as the keys. By touch,
   the interval buttons, the watchlist's up/down arrows and each chart's
   latest-candles button (which now also restores the automatic price scale)
@@ -337,7 +338,7 @@ settle on the same time window, and exercises full screen on desktop and phone
 and keyboard symbol navigation. Hotkey tests type 1 then 5 then Enter and check
 that no request asked for 1m on the way to 15m, refuse 7, erase with Backspace,
 cancel with Escape (staying in full screen) and with a click, switch with H, 4,
-D and W, stay off in fields, selects and dialogs, step the watchlist with
+D and W, stay off in fields, selects, dialogs and the Sync drawer, step the watchlist with
 Space and Shift+Space from a clicked button while a Tabbed-to button keeps
 Space, reset every chart's range and price scales with Alt+R, return each
 chart to its latest candle at the same zoom with End (also with linked

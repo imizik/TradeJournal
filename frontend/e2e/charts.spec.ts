@@ -1824,6 +1824,22 @@ test("H, 4, D and W switch the main chart at once; hotkeys stay off in fields an
   await expect(page.getByRole("dialog", { name: "Saved layouts" })).toHaveCount(0);
   await expect(mainInterval(page)).toHaveValue("1W");
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+
+  // So do the app's own overlays: the Sync drawer covers the charts and takes every key.
+  await page.getByTitle("Sync & enrichment status").filter({ visible: true }).click();
+  await expect(page.getByRole("dialog", { name: "Background jobs" })).toBeVisible();
+  // Off the Sync button, which Space would press like any focused button.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  for (const key of ["d", "Space", "?", "End", "1", "Enter", "ControlOrMeta+k"]) await page.keyboard.press(key);
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Symbol search" })).toHaveCount(0);
+  await expect(intervalEntry(page)).toHaveCount(0);
+  await expect(mainInterval(page)).toHaveValue("1W");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+  await page.mouse.click(1000, 400); // the backdrop beside the drawer closes it
+  await expect(page.getByRole("dialog", { name: "Background jobs" })).toHaveCount(0);
+  await page.keyboard.press("d");
+  await expect(mainInterval(page)).toHaveValue("1D");
 });
 
 test("Space and Shift+Space step through the watchlist; a button reached by keyboard keeps Space", async ({ page }) => {

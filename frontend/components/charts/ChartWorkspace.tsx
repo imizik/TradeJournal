@@ -92,6 +92,7 @@ export default function ChartWorkspace() {
   const rangeLink = useMemo(() => createRangeLink(), []);
   const commands = useMemo(() => createChartCommands(), []);
   const stream = useMemo(() => createStreamStore(), []);
+  const root = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
@@ -383,6 +384,8 @@ export default function ChartWorkspace() {
     const onFocus = (event: FocusEvent) => { keyboardFocus = pointer ? null : event.target; };
     const onKey = (event: KeyboardEvent) => {
       const state = keys.current;
+      // An app overlay over the charts (the Sync drawer, the phone menu) owns every key.
+      if ([...document.querySelectorAll('[aria-modal="true"]')].some((dialog) => !root.current?.contains(dialog))) return;
       // One dialog at a time: with the layouts dialog or the shortcuts open, symbol search stays closed.
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -490,7 +493,7 @@ export default function ChartWorkspace() {
   const showAside = !immersive || settings.immersiveWatchlist;
 
   return (
-    <div data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
+    <div ref={root} data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
       ? "fixed inset-0 z-[70] space-y-2 overflow-y-auto overscroll-contain bg-[#0b1017] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] text-slate-300 sm:px-3"
       : "space-y-4 text-slate-300"}>
       <header className={`flex flex-wrap items-center justify-between gap-3 ${immersive ? "sticky top-0 z-20 -mx-2 bg-[#0b1017]/95 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-3 sm:px-3" : ""}`}>

@@ -205,8 +205,10 @@ export default function StatusPanel({ open, onClose }: Props) {
         onClick={onClose}
       />
 
-      {/* Drawer — slides in from the left, same width as nav so it replaces it visually */}
+      {/* Drawer — slides in from the left, same width as nav so it replaces it visually.
+          Modal while open, so page shortcuts (the chart hotkeys) stand down behind it. */}
       <div
+        {...(open ? { role: "dialog", "aria-modal": true, "aria-label": "Background jobs" } : {})}
         className={`fixed left-0 top-0 z-50 flex h-screen w-72 flex-col bg-card shadow-2xl transition-transform duration-250 ease-in-out ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
