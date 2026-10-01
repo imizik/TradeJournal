@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { applyTicks, intradayInterval } from "@/lib/charts";
+import { applyTicks, intradayInterval, MAX_HELD_SYMBOLS } from "@/lib/charts";
 import type { ChartPanelData, ChartStreamTick, Interval, TickScope } from "@/lib/charts";
 
 /**
@@ -28,10 +28,10 @@ export function createStreamStore() {
       if (state.key === key && state.status === status) return;
       publish(state.key === key ? { ...state, status } : { key, status, ticks: [], seq: state.seq });
     },
-    /** Keeps the last two minutes (at most 120 trades); REST refreshes every 15 seconds. */
+    /** Keeps the last two minutes: at most 120 trades for each symbol on screen. REST refreshes every 15 seconds. */
     tick(key: string, tick: ChartStreamTick) {
       const kept = state.key === key ? state.ticks.filter((old) => old.at > Date.now() / 1000 - 120) : [];
-      publish({ key, status: "connected", ticks: [...kept, tick].slice(-120), seq: state.seq + 1 });
+      publish({ key, status: "connected", ticks: [...kept, tick].slice(-120 * (MAX_HELD_SYMBOLS + 1)), seq: state.seq + 1 });
     },
   };
 }

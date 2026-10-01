@@ -154,7 +154,7 @@ def workspace(
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
     data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
     for name, other in data["extras"].items():
-        _markers(db, name, list(other["panels"].values()))
+        _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values()))
     return data
 
 

@@ -1,6 +1,6 @@
 """Chart data integrity, request sharing, and private journal marker boundaries."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as wall_time, timedelta, timezone
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -134,6 +134,15 @@ def test_market_day_sends_the_same_windows_to_the_browser():
 def provider(monkeypatch):
     clock = [1000.0]
     monkeypatch.setattr(feed_module.time, "time", lambda: clock[0])
+    # 10:00 New York today, so today's session has started whenever the suite runs.
+    opened = datetime.combine(datetime.now(ET).date(), wall_time(10), ET)
+
+    class MarketHours(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return opened.astimezone(tz)
+
+    monkeypatch.setattr(feed_module, "datetime", MarketHours)
     monkeypatch.setattr(feed_module.tradier, "TRADIER_API_KEY", "test-secret")
     monkeypatch.setattr(feed_module.tradier, "TRADIER_BASE_URL", "https://api.tradier.com")
     calls = []
@@ -188,6 +197,28 @@ def test_workspace_uses_todays_calendar_and_discloses_when_it_is_missing(provide
     missing = feed.workspace("SPY", ["5m"], [], "regular")
     assert missing["market"]["status"] == "unknown" and missing["market"]["note"] == CLOCK_NOTE
     assert "issues" in missing and not missing["issues"]  # disclosed, not reported as stale data
+
+
+def test_before_four_am_today_is_not_requested_so_quotes_and_daily_bars_still_load(provider, monkeypatch):
+    """Tradier answers a start in the future with HTTP 400 ("start: must be before
+    now"), which used to cool down every chart read from midnight to 04:00 New York."""
+    feed, calls, clock, _ = provider
+    moment = [datetime(2026, 10, 1, 0, 10, tzinfo=ET)]
+
+    class Fixed(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return moment[0].astimezone(tz)
+
+    monkeypatch.setattr(feed_module, "datetime", Fixed)
+    data = feed.workspace("SPY", ["5m", "1D"], ["QQQ"], "extended")
+    assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["history", "quotes"]
+    assert data["panels"]["5m"]["bars"] == [] and data["panels"]["1D"]["bars"] and data["quotes"]
+    assert data["issues"] == [] and data["intraday_as_of"] is None
+    clock[0] += 16
+    moment[0] = datetime(2026, 10, 1, 4, 0, 30, tzinfo=ET)
+    feed.workspace("SPY", ["5m", "1D"], ["QQQ"], "extended")
+    assert calls[2][0].endswith("/timesales") and calls[2][1]["start"] == "2026-10-01 04:00"
 
 
 def test_three_symbol_layout_from_two_tabs_stays_within_the_chart_budget(provider):
@@ -336,7 +367,23 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     # A held symbol that fails leaves the main charts and the other held symbol intact.
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
-    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": ["Tradier could not load these charts."]}
+    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
+                                     "issues": ["Tradier could not load these charts."], "fills_truncated": False}
+
+
+def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):
+    db = next(route_client.app.dependency_overrides[get_session]())
+    for i in range(1001):  # one more than the marker cap, all inside the 09:30-10:05 window
+        db.add(Fill(id=UUID(int=5000 + i), account_id=UUID(int=1), ticker="QQQ", side="buy_to_open", instrument_type="stock",
+                    price=500, contracts=1, executed_at=datetime.fromisoformat("2026-09-29T09:31") + timedelta(seconds=i), raw_email_id=f"qqq:{i}"))
+    db.commit()
+    bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
+    monkeypatch.setattr(charts.chart_feed, "workspace", lambda symbol, frames, *_, **__: {
+        "panels": {f: {"bars": bars, "markers": []} for f in frames}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "quotes": []})
+    data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=QQQ:5m,SPY:5m").json()
+    assert data["fills_truncated"] is False
+    assert data["extras"]["QQQ"]["fills_truncated"] is True and data["extras"]["SPY"]["fills_truncated"] is False
+    assert data["extras"]["QQQ"]["panels"]["5m"]["markers"]  # the newest 1,000 are still drawn
 
 
 @pytest.mark.parametrize("extras", ["SPY:5m,QQQ:5m,IWM:5m", "MRVL:5m", "SPY:", "SPY:2m", "SPY:5m.15m.1h.4h.1D.1m", "../x:5m"])

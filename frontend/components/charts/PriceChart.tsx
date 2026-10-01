@@ -65,12 +65,14 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, link, rangeLink, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
   pending?: string | null;
+  /** A limitation of what this chart shows, such as capped fill markers. */
+  notice?: string | null;
   link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed; height: number;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null };
@@ -342,6 +344,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : history.calendarNote}
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}
       </div>}
+      {notice && !pending && <p className="px-3 py-1 text-[10px] text-amber-300">{notice}</p>}
       {pending ? <div role="status" className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center"><span className="rounded-md border border-slate-700/60 bg-[#10151e]/90 px-3 py-1.5 text-sm text-slate-200">{pending}</span></div>
         : !panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}
       {drawing && <div className="pointer-events-none absolute left-3 top-24 rounded bg-blue-500/90 px-3 py-1.5 text-xs text-white">Click a price to save a level</div>}
