@@ -18,6 +18,8 @@
 #
 # Every check runs even after one fails, so a single run reports every problem
 # rather than only the first. Exit status is non-zero if any check failed.
+# Successful checks show their last result line; failures show the end of their
+# output and leave complete logs in a private temporary directory.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,17 +37,25 @@ case "${1:-}" in
   *)          echo "unknown option: $1 (try --help)" >&2; exit 2 ;;
 esac
 
+VERIFY_LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tradejournal-verify.XXXXXX")" || exit 1
 FAILED=()
 PASSED=()
 
 run() {
-  local name="$1"; shift
+  local name="$1" log status last_line
+  shift
+  log="$VERIFY_LOG_DIR/${name// /-}.log"
   printf '\n\033[1m==> %s\033[0m\n' "$name"
-  if "$@"; then
+  if "$@" >"$log" 2>&1; then
     PASSED+=("$name")
+    last_line="$(awk 'NF { last = $0 } END { print last }' "$log")"
+    [ -z "$last_line" ] || printf '  %s\n' "$last_line"
   else
+    status=$?
     FAILED+=("$name")
-    printf '\033[31mFAILED: %s\033[0m\n' "$name"
+    printf '\033[31mFAILED: %s (exit %d)\033[0m\n' "$name" "$status"
+    [ ! -s "$log" ] || tail -n 40 "$log"
+    printf 'Full output: %s\n' "$log"
   fi
 }
 
@@ -127,6 +137,8 @@ for name in "${FAILED[@]:-}"; do [ -n "$name" ] && printf '  \033[31mFAIL\033[0m
 
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf '\n\033[31m%d check(s) failed.\033[0m\n' "${#FAILED[@]}"
+  printf 'Complete check logs: %s\n' "$VERIFY_LOG_DIR"
   exit 1
 fi
+rm -rf -- "$VERIFY_LOG_DIR"
 printf '\n\033[32mAll checks passed.\033[0m\n'
