@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import type { ChartData, ChartBar, Interval, MarketDay } from "../lib/charts";
-import { fakeChartSettings } from "./fixtures/chartSettings";
+import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 
 // Each test starts from empty server settings of its own; tests tagged
 // @real-settings use the e2e backend's endpoint instead.
@@ -1362,4 +1362,297 @@ test("a held panel scrolls back its own symbol, and focusing it swaps it with th
   await expect(page.getByRole("region", { name: "SPY 15m chart" })).toBeVisible(); // followers follow SPY now
   await expect(page.getByRole("region", { name: "Saved price levels" })).toContainText("SPY levels");
   await expect.poll(() => (server.data as { panelSymbols?: unknown } | null)?.panelSymbols).toEqual([null, null, "MRVL", null, null]);
+});
+
+
+// ---- Named layouts (C7.2): save, switch, rename, replace and delete arrangements ----
+
+type SavedLayouts = { id: string; name: string; layout: string; intervals: string[]; panelSymbols: (string | null)[]; smallSize: string; linkRange: boolean }[];
+const layoutsOn = (server: SettingsStore) => (server.data as { layouts?: SavedLayouts } | null)?.layouts ?? [];
+const layoutNames = (server: SettingsStore) => layoutsOn(server).map((layout) => layout.name);
+const layoutsButton = (page: Page) => page.getByRole("button", { name: /^Layouts/ });
+const layoutsDialog = (page: Page) => page.getByRole("dialog", { name: "Saved layouts", exact: true });
+const intervalsShown = (page: Page) => Promise.all(["Main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"].map((id) => page.getByLabel(`${id} interval`, { exact: true }).inputValue()));
+async function openLayouts(page: Page) {
+  await layoutsButton(page).click();
+  const dialog = layoutsDialog(page);
+  await expect(dialog).toBeVisible();
+  return dialog;
+}
+async function saveLayout(page: Page, name: string) {
+  const dialog = await openLayouts(page);
+  await dialog.getByLabel("Layout name", { exact: true }).fill(name);
+  await dialog.getByRole("button", { name: "Save layout" }).click();
+  await expect(dialog.getByRole("button", { name: `Use layout ${name}`, exact: true })).toHaveAttribute("aria-current", "true");
+  await dialog.getByRole("button", { name: "Close layouts" }).click();
+  await expect(dialog).toHaveCount(0);
+}
+async function useLayout(page: Page, name: string) {
+  const dialog = await openLayouts(page);
+  await dialog.getByRole("button", { name: `Use layout ${name}`, exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+}
+async function followMain(page: Page, panel: string, main: string) {
+  await page.getByRole("button", { name: `${panel} symbol` }).click();
+  await page.getByRole("dialog", { name: `Symbol for ${panel}` }).getByRole("option", { name: new RegExp(`Follow the main chart \\(${main}\\)`) }).click();
+}
+
+test("named layouts save, switch, rename, update and delete without moving the symbol, levels or watchlist", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  await expect(layoutsButton(page)).toHaveText("Layouts");
+  await addLevel(page, "Support", "255.00");
+  const dialog = await openLayouts(page);
+  await expect(dialog).toContainText("No saved layouts yet");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+
+  // "Names": SPY and QQQ beside the traded name.
+  await holdSymbol(page, "Panel 3", "SPY");
+  await holdSymbol(page, "Panel 5", "QQQ");
+  await saveLayout(page, "Names");
+  await expect(layoutsButton(page)).toContainText("Names"); // the panels are arranged as this layout
+  await expect.poll(() => layoutNames(server)).toEqual(["Names"]);
+  expect(layoutsOn(server)[0]).toMatchObject({ layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, "SPY", null, "QQQ"], smallSize: "normal", linkRange: false });
+
+  // "Scalp": faster intervals on the traded name alone, tall charts, linked ranges.
+  await followMain(page, "Panel 3", "MRVL");
+  await followMain(page, "Panel 5", "MRVL");
+  for (const [id, interval] of [["Main", "1m"], ["Panel 2", "3m"], ["Panel 3", "5m"], ["Panel 4", "15m"], ["Panel 5", "30m"]]) await page.getByLabel(`${id} interval`, { exact: true }).selectOption(interval);
+  await page.getByRole("button", { name: "Link time ranges" }).click();
+  await page.getByRole("button", { name: "tall small charts" }).click();
+  await expect(layoutsButton(page)).toHaveText("Layouts"); // edited: no saved layout matches
+  await saveLayout(page, "Scalp");
+  await expect.poll(() => layoutNames(server)).toEqual(["Names", "Scalp"]);
+  expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "tall", linkRange: true });
+
+  // Switching back restores intervals, symbol groups, chart height and range linking.
+  await useLayout(page, "Names");
+  expect(await intervalsShown(page)).toEqual(["5m", "15m", "1h", "1D", "1m"]);
+  await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "QQQ 1m chart" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Link time ranges" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "normal small charts" })).toHaveAttribute("aria-pressed", "true");
+  await expect(layoutsButton(page)).toContainText("Names");
+
+  // The main symbol, levels and watchlist belong to the workspace, not to a layout.
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await useLayout(page, "Scalp");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("NVDA");
+  await expect(page.getByRole("region", { name: "NVDA 1m chart" }).first()).toBeVisible();
+  await expect(page.getByRole("region", { name: /SPY .* chart/ })).toHaveCount(0);
+  await useLayout(page, "Names");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("NVDA");
+  await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
+  await expect(levelsPanel(page)).toContainText("NVDA levels");
+  await page.getByRole("button", { name: "Chart MRVL", exact: true }).click();
+  await expect(levelsPanel(page)).toContainText("Support");
+  expect((server.data as { watchlist: string[] }).watchlist).toEqual(["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"]);
+  expect((server.data as { levels: Record<string, { label: string }[]> }).levels.MRVL.map((level) => level.label)).toEqual(["Support"]);
+  expect(server.data).not.toHaveProperty("symbol");
+
+  // Rename. A name already used (ignoring case) is refused.
+  let menu = await openLayouts(page);
+  await page.screenshot({ path: test.info().outputPath("layouts-menu.png") });
+  await menu.getByRole("button", { name: "Rename Names" }).click();
+  await menu.getByLabel("Rename Names").fill("scalp");
+  await menu.getByLabel("Rename Names").press("Enter");
+  await expect(menu.getByRole("alert")).toHaveText("A layout named scalp already exists.");
+  await menu.getByLabel("Rename Names").fill("Index  names");
+  await menu.getByLabel("Rename Names").press("Enter");
+  await expect(menu.getByRole("button", { name: "Use layout Index names" })).toHaveAttribute("aria-current", "true");
+  await menu.getByLabel("Layout name", { exact: true }).fill("SCALP");
+  await menu.getByRole("button", { name: "Save layout" }).click();
+  await expect(menu.getByRole("alert")).toHaveText("A layout named SCALP already exists.");
+  await expect.poll(() => layoutNames(server)).toEqual(["Index names", "Scalp"]);
+  await menu.getByRole("button", { name: "Close layouts" }).click();
+
+  // Edit a panel: no layout is in use until one is replaced with the new arrangement.
+  await page.getByLabel("Panel 2 interval", { exact: true }).selectOption("30m");
+  await expect(layoutsButton(page)).toHaveText("Layouts");
+  menu = await openLayouts(page);
+  await expect(menu.getByRole("button", { name: "Update Index names with the current arrangement" })).toBeEnabled();
+  await menu.getByRole("button", { name: "Update Index names with the current arrangement" }).click();
+  await expect(menu.getByRole("button", { name: "Update Index names with the current arrangement" })).toBeDisabled();
+  await expect(menu.getByRole("button", { name: "Use layout Index names" })).toHaveAttribute("aria-current", "true");
+  await menu.getByRole("button", { name: "Close layouts" }).click();
+  await expect.poll(() => layoutsOn(server)[0].intervals[1]).toBe("30m");
+  expect(layoutsOn(server)[1].intervals[1]).toBe("3m"); // the other layout is untouched
+
+  // Delete asks first.
+  menu = await openLayouts(page);
+  await menu.getByRole("button", { name: "Delete Scalp" }).click();
+  await expect(menu).toContainText("Delete Scalp?");
+  await menu.getByRole("button", { name: "Keep" }).click();
+  await expect(menu.getByRole("button", { name: "Use layout Scalp" })).toBeVisible();
+  await menu.getByRole("button", { name: "Delete Scalp" }).click();
+  await menu.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(menu.getByRole("button", { name: "Use layout Scalp" })).toHaveCount(0);
+  await expect.poll(() => layoutNames(server)).toEqual(["Index names"]);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+
+  // The saved layout survives a reload and is still the one in use.
+  await page.reload();
+  await expect(layoutsButton(page)).toContainText("Index names");
+  await expect(syncStatus(page)).toHaveText("Saved");
+});
+
+test("a layout saved in one browser is usable in another with its symbol groups", { tag: "@real-settings" }, async ({ page, browser, request }) => {
+  const run = Date.now().toString(36);
+  const [desk, phone] = [`Desk ${run}`, `Phone ${run}`];
+  const serverLayouts = async (): Promise<SavedLayouts> => (await (await request.get("/api/backend/charts/settings")).json()).data?.layouts ?? [];
+  const start = await (await request.get("/api/backend/charts/settings")).json();
+  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: {} } })).ok()).toBe(true);
+  await stub(page);
+  await page.goto("/charts");
+  await holdSymbol(page, "Panel 3", "SPY");
+  await page.getByLabel("Panel 2 interval", { exact: true }).selectOption("30m");
+  await saveLayout(page, desk);
+  await expect.poll(async () => (await serverLayouts()).map((layout) => layout.name)).toEqual([desk]);
+  await expect(syncStatus(page)).toHaveText("Saved");
+
+  // A second browser (its own storage, like a phone) sees the saved layout and can switch to it.
+  const other = await browser.newContext();
+  const phonePage = await other.newPage();
+  await stub(phonePage);
+  await phonePage.goto("/charts");
+  await expect(layoutsButton(phonePage)).toContainText(desk);
+  await phonePage.getByLabel("Panel 2 interval", { exact: true }).selectOption("3m");
+  await phonePage.getByRole("button", { name: "Panel 3 symbol" }).click();
+  await phonePage.getByRole("dialog", { name: "Symbol for Panel 3" }).getByRole("option", { name: /Follow the main chart/ }).click();
+  await expect(layoutsButton(phonePage)).toHaveText("Layouts");
+  await useLayout(phonePage, desk);
+  await expect(phonePage.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
+  await expect(phonePage.getByLabel("Panel 2 interval", { exact: true })).toHaveValue("30m");
+
+  // It saves a layout of its own, which the first browser picks up on focus next to the one it saved.
+  await phonePage.getByLabel("Panel 4 interval", { exact: true }).selectOption("4h");
+  await saveLayout(phonePage, phone);
+  await expect.poll(async () => (await serverLayouts()).map((layout) => layout.name)).toEqual([desk, phone]);
+  const saved = await serverLayouts();
+  expect(saved[0]).toMatchObject({ intervals: ["5m", "30m", "1h", "1D", "1m"], panelSymbols: [null, null, "SPY", null, null] });
+  expect(saved[1]).toMatchObject({ intervals: ["5m", "30m", "1h", "4h", "1m"], panelSymbols: [null, null, "SPY", null, null] });
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  const menu = await openLayouts(page);
+  await expect(menu.getByRole("button", { name: `Use layout ${desk}` })).toBeVisible();
+  await expect(menu.getByRole("button", { name: `Use layout ${phone}` })).toHaveAttribute("aria-current", "true");
+  await menu.getByRole("button", { name: `Delete ${phone}` }).click();
+  await menu.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect.poll(async () => (await serverLayouts()).map((layout) => layout.name)).toEqual([desk]);
+  await other.close();
+});
+
+test("a layout save refused as stale keeps the other device's layouts, renames and additions", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await stub(page);
+  await page.goto("/charts");
+  await saveLayout(page, "Alpha");
+  await page.getByLabel("Panel 2 interval", { exact: true }).selectOption("30m");
+  await saveLayout(page, "Beta");
+  await expect.poll(() => layoutNames(server)).toEqual(["Alpha", "Beta"]);
+  await expect(syncStatus(page)).toHaveText("Saved");
+
+  // This device deletes Alpha and saves Delta while it cannot reach the server...
+  server.offline = true;
+  let menu = await openLayouts(page);
+  await menu.getByRole("button", { name: "Delete Alpha" }).click();
+  await menu.getByRole("button", { name: "Delete", exact: true }).click();
+  await menu.getByLabel("Layout name", { exact: true }).fill("Delta");
+  await menu.getByRole("button", { name: "Save layout" }).click();
+  await menu.getByRole("button", { name: "Close layouts" }).click();
+  await expect(syncStatus(page)).toHaveText("Saved in this browser · server unavailable");
+
+  // ...while another device renamed Beta and saved Gamma and its own Delta.
+  const theirs = layoutsOn(server);
+  server.data = { ...(server.data as object), layouts: [theirs[0], { ...theirs[1], name: "Beta desk" },
+    { ...theirs[0], id: "other-gamma", name: "Gamma", intervals: ["1m", "3m", "5m", "15m", "30m"] },
+    { ...theirs[0], id: "other-delta", name: "Delta", intervals: ["1D", "1h", "30m", "15m", "5m"] }] };
+  server.revision += 1;
+  server.offline = false;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(syncStatus(page)).toHaveText("Merged with changes from another device");
+  await expect.poll(() => layoutNames(server)).toEqual(["Beta desk", "Gamma", "Delta", "Delta (2)"]);
+  expect(server.saves.map((save) => save.status).slice(-2)).toEqual([409, 200]);
+  const merged = layoutsOn(server);
+  expect(merged.map((layout) => layout.id)).not.toContain(theirs[0].id); // Alpha stays deleted
+  expect(merged[0]).toMatchObject({ id: theirs[1].id, intervals: ["5m", "30m", "1h", "1D", "1m"] }); // Beta kept its arrangement
+  expect(merged[1]).toMatchObject({ id: "other-gamma", intervals: ["1m", "3m", "5m", "15m", "30m"] });
+  expect(merged[2]).toMatchObject({ id: "other-delta", intervals: ["1D", "1h", "30m", "15m", "5m"] });
+  expect(merged[3]).toMatchObject({ intervals: ["5m", "30m", "1h", "1D", "1m"] }); // this device's Delta, renamed to tell them apart
+  menu = await openLayouts(page);
+  for (const name of ["Beta desk", "Gamma", "Delta", "Delta (2)"]) await expect(menu.getByRole("button", { name: `Use layout ${name}`, exact: true })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Use layout Alpha" })).toHaveCount(0);
+});
+
+test("saved layouts that are malformed are dropped and duplicate names are told apart", async ({ page, context }) => {
+  const names = (name: string, extra: object = {}) => ({ id: `id-${name}`, name, layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: false, ...extra });
+  await fakeChartSettings(context, { revision: 1, data: { layouts: [
+    names("Index", { panelSymbols: [null, "SPY", "QQQ", "AAPL", null] }), // a third held symbol is not allowed
+    names("Four intervals", { intervals: ["5m", "15m", "1h", "1D"] }),
+    names("Bad interval", { intervals: ["5m", "15m", "1h", "1D", "2m"] }),
+    names("   "), { ...names("No id"), id: undefined }, "nonsense", null,
+    names("Index", { id: "second-index", layout: "single" }),
+    names("Copy", { id: "id-Index" }), // reuses an id
+  ] } });
+  await stub(page);
+  await page.goto("/charts");
+  const menu = await openLayouts(page);
+  await expect(menu.getByRole("list", { name: "Saved layouts list" }).getByRole("listitem")).toHaveCount(2);
+  await expect(menu.getByRole("button", { name: "Use layout Index", exact: true })).toContainText("5m | 15m | 1h | 1D | 1m · SPY, QQQ");
+  await expect(menu.getByRole("button", { name: "Use layout Index (2)", exact: true })).toContainText(/^Index \(2\)\s*5m$/);
+});
+
+test.describe("phone layouts", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the layouts sheet fits the screen, saves and switches by touch, and works full screen", async ({ page, context }) => {
+    const server = await fakeChartSettings(context);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main")).toBeVisible();
+    await page.getByRole("button", { name: "Show single chart" }).click();
+    await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
+    await layoutsButton(page).tap();
+    let dialog = layoutsDialog(page);
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Layout name", { exact: true }).fill("Focus");
+    await dialog.getByRole("button", { name: "Save layout" }).tap();
+    await expect(dialog.getByRole("button", { name: "Use layout Focus" })).toHaveAttribute("aria-current", "true");
+    // A bottom sheet inside the viewport with touch-sized controls.
+    const sheet = (await dialog.boundingBox())!;
+    expect(sheet.x).toBeGreaterThanOrEqual(0);
+    expect(sheet.x + sheet.width).toBeLessThanOrEqual(390);
+    expect(sheet.y + sheet.height).toBeLessThanOrEqual(844);
+    expect(sheet.y + sheet.height).toBeGreaterThan(780);
+    for (const name of ["Update Focus with the current arrangement", "Rename Focus", "Delete Focus", "Use layout Focus"]) {
+      const box = (await dialog.getByRole("button", { name }).boundingBox())!;
+      expect(Math.min(box.width, box.height), name).toBeGreaterThanOrEqual(32);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("layouts-sheet-mobile.png") });
+    await dialog.getByRole("button", { name: "Close layouts" }).tap();
+
+    // Back to five charts, then the single-chart layout in one tap.
+    await page.getByRole("button", { name: "Show five charts" }).tap();
+    await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+    await layoutsButton(page).tap();
+    await dialog.getByRole("button", { name: "Use layout Focus" }).tap();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
+    await expect.poll(() => layoutNames(server)).toEqual(["Focus"]);
+
+    // Full screen: the button is in the sticky header and the sheet sits above the charts.
+    await page.getByRole("button", { name: "Enter full-screen charts" }).tap();
+    await layoutsButton(page).tap();
+    dialog = layoutsDialog(page);
+    await expect(dialog).toBeInViewport();
+    await expect(dialog.getByRole("button", { name: "Use layout Focus" })).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(page.getByTestId("chart-workspace")).toHaveAttribute("data-immersive", "true"); // Escape closed the sheet only
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
 });

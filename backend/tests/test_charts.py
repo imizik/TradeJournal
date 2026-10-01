@@ -1,5 +1,6 @@
 """Chart data integrity, request sharing, and private journal marker boundaries."""
 
+import json
 from datetime import date, datetime, time as wall_time, timedelta, timezone
 from uuid import UUID
 
@@ -414,6 +415,27 @@ def test_chart_settings_save_only_on_top_of_the_revision_they_were_based_on(rout
     assert route_client.put("/charts/settings", json={"base_revision": 7, "data": {}}).status_code == 409
     saved = route_client.get("/charts/settings").json()
     assert saved["revision"] == 2 and saved["data"] == phone and saved["updated_at"]
+
+
+def test_chart_settings_keep_saved_layouts_whole_and_return_them_with_a_refused_save(route_client):
+    def layout(name, **changes):
+        return {"id": f"id-{name}", "name": name, "layout": "multi", "intervals": ["5m", "15m", "1h", "1D", "1m"],
+                "panelSymbols": [None, None, "SPY", None, "QQQ"], "smallSize": "normal", "linkRange": False, **changes}
+
+    desk = {"levels": {"SPY": [{"id": "a", "price": 500.25, "label": "Desk"}]},
+            "layouts": [layout("0DTE SPY", intervals=["1m", "5m", "15m", "30m", "1h"], linkRange=True), layout("Names")]}
+    saved = route_client.put("/charts/settings", json={"base_revision": 0, "data": desk}).json()
+    assert saved["data"] == desk and route_client.get("/charts/settings").json()["data"] == desk  # held-symbol nulls included
+    # Another device renames a layout and saves a third; the first device's stale save is refused with all of it.
+    phone = {**desk, "layouts": [desk["layouts"][0], {**desk["layouts"][1], "name": "Names (phone)"}, layout("Scalp", layout="single")]}
+    assert route_client.put("/charts/settings", json={"base_revision": 1, "data": phone}).json()["revision"] == 2
+    stale = route_client.put("/charts/settings", json={"base_revision": 1, "data": {**desk, "layouts": [layout("Desk only")]}})
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["current"]["data"]["layouts"] == phone["layouts"]
+    assert route_client.get("/charts/settings").json()["data"] == phone
+    # The most layouts the page keeps (twelve) are a sliver of the size limit.
+    twelve = {"layouts": [layout(f"Layout {n}") for n in range(12)]}
+    assert len(json.dumps(twelve, separators=(",", ":")).encode()) < charts.SETTINGS_BYTES // 50
 
 
 def test_chart_settings_save_reports_the_revision_it_wrote_not_a_later_one(route_client, monkeypatch):

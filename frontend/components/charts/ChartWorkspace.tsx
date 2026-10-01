@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, LayoutGrid, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { chartStreamUrl, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, liveTick, MAX_HELD_SYMBOLS, mergeBars, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, validSymbol } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceLevel, SmallChartSize, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
@@ -77,6 +78,7 @@ export default function ChartWorkspace() {
   const [immersive, setImmersive] = useState(false);
   // The panel the symbol search chooses for: 0 is the main symbol.
   const [palette, setPalette] = useState<number | null>(null);
+  const [layoutMenu, setLayoutMenu] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 900 });
   const link = useMemo(() => createCrosshairLink(), []);
@@ -341,17 +343,30 @@ export default function ChartWorkspace() {
     setSettings((s) => ({ ...s, panelSymbols: s.panelSymbols.map((other, i) => i === index ? held : other) }));
     setSymbolError(""); setPalette(null);
   };
+  // Named layouts (C7.2) are arrangements saved in the shared settings: they
+  // move intervals, held symbols, chart height and linked ranges, never the
+  // main symbol, levels or watchlist.
+  const inUse = activeLayout(settings);
+  const chooseLayout = (id: string) => {
+    setSettings((s) => { const layout = s.layouts.find((other) => other.id === id); return layout ? applyLayout(s, layout) : s; });
+    setExpanded(null); setSymbolError(""); setLayoutMenu(false);
+  };
+  const saveLayout = (name: string) => setSettings((s) => s.layouts.length >= MAX_LAYOUTS || nameTaken(s.layouts, name) ? s
+    : { ...s, layouts: [...s.layouts, { id: crypto.randomUUID(), name, ...arrangementOf(s) }] });
+  const renameLayout = (id: string, name: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, name } : layout) }));
+  const updateLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, ...arrangementOf(s) } : layout) }));
+  const deleteLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.filter((layout) => layout.id !== id) }));
   const choose = useRef(chooseSymbol);
-  const keys = useRef({ palette: palette !== null, immersive, watchlist: settings.watchlist, symbol: settings.symbol });
+  const keys = useRef({ palette: palette !== null, layoutMenu, immersive, watchlist: settings.watchlist, symbol: settings.symbol });
   useEffect(() => {
     choose.current = chooseSymbol;
-    keys.current = { palette: palette !== null, immersive, watchlist: settings.watchlist, symbol: settings.symbol };
+    keys.current = { palette: palette !== null, layoutMenu, immersive, watchlist: settings.watchlist, symbol: settings.symbol };
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const state = keys.current;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setPalette((v) => v === null ? 0 : null); return; }
-      if (state.palette) return;
+      if (state.palette || state.layoutMenu) return;
       if (event.key === "Escape" && state.immersive) { setImmersive(false); return; }
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
@@ -429,6 +444,7 @@ export default function ChartWorkspace() {
           <span role="status" aria-label="Chart settings" className={`mr-1 hidden items-center gap-1.5 text-[11px] lg:flex ${sync === "offline" || merged ? "text-amber-300" : "text-slate-500"}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
           <button className={`${button} hidden sm:inline-flex`} onClick={() => setPalette(0)} aria-label="Search symbols (Ctrl or Cmd+K)" title="Search symbols (⌘K / Ctrl+K)"><Search size={13} /><kbd className="text-[10px] text-slate-500">⌘K</kbd></button>
           {immersive && <button className={button} aria-pressed={settings.immersiveWatchlist} onClick={() => setSettings((s) => ({ ...s, immersiveWatchlist: !s.immersiveWatchlist }))}>{settings.immersiveWatchlist ? "Hide watchlist" : "Watchlist"}</button>}
+          <button className={button} onClick={() => setLayoutMenu(true)} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} />Layouts{inUse && <span className="max-w-24 truncate text-sky-300">{inUse.name}</span>}</button>
           <button className={button} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"}>
             {settings.layout === "multi" ? <Maximize2 size={13} /> : <Columns3 size={13} />}{settings.layout === "multi" ? "Focus" : "Five charts"}</button>
           <button className={button} onClick={() => setPaused((v) => !v)} aria-label={paused ? "Resume chart updates" : "Pause chart updates"}>{paused ? <Play size={13} /> : <Pause size={13} />}{paused ? "Resume" : "Pause"}</button>
@@ -531,6 +547,8 @@ export default function ChartWorkspace() {
       {palette !== null && <SymbolPalette current={palette ? slots.find((slot) => slot.index === palette)?.symbol ?? symbol : symbol} recent={settings.recent} watchlist={settings.watchlist} quotes={latest?.quotes ?? []}
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
+      {layoutMenu && <LayoutMenu layouts={settings.layouts} current={arrangementOf(settings)} onApply={chooseLayout} onSave={saveLayout} onRename={renameLayout}
+        onUpdate={updateLayout} onDelete={deleteLayout} onClose={() => setLayoutMenu(false)} />}
       {!immersive && <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
         <p className="max-w-3xl">{latest?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>
         <div className="text-right"><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-300">TradingView Lightweight Charts™</a><a href="/lightweight-charts-NOTICE.txt" className="block">Copyright (с) 2025 TradingView, Inc.</a></div>

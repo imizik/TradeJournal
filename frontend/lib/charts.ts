@@ -52,19 +52,31 @@ export type ChartStreamTick = {
 export type PriceLevel = { id: string; price: number; label: string };
 export type Indicators = Record<"ema9" | "ema20" | "ema50" | "ema200" | "vwap" | "volume" | "rsi" | "fills", boolean>;
 export type SmallChartSize = "compact" | "normal" | "tall";
+/**
+ * How the panels are arranged, and nothing about what they show beyond the
+ * symbols panels hold: the main symbol, levels, watchlist and indicators belong
+ * to the workspace, so switching layouts never moves them. Keys match
+ * `ChartSettings` so an arrangement spreads straight into it.
+ */
+export type Arrangement = {
+  layout: "multi" | "single"; intervals: Interval[]; panelSymbols: (string | null)[]; smallSize: SmallChartSize; linkRange: boolean;
+};
+/** A named arrangement ("0DTE SPY", "Names"), saved with the workspace. */
+export type SavedLayout = Arrangement & { id: string; name: string };
 export type ChartSettings = {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: "regular" | "extended";
   /** Per panel, aligned with `intervals`: a symbol the panel holds, or null to follow `symbol`. The main panel always follows. */
   panelSymbols: (string | null)[];
   layout: "multi" | "single"; indicators: Indicators; levels: Record<string, PriceLevel[]>;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize; immersiveWatchlist: boolean;
+  layouts: SavedLayout[];
 };
 export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false,
+  levels: {}, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -72,6 +84,8 @@ export const validSymbol = (value: string) => /^[A-Z][A-Z0-9./-]{0,14}$/.test(va
 /** Panels may hold two symbols besides the main one: each costs its own chart-feed reads. */
 export const MAX_HELD_SYMBOLS = 2;
 export const heldSymbols = (panelSymbols: (string | null)[]) => [...new Set(panelSymbols.filter((s): s is string => !!s))];
+export const MAX_LAYOUTS = 12;
+export const LAYOUT_NAME_MAX = 30;
 
 /** Settings from outside this code (browser storage, the server), with anything malformed replaced by its default. */
 export function sanitizeSettings(input: unknown): ChartSettings {
@@ -100,9 +114,67 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
       immersiveWatchlist: value.immersiveWatchlist === true,
+      layouts: sanitizeLayouts(value.layouts),
     };
   } catch { return DEFAULT_SETTINGS; }
 }
+
+const isInterval = (value: unknown): value is Interval => INTERVALS.includes(value as Interval);
+
+/** Saved layouts from outside this code: a malformed one is dropped, never repaired into something the user did not save. */
+function sanitizeLayouts(value: unknown): SavedLayout[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  const out: SavedLayout[] = [];
+  for (const row of value) {
+    if (out.length >= MAX_LAYOUTS) break;
+    const name = typeof row?.name === "string" ? layoutName(row.name) : "";
+    if (!name || typeof row.id !== "string" || !row.id || row.id.length > 64 || ids.has(row.id)
+      || !Array.isArray(row.intervals) || row.intervals.length !== 5 || !row.intervals.every(isInterval)) continue;
+    ids.add(row.id);
+    out.push({ id: row.id, name, layout: row.layout === "single" ? "single" : "multi", intervals: row.intervals,
+      panelSymbols: sanitizePanelSymbols(row.panelSymbols), smallSize: row.smallSize === "compact" || row.smallSize === "tall" ? row.smallSize : "normal",
+      linkRange: row.linkRange === true });
+  }
+  return uniqueLayoutNames(out);
+}
+
+/** A layout name as saved: single-spaced and short. Empty means unusable. */
+export const layoutName = (input: string) => input.replace(/\s+/g, " ").trim().slice(0, LAYOUT_NAME_MAX);
+const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+export const nameTaken = (layouts: SavedLayout[], name: string, exceptId?: string) => layouts.some((layout) => layout.id !== exceptId && sameName(layout.name, name));
+
+/**
+ * Two devices can each save a layout under one name before either sees the
+ * other's. Names identify layouts to the person choosing, so the later one in
+ * the list becomes "Name (2)". Idempotent: unique names pass through unchanged.
+ */
+export function uniqueLayoutNames(layouts: SavedLayout[]): SavedLayout[] {
+  const taken: string[] = [];
+  return layouts.map((layout) => {
+    let name = layout.name;
+    for (let n = 2; taken.some((other) => sameName(other, name)); n++) {
+      const suffix = ` (${n})`;
+      name = `${layout.name.slice(0, LAYOUT_NAME_MAX - suffix.length)}${suffix}`;
+    }
+    taken.push(name);
+    return name === layout.name ? layout : { ...layout, name };
+  });
+}
+
+/** The current arrangement, keys in a fixed order so equal arrangements compare equal as text. */
+export const arrangementOf = ({ layout, intervals, panelSymbols, smallSize, linkRange }: Arrangement): Arrangement =>
+  ({ layout, intervals, panelSymbols, smallSize, linkRange });
+export const sameArrangement = (a: Arrangement, b: Arrangement) => JSON.stringify(arrangementOf(a)) === JSON.stringify(arrangementOf(b));
+/** The saved layout the panels are arranged as right now, if any; editing a panel afterwards leaves none. */
+export const activeLayout = (settings: ChartSettings) => settings.layouts.find((layout) => sameArrangement(layout, settings));
+/** Switching layouts changes how panels are arranged and leaves the main symbol, levels and watchlist where they are. */
+export const applyLayout = (settings: ChartSettings, layout: SavedLayout): ChartSettings => ({ ...settings, ...arrangementOf(layout) });
+/** "5m | 15m | 1h | 1D | 1m · SPY, QQQ" (just the main chart's interval for a single chart). */
+export const layoutSummary = (layout: Arrangement) => {
+  const held = heldSymbols(layout.panelSymbols);
+  return `${layout.intervals.slice(0, layout.layout === "single" ? 1 : 5).join(" | ")}${held.length ? ` · ${held.join(", ")}` : ""}`;
+};
 
 function sanitizePanelSymbols(value: unknown): (string | null)[] {
   const kept = new Set<string>();
