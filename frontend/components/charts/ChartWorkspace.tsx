@@ -6,7 +6,7 @@ import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, Lin
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
 import { chartStreamUrl, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, liveTick, MAX_HELD_SYMBOLS, mergeBars, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, FillMarker, Indicators, Interval, PriceLevel, SmallChartSize, SymbolPanels } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceLevel, SmallChartSize, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
 import type { LiveFeed } from "@/lib/chartStore";
@@ -25,8 +25,11 @@ const NO_LEVELS: PriceLevel[] = [];
 
 // The pieces of the toolbar and footer that move with every trade or second
 // subscribe themselves, so the workspace above them does not re-render.
+// The stream also carries symbols that panels hold: the headline reads only the
+// main symbol's trades, so a SPY trade never hides the newest MRVL one.
+const latestTrade = (ticks: ChartStreamTick[], symbol: string) => ticks.findLast((tick) => tick.symbol === symbol);
 function LiveQuote({ live, quote, candle }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar }) {
-  const tick = useStream(live, (ticks) => ticks.at(-1));
+  const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
   const shown = shownPrice({ tick, quote, candle, scope: live });
   const change = shown.price != null && quote?.previous_close && quote.previous_close > 0
     ? (shown.price / quote.previous_close - 1) * 100 : quote?.change_percentage;
@@ -47,7 +50,7 @@ function FeedStatus({ live, paused, delayed, hasData, failed, loading }: { live:
 function LiveFooter({ live, quote, candle, asOf }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; asOf?: number | null }) {
   const minute = useStream(live, (ticks) => asOf === undefined ? 0
     : ticks.reduce((latest, tick) => liveTick(tick, live) ? Math.max(latest, tick.minute) : latest, asOf ?? 0));
-  const tick = useStream(live, (ticks) => ticks.at(-1));
+  const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
   const shown = shownPrice({ tick, quote, candle, scope: live });
   const age = useClock((now) => shown.at ? Math.max(0, Math.floor(now - shown.at)) : null);
   return <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-slate-500">
@@ -477,7 +480,8 @@ export default function ChartWorkspace() {
               history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />)}
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
-                <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={settings.levels[slot.symbol] ?? NO_LEVELS} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={settings.levels[slot.symbol] ?? NO_LEVELS} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
