@@ -19,7 +19,10 @@ A Claude Code cloud session clones the repository without `backend/.venv` or
 Chromium that `verify.sh` finds on its own (see [browser tests](#browser-tests)).
 
 `verify.sh` runs every check even after one fails, so one run reports every
-problem. It exits non-zero if any check failed.
+problem. It exits non-zero if any check failed. Passing checks print their last
+result line, including pytest's warning count. A failed check prints the last
+40 lines and the path to its complete log. Failed runs retain all check logs in
+a private temporary directory; successful runs remove them.
 
 On Windows, run these through Git Bash or WSL. `startdev.ps1` remains the
 native PowerShell launcher for the app itself.

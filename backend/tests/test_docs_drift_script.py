@@ -31,6 +31,7 @@ echo "A corrected sentence." >> docs/guide.md
 [ "$mode" = nomarker ] || printf '{"commit": "%s", "date": "2026-10-03", "note": "stub"}\\n' "$(git rev-parse HEAD)" \\
   > docs/agent/last-reconciled.json
 case "$mode" in
+  stall) exec sleep 30 ;;
   unfinished) echo '{"type": "result", "subtype": "error_max_budget_usd", "is_error": true, "result": ""}' ;;
   # How the CLI reports a refused key or login: "success", with the error as the answer.
   refused) echo '{"type": "result", "subtype": "success", "is_error": true, "result": "Failed to authenticate. API Error: 401"}' ;;
@@ -109,7 +110,7 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
 
 def run(work: Path, env: dict, **extra: str) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", str(work / "scripts" / "docs_drift_week.sh")], cwd=work, env={**env, **extra},
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, timeout=30)
 
 
 def logged(env: dict, name: str) -> str:
@@ -186,6 +187,14 @@ def test_failed_docs_tests_stop_the_push(checkout):
     work, env = checkout
     result = run(work, env, DOCS_DRIFT_CHECK="exit 1")
     assert result.returncode == 1 and "the docs tests failed" in result.stderr
+    assert remote_branches(work, env) == ["main"]
+    assert_tidy(work, env)
+
+
+def test_time_limit_stops_a_stalled_pass(checkout):
+    work, env = checkout
+    result = run(work, env, STUB_CLAUDE="stall", DOCS_DRIFT_TIME_LIMIT="1")
+    assert result.returncode == 1 and "stopped with exit" in result.stderr
     assert remote_branches(work, env) == ["main"]
     assert_tidy(work, env)
 

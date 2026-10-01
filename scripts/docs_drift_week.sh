@@ -181,12 +181,20 @@ For this run:
     --permission-mode dontAsk --permission-prompts none --max-budget-usd "$BUDGET_USD" \
     --no-session-persistence --output-format json < /dev/null > "$result" 2> "$result.stderr" &
   local pid=$!
-  ( sleep "$TIME_LIMIT" && kill "$pid" 2> /dev/null ) &
+  # Keep the watchdog's descriptors out of callers that capture this script's
+  # output, and stop its sleep when Claude finishes before the time limit.
+  (
+    sleep "$TIME_LIMIT" &
+    sleeper=$!
+    trap 'kill "$sleeper" 2>/dev/null; wait "$sleeper" 2>/dev/null; exit 0' TERM
+    wait "$sleeper" || exit 0
+    kill "$pid" 2>/dev/null
+  ) > /dev/null 2>&1 &
   local watchdog=$!
   wait "$pid"
   local status=$?
-  pkill -P "$watchdog" 2> /dev/null
   kill "$watchdog" 2> /dev/null
+  wait "$watchdog" 2> /dev/null || true
   [ "$status" -eq 0 ] || fail "Claude stopped with exit $status (a run past ${TIME_LIMIT}s is stopped); see $result"
   local body
   body="$("$PYTHON" - "$result" <<'EOF'
