@@ -202,9 +202,11 @@ def save_settings(body: ChartSettingsSave, db: Session = Depends(get_session)):
     except IntegrityError:
         db.rollback()  # another save created the row first
         saved = False
+    if saved:
+        # Exactly what this request wrote. Rereading the row could return a save
+        # another device made after this commit, and this client would then take
+        # that revision as the base for its own copy.
+        return {"revision": body.base_revision + 1, "data": body.data, "updated_at": now.isoformat()}
     db.expire_all()
-    current = _settings(db.get(ChartSettingsRecord, SETTINGS))
-    if not saved:
-        raise HTTPException(409, {"code": "revision_conflict",
-                                  "message": "These chart settings changed on another device.", "current": current})
-    return current
+    raise HTTPException(409, {"code": "revision_conflict", "message": "These chart settings changed on another device.",
+                              "current": _settings(db.get(ChartSettingsRecord, SETTINGS))})

@@ -154,9 +154,11 @@ export function useChartSettings() {
   useEffect(() => {
     let alive = true;
     const local = readLocal();
-    const mine = shared(local.settings ?? DEFAULT_SETTINGS);
     const base = local.meta?.base ?? shared(DEFAULT_SETTINGS);
-    const device = { symbol: local.settings?.symbol ?? DEFAULT_SETTINGS.symbol, recent: local.settings?.recent ?? [] };
+    // This browser's copy shows while the server's loads (read after hydration,
+    // so the server render matches). Anything changed meanwhile is part of this
+    // device's changes, merged in below.
+    queueMicrotask(() => { if (alive && local.settings) setSettings(local.settings); });
     fetchSettings().then((server) => {
       if (!alive) return;
       const theirs = server.data ? fromServer(server.data) : shared(DEFAULT_SETTINGS);
@@ -164,13 +166,15 @@ export function useChartSettings() {
       confirmed.current = theirs;
       // A first visit after the server started keeping settings has no base:
       // everything saved in this browser merges in as this device's changes.
-      setSettings({ ...(same(mine, base) ? theirs : rebase(base, mine, theirs)), ...device });
+      setSettings((current) => {
+        const mine = shared(current);
+        return { ...(same(mine, base) ? theirs : rebase(base, mine, theirs)), symbol: current.symbol, recent: current.recent };
+      });
       setSync("saved");
     }, () => {
       if (!alive) return;
       revision.current = local.meta?.revision ?? 0;
       confirmed.current = base;
-      if (local.settings) setSettings(local.settings);
       setSync("offline");
     }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };

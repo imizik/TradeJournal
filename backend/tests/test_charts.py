@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import httpx
 import pytest
+from sqlalchemy import update
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
@@ -14,7 +15,7 @@ from app.database import get_session
 from app.engine import chart_feed as feed_module
 from app.engine.chart_feed import ChartFeed, ChartFeedError
 from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, market_day, normalize_bars, session_part
-from app.models import Account, Fill
+from app.models import Account, ChartSettingsRecord, Fill
 from app.routers import charts
 
 
@@ -366,6 +367,25 @@ def test_chart_settings_save_only_on_top_of_the_revision_they_were_based_on(rout
     assert route_client.put("/charts/settings", json={"base_revision": 7, "data": {}}).status_code == 409
     saved = route_client.get("/charts/settings").json()
     assert saved["revision"] == 2 and saved["data"] == phone and saved["updated_at"]
+
+
+def test_chart_settings_save_reports_the_revision_it_wrote_not_a_later_one(route_client, monkeypatch):
+    assert route_client.put("/charts/settings", json={"base_revision": 0, "data": {"device": "phone"}}).json()["revision"] == 1
+    # Another device saves between this request's commit and its response.
+    commit, raced = Session.commit, []
+
+    def commit_then_race(self):
+        commit(self)
+        if not raced:
+            raced.append(True)
+            with Session(self.get_bind()) as other:
+                other.execute(update(ChartSettingsRecord).values(revision=3, data_json='{"device":"tablet"}'))
+                other.commit()
+
+    monkeypatch.setattr(Session, "commit", commit_then_race)
+    saved = route_client.put("/charts/settings", json={"base_revision": 1, "data": {"device": "desktop"}}).json()
+    assert (saved["revision"], saved["data"]) == (2, {"device": "desktop"})
+    assert route_client.get("/charts/settings").json()["revision"] == 3  # the later save is still there to conflict with
 
 
 @pytest.mark.parametrize("body", [{"base_revision": -1, "data": {}}, {"base_revision": 0, "data": []}, {"base_revision": 0}, {"data": {}}])
