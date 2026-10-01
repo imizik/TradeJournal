@@ -37,7 +37,8 @@ function fixture(url: string): ChartData {
   const extras = Object.fromEntries((query.get("extras") ?? "").split(",").filter(Boolean).map((part) => {
     const [name, frames] = part.split(":");
     return [name, { panels: fixturePanels(frames.split(".") as Interval[], HELD_OFFSET[name] ?? 100),
-      fetched_at: { intraday: Math.floor(Date.now() / 1000) }, intraday_as_of: Math.floor(Date.now() / 1000) - 60, issues: [] }];
+      fetched_at: { intraday: Math.floor(Date.now() / 1000) }, intraday_as_of: Math.floor(Date.now() / 1000) - 60, issues: [],
+      fills_truncated: name === "QQQ" }];
   }));
   const now = Math.floor(Date.now() / 1000);
   const symbols = [...new Set([symbol, ...(query.get("watchlist") ?? "").split(",")].filter(Boolean))];
@@ -1254,6 +1255,9 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(values(page, "Panel 3")).toContainText(/C 6\d\d\.\d\d/); // SPY's candles, not MRVL's
   await expect(values(page, "Panel 5")).toContainText(/C 5\d\d\.\d\d/);
   await expect(values(page, "Panel 2")).toContainText(/C 2\d\d\.\d\d/);
+  // A held chart says when its fill markers stop at the newest 1,000.
+  await expect(page.getByRole("region", { name: "QQQ 1m chart" })).toContainText("Most recent 1,000 QQQ fills shown.");
+  await expect(page.getByRole("region", { name: "SPY 1h chart" })).not.toContainText("fills shown");
   expect(requests.at(-1)!.get("intervals")).toBe("5m,15m,1D");
   expect(requests.at(-1)!.get("extras")).toBe("QQQ:1m,SPY:1h");
   await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("MRVL,QQQ,SPY");
@@ -1284,11 +1288,17 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(values(page, "main")).toContainText("C 191.50");
   await expect(values(page, "Panel 3")).toContainText("C 701.25");
   await expect(values(page, "Panel 5")).not.toContainText("191.50");
+  // The headline follows NVDA's newest trade even after SPY trades again.
+  await trade(page, "SPY", 702.5);
+  await expect(values(page, "Panel 3")).toContainText("C 702.50");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("191.50");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("Live trade");
+  await expect(page.getByText(/^Live trade \d+s ago$/)).toBeVisible();
 
   // Pause freezes every symbol; resume reconnects the same three.
   await page.getByRole("button", { name: "Pause chart updates" }).click();
   await trade(page, "SPY", 705);
-  await expect(values(page, "Panel 3")).toContainText("C 701.25");
+  await expect(values(page, "Panel 3")).toContainText("C 702.50");
   await page.getByRole("button", { name: "Resume chart updates" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(3);
   expect(await page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");

@@ -33,6 +33,8 @@ export type ChartQuote = {
 export type SymbolPanels = {
   panels: Partial<Record<Interval, ChartPanelData>>; fetched_at: Record<string, number>;
   intraday_as_of: number | null; issues: string[];
+  /** Fill markers stop at the newest 1,000 in the window; the chart says so. */
+  fills_truncated?: boolean;
 };
 export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;

@@ -1,6 +1,6 @@
 """Chart data integrity, request sharing, and private journal marker boundaries."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import FastAPI
@@ -336,7 +336,23 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     # A held symbol that fails leaves the main charts and the other held symbol intact.
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
-    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": ["Tradier could not load these charts."]}
+    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
+                                     "issues": ["Tradier could not load these charts."], "fills_truncated": False}
+
+
+def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):
+    db = next(route_client.app.dependency_overrides[get_session]())
+    for i in range(1001):  # one more than the marker cap, all inside the 09:30-10:05 window
+        db.add(Fill(id=UUID(int=5000 + i), account_id=UUID(int=1), ticker="QQQ", side="buy_to_open", instrument_type="stock",
+                    price=500, contracts=1, executed_at=datetime.fromisoformat("2026-09-29T09:31") + timedelta(seconds=i), raw_email_id=f"qqq:{i}"))
+    db.commit()
+    bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
+    monkeypatch.setattr(charts.chart_feed, "workspace", lambda symbol, frames, *_, **__: {
+        "panels": {f: {"bars": bars, "markers": []} for f in frames}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "quotes": []})
+    data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=QQQ:5m,SPY:5m").json()
+    assert data["fills_truncated"] is False
+    assert data["extras"]["QQQ"]["fills_truncated"] is True and data["extras"]["SPY"]["fills_truncated"] is False
+    assert data["extras"]["QQQ"]["panels"]["5m"]["markers"]  # the newest 1,000 are still drawn
 
 
 @pytest.mark.parametrize("extras", ["SPY:5m,QQQ:5m,IWM:5m", "MRVL:5m", "SPY:", "SPY:2m", "SPY:5m.15m.1h.4h.1D.1m", "../x:5m"])
