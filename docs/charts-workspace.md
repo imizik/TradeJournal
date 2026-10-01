@@ -80,7 +80,7 @@ cd backend
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Tradier does not guarantee dividend adjustment.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
-- Levels, watchlist, intervals, session, indicators and layout are saved on the
+- Levels, watchlist, intervals, session, indicators, layout and named layouts are saved on the
   server (`GET`/`PUT /charts/settings`, table `chart_settings`), so the phone
   and the desktop share them. The symbol on screen and the recent symbols stay
   per device. Each save names the revision it was based on and the server
@@ -97,6 +97,32 @@ cd backend
   of that symbol and can be deleted individually.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
+- **Layouts** (header button) saves the current arrangement under a name, such
+  as "0DTE SPY" (1m | 5m | 15m ...) or "Names" (the traded name beside SPY and QQQ),
+  and switches to it in one click or tap. A layout is the chart mode (five
+  charts or one), the five intervals, the symbols panels hold, the small-chart
+  height and linked time ranges. The main symbol, levels, watchlist, session
+  and indicators belong to the workspace, so switching never moves them. The
+  button shows the layout the panels are arranged as right now; after a panel
+  is edited no layout is in use until one is replaced with **Update**. Rows
+  rename, replace with the current arrangement, and delete after a
+  confirmation. Names are single-spaced, up to 30 characters and unique
+  ignoring case, and twelve layouts can be saved. A saved layout whose
+  arrangement is not one the page could have saved (a wrong number of
+  intervals, a third held symbol, an unknown mode or size) is dropped whole
+  when read, never repaired into an arrangement nobody made. Layouts are part of the saved
+  settings: another device sees them on focus or within 30 seconds, and a save
+  refused as stale merges layout by layout (a layout saved, renamed or deleted
+  here is re-applied on the other device's copy; if both devices changed one
+  layout, this device's version wins; two layouts that end up with one name
+  become "Name" and "Name (2)"; if both devices save one at the limit, both are
+  kept, the menu reads 13/12 and asks for a deletion before another save).
+  Switching changes the shared intervals and
+  held symbols, so the other device's panels follow. The menu is a centered
+  dialog on a desktop and a bottom sheet on a phone, also in full screen;
+  Escape closes it without leaving full screen, and symbol search (Cmd/Ctrl+K)
+  stays closed while it is open. Layouts make no provider calls
+  beyond the workspace request the new intervals and symbols need.
 - One private API-owned Tradier WebSocket market stream serves all visible chart
   tabs. Valid trade prices are batched to at most one event per second and sent
   to each tab through private server-sent events. Symbol changes update that
@@ -328,11 +354,21 @@ level in one browser context and read it in a second one through the e2e
 backend, check that a stale save is refused, and use a fake settings server for
 a merged conflict, the first-visit merge of browser-only settings, and an
 unreachable server. `backend/tests/test_charts.py` covers the revision rule,
-malformed and oversized saves.
+malformed and oversized saves, and that a refused save returns another
+device's layouts whole. Layout tests save, switch, rename, replace, refuse a
+duplicate name and delete layouts through the menu, and check that switching
+restores intervals, held symbols, chart height and range linking while the main
+symbol, levels and watchlist stay put (and that the server copy has them). They
+save a layout in one browser context and use it from a second one through the
+e2e backend, merge a stale save (a layout deleted and one saved offline beside
+another device's rename, addition and same-named layout), keep both layouts when
+two devices each save a twelfth, drop each kind of malformed saved layout whole,
+keep Cmd/Ctrl+K from opening symbol search behind the dialog, and open the 390px
+bottom sheet by touch, in full screen too.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine
-runtime, raw tick tape, trendline/fibonacci tools, replay, volume profile,
-server-side chart alerts or named layouts. The existing
+runtime, raw tick tape, trendline/fibonacci tools, replay, volume profile
+or server-side chart alerts. The existing
 TradingView-to-Signals loop still runs separately. Keep TradingView while
 comparing the required indicators and sessions side by side.

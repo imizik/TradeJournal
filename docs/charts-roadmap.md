@@ -66,8 +66,8 @@ from planned work.
 | C0.3 | Keep chart instances across symbol and interval switches | 0 Foundations | done ([PR #92](https://github.com/imizik/TradeJournal/pull/92)) |
 | C0.4 | Workspace saved on the server, so phone and desktop share levels and layout | 0 Foundations | done ([PR #93](https://github.com/imizik/TradeJournal/pull/93)) |
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | done ([PR #95](https://github.com/imizik/TradeJournal/pull/95)) |
-| C7.2 | Named saved layouts | 7 Layouts | next |
-| C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | todo |
+| C7.2 | Named saved layouts | 7 Layouts | done ([PR #98](https://github.com/imizik/TradeJournal/pull/98)) |
+| C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | next |
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | todo |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | todo |
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | todo |
@@ -620,11 +620,16 @@ range/crosshair linking, pause/resume and scroll-back in browser tests. A backen
 test proves tabs/panels share one upstream WebSocket and stay within aggregate
 REST budgets. Depends on C0.2/C0.3; comes early in execution order.
 
-**C7.2 Named layouts.** Save and switch layouts such as "0DTE SPY" (1m | 5m |
+**C7.2 Named layouts (done in PR #98).** Save and switch layouts such as "0DTE SPY" (1m | 5m |
 15m) or "Names" (SPY | QQQ | ticker). Stored with the workspace (C0.4).
 *Done when:* saving, renaming, switching and deleting layouts works across two
 browser contexts without losing symbol groups, intervals or levels, including
 revision-conflict handling and phone controls.
+As built: a layout is the arrangement of the existing five panels (chart mode,
+the five intervals, held symbols, small-chart height, linked time ranges). A
+variable panel count is not part of it. The main symbol, levels, watchlist,
+session and indicators stay workspace-wide, and switching changes the shared
+intervals and held symbols, so the other device's panels follow.
 
 ### G0 — Daily chart replacement acceptance
 
