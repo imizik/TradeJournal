@@ -281,6 +281,16 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     return zero == null || one == null || one === zero ? null : (x - zero) / (one - zero);
   }
 
+  /** With the magnet: the open, high, low or close of the bar at `logical` drawn nearest `price`, or null past the bars. */
+  snapPrice(logical: number, price: number): number | null {
+    const bar = this.timeline.bar(Math.floor(logical + 0.5));
+    const series = this.series;
+    const y = series?.priceToCoordinate(price);
+    if (!bar || !series || y == null) return null;
+    const near = (value: number) => Math.abs((series.priceToCoordinate(value) ?? Infinity) - y);
+    return [bar.open, bar.high, bar.low, bar.close].reduce((best, value) => near(value) < near(best) ? value : best);
+  }
+
   /**
    * The anchor a click at (x, y) places: the middle of the nearest bar (or of
    * an empty slot past the last one) at the price under the pointer, to the

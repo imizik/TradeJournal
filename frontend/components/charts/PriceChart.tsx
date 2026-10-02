@@ -222,9 +222,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // any item; a finger drags only the selected one, so panning across a
     // drawing never moves it. A tap selects (the click handler below). A press
     // on a selected drawing's handle moves that anchor; anywhere else on it
-    // moves the whole drawing by whole bars. `offset` keeps a level where it
+    // moves the whole drawing by whole bars, and with the magnet the anchor
+    // nearest the press (`anchor`) snaps. `offset` keeps a level where it
     // was grabbed, so it moves by the drag instead of jumping to the pointer.
-    type Drag = { id: string; handle: number | null; touch: number | null; from: { x: number; y: number }; base: Shown; offset: number; result: Shown | null; moved: boolean };
+    type Drag = { id: string; handle: number | null; anchor: number; touch: number | null; from: { x: number; y: number }; base: Shown; offset: number; result: Shown | null; moved: boolean };
     let drag: Drag | null = null;
     let lastTouch = -Infinity;
     const local = (clientX: number, clientY: number) => { const box = element.getBoundingClientRect(); return { x: clientX - box.left, y: clientY - box.top }; };
@@ -242,7 +243,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       if (!hit || !base || !(base.kind === "level" ? now.onMove : now.onEditDrawing)) return false;
       const at = base.kind === "level" ? layer.y(hit.id) : y;
       if (at === null) return false;
-      drag = { id: hit.id, handle: hit.handle, touch, from: { x, y }, base, offset: at - y, result: null, moved: false };
+      const near = (layer.anchors(hit.id) ?? []).reduce<{ index: number; distance: number }>((best, point, index) => {
+        const distance = point ? Math.hypot(point.x - x, point.y - y) : Infinity;
+        return distance < best.distance ? { index, distance } : best;
+      }, { index: 0, distance: Infinity });
+      drag = { id: hit.id, handle: hit.handle, anchor: near.index, touch, from: { x, y }, base, offset: at - y, result: null, moved: false };
       if (touch === null) now.onSelect?.(hit.id);
       window.addEventListener("keydown", onEscape, true);
       return true;
@@ -263,7 +268,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       } else {
         const [from, to] = [layer.logicalAt(drag.from.x), layer.logicalAt(x)];
         const [was, now] = [candles.coordinateToPrice(drag.from.y), candles.coordinateToPrice(inPane(y))];
-        points = from === null || to === null || was === null || now === null ? null : shiftPoints(base.points, timeline, Math.round(to - from), now - was);
+        if (from !== null && to !== null && was !== null && now !== null) {
+          const bars = Math.round(to - from);
+          const grabbed = base.points[drag.anchor];
+          const at = timeline.toLogical(grabbed.time);
+          // The magnet lands the grabbed anchor on its new bar's nearest open, high, low or close; the rest move with it.
+          const snapped = magnet && at !== null ? layer.snapPrice(at + bars, grabbed.price + now - was) : null;
+          points = shiftPoints(base.points, timeline, bars, snapped === null ? now - was : snapped - grabbed.price);
+          if (points && snapped !== null) points[drag.anchor] = { ...points[drag.anchor], price: snapped };
+        }
       }
       // A position with no valid (positive) price keeps the last one.
       if (!points) return;

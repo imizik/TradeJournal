@@ -123,7 +123,9 @@ cd backend
   5m anchor sits inside the right 1h bar and a moment between sessions on the
   boundary between bars; past the last bar the axis continues one interval per
   bar. The magnet (toggle, or hold ⌘/Ctrl for one click or drag) snaps the
-  price to that bar's open, high, low or close, whichever is drawn nearest.
+  price to that bar's open, high, low or close, whichever is drawn nearest; a
+  drawing dragged whole snaps the anchor nearest where it was grabbed and moves
+  the others with it.
   Drawings select, drag (a mouse drags any; a finger only the selected one),
   delete and undo like levels: a handle moves one anchor (a zone has one at
   every corner), and the body moves the whole drawing by whole bars and any

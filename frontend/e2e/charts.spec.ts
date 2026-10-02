@@ -2630,7 +2630,7 @@ test("a ray, a zone and a note draw, edit and delete; the zone resizes by a corn
   await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo deleting text note/);
 });
 
-test("the magnet snaps anchors to the bar's open, high, low or close, by toggle or while Cmd/Ctrl is held", async ({ page, context }) => {
+test("the magnet snaps anchors to the bar's open, high, low or close when placed, dragged by a handle or dragged whole, by toggle or while Cmd/Ctrl is held", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const server = await fakeChartSettings(context);
   await registerCharts(page);
@@ -2664,6 +2664,16 @@ test("the magnet snaps anchors to the bar's open, high, low or close, by toggle 
   const [first] = (await anchorsOf(page, "main", line.id))!;
   await dragChart(page, "main", first!, await near(190, fixtureBar(190).high, 2));
   await expect.poll(() => drawingsOf(server)[2].points[0]).toEqual({ time: fixtureBar(190).middle, price: fixtureBar(190).high });
+
+  // Dragged whole, the anchor nearest the press lands on its new bar's high; the other end moves by the same bars and price.
+  const [a, b] = (await anchorsOf(page, "main", line.id))!;
+  const grabbed = { x: a!.x + (b!.x - a!.x) * 0.15, y: a!.y + (b!.y - a!.y) * 0.15 };
+  const target = await near(193, fixtureBar(193).high, 3);
+  await dragChart(page, "main", grabbed, { x: grabbed.x + target.x - a!.x, y: grabbed.y + target.y - a!.y });
+  await expect.poll(() => drawingsOf(server)[2].points[0]).toEqual({ time: fixtureBar(193).middle, price: fixtureBar(193).high });
+  const other = drawingsOf(server)[2].points[1];
+  expect(other.time).toBe(fixtureBar(223).middle);
+  expect(Math.abs(other.price - (fixtureBar(220).close + fixtureBar(193).high - fixtureBar(190).high))).toBeLessThan(0.006);
 
   // Off again, Cmd/Ctrl held for one click: that click snaps (to the open), the next does not.
   await page.getByRole("button", { name: "Magnet" }).click();
