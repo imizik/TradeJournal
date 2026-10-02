@@ -356,6 +356,34 @@ def test_sync_pipeline_gives_up_after_its_retry_window(monkeypatch, capsys):
     assert "skipped" in capsys.readouterr().out
 
 
+def test_options_snapshot_is_queued_after_the_close_and_retried(monkeypatch, capsys):
+    automation = load("automation")
+    responses = [(409, {"detail": "busy"}), (200, {"run_id": "run-1"})]
+    calls = []
+    monkeypatch.setattr(automation, "request", lambda path, method="GET": calls.append((path, method)) or responses.pop(0))
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    automation.options_snapshot()
+    assert calls == [("/sync/jobs/options_snapshot/run", "POST")] * 2
+    assert "queued: run-1" in capsys.readouterr().out
+    timer = (Path(__file__).resolve().parents[2] / "deploy/systemd/tradejournal-options-snapshot.timer").read_text()
+    # After the 16:15 option close and before SPX's 20:15 overnight session.
+    assert "OnCalendar=Mon..Fri *-*-* 16:20:00 America/New_York" in timer
+    assert "OnCalendar=Mon..Fri *-*-* 19:20:00 America/New_York" in timer
+    assert "tradejournal-options-snapshot.timer" in load("control").TIMERS
+
+
+def test_an_options_snapshot_that_cannot_be_queued_fails_the_unit(monkeypatch):
+    # A session's open interest cannot be recorded later, so this is not a quiet skip.
+    automation = load("automation")
+    monkeypatch.setattr(automation, "request", lambda *_args, **_kwargs: (409, {"detail": "busy"}))
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    with pytest.raises(SystemExit, match="not queued"):
+        automation.options_snapshot(retry_seconds=0)
+    alerts = load("alerts")
+    assert "tradejournal-options-snapshot.service" in alerts.SERVICES
+    assert "tradejournal-options-snapshot.timer" in alerts.TIMERS
+
+
 @pytest.fixture
 def alerts(tmp_path, monkeypatch):
     module = load("alerts")

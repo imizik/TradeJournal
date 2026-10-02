@@ -13,7 +13,7 @@ from app import models as _models  # noqa: F401  # registers all SQLModel tables
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 PREVIOUS_HEAD = "f1a2b3c4d5e6"
-CURRENT_HEAD = "3c5e7a9b1d24"
+CURRENT_HEAD = "5e8b2d7c4a19"
 
 EXPECTED_COLUMNS = {
     "alert_id",
