@@ -14,7 +14,9 @@ import time
 import httpx
 
 from app.engine import tradier
+from app.engine.chart_adjust import adjust_daily, describe, suspect_gaps
 from app.engine.chart_math import ET, chart_bars, market_day, normalize_bars
+from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
 
 
 class ChartFeedError(Exception):
@@ -31,7 +33,8 @@ class CachedRead:
 
 
 class ChartFeed:
-    def __init__(self):
+    def __init__(self, splits: ChartSplits | None = None):
+        self.splits = splits  # None: no split data, disclosed on every response
         self._lock = threading.RLock()
         self._cache: OrderedDict[tuple, CachedRead] = OrderedDict()
         self._calls: deque[float] = deque()
@@ -132,6 +135,9 @@ class ChartFeed:
                 "start": (today - timedelta(days=1100)).isoformat(), "end": today.isoformat(),
             }, 60)
             daily = normalize_bars(_rows(history, "history", "day"), daily=True)
+        # Split data comes from its own provider read, outside the Tradier lock and budget.
+        info = self.splits.get(symbol) if self.splits else UNAVAILABLE
+        daily, daily_states = adjust_daily(daily, info["splits"])
 
         quote_data = read("quotes", "/v1/markets/quotes", {"symbols": ",".join(sorted(set([symbol, *watchlist])))}, 15) if quotes else {}
         rows = []
@@ -150,13 +156,17 @@ class ChartFeed:
             panels[interval] = {"bars": bars[-1200:], "markers": []}
         if not any(p["bars"] for p in panels.values()) and problems:
             raise ChartFeedError(problems[0])
+        # Today's Tradier minutes are on the post-split basis already: a split is
+        # effective from its ex-date, and only splits up to today are applied.
+        adjustment = describe(info, daily=daily_states, suspects=suspect_gaps(daily) if needs_daily else [])
         return {
             "symbol": symbol, "provider": "Tradier", "session": session,
             "delayed": "sandbox" in tradier.TRADIER_BASE_URL,
             "refresh_seconds": 15, "checked_at": int(time.time()), "fetched_at": fetched,
             "panels": panels, "quotes": rows, "issues": list(dict.fromkeys(problems)),
             "intraday_as_of": minutes[-1]["time"] if minutes else None, "market": market_day(today, hours),
-            "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP raw bars (from 2016); today uses Tradier. Intraday prices are unadjusted, so splits can create discontinuities. Daily bars remain Tradier and dividend adjustments are not guaranteed.",
+            "adjustment": adjustment,
+            "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP bars (from 2016); today uses Tradier. Prices are split-adjusted from recorded splits, as of each split's ex-date; the stored bars stay raw. Dividends are not adjusted.",
         }
 
 
@@ -176,4 +186,4 @@ def _number(value, divisor=1):
         return None
 
 
-chart_feed = ChartFeed()
+chart_feed = ChartFeed(splits=chart_splits)

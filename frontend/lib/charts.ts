@@ -9,13 +9,25 @@ export type ChartBar = {
   extended: boolean; ema9: number | null; ema20: number | null; ema50: number | null; ema200: number | null;
   vwap: number | null; rsi: number | null;
 };
+/** One recorded split, from the provider named in `PriceAdjustment.source`. */
+export type SplitRecord = { ex_date: string; ratio: number; label: string };
+/**
+ * The chart's single price basis: split-adjusted, built from recorded splits at
+ * display time while stored bars stay raw. `unknown` means no split data was
+ * available, so prices are as the provider supplied them and `warnings` says so.
+ */
+export type PriceAdjustment = {
+  basis: "split_adjusted"; status: "ok" | "stale" | "unknown"; source: string; as_of: number | null;
+  splits: SplitRecord[]; daily: Record<string, "provider_adjusted" | "adjusted_here" | "unverified">;
+  dividends: "unsupported"; dividends_note: string; warnings: string[];
+};
 export type FillMarker = { id: string; time: number; label: string; buy: boolean };
 export type ChartPanelData = { bars: ChartBar[]; markers: FillMarker[] };
 export type HistoryPage = {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number; limit: number;
   bars: ChartBar[]; markers: FillMarker[]; older_cursor: number | null; exhausted: boolean;
   continuation: string | null; warmup: "ready" | "pending" | "insufficient";
-  source: "alpaca_sip"; price_basis: "raw"; fills_truncated: boolean;
+  source: "alpaca_sip"; price_basis: "split_adjusted"; adjustment: PriceAdjustment; fills_truncated: boolean;
   issue: { code: string; message: string; retry_at: number } | null;
   /** Set when a shown session was resampled with clock hours because the calendar was unavailable. */
   calendar_note?: string | null;
@@ -35,6 +47,7 @@ export type SymbolPanels = {
   intraday_as_of: number | null; issues: string[];
   /** Fill markers stop at the newest 1,000 in the window; the chart says so. */
   fills_truncated?: boolean;
+  adjustment?: PriceAdjustment | null;
 };
 export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
@@ -49,7 +62,22 @@ export type ChartStreamTick = {
   minute: number; session: "pre" | "regular" | "post";
   buckets: Partial<Record<Interval, { time: number; end_time: number; extended: boolean }>>;
 };
-export type PriceLevel = { id: string; price: number; label: string };
+/** `drawn_on` is the New York date the price was seen; levels saved before C0.6 have none. */
+export type PriceLevel = { id: string; price: number; label: string; drawn_on?: string };
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+export const todayNewYork = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+/** The splits that decide where a level sits, as a comparable string. */
+export const splitsKey = (adjustment?: PriceAdjustment | null) => adjustment?.splits.map((s) => `${s.ex_date}:${s.ratio}`).join(",") ?? "";
+/**
+ * A saved level on the adjusted basis. Levels hold the price the user saw on
+ * `drawn_on`; every recorded split after that date moves it by the same ratio
+ * the candles moved by. A level without a date is shown as saved.
+ */
+export function levelOnBasis(level: PriceLevel, splits: { ex_date: string; ratio: number }[]): { price: number; moved: boolean } {
+  if (!level.drawn_on) return { price: level.price, moved: false };
+  const factor = splits.reduce((product, s) => s.ex_date > level.drawn_on! ? product * s.ratio : product, 1);
+  return { price: level.price / factor, moved: factor !== 1 };
+}
 export type Indicators = Record<"ema9" | "ema20" | "ema50" | "ema200" | "vwap" | "volume" | "rsi" | "fills", boolean>;
 export type SmallChartSize = "compact" | "normal" | "tall";
 /**
@@ -105,7 +133,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       for (const [symbol, rows] of Object.entries(value.levels)) {
         if (!validSymbol(symbol) || !Array.isArray(rows)) continue;
         levels[symbol] = rows.filter((row) => row && typeof row.id === "string" && Number.isFinite(row.price) && row.price > 0 && typeof row.label === "string")
-          .slice(0, 30).map((row) => ({ id: row.id, price: row.price, label: row.label.slice(0, 30) }));
+          .slice(0, 30).map((row) => ({ id: row.id, price: row.price, label: row.label.slice(0, 30), ...(typeof row.drawn_on === "string" && DAY.test(row.drawn_on) ? { drawn_on: row.drawn_on } : {}) }));
       }
     }
     return {
