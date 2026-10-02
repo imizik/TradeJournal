@@ -1044,8 +1044,15 @@ async function addLevel(page: Page, label: string, value: string) {
   await expect(levelsPanel(page)).toContainText(label);
 }
 type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | null; revision: number };
-// The server keeps a field a save leaves out, so starting over saves each one empty.
-const EMPTY_SETTINGS = { levels: {}, drawings: {}, layouts: [] };
+// The server keeps a field a save leaves out, so starting over saves every shared
+// field at the page's default; otherwise one run's intervals or held symbols
+// carry into the next run against the same e2e database.
+const EMPTY_SETTINGS = {
+  levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false,
+  intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
+  watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false, indicators: false },
+  indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
+};
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
 
 test("a level saved in one browser appears in another, and a stale save is refused", { tag: "@real-settings" }, async ({ page, browser, request }) => {
@@ -2869,7 +2876,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await expect(page.getByRole("button", { name: "Volume", exact: true })).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Escape");
   await expect(chartMenu(page)).toHaveCount(0);
-  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false });
+  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false, indicators: false });
   expect((server.data!.indicators as Record<string, boolean>).volume).toBe(false);
   await expect(levelsPanel(page).getByRole("button", { name: "Hidden · Show" })).toBeVisible();
   await page.reload();
@@ -3027,7 +3034,7 @@ test("right-click on a drawing restyles, locks, hides and deletes it, and a note
   await clickChart(page, "main", await screenAt(page, "main", 205, 251));
   await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "trend,note");
   await expect.poll(() => drawingsOf(server).length).toBe(2);
-  expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false });
+  expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false, indicators: false });
 
   // A note's text edits inline in its menu.
   const note = drawingsOf(server)[1];
@@ -3120,6 +3127,181 @@ test.describe("phone context menu", () => {
     await expect(drawn(page, "main")).toHaveAttribute("data-levels", expected);
     await page.touchscreen.tap(195, 30);
     await expect(chartMenu(page)).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});
+
+// ---- Layers panel (C1.4): show, hide, lock and delete by group and item; a click brings an item into view ----
+
+const layersPanel = (page: Page) => page.getByRole("region", { name: "Layers" });
+const layerGroup = (page: Page, name: string) => layersPanel(page).getByRole("group", { name });
+const paneCount = (page: Page, id: string) => page.evaluate((key) => (window as unknown as { __tjCharts: Map<string, { panes(): unknown[] }> }).__tjCharts.get(key)!.panes().length, id);
+const ALL_PANELS = ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"];
+
+test("the layers panel hides, locks and deletes by group and by item, and a click brings an item into view", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Breakout", "256.00");
+  await addLevel(page, "Far", "280.00"); // above every candle, so off the price scale
+  await tool(page, "trend line").click();
+  await clickChart(page, "main", await screenAt(page, "main", 180, 254));
+  await clickChart(page, "main", await screenAt(page, "main", 220, 258));
+  await expect.poll(() => drawingsOf(server).length).toBe(1);
+  await page.keyboard.press("Escape");
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(layersPanel(page)).toBeVisible();
+  await expect(layerGroup(page, "My levels").getByRole("button", { name: "My levels, 2" })).toHaveAttribute("aria-expanded", "true");
+  await expect(layerGroup(page, "Drawings")).toContainText("Trend line");
+  await page.screenshot({ path: test.info().outputPath("layers-desktop.png") });
+
+  // A group hidden here is hidden on all five charts, saved, and still hidden (with the panel open) after a reload.
+  await layerGroup(page, "My levels").getByRole("button", { name: "Hide My levels" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-levels", "");
+  await layerGroup(page, "Drawings").getByRole("button", { name: "Hide Drawings" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-drawings", "");
+  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: true, indicators: false });
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(layersPanel(page)).toBeVisible();
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-drawings", "");
+  await layerGroup(page, "My levels").getByRole("button", { name: "Show My levels" }).click();
+  await layerGroup(page, "Drawings").getByRole("button", { name: "Show Drawings" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00,280.00");
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "trend");
+
+  // One item hides and shows; it is an undo step.
+  const levels = layerGroup(page, "My levels");
+  await levels.getByRole("button", { name: "Hide Breakout 256.00" }).click();
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "280.00");
+  await expect(levels.getByRole("button", { name: "Go to Breakout 256.00" })).toBeDisabled();
+  await levels.getByRole("button", { name: "Show Breakout 256.00" }).click();
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "256.00,280.00");
+
+  // Lock all is one undo step; then every level reads locked, and the button unlocks them all.
+  await levels.getByRole("button", { name: "Lock all levels" }).click();
+  await expect.poll(() => savedLevels(server).map((level) => level.locked)).toEqual([true, true]);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo locking 2 levels/);
+  await expect(levels.getByRole("button", { name: "Unlock all levels" })).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => savedLevels(server).map((level) => level.locked)).toEqual([undefined, undefined]);
+  await levels.getByRole("button", { name: "Lock Far 280.00" }).click();
+  await expect.poll(() => savedLevels(server)[1].locked).toBe(true);
+
+  // A click on a level off the price scale widens the scale to it and selects it.
+  const far = savedLevels(server)[1];
+  const height = await page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { panes(): { getHeight(): number }[] }> }).__tjCharts.get("main")!.panes()[0].getHeight());
+  expect(await levelY(page, "main", 280)).toBeLessThan(0);
+  await levels.getByRole("button", { name: "Go to Far 280.00" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", far.id);
+  await expect.poll(() => levelY(page, "main", 280)).toBeGreaterThan(0);
+  expect(await levelY(page, "main", 280)).toBeLessThan(height);
+
+  // A click on the trend line centres its bars at the current zoom.
+  const line = drawingsOf(server)[0];
+  await moveAway(page, "main", { from: 20, to: 80 });
+  await layerGroup(page, "Drawings").getByRole("button", { name: /^Go to Trend line/ }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", line.id);
+  await expect.poll(async () => { const range = (await visibleRange(page, "main"))!; return range.from < line.points[0].time && line.points[1].time < range.to; }).toBe(true);
+
+  // Indicators hide together and come back with their own settings; Journal is the fill arrows.
+  await expect.poll(() => paneCount(page, "main")).toBe(2);
+  await layerGroup(page, "Indicators").getByRole("button", { name: /^Indicators,/ }).click(); // unfold
+  await layerGroup(page, "Indicators").getByRole("button", { name: "Hide Indicators" }).click();
+  await expect.poll(() => paneCount(page, "main")).toBe(1);
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" })).not.toContainText("EMA9");
+  await expect(page.getByRole("button", { name: "EMA 9", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "Indicators hidden · Show" })).toBeVisible();
+  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: false, drawings: false, indicators: true });
+  expect((server.data!.indicators as Record<string, boolean>).ema9).toBe(true); // kept for when the group shows again
+  await layerGroup(page, "Indicators").getByRole("button", { name: "Show EMA 9" }).click();
+  await expect.poll(() => paneCount(page, "main")).toBe(2);
+  await expect(page.getByRole("button", { name: "Indicators hidden · Show" })).toHaveCount(0);
+  await layerGroup(page, "Journal").getByRole("button", { name: "Hide Journal" }).click();
+  await expect(page.getByRole("button", { name: "My fills", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect.poll(() => (server.data?.indicators as Record<string, boolean>).fills).toBe(false);
+
+  // Delete all asks first; Cancel keeps them, Delete removes them as one undo step that puts them back in order.
+  await levels.getByRole("button", { name: "Delete all levels" }).click();
+  await expect(levels.getByRole("alert")).toContainText("Delete 2 levels?");
+  await levels.getByRole("button", { name: "Cancel" }).click();
+  await expect(levels.getByRole("alert")).toHaveCount(0);
+  await levels.getByRole("button", { name: "Delete all levels" }).click();
+  await levels.getByRole("alert").getByRole("button", { name: "Delete" }).click();
+  await expect.poll(() => savedLevels(server).length).toBe(0);
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-levels", "");
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo deleting 2 levels/);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => savedLevels(server).map((level) => level.label)).toEqual(["Breakout", "Far"]);
+  await layerGroup(page, "Drawings").getByRole("button", { name: /^Delete Trend line/ }).click();
+  await expect.poll(() => drawingsOf(server).length).toBe(0);
+
+  // Groups fold, and the panel closes from its own button and from the toolbar.
+  await levels.getByRole("button", { name: "My levels, 2" }).click();
+  await expect(levels.getByRole("button", { name: /^Go to/ })).toHaveCount(0);
+  await layersPanel(page).getByRole("button", { name: "Close layers" }).click();
+  await expect(layersPanel(page)).toHaveCount(0);
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(layersPanel(page)).toHaveCount(0);
+});
+
+test("a click on a drawing older than the loaded candles loads pages back to it", async ({ page, context }) => {
+  await registerCharts(page);
+  const state = await deepHistoryStub(page);
+  const [a, b] = [state.bars[state.bars.length - 2400], state.bars[state.bars.length - 2390]];
+  const old = { id: "old-line", kind: "trend", points: [{ time: a.time + 150, price: a.close }, { time: b.time + 150, price: b.close }],
+    color: "#67d5eb", width: 2, drawn_on: "2026-07-01", extendLeft: false, extendRight: false };
+  await fakeChartSettings(context, { revision: 1, data: { drawings: { MRVL: [old] } } });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await layerGroup(page, "Drawings").getByRole("button", { name: /^Go to Trend line/ }).click();
+  // Two pages of 1,200 candles reach it; the view then centres on it, and it is selected.
+  await expect.poll(async () => { const range = await visibleRange(page, "main"); return !!range && range.from < old.points[0].time && old.points[1].time < range.to; }, { timeout: 15_000 }).toBe(true);
+  expect(state.requests()).toBeGreaterThanOrEqual(2);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-selected", "old-line");
+});
+
+test.describe("phone layers panel", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the layers panel is a bottom sheet with 44px targets that hides a group on every chart", async ({ page, context }) => {
+    const server = await fakeChartSettings(context);
+    await registerCharts(page);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await addLevel(page, "Support", "256.00");
+    await page.getByRole("button", { name: "Layers", exact: true }).tap();
+    const sheet = page.getByRole("dialog", { name: "Layers" });
+    await expect(sheet).toBeVisible();
+    const box = (await sheet.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(389);
+    expect(Math.abs(box.y + box.height - 844)).toBeLessThan(2);
+    for (const target of await sheet.getByRole("button").all()) {
+      const size = (await target.boundingBox())!;
+      expect(size.height, (await target.getAttribute("aria-label")) ?? (await target.textContent())!).toBeGreaterThanOrEqual(44);
+    }
+    await page.screenshot({ path: test.info().outputPath("layers-phone.png") });
+    await sheet.getByRole("button", { name: "Hide My levels" }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", "");
+    await expect.poll(() => (server.data?.hiddenGroups as Record<string, boolean> | undefined)?.levels).toBe(true);
+    await sheet.getByRole("button", { name: "Show My levels" }).tap();
+    // Going to an item closes the sheet so the chart shows, with the item selected.
+    await sheet.getByRole("button", { name: "Go to Support 256.00" }).tap();
+    await expect(sheet).toHaveCount(0);
+    await expect(drawn(page, "main")).toHaveAttribute("data-selected", savedLevels(server)[0].id);
+    // The backdrop closes it too.
+    await page.getByRole("button", { name: "Layers", exact: true }).tap();
+    await expect(sheet).toBeVisible();
+    await page.touchscreen.tap(195, 30);
+    await expect(sheet).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 });

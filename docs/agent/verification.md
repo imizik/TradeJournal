@@ -202,7 +202,13 @@ inline label and color, Esc discarding a label, lock against a drag, unlock,
 duplicate, hide and show, delete and undo; on drawings color, lock, hide and
 the Drawings group, and a note's text; at 390px a long press opening bottom
 sheets with 44px rows while a swipe or tap opens nothing; the menu's look is
-checked by screenshot only), the price basis (the chip, a
+checked by screenshot only), the layers panel (groups hidden on all five
+charts through a reload, one item hidden, lock all as one undo step, a level
+off the price scale and a scrolled-away trend line brought into view, the
+Indicators group hidden and shown by one study, the Journal hidden, delete all
+confirmed and undone in order, a drawing two history pages back reached, and
+at 390px a bottom sheet with 44px buttons; its look is checked by screenshot
+only), the price basis (the chip, a
 level drawn before a split moving with it, new levels recording their date, the
 missing-split banner, a history page on a different split set refused, and a
 possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year

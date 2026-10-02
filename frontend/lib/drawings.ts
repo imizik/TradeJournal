@@ -104,9 +104,15 @@ export function cleanToolStyles(value: unknown): Record<DrawingKind, ToolStyle> 
 }
 
 /** One item changed: added (no `before`), deleted (no `after`), moved or restyled. `index` is where it sat. */
-export type DrawingEdit =
+export type ItemEdit =
   | { symbol: string; layer: "levels"; before: PriceLevel | null; after: PriceLevel | null; index: number }
   | { symbol: string; layer: "drawings"; before: Drawing | null; after: Drawing | null; index: number };
+/**
+ * One undo step: an item, or a whole group locked, unlocked or deleted at once
+ * from the layers panel (C1.4), named for Undo ("3 levels"). A batch's `symbol`
+ * is empty when its items belong to more than one symbol.
+ */
+export type DrawingEdit = ItemEdit | { symbol: string; layer: "batch"; edits: ItemEdit[]; name: string };
 type Items = { levels: Record<string, PriceLevel[]>; drawings: Record<string, Drawing[]> };
 
 function applyRows<T extends { id: string }>(map: Record<string, T[]>, edit: { symbol: string; before: T | null; after: T | null; index: number }, side: "before" | "after", max: number): Record<string, T[]> | null {
@@ -124,17 +130,25 @@ function applyRows<T extends { id: string }>(map: Record<string, T[]>, edit: { s
 
 /**
  * Levels and drawings with one side of an edit applied: `after` replays it,
- * `before` undoes it. Null when that would put a symbol over its limit.
+ * `before` undoes it. Null when that would put a symbol over its limit. A
+ * batch undoes in reverse, so items deleted last-first come back in place.
  */
 export function applyEdit<T extends Items>(items: T, edit: DrawingEdit, side: "before" | "after"): T | null {
+  if (edit.layer === "batch") {
+    let out: T | null = items;
+    for (const one of side === "after" ? edit.edits : [...edit.edits].reverse()) { out = out && applyEdit(out, one, side); }
+    return out;
+  }
   if (edit.layer === "levels") { const levels = applyRows(items.levels, edit, side, MAX_LEVELS); return levels && { ...items, levels }; }
   const drawings = applyRows(items.drawings, edit, side, MAX_DRAWINGS);
   return drawings && { ...items, drawings };
 }
 
-/** "trend line", or a level's label: what Undo and Redo name. */
-export const editName = (edit: DrawingEdit) => edit.layer === "levels" ? (edit.after ?? edit.before)!.label : TOOL_NAMES[(edit.after ?? edit.before)!.kind].toLowerCase();
-export function editVerb(edit: DrawingEdit) {
+/** "trend line", a level's label, or a batch's "3 levels": what Undo and Redo name. */
+export const editName = (edit: DrawingEdit): string => edit.layer === "batch" ? edit.name
+  : edit.layer === "levels" ? (edit.after ?? edit.before)!.label : TOOL_NAMES[(edit.after ?? edit.before)!.kind].toLowerCase();
+export function editVerb(edit: DrawingEdit): string {
+  if (edit.layer === "batch") return edit.edits.length ? editVerb(edit.edits[0]) : "changing";
   if (!edit.before) return "adding";
   if (!edit.after) return "deleting";
   const [before, after] = [edit.before, edit.after];

@@ -168,6 +168,30 @@ cd backend
   hotkeys are off while the menu is open (Esc closes it; arrow keys move
   between its rows). A label typed in the menu is saved when the menu closes,
   unless Esc closed it.
+- **Layers panel (C1.4).** The **Layers** button at the end of the drawing
+  tools opens `frontend/components/charts/LayersPanel.tsx`: a section beside the
+  charts on a screen at least 1024px wide (its open state remembered on that
+  device), and a bottom sheet with 44px targets below that, closed by its
+  backdrop, its close button or Esc. Groups: **My levels** and **Drawings** (the
+  items of every symbol on screen, under a symbol heading when there is more
+  than one), **Journal** (the fill arrows) and **Indicators** (each study).
+  Every group hides on all five charts. Levels and drawings also **lock all**
+  (or unlock all, once every one is locked) and **delete all** after a
+  confirmation, each one undo step ("Undo deleting 2 levels" puts them back
+  where they sat), and each item hides, locks and deletes on its own. Groups
+  fold; which are folded is remembered on the device. A click on an item
+  brings the first panel showing its symbol to it and selects it: a drawing's
+  bars are centred at the current zoom (widened to fit a long one), and a
+  price off the scale widens the price scale to include it. A drawing older
+  than the loaded candles loads the pages before them, at most 20, and then
+  centres; a new symbol or interval on that panel, or 20 seconds, cancels the
+  wait. On a phone the sheet closes so the chart shows. Hidden items can't be
+  gone to. The Indicators group is a third `hiddenGroups` key: while it is
+  hidden no study draws, each keeps its own setting for when the group shows
+  again, and the study chips read off with a **Indicators hidden · Show**
+  chip. Turning one study on (chip, menu or panel) shows the group again, so
+  the studies that were on come back with it. Auto levels and options join the
+  panel when their layers exist (C2.3, C4.4).
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (header button) saves the current arrangement under a name, such
@@ -625,6 +649,19 @@ text inline. At 390px a swipe and a tap open nothing, a held finger opens
 the chart menu and a level's menu as bottom sheets with 44px rows and swatches,
 a held finger on a selected level opens its menu without moving it, and the
 backdrop closes the sheet.
+Layers-panel tests (C1.4) hide My levels and Drawings from the panel and read
+them gone on all five charts, still gone (panel still open) after a reload,
+and back; hide and show one level; lock all as one undo step and lock one;
+go to a level above every candle (the price scale widens to it) and to a
+trend line scrolled away (its bars come back into view), both selected; hide
+the Indicators group (the RSI pane and EMA legend go, the chips read off,
+each study's own setting is kept) and show it again by turning on one study;
+hide the Journal; cancel and confirm delete all, then undo it in order; and
+fold a group and close the panel for good. A drawing two pages older than
+the loaded 5m candles is reached through the history stub. At 390px the
+panel is a full-width bottom sheet whose every button is 44px tall; it hides
+a group, goes to an item (closing the sheet, item selected) and closes from
+its backdrop.
 A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_splits.py` pins the basis: a NVDA-shaped split gives

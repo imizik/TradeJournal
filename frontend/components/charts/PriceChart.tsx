@@ -5,7 +5,7 @@ import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType,
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
 import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, staleCandles } from "@/lib/charts";
-import type { ChartBar, ChartCommand, ChartCommands, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
+import type { ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
@@ -66,6 +66,9 @@ const SECOND_TEXT: Partial<Record<Tool, string>> = { trend: "Click the second po
 /** A finger held this long without moving opens the chart menu (C1.3); moving further than `HOLD_SLOP` first is a pan or a crosshair scrub. */
 const LONG_PRESS = 500;
 const HOLD_SLOP = 10;
+/** A jump to an item drawn before the loaded candles (C1.4) loads at most this many older pages, and gives up after this long. */
+const JUMP_PAGES = 20;
+const JUMP_MS = 20_000;
 /** What the countdown needs besides the clock and the candles. */
 export type ClockFeed = { session: "regular" | "extended"; market?: MarketDay | null; paused: boolean; delayed: boolean; failed: boolean; fetched?: number };
 
@@ -145,7 +148,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted: !!history?.exhausted });
+  // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
+  const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
   const placing = useRef<{ kind: DrawingKind; first: Anchor } | null>(null);
   const [second, setSecond] = useState(false);
@@ -158,7 +163,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const renders = (window as typeof window & { __tjRenders?: RenderCounts }).__tjRenders;
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu]);
+  const exhausted = !!history?.exhausted;
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -488,10 +494,58 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       quiet();
       moveView(chart, barsRef.current.length, main, command);
     });
+    // A jump from the layers panel (C1.4): centre the item's moments at the
+    // current zoom (widened to fit a long drawing), then widen the price
+    // scale if its prices are off it. One drawn before the loaded candles
+    // asks for the page before them and tries again when it arrives.
+    let jump: { target: ChartJump; pages: number; until: number; frame: string } | null = null;
+    const fitPrices = (prices: number[]) => {
+      const height = chart.panes()[0]?.getHeight() ?? 0;
+      const [top, bottom] = [candles.coordinateToPrice(0), candles.coordinateToPrice(height)];
+      if (!prices.length || top === null || bottom === null) return;
+      const [low, high] = [Math.min(...prices), Math.max(...prices)];
+      if (low >= bottom && high <= top) return;
+      const pad = Math.max(high - low, top - bottom) * 0.08;
+      candles.priceScale().setVisibleRange({ from: Math.min(bottom, low - pad), to: Math.max(top, high + pad) });
+    };
+    const tryJump = () => {
+      const pending = jump;
+      if (!pending || !barsRef.current.length) return;
+      // A jump expires, and a new symbol or interval on the panel cancels it.
+      if (performance.now() > pending.until || bundle.current?.frame !== pending.frame) { jump = null; return; }
+      const { target } = pending;
+      const scale = chart.timeScale();
+      if (target.times.length) {
+        const spots = target.times.map((time) => timeline.toLogical(time)).filter((spot): spot is number => spot !== null);
+        if (!spots.length) return;
+        const [first, last] = [Math.min(...spots), Math.max(...spots)];
+        const range = scale.getVisibleLogicalRange();
+        const width = range ? range.to - range.from : main ? 114 : 69;
+        quiet();
+        if (first < -0.5 && !actions.current.exhausted && pending.pages < JUMP_PAGES) {
+          pending.pages += 1;
+          scale.setVisibleLogicalRange({ from: -0.5, to: width - 0.5 });
+          actions.current.onNeedHistory?.();
+          return;
+        }
+        const span = Math.max(width, (last - first) * 1.4 + 8);
+        const centre = (first + last) / 2;
+        scale.setVisibleLogicalRange({ from: centre - span / 2, to: centre + span / 2 });
+      }
+      jump = null;
+      // The price scale settles on the new candles over the next frames; then the prices must fit on it.
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => fitPrices(target.prices)));
+    };
+    retryJump.current = tryJump;
+    const stopJumps = commands.listenJump((target) => {
+      if (target.panel !== id) return;
+      jump = { target, pages: 0, until: performance.now() + JUMP_MS, frame: bundle.current?.frame ?? "" };
+      tryJump();
+    });
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
     return () => {
-      stopLink(); stopRange(); stopCommands(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id);
+      stopLink(); stopRange(); stopCommands(); stopJumps(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id);
       finish(false); dropHold();
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
@@ -581,6 +635,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       current.chart.timeScale().setVisibleLogicalRange({ from: bars.length + 4 - width, to: bars.length + 4 });
     } else if (logical && movedTo >= 0) current.chart.timeScale().setVisibleLogicalRange({ from: logical.from + moved, to: logical.to + moved });
     else if (bars.length && range) current.chart.timeScale().setVisibleRange(range);
+    retryJump.current();
   }, [panel, pending, dataKey, symbol, interval, main]);
 
   useEffect(() => {
