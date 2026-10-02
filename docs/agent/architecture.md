@@ -243,9 +243,10 @@ symbol, refetched once per New York date) say which splits happened, and
 `chart_adjust.py` adjusts copies of bars at display time, so the raw history
 cache is never edited and dividends are not adjusted. Chart
 calculations and temporary bars are separate from historical enrichment, and
-execution markers are read-only journal views. Layouts, watchlist and
-horizontal levels are one JSON document in `chart_settings` (`/charts/settings`,
-saved only on top of the revision the client last saw), with a browser copy
+execution markers are read-only journal views. Layouts, watchlist,
+horizontal levels and drawings are one JSON document in `chart_settings` (`/charts/settings`,
+saved only on top of the revision the client last saw, and never losing a
+top-level field a save leaves out), with a browser copy
 for when the server is unreachable. Daily option open interest and volume
 snapshots (`option_chain_snapshot`, with a per-session status in
 `option_snapshot_day`) are written only by the after-close `options_snapshot`

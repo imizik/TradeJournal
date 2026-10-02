@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetStateAction } from "react";
 import { apiUrl } from "@/lib/api";
-import { DEFAULT_SETTINGS, MAX_KEPT_LAYOUTS, STORAGE_KEY, arrangementOf, sanitizeSettings, uniqueLayoutNames } from "@/lib/charts";
+import { DEFAULT_SETTINGS, MAX_KEPT_LAYOUTS, STORAGE_KEY, arrangementOf, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
 import type { ChartSettings, Indicators } from "@/lib/charts";
+import { cleanDrawings, cleanToolStyles, DRAWING_KINDS, MAX_DRAWINGS } from "@/lib/drawings";
 
 /**
  * Chart settings saved on the server, so the phone and the desktop share
@@ -26,10 +27,13 @@ const json = (value: unknown) => JSON.stringify(value);
 
 /** The shared part of the settings in a canonical key order, so equal settings compare equal. */
 export function shared(settings: ChartSettings): SharedSettings {
-  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, linkRange, smallSize, immersiveWatchlist, layouts } = settings;
+  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, linkRange, smallSize, immersiveWatchlist, layouts } = settings;
   return { intervals, panelSymbols, watchlist, session, layout, indicators, linkRange, smallSize, immersiveWatchlist,
     layouts: layouts.map(({ id, name, ...arrangement }) => ({ id, name, ...arrangementOf(arrangement) })),
-    levels: Object.fromEntries(Object.keys(levels).sort().filter((symbol) => levels[symbol].length).map((symbol) => [symbol, levels[symbol]])) };
+    levels: Object.fromEntries(Object.keys(levels).sort().filter((symbol) => levels[symbol].length).map((symbol) => [symbol, levels[symbol]])),
+    // Always sent, even empty: the server keeps a field a save leaves out, so omitting it could never clear it.
+    drawings: cleanDrawings(Object.fromEntries(Object.keys(drawings).sort().map((symbol) => [symbol, drawings[symbol]])), validSymbol),
+    toolStyles: cleanToolStyles(toolStyles), magnet };
 }
 const same = (a: SharedSettings, b: SharedSettings) => json(a) === json(b);
 const fromServer = (data: unknown) => shared(sanitizeSettings(data ?? {}));
@@ -46,16 +50,18 @@ function mergeItems<T>(base: T[], mine: T[], theirs: T[], id: (item: T) => strin
 
 /**
  * Three-way merge: re-apply this device's edits since `base` to `theirs`, the
- * newer copy another device saved. Levels, the watchlist and saved layouts merge
- * item by item (a layout is one item: saved, renamed or deleted whole); any
- * other setting this device changed keeps this device's value.
+ * newer copy another device saved. Levels, drawings, the watchlist and saved
+ * layouts merge item by item (a layout or a drawing is one item: saved, changed
+ * or deleted whole); any other setting this device changed keeps this device's value.
  */
 export function rebase(base: SharedSettings, mine: SharedSettings, theirs: SharedSettings): SharedSettings {
   const out: SharedSettings = { ...theirs, indicators: { ...theirs.indicators } };
-  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist"] as const;
+  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet"] as const;
   for (const key of scalars) if (json(mine[key]) !== json(base[key])) Object.assign(out, { [key]: mine[key] });
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];
+  out.toolStyles = { ...theirs.toolStyles };
+  for (const kind of DRAWING_KINDS) if (json(mine.toolStyles[kind]) !== json(base.toolStyles[kind])) out.toolStyles[kind] = mine.toolStyles[kind];
   out.watchlist = mergeItems(base.watchlist, mine.watchlist, theirs.watchlist, (symbol) => symbol).slice(0, 30);
   out.layouts = uniqueLayoutNames(mergeItems(base.layouts, mine.layouts, theirs.layouts, (layout) => layout.id).slice(0, MAX_KEPT_LAYOUTS));
   const levels = { ...theirs.levels };
@@ -64,7 +70,13 @@ export function rebase(base: SharedSettings, mine: SharedSettings, theirs: Share
     if (merged.length) levels[symbol] = merged;
     else delete levels[symbol];
   }
-  return shared({ ...DEFAULT_SETTINGS, ...out, levels });
+  const drawings = { ...theirs.drawings };
+  for (const symbol of new Set([...Object.keys(base.drawings), ...Object.keys(mine.drawings)])) {
+    const merged = mergeItems(base.drawings[symbol] ?? [], mine.drawings[symbol] ?? [], theirs.drawings[symbol] ?? [], (drawing) => drawing.id).slice(0, MAX_DRAWINGS);
+    if (merged.length) drawings[symbol] = merged;
+    else delete drawings[symbol];
+  }
+  return shared({ ...DEFAULT_SETTINGS, ...out, levels, drawings });
 }
 
 class Conflict extends Error {

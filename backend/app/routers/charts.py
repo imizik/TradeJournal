@@ -192,11 +192,23 @@ def save_settings(body: ChartSettingsSave, db: Session = Depends(get_session)):
     """Save only on top of the revision the client last saw; anything else is a 409 carrying the current copy.
 
     The frontend owns the document's shape and validates it on every read; the
-    server stores it whole and guarantees that no save silently replaces one it
-    was not based on. The revision check is a single conditional statement, so
-    it holds across processes as well.
+    server stores it and guarantees that no save silently replaces one it was
+    not based on. The revision check is a single conditional statement, so it
+    holds across processes as well.
+
+    A save never drops a top-level field it leaves out: the stored copy keeps
+    it. A browser tab still running an older build does not know fields a newer
+    build added (C1.2's drawings), and must not erase them when it saves its
+    watchlist. Clearing a field means saving it empty.
     """
-    text = json.dumps(body.data, separators=(",", ":"))
+    data = body.data
+    row = db.get(ChartSettingsRecord, SETTINGS) if body.base_revision else None
+    # Only the copy this save replaces lends fields; on any other revision the update below is refused anyway.
+    if row is not None and row.revision == body.base_revision:
+        stored = json.loads(row.data_json)
+        if isinstance(stored, dict):
+            data = {**data, **{key: value for key, value in stored.items() if key not in data}}
+    text = json.dumps(data, separators=(",", ":"))
     if len(text.encode()) > SETTINGS_BYTES:
         raise HTTPException(413, {"code": "too_large", "message": "Chart settings are too large to save."})
     now = datetime.now(UTC).replace(tzinfo=None)
@@ -218,7 +230,7 @@ def save_settings(body: ChartSettingsSave, db: Session = Depends(get_session)):
         # Exactly what this request wrote. Rereading the row could return a save
         # another device made after this commit, and this client would then take
         # that revision as the base for its own copy.
-        return {"revision": body.base_revision + 1, "data": body.data, "updated_at": now.isoformat()}
+        return {"revision": body.base_revision + 1, "data": data, "updated_at": now.isoformat()}
     db.expire_all()
     raise HTTPException(409, {"code": "revision_conflict", "message": "These chart settings changed on another device.",
                               "current": _settings(db.get(ChartSettingsRecord, SETTINGS))})

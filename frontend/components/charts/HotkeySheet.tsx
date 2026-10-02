@@ -30,7 +30,7 @@ export default function HotkeySheet({ onClose }: { onClose(): void }) {
               <td className="py-1 text-slate-300">{row.does}</td>
             </tr>)}</tbody>
           </table>)}
-          <p className="text-[10px] leading-4 text-slate-500">Shortcuts pause while you type in a field or a dialog is open. Alt is Option on a Mac. The interval buttons, the watchlist arrows, each chart&rsquo;s latest-candles button, a selected level&rsquo;s Delete button and the Undo and Redo buttons do the same by touch.</p>
+          <p className="text-[10px] leading-4 text-slate-500">Shortcuts pause while you type in a field or a dialog is open. Alt is Option on a Mac. The interval buttons, the watchlist arrows, each chart&rsquo;s latest-candles button, a selected item&rsquo;s Delete button, the Undo and Redo buttons and the Magnet button do the same by touch.</p>
         </div>
       </div>
     </div>

@@ -80,7 +80,7 @@ cd backend
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
-- Levels, watchlist, intervals, session, indicators, layout and named layouts are saved on the
+- Levels, drawings, watchlist, intervals, session, indicators, layout and named layouts are saved on the
   server (`GET`/`PUT /charts/settings`, table `chart_settings`), so the phone
   and the desktop share them. The symbol on screen and the recent symbols stay
   per device. Each save names the revision it was based on and the server
@@ -114,6 +114,30 @@ cd backend
   item onto the levels as they are now, so another device's levels are left
   alone. Levels are still saved in the same `levels` shape, so a tab running
   an older build keeps reading and merging them.
+- **Drawing tools (C1.2).** Beside Undo and Redo: price level, horizontal ray,
+  trend line, rectangle zone and text note, then **Magnet**. A tool arms the
+  main chart and shows what a click would place under the pointer; a ray or a
+  note takes one click, a trend line two points and a zone two opposite
+  corners (the hint names the next click; Esc puts the tool away). Anchors are
+  a time and a price: each click lands in the middle of the nearest bar, so a
+  5m anchor sits inside the right 1h bar and a moment between sessions on the
+  boundary between bars; past the last bar the axis continues one interval per
+  bar. The magnet (toggle, or hold ⌘/Ctrl for one click or drag) snaps the
+  price to that bar's open, high, low or close, whichever is drawn nearest; a
+  drawing dragged whole snaps the anchor nearest where it was grabbed and moves
+  the others with it.
+  Drawings select, drag (a mouse drags any; a finger only the selected one),
+  delete and undo like levels: a handle moves one anchor (a zone has one at
+  every corner), and the body moves the whole drawing by whole bars and any
+  price. The selected drawing's bar names it with its prices; a note's text is
+  edited there (a new note opens with the text ready), and **Style** unfolds
+  color, line width (ray, trend line) and extend left/right (trend line). A
+  color or width becomes that tool's style for the next drawing. Drawings are
+  saved per symbol in a `drawings` field of the shared settings (40 per symbol),
+  with `toolStyles` and `magnet`, and merge item by item like levels. A save
+  never drops a field it leaves out, so an open tab on an older build cannot
+  erase drawings. Like levels, each drawing keeps the date it was drawn and
+  moves with a later split.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (header button) saves the current arrangement under a name, such
@@ -635,7 +659,7 @@ run after deployment is the production evidence.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine
-runtime, raw tick tape, trendline/fibonacci tools, replay, volume profile
+runtime, raw tick tape, fibonacci or other geometry tools, replay, volume profile
 or server-side chart alerts. The existing
 TradingView-to-Signals loop still runs separately. Keep TradingView while
 comparing the required indicators and sessions side by side.

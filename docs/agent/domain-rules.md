@@ -316,7 +316,16 @@ is verifiable rather than hopeful.
   at display time by splits after that date, so a split never rewrites the
   saved record. Only the user does: dragging a level (C1.1) saves the price it
   was dropped at, on the chart's current basis, with that New York date, and
-  undo restores the previous record exactly.
+  undo restores the previous record exactly. Drawings (C1.2) follow the same
+  rule: every anchor is a time and a price, never a pixel or a bar index; a
+  split after the drawing's `drawn_on` divides all its prices; and a drag saves
+  every anchor on the current basis dated that day, while a color, width or
+  text change keeps the saved prices and date.
+- The chart settings document belongs to the frontend, but a save never drops
+  a top-level field it leaves out (`PUT /charts/settings` keeps the stored
+  value). A tab still running an older build cannot erase a field a newer build
+  added; clearing a field means saving it empty, and the frontend always sends
+  every field it knows.
 - Daily and weekly bars come only from Tradier's daily history, never from
   minutes. The whole series is read once per symbol per New York date into
   memory (no disk copy: the provider rewrites adjusted history after each

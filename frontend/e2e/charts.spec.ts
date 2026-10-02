@@ -1044,6 +1044,8 @@ async function addLevel(page: Page, label: string, value: string) {
   await expect(levelsPanel(page)).toContainText(label);
 }
 type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | null; revision: number };
+// The server keeps a field a save leaves out, so starting over saves each one empty.
+const EMPTY_SETTINGS = { levels: {}, drawings: {}, layouts: [] };
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
 
 test("a level saved in one browser appears in another, and a stale save is refused", { tag: "@real-settings" }, async ({ page, browser, request }) => {
@@ -1051,7 +1053,7 @@ test("a level saved in one browser appears in another, and a stale save is refus
   const [desk, phone, later] = [`Desk ${run}`, `Phone ${run}`, `Late ${run}`];
   // The e2e database outlives a run: start from empty settings.
   const start: SavedLevels = await (await request.get("/api/backend/charts/settings")).json();
-  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: {} } })).ok()).toBe(true);
+  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
   await stub(page);
   await page.goto("/charts");
   await addLevel(page, desk, "263.50");
@@ -1514,7 +1516,7 @@ test("a layout saved in one browser is usable in another with its symbol groups"
   const [desk, phone] = [`Desk ${run}`, `Phone ${run}`];
   const serverLayouts = async (): Promise<SavedLayouts> => (await (await request.get("/api/backend/charts/settings")).json()).data?.layouts ?? [];
   const start = await (await request.get("/api/backend/charts/settings")).json();
-  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: {} } })).ok()).toBe(true);
+  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
   await stub(page);
   await page.goto("/charts");
   await holdSymbol(page, "Panel 3", "SPY");
@@ -2189,7 +2191,7 @@ test("? opens a cheat sheet listing exactly the bindings that exist; ? and Escap
   // Each of these has a test in this file; the sheet lists them and nothing else.
   const bindings = ["1 3 5 15 30 then Enter", "Backspace", "Esc", "H", "4", "D", "W",
     "Space", "Shift + Space", "Alt + ↓ or Alt + ↑", "⌘ + K or Ctrl + K",
-    "Delete or Backspace", "⌘ + Z or Ctrl + Z", "⌘ + Shift + Z or Ctrl + Shift + Z", "Esc",
+    "Delete or Backspace", "⌘ + Z or Ctrl + Z", "⌘ + Shift + Z or Ctrl + Shift + Z", "Esc", "Hold ⌘ or Ctrl",
     "Alt + R", "End", "Esc", "?"];
   expect(await sheet.locator("td[aria-label]").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label")))).toEqual(bindings);
   await expect(sheet.getByRole("row")).toHaveCount(bindings.length);
@@ -2429,6 +2431,351 @@ test.describe("phone drawing layer", () => {
     await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
     await page.getByRole("button", { name: "Undo", exact: true }).tap();
     await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});
+
+// ---- Drawing tools (C1.2): ray, trend line, zone, note; magnet ----
+
+type Point = { x: number; y: number };
+type LayerProbe = Map<string, { anchors(id: string): (Point | null)[] | null }>;
+type CoordinateProbe = Map<string, { timeScale(): { logicalToCoordinate(at: number): number | null }; panes(): { getSeries(): SeriesProbe[] }[] }>;
+type SavedDrawing = { id: string; kind: string; points: { time: number; price: number }[]; color: string; width: number; drawn_on: string; text?: string; extendLeft?: boolean; extendRight?: boolean };
+const registerLayers = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjDrawings?: Map<string, unknown> }).__tjDrawings = new Map(); });
+const drawingsOf = (server: SettingsStore, symbol = "MRVL") => (server.data?.drawings as Record<string, SavedDrawing[]> | undefined)?.[symbol] ?? [];
+const anchorsOf = (page: Page, panel: string, id: string) => page.evaluate(([key, item]) => (window as unknown as { __tjDrawings: LayerProbe }).__tjDrawings.get(key)!.anchors(item), [panel, id] as const);
+/** Where bar `index` and `price` are drawn on a chart's candle pane. */
+const screenAt = (page: Page, id: string, index: number, value: number) => page.evaluate(([key, at, p]) => {
+  const chart = (window as unknown as { __tjCharts: CoordinateProbe }).__tjCharts.get(key as string)!;
+  return { x: chart.timeScale().logicalToCoordinate(at as number)!, y: chart.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!.priceToCoordinate(p as number)! };
+}, [id, index, value] as const);
+const FIXTURE_START = 1789392600;
+/** The 5m fixture's bar `index` (78 a day): its middle, where a click places an anchor, and its prices. */
+function fixtureBar(index: number) {
+  const time = FIXTURE_START + Math.floor(index / 78) * 86400 + (index % 78) * 300;
+  const close = 245 + index * 0.06 + Math.sin(index / 8) * 2;
+  return { middle: time + 150, open: close - 0.3, high: close + 0.8, low: close - 0.7, close };
+}
+async function clickChart(page: Page, id: string, at: Point) {
+  const box = (await drawn(page, id).boundingBox())!;
+  await page.mouse.click(box.x + at.x, box.y + at.y);
+}
+async function dragChart(page: Page, id: string, from: Point, to: Point) {
+  const box = (await drawn(page, id).boundingBox())!;
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  for (let step = 1; step <= 6; step++) await page.mouse.move(box.x + from.x + (to.x - from.x) * step / 6, box.y + from.y + (to.y - from.y) * step / 6);
+  await page.mouse.up();
+}
+const tool = (page: Page, name: string) => page.getByRole("button", { name: `Draw ${name}`, exact: true });
+const drawingBar = (page: Page, panel = "main") => page.getByRole("toolbar", { name: `Selected drawing on ${panel}` });
+
+test("a trend line draws, drags by handle and by body, extends, restyles, deletes, undoes and sits on the 1h chart", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+
+  await tool(page, "trend line").click();
+  const hint = page.getByRole("status", { name: "Drawing tool" });
+  await expect(hint).toHaveText("Click the first point of the line");
+  await clickChart(page, "main", await screenAt(page, "main", 180, 254));
+  await expect(hint).toHaveText("Click the second point");
+  await clickChart(page, "main", await screenAt(page, "main", 220, 258));
+  await expect(hint).toHaveCount(0);
+  await expect.poll(() => drawingsOf(server).length).toBe(1);
+  let [line] = drawingsOf(server);
+  expect(line).toMatchObject({ kind: "trend", color: "#67d5eb", width: 2, extendLeft: false, extendRight: false });
+  expect(line.drawn_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  // Each anchor sits in the middle of the bar clicked, at the price clicked.
+  expect(line.points.map((p) => p.time)).toEqual([fixtureBar(180).middle, fixtureBar(220).middle]);
+  expect(Math.abs(line.points[0].price - 254)).toBeLessThan(0.08);
+  expect(Math.abs(line.points[1].price - 258)).toBeLessThan(0.08);
+  await expect(drawingBar(page)).toContainText("Trend line");
+
+  // The 1h chart draws the same moment inside the hour that holds it, at the same price.
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-drawings", "trend");
+  const hourIndex = (time: number) => Math.floor((time - FIXTURE_START) / 86400) * 7 + Math.floor(((time - FIXTURE_START) % 86400) / 3600);
+  const [hourA] = (await anchorsOf(page, "Panel 3", line.id))!;
+  const hourBar = await screenAt(page, "Panel 3", hourIndex(line.points[0].time), line.points[0].price);
+  const hourNext = await screenAt(page, "Panel 3", hourIndex(line.points[0].time) + 1, line.points[0].price);
+  const spacing = hourNext.x - hourBar.x;
+  expect(Math.abs(hourA!.x - hourBar.x)).toBeLessThanOrEqual(spacing / 2);
+  expect(Math.abs(hourA!.y - hourBar.y)).toBeLessThan(1);
+
+  // Dragging the second handle moves only that anchor.
+  const [, end] = (await anchorsOf(page, "main", line.id))!;
+  await dragChart(page, "main", end!, await screenAt(page, "main", 230, 260));
+  await expect.poll(() => drawingsOf(server)[0].points[1].time).toBe(fixtureBar(230).middle);
+  [line] = drawingsOf(server);
+  expect(line.points[0]).toEqual({ time: fixtureBar(180).middle, price: line.points[0].price });
+  expect(Math.abs(line.points[1].price - 260)).toBeLessThan(0.08);
+
+  // Dragging the line itself moves both anchors by whole bars and the same price.
+  const before = line;
+  const [a, b] = (await anchorsOf(page, "main", line.id))!;
+  const middle = { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 };
+  const step = (await screenAt(page, "main", 1, 250)).x - (await screenAt(page, "main", 0, 250)).x;
+  const expectedShift = (await priceAtY(page, "main", middle.y + 40)) - (await priceAtY(page, "main", middle.y));
+  await dragChart(page, "main", middle, { x: middle.x + 5 * step, y: middle.y + 40 });
+  await expect.poll(() => drawingsOf(server)[0].points[0].time).toBe(fixtureBar(185).middle);
+  [line] = drawingsOf(server);
+  expect(line.points[1].time).toBe(fixtureBar(235).middle); // across the night: bars, not seconds
+  line.points.forEach((point, index) => expect(Math.abs(point.price - (before.points[index].price + expectedShift))).toBeLessThan(0.03));
+
+  // Extend, color and width from the bar; each is one undo step and the tool remembers the style.
+  const bar = drawingBar(page);
+  await bar.getByRole("button", { name: "Style" }).click();
+  await bar.getByRole("button", { name: "Extend right" }).click();
+  await expect.poll(() => drawingsOf(server)[0].extendRight).toBe(true);
+  await bar.getByRole("button", { name: "Red trend line" }).click();
+  await bar.getByRole("button", { name: "Line width 3" }).click();
+  await expect.poll(() => drawingsOf(server)[0]).toMatchObject({ color: "#ee617a", width: 3, extendRight: true });
+  await expect(bar.getByRole("button", { name: "Red trend line" })).toHaveAttribute("aria-pressed", "true");
+  await page.screenshot({ path: test.info().outputPath("trend-selected-desktop.png") });
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo changing trend line/);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => drawingsOf(server)[0].width).toBe(2);
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect.poll(() => drawingsOf(server)[0].width).toBe(3);
+
+  // Delete, then undo it back; a new trend line starts in the remembered style.
+  await page.keyboard.press("Delete");
+  await expect.poll(() => drawingsOf(server).length).toBe(0);
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "");
+  await expect(bar).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => drawingsOf(server).length).toBe(1);
+  await tool(page, "trend line").click();
+  await clickChart(page, "main", await screenAt(page, "main", 200, 252));
+  await clickChart(page, "main", await screenAt(page, "main", 210, 253));
+  await expect.poll(() => drawingsOf(server).length).toBe(2);
+  expect(drawingsOf(server)[1]).toMatchObject({ color: "#ee617a", width: 3 });
+  expect((server.data!.toolStyles as Record<string, unknown>).trend).toEqual({ color: "#ee617a", width: 3 });
+
+  // Esc puts a half-placed line away; nothing is saved.
+  await tool(page, "trend line").click();
+  await clickChart(page, "main", await screenAt(page, "main", 190, 255));
+  await page.keyboard.press("Escape");
+  await expect(hint).toHaveCount(0);
+  await expect(tool(page, "trend line")).toHaveAttribute("aria-pressed", "false");
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "trend,trend");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-drawings", "trend,trend");
+});
+
+test("a ray, a zone and a note draw, edit and delete; the zone resizes by a corner and the note takes text", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+
+  // Ray: one click; its price is on the axis like a level's.
+  await tool(page, "horizontal ray").click();
+  await expect(page.getByRole("status", { name: "Drawing tool" })).toHaveText("Click where the ray starts");
+  await clickChart(page, "main", await screenAt(page, "main", 200, 256));
+  await expect.poll(() => drawingsOf(server).length).toBe(1);
+  const [ray] = drawingsOf(server);
+  expect(ray).toMatchObject({ kind: "ray", points: [{ time: fixtureBar(200).middle }], color: "#f4c66b", width: 1 });
+  expect(Math.abs(ray.points[0].price - 256)).toBeLessThan(0.08);
+  await expect(drawingBar(page)).toContainText("Horizontal ray");
+  // Dragging the ray moves it; a click on empty chart space deselects.
+  const [start] = (await anchorsOf(page, "main", ray.id))!;
+  await dragChart(page, "main", { x: start!.x + 60, y: start!.y }, { x: start!.x + 60, y: start!.y - 30 });
+  await expect.poll(() => drawingsOf(server)[0].points[0].price).toBeGreaterThan(ray.points[0].price);
+  await clickChart(page, "main", { x: start!.x + 60, y: start!.y + 90 });
+  await expect(drawingBar(page)).toHaveCount(0);
+
+  // Zone: two opposite corners; a third corner's handle moves one time and one price.
+  await tool(page, "rectangle zone").click();
+  await clickChart(page, "main", await screenAt(page, "main", 190, 252));
+  await expect(page.getByRole("status", { name: "Drawing tool" })).toHaveText("Click the opposite corner");
+  await clickChart(page, "main", await screenAt(page, "main", 210, 255));
+  await expect.poll(() => drawingsOf(server).length).toBe(2);
+  let zone = drawingsOf(server)[1];
+  expect(zone.kind).toBe("zone");
+  expect(zone.points.map((p) => p.time)).toEqual([fixtureBar(190).middle, fixtureBar(210).middle]);
+  const corners = (await anchorsOf(page, "main", zone.id))!;
+  await dragChart(page, "main", { x: corners[0]!.x, y: corners[1]!.y }, await screenAt(page, "main", 186, 257));
+  await expect.poll(() => drawingsOf(server)[1].points[0].time).toBe(fixtureBar(186).middle);
+  zone = drawingsOf(server)[1];
+  expect(Math.abs(zone.points[1].price - 257)).toBeLessThan(0.08);
+  expect(zone.points[1].time).toBe(fixtureBar(210).middle);
+  await page.keyboard.press("Backspace");
+  await expect.poll(() => drawingsOf(server).map((d) => d.kind)).toEqual(["ray"]);
+
+  // Note: the text field opens ready to type; Enter saves the text.
+  await tool(page, "text note").click();
+  await clickChart(page, "main", await screenAt(page, "main", 205, 251));
+  const text = drawingBar(page).getByLabel("Note text");
+  await expect(text).toBeFocused();
+  await page.keyboard.type("Earnings gap fills here");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => drawingsOf(server).find((d) => d.kind === "note")?.text).toBe("Earnings gap fills here");
+  // Typing Backspace in the field never deletes the note; its Delete button does.
+  await text.focus();
+  await page.keyboard.press("ArrowRight"); // the caret to the end of the selected text
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Enter");
+  await expect.poll(() => drawingsOf(server).find((d) => d.kind === "note")?.text).toBe("Earnings gap fills her");
+  await page.screenshot({ path: test.info().outputPath("note-selected-desktop.png") });
+  await drawingBar(page).getByRole("button", { name: "Delete selected drawing" }).click();
+  await expect.poll(() => drawingsOf(server).map((d) => d.kind)).toEqual(["ray"]);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo deleting text note/);
+});
+
+test("the magnet snaps anchors to the bar's open, high, low or close when placed, dragged by a handle or dragged whole, by toggle or while Cmd/Ctrl is held", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const near = async (index: number, value: number, by: number) => { const at = await screenAt(page, "main", index, value); return { x: at.x, y: at.y + by }; };
+
+  // Off: the price under the pointer, to the cent.
+  await tool(page, "horizontal ray").click();
+  await clickChart(page, "main", await near(200, fixtureBar(200).high, -3));
+  await expect.poll(() => drawingsOf(server).length).toBe(1);
+  expect(drawingsOf(server)[0].points[0].price).not.toBe(fixtureBar(200).high);
+
+  // On: a ray near bar 200's high takes that high exactly; a trend line takes a low and a close.
+  await page.getByRole("button", { name: "Magnet" }).click();
+  await expect(page.getByRole("button", { name: "Magnet" })).toHaveAttribute("aria-pressed", "true");
+  await tool(page, "horizontal ray").click();
+  await clickChart(page, "main", await near(200, fixtureBar(200).high, -3));
+  await tool(page, "trend line").click();
+  await clickChart(page, "main", await near(180, fixtureBar(180).low, 3));
+  await clickChart(page, "main", await near(220, fixtureBar(220).close, -2));
+  await expect.poll(() => drawingsOf(server).length).toBe(3);
+  expect(drawingsOf(server)[1].points).toEqual([{ time: fixtureBar(200).middle, price: fixtureBar(200).high }]);
+  const line = drawingsOf(server)[2];
+  expect(line.points).toEqual([{ time: fixtureBar(180).middle, price: fixtureBar(180).low }, { time: fixtureBar(220).middle, price: fixtureBar(220).close }]);
+  expect(server.data!.magnet).toBe(true);
+
+  // A dragged handle snaps too.
+  const [first] = (await anchorsOf(page, "main", line.id))!;
+  await dragChart(page, "main", first!, await near(190, fixtureBar(190).high, 2));
+  await expect.poll(() => drawingsOf(server)[2].points[0]).toEqual({ time: fixtureBar(190).middle, price: fixtureBar(190).high });
+
+  // Dragged whole, the anchor nearest the press lands on its new bar's high; the other end moves by the same bars and price.
+  const [a, b] = (await anchorsOf(page, "main", line.id))!;
+  const grabbed = { x: a!.x + (b!.x - a!.x) * 0.15, y: a!.y + (b!.y - a!.y) * 0.15 };
+  const target = await near(193, fixtureBar(193).high, 3);
+  await dragChart(page, "main", grabbed, { x: grabbed.x + target.x - a!.x, y: grabbed.y + target.y - a!.y });
+  await expect.poll(() => drawingsOf(server)[2].points[0]).toEqual({ time: fixtureBar(193).middle, price: fixtureBar(193).high });
+  const other = drawingsOf(server)[2].points[1];
+  expect(other.time).toBe(fixtureBar(223).middle);
+  expect(Math.abs(other.price - (fixtureBar(220).close + fixtureBar(193).high - fixtureBar(190).high))).toBeLessThan(0.006);
+
+  // Off again, Cmd/Ctrl held for one click: that click snaps (to the open), the next does not.
+  await page.getByRole("button", { name: "Magnet" }).click();
+  await tool(page, "horizontal ray").click();
+  await page.keyboard.down("ControlOrMeta");
+  await clickChart(page, "main", await near(205, fixtureBar(205).open, 2));
+  await page.keyboard.up("ControlOrMeta");
+  await expect.poll(() => drawingsOf(server).length).toBe(4);
+  expect(drawingsOf(server)[3].points[0]).toEqual({ time: fixtureBar(205).middle, price: fixtureBar(205).open });
+  await tool(page, "horizontal ray").click();
+  await clickChart(page, "main", await near(205, fixtureBar(205).open, 4));
+  await expect.poll(() => drawingsOf(server).length).toBe(5);
+  expect(drawingsOf(server)[4].points[0].price).not.toBe(fixtureBar(205).open);
+});
+
+test("a drawing made before a recorded split moves with the candles, and a drag saves it on today's basis", async ({ page, context }) => {
+  const zone = { id: "old-zone", kind: "zone", points: [{ time: fixtureBar(190).middle, price: 2500 }, { time: fixtureBar(210).middle, price: 2560 }],
+    color: "#659ef0", width: 1, drawn_on: "2024-06-07" };
+  const server = await fakeChartSettings(context, { revision: 1, data: { drawings: { MRVL: [zone] } } });
+  await registerCharts(page);
+  await registerLayers(page);
+  await stubAdjustment(page, NVDA_SPLIT);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "zone");
+  // Drawn at a tenth of its saved prices, as the candles are; the saved record is untouched.
+  const corners = (await anchorsOf(page, "main", "old-zone"))!;
+  expect(Math.abs(corners[0]!.y - await levelY(page, "main", 250))).toBeLessThan(1);
+  expect(Math.abs(corners[1]!.y - await levelY(page, "main", 256))).toBeLessThan(1);
+  expect(drawingsOf(server)[0]).toEqual(zone);
+  const inside = { x: (corners[0]!.x + corners[1]!.x) / 2, y: (corners[0]!.y + corners[1]!.y) / 2 };
+  await dragChart(page, "main", inside, { x: inside.x, y: inside.y - 20 });
+  await expect.poll(() => drawingsOf(server)[0].drawn_on).not.toBe("2024-06-07");
+  const moved = drawingsOf(server)[0];
+  expect(moved.points[0].price).toBeGreaterThan(250);
+  expect(moved.points[0].price).toBeLessThan(260);
+  expect(Math.abs((moved.points[1].price - moved.points[0].price) - 6)).toBeLessThan(0.02);
+});
+
+test.describe("phone drawing tools", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("a trend line is placed by two taps, selected by a tap, dragged by a handle, deleted and undone by touch", async ({ page, context }) => {
+    const server = await fakeChartSettings(context);
+    await registerCharts(page);
+    await registerLayers(page);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await drawn(page, "main").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const box = (await drawn(page, "main").boundingBox())!;
+    const tap = async (at: Point) => page.touchscreen.tap(Math.round(box.x + at.x), Math.round(box.y + at.y));
+    const visible = (await logicalRange(page, "main"))!;
+    const [left, right] = [Math.ceil(visible.from) + 15, Math.floor(visible.to) - 15];
+
+    await tool(page, "trend line").tap();
+    await tap(await screenAt(page, "main", left, 254));
+    await tap(await screenAt(page, "main", right, 258));
+    await expect.poll(() => drawingsOf(server).length).toBe(1);
+    const [line] = drawingsOf(server);
+    expect(line.points.map((p) => p.time)).toEqual([fixtureBar(left).middle, fixtureBar(right).middle]);
+    await expect(drawingBar(page)).toBeVisible();
+    // Folded, the bar is one row, so it covers no more of the chart than a level's.
+    expect((await drawingBar(page).boundingBox())!.height).toBeLessThan(40);
+    await drawingBar(page).getByRole("button", { name: "Style" }).tap();
+    for (const target of await drawingBar(page).getByRole("button").all()) {
+      const size = (await target.boundingBox())!;
+      expect(Math.min(size.width, size.height), (await target.getAttribute("aria-label"))!).toBeGreaterThanOrEqual(24);
+    }
+    await page.screenshot({ path: test.info().outputPath("trend-selected-phone.png") });
+    await drawingBar(page).getByRole("button", { name: "Deselect drawing" }).tap();
+    await expect(drawingBar(page)).toHaveCount(0);
+
+    // A finger dragging across the unselected line pans the chart and leaves the line alone.
+    const client = await page.context().newCDPSession(page);
+    const swipe = async (from: Point, to: Point) => {
+      await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: Math.round(box.x + from.x), y: Math.round(box.y + from.y) }] });
+      for (let step = 1; step <= 8; step++) {
+        await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: Math.round(box.x + from.x + (to.x - from.x) * step / 8), y: Math.round(box.y + from.y + (to.y - from.y) * step / 8) }] });
+        await page.waitForTimeout(16);
+      }
+      await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+    let [a, b] = (await anchorsOf(page, "main", line.id))!;
+    await swipe({ x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 }, { x: (a!.x + b!.x) / 2 - 40, y: (a!.y + b!.y) / 2 });
+    await page.waitForTimeout(500);
+    expect(drawingsOf(server)[0].points).toEqual(line.points);
+
+    // A tap near the line selects it; a finger then drags its second handle without scrolling the page.
+    [a, b] = (await anchorsOf(page, "main", line.id))!;
+    await tap({ x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 + 8 });
+    await expect(drawingBar(page)).toBeVisible();
+    [, b] = (await anchorsOf(page, "main", line.id))!;
+    const scrolled = await page.evaluate(() => window.scrollY);
+    await swipe(b!, { x: b!.x, y: b!.y + 45 });
+    await expect.poll(() => drawingsOf(server)[0].points[1].price).toBeLessThan(line.points[1].price - 0.5);
+    expect(drawingsOf(server)[0].points[0]).toEqual(line.points[0]);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+
+    await drawingBar(page).getByRole("button", { name: "Delete selected drawing" }).tap();
+    await expect.poll(() => drawingsOf(server).length).toBe(0);
+    await page.getByRole("button", { name: "Undo", exact: true }).tap();
+    await expect.poll(() => drawingsOf(server).length).toBe(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 });
