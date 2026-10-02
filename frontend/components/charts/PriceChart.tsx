@@ -93,7 +93,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   /** Alt+R and End from the workspace: every chart moves its own view. */
   commands: ChartCommands;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
-  history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null };
+  history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   onInterval(interval: Interval): void; onFocus?(): void; onExpand?(): void;
 }) {
@@ -364,8 +364,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
       <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} style={{ height }} className={`transition-opacity ${drawing ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
-      {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
-        {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : history.calendarNote}
+      {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote || history.adjustmentNote) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
+        {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : [history.calendarNote, history.adjustmentNote].filter(Boolean).join(" ")}
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}
       </div>}
       {notice && !pending && <p className="px-3 py-1 text-[10px] text-amber-300">{notice}</p>}

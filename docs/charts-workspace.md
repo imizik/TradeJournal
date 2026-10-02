@@ -326,7 +326,8 @@ basis. Dividends are **not** adjusted, and the hover text says so.
   from the adjusted daily bars.
 - **Possible unrecorded splits.** A close-to-open jump within 4% of a common
   split ratio, in a symbol with no matching record, adds a warning with its
-  dates. Prices are never changed on that evidence.
+  dates (in the panel's status line for older pages, so the page does not
+  shift). Prices are never changed on that evidence.
 - **Saved levels.** A level stores the price the user saw and the New York
   date it was drawn (`drawn_on`). On the adjusted basis it is shown at
   `price / (product of ratios of splits after drawn_on)`, the same factor the

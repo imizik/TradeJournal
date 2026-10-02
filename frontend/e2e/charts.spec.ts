@@ -1770,10 +1770,32 @@ test("a history page on a different split basis than the candles on screen is re
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
   await page.waitForTimeout(120);
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
-  await expect(page.getByRole("button", { name: "Retry history" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Retry history" }).first()).toBeVisible();
   expect(asked).toBeGreaterThan(0);
   await expect(page.getByText("A split was recorded while these charts were open").first()).toBeVisible();
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100"); // nothing from the other basis was drawn
+});
+
+test("a possible unrecorded split in older candles is noted on its panel without shifting the page banner", async ({ page }) => {
+  await registerCharts(page);
+  const base = Math.floor(Date.now() / 1000);
+  const jump = "Price jumps 10x between 2024-06-07 and 2024-06-10, like a forward split that is not in the split data. Prices there are not adjusted.";
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: currentFixture(route.request().url(), base) }));
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const template = fixture(route.request().url()).panels["5m"]!.bars[0];
+    const bars = Array.from({ length: 1200 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (1200 - i) * 300, end_time: before - (1199 - i) * 300 }));
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: "5m", session: "extended", before, limit: 1200, bars, markers: [],
+      older_cursor: bars[0].time, exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted",
+      adjustment: { ...ADJUSTED, warnings: [jump] }, fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.waitForTimeout(120);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" }).getByRole("status")).toContainText("Price jumps 10x between 2024-06-07 and 2024-06-10");
+  await expect(page.getByRole("status", { name: "Price basis warning" })).toHaveCount(0);
 });
 
 // ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----

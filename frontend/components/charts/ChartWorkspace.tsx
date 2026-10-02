@@ -17,7 +17,7 @@ import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
-type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment };
+type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null };
 /** Older history per frame (`symbol|interval`), for one session. */
 type OlderState = { key: string; panels: Partial<Record<string, OlderPanel>> };
 /** A symbol at an interval: what one panel draws, and the key its history is kept under. */
@@ -240,6 +240,8 @@ export default function ChartWorkspace() {
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
           return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers,
             calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment,
+            // Notes the workspace banner does not already carry (for example a jump that looks like an unrecorded split in older candles).
+            adjustmentNote: page.adjustment.warnings.filter((note) => !feed.adjustment?.warnings.includes(note)).join(" ") || prior?.adjustmentNote || null,
             exhausted: page.exhausted, warmup: page.warmup, issue: page.issue?.code === "pending" ? null : page.issue?.message ?? null,
             loading: !!page.continuation && (!page.issue || page.issue.code === "pending" || page.issue.code === "rate_limited") } } };
         });
@@ -523,8 +525,7 @@ export default function ChartWorkspace() {
     basis.dividends_note].join(" · ") : undefined;
   const basisNotes = [...new Set([...wanted.keys()].flatMap((name) => {
     const own = feedFor(name)?.adjustment;
-    const older = slots.filter((slot) => slot.symbol === name).map((slot) => currentOlder[frameKey(slot)]?.adjustment);
-    return [...(own?.warnings ?? []), ...older.flatMap((a) => a?.warnings ?? [])].map((note) => `${name}: ${note}`);
+    return (own?.warnings ?? []).map((note) => `${name}: ${note}`);
   }))];
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
