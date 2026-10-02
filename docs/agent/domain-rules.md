@@ -297,6 +297,28 @@ is verifiable rather than hopeful.
   before its answer is judged, and does not propose again after reading
   results; the next run starts in a fresh session.
 
+## Charts
+
+- Chart data is display-only. Candles, adjustments and indicators never write
+  to fills, trades, P&L or the enrichment caches, and chart code never reads
+  those caches as chart history.
+- One price basis, **split-adjusted**, for every interval. It is a display
+  layer over raw bars (`chart_adjust.py`, pure): the stored Alpaca SIP session
+  files stay raw and are never rewritten, and a split is adjusted exactly once
+  (Tradier's daily bars are checked per split, not assumed). Split records come
+  only from Alpaca corporate actions (`chart_splits.py`); a missing record is
+  disclosed on the chart and never guessed, and a jump that merely looks like a
+  split only warns. Dividends are not adjusted and the chart says so.
+- Fills and P&L are never adjusted. Fill arrows are timestamps; a saved level
+  keeps the price and the New York date it was drawn (`drawn_on`) and is moved
+  at display time by splits after that date, so the saved record never changes.
+- Daily and weekly bars come only from Tradier's daily history, never from
+  minutes. The whole series is read once per symbol per New York date into
+  memory (no disk copy: the provider rewrites adjusted history after each
+  split) and indicators are computed over it whole, so pages are slices.
+- Charts pass `feed=sip` explicitly on every Alpaca request and never change
+  `ALPACA_DATA_FEED`; IEX bars never reach a chart.
+
 ## TradingView live alerts
 
 - Wire `v` is the immutable wire-schema version and is distinct from Pine

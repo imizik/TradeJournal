@@ -182,17 +182,28 @@ per-panel symbols (SPY and QQQ beside the traded name through switches,
 streaming, pause, scroll-back and focus), and hotkeys (typed minutes on Enter
 without a 1m detour, immediate intervals, Space watchlist steps, Alt+R and End
 on every chart, keys off in fields and dialogs, the `?` sheet against the exact
-binding list, and the 390px touch equivalents). Chart
+binding list, and the 390px touch equivalents), the price basis (the chip, a
+level drawn before a split moving with it, new levels recording their date, the
+missing-split banner, a history page on a different split set refused, and a
+possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year
+1D chart and a 30-year 1W chart panned page by page to their first bar with a
+stable zoom and the start-of-history label, 1D to 1W to 5m switching, and a
+390px touch pan). Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
-spec installs; production never defines them. `backend/tests/test_charts.py`
-`backend/tests/test_chart_history.py`, `backend/tests/test_chart_daily_history.py`
-(12+ years of fixture daily rows: 1D/1W paging equal to the continuous series,
-workspace seam, new listing, one provider call per symbol per date, coded
-failures, the route) plus `backend/tests/test_chart_stream.py`
+spec installs; production never defines them. `backend/tests/test_charts.py`,
+`backend/tests/test_chart_history.py`, `backend/tests/test_chart_calendar.py`,
+`backend/tests/test_chart_splits.py` (the split basis: matching minute, daily and
+weekly prices, the raw cache untouched, missing, stale and damaged split data),
+`backend/tests/test_chart_daily_history.py` (12+ years of fixture daily rows:
+1D/1W paging equal to the continuous series, workspace seam, new listing, one
+provider call per symbol per date, coded failures, a split effective today in
+raw bars, the route) and `backend/tests/test_chart_stream.py`
 verify private routes and provider/indicator boundaries. Actual Tradier/Webull
-access is checked separately by `backend/scripts/check_chart_feed.py`, and a
+access is checked separately by `backend/scripts/check_chart_feed.py`, split
+records and the adjusted prices against both providers by
+`backend/scripts/check_chart_splits.py` (read-only, a real split), and a
 separate configured-account SIP/raw probe checks Alpaca entitlement; browser fixtures
 do not establish live entitlement or TradingView parity.
 

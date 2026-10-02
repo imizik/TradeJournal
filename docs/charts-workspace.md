@@ -315,6 +315,10 @@ the left edge, exactly like intraday pages.
   so there are no warmup prefixes and page seams cannot disagree. Weekly bars
   are the Monday-dated resample of the whole daily series, sliced whole, never
   resampled from a daily slice. EMA-200 is null for the first 199 bars.
+- **A split effective today in raw provider bars.** The series ends yesterday and
+  cannot show the split, so the tail settles it: if the tail's bars still jump by
+  the ratio, the whole series is re-scaled before the join, and history pages
+  read the tail the same way, so a page and the workspace never disagree.
 - **Workspace join.** The 1D/1W panels join a ten-day tail (60-second TTL) to
   the series by date, the tail winning where they overlap (today's forming bar),
   then return the last 1,200 bars. The workspace tail and the first history page
