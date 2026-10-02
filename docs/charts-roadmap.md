@@ -73,7 +73,7 @@ from planned work.
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done ([PR #104](https://github.com/imizik/TradeJournal/pull/104)) |
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done ([PR #105](https://github.com/imizik/TradeJournal/pull/105)) |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | done ([PR #106](https://github.com/imizik/TradeJournal/pull/106)) |
-| C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done (PR_LINK) |
+| C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done ([PR #111](https://github.com/imizik/TradeJournal/pull/111)) |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | next |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | todo |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
@@ -420,7 +420,7 @@ shape, so an open tab on an older build still reads and merges them. C1.2's new
 kinds needed a new settings field, which an older tab's save would have dropped;
 C1.2 made the server keep fields a save leaves out.
 
-**C1.2 Tools (done in PR_REF).** Horizontal ray, trendline (with extend left/right), rectangle
+**C1.2 Tools (done in PR #111).** Horizontal ray, trendline (with extend left/right), rectangle
 zone and text note. Magnet mode (hold `Cmd/Ctrl` or toggle) snaps anchors to the
 nearest open, high, low or close. Each tool remembers its last style. *Done when:*
 each tool can be drawn, edited and deleted in a browser test, and the magnet
