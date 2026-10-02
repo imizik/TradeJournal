@@ -167,7 +167,8 @@ cd backend
 - Intraday charts load older SIP/raw pages when the visible range nears the
   loaded left edge. A 5m chart can navigate six months through pages. The
   candle hover legend says **SIP** or **Tradier**. Today's forming bars and
-  the live stream remain Tradier; daily/weekly bars remain Tradier.
+  the live stream remain Tradier; daily/weekly bars remain Tradier and page
+  back through the symbol's whole daily history (see Daily and weekly depth).
 - When today has no intraday bars (before 04:00, weekends, holidays), each
   intraday panel opens on the latest completed SIP sessions instead of an
   empty chart.
@@ -239,8 +240,10 @@ Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
 demand-driven and bounded to the symbols each tab is viewing (three at most).
 
-`backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), daily
-bars (60-second TTL), and a single batch of watchlist quotes (15-second TTL).
+`backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), a
+ten-day daily tail (60-second TTL) joined to the whole daily series that
+`chart_daily.py` reads once per symbol per New York date, and a single batch of
+watchlist quotes (15-second TTL).
 All five panels share these reads. A lock coalesces concurrent misses; a bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable
@@ -291,6 +294,48 @@ retain last-known bars with their original fetch timestamps and an explicit
 warning. Missing credentials/data produces an empty setup state, never sample
 prices. Sandbox data is labeled delayed. Last-trade age is displayed separately
 from refresh time; a successful HTTP call is not proof that a quote is fresh.
+
+### Daily and weekly depth (C0.7)
+
+A 1D or 1W chart scrolls back through everything Tradier holds for the symbol
+(SPY: 7,999 daily bars from 1994-12-16), loading older pages as the view nears
+the left edge, exactly like intraday pages.
+
+- **One series per symbol per New York date.** `backend/app/engine/chart_daily.py`
+  reads `/v1/markets/history` (daily, start 1970-01-01, end yesterday) once,
+  through the chart feed so it shares Tradier's 60/minute budget and cooldown,
+  and keeps the adjusted bars in a memory LRU of 8 symbols (about 3 MB each).
+  There is deliberately no disk copy: the provider rewrites adjusted history
+  after every split. A new date, or a new split set, reads once more. Paging
+  ten years costs no further Tradier calls. Daily bars are never built from
+  minutes, Alpaca or Tradier's weekly interval.
+- **Pages are slices.** Indicators are computed over the whole series
+  (`chart_bars`, about 9 ms for 1D and 14 ms for 1W over SPY's 7,972 bars,
+  measured 2026-10-01) and a page is `chart_math.daily_page`'s slice of the result,
+  so there are no warmup prefixes and page seams cannot disagree. Weekly bars
+  are the Monday-dated resample of the whole daily series, sliced whole, never
+  resampled from a daily slice. EMA-200 is null for the first 199 bars.
+- **Workspace join.** The 1D/1W panels join a ten-day tail (60-second TTL) to
+  the series by date, the tail winning where they overlap (today's forming bar),
+  then return the last 1,200 bars. The workspace tail and the first history page
+  therefore agree on every shared completed bar, indicators included. If the
+  series cannot be read, the daily panels are empty with a warning, never a
+  ten-day chart standing in for the history; intraday panels still load.
+- **API.** `GET /charts/history?interval=1D|1W` takes `before` (exclusive candle
+  start) and `limit` (at most 1,200); `session` is accepted and ignored.
+  `continuation` is always null and `warmup` always `ready`. `exhausted` is true
+  only for the page holding the first bar (its `older_cursor` is then null) and
+  `history_start` is the date of the earliest Tradier bar, not the listing date
+  (SPY listed in 1993). Failures are 503 with `rate_limited`, `access_denied` or
+  `provider_unavailable` and are never reported as exhausted. Every response
+  carries the C0.6 `price_basis` and `adjustment`.
+- **Browser.** An exhausted daily or weekly panel says `Tradier daily history
+  starts {date}` in its status row. The gap detector asks for missing history
+  across steps over 5 days (intraday), 10 (1D) or 21 (1W).
+- **Live evidence.** 2026-10-01, production Tradier account: SPY daily from
+  1970 returned 7,999 rows (1994-12-16 to 2026-09-30, 775 KB, 0.45 s); NVDA
+  2024-06-05 to 06-12 showed split-adjusted prices and volume; CRWV returned 379
+  rows from its 2025-03-28 listing.
 
 ### Price basis (C0.6)
 

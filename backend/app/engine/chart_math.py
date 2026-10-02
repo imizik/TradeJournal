@@ -6,6 +6,7 @@ Session windows come from a normalized market-calendar day when one is
 supplied, so holidays and early closes resample, stream and count down alike.
 """
 
+from bisect import bisect_left
 from datetime import date, datetime, time as wall_time, timedelta
 from math import isfinite
 from typing import Mapping
@@ -81,6 +82,19 @@ def market_day(day: date, hours: dict | None) -> dict:
             "description": None if hours is None else hours.get("description") or None,
             "sessions": [{"part": part, "start": stamp(start), "end": stamp(end)} for part, start, end in session_windows(day, hours)],
             "note": CLOCK_NOTE if hours is None else None}
+
+
+def daily_page(series: list[dict], before: int, limit: int) -> tuple[list[dict], int | None, bool]:
+    """One page of an already computed daily or weekly series: the ``limit`` bars starting before ``before``.
+
+    Slicing the finished series (never resampling a slice) keeps indicators and
+    weekly bars identical across page seams. Returns (bars, older cursor, exhausted):
+    exhausted only when the page reaches the series' first bar, and then the cursor is None.
+    """
+    end = bisect_left(series, before, key=lambda bar: bar["time"])
+    page = series[max(0, end - limit):end]
+    exhausted = end <= limit
+    return page, None if exhausted or not page else page[0]["time"], exhausted
 
 
 def chart_bars(minutes: list[dict], daily: list[dict], interval: str, session: str,

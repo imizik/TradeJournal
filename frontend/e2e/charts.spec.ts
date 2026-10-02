@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page } from "@playwright/test";
 import type { ChartData, ChartBar, Interval, MarketDay, PriceAdjustment } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 
@@ -1796,6 +1796,146 @@ test("a possible unrecorded split in older candles is noted on its panel without
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
   await expect(page.getByRole("region", { name: "MRVL 5m chart" }).getByRole("status")).toContainText("Price jumps 10x between 2024-06-07 and 2024-06-10");
   await expect(page.getByRole("status", { name: "Price basis warning" })).toHaveCount(0);
+});
+
+// ---- C0.7: daily and weekly history depth ----
+/** Tradier-style daily history of `years`, paged by the stub the way the backend pages it (limit 1,200). */
+async function dailyHistoryStub(page: Page, years: number) {
+  const template = fixture("http://test/charts/workspace?intervals=1D").panels["1D"]!.bars[0];
+  const now = new Date();
+  const daily: ChartBar[] = [];
+  for (let day = Date.UTC(now.getUTCFullYear() - years, now.getUTCMonth(), now.getUTCDate()); day < Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()); day += 86400_000) {
+    const weekday = new Date(day).getUTCDay();
+    if (weekday === 0 || weekday === 6) continue;
+    const time = Math.floor(day / 1000) + 13 * 3600 + 30 * 60;
+    const close = 150 + daily.length * 0.01 + Math.sin(daily.length / 30) * 6;
+    daily.push({ ...template, time, end_time: time + 23400, open: close - 0.4, high: close + 1, low: close - 1, close, source: "tradier",
+      ema9: close - 0.5, ema20: close - 1, ema50: close - 2, ema200: daily.length < 199 ? null : close - 3, vwap: null, rsi: 50 });
+  }
+  const weekly = [...Map.groupBy(daily, (bar) => bar.time - ((new Date(bar.time * 1000).getUTCDay() + 6) % 7) * 86400)].map(([time, days]) =>
+    ({ ...days[0], time, end_time: time + 4 * 86400 + 23400, open: days[0].open, close: days.at(-1)!.close, high: Math.max(...days.map((d) => d.high)), low: Math.min(...days.map((d) => d.low)) }));
+  const series: Record<string, ChartBar[]> = { "1D": daily, "1W": weekly };
+  const start = new Date(daily[0].time * 1000).toISOString().slice(0, 10);
+  const requests: { interval: string; before: number }[] = [];
+  const base = Math.floor(Date.now() / 1000);
+  let refreshes = 0;
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    refreshes++;
+    const data = currentFixture(route.request().url(), base);
+    for (const interval of ["1D", "1W"]) if (data.panels[interval as Interval]) data.panels[interval as Interval] = { bars: series[interval].slice(-100), markers: [] };
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const interval = query.get("interval")!;
+    const before = Number(query.get("before"));
+    requests.push({ interval, before });
+    if (!series[interval]) return route.fulfill({ status: 503, json: { detail: { code: "provider_unavailable", message: "unexpected intraday request", retry_at: 0 } } });
+    const eligible = series[interval].filter((bar) => bar.time < before);
+    const bars = eligible.slice(-1200);
+    const exhausted = eligible.length <= 1200;
+    return route.fulfill({ json: { symbol: "MRVL", interval, session: query.get("session"), before, limit: 1200, bars, markers: [],
+      older_cursor: exhausted ? null : bars[0].time, exhausted, continuation: null, warmup: "ready", source: "tradier", price_basis: "split_adjusted",
+      adjustment: ADJUSTED, fills_truncated: false, issue: null, history_start: start } });
+  });
+  return { series, start, base, daily: () => requests.filter((r) => r.interval in series), intraday: () => requests.filter((r) => !(r.interval in series)), refreshes: () => refreshes };
+}
+
+async function mainIs(context: BrowserContext, interval: Interval) {
+  await fakeChartSettings(context, { revision: 1, data: { intervals: [interval, ...(["15m", "1h", "5m", "1m"] as Interval[])] } });
+}
+
+async function panToStart(page: Page, state: Awaited<ReturnType<typeof dailyHistoryStub>>, interval: "1D" | "1W") {
+  const total = state.series[interval].length;
+  const loaded = async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"));
+  await page.waitForTimeout(120); // past the reset's programmatic-range window
+  for (let index = 0; index < 8 && await loaded() < total; index++) {
+    const count = state.daily().length;
+    await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10.25, to: 60.25 }));
+    await page.waitForTimeout(180);
+    await expect.poll(() => state.daily().length).toBeGreaterThan(count);
+    await expect.poll(loaded).toBeGreaterThan(100 + index * 600);
+    const logical = (await logicalRange(page, "main"))!;
+    expect(logical.to - logical.from).toBeCloseTo(50, 2); // prepending a page does not change the zoom
+    const range = (await visibleRange(page, "main"))!;
+    await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Refresh charts", exact: true })).toBeEnabled();
+    expect(await visibleRange(page, "main")).toEqual(range); // nor does a REST refresh
+  }
+  expect(await loaded()).toBe(total);
+  // At the very first bar the view can sit on it: the oldest candle is reachable.
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: -2, to: 48 }));
+  await expect.poll(async () => (await visibleRange(page, "main"))!.from).toBeLessThanOrEqual(state.series[interval][0].time);
+}
+
+test("a 1D chart pans back page by page through twelve years to its first bar", async ({ page, context }) => {
+  await registerCharts(page);
+  await mainIs(context, "1D");
+  const state = await dailyHistoryStub(page, 12);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue("1D");
+  await page.waitForTimeout(300);
+  const intradayBefore = state.intraday().length;
+  await panToStart(page, state, "1D");
+  const earliest = (await visibleRange(page, "main"))!.from;
+  expect(earliest).toBeLessThanOrEqual(state.series["1D"][0].time + 86400 * 8);
+  expect(new Date(earliest * 1000).getUTCFullYear()).toBeLessThanOrEqual(new Date(state.series["1D"][0].time * 1000).getUTCFullYear() + 1);
+  expect(Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBe(state.series["1D"].length);
+  expect(state.daily().length).toBeGreaterThanOrEqual(3);
+  expect(state.daily().length).toBeLessThanOrEqual(5); // 3,100 bars take three 1,200-bar pages, plus at most a retry
+  expect(state.intraday().length).toBe(intradayBefore); // panning a daily chart never asks for minutes
+  await expect(page.getByRole("region", { name: "MRVL 1D chart" }).getByRole("status")).toContainText(`Tradier daily history starts ${state.start}`);
+  await page.screenshot({ path: test.info().outputPath("daily-history-desktop.png"), fullPage: true });
+});
+
+test("a 1W chart pans back to its first week, and 1D, 1W and 5m switch freely afterwards", async ({ page, context }) => {
+  await registerCharts(page);
+  await mainIs(context, "1W");
+  const state = await dailyHistoryStub(page, 30); // 1,560 weeks: two pages
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.waitForTimeout(300);
+  const intradayBefore = state.intraday().length;
+  await panToStart(page, state, "1W");
+  expect(Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBe(state.series["1W"].length);
+  expect(state.daily().length).toBe(2);
+  expect(state.intraday().length).toBe(intradayBefore);
+  expect(state.daily().every((r) => r.interval === "1W")).toBe(true);
+  await expect(page.getByRole("region", { name: "MRVL 1W chart" }).getByRole("status")).toContainText(`Tradier daily history starts ${state.start}`);
+  for (const interval of ["1D", "1W", "5m"] as const) {
+    await page.getByRole("button", { name: interval, exact: true }).first().click();
+    await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue(interval);
+    await expect(page.getByRole("region", { name: `MRVL ${interval} chart` }).first()).toBeVisible();
+    await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-bars", "0");
+  }
+});
+
+test.describe("phone daily history", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("touch panning loads an older daily page without horizontal overflow", async ({ page, context }) => {
+    await registerCharts(page);
+    await mainIs(context, "1D");
+    const state = await dailyHistoryStub(page, 12);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+    await page.getByTestId("canvas-main").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const box = (await page.getByTestId("canvas-main").boundingBox())!;
+    const client = await page.context().newCDPSession(page);
+    const y = Math.round(box.y + box.height / 2);
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: Math.round(box.x + 90), y }] });
+    for (let x = 110; x <= 330; x += 20) {
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: Math.round(box.x + x), y }] });
+      await page.waitForTimeout(20);
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await expect.poll(() => state.daily().length).toBeGreaterThan(0);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    expect(state.intraday().length).toBe(0);
+    await page.screenshot({ path: test.info().outputPath("daily-history-phone.png"), fullPage: true });
+  });
 });
 
 // ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----

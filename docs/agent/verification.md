@@ -187,7 +187,10 @@ tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
 spec installs; production never defines them. `backend/tests/test_charts.py`
-and `backend/tests/test_chart_history.py` plus `backend/tests/test_chart_stream.py`
+`backend/tests/test_chart_history.py`, `backend/tests/test_chart_daily_history.py`
+(12+ years of fixture daily rows: 1D/1W paging equal to the continuous series,
+workspace seam, new listing, one provider call per symbol per date, coded
+failures, the route) plus `backend/tests/test_chart_stream.py`
 verify private routes and provider/indicator boundaries. Actual Tradier/Webull
 access is checked separately by `backend/scripts/check_chart_feed.py`, and a
 separate configured-account SIP/raw probe checks Alpaca entitlement; browser fixtures

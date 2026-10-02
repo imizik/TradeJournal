@@ -27,7 +27,9 @@ export type HistoryPage = {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number; limit: number;
   bars: ChartBar[]; markers: FillMarker[]; older_cursor: number | null; exhausted: boolean;
   continuation: string | null; warmup: "ready" | "pending" | "insufficient";
-  source: "alpaca_sip"; price_basis: "split_adjusted"; adjustment: PriceAdjustment; fills_truncated: boolean;
+  source: "alpaca_sip" | "tradier"; price_basis: "split_adjusted"; adjustment: PriceAdjustment; fills_truncated: boolean;
+  /** Daily and weekly pages: the date of the earliest bar Tradier holds (not the listing date). */
+  history_start?: string | null;
   issue: { code: string; message: string; retry_at: number } | null;
   /** Set when a shown session was resampled with clock hours because the calendar was unavailable. */
   calendar_note?: string | null;
@@ -373,6 +375,8 @@ export function barAt(bars: ChartBar[], time: number): ChartBar | undefined {
 
 export const INTERVAL_SECONDS: Record<Interval, number> = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 };
 export const intradayInterval = (interval: Interval) => interval !== "1D" && interval !== "1W";
+/** The widest step between neighboring candles that is still ordinary: a longer one asks for the missing history (C0.7). */
+export const gapSeconds = (interval: Interval) => (interval === "1W" ? 21 : interval === "1D" ? 10 : 5) * 86400;
 
 const nyClock = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hourCycle: "h23", weekday: "short", hour: "2-digit", minute: "2-digit", second: "2-digit" });
 const nyDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });

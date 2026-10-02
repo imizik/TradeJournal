@@ -170,15 +170,15 @@ def test_five_panels_share_history_and_poll_only_recent_data(provider):
     feed, calls, clock, _ = provider
     frames = ["1m", "5m", "15m", "1h", "1D"]
     feed.workspace("SPY", frames, ["QQQ", "SPY"], "extended")
-    assert len(calls) == 3
+    assert len(calls) == 4  # today, the whole daily series (once per date), the daily tail and quotes
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
-    assert len(calls) == 3  # today, daily and quotes; completed minutes use SIP history
+    assert len(calls) == 4  # completed minutes use SIP history
     clock[0] += 16
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
-    assert len(calls) == 5  # current minute history + one batch of quotes
+    assert len(calls) == 6  # current minute history + one batch of quotes
     clock[0] += 60
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
-    assert len(calls) == 8  # daily history now due; no Tradier historical request
+    assert len(calls) == 9  # the daily tail is due again; the series is not read twice in a date, and no Tradier historical request
 
 
 def test_workspace_uses_todays_calendar_and_discloses_when_it_is_missing(provider):
@@ -213,13 +213,13 @@ def test_before_four_am_today_is_not_requested_so_quotes_and_daily_bars_still_lo
 
     monkeypatch.setattr(feed_module, "datetime", Fixed)
     data = feed.workspace("SPY", ["5m", "1D"], ["QQQ"], "extended")
-    assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["history", "quotes"]
+    assert [url.rsplit("/", 1)[-1] for url, _ in calls] == ["history", "history", "quotes"]  # daily tail, daily series, quotes
     assert data["panels"]["5m"]["bars"] == [] and data["panels"]["1D"]["bars"] and data["quotes"]
     assert data["issues"] == [] and data["intraday_as_of"] is None
     clock[0] += 16
     moment[0] = datetime(2026, 10, 1, 4, 0, 30, tzinfo=ET)
     feed.workspace("SPY", ["5m", "1D"], ["QQQ"], "extended")
-    assert calls[2][0].endswith("/timesales") and calls[2][1]["start"] == "2026-10-01 04:00"
+    assert calls[3][0].endswith("/timesales") and calls[3][1]["start"] == "2026-10-01 04:00"
 
 
 def test_three_symbol_layout_from_two_tabs_stays_within_the_chart_budget(provider):

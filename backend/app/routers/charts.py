@@ -5,6 +5,7 @@ import asyncio
 from datetime import UTC, datetime
 import json
 import re
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -71,6 +72,17 @@ def history(
     symbol = symbol.upper().strip()
     if not SYMBOL.fullmatch(symbol):
         raise HTTPException(422, "Use a US stock or ETF ticker.")
+    if interval in ("1D", "1W"):
+        # Daily and weekly bars are Tradier's regular session; `session` and `continuation` do not apply.
+        try:
+            data = chart_feed.daily.page(symbol, interval, before, limit)
+        except ChartFeedError as exc:
+            retry = int(time.time() + (60 if exc.code == "rate_limited" else 15))
+            raise HTTPException(503, {"code": exc.code, "message": str(exc), "retry_at": retry}) from None
+        data["session"] = session
+        data["markers"] = []
+        data["fills_truncated"] = _markers(db, symbol, [data])[1]
+        return data
     try:
         data = chart_history.page(symbol, interval, session, before, limit, continuation)
     except HistoryError as exc:

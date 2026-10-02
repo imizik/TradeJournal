@@ -6,7 +6,7 @@ separate memory cache; nothing is written into the enrichment caches or fills.
 
 from collections import OrderedDict, deque
 from dataclasses import dataclass
-from datetime import datetime, time as wall_time, timedelta
+from datetime import datetime, time as wall_time
 import math
 import threading
 import time
@@ -14,7 +14,7 @@ import time
 import httpx
 
 from app.engine import tradier
-from app.engine.chart_adjust import adjust_daily, describe, suspect_gaps
+from app.engine.chart_adjust import describe, suspect_gaps
 from app.engine.chart_math import ET, chart_bars, market_day, normalize_bars
 from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
 
@@ -34,20 +34,25 @@ class CachedRead:
 
 class ChartFeed:
     def __init__(self, splits: ChartSplits | None = None):
+        from app.engine.chart_daily import ChartDaily  # imported here: chart_daily needs this module's errors
+
         self.splits = splits  # None: no split data, disclosed on every response
+        self.daily = ChartDaily(self)
         self._lock = threading.RLock()
         self._cache: OrderedDict[tuple, CachedRead] = OrderedDict()
         self._calls: deque[float] = deque()
         self._retry_at = 0.0
 
-    def read(self, path: str, params: dict, ttl: int) -> tuple[dict, float, str | None]:
+    def read(self, path: str, params: dict, ttl: int, keep: bool = True) -> tuple[dict, float, str | None]:
+        """One budgeted Tradier GET. ``keep=False`` skips the response cache (and its stale fallback):
+        for a large answer the caller stores itself, so it is not held twice."""
         if not tradier.tradier_configured():
             raise ChartFeedError("Connect your Tradier account to load charts. Set TRADIER_API_KEY on the private backend.", "not_configured")
         key = (tradier.TRADIER_BASE_URL, path, tuple(sorted(params.items())))
         # The lock also coalesces concurrent requests from several tabs/panels.
         with self._lock:
             now = time.time()
-            saved = self._cache.get(key)
+            saved = self._cache.get(key) if keep else None
             if saved:
                 self._cache.move_to_end(key)
                 if now < saved.expires_at:
@@ -74,12 +79,14 @@ class ChartFeed:
                 payload = response.json()
                 if not isinstance(payload, dict) or payload.get("fault") or payload.get("errors"):
                     raise ChartFeedError("Tradier returned an unexpected market-data response.")
-                saved = CachedRead(payload, time.time(), now + ttl)
-                self._cache[key] = saved
+                fresh = CachedRead(payload, time.time(), now + ttl)
+                if not keep:
+                    return fresh.data, fresh.fetched_at, None
+                self._cache[key] = fresh
                 self._cache.move_to_end(key)
                 while len(self._cache) > 96:
                     self._cache.popitem(last=False)
-                return saved.data, saved.fetched_at, None
+                return fresh.data, fresh.fetched_at, None
             except (httpx.HTTPError, ValueError, ChartFeedError) as exc:
                 error = exc if isinstance(exc, ChartFeedError) else ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
                 # Failure cache prevents repeated misses during an outage; old
@@ -129,15 +136,19 @@ class ChartFeed:
                 "end": today.strftime("%Y-%m-%d 20:00"),
             }, 15)
             minutes = normalize_bars(_rows(current, "series", "data"))
-        if needs_daily:
-            history = read("daily", "/v1/markets/history", {
-                "symbol": symbol, "interval": "daily",
-                "start": (today - timedelta(days=1100)).isoformat(), "end": today.isoformat(),
-            }, 60)
-            daily = normalize_bars(_rows(history, "history", "day"), daily=True)
         # Split data comes from its own provider read, outside the Tradier lock and budget.
         info = self.splits.get(symbol) if self.splits else UNAVAILABLE
-        daily, daily_states = adjust_daily(daily, info["splits"])
+        daily_states: dict[str, str] = {}
+        if needs_daily:
+            # Whole history once per New York date (C0.7), joined to a short tail read every minute.
+            tail = normalize_bars(_rows(read("daily", "/v1/markets/history", self.daily.tail_params(symbol, today), 60), "history", "day"), daily=True)
+            try:
+                daily, daily_states = self.daily.assemble(self.daily.entry(symbol, today, info), tail)
+            except ChartFeedError as exc:
+                if exc.code == "not_configured":
+                    raise
+                # No older bars means no honest daily chart: the tail alone would pass for the whole history.
+                problems.append(str(exc))
 
         quote_data = read("quotes", "/v1/markets/quotes", {"symbols": ",".join(sorted(set([symbol, *watchlist])))}, 15) if quotes else {}
         rows = []
@@ -166,7 +177,7 @@ class ChartFeed:
             "panels": panels, "quotes": rows, "issues": list(dict.fromkeys(problems)),
             "intraday_as_of": minutes[-1]["time"] if minutes else None, "market": market_day(today, hours),
             "adjustment": adjustment,
-            "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP bars (from 2016); today uses Tradier. Prices are split-adjusted from recorded splits, as of each split's ex-date; the stored bars stay raw. Dividends are not adjusted.",
+            "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP bars (from 2016); today uses Tradier. Daily and weekly charts scroll back through Tradier's whole daily history, read once per day and kept in memory. Prices are split-adjusted from recorded splits, as of each split's ex-date; the stored bars stay raw. Dividends are not adjusted.",
         }
 
 
