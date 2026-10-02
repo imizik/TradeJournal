@@ -2440,7 +2440,7 @@ test.describe("phone drawing layer", () => {
 type Point = { x: number; y: number };
 type LayerProbe = Map<string, { anchors(id: string): (Point | null)[] | null }>;
 type CoordinateProbe = Map<string, { timeScale(): { logicalToCoordinate(at: number): number | null }; panes(): { getSeries(): SeriesProbe[] }[] }>;
-type SavedDrawing = { id: string; kind: string; points: { time: number; price: number }[]; color: string; width: number; drawn_on: string; text?: string; extendLeft?: boolean; extendRight?: boolean };
+type SavedDrawing = { id: string; kind: string; points: { time: number; price: number }[]; color: string; width: number; drawn_on: string; text?: string; extendLeft?: boolean; extendRight?: boolean; hidden?: boolean; locked?: boolean };
 const registerLayers = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjDrawings?: Map<string, unknown> }).__tjDrawings = new Map(); });
 const drawingsOf = (server: SettingsStore, symbol = "MRVL") => (server.data?.drawings as Record<string, SavedDrawing[]> | undefined)?.[symbol] ?? [];
 const anchorsOf = (page: Page, panel: string, id: string) => page.evaluate(([key, item]) => (window as unknown as { __tjDrawings: LayerProbe }).__tjDrawings.get(key)!.anchors(item), [panel, id] as const);
@@ -2776,6 +2776,350 @@ test.describe("phone drawing tools", () => {
     await expect.poll(() => drawingsOf(server).length).toBe(0);
     await page.getByRole("button", { name: "Undo", exact: true }).tap();
     await expect.poll(() => drawingsOf(server).length).toBe(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});
+
+// ---- Context menu (C1.3): right-click, or a long press on a phone, on the chart, a level or a drawing ----
+
+const chartMenu = (page: Page) => page.getByRole("dialog", { name: "Chart menu" });
+const itemMenu = (page: Page, name: string) => page.getByRole("dialog", { name: `${name} menu` });
+type SavedLevel = { id: string; price: number; label: string; color?: string; hidden?: boolean; locked?: boolean };
+const savedLevels = (server: SettingsStore, symbol = "MRVL") => (server.data?.levels as Record<string, SavedLevel[]> | undefined)?.[symbol] ?? [];
+async function rightClick(page: Page, id: string, at: Point) {
+  const box = (await drawn(page, id).boundingBox())!;
+  await page.mouse.click(box.x + at.x, box.y + at.y, { button: "right" });
+}
+/** Open the chart menu on empty chart space and switch it to Layers. */
+async function openLayers(page: Page) {
+  await rightClick(page, "main", { x: 300, y: 150 });
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+}
+const plotWidth = (page: Page) => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { timeScale(): { width(): number } }> }).__tjCharts.get("main")!.timeScale().width());
+
+test("right-click on the chart adds a level at the price, copies it, resets that chart's scale and toggles layers", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-bars", "240");
+
+  // At the pointer, naming the symbol and the price there to the cent; arrow keys move between rows.
+  const at = await screenAt(page, "main", 200, 256);
+  await rightClick(page, "main", at);
+  const menu = chartMenu(page);
+  await expect(menu).toContainText(/^MRVL\d+\.\d\d/);
+  const expected = /^MRVL(\d+\.\d\d)/.exec((await menu.textContent())!)![1];
+  expect(Math.abs(Number(expected) - await priceAtY(page, "main", at.y))).toBeLessThan(0.08);
+  const box = (await drawn(page, "main").boundingBox())!;
+  const spot = (await menu.boundingBox())!;
+  expect(Math.abs(spot.x - (box.x + at.x))).toBeLessThan(2);
+  expect(Math.abs(spot.y - (box.y + at.y))).toBeLessThan(2);
+  await expect(menu).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: `Add level at ${expected}` })).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  await expect(menu.getByRole("menuitem", { name: `Copy price ${expected}` })).toBeFocused();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(menu.getByRole("menuitem", { name: /^Layers/ })).toBeFocused();
+  await page.screenshot({ path: test.info().outputPath("chart-menu-desktop.png") });
+
+  await menu.getByRole("menuitem", { name: `Copy price ${expected}` }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(page.getByRole("status", { name: "Chart notice" })).toHaveText(`Copied ${expected}`);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
+
+  await rightClick(page, "main", at);
+  await chartMenu(page).getByRole("menuitem", { name: `Add level at ${expected}` }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", expected);
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", expected);
+  await expect.poll(() => savedLevels(server).map((level) => level.price)).toEqual([Number(expected)]);
+
+  // Reset puts this chart on its latest candles with automatic price scales; the others stay where they are.
+  await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
+  await moveAway(page, "main", { from: 120, to: 180 });
+  await moveAway(page, "Panel 2", { from: 150, to: 170 });
+  await rightClick(page, "main", { x: 300, y: 150 });
+  await chartMenu(page).getByRole("menuitem", { name: "Reset chart scale" }).click();
+  await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
+  expect(await autoScaled(page, "main")).toEqual([true, true]);
+  expect(await roundedRange(page, "Panel 2")).toEqual({ from: 150, to: 170 });
+  expect(await autoScaled(page, "Panel 2")).toEqual([false, false]);
+
+  // On the price scale there is no price to add or copy; the rest of the menu is there.
+  await rightClick(page, "main", { x: (await plotWidth(page)) + 20, y: 150 });
+  await expect(chartMenu(page).getByRole("menuitem", { name: "Reset chart scale" })).toBeVisible();
+  await expect(chartMenu(page).getByRole("menuitem", { name: /^(Add level|Copy price)/ })).toHaveCount(0);
+  // A click elsewhere closes it, and the browser's own menu never shows over a chart.
+  await page.getByRole("heading", { name: "Charts" }).click();
+  await expect(chartMenu(page)).toHaveCount(0);
+
+  // Layers: hiding My levels takes the level off all five charts, is saved, and survives reload.
+  await openLayers(page);
+  const levelsShown = chartMenu(page).getByRole("menuitemcheckbox", { name: "My levels" });
+  await expect(levelsShown).toHaveAttribute("aria-checked", "true");
+  await levelsShown.click();
+  await expect(levelsShown).toHaveAttribute("aria-checked", "false");
+  for (const panel of ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"]) await expect(drawn(page, panel)).toHaveAttribute("data-levels", "");
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume" }).click();
+  await expect(page.getByRole("button", { name: "Volume", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
+  await expect(chartMenu(page)).toHaveCount(0);
+  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false });
+  expect((server.data!.indicators as Record<string, boolean>).volume).toBe(false);
+  await expect(levelsPanel(page).getByRole("button", { name: "Hidden · Show" })).toBeVisible();
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "");
+  await openLayers(page);
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "My levels" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", expected);
+  await page.keyboard.press("Escape");
+
+  // With a tool armed, right-click only puts the tool away.
+  await tool(page, "trend line").click();
+  await rightClick(page, "main", { x: 300, y: 150 });
+  await expect(tool(page, "trend line")).toHaveAttribute("aria-pressed", "false");
+  await expect(chartMenu(page)).toHaveCount(0);
+});
+
+test("right-click on a level edits its label and color inline, locks, duplicates, hides and deletes it, each one undo step", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Breakout", "256.00");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  const onLevel = async () => ({ x: 220, y: await levelY(page, "main", 256) });
+
+  // The menu selects the level, so its bar shows too; keys go to the menu, so Delete deletes nothing.
+  await rightClick(page, "main", await onLevel());
+  const menu = itemMenu(page, "Level");
+  await expect(menu).toContainText("Breakout");
+  await expect(page.getByRole("toolbar", { name: "Selected level on main" })).toContainText("Breakout");
+  await page.keyboard.press("Delete");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  await page.screenshot({ path: test.info().outputPath("level-menu-desktop.png") });
+  await menu.getByLabel("Level label").fill("Pivot");
+  await menu.getByLabel("Level label").press("Enter");
+  await expect(menu).toHaveCount(0);
+  await expect.poll(() => savedLevels(server)[0]?.label).toBe("Pivot");
+  await expect(levelsPanel(page)).toContainText("Pivot");
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo changing Pivot/);
+
+  // A color applies at once and the menu stays open on it; Esc then drops a label typed but not saved.
+  await rightClick(page, "main", await onLevel());
+  await itemMenu(page, "Level").getByRole("button", { name: "Red" }).click();
+  await expect.poll(() => savedLevels(server)[0]?.color).toBe("#ee617a");
+  await expect(itemMenu(page, "Level").getByRole("button", { name: "Red" })).toHaveAttribute("aria-pressed", "true");
+  await itemMenu(page, "Level").getByLabel("Level label").fill("Never saved");
+  await page.keyboard.press("Escape");
+  await expect(itemMenu(page, "Level")).toHaveCount(0);
+  await page.waitForTimeout(600); // past the save debounce
+  expect(savedLevels(server)[0].label).toBe("Pivot");
+
+  // Locked, it still selects, but a press on it pans the chart instead of dragging it.
+  await rightClick(page, "main", await onLevel());
+  await itemMenu(page, "Level").getByRole("menuitem", { name: "Lock" }).click();
+  await expect.poll(() => savedLevels(server)[0]?.locked).toBe(true);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo locking Pivot/);
+  const before = await logicalRange(page, "main");
+  const from = await onLevel();
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  for (let step = 1; step <= 6; step++) await page.mouse.move(box.x + from.x + step * 20, box.y + from.y + step * 8);
+  await page.mouse.up();
+  await expect.poll(async () => (await logicalRange(page, "main"))!.from).toBeLessThan(before!.from - 1);
+  await page.waitForTimeout(600);
+  expect(savedLevels(server)[0].price).toBe(256);
+  const bar = page.getByRole("toolbar", { name: "Selected level on main" });
+  await bar.getByRole("button", { name: "Unlock" }).click();
+  await expect.poll(() => savedLevels(server)[0]?.locked).toBeUndefined();
+  await expect(bar.getByRole("button", { name: "Unlock" })).toHaveCount(0);
+
+  // A duplicate sits at the same price, unlocked, and is selected; undo removes it.
+  await rightClick(page, "main", await onLevel());
+  await itemMenu(page, "Level").getByRole("menuitem", { name: "Duplicate" }).click();
+  await expect.poll(() => savedLevels(server).length).toBe(2);
+  const [original, copy] = savedLevels(server);
+  expect(copy).toMatchObject({ price: 256, label: "Pivot", color: "#ee617a" });
+  expect(copy.id).not.toBe(original.id);
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", copy.id);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(() => savedLevels(server).length).toBe(1);
+
+  // Hidden, it leaves every chart and its selection; the list and the chart menu's Layers can show it again.
+  await rightClick(page, "main", await onLevel());
+  await itemMenu(page, "Level").getByRole("menuitem", { name: "Hide" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "");
+  await expect(bar).toHaveCount(0);
+  await expect.poll(() => savedLevels(server)[0]?.hidden).toBe(true);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo hiding Pivot/);
+  await expect(levelsPanel(page).getByRole("button", { name: "Show Pivot" })).toBeVisible();
+  await openLayers(page);
+  await expect(chartMenu(page).getByText("Hidden MRVL items")).toBeVisible();
+  await chartMenu(page).getByRole("menuitem", { name: "Show Pivot 256.00" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  await expect.poll(() => savedLevels(server)[0]?.hidden).toBeUndefined();
+  await page.keyboard.press("Escape");
+
+  await rightClick(page, "main", await onLevel());
+  await itemMenu(page, "Level").getByRole("menuitem", { name: "Delete" }).click();
+  await expect.poll(() => savedLevels(server).length).toBe(0);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect.poll(() => savedLevels(server)[0]).toMatchObject({ label: "Pivot", color: "#ee617a", price: 256 });
+});
+
+test("right-click on a drawing restyles, locks, hides and deletes it, and a note's text edits inline", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await tool(page, "trend line").click();
+  await clickChart(page, "main", await screenAt(page, "main", 180, 254));
+  await clickChart(page, "main", await screenAt(page, "main", 220, 258));
+  await expect.poll(() => drawingsOf(server).length).toBe(1);
+  const [line] = drawingsOf(server);
+  const onLine = async () => { const [a, b] = (await anchorsOf(page, "main", line.id))!; return { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 }; };
+
+  await rightClick(page, "main", await onLine());
+  const menu = itemMenu(page, "Trend line");
+  await expect(menu).toContainText("Trend line");
+  await menu.getByRole("button", { name: "Green" }).click();
+  await expect.poll(() => drawingsOf(server)[0].color).toBe("#2bc9a4");
+  // The tool draws its next line in the color last chosen, as from the selection bar.
+  expect((server.data!.toolStyles as Record<string, unknown>).trend).toEqual({ color: "#2bc9a4", width: 2 });
+  await menu.getByRole("menuitem", { name: "Lock" }).click();
+  await expect.poll(() => drawingsOf(server)[0].locked).toBe(true);
+  // Locked: no handles, and neither a handle nor the body drags it.
+  const [, end] = (await anchorsOf(page, "main", line.id))!;
+  await dragChart(page, "main", end!, { x: end!.x, y: end!.y + 40 });
+  await dragChart(page, "main", await onLine(), { x: (await onLine()).x, y: (await onLine()).y - 40 });
+  await page.waitForTimeout(600);
+  expect(drawingsOf(server)[0].points).toEqual(line.points);
+  await expect(drawingBar(page).getByRole("button", { name: "Unlock" })).toBeVisible();
+
+  // Hidden on its own, then shown from Layers; then the whole Drawings group off and on.
+  await rightClick(page, "main", await onLine());
+  await itemMenu(page, "Trend line").getByRole("menuitem", { name: "Hide" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-drawings", "");
+  await openLayers(page);
+  await expect(chartMenu(page).getByRole("menuitem", { name: /^Layers 1 hidden/ })).toHaveCount(0); // in the Layers view now
+  await chartMenu(page).getByRole("menuitem", { name: /^Show Trend line/ }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "trend");
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Drawings" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "");
+  await page.keyboard.press("Escape");
+  // Placing a drawing shows the group again, so nothing is drawn out of sight.
+  await tool(page, "text note").click();
+  await clickChart(page, "main", await screenAt(page, "main", 205, 251));
+  await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "trend,note");
+  await expect.poll(() => drawingsOf(server).length).toBe(2);
+  expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false });
+
+  // A note's text edits inline in its menu.
+  const note = drawingsOf(server)[1];
+  await page.keyboard.press("Escape");
+  const [anchor] = (await anchorsOf(page, "main", note.id))!;
+  await rightClick(page, "main", { x: anchor!.x + 12, y: anchor!.y });
+  await itemMenu(page, "Text note").getByLabel("Note text").fill("Gap fill");
+  await itemMenu(page, "Text note").getByLabel("Note text").press("Enter");
+  await expect.poll(() => drawingsOf(server)[1].text).toBe("Gap fill");
+  await rightClick(page, "main", { x: anchor!.x + 12, y: anchor!.y });
+  await itemMenu(page, "Text note").getByRole("menuitem", { name: "Delete" }).click();
+  await expect.poll(() => drawingsOf(server).map((d) => d.kind)).toEqual(["trend"]);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo deleting text note/);
+});
+
+test.describe("phone context menu", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("a long press opens the chart menu and a level's menu as bottom sheets; a swipe or a tap does not", async ({ page, context }) => {
+    const server = await fakeChartSettings(context);
+    await registerCharts(page);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await drawn(page, "main").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const box = (await drawn(page, "main").boundingBox())!;
+    const client = await page.context().newCDPSession(page);
+    const point = (at: Point) => ({ x: Math.round(box.x + at.x), y: Math.round(box.y + at.y) });
+    const hold = async (at: Point) => {
+      await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point(at)] });
+      await page.waitForTimeout(700);
+      await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+    const at = { x: 150, y: 120 };
+
+    // A swipe pans and a tap selects nothing: neither opens a menu.
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [point(at)] });
+    for (let step = 1; step <= 8; step++) {
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [point({ x: at.x - step * 6, y: at.y })] });
+      await page.waitForTimeout(80);
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await page.touchscreen.tap(point(at).x, point(at).y);
+    await page.waitForTimeout(700);
+    await expect(chartMenu(page)).toHaveCount(0);
+
+    // Held still: the chart menu, as a bottom sheet with 44px rows.
+    await hold(at);
+    const menu = chartMenu(page);
+    await expect(menu).toContainText(/MRVL\d+\.\d\d/);
+    const expected = /MRVL(\d+\.\d\d)/.exec((await menu.textContent())!)![1];
+    expect(Math.abs(Number(expected) - await priceAtY(page, "main", at.y))).toBeLessThan(0.1);
+    const sheet = (await menu.boundingBox())!;
+    expect(sheet.width).toBeGreaterThanOrEqual(389);
+    expect(Math.abs(sheet.y + sheet.height - 844)).toBeLessThan(2);
+    for (const row of await menu.getByRole("menuitem").all()) expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await page.screenshot({ path: test.info().outputPath("chart-menu-phone.png") });
+    await menu.getByRole("menuitem", { name: `Add level at ${expected}` }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", expected);
+    const onLevel = async () => ({ x: 150, y: (await levelY(page, "main", Number(expected))) + 6 });
+
+    // Held on a level that is not selected: its menu, and it is selected. The backdrop closes the sheet.
+    await hold(await onLevel());
+    const levelMenu = itemMenu(page, "Level");
+    await expect(levelMenu).toBeVisible();
+    await expect(page.getByRole("toolbar", { name: "Selected level on main" })).toBeVisible();
+    for (const swatch of await levelMenu.getByRole("group", { name: "Level color" }).getByRole("button").all()) {
+      const size = (await swatch.boundingBox())!;
+      expect(Math.min(size.width, size.height)).toBeGreaterThanOrEqual(44);
+    }
+    await page.screenshot({ path: test.info().outputPath("level-menu-phone.png") });
+    await page.touchscreen.tap(195, 30);
+    await expect(levelMenu).toHaveCount(0);
+    await expect(page.getByRole("toolbar", { name: "Selected level on main" })).toBeVisible();
+
+    // Held on the selected level: the menu again, and the level has not moved (a held finger is not a drag).
+    await hold(await onLevel());
+    await levelMenu.getByRole("menuitem", { name: "Lock" }).tap();
+    await expect.poll(() => savedLevels(server)[0]?.locked).toBe(true);
+    expect(savedLevels(server)[0].price).toBe(Number(expected));
+    await hold(await onLevel());
+    await expect(levelMenu.getByRole("menuitem", { name: "Unlock" })).toBeVisible();
+    await levelMenu.getByRole("menuitem", { name: "Hide" }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", "");
+
+    // Layers in the sheet shows it again.
+    await hold(at);
+    await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).tap();
+    await chartMenu(page).getByRole("menuitem", { name: `Show Level 1 ${expected}` }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", expected);
+    await page.touchscreen.tap(195, 30);
+    await expect(chartMenu(page)).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 });

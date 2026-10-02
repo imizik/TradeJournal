@@ -1,17 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowLeftToLine, ArrowRightToLine, Palette, Trash2, X } from "lucide-react";
+import { ArrowLeftToLine, ArrowRightToLine, Lock, Palette, Trash2, X } from "lucide-react";
 import { price } from "@/lib/charts";
-import { NOTE_MAX, PALETTE, TOOL_NAMES } from "@/lib/drawings";
+import { LEVEL_COLOR, NOTE_MAX, PALETTE, TOOL_NAMES } from "@/lib/drawings";
 import type { Drawing, DrawingPatch, LineWidth } from "@/lib/drawings";
 
 const square = "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded";
 /** Style buttons: 24px, the smallest touch target the chart allows. */
 const small = "inline-flex h-6 w-6 shrink-0 items-center justify-center rounded";
 
-/** What a drawing spans, in prices: shown beside its name. */
-function summary(drawing: Drawing) {
+/** What a drawing spans, in prices: shown beside its name (and in its menu). */
+export function summary(drawing: Drawing) {
   const [a, b] = drawing.points;
   if (drawing.kind === "ray") return price(a.price);
   if (drawing.kind === "trend") return `${price(a.price)} → ${price(b.price)}`;
@@ -25,18 +25,25 @@ function summary(drawing: Drawing) {
  * width and trend-line extensions. Style stays folded so the bar is one row
  * and covers as little of the chart as a level's does. Every change is one
  * undo step, and a color or width becomes what that tool draws with next.
+ * A locked item (C1.3) shows a lock that unlocks it.
  */
-export default function SelectionBar({ panel, level, drawing, focusText = false, onDelete, onDeselect, onEdit }: {
-  panel: string; level?: { id: string; label: string; price: number }; drawing?: Drawing; focusText?: boolean;
-  onDelete(): void; onDeselect(): void; onEdit?(patch: DrawingPatch): void;
+export default function SelectionBar({ panel, level, drawing, focusText = false, onDelete, onDeselect, onEdit, onUnlock }: {
+  panel: string; level?: { id: string; label: string; price: number; color?: string; locked?: boolean }; drawing?: Drawing; focusText?: boolean;
+  onDelete(): void; onDeselect(): void; onEdit?(patch: DrawingPatch): void; onUnlock?(): void;
 }) {
   const [draft, setDraft] = useState(drawing?.text ?? "");
   const [styling, setStyling] = useState(false);
-  if (level) return <div role="toolbar" aria-label={`Selected level on ${panel}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] items-center gap-1 rounded-md border border-slate-600 bg-[#121924]/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
-    <span className="h-0.5 w-3 shrink-0 bg-[#9cc2ff]" /><span className="min-w-0 truncate text-slate-300">{level.label}</span><span className="font-mono text-[#9cc2ff]">{price(level.price)}</span>
+  const unlock = (level ?? drawing)?.locked && <button aria-label="Unlock" title="Locked: it selects but does not drag. Unlock." onClick={onUnlock}
+    className={`${square} text-amber-300 hover:bg-slate-800`}><Lock size={13} /></button>;
+  if (level) {
+    const color = !level.color || level.color === LEVEL_COLOR ? "#9cc2ff" : level.color;
+    return <div role="toolbar" aria-label={`Selected level on ${panel}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] items-center gap-1 rounded-md border border-slate-600 bg-[#121924]/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
+    <span className="h-0.5 w-3 shrink-0" style={{ background: color }} /><span className="min-w-0 truncate text-slate-300">{level.label}</span><span className="font-mono" style={{ color }}>{price(level.price)}</span>
+    {unlock}
     <button aria-label="Delete selected level" title="Delete (Delete or Backspace)" onClick={onDelete} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-rose-300`}><Trash2 size={13} /></button>
     <button aria-label="Deselect level" title="Deselect (Esc)" onClick={onDeselect} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-slate-200`}><X size={13} /></button>
   </div>;
+  }
   if (!drawing) return null;
   const name = TOOL_NAMES[drawing.kind];
   const span = summary(drawing);
@@ -51,6 +58,7 @@ export default function SelectionBar({ panel, level, drawing, focusText = false,
         onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); else if (e.key === "Escape") { setDraft(drawing.text ?? ""); e.preventDefault(); e.stopPropagation(); } }}
         className="h-7 w-32 min-w-0 rounded border border-slate-700 bg-[#10151e] px-1.5 text-[11px] text-slate-200 outline-none focus:border-sky-600" />}
       <button aria-label="Style" aria-expanded={styling} title="Color, width and extensions" onClick={() => setStyling((v) => !v)} className={`${square} ml-auto ${styling ? "bg-slate-700 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Palette size={13} /></button>
+      {unlock}
       <button aria-label="Delete selected drawing" title="Delete (Delete or Backspace)" onClick={onDelete} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-rose-300`}><Trash2 size={13} /></button>
       <button aria-label="Deselect drawing" title="Deselect (Esc)" onClick={onDeselect} className={`${square} text-slate-400 hover:bg-slate-800 hover:text-slate-200`}><X size={13} /></button>
     </div>

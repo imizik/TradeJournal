@@ -66,9 +66,27 @@ export type ChartStreamTick = {
   minute: number; session: "pre" | "regular" | "post";
   buckets: Partial<Record<Interval, { time: number; end_time: number; extended: boolean }>>;
 };
-/** `drawn_on` is the New York date the price was seen; levels saved before C0.6 have none. */
-export type PriceLevel = { id: string; price: number; label: string; drawn_on?: string };
+/**
+ * `drawn_on` is the New York date the price was seen; levels saved before C0.6
+ * have none. A level without `color` draws in the default blue; `hidden` and
+ * `locked` (C1.3) are present only when set, so older levels keep their shape.
+ */
+export type PriceLevel = { id: string; price: number; label: string; drawn_on?: string; color?: string; hidden?: boolean; locked?: boolean };
+export const LEVEL_LABEL_MAX = 30;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const COLOR = /^#[0-9a-f]{6}$/;
+/** A level in the one shape the workspace saves and compares, or null if it is not one the page could have made. */
+export function cleanLevel(row: unknown): PriceLevel | null {
+  const value = row as Partial<PriceLevel> | null;
+  if (!value || typeof value.id !== "string" || typeof value.price !== "number" || !Number.isFinite(value.price) || value.price <= 0 || typeof value.label !== "string") return null;
+  return {
+    id: value.id, price: value.price, label: value.label.slice(0, LEVEL_LABEL_MAX),
+    ...(typeof value.drawn_on === "string" && DAY.test(value.drawn_on) ? { drawn_on: value.drawn_on } : {}),
+    ...(typeof value.color === "string" && COLOR.test(value.color) ? { color: value.color } : {}),
+    ...(value.hidden === true ? { hidden: true } : {}),
+    ...(value.locked === true ? { locked: true } : {}),
+  };
+}
 export const todayNewYork = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
 /** The splits that decide where a level sits, as a comparable string. */
 export const splitsKey = (adjustment?: PriceAdjustment | null) => adjustment?.splits.map((s) => `${s.ex_date}:${s.ratio}`).join(",") ?? "";
@@ -83,6 +101,9 @@ export function levelOnBasis(level: PriceLevel, splits: { ex_date: string; ratio
   return { price: level.price / factor, moved: factor !== 1 };
 }
 export type Indicators = Record<"ema9" | "ema20" | "ema50" | "ema200" | "vwap" | "volume" | "rsi" | "fills", boolean>;
+/** Groups of the user's own items that can be hidden from every chart at once (C1.3; C1.4 adds more). */
+export type HiddenGroups = Record<"levels" | "drawings", boolean>;
+export const LAYER_GROUPS = ["levels", "drawings"] as const;
 export type SmallChartSize = "compact" | "normal" | "tall";
 /**
  * How the panels are arranged, and nothing about what they show beyond the
@@ -106,6 +127,8 @@ export type ChartSettings = {
   toolStyles: Record<DrawingKind, ToolStyle>;
   /** Snap placed and dragged anchors to the nearest open, high, low or close. */
   magnet: boolean;
+  /** Groups hidden from every chart, from the chart menu's Layers (C1.3). */
+  hiddenGroups: HiddenGroups;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize; immersiveWatchlist: boolean;
   layouts: SavedLayout[];
 };
@@ -114,7 +137,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -142,8 +165,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
     if (value.levels && typeof value.levels === "object") {
       for (const [symbol, rows] of Object.entries(value.levels)) {
         if (!validSymbol(symbol) || !Array.isArray(rows)) continue;
-        levels[symbol] = rows.filter((row) => row && typeof row.id === "string" && Number.isFinite(row.price) && row.price > 0 && typeof row.label === "string")
-          .slice(0, 30).map((row) => ({ id: row.id, price: row.price, label: row.label.slice(0, 30), ...(typeof row.drawn_on === "string" && DAY.test(row.drawn_on) ? { drawn_on: row.drawn_on } : {}) }));
+        levels[symbol] = rows.map(cleanLevel).filter((row): row is PriceLevel => !!row).slice(0, 30);
       }
     }
     return {
@@ -159,6 +181,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       drawings: cleanDrawings(value.drawings, validSymbol),
       toolStyles: cleanToolStyles(value.toolStyles),
       magnet: value.magnet === true,
+      hiddenGroups: { levels: value.hiddenGroups?.levels === true, drawings: value.hiddenGroups?.drawings === true },
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",

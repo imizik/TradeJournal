@@ -138,6 +138,36 @@ cd backend
   never drops a field it leaves out, so an open tab on an older build cannot
   erase drawings. Like levels, each drawing keeps the date it was drawn and
   moves with a later split.
+- **Context menu (C1.3).** Right-click a chart, or hold a finger still on it
+  for half a second, for its menu (`frontend/components/charts/ChartMenu.tsx`).
+  A mouse opens it at the pointer; a finger opens it as a bottom sheet with
+  44px rows, closed by its backdrop. On empty chart space it offers **Add level
+  at** and **Copy price** for the price under the pointer (to the cent; the
+  magnet applies, as it does to a placed level), **Reset chart scale** for that
+  chart alone, and **Layers**: show or hide My levels, Drawings, My fills and
+  each study on every chart, plus a **Show** for each of the symbol's items
+  hidden one by one. On a price scale, a time scale or the RSI pane there is no
+  price, so only the reset and Layers appear. On a level or drawing it selects
+  the item and offers its label (a level's name, a note's text) and color
+  inline, **Lock**, **Hide**, **Duplicate** and **Delete**. A locked item still
+  selects, restyles, hides and deletes, but never drags: a press on it pans
+  the chart, it shows no handles, and its selection bar carries a lock that
+  unlocks it. A hidden item leaves every chart and cannot be selected; the side
+  list shows a hidden level dimmed with a Show button. A duplicate sits at the
+  same place, unlocked and shown, and is selected so the next drag moves the
+  copy. Each item change is one undo step named in the Undo button ("Undo
+  hiding Pivot"); group visibility is a setting, not an undo step. Adding a
+  level or placing a drawing while its group is hidden shows the group again,
+  so nothing is saved out of sight. A level's color is saved only when it is
+  not the default blue, and `hidden`/`locked` only when set, so untouched
+  levels keep their old shape; the hidden groups are a `hiddenGroups` settings
+  field that merges key by key. A tab still running a build from before C1.3
+  drops these per-item flags if it saves levels or drawings, so reload old tabs
+  after deploying. With a tool armed, right-click (or Esc) only puts the tool
+  away. The browser's own menu never opens over a chart, and the chart's
+  hotkeys are off while the menu is open (Esc closes it; arrow keys move
+  between its rows). A label typed in the menu is saved when the menu closes,
+  unless Esc closed it.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (header button) saves the current arrangement under a name, such
@@ -580,6 +610,21 @@ check that a finger on an unselected level leaves it, a tap selects it, a
 finger then drags it without scrolling the page, and Delete and Undo work by
 tap with 24px targets. Those tests read the prices handed to the layer; what
 the canvas paints (dash, handle, label) is checked by screenshot review only.
+Context-menu tests (C1.3) right-click at a known price and read it in the
+menu, copy it to the clipboard, add a level there on all five charts, reset
+one chart's range and price scales while another keeps its own, find no price
+on the price scale, close by click and Esc, put an armed tool away, move
+between rows by arrow key, and hide My levels and Volume through a reload.
+On a level they rename it and recolor it inline, drop an unsaved label on Esc,
+lock it (a drag then pans and saves nothing) and unlock it from the selection
+bar, duplicate and undo, hide it and show it again from the side list's
+button and from Layers, and delete and undo it; on drawings they recolor (the
+tool's style follows), lock against handle and body drags, hide one and the
+Drawings group, show the group again by placing a note, and edit a note's
+text inline. At 390px a swipe and a tap open nothing, a held finger opens
+the chart menu and a level's menu as bottom sheets with 44px rows and swatches,
+a held finger on a selected level opens its menu without moving it, and the
+backdrop closes the sheet.
 A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_splits.py` pins the basis: a NVDA-shaped split gives

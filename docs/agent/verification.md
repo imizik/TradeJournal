@@ -195,7 +195,14 @@ handle and while Cmd/Ctrl is held; a pre-split drawing moving with the
 candles; and at 390px two taps to place, tap to select, a handle dragged by
 finger without page scroll, a one-row bar and 24px style targets; the painted
 shapes are checked by screenshot only and anchors are read through a test-only
-`window.__tjDrawings` map), the price basis (the chip, a
+`window.__tjDrawings` map), the context menu (right-click on the chart for the
+price there, copy, add level, one chart's reset, Layers hiding levels and
+Volume through a reload, an armed tool put away, arrow keys; on a level an
+inline label and color, Esc discarding a label, lock against a drag, unlock,
+duplicate, hide and show, delete and undo; on drawings color, lock, hide and
+the Drawings group, and a note's text; at 390px a long press opening bottom
+sheets with 44px rows while a swipe or tap opens nothing; the menu's look is
+checked by screenshot only), the price basis (the chip, a
 level drawn before a split moving with it, new levels recording their date, the
 missing-split banner, a history page on a different split set refused, and a
 possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year

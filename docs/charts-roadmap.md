@@ -32,8 +32,7 @@ from planned work.
 
 **Screen-space planning update (2026-10-02):** C7.3 and C7.4 were added from the
 user's TradingView screenshot and the current layout code. They run **after
-C1.2, C1.3 and C1.4**, before automatic overlays. C1.2 remains the next item;
-the user reports Claude is implementing it. This update plans future work only.
+C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work only.
 
 ## How to work from this file
 
@@ -79,8 +78,8 @@ the user reports Claude is implementing it. This update plans future work only.
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done ([PR #105](https://github.com/imizik/TradeJournal/pull/105)) |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | done ([PR #106](https://github.com/imizik/TradeJournal/pull/106)) |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done ([PR #111](https://github.com/imizik/TradeJournal/pull/111)) |
-| C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | next |
-| C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | todo |
+| C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
+| C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | next |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | todo |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | todo |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
@@ -445,10 +444,23 @@ own clicks because the library holds back a quick second click. The selection
 bar folds its style controls behind **Style** so it stays one row on a phone;
 C1.3's inline label and color editing can reuse it.
 
-**C1.3 Context menu.** Right-click, or long-press on touch, on empty chart: add
+**C1.3 Context menu (done in PR #112).** Right-click, or long-press on touch, on empty chart: add
 level here, copy price, reset scale, toggle layers. On a level or drawing: edit
 label and color inline, lock, hide, duplicate, delete, and (after C5.1) create
 alert. *Done when:* both menus work by mouse and by touch.
+As built ([Implemented behavior](charts-workspace.md#implemented-behavior)): the menu is
+`frontend/components/charts/ChartMenu.tsx`, a popup at the pointer for a mouse
+and a bottom sheet for a finger held still for 500 ms. Lock stops dragging
+only; a locked item still selects, restyles, hides and deletes. Hidden items
+and hidden groups are left out of the layer entirely, so they neither draw nor
+select. Levels gained optional `color`, `hidden` and `locked`, and drawings
+`hidden` and `locked`, each saved only when set; "toggle layers" is a
+`hiddenGroups` setting for My levels and Drawings plus the existing fills and
+study toggles. C1.4 builds its panel on these flags. Labels exist only where
+items already had text (a level's name, a note); rays, trend lines and zones
+take a color but no label. A tab on a pre-C1.3 build drops the per-item flags
+when it saves levels or drawings, because the server keeps only top-level
+fields a save leaves out.
 
 **C1.4 Layers panel.** A collapsible list grouped as My levels, Drawings, Auto
 levels, Options, Journal and Indicators. Each group and item can be hidden,

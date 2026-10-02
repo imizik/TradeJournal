@@ -320,7 +320,10 @@ is verifiable rather than hopeful.
   rule: every anchor is a time and a price, never a pixel or a bar index; a
   split after the drawing's `drawn_on` divides all its prices; and a drag saves
   every anchor on the current basis dated that day, while a color, width or
-  text change keeps the saved prices and date.
+  text change keeps the saved prices and date. The context menu (C1.3) changes
+  only a level's label or color, an item's `hidden` or `locked` flag, or adds
+  a duplicate that keeps the original's prices and `drawn_on`; none of them
+  moves a price.
 - The chart settings document belongs to the frontend, but a save never drops
   a top-level field it leaves out (`PUT /charts/settings` keeps the stored
   value). A tab still running an older build cannot erase a field a newer build

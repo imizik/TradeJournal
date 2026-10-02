@@ -2,19 +2,22 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Keyboard, LayoutGrid, Link2, Loader2, Magnet, Maximize2, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Keyboard, LayoutGrid, Link2, Loader2, Lock, Magnet, Maximize2, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, Trash2, Type, Undo2, X } from "lucide-react";
+import ChartMenu from "./ChartMenu";
+import type { HiddenItem, LayerToggle, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
 import HotkeySheet from "./HotkeySheet";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, todayNewYork, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, todayNewYork, validSymbol } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
-import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, MAX_DRAWINGS, MAX_LEVELS, MAX_UNDO, TOOL_NAMES } from "@/lib/drawings";
+import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLOR, MAX_DRAWINGS, MAX_LEVELS, MAX_UNDO, TOOL_NAMES } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
+import { summary } from "./SelectionBar";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
@@ -32,6 +35,29 @@ const NO_LEVELS: ShownLevel[] = [];
 const NO_DRAWINGS: Drawing[] = [];
 /** The selected level or drawing and the panel it was selected on, which carries its bar. */
 type Selection = { symbol: string; id: string; panel: string };
+/** An open chart menu (C1.3): where it was asked for, on which panel's symbol, and the item there (`id`) or the price. */
+type OpenMenu = { at: { x: number; y: number; touch: boolean }; panel: string; symbol: string; price: number | null; id: string | null; reset(): void };
+/** The chart menu's Layers: the user's own groups first, then fills and the studies. */
+const GROUP_NAMES: [keyof HiddenGroups, string][] = [["levels", "My levels"], ["drawings", "Drawings"]];
+/** Only the items a chart draws: none of a hidden group, and no item hidden on its own. */
+function visible<T extends { hidden?: boolean }>(rows: T[], groupHidden: boolean, none: T[]): T[] {
+  if (groupHidden) return none;
+  return rows.some((row) => row.hidden) ? rows.filter((row) => !row.hidden) : rows;
+}
+/** Copy text from a click: the clipboard API where the page is a secure context, otherwise the older copy command. */
+async function copyText(text: string): Promise<boolean> {
+  try { if (window.isSecureContext && navigator.clipboard) { await navigator.clipboard.writeText(text); return true; } } catch { /* fall back below */ }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(area);
+  area.select();
+  let copied = false;
+  try { copied = document.execCommand("copy"); } catch { copied = false; }
+  area.remove();
+  return copied;
+}
 /** "moving Breakout" or "adding trend line", with the symbol when it is not the one on screen: what Undo or Redo would do. */
 const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} ${editName(edit)}${edit.symbol === symbol ? "" : ` (${edit.symbol})`}`;
 /** The toolbar's drawing tools, in order (C1.2). */
@@ -96,6 +122,9 @@ export default function ChartWorkspace() {
   const [levelLabel, setLevelLabel] = useState("");
   const [levelError, setLevelError] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [menu, setMenu] = useState<OpenMenu | null>(null);
+  // A short message after a menu action ("Copied 256.12"), cleared after a moment.
+  const [notice, setNotice] = useState("");
   // Level and drawing edits made in this tab, for undo and redo (C1.1, C1.2).
   const [edits, setEdits] = useState<{ undo: DrawingEdit[]; redo: DrawingEdit[] }>({ undo: [], redo: [] });
   const [immersive, setImmersive] = useState(false);
@@ -192,9 +221,12 @@ export default function ChartWorkspace() {
     const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
     return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
   }, [splitsBySymbol, wanted, settings.drawings]);
-  // An item deleted here or on another device is no longer selected.
-  const picked = selection && ((shownLevels.get(selection.symbol) ?? NO_LEVELS).some((level) => level.id === selection.id)
-    || (shownDrawings.get(selection.symbol) ?? NO_DRAWINGS).some((drawing) => drawing.id === selection.id)) ? selection : null;
+  // What the charts draw: hidden items and hidden groups (C1.3) are left out, so they neither draw nor select.
+  const visibleLevels = useMemo(() => new Map([...shownLevels].map(([name, rows]) => [name, visible(rows, settings.hiddenGroups.levels, NO_LEVELS)])), [shownLevels, settings.hiddenGroups.levels]);
+  const visibleDrawings = useMemo(() => new Map([...shownDrawings].map(([name, rows]) => [name, visible(rows, settings.hiddenGroups.drawings, NO_DRAWINGS)])), [shownDrawings, settings.hiddenGroups.drawings]);
+  // An item deleted or hidden here or on another device is no longer selected.
+  const picked = selection && ((visibleLevels.get(selection.symbol) ?? NO_LEVELS).some((level) => level.id === selection.id)
+    || (visibleDrawings.get(selection.symbol) ?? NO_DRAWINGS).some((drawing) => drawing.id === selection.id)) ? selection : null;
 
   useEffect(() => {
     historyFlights.current.forEach((controller) => controller.abort());
@@ -312,6 +344,11 @@ export default function ChartWorkspace() {
     return () => window.removeEventListener("resize", measure);
   }, []);
   useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(""), 2500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+  useEffect(() => {
     if (!immersive) return;
     const prior = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -399,7 +436,7 @@ export default function ChartWorkspace() {
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
-    setTool(null); setSelection(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null);
+    setTool(null); setSelection(null); setMenu(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null);
   };
   // A panel holds its own symbol (null: follow the main one). Two held symbols at most.
   const choosePanelSymbol = (index: number, held: string | null) => {
@@ -463,6 +500,7 @@ export default function ChartWorkspace() {
     const drawing = cleanDrawing({ id: crypto.randomUUID(), kind, points, color: style.color, width: style.width, drawn_on: todayNewYork(), text: "Note" });
     if (!drawing) return;
     editItems({ symbol: target, layer: "drawings", before: null, after: drawing, index: existing.length });
+    showGroup("drawings"); // a new drawing is never placed out of sight
     setSelection({ symbol: target, id: drawing.id, panel });
     setFresh(kind === "note" ? drawing.id : null);
   };
@@ -480,6 +518,62 @@ export default function ChartWorkspace() {
     editItems({ symbol: target, layer: "drawings", before, after, index });
     if (patch.color || patch.width) setSettings((s) => ({ ...s, toolStyles: { ...s.toolStyles, [after.kind]: { color: after.color, width: after.width } } }));
   };
+  /**
+   * A level's label, color, hidden or locked flag (C1.3), as one undo step.
+   * The default blue is saved as no color, so an untouched level keeps its shape.
+   */
+  const editLevel = (target: string, id: string, patch: MenuPatch) => {
+    const rows = settings.levels[target] ?? [];
+    const index = rows.findIndex((row) => row.id === id);
+    if (index < 0) return;
+    const before = rows[index];
+    const next: Partial<PriceLevel> = { ...before, ...patch, label: patch.label ?? before.label };
+    if (patch.color === LEVEL_COLOR) delete next.color;
+    const after = cleanLevel(next);
+    if (!after || JSON.stringify(after) === JSON.stringify(cleanLevel(before))) return;
+    editItems({ symbol: target, layer: "levels", before, after, index });
+  };
+  /** A change from the chart menu or the selection bar's lock: a level's label, or a note's text. */
+  const editItem = (target: string, id: string, patch: MenuPatch) => {
+    if ((settings.levels[target] ?? []).some((row) => row.id === id)) editLevel(target, id, patch);
+    else { const { label, ...rest } = patch; editDrawing(target, id, label === undefined ? rest : { ...rest, text: label }); }
+    if (patch.hidden && selection?.id === id) setSelection(null);
+    if (patch.hidden === false) showGroup((settings.levels[target] ?? []).some((row) => row.id === id) ? "levels" : "drawings");
+  };
+  /** A copy in the same place, unlocked and shown, then selected, so a drag moves the copy. */
+  const duplicateItem = (target: string, id: string, panel: string) => {
+    const levels = settings.levels[target] ?? [];
+    const drawings = settings.drawings[target] ?? [];
+    const level = levels.findIndex((row) => row.id === id);
+    const drawing = drawings.findIndex((row) => row.id === id);
+    const copy = crypto.randomUUID();
+    if (level >= 0) {
+      if (levels.length >= MAX_LEVELS) { setNotice(`Remove a ${target} level before adding another (${MAX_LEVELS} per symbol).`); return; }
+      editItems({ symbol: target, layer: "levels", before: null, after: cleanLevel({ ...levels[level], id: copy, hidden: false, locked: false })!, index: level + 1 });
+    } else if (drawing >= 0) {
+      if (drawings.length >= MAX_DRAWINGS) { setNotice(`Remove a ${target} drawing before adding another (${MAX_DRAWINGS} per symbol).`); return; }
+      editItems({ symbol: target, layer: "drawings", before: null, after: cleanDrawing({ ...drawings[drawing], id: copy, hidden: false, locked: false })!, index: drawing + 1 });
+    } else return;
+    setSelection({ symbol: target, id: copy, panel }); setFresh(null);
+  };
+  const showGroup = (group: keyof HiddenGroups) => setSettings((s) => s.hiddenGroups[group] ? { ...s, hiddenGroups: { ...s.hiddenGroups, [group]: false } } : s);
+  const toggleGroup = (group: keyof HiddenGroups) => {
+    const hiding = !settings.hiddenGroups[group];
+    setSettings((s) => ({ ...s, hiddenGroups: { ...s.hiddenGroups, [group]: hiding } }));
+    const rows: { id: string }[] = (group === "levels" ? settings.levels : settings.drawings)[selection?.symbol ?? ""] ?? [];
+    if (hiding && rows.some((row) => row.id === selection?.id)) setSelection(null);
+  };
+  /** Right-click or long press on a panel: with a tool armed it only puts the tool away, as Esc does. */
+  const openMenu = (target: string, panel: string) => (request: MenuRequest) => {
+    if (tool) { setTool(null); return; }
+    setEntry(NO_ENTRY);
+    if (request.id) { setSelection({ symbol: target, id: request.id, panel }); setFresh(null); }
+    setMenu({ at: { x: request.clientX, y: request.clientY, touch: request.touch }, panel, symbol: target, price: request.price, id: request.id, reset: request.reset });
+  };
+  const copyPrice = async (value: number) => {
+    const text = value.toFixed(2);
+    setNotice(await copyText(text) ? `Copied ${text}` : `Could not copy. The price is ${text}.`);
+  };
   const select = (target: string, panel: string) => (id: string | null) => { setSelection(id ? { symbol: target, id, panel } : null); setFresh(null); };
   const chooseTool = (next: Tool) => { setTool((current) => current === next ? null : next); setSelection(null); setDrawError(""); };
   // A dragged level saves the price it was dropped at, dated today: that is the basis the chart shows.
@@ -488,13 +582,13 @@ export default function ChartWorkspace() {
     const index = rows.findIndex((row) => row.id === id);
     const shown = shownLevels.get(target)?.find((level) => level.id === id);
     if (index < 0 || !shown || !Number.isFinite(value) || value <= 0 || Math.abs(shown.price - value) < 0.005) return;
-    editItems({ symbol: target, layer: "levels", before: rows[index], after: { ...rows[index], price: value, drawn_on: todayNewYork() }, index });
+    editItems({ symbol: target, layer: "levels", before: rows[index], after: cleanLevel({ ...rows[index], price: value, drawn_on: todayNewYork() })!, index });
   };
   const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem });
-  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool });
+  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu });
   useEffect(() => {
     actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem };
-    keys.current = { palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool };
+    keys.current = { palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu };
   });
   // Hotkeys (lib/hotkeys.ts, listed by the ? sheet). They act on the main
   // chart's interval, the watchlist and every chart's view.
@@ -508,8 +602,9 @@ export default function ChartWorkspace() {
     const onFocus = (event: FocusEvent) => { keyboardFocus = pointer ? null : event.target; };
     const onKey = (event: KeyboardEvent) => {
       const state = keys.current;
-      // An app overlay over the charts (the Sync drawer, the phone menu) owns every key.
+      // An app overlay over the charts (the Sync drawer, the phone menu) owns every key, as does an open chart menu (it closes on Esc).
       if ([...document.querySelectorAll('[aria-modal="true"]')].some((dialog) => !root.current?.contains(dialog))) return;
+      if (state.menu) return;
       // One dialog at a time: with the layouts dialog or the shortcuts open, symbol search stays closed.
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
@@ -587,9 +682,10 @@ export default function ChartWorkspace() {
     const existing = settings.levels[target] ?? NO_LEVELS;
     if (!Number.isFinite(value) || value <= 0) { setLevelError("Enter a positive price."); return; }
     if (existing.length >= MAX_LEVELS) { setLevelError(`Remove a ${target} level before adding another (${MAX_LEVELS} per symbol).`); return; }
-    const level = { id: crypto.randomUUID(), price: value, drawn_on: todayNewYork(), label: levelLabel.trim().slice(0, 30) || `Level ${existing.length + 1}` };
+    const level = cleanLevel({ id: crypto.randomUUID(), price: value, label: levelLabel.trim().slice(0, 30) || `Level ${existing.length + 1}`, drawn_on: todayNewYork() })!;
     editItems({ symbol: target, layer: "levels", before: null, after: level, index: existing.length });
     setTool(null); setLevelPrice(""); setLevelLabel("");
+    showGroup("levels"); // a new level is never saved out of sight
   };
   const failed = requestFailed || !!current?.issues.length;
   // A newer extended-hours candle can outrank the quote. Streamed trades outrank
@@ -620,6 +716,27 @@ export default function ChartWorkspace() {
     const own = feedFor(name)?.adjustment;
     return (own?.warnings ?? []).map((note) => `${name}: ${note}`);
   }))];
+  // The open menu's item, as the charts show it (on the chart's basis); an item deleted or hidden meanwhile closes the menu.
+  const menuLevel = menu?.id ? visibleLevels.get(menu.symbol)?.find((level) => level.id === menu.id) : undefined;
+  const menuDrawing = menu?.id && !menuLevel ? visibleDrawings.get(menu.symbol)?.find((drawing) => drawing.id === menu.id) : undefined;
+  const menuItem: MenuItem | null = menuLevel ? { layer: "levels", level: menuLevel } : menuDrawing ? { layer: "drawings", drawing: menuDrawing } : null;
+  const layerToggles: LayerToggle[] = [
+    ...GROUP_NAMES.map(([group, label]) => ({ key: group, label, on: !settings.hiddenGroups[group], toggle: () => toggleGroup(group) })),
+    ...[...INDICATORS.slice(-1), ...INDICATORS.slice(0, -1)].map(([key, label]) => ({ key, label, on: settings.indicators[key],
+      toggle: () => setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !s.indicators[key] } })) })),
+  ];
+  // Items hidden one by one on a symbol, each with its own Show (one undo step each).
+  const hiddenItems = (name: string): HiddenItem[] => [
+    ...(shownLevels.get(name) ?? NO_LEVELS).filter((level) => level.hidden).map((level) => ({ id: level.id, name: `${level.label} ${price(level.price)}`, show: () => editItem(name, level.id, { hidden: false }) })),
+    ...(shownDrawings.get(name) ?? NO_DRAWINGS).filter((drawing) => drawing.hidden).map((drawing) => ({ id: drawing.id,
+      name: drawing.kind === "note" ? `Note: ${drawing.text}` : `${TOOL_NAMES[drawing.kind]} ${summary(drawing)}`, show: () => editItem(name, drawing.id, { hidden: false }) })),
+  ];
+  const menuGone = !!menu?.id && !menuItem;
+  useEffect(() => { if (menuGone) setMenu(null); }, [menuGone]);
+  const menuAddLevel = (target: string, value: number) => {
+    if ((settings.levels[target] ?? []).length >= MAX_LEVELS) { setNotice(`Remove a ${target} level before adding another (${MAX_LEVELS} per symbol).`); return; }
+    addLevel(value, target);
+  };
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
   // Immersive: the main chart fills the screen below the toolbar. On a tall,
@@ -705,20 +822,22 @@ export default function ChartWorkspace() {
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {response ? <>
-            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} drawings={shownDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight}
+            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight}
               tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
               selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
               onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
+              onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
               history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />)}
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} drawings={shownDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
                   selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}
                   onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
+                  onMenu={openMenu(slot.symbol, `Panel ${slot.index + 1}`)} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
                   onFocus={() => { setExpanded(null); setSettings((s) => focusPanel(s, slot.index)); }} />
               </div>; })}
             </div>}
@@ -750,8 +869,13 @@ export default function ChartWorkspace() {
           </section>
 
           {!immersive && <><section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
-            <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2><span className="text-[10px] text-slate-600">{levels.length}/30</span></div>
-            {levels.map((level) => <div key={level.id} className="mb-2 flex items-center gap-2 text-[11px]"><span className="h-px w-3 bg-blue-400" /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span><span className="font-mono text-blue-300" title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteItem(settings.symbol, level.id)} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
+            <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
+              {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className="inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800"><EyeOff size={11} />Hidden · Show</button>
+                : <span className="text-[10px] text-slate-600">{levels.length}/30</span>}</div>
+            {levels.map((level) => <div key={level.id} className={`mb-2 flex items-center gap-2 text-[11px] ${level.hidden ? "opacity-60" : ""}`}><span className="h-px w-3" style={{ background: level.color ?? "#60a5fa" }} /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span>
+              {level.locked && <Lock size={11} className="text-slate-500" aria-label="Locked" />}
+              {level.hidden && <button aria-label={`Show ${level.label}`} title="Hidden on the charts. Show it." onClick={() => editItem(settings.symbol, level.id, { hidden: false })} className="p-1 text-slate-500 hover:text-slate-200"><Eye size={12} /></button>}
+              <span className="font-mono text-blue-300" style={level.color ? { color: level.color } : undefined} title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteItem(settings.symbol, level.id)} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
             {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
             <form onSubmit={(e) => { e.preventDefault(); addLevel(Number(levelPrice)); }} className="space-y-2">
               <input aria-label="Level label" placeholder="Label (optional)" value={levelLabel} maxLength={30} onChange={(e) => setLevelLabel(e.target.value)} className="h-8 w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600" />
@@ -770,6 +894,11 @@ export default function ChartWorkspace() {
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
+      {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
+        layers={layerToggles} hidden={hiddenItems(menu.symbol)} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
+        onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
+        onDelete={() => { if (menu.id) deleteItem(menu.symbol, menu.id); }} onClose={() => setMenu(null)} />}
+      {notice && <div role="status" aria-label="Chart notice" className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[85] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-md border border-slate-600 bg-[#121924]/95 px-3 py-1.5 text-xs text-slate-200 shadow-xl">{notice}</div>}
       {entry.typed && <div role="status" aria-label="Interval entry" className="pointer-events-none fixed left-1/2 top-1/2 z-[75] min-w-56 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-600 bg-[#121924]/95 px-4 py-3 text-center shadow-2xl">
         <div className="font-mono text-2xl font-medium text-slate-100">{entry.typed}<span className="text-base text-slate-500">m</span></div>
         <p className={`mt-1 text-[11px] ${entry.invalid ? "text-amber-300" : "text-slate-400"}`}>{entry.invalid ? `No ${entry.typed}m interval. Type 1, 3, 5, 15 or 30.` : "Enter to apply · Esc to cancel"}</p>

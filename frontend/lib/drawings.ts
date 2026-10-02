@@ -10,6 +10,8 @@ import type { ChartBar, PriceLevel } from "./charts";
  *
  * Edits are item-level (`DrawingEdit`), so undo and redo replay onto whatever
  * the workspace holds now, including items another device saved since.
+ * Hiding and locking (C1.3) are edits too: a hidden item is not given to the
+ * layer at all, and a locked one draws and selects but never drags.
  */
 
 /** Pointer distance, in CSS pixels, that still counts as on a line. A finger gets a 28px band. */
@@ -24,6 +26,8 @@ export const NOTE_MAX = 120;
 export const MAX_UNDO = 100;
 
 const LINE = "#659ef0";
+/** What a level without a color of its own draws in. */
+export const LEVEL_COLOR = LINE;
 const SELECTED = "#9cc2ff";
 const BACKGROUND = "#10151e";
 const FONT = "ui-sans-serif, system-ui, sans-serif";
@@ -39,12 +43,13 @@ export type ToolStyle = { color: string; width: LineWidth };
  * A saved drawing. Prices are on the chart's basis on `drawn_on`, like a
  * level's, so a later split moves every anchor by the same ratio. A ray and a
  * note have one anchor; a trend line and a zone (two opposite corners) have two.
+ * `hidden` and `locked` are present only when set.
  */
 export type Drawing = {
   id: string; kind: DrawingKind; points: Anchor[]; color: string; width: LineWidth; drawn_on: string;
-  text?: string; extendLeft?: boolean; extendRight?: boolean;
+  text?: string; extendLeft?: boolean; extendRight?: boolean; hidden?: boolean; locked?: boolean;
 };
-export type DrawingPatch = Partial<Pick<Drawing, "points" | "color" | "width" | "text" | "extendLeft" | "extendRight">>;
+export type DrawingPatch = Partial<Pick<Drawing, "points" | "color" | "width" | "text" | "extendLeft" | "extendRight" | "hidden" | "locked">>;
 
 export const DRAWING_KINDS: DrawingKind[] = ["ray", "trend", "zone", "note"];
 export const TOOL_NAMES: Record<Tool, string> = { level: "Price level", ray: "Horizontal ray", trend: "Trend line", zone: "Rectangle zone", note: "Text note" };
@@ -74,6 +79,8 @@ export function cleanDrawing(row: unknown): Drawing | null {
     width: width(value.width), drawn_on: value.drawn_on,
     ...(kind === "note" ? { text: typeof value.text === "string" && value.text.trim() ? value.text.slice(0, NOTE_MAX) : "Note" } : {}),
     ...(kind === "trend" ? { extendLeft: value.extendLeft === true, extendRight: value.extendRight === true } : {}),
+    ...(value.hidden === true ? { hidden: true } : {}),
+    ...(value.locked === true ? { locked: true } : {}),
   };
 }
 
@@ -130,7 +137,10 @@ export const editName = (edit: DrawingEdit) => edit.layer === "levels" ? (edit.a
 export function editVerb(edit: DrawingEdit) {
   if (!edit.before) return "adding";
   if (!edit.after) return "deleting";
-  if (edit.layer === "levels") return "moving";
+  const [before, after] = [edit.before, edit.after];
+  if (!!before.hidden !== !!after.hidden) return after.hidden ? "hiding" : "showing";
+  if (!!before.locked !== !!after.locked) return after.locked ? "locking" : "unlocking";
+  if (edit.layer === "levels") return edit.before.price === edit.after.price ? "changing" : "moving";
   return JSON.stringify(edit.before.points) === JSON.stringify(edit.after.points) ? "changing" : "moving";
 }
 
@@ -186,10 +196,12 @@ export function moveHandle(points: Anchor[], kind: DrawingKind, handle: number, 
   return next;
 }
 
-/** What the layer draws: a level (one price, no time) or a drawing, on the chart's current basis. */
-export type Shown = { id: string; kind: Tool; points: Anchor[]; label: string; color: string; width: number; extendLeft?: boolean; extendRight?: boolean };
-export const levelShape = (level: { id: string; price: number; label: string }): Shown => ({ id: level.id, kind: "level", points: [{ time: 0, price: level.price }], label: level.label, color: LINE, width: 1 });
-export const drawingShape = (drawing: Drawing): Shown => ({ id: drawing.id, kind: drawing.kind, points: drawing.points, label: drawing.text ?? "", color: drawing.color, width: drawing.width, extendLeft: drawing.extendLeft, extendRight: drawing.extendRight });
+/** What the layer draws: a level (one price, no time) or a drawing, on the chart's current basis. A locked item has no handles and never drags. */
+export type Shown = { id: string; kind: Tool; points: Anchor[]; label: string; color: string; width: number; extendLeft?: boolean; extendRight?: boolean; locked?: boolean };
+export const levelShape = (level: { id: string; price: number; label: string; color?: string; locked?: boolean }): Shown => ({ id: level.id, kind: "level", points: [{ time: 0, price: level.price }], label: level.label, color: level.color ?? LINE, width: 1, locked: level.locked });
+export const drawingShape = (drawing: Drawing): Shown => ({ id: drawing.id, kind: drawing.kind, points: drawing.points, label: drawing.text ?? "", color: drawing.color, width: drawing.width, extendLeft: drawing.extendLeft, extendRight: drawing.extendRight, locked: drawing.locked });
+/** A level in the default blue lightens when selected; one with its own color keeps it and thickens. */
+const levelColor = (item: Shown, selected: boolean) => item.color === LINE && selected ? SELECTED : item.color;
 /** Zones under everything, notes on top; ties in a hit go to what is drawn on top. */
 const LAYER: Record<Tool, number> = { zone: 0, level: 1, ray: 2, trend: 3, note: 4 };
 
@@ -326,7 +338,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
    */
   hit(x: number, y: number, slop: number, only?: string | null): Hit | null {
     const p = { x, y };
-    const selected = this.placed.find((entry) => entry.item.id === this.selected && (only === undefined || entry.item.id === only));
+    const selected = this.placed.find((entry) => entry.item.id === this.selected && !entry.item.locked && (only === undefined || entry.item.id === only));
     if (selected) {
       const handles = this.handlePoints(selected);
       const index = handles.findIndex((handle) => handle && Math.hypot(handle.x - x, handle.y - y) <= slop + 3);
@@ -377,8 +389,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     if (!this.interactive) return null;
     const hit = this.hit(x, y, MOUSE_SLOP);
     if (!hit) return null;
-    const kind = this.item(hit.id)?.kind;
-    return { externalId: hit.id, zOrder: "top", cursorStyle: hit.handle !== null ? "pointer" : kind === "level" ? "ns-resize" : "move", hitTestPriority: 1 };
+    const item = this.item(hit.id);
+    return { externalId: hit.id, zOrder: "top", cursorStyle: item?.locked ? "default" : hit.handle !== null ? "pointer" : item?.kind === "level" ? "ns-resize" : "move", hitTestPriority: 1 };
   }
 
   private update() {
@@ -418,11 +430,11 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   private axisView(id: string, index: number): ISeriesPrimitiveAxisView {
     const placed = () => this.placed.find((entry) => entry.item.id === id);
-    const color = () => { const item = placed()?.item; return !item ? LINE : item.kind === "level" ? (id === this.selected ? SELECTED : LINE) : item.color; };
+    const color = () => { const item = placed()?.item; return !item ? LINE : item.kind === "level" ? levelColor(item, id === this.selected) : item.color; };
     return {
       coordinate: () => placed()?.at[index]?.y ?? -100,
       text: () => { const entry = placed(); return entry && this.series ? this.series.priceFormatter().format(entry.item.points[index].price) : ""; },
-      textColor: () => placed()?.item.kind === "level" && id !== this.selected ? "#ffffff" : BACKGROUND,
+      textColor: () => { const item = placed()?.item; return item?.kind === "level" && item.color === LINE && id !== this.selected ? "#ffffff" : BACKGROUND; },
       backColor: color,
       visible: () => placed()?.at[index] != null,
     };
@@ -449,7 +461,8 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
           if (a.y < -2 || a.y * v > bitmapSize.height + 2 * v) continue;
           const lineWidth = Math.max(1, Math.floor((selected ? 2 : 1) * v));
           const row = Math.round(a.y * v) + (lineWidth % 2 ? 0.5 : 0);
-          context.strokeStyle = selected ? SELECTED : LINE;
+          const color = levelColor(item, selected);
+          context.strokeStyle = color;
           context.lineWidth = lineWidth;
           context.setLineDash(selected ? [] : [Math.round(4 * h), Math.round(3 * h)]);
           context.beginPath();
@@ -459,13 +472,13 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
           context.setLineDash([]);
           if (this.labels && item.label) {
             context.font = `${Math.round(10 * v)}px ${FONT}`;
-            context.fillStyle = selected ? SELECTED : LINE;
+            context.fillStyle = color;
             context.textAlign = "right";
             context.textBaseline = "bottom";
             context.fillText(item.label, bitmapSize.width - Math.round(6 * h), row - Math.round(3 * v));
           }
-          // The handle: where the level reads as grabbable. The whole line drags.
-          if (selected) handle({ x: bitmapSize.width / h / 2, y: a.y }, SELECTED);
+          // The handle: where the level reads as grabbable. The whole line drags; a locked one does not.
+          if (selected && !item.locked) handle({ x: bitmapSize.width / h / 2, y: a.y }, color);
           continue;
         }
         context.strokeStyle = item.color;
@@ -500,7 +513,7 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
           context.textBaseline = "middle";
           context.fillText(item.label, Math.round((box.left + 6) * h), Math.round(a.y * v));
         }
-        if (selected) for (const point of this.handlePoints(entry)) if (point) handle(point, item.color);
+        if (selected && !item.locked) for (const point of this.handlePoints(entry)) if (point) handle(point, item.color);
       }
     });
   }
