@@ -425,6 +425,39 @@ attach to an actual containing candle. They never snap a missing/out-of-session
 execution onto an earlier candle. Historical source timestamp uncertainty still
 applies; rendering a marker does not revalidate the original execution time.
 
+### Option chains (C4.1)
+
+`backend/app/engine/options_chain.py` is the Tradier option chain adapter.
+Nothing on the chart uses it yet; the recorder (C4.3) is its first caller. It
+turns `/v1/markets/options/expirations` (every root included, so SPXW dates
+appear) and `/v1/markets/options/chains` (one request per expiration, with
+greeks) into the provider-independent `OptionChain` and `OptionContract` of
+`backend/app/engine/options_models.py`, a pure module. Nothing outside the
+Tradier adapters names a Tradier option field.
+
+- **Roots stay apart.** One SPX date can list SPX (AM-settled) and SPXW
+  (PM-settled) contracts at the same strikes: 1,060 and 938 on 2026-10-16. Every
+  contract keeps its root, and nothing that aggregates may merge them.
+- **Observed values only.** Bid/ask/sizes, last, volume, open interest, IV and
+  greeks are the provider's. Tradier's "never traded" trade time of 0 and its
+  uncomputed IV of 0 become unavailable; real zeros (no open interest, no
+  volume, a zero bid) stay zero. A missing contract size stays unknown rather
+  than assumed to be 100.
+- **As-of times.** Bid, ask and trade times are provider event times in UTC.
+  The greeks' `updated_at` is kept verbatim because Tradier does not document
+  its time zone (recorded values, `2026-10-01 20:00:06` after a 16:00 New York
+  close, read as UTC). Open interest is OCC's overnight figure. `fetched_at` is
+  this process's capture time, not a provider as-of.
+- **Whole chains or nothing.** A row whose strike, side, expiration or root
+  disagrees with its OCC symbol or the request, or a contract listed twice,
+  makes the chain `malformed`: a chain missing strikes would misstate
+  positioning. A date with nothing listed is an empty chain.
+- **Budget.** Option reads share 30 requests per rolling minute in one API
+  process, separate from the chart feed's 60. Each request takes a slot whether
+  or not it succeeds, nothing is retried, and a 429 or an access refusal pauses
+  option reads for a minute. A background caller passes `wait=True` to sleep
+  for a slot; any other caller is refused at once with `rate_limited`.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
@@ -504,6 +537,15 @@ another device's rename, addition and same-named layout), keep both layouts when
 two devices each save a twelfth, drop each kind of malformed saved layout whole,
 keep Cmd/Ctrl+K from opening symbol search behind the dialog, and open the 390px
 bottom sheet by touch, in full screen too.
+
+`backend/tests/test_options_chain.py` parses recorded production SPY and SPX
+expiration and chain responses (2026-10-01, rows verbatim), including SPX and
+SPXW at one strike, placeholders, contract sizes, malformed rows and shapes,
+the 30-per-minute budget, the pause after a 429 and coded failures, and checks
+that no module outside the Tradier adapters names a Tradier option field.
+`backend/scripts/check_options_chain.py` reads live chains (read-only, two
+requests per symbol); on 2026-10-01 after the close it listed 342 SPY, 602 SPXW
+and 160 NVDA contracts for 2026-10-02.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine
