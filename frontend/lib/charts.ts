@@ -1,4 +1,6 @@
 import { apiUrl } from "@/lib/api";
+import { cleanDrawings, cleanToolStyles, DEFAULT_TOOL_STYLES } from "./drawings";
+import type { Drawing, DrawingKind, ToolStyle } from "./drawings";
 
 export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as const;
 export type Interval = typeof INTERVALS[number];
@@ -98,6 +100,12 @@ export type ChartSettings = {
   /** Per panel, aligned with `intervals`: a symbol the panel holds, or null to follow `symbol`. The main panel always follows. */
   panelSymbols: (string | null)[];
   layout: "multi" | "single"; indicators: Indicators; levels: Record<string, PriceLevel[]>;
+  /** Rays, trend lines, zones and notes per symbol (C1.2). */
+  drawings: Record<string, Drawing[]>;
+  /** The style each drawing tool last used, so the next one starts there. */
+  toolStyles: Record<DrawingKind, ToolStyle>;
+  /** Snap placed and dragged anchors to the nearest open, high, low or close. */
+  magnet: boolean;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize; immersiveWatchlist: boolean;
   layouts: SavedLayout[];
 };
@@ -106,7 +114,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -148,6 +156,9 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       layout: value.layout === "single" ? "single" : "multi",
       indicators: Object.fromEntries(Object.entries(DEFAULT_SETTINGS.indicators).map(([key, fallback]) => [key, typeof value.indicators?.[key] === "boolean" ? value.indicators[key] : fallback])) as Indicators,
       levels,
+      drawings: cleanDrawings(value.drawings, validSymbol),
+      toolStyles: cleanToolStyles(value.toolStyles),
+      magnet: value.magnet === true,
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",

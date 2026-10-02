@@ -186,7 +186,16 @@ binding list, and the 390px touch equivalents), the drawing layer (a level
 dragged by mouse on the 5m chart read back on the 1h chart, Esc cancel,
 Delete, undo/redo by key and button, reload, undo beside another device's
 level, and tap-to-select then touch drag at 390px without page scroll; the
-painted line and handle are checked by screenshot only), the price basis (the chip, a
+painted line and handle are checked by screenshot only), the drawing tools (a
+trend line placed by two clicks, dragged by a handle and by its body in whole
+bars, extended, recolored and widened, deleted and undone, and drawn inside the
+right hour on the 1h chart; a ray, a zone resized by a corner and a note's
+text; the magnet against the fixture's known OHLC by toggle, by a dragged
+handle and while Cmd/Ctrl is held; a pre-split drawing moving with the
+candles; and at 390px two taps to place, tap to select, a handle dragged by
+finger without page scroll, a one-row bar and 24px style targets; the painted
+shapes are checked by screenshot only and anchors are read through a test-only
+`window.__tjDrawings` map), the price basis (the chip, a
 level drawn before a split moving with it, new levels recording their date, the
 missing-split banner, a history page on a different split set refused, and a
 possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year
@@ -195,7 +204,7 @@ stable zoom and the start-of-history label, 1D to 1W to 5m switching, and a
 390px touch pan). Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
-read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
+read through test-only `window.__tjCharts`, `window.__tjRenders` and `window.__tjDrawings` maps the
 spec installs; production never defines them. `backend/tests/test_charts.py`,
 `backend/tests/test_chart_history.py`, `backend/tests/test_chart_calendar.py`,
 `backend/tests/test_chart_splits.py` (the split basis: matching minute, daily and

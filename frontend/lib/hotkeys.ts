@@ -23,7 +23,7 @@ export type Hotkey =
   | { kind: "reset" }
   | { kind: "realtime" }
   | { kind: "help" }
-  /** Drawings (C1.1): the workspace ignores these when nothing is selected or there is nothing to undo. */
+  /** Levels and drawings (C1.1): the workspace ignores these when nothing is selected or there is nothing to undo. */
   | { kind: "delete" }
   | { kind: "undo" }
   | { kind: "redo" };
@@ -66,7 +66,7 @@ export function stepWatchlist(watchlist: string[], symbol: string, by: 1 | -1): 
 }
 
 /** The cheat sheet: words in `keys` are drawn as keys, except the joiners. */
-export const HOTKEY_JOINERS = new Set(["then", "or", "+"]);
+export const HOTKEY_JOINERS = new Set(["then", "or", "+", "Hold"]);
 export const HOTKEY_HELP: { group: string; rows: { keys: string; does: string }[] }[] = [
   { group: "Main chart interval", rows: [
     { keys: "1 3 5 15 30 then Enter", does: "Minutes; nothing changes until Enter" },
@@ -83,11 +83,12 @@ export const HOTKEY_HELP: { group: string; rows: { keys: string; does: string }[
     { keys: "Alt + ↓ or Alt + ↑", does: "Next or previous symbol in the watchlist" },
     { keys: "⌘ + K or Ctrl + K", does: "Search symbols" },
   ] },
-  { group: "Levels", rows: [
-    { keys: "Delete or Backspace", does: "Delete the selected level" },
-    { keys: "⌘ + Z or Ctrl + Z", does: "Undo adding, moving or deleting a level" },
+  { group: "Levels and drawings", rows: [
+    { keys: "Delete or Backspace", does: "Delete the selected level or drawing" },
+    { keys: "⌘ + Z or Ctrl + Z", does: "Undo adding, moving, changing or deleting a level or drawing" },
     { keys: "⌘ + Shift + Z or Ctrl + Shift + Z", does: "Redo" },
-    { keys: "Esc", does: "Deselect the level (while dragging: put it back)" },
+    { keys: "Esc", does: "Put away the drawing tool, or deselect (while dragging: put it back)" },
+    { keys: "Hold ⌘ or Ctrl", does: "Magnet while placing or dragging: snap to open, high, low or close" },
   ] },
   { group: "View", rows: [
     { keys: "Alt + R", does: "Reset every chart: latest candles, automatic price scale" },

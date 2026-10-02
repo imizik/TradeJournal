@@ -457,6 +457,22 @@ def test_chart_settings_save_reports_the_revision_it_wrote_not_a_later_one(route
     assert route_client.get("/charts/settings").json()["revision"] == 3  # the later save is still there to conflict with
 
 
+def test_chart_settings_save_keeps_top_level_fields_it_leaves_out(route_client):
+    # A newer build saves drawings; a tab still on an older build knows nothing about them.
+    trend = {"id": "t", "kind": "trend", "points": [{"time": 1789392750, "price": 250.5}, {"time": 1789410750, "price": 252}],
+             "color": "#67d5eb", "width": 2, "drawn_on": "2026-10-02", "extendLeft": False, "extendRight": True}
+    newer = {"watchlist": ["SPY"], "levels": {}, "drawings": {"SPY": [trend]}, "magnet": True}
+    assert route_client.put("/charts/settings", json={"base_revision": 0, "data": newer}).status_code == 200
+    older = route_client.put("/charts/settings", json={"base_revision": 1, "data": {"watchlist": ["SPY", "QQQ"], "levels": {}}})
+    assert older.status_code == 200 and older.json()["data"]["drawings"] == {"SPY": [trend]}
+    assert route_client.get("/charts/settings").json()["data"] == {**newer, "watchlist": ["SPY", "QQQ"]}
+    # Saving a field empty clears it; a refused save lends nothing.
+    assert route_client.put("/charts/settings", json={"base_revision": 2, "data": {"drawings": {}}}).json()["data"]["drawings"] == {}
+    assert route_client.put("/charts/settings", json={"base_revision": 2, "data": {"magnet": False}}).status_code == 409
+    saved = route_client.get("/charts/settings").json()
+    assert saved["revision"] == 3 and saved["data"] == {**newer, "watchlist": ["SPY", "QQQ"], "drawings": {}}
+
+
 @pytest.mark.parametrize("body", [{"base_revision": -1, "data": {}}, {"base_revision": 0, "data": []}, {"base_revision": 0}, {"data": {}}])
 def test_chart_settings_reject_malformed_saves(route_client, body):
     assert route_client.put("/charts/settings", json=body).status_code == 422

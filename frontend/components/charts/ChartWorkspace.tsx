@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Keyboard, LayoutGrid, Link2, Loader2, Maximize2, Pause, Play, Plus, Redo2, RefreshCw, Search, Trash2, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Keyboard, LayoutGrid, Link2, Loader2, Magnet, Maximize2, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, Trash2, Type, Undo2, X } from "lucide-react";
 import HotkeySheet from "./HotkeySheet";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
@@ -11,8 +11,8 @@ import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createChartCo
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
-import { applyLevelEdit, MAX_LEVELS, MAX_UNDO } from "@/lib/drawings";
-import type { LevelEdit } from "@/lib/drawings";
+import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, MAX_DRAWINGS, MAX_LEVELS, MAX_UNDO, TOOL_NAMES } from "@/lib/drawings";
+import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
 
@@ -29,10 +29,13 @@ const frameKey = (frame: Frame) => `${frame.symbol}|${frame.interval}`;
 /** A saved level on the adjusted basis; `was` is its saved price when a split moved it. */
 type ShownLevel = PriceLevel & { was: number | null };
 const NO_LEVELS: ShownLevel[] = [];
-/** The selected level and the panel it was selected on, which carries its Delete bar. */
+const NO_DRAWINGS: Drawing[] = [];
+/** The selected level or drawing and the panel it was selected on, which carries its bar. */
 type Selection = { symbol: string; id: string; panel: string };
-/** "moving Breakout", with the symbol when it is not the one on screen: what Undo or Redo would do. */
-const describeEdit = (edit: LevelEdit, symbol: string) => `${!edit.before ? "adding" : !edit.after ? "deleting" : "moving"} ${(edit.after ?? edit.before)!.label}${edit.symbol === symbol ? "" : ` (${edit.symbol})`}`;
+/** "moving Breakout" or "adding trend line", with the symbol when it is not the one on screen: what Undo or Redo would do. */
+const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} ${editName(edit)}${edit.symbol === symbol ? "" : ` (${edit.symbol})`}`;
+/** The toolbar's drawing tools, in order (C1.2). */
+const TOOLS: [Tool, typeof Crosshair][] = [["level", Crosshair], ["ray", MoveRight], ["trend", Slash], ["zone", RectangleHorizontal], ["note", Type]];
 /** Digits typed for the main chart's interval, waiting for Enter (C0.5). */
 type Entry = { typed: string; invalid: boolean };
 const NO_ENTRY: Entry = { typed: "", invalid: false };
@@ -84,13 +87,17 @@ export default function ChartWorkspace() {
   const [paused, setPaused] = useState(false);
   const [symbolInput, setSymbolInput] = useState("");
   const [symbolError, setSymbolError] = useState("");
-  const [drawing, setDrawing] = useState(false);
+  // The tool the main chart's next click places with; null when not drawing.
+  const [tool, setTool] = useState<Tool | null>(null);
+  // A note just placed, whose text field opens ready to type.
+  const [fresh, setFresh] = useState<string | null>(null);
+  const [drawError, setDrawError] = useState("");
   const [levelPrice, setLevelPrice] = useState("");
   const [levelLabel, setLevelLabel] = useState("");
   const [levelError, setLevelError] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
-  // Level edits made in this tab, for undo and redo (C1.1).
-  const [edits, setEdits] = useState<{ undo: LevelEdit[]; redo: LevelEdit[] }>({ undo: [], redo: [] });
+  // Level and drawing edits made in this tab, for undo and redo (C1.1, C1.2).
+  const [edits, setEdits] = useState<{ undo: DrawingEdit[]; redo: DrawingEdit[] }>({ undo: [], redo: [] });
   const [immersive, setImmersive] = useState(false);
   // The panel the symbol search chooses for: 0 is the main symbol.
   const [palette, setPalette] = useState<number | null>(null);
@@ -180,8 +187,14 @@ export default function ChartWorkspace() {
     })]));
   }, [splitsBySymbol, wanted, settings.levels]);
   const levels = shownLevels.get(symbol) ?? NO_LEVELS;
-  // A level deleted here or on another device is no longer selected.
-  const picked = selection && (shownLevels.get(selection.symbol) ?? NO_LEVELS).some((level) => level.id === selection.id) ? selection : null;
+  // Drawings on the same basis: every anchor moves with a split after the drawing's date.
+  const shownDrawings = useMemo(() => {
+    const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
+    return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
+  }, [splitsBySymbol, wanted, settings.drawings]);
+  // An item deleted here or on another device is no longer selected.
+  const picked = selection && ((shownLevels.get(selection.symbol) ?? NO_LEVELS).some((level) => level.id === selection.id)
+    || (shownDrawings.get(selection.symbol) ?? NO_DRAWINGS).some((drawing) => drawing.id === selection.id)) ? selection : null;
 
   useEffect(() => {
     historyFlights.current.forEach((controller) => controller.abort());
@@ -386,7 +399,7 @@ export default function ChartWorkspace() {
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
-    setDrawing(false); setSelection(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null);
+    setTool(null); setSelection(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null);
   };
   // A panel holds its own symbol (null: follow the main one). Two held symbols at most.
   const choosePanelSymbol = (index: number, held: string | null) => {
@@ -412,41 +425,76 @@ export default function ChartWorkspace() {
   const renameLayout = (id: string, name: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, name } : layout) }));
   const updateLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, ...arrangementOf(s) } : layout) }));
   const deleteLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.filter((layout) => layout.id !== id) }));
-  // Every change to a level goes through here, so it can be undone.
-  const editLevels = (edit: LevelEdit) => {
-    setSettings((s) => { const next = applyLevelEdit(s.levels, edit, "after"); return next ? { ...s, levels: next } : s; });
+  // Every change to a level or drawing goes through here, so it can be undone.
+  const editItems = (edit: DrawingEdit) => {
+    setSettings((s) => applyEdit(s, edit, "after") ?? s);
     setEdits((h) => ({ undo: [...h.undo, edit].slice(-MAX_UNDO), redo: [] }));
-    setLevelError("");
+    setLevelError(""); setDrawError("");
   };
-  /** Undo (`before`) or redo (`after`) the latest edit, onto whatever the levels are now. */
+  /** Undo (`before`) or redo (`after`) the latest edit, onto whatever the levels and drawings are now. */
   const replay = (side: "before" | "after") => {
     const edit = (side === "before" ? edits.undo : edits.redo).at(-1);
     if (!edit) return;
-    if (!applyLevelEdit(settings.levels, edit, side)) { setLevelError(`Remove a ${edit.symbol} level first: ${MAX_LEVELS} per symbol.`); return; }
-    setSettings((s) => { const next = applyLevelEdit(s.levels, edit, side); return next ? { ...s, levels: next } : s; });
+    if (!applyEdit(settings, edit, side)) {
+      if (edit.layer === "levels") setLevelError(`Remove a ${edit.symbol} level first: ${MAX_LEVELS} per symbol.`);
+      else setDrawError(`Remove a ${edit.symbol} drawing first: ${MAX_DRAWINGS} per symbol.`);
+      return;
+    }
+    setSettings((s) => applyEdit(s, edit, side) ?? s);
     setEdits((h) => side === "before" ? { undo: h.undo.slice(0, -1), redo: [...h.redo, edit] } : { undo: [...h.undo, edit], redo: h.redo.slice(0, -1) });
-    setLevelError("");
+    setLevelError(""); setDrawError("");
   };
-  const deleteLevel = (target: string, id: string) => {
-    const rows = settings.levels[target] ?? [];
-    const index = rows.findIndex((row) => row.id === id);
-    if (index < 0) return;
-    editLevels({ symbol: target, before: rows[index], after: null, index });
+  const deleteItem = (target: string, id: string) => {
+    const levels = settings.levels[target] ?? [];
+    const drawings = settings.drawings[target] ?? [];
+    const level = levels.findIndex((row) => row.id === id);
+    const drawing = drawings.findIndex((row) => row.id === id);
+    if (level >= 0) editItems({ symbol: target, layer: "levels", before: levels[level], after: null, index: level });
+    else if (drawing >= 0) editItems({ symbol: target, layer: "drawings", before: drawings[drawing], after: null, index: drawing });
+    else return;
     if (selection?.id === id) setSelection(null);
   };
+  /** A drawing placed on a chart: the tool's last style, dated today (its anchors are on today's basis), then selected. */
+  const placeDrawing = (target: string, kind: DrawingKind, points: Anchor[], panel: string) => {
+    const existing = settings.drawings[target] ?? NO_DRAWINGS;
+    setTool(null);
+    if (existing.length >= MAX_DRAWINGS) { setDrawError(`Remove a ${target} drawing before adding another (${MAX_DRAWINGS} per symbol).`); return; }
+    const style = settings.toolStyles[kind];
+    const drawing = cleanDrawing({ id: crypto.randomUUID(), kind, points, color: style.color, width: style.width, drawn_on: todayNewYork(), text: "Note" });
+    if (!drawing) return;
+    editItems({ symbol: target, layer: "drawings", before: null, after: drawing, index: existing.length });
+    setSelection({ symbol: target, id: drawing.id, panel });
+    setFresh(kind === "note" ? drawing.id : null);
+  };
+  /**
+   * A drawing dragged (new points, on the chart's basis, so dated today) or
+   * restyled. A new color or width is what that tool draws with next.
+   */
+  const editDrawing = (target: string, id: string, patch: DrawingPatch) => {
+    const rows = settings.drawings[target] ?? [];
+    const index = rows.findIndex((row) => row.id === id);
+    if (index < 0) return;
+    const before = rows[index];
+    const after = cleanDrawing({ ...before, ...patch, ...(patch.points ? { drawn_on: todayNewYork() } : {}) });
+    if (!after || JSON.stringify(after) === JSON.stringify(before)) return;
+    editItems({ symbol: target, layer: "drawings", before, after, index });
+    if (patch.color || patch.width) setSettings((s) => ({ ...s, toolStyles: { ...s.toolStyles, [after.kind]: { color: after.color, width: after.width } } }));
+  };
+  const select = (target: string, panel: string) => (id: string | null) => { setSelection(id ? { symbol: target, id, panel } : null); setFresh(null); };
+  const chooseTool = (next: Tool) => { setTool((current) => current === next ? null : next); setSelection(null); setDrawError(""); };
   // A dragged level saves the price it was dropped at, dated today: that is the basis the chart shows.
   const moveLevel = (target: string, id: string, value: number) => {
     const rows = settings.levels[target] ?? [];
     const index = rows.findIndex((row) => row.id === id);
     const shown = shownLevels.get(target)?.find((level) => level.id === id);
     if (index < 0 || !shown || !Number.isFinite(value) || value <= 0 || Math.abs(shown.price - value) < 0.005) return;
-    editLevels({ symbol: target, before: rows[index], after: { ...rows[index], price: value, drawn_on: todayNewYork() }, index });
+    editItems({ symbol: target, layer: "levels", before: rows[index], after: { ...rows[index], price: value, drawn_on: todayNewYork() }, index });
   };
-  const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteLevel });
-  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked });
+  const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem });
+  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool });
   useEffect(() => {
-    actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteLevel };
-    keys.current = { palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked };
+    actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem };
+    keys.current = { palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool };
   });
   // Hotkeys (lib/hotkeys.ts, listed by the ? sheet). They act on the main
   // chart's interval, the watchlist and every chart's view.
@@ -479,7 +527,8 @@ export default function ChartWorkspace() {
       const typing = !!target?.closest("input, textarea, select, [contenteditable=true]");
       const hotkey = typing ? null : readHotkey(event, state.typed);
       if (!hotkey) {
-        if (event.key === "Escape" && state.selected) setSelection(null);
+        if (event.key === "Escape" && state.tool) setTool(null);
+        else if (event.key === "Escape" && state.selected) setSelection(null);
         else if (event.key === "Escape" && state.immersive) setImmersive(false);
         return;
       }
@@ -500,7 +549,7 @@ export default function ChartWorkspace() {
       else if (hotkey.kind === "reset" || hotkey.kind === "realtime") commands.emit(hotkey.kind);
       else if (hotkey.kind === "help") setHelp(true);
       else if (hotkey.kind === "undo" || hotkey.kind === "redo") actions.current.replay(hotkey.kind === "undo" ? "before" : "after");
-      else if (hotkey.kind === "delete" && state.selected) actions.current.deleteLevel(state.selected.symbol, state.selected.id);
+      else if (hotkey.kind === "delete" && state.selected) actions.current.deleteItem(state.selected.symbol, state.selected.id);
     };
     window.addEventListener("pointerdown", onPointer, true);
     window.addEventListener("keydown", onKeyboard, true);
@@ -539,8 +588,8 @@ export default function ChartWorkspace() {
     if (!Number.isFinite(value) || value <= 0) { setLevelError("Enter a positive price."); return; }
     if (existing.length >= MAX_LEVELS) { setLevelError(`Remove a ${target} level before adding another (${MAX_LEVELS} per symbol).`); return; }
     const level = { id: crypto.randomUUID(), price: value, drawn_on: todayNewYork(), label: levelLabel.trim().slice(0, 30) || `Level ${existing.length + 1}` };
-    editLevels({ symbol: target, before: null, after: level, index: existing.length });
-    setDrawing(false); setLevelPrice(""); setLevelLabel("");
+    editItems({ symbol: target, layer: "levels", before: null, after: level, index: existing.length });
+    setTool(null); setLevelPrice(""); setLevelLabel("");
   };
   const failed = requestFailed || !!current?.issues.length;
   // A newer extended-hours candle can outrank the quote. Streamed trades outrank
@@ -623,11 +672,18 @@ export default function ChartWorkspace() {
             {([["Undo", "before", edits.undo, Undo2, "⌘Z / Ctrl+Z"], ["Redo", "after", edits.redo, Redo2, "⇧⌘Z / Ctrl+Shift+Z"]] as const).map(([name, side, stack, Icon, key]) => <button key={name} aria-label={name} disabled={!stack.length}
               title={stack.length ? `${name} ${describeEdit(stack.at(-1)!, symbol)} (${key})` : `Nothing to ${name.toLowerCase()}`} onClick={() => replay(side)}
               className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30"><Icon size={13} /></button>)}
-            <button className={`inline-flex items-center gap-1.5 rounded px-2 py-1.5 text-[11px] ${drawing ? "bg-blue-400/15 text-blue-300" : "text-slate-400 hover:bg-slate-800"}`} aria-pressed={drawing} onClick={() => { setDrawing((v) => !v); setSelection(null); }}><Crosshair size={13} />{drawing ? "Cancel drawing" : "Draw price level"}</button>
+            <span className="mx-1 h-4 border-l border-slate-700" />
+            <div role="group" aria-label="Drawing tools" className="flex items-center gap-0.5">
+              {TOOLS.map(([kind, Icon]) => <button key={kind} aria-label={`Draw ${TOOL_NAMES[kind].toLowerCase()}`} aria-pressed={tool === kind} title={tool === kind ? "Cancel drawing (Esc)" : TOOL_NAMES[kind]} onClick={() => chooseTool(kind)}
+                className={`inline-flex h-7 w-7 items-center justify-center rounded ${tool === kind ? "bg-blue-400/15 text-blue-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Icon size={13} /></button>)}
+              <button aria-label="Magnet" aria-pressed={settings.magnet} title="Magnet: anchors snap to the nearest open, high, low or close (or hold ⌘/Ctrl)" onClick={() => setSettings((s) => ({ ...s, magnet: !s.magnet }))}
+                className={`ml-0.5 inline-flex h-7 w-7 items-center justify-center rounded ${settings.magnet ? "bg-amber-400/15 text-amber-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Magnet size={13} /></button>
+            </div>
           </div>
         </div>
       </div>
       {symbolError && <p className="text-xs text-amber-300" role="alert">{symbolError}</p>}
+      {drawError && <p className="text-xs text-amber-300" role="alert">{drawError}</p>}
 
       <div className="flex flex-wrap items-center gap-2" aria-label="Chart indicators">
         {INDICATORS.map(([key, label]) => <button key={key} aria-pressed={settings.indicators[key]} onClick={() => setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !s.indicators[key] } }))} className={`rounded-full border px-2.5 py-1 text-[10px] ${settings.indicators[key] ? "border-slate-600 bg-slate-800/60 text-slate-200" : "border-slate-800 text-slate-600"}`}>{label}</button>)}
@@ -649,19 +705,20 @@ export default function ChartWorkspace() {
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {response ? <>
-            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
-              selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} onSelect={(id) => setSelection(id ? { symbol: slot.symbol, id, panel: "main" } : null)}
-              onMove={(id, value) => moveLevel(slot.symbol, id, value)} onDelete={(id) => deleteLevel(slot.symbol, id)}
+            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} drawings={shownDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight}
+              tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
+              selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
+              onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
               history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />)}
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} drawings={shownDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
-                  selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} onSelect={(id) => setSelection(id ? { symbol: slot.symbol, id, panel: `Panel ${slot.index + 1}` } : null)}
-                  onMove={(id, value) => moveLevel(slot.symbol, id, value)} onDelete={(id) => deleteLevel(slot.symbol, id)}
+                  selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}
+                  onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                   onFocus={() => { setExpanded(null); setSettings((s) => focusPanel(s, slot.index)); }} />
               </div>; })}
             </div>}
@@ -694,7 +751,7 @@ export default function ChartWorkspace() {
 
           {!immersive && <><section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
             <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2><span className="text-[10px] text-slate-600">{levels.length}/30</span></div>
-            {levels.map((level) => <div key={level.id} className="mb-2 flex items-center gap-2 text-[11px]"><span className="h-px w-3 bg-blue-400" /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span><span className="font-mono text-blue-300" title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteLevel(settings.symbol, level.id)} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
+            {levels.map((level) => <div key={level.id} className="mb-2 flex items-center gap-2 text-[11px]"><span className="h-px w-3 bg-blue-400" /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span><span className="font-mono text-blue-300" title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteItem(settings.symbol, level.id)} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
             {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
             <form onSubmit={(e) => { e.preventDefault(); addLevel(Number(levelPrice)); }} className="space-y-2">
               <input aria-label="Level label" placeholder="Label (optional)" value={levelLabel} maxLength={30} onChange={(e) => setLevelLabel(e.target.value)} className="h-8 w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600" />
