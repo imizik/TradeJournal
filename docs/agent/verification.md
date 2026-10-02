@@ -36,7 +36,7 @@ native PowerShell launcher for the app itself.
 | Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Docs | `cd backend && pytest tests/test_docs_freshness.py -q` | That the drift pass above is overdue: it counts code commits since `docs/agent/last-reconciled.json` and fails past 30. It cannot check that the pass happened, only that someone was asked. CI runs it on pull requests only, so it never blocks a release from `main` |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
-| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port and the strategy factory on synthetic bars, and the import boundaries again |
+| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port, the strategy factory on synthetic bars, the Charts routes, session calendar, history cache, stream and split-adjusted price basis on fixtures, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
@@ -182,14 +182,19 @@ per-panel symbols (SPY and QQQ beside the traded name through switches,
 streaming, pause, scroll-back and focus), and hotkeys (typed minutes on Enter
 without a 1m detour, immediate intervals, Space watchlist steps, Alt+R and End
 on every chart, keys off in fields and dialogs, the `?` sheet against the exact
-binding list, and the 390px touch equivalents). Chart
+binding list, and the 390px touch equivalents), named layouts, holiday and
+early-close sessions, the split-adjusted basis chip and levels drawn before a
+split, and that nothing in a chart paints above the Sync drawer's backdrop. Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts` and `window.__tjRenders` maps the
 spec installs; production never defines them. `backend/tests/test_charts.py`
-and `backend/tests/test_chart_history.py` plus `backend/tests/test_chart_stream.py`
-verify private routes and provider/indicator boundaries. Actual Tradier/Webull
-access is checked separately by `backend/scripts/check_chart_feed.py`, and a
+and `backend/tests/test_chart_history.py` plus `backend/tests/test_chart_stream.py`,
+`backend/tests/test_chart_calendar.py` and `backend/tests/test_chart_splits.py`
+verify private routes, provider/indicator boundaries, the session calendar and
+the price basis. Actual Tradier/Webull
+access is checked separately by `backend/scripts/check_chart_feed.py`, the split
+basis across a real split by `backend/scripts/check_chart_splits.py`, and a
 separate configured-account SIP/raw probe checks Alpaca entitlement; browser fixtures
 do not establish live entitlement or TradingView parity.
 
