@@ -68,7 +68,7 @@ from planned work.
 | C7.1 | Per-panel symbol linking (for example SPY, QQQ and the traded name) | 7 Layouts | done ([PR #95](https://github.com/imizik/TradeJournal/pull/95)) |
 | C7.2 | Named saved layouts | 7 Layouts | done ([PR #98](https://github.com/imizik/TradeJournal/pull/98)) |
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | next |
-| C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done (PR pending) |
+| C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done ([PR #101](https://github.com/imizik/TradeJournal/pull/101)) |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | todo |
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | todo |
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | todo |
