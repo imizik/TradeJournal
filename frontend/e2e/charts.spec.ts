@@ -1050,7 +1050,7 @@ type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | nu
 const EMPTY_SETTINGS = {
   levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false,
   intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
-  watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false, indicators: false },
+  watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false,
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
 };
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
@@ -2876,7 +2876,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await expect(page.getByRole("button", { name: "Volume", exact: true })).toHaveAttribute("aria-pressed", "false");
   await page.keyboard.press("Escape");
   await expect(chartMenu(page)).toHaveCount(0);
-  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false, indicators: false });
+  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false });
   expect((server.data!.indicators as Record<string, boolean>).volume).toBe(false);
   await expect(levelsPanel(page).getByRole("button", { name: "Hidden · Show" })).toBeVisible();
   await page.reload();
@@ -3034,7 +3034,7 @@ test("right-click on a drawing restyles, locks, hides and deletes it, and a note
   await clickChart(page, "main", await screenAt(page, "main", 205, 251));
   await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "trend,note");
   await expect.poll(() => drawingsOf(server).length).toBe(2);
-  expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false, indicators: false });
+  expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false });
 
   // A note's text edits inline in its menu.
   const note = drawingsOf(server)[1];
@@ -3165,7 +3165,7 @@ test("the layers panel hides, locks and deletes by group and by item, and a clic
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-levels", "");
   await layerGroup(page, "Drawings").getByRole("button", { name: "Hide Drawings" }).click();
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-drawings", "");
-  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: true, indicators: false });
+  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: true });
   await page.reload();
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   await expect(layersPanel(page)).toBeVisible();
@@ -3218,7 +3218,8 @@ test("the layers panel hides, locks and deletes by group and by item, and a clic
   await expect(page.getByRole("region", { name: "MRVL 5m chart" })).not.toContainText("EMA9");
   await expect(page.getByRole("button", { name: "EMA 9", exact: true })).toHaveAttribute("aria-pressed", "false");
   await expect(page.getByRole("button", { name: "Indicators hidden · Show" })).toBeVisible();
-  await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: false, drawings: false, indicators: true });
+  await expect.poll(() => server.data?.studiesHidden).toBe(true);
+  expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false });
   expect((server.data!.indicators as Record<string, boolean>).ema9).toBe(true); // kept for when the group shows again
   await layerGroup(page, "Indicators").getByRole("button", { name: "Show EMA 9" }).click();
   await expect.poll(() => paneCount(page, "main")).toBe(2);

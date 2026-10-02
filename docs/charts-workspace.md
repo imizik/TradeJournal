@@ -186,8 +186,10 @@ cd backend
   than the loaded candles loads the pages before them, at most 20, and then
   centres; a new symbol or interval on that panel, or 20 seconds, cancels the
   wait. On a phone the sheet closes so the chart shows. Hidden items can't be
-  gone to. The Indicators group is a third `hiddenGroups` key: while it is
-  hidden no study draws, each keeps its own setting for when the group shows
+  gone to. The Indicators group is a `studiesHidden` settings field of its own
+  rather than a `hiddenGroups` key, because a tab on an older build saves
+  `hiddenGroups` whole and would drop a key it does not know, while the server
+  keeps a top-level field a save leaves out. While it is hidden no study draws, each keeps its own setting for when the group shows
   again, and the study chips read off with a **Indicators hidden · Show**
   chip. Turning one study on (chip, menu or panel) shows the group again, so
   the studies that were on come back with it. Auto levels and options join the
