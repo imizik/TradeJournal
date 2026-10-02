@@ -30,6 +30,11 @@ The implementation-readiness review moved everyday chart workflows earlier
 and clarified data correctness. The status board distinguishes shipped work
 from planned work.
 
+**Screen-space planning update (2026-10-02):** C7.3 and C7.4 were added from the
+user's TradingView screenshot and the current layout code. They run **after
+C1.2, C1.3 and C1.4**, before automatic overlays. C1.2 remains the next item;
+the user reports Claude is implementing it. This update plans future work only.
+
 ## How to work from this file
 
 1. Take the first item in the [status board](#status-board) whose status is
@@ -76,6 +81,8 @@ from planned work.
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | next |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | todo |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | todo |
+| C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | todo |
+| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | todo |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | todo |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
@@ -98,10 +105,14 @@ shared state and SPY/QQQ/name layouts. Record options snapshots early because
 lost days cannot be recovered, but defer their analytical UI. Drawings precede
 automatic overlays, and ordinary alerts precede gamma tools and replay.
 Historical trade navigation makes the new history useful before rich trade cards.
+After the drawing tools, context menu and layers panel settle, reclaim screen
+space before automatic levels add more controls. C7.3 establishes the shell;
+C7.4 adds resizing to that shell. Both precede G0, options analytics and replay.
 
 Dependencies beyond board order: C7.1 needs C0.2/C0.3; C7.2 needs C0.4/C7.1;
 C4.3 needs C4.1/C0.1 and the durable job framework, not C4.2; C2.1 needs C0.1
-for session boundaries; C2.4 and C3.3 need C0.0; C5.1 needs C1.3/C2.3 plus
+for session boundaries; C7.3 needs C0.2/C0.3/C1.2/C1.3/C1.4;
+C7.4 needs C7.3/C7.2/C0.4; C2.4 and C3.3 need C0.0; C5.1 needs C1.3/C2.3 plus
 durable alert state; C4.4 needs C2.2/C4.2; C6.1 needs C3.3. G0 precedes
 advanced analytics, not every possible future feature.
 
@@ -681,6 +692,102 @@ variable panel count is not part of it. The main symbol, levels, watchlist,
 session and indicators stay workspace-wide, and switching changes the shared
 intervals and held symbols, so the other device's panels follow.
 
+**C7.3 Viewport-filling chart workspace (planned).** Make `/charts` use the
+available browser content area in ordinary use, like the supplied TradingView
+view: a compact top toolbar, narrow tool rail, chart grid and optional right
+dock. Keep the existing one-large-plus-four-small arrangement and single-chart
+mode. Browser tabs and the address bar are outside the app's control; optional
+browser fullscreen is an enhancement, not a prerequisite for this item.
+
+Current code to replace: `frontend/app/layout.tsx` adds desktop page padding,
+`frontend/components/Nav.tsx` owns the journal sidebar, and
+`frontend/components/charts/ChartWorkspace.tsx` stacks a page heading, quote and
+control rows, indicators and fixed-height charts. Its main canvas is 410px in
+normal mode; immersive mode estimates available height as viewport height minus
+260px and fits the lower row only on sufficiently tall screens. Adding another
+fullscreen button will not address those layout constraints.
+
+Implementation plan:
+
+- Give `/charts` a route-aware shell: fill the available viewport, collapse
+  journal navigation to an accessible rail/menu, remove the duplicate page
+  heading and outer card padding. Keep navigation, sync status and actionable
+  Gmail warnings reachable; other journal pages retain their current shell.
+- Put symbol/search, interval/session, indicators, layout, pause and workspace
+  controls in one desktop toolbar. Move drawing tools and undo/redo into a
+  slim rail using the C1.2 actions. Put secondary settings in menus/overflow;
+  retain keyboard access, tooltips and visible selected-tool state.
+- Use a collapsible right dock for watchlist and the C1.4 layers panel, with
+  tabs/sections rather than more full-width rows above the chart. Accommodate
+  the [symbol info panel](symbol-info-roadmap.md) and future C4.5 strike ladder
+  when built; do not implement their content in this item. Symbol info may
+  still hide in immersive mode as T1.1 specifies. On phone, use a drawer/sheet.
+- Size the chart grid from its actual remaining container with CSS grid/flex,
+  `minmax(0, 1fr)` and container measurement. Remove the hardcoded viewport
+  subtraction. Let `PriceChart`'s existing `autoSize` follow its container;
+  account for chart headers, scales, RSI/volume, warnings and safe areas.
+- Keep a compact status strip for provider/source, freshness, delayed/stale,
+  pause/error and price-basis warnings; preserve attribution. Density must
+  not hide data truth. Full-screen mode reuses this shell, keeps an obvious
+  exit and follows existing Escape/dialog/drawing cancellation precedence.
+
+*Done when:*
+
+- At 1440×900 and 1920×1080 browser content viewports, the default five-chart
+  arrangement fits without document scrolling with the dock open or closed.
+  With the dock closed, the grid (including panel headers/scales/study panes)
+  occupies at least 80% of viewport height and 90% of viewport width. Measure
+  DOM bounds and save screenshots; these are layout targets, not observations.
+- At 1280×720, usable minimum panel sizes take priority over forcing all five
+  charts into view: offer single-panel focus or a contained lower-row scroller.
+  At 390px, controls remain reachable with 44px touch targets, safe-area padding
+  and no horizontal document overflow. Phone sheets do not shrink the canvas
+  into an unusable sliver, and can be dismissed accessibly.
+- Browser tests cover dock/navigation toggles, toolbar overflow, focus order,
+  chart interactions after container/window resize, dialogs and fullscreen
+  entry/exit. Resizing/toggling preserves instances, drawings, selection,
+  scroll-back position and live updates; it creates no extra data fetches or
+  stream connections. Existing drawing, hotkey and phone regressions pass.
+
+**C7.4 Resizable chart grid and dock (planned).** Let the user distribute space
+within C7.3's shell: drag the main/lower-row divider, the dividers between the
+four lower charts and the right dock's edge. Start with the existing five panel
+slots; arbitrary docking, variable panel counts and a new layout library are
+outside this item. Existing volume/RSI pane resizing stays independent.
+
+Implementation plan:
+
+- Store bounded proportions for the main/lower split and lower-chart columns,
+  with sensible minimum sizes. Separators support mouse and keyboard with
+  accessible names/values; touch resizing is offered only where enough space
+  exists. Double-click or an explicit reset restores defaults. Clamp on resize
+  and use C7.3's small-screen fallback rather than crushing scales and labels.
+- Maximize any chart in place, then restore the exact prior arrangement.
+  Treat this as temporary view state, preserving interval, held/follow symbol,
+  crosshair/range linking, drawings, selection and historical viewport. Keep
+  the existing Focus action's symbol/slot semantics explicit; do not silently
+  swap panel identities just to enlarge one chart.
+- Extend C7.2's saved arrangements with normalized chart split proportions.
+  Update `frontend/lib/charts.ts` validation/defaults, layout save/apply/match,
+  and `frontend/lib/chartSync.ts` conflict handling together. Old layouts with
+  S/M/L heights remain readable and get equivalent defaults. Proportions sync;
+  dock width/visibility, navigation collapse and temporary maximization stay
+  per device, so desktop geometry never forces an unusable phone layout.
+  Migrate the currently shared `immersiveWatchlist` preference to local view
+  state without losing the device's prior choice or breaking older clients.
+- Update container geometry during dragging without remounting charts or
+  resetting time/price scales. Persist on completion, not on every pointer
+  move; keep geometry changes separate from the tick/clock hot path.
+
+*Done when:* browser tests resize and reset every separator, maximize/restore
+each panel, shrink/enlarge the viewport, reload and switch named layouts with
+ticks and REST reconciliation running while scrolled back. Keyboard controls
+and phone fallback work; malformed ratios and old saved layouts normalize
+safely. Two browser contexts prove saved proportions and conflict handling,
+while dock geometry stays local. Chart instances and viewport state survive;
+resize operations issue no additional provider requests. Record desktop/phone
+screenshots and bounded size measurements separately from live-session proof.
+
 ### G0 — Daily chart replacement acceptance
 
 This is an evidence checkpoint after the preceding board items, before advanced
@@ -694,6 +801,8 @@ follow-up item and leave the gate open.
   symbols/intervals, view SPY + QQQ + a stock, draw/edit/undo, save/reload, scroll
   months back, open a historical trade and return live. No unexplained viewport
   jumps, stale-symbol candles or lost saved work.
+- Use C7.3/C7.4's compact workspace, collapse/reopen the dock, resize the grid
+  and maximize/restore a panel during that session without losing chart state.
 - Sample candles, volume, EMA and VWAP against source responses and, when
   available, the user's TradingView view with matched interval/session/basis.
   Explain feed, adjustment or calculation differences; do not promise pixel or
@@ -750,7 +859,7 @@ Worth doing once the phases above have shipped, in roughly this order:
 
 ## Decisions
 
-Settled with the user on 2026-09-30, and items 8 and 9 on 2026-10-02. Do not
+Settled with the user on 2026-09-30, and items 8–10 on 2026-10-02. Do not
 reopen them without the user.
 
 1. **Drawings (Phase 1) come before automatic levels (Phase 2).** Every later
@@ -776,3 +885,7 @@ reopen them without the user.
    setup fired belongs to the strategy factory's paper-trading step, runs that
    family's own code, and exists only for a candidate that passed the factory
    (`docs/strategy-factory.md`). This epic's alerts are levels and claim no edge.
+10. **Use more screen space after the current drawing work.** The user requested
+    a TradingView-like use of the available screen while Claude works on C1.2.
+    C7.3/C7.4 are future `todo` items after C1.4; they do not change C1.2 or
+    start its implementation. The compact shell precedes resizable geometry.
