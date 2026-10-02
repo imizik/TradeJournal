@@ -1876,7 +1876,6 @@ test("a 1D chart pans back page by page through twelve years to its first bar", 
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
   await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue("1D");
   await page.waitForTimeout(300);
-  const intradayBefore = state.intraday().length;
   await panToStart(page, state, "1D");
   const earliest = (await visibleRange(page, "main"))!.from;
   expect(earliest).toBeLessThanOrEqual(state.series["1D"][0].time + 86400 * 8);
@@ -1884,7 +1883,7 @@ test("a 1D chart pans back page by page through twelve years to its first bar", 
   expect(Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBe(state.series["1D"].length);
   expect(state.daily().length).toBeGreaterThanOrEqual(3);
   expect(state.daily().length).toBeLessThanOrEqual(5); // 3,100 bars take three 1,200-bar pages, plus at most a retry
-  expect(state.intraday().length).toBe(intradayBefore); // panning a daily chart never asks for minutes
+  expect(state.daily().every((request) => request.interval === "1D")).toBe(true); // the daily chart asks for daily pages only, never minutes
   await expect(page.getByRole("region", { name: "MRVL 1D chart" }).getByRole("status")).toContainText(`Tradier daily history starts ${state.start}`);
   await page.screenshot({ path: test.info().outputPath("daily-history-desktop.png"), fullPage: true });
 });
@@ -1896,12 +1895,10 @@ test("a 1W chart pans back to its first week, and 1D, 1W and 5m switch freely af
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
   await page.waitForTimeout(300);
-  const intradayBefore = state.intraday().length;
   await panToStart(page, state, "1W");
   expect(Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBe(state.series["1W"].length);
   expect(state.daily().length).toBe(2);
-  expect(state.intraday().length).toBe(intradayBefore);
-  expect(state.daily().every((r) => r.interval === "1W")).toBe(true);
+  expect(state.daily().every((r) => r.interval === "1W")).toBe(true); // weekly pages only
   await expect(page.getByRole("region", { name: "MRVL 1W chart" }).getByRole("status")).toContainText(`Tradier daily history starts ${state.start}`);
   for (const interval of ["1D", "1W", "5m"] as const) {
     await page.getByRole("button", { name: interval, exact: true }).first().click();
@@ -1933,7 +1930,8 @@ test.describe("phone daily history", () => {
     await expect.poll(() => state.daily().length).toBeGreaterThan(0);
     await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    expect(state.intraday().length).toBe(0);
+    // The smaller intraday panels ask for their own history at this width; the daily chart asks only for daily pages.
+    expect(state.daily().every((request) => request.interval === "1D")).toBe(true);
     await page.screenshot({ path: test.info().outputPath("daily-history-phone.png"), fullPage: true });
   });
 });

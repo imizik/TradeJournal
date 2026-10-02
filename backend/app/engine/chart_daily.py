@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 import threading
 
-from app.engine.chart_adjust import BASIS, adjust_daily, describe, suspect_gaps
+from app.engine.chart_adjust import BASIS, adjust_daily, apply_splits, describe, suspect_gaps
 from app.engine.chart_math import ET, chart_bars, daily_page, normalize_bars
 from app.engine.chart_splits import UNAVAILABLE
 
@@ -108,17 +108,30 @@ class ChartDaily:
         if not tail:
             return entry.bars, entry.states
         base = entry.bars[:bisect_left(entry.bars, tail[0]["time"], key=lambda bar: bar["time"])]
-        return base + tail, {**entry.states, **tail_states}
+        # A split effective today cannot be checked against a series that ends yesterday. If the tail shows
+        # the provider's bars are raw there, the whole series needs the same split, not just the tail's days.
+        late = [s for s in entry.info["splits"] if entry.states.get(s["ex_date"]) == "unverified" and tail_states.get(s["ex_date"]) == "adjusted_here"]
+        return apply_splits(base, late) + tail, {**entry.states, **tail_states}
 
     def page(self, symbol: str, interval: str, before: int, limit: int = PAGE, today: date | None = None) -> dict:
         """One page of older daily or weekly bars. Raises ``ChartFeedError`` when Tradier cannot answer."""
         today = today or datetime.now(ET).date()
         info = self.feed.splits.get(symbol) if self.feed.splits else UNAVAILABLE
         entry = self.entry(symbol, today, info)
-        series = chart_bars([], entry.bars, interval, "regular")
-        bars, older, exhausted = daily_page(series, before, limit)
-        start = datetime.fromtimestamp(entry.bars[0]["time"], ET).date().isoformat() if entry.bars else None
-        return {"symbol": symbol, "interval": interval, "before": before, "limit": limit, "bars": bars,
+        bars, states = entry.bars, entry.states
+        if "unverified" in states.values():
+            # Only a split effective today leaves one unverified; the tail can settle it, so pages agree with the workspace.
+            from app.engine.chart_feed import ChartFeedError
+
+            try:
+                data, _, _ = self.feed.read("/v1/markets/history", self.tail_params(symbol, today), 60)
+                bars, states = self.assemble(entry, normalize_bars(history_rows(data), daily=True))
+            except ChartFeedError:
+                pass  # still unverified, and still said so
+        series = chart_bars([], bars, interval, "regular")
+        page, older, exhausted = daily_page(series, before, limit)
+        start = datetime.fromtimestamp(bars[0]["time"], ET).date().isoformat() if bars else None
+        return {"symbol": symbol, "interval": interval, "before": before, "limit": limit, "bars": page,
                 "older_cursor": older, "exhausted": exhausted, "continuation": None, "warmup": "ready",
                 "source": "tradier", "price_basis": BASIS, "issue": None, "history_start": start,
-                "adjustment": describe(entry.info, daily=entry.states, suspects=suspect_gaps(bars))}
+                "adjustment": describe(entry.info, daily=states, suspects=suspect_gaps(page))}

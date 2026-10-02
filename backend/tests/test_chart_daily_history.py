@@ -273,3 +273,51 @@ def test_history_route_rejects_unsupported_intervals_and_reports_provider_failur
     response = client.get(f"/charts/history?symbol=QQQ&interval=1D&session=regular&before={before}")
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "rate_limited" and response.json()["detail"]["retry_at"] > before - 10**9
+
+
+class FixedSplits:
+    def __init__(self, splits):
+        self.info = {"status": "ok", "splits": splits, "as_of": 1_790_000_000, "issue": None}
+
+    def get(self, symbol):
+        return self.info
+
+
+def raw_before_a_split_today(monkeypatch):
+    """Tradier returns RAW bars: ten times the price and a tenth of the volume before a 10-for-1 split effective today."""
+    raw = [{**r, **{k: r[k] * 10 for k in ("open", "high", "low", "close")}, "volume": r["volume"] / 10} if r["date"] < TODAY.isoformat() else r for r in HISTORY]
+    provider = Tradier(monkeypatch, raw)
+    return provider, FixedSplits([{"ex_date": TODAY.isoformat(), "ratio": 10.0, "new_rate": 10.0, "old_rate": 1.0}])
+
+
+def test_a_split_effective_today_in_raw_provider_bars_adjusts_the_whole_series_not_just_the_tail(monkeypatch):
+    _, splits = raw_before_a_split_today(monkeypatch)
+    feed = ChartFeed(splits=splits)
+    data = feed.workspace("SPY", ["1D", "1W"], [], "regular")
+    expected = {iv: chart_bars([], normalize_bars(HISTORY, daily=True), iv, "regular") for iv in ("1D", "1W")}
+    for interval, shown in ((iv, data["panels"][iv]["bars"]) for iv in ("1D", "1W")):
+        assert [b["time"] for b in shown] == [b["time"] for b in expected[interval][-1200:]]
+        assert [b["close"] for b in shown] == pytest.approx([b["close"] for b in expected[interval][-1200:]])
+        assert [b["ema9"] for b in shown[-300:]] == pytest.approx([b["ema9"] for b in expected[interval][-300:]])  # indicators too
+        closes = [b["close"] for b in shown]
+        assert max(abs(b / a - 1) for a, b in zip(closes, closes[1:])) < 0.1  # no cliff at the split, or anywhere older
+    assert data["adjustment"]["daily"] == {TODAY.isoformat(): "adjusted_here"} and data["adjustment"]["warnings"] == []
+    # A history page agrees with the workspace on every bar they share, including volume.
+    cut = data["panels"]["1D"]["bars"][600]["time"]
+    page = feed.daily.page("SPY", "1D", cut, 200, today=TODAY)
+    assert [b["close"] for b in page["bars"]] == pytest.approx([b["close"] for b in data["panels"]["1D"]["bars"][400:600]])
+    assert [b["volume"] for b in page["bars"]] == pytest.approx([b["volume"] for b in data["panels"]["1D"]["bars"][400:600]])
+    # Pages cut before the series' last bar see the same adjusted history as pages that reach the newest bars.
+    newest = feed.daily.page("SPY", "1D", int(datetime(2026, 10, 1, 20, tzinfo=ET).timestamp()), 50, today=TODAY)
+    assert max(abs(b["close"] / a["close"] - 1) for a, b in zip(newest["bars"], newest["bars"][1:])) < 0.1
+    assert newest["adjustment"]["daily"] == {TODAY.isoformat(): "adjusted_here"}
+
+
+def test_a_split_effective_today_with_provider_adjusted_bars_is_left_alone(monkeypatch):
+    Tradier(monkeypatch)
+    splits = FixedSplits([{"ex_date": TODAY.isoformat(), "ratio": 10.0, "new_rate": 10.0, "old_rate": 1.0}])
+    data = ChartFeed(splits=splits).workspace("SPY", ["1D"], [], "regular")
+    shown = data["panels"]["1D"]["bars"]
+    expected = chart_bars([], normalize_bars(HISTORY, daily=True), "1D", "regular")[-1200:]
+    assert [b["close"] for b in shown] == [b["close"] for b in expected]  # never adjusted twice
+    assert data["adjustment"]["daily"] == {TODAY.isoformat(): "provider_adjusted"}

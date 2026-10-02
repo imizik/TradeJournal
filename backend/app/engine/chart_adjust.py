@@ -61,6 +61,11 @@ def adjust_minutes(minutes: list[dict], day: date, splits: list[dict]) -> list[d
     return minutes if factor == 1.0 else [_scaled(b, factor) for b in minutes]
 
 
+def apply_splits(daily: list[dict], splits: list[dict]) -> list[dict]:
+    """Daily bars on the adjusted basis for exactly these splits, with no check of what the provider did."""
+    return [_scaled(b, factor_before(splits, _day(b["time"]))) for b in daily] if splits else daily
+
+
 def adjust_daily(daily: list[dict], splits: list[dict]) -> tuple[list[dict], dict[str, str]]:
     """Daily bars on the adjusted basis, plus what each split needed.
 
@@ -93,7 +98,7 @@ def adjust_daily(daily: list[dict], splits: list[dict]) -> tuple[list[dict], dic
             states[split["ex_date"]] = "provider_adjusted"
     if not pending:
         return daily, states
-    return [_scaled(b, factor_before(pending, _day(b["time"]))) for b in daily], states
+    return apply_splits(daily, pending), states
 
 
 def suspect_gaps(bars: list[dict], limit: int = 3) -> list[str]:
