@@ -79,8 +79,8 @@ C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work 
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | done ([PR #106](https://github.com/imizik/TradeJournal/pull/106)) |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done ([PR #111](https://github.com/imizik/TradeJournal/pull/111)) |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
-| C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | next |
-| C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | todo |
+| C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done |
+| C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | next |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | todo |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | todo |
@@ -462,11 +462,24 @@ take a color but no label. A tab on a pre-C1.3 build drops the per-item flags
 when it saves levels or drawings, because the server keeps only top-level
 fields a save leaves out.
 
-**C1.4 Layers panel.** A collapsible list grouped as My levels, Drawings, Auto
+**C1.4 Layers panel (done).** A collapsible list grouped as My levels, Drawings, Auto
 levels, Options, Journal and Indicators. Each group and item can be hidden,
 locked or deleted, and a click jumps the chart to it. *Done when:* hiding a
 group hides it on all five panels, the state persists, and the panel works as a
 bottom sheet on a phone.
+As built ([Implemented behavior](charts-workspace.md#implemented-behavior)): `frontend/components/charts/LayersPanel.tsx`,
+opened from a **Layers** button after the drawing tools, sits in the side
+column on screens 1024px and wider and is a bottom sheet below that. It has
+My levels, Drawings, Journal and Indicators; Auto levels and Options are
+added by C2.3 and C4.4, since an empty group is noise. Lock and delete apply
+to levels and drawings (fills and studies have neither). A group lock is not
+a separate flag: it locks or unlocks every item as one undo step, so the
+chart menu and selection bar never disagree with it, and a level added later
+starts unlocked. Group deletes are also one undo step (a new `batch` edit).
+Group hiding is the C1.3 `hiddenGroups` setting plus an `indicators` key; the
+Journal group is the existing fills toggle. Jumps reuse the history loader to
+reach drawings older than the loaded candles. The panel lists items of every
+symbol on screen (main and held), each going to the first panel showing it.
 
 ### Phase 2 — Levels that draw themselves
 

@@ -323,7 +323,9 @@ is verifiable rather than hopeful.
   text change keeps the saved prices and date. The context menu (C1.3) changes
   only a level's label or color, an item's `hidden` or `locked` flag, or adds
   a duplicate that keeps the original's prices and `drawn_on`; none of them
-  moves a price.
+  moves a price. The layers panel (C1.4) locks, unlocks or deletes many items
+  as one undo step under the same rule, and going to an item moves only the
+  view.
 - The chart settings document belongs to the frontend, but a save never drops
   a top-level field it leaves out (`PUT /charts/settings` keeps the stored
   value). A tab still running an older build cannot erase a field a newer build

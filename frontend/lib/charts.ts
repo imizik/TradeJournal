@@ -101,9 +101,14 @@ export function levelOnBasis(level: PriceLevel, splits: { ex_date: string; ratio
   return { price: level.price / factor, moved: factor !== 1 };
 }
 export type Indicators = Record<"ema9" | "ema20" | "ema50" | "ema200" | "vwap" | "volume" | "rsi" | "fills", boolean>;
-/** Groups of the user's own items that can be hidden from every chart at once (C1.3; C1.4 adds more). */
-export type HiddenGroups = Record<"levels" | "drawings", boolean>;
-export const LAYER_GROUPS = ["levels", "drawings"] as const;
+/** Groups that can be hidden from every chart at once: the user's levels and drawings (C1.3) and the studies (C1.4). */
+export type HiddenGroups = Record<"levels" | "drawings" | "indicators", boolean>;
+export const LAYER_GROUPS = ["levels", "drawings", "indicators"] as const;
+/** The studies the Indicators group hides together; fill arrows are the Journal group. */
+export const STUDIES = ["ema9", "ema20", "ema50", "ema200", "vwap", "volume", "rsi"] as const;
+/** What the charts draw: with the Indicators group hidden every study is off, and each one's own setting is kept for when it shows again. */
+export const shownIndicators = (indicators: Indicators, groupHidden: boolean): Indicators =>
+  groupHidden ? { ...indicators, ...Object.fromEntries(STUDIES.map((key) => [key, false])) } : indicators;
 export type SmallChartSize = "compact" | "normal" | "tall";
 /**
  * How the panels are arranged, and nothing about what they show beyond the
@@ -137,7 +142,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false, indicators: false }, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -181,7 +186,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       drawings: cleanDrawings(value.drawings, validSymbol),
       toolStyles: cleanToolStyles(value.toolStyles),
       magnet: value.magnet === true,
-      hiddenGroups: { levels: value.hiddenGroups?.levels === true, drawings: value.hiddenGroups?.drawings === true },
+      hiddenGroups: { levels: value.hiddenGroups?.levels === true, drawings: value.hiddenGroups?.drawings === true, indicators: value.hiddenGroups?.indicators === true },
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
@@ -523,10 +528,15 @@ export function createCrosshairLink() {
 export type ChartCommand = "reset" | "realtime";
 export type ChartCommands = ReturnType<typeof createChartCommands>;
 /** Workspace hotkeys reach every chart through this, as the crosshair link does. */
+/** Bring an item into view on one panel (C1.4): its anchors' times (none for a level) and its prices, on the chart's basis. */
+export type ChartJump = { panel: string; times: number[]; prices: number[] };
 export function createChartCommands() {
   const listeners = new Set<(command: ChartCommand) => void>();
+  const jumps = new Set<(jump: ChartJump) => void>();
   return {
     listen(fn: (command: ChartCommand) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     emit(command: ChartCommand) { listeners.forEach((fn) => fn(command)); },
+    listenJump(fn: (jump: ChartJump) => void) { jumps.add(fn); return () => { jumps.delete(fn); }; },
+    jump(target: ChartJump) { jumps.forEach((fn) => fn(target)); },
   };
 }

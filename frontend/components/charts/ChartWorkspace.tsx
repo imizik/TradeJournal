@@ -2,19 +2,21 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Keyboard, LayoutGrid, Link2, Loader2, Lock, Magnet, Maximize2, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, Loader2, Lock, Magnet, Maximize2, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, Trash2, Type, Undo2, X } from "lucide-react";
 import ChartMenu from "./ChartMenu";
 import type { HiddenItem, LayerToggle, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
 import HotkeySheet from "./HotkeySheet";
+import LayersPanel from "./LayersPanel";
+import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, todayNewYork, validSymbol } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownIndicators, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
 import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLOR, MAX_DRAWINGS, MAX_LEVELS, MAX_UNDO, TOOL_NAMES } from "@/lib/drawings";
-import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, Tool } from "@/lib/drawings";
+import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, ItemEdit, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
 import { summary } from "./SelectionBar";
@@ -59,7 +61,11 @@ async function copyText(text: string): Promise<boolean> {
   return copied;
 }
 /** "moving Breakout" or "adding trend line", with the symbol when it is not the one on screen: what Undo or Redo would do. */
-const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} ${editName(edit)}${edit.symbol === symbol ? "" : ` (${edit.symbol})`}`;
+const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} ${editName(edit)}${edit.symbol === symbol || !edit.symbol ? "" : ` (${edit.symbol})`}`;
+/** Whether the layers panel was left open, on this device only (C1.4); a phone always starts with it closed. */
+const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
+/** Below this width the aside sits under the charts, so the layers panel is a bottom sheet. */
+const WIDE = 1024;
 /** The toolbar's drawing tools, in order (C1.2). */
 const TOOLS: [Tool, typeof Crosshair][] = [["level", Crosshair], ["ray", MoveRight], ["trend", Slash], ["zone", RectangleHorizontal], ["note", Type]];
 /** Digits typed for the main chart's interval, waiting for Enter (C0.5). */
@@ -123,6 +129,7 @@ export default function ChartWorkspace() {
   const [levelError, setLevelError] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
+  const [layersOpen, setLayersOpen] = useState(false);
   // A short message after a menu action ("Copied 256.12"), cleared after a moment.
   const [notice, setNotice] = useState("");
   // Level and drawing edits made in this tab, for undo and redo (C1.1, C1.2).
@@ -221,6 +228,8 @@ export default function ChartWorkspace() {
     const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
     return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
   }, [splitsBySymbol, wanted, settings.drawings]);
+  // The studies the charts draw: none while the Indicators group is hidden (C1.4).
+  const indicators = useMemo(() => shownIndicators(settings.indicators, settings.hiddenGroups.indicators), [settings.indicators, settings.hiddenGroups.indicators]);
   // What the charts draw: hidden items and hidden groups (C1.3) are left out, so they neither draw nor select.
   const visibleLevels = useMemo(() => new Map([...shownLevels].map(([name, rows]) => [name, visible(rows, settings.hiddenGroups.levels, NO_LEVELS)])), [shownLevels, settings.hiddenGroups.levels]);
   const visibleDrawings = useMemo(() => new Map([...shownDrawings].map(([name, rows]) => [name, visible(rows, settings.hiddenGroups.drawings, NO_DRAWINGS)])), [shownDrawings, settings.hiddenGroups.drawings]);
@@ -342,6 +351,9 @@ export default function ChartWorkspace() {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
+  }, []);
+  useEffect(() => {
+    try { if (window.innerWidth >= WIDE && localStorage.getItem(LAYERS_OPEN_KEY) === "1") setLayersOpen(true); } catch { /* starts closed */ }
   }, []);
   useEffect(() => {
     if (!notice) return;
@@ -473,7 +485,7 @@ export default function ChartWorkspace() {
     const edit = (side === "before" ? edits.undo : edits.redo).at(-1);
     if (!edit) return;
     if (!applyEdit(settings, edit, side)) {
-      if (edit.layer === "levels") setLevelError(`Remove a ${edit.symbol} level first: ${MAX_LEVELS} per symbol.`);
+      if ((edit.layer === "batch" ? edit.edits[0]?.layer : edit.layer) === "levels") setLevelError(`Remove a ${edit.symbol} level first: ${MAX_LEVELS} per symbol.`);
       else setDrawError(`Remove a ${edit.symbol} drawing first: ${MAX_DRAWINGS} per symbol.`);
       return;
     }
@@ -560,8 +572,36 @@ export default function ChartWorkspace() {
   const toggleGroup = (group: keyof HiddenGroups) => {
     const hiding = !settings.hiddenGroups[group];
     setSettings((s) => ({ ...s, hiddenGroups: { ...s.hiddenGroups, [group]: hiding } }));
-    const rows: { id: string }[] = (group === "levels" ? settings.levels : settings.drawings)[selection?.symbol ?? ""] ?? [];
+    const rows: { id: string }[] = group === "indicators" ? [] : (group === "levels" ? settings.levels : settings.drawings)[selection?.symbol ?? ""] ?? [];
     if (hiding && rows.some((row) => row.id === selection?.id)) setSelection(null);
+  };
+  /** A study or fill arrows on or off as the charts show them; turning a study on shows the Indicators group again. */
+  const toggleIndicator = (key: keyof Indicators) => {
+    const on = indicators[key];
+    setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !on },
+      hiddenGroups: !on && key !== "fills" ? { ...s.hiddenGroups, indicators: false } : s.hiddenGroups }));
+  };
+  /**
+   * Lock, unlock or delete every listed level or drawing at once (C1.4): one
+   * undo step. Deletions are recorded last-first, so undo puts each back
+   * where it sat.
+   */
+  const editGroup = (layer: ItemGroup, ids: Set<string>, change: { locked: boolean } | "delete") => {
+    const edits: ItemEdit[] = [];
+    for (const name of wanted.keys()) {
+      if (layer === "levels") {
+        const rows = settings.levels[name] ?? [];
+        for (let index = rows.length - 1; index >= 0; index--) if (ids.has(rows[index].id))
+          edits.push({ symbol: name, layer, before: rows[index], after: change === "delete" ? null : cleanLevel({ ...rows[index], locked: change.locked }), index });
+      } else {
+        const rows = settings.drawings[name] ?? [];
+        for (let index = rows.length - 1; index >= 0; index--) if (ids.has(rows[index].id))
+          edits.push({ symbol: name, layer, before: rows[index], after: change === "delete" ? null : cleanDrawing({ ...rows[index], locked: change.locked }), index });
+      }
+    }
+    if (!edits.length) return;
+    const symbols = new Set(edits.map((edit) => edit.symbol));
+    editItems(edits.length === 1 ? edits[0] : { symbol: symbols.size === 1 ? edits[0].symbol : "", layer: "batch", edits, name: `${edits.length} ${layer}` });
   };
   /** Right-click or long press on a panel: with a tool armed it only puts the tool away, as Esc does. */
   const openMenu = (target: string, panel: string) => (request: MenuRequest) => {
@@ -722,15 +762,49 @@ export default function ChartWorkspace() {
   const menuItem: MenuItem | null = menuLevel ? { layer: "levels", level: menuLevel } : menuDrawing ? { layer: "drawings", drawing: menuDrawing } : null;
   const layerToggles: LayerToggle[] = [
     ...GROUP_NAMES.map(([group, label]) => ({ key: group, label, on: !settings.hiddenGroups[group], toggle: () => toggleGroup(group) })),
-    ...[...INDICATORS.slice(-1), ...INDICATORS.slice(0, -1)].map(([key, label]) => ({ key, label, on: settings.indicators[key],
-      toggle: () => setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !s.indicators[key] } })) })),
+    ...[...INDICATORS.slice(-1), ...INDICATORS.slice(0, -1)].map(([key, label]) => ({ key, label, on: indicators[key], toggle: () => toggleIndicator(key) })),
   ];
+  // The layers panel (C1.4): the items of every symbol on screen, main symbol first.
+  const levelItems: LayerItem[] = [...wanted.keys()].flatMap((name) => (shownLevels.get(name) ?? NO_LEVELS).map((level) => ({ id: level.id, symbol: name,
+    name: level.label, detail: price(level.price), color: level.color ?? LEVEL_COLOR, line: true, hidden: !!level.hidden, locked: !!level.locked })));
+  const drawingItems: LayerItem[] = [...wanted.keys()].flatMap((name) => (shownDrawings.get(name) ?? NO_DRAWINGS).map((drawing) => ({ id: drawing.id, symbol: name,
+    name: drawing.kind === "note" ? `Note: ${drawing.text}` : TOOL_NAMES[drawing.kind], detail: summary(drawing) ?? "", color: drawing.color, line: false,
+    hidden: !!drawing.hidden, locked: !!drawing.locked })));
+  const layerGroups: LayerGroup[] = [
+    { key: "levels", name: "My levels", noun: "levels", hidden: settings.hiddenGroups.levels, items: levelItems },
+    { key: "drawings", name: "Drawings", noun: "drawings", hidden: settings.hiddenGroups.drawings, items: drawingItems },
+    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in." },
+    { key: "indicators", name: "Indicators", hidden: settings.hiddenGroups.indicators,
+      studies: INDICATORS.filter(([key]) => (STUDIES as readonly string[]).includes(key)).map(([key, label]) => ({ key, label, on: indicators[key] })) },
+  ];
+  /** A click on an item: the first panel showing its symbol brings it into view and selects it; a phone's sheet closes so the chart shows. */
+  const jumpTo = (layer: ItemGroup, item: LayerItem) => {
+    const slot = slots.find((other) => other.symbol === item.symbol);
+    if (!slot) return;
+    const panel = slot.index === 0 ? "main" : `Panel ${slot.index + 1}`;
+    const points = layer === "levels" ? (shownLevels.get(item.symbol) ?? NO_LEVELS).filter((level) => level.id === item.id).map((level) => ({ time: null, price: level.price }))
+      : (shownDrawings.get(item.symbol) ?? NO_DRAWINGS).find((drawing) => drawing.id === item.id)?.points ?? [];
+    if (!points.length) return;
+    commands.jump({ panel, times: points.flatMap((point) => point.time === null ? [] : [point.time]), prices: points.map((point) => point.price) });
+    setSelection({ symbol: item.symbol, id: item.id, panel }); setFresh(null);
+    if (narrow) setLayersOpen(false);
+  };
+  const lockGroup = (layer: ItemGroup) => {
+    const items = layer === "levels" ? levelItems : drawingItems;
+    const lock = !items.every((item) => item.locked);
+    editGroup(layer, new Set(items.filter((item) => item.locked !== lock).map((item) => item.id)), { locked: lock });
+  };
   // Items hidden one by one on a symbol, each with its own Show (one undo step each).
   const hiddenItems = (name: string): HiddenItem[] => [
     ...(shownLevels.get(name) ?? NO_LEVELS).filter((level) => level.hidden).map((level) => ({ id: level.id, name: `${level.label} ${price(level.price)}`, show: () => editItem(name, level.id, { hidden: false }) })),
     ...(shownDrawings.get(name) ?? NO_DRAWINGS).filter((drawing) => drawing.hidden).map((drawing) => ({ id: drawing.id,
       name: drawing.kind === "note" ? `Note: ${drawing.text}` : `${TOOL_NAMES[drawing.kind]} ${summary(drawing)}`, show: () => editItem(name, drawing.id, { hidden: false }) })),
   ];
+  const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showLayers(false)}
+    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else toggleGroup(key); }} onGroupLock={lockGroup}
+    onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
+    onJump={jumpTo} onItem={(item, patch) => editItem(item.symbol, item.id, patch)} onDelete={(item) => deleteItem(item.symbol, item.id)}
+    onStudy={(key) => toggleIndicator(key as keyof Indicators)} />;
   const menuGone = !!menu?.id && !menuItem;
   useEffect(() => { if (menuGone) setMenu(null); }, [menuGone]);
   const menuAddLevel = (target: string, value: number) => {
@@ -744,7 +818,14 @@ export default function ChartWorkspace() {
   const fillHeight = viewport.height - 260;
   const withRow = multi && viewport.width >= 1280 && fillHeight - smallHeight - 70 >= 520;
   const mainHeight = immersive ? Math.max(420, withRow ? fillHeight - smallHeight - 70 : fillHeight) : 410;
-  const showAside = !immersive || settings.immersiveWatchlist;
+  // The layers panel: beside the charts when there is room, otherwise a bottom sheet.
+  const narrow = viewport.width < WIDE;
+  const showLayers = (open: boolean) => {
+    setLayersOpen(open);
+    if (!narrow) try { localStorage.setItem(LAYERS_OPEN_KEY, open ? "1" : "0"); } catch { /* remembered for this visit only */ }
+  };
+  const showAside = !immersive || settings.immersiveWatchlist || (layersOpen && !narrow);
+  const watchlistShown = !immersive || settings.immersiveWatchlist;
 
   return (
     <div ref={root} data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
@@ -796,6 +877,8 @@ export default function ChartWorkspace() {
               <button aria-label="Magnet" aria-pressed={settings.magnet} title="Magnet: anchors snap to the nearest open, high, low or close (or hold ⌘/Ctrl)" onClick={() => setSettings((s) => ({ ...s, magnet: !s.magnet }))}
                 className={`ml-0.5 inline-flex h-7 w-7 items-center justify-center rounded ${settings.magnet ? "bg-amber-400/15 text-amber-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Magnet size={13} /></button>
             </div>
+            <button aria-label="Layers" aria-expanded={layersOpen} title="Layers: show, hide, lock and delete what the charts draw" onClick={() => showLayers(!layersOpen)}
+              className={`ml-0.5 inline-flex h-7 w-7 items-center justify-center rounded ${layersOpen ? "bg-sky-400/15 text-sky-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><LayersIcon size={13} /></button>
           </div>
         </div>
       </div>
@@ -803,7 +886,8 @@ export default function ChartWorkspace() {
       {drawError && <p className="text-xs text-amber-300" role="alert">{drawError}</p>}
 
       <div className="flex flex-wrap items-center gap-2" aria-label="Chart indicators">
-        {INDICATORS.map(([key, label]) => <button key={key} aria-pressed={settings.indicators[key]} onClick={() => setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !s.indicators[key] } }))} className={`rounded-full border px-2.5 py-1 text-[10px] ${settings.indicators[key] ? "border-slate-600 bg-slate-800/60 text-slate-200" : "border-slate-800 text-slate-600"}`}>{label}</button>)}
+        {settings.hiddenGroups.indicators && <button onClick={() => toggleGroup("indicators")} title="Indicators are hidden on every chart" className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 px-2.5 py-1 text-[10px] text-amber-300"><EyeOff size={11} />Indicators hidden · Show</button>}
+        {INDICATORS.map(([key, label]) => <button key={key} aria-pressed={indicators[key]} onClick={() => toggleIndicator(key)} className={`rounded-full border px-2.5 py-1 text-[10px] ${indicators[key] ? "border-slate-600 bg-slate-800/60 text-slate-200" : "border-slate-800 text-slate-600"}`}>{label}</button>)}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button aria-pressed={settings.linkRange} onClick={() => setSettings((s) => ({ ...s, linkRange: !s.linkRange }))} title="Scroll and zoom every chart to the same time window"
             className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${settings.linkRange ? "border-sky-500/50 bg-sky-400/10 text-sky-200" : "border-slate-800 text-slate-500"}`}><Link2 size={11} />Link time ranges</button>
@@ -822,7 +906,7 @@ export default function ChartWorkspace() {
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {response ? <>
-            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight}
+            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight}
               tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
               selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
               onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -831,7 +915,7 @@ export default function ChartWorkspace() {
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -850,7 +934,7 @@ export default function ChartWorkspace() {
         </div>
 
         {showAside && <aside className="min-w-0 space-y-3">
-          <section className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]" aria-label="Watchlist">
+          {watchlistShown && <section className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]" aria-label="Watchlist">
             <div className="flex items-center justify-between border-b border-slate-700/40 px-3 py-3"><h2 className="text-xs font-medium text-slate-200">Watchlist <span className="ml-1 text-slate-500">{settings.watchlist.length}</span></h2>
               <div className="flex items-center gap-0.5">
                 {([[-1, "Previous", "Shift+Space", ChevronUp], [1, "Next", "Space", ChevronDown]] as const).map(([by, name, key, Icon]) => <button key={name} aria-label={`${name} watchlist symbol`} title={`${name} symbol (${key})`} disabled={!settings.watchlist.length}
@@ -866,7 +950,8 @@ export default function ChartWorkspace() {
               </div>;
             })}
             {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
-          </section>
+          </section>}
+          {layersOpen && !narrow && layersPanel(false)}
 
           {!immersive && <><section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
             <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
@@ -894,6 +979,7 @@ export default function ChartWorkspace() {
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
+      {layersOpen && narrow && layersPanel(true)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}

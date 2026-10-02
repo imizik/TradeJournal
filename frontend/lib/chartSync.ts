@@ -33,7 +33,7 @@ export function shared(settings: ChartSettings): SharedSettings {
     levels: Object.fromEntries(Object.keys(levels).sort().filter((symbol) => levels[symbol].length).map((symbol) => [symbol, levels[symbol]])),
     // Always sent, even empty: the server keeps a field a save leaves out, so omitting it could never clear it.
     drawings: cleanDrawings(Object.fromEntries(Object.keys(drawings).sort().map((symbol) => [symbol, drawings[symbol]])), validSymbol),
-    toolStyles: cleanToolStyles(toolStyles), magnet, hiddenGroups: { levels: hiddenGroups.levels, drawings: hiddenGroups.drawings } };
+    toolStyles: cleanToolStyles(toolStyles), magnet, hiddenGroups: { levels: hiddenGroups.levels, drawings: hiddenGroups.drawings, indicators: hiddenGroups.indicators } };
 }
 const same = (a: SharedSettings, b: SharedSettings) => json(a) === json(b);
 const fromServer = (data: unknown) => shared(sanitizeSettings(data ?? {}));
