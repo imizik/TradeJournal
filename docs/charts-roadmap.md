@@ -78,7 +78,7 @@ C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work 
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done ([PR #105](https://github.com/imizik/TradeJournal/pull/105)) |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | done ([PR #106](https://github.com/imizik/TradeJournal/pull/106)) |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done ([PR #111](https://github.com/imizik/TradeJournal/pull/111)) |
-| C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done |
+| C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | next |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | todo |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | todo |
@@ -444,7 +444,7 @@ own clicks because the library holds back a quick second click. The selection
 bar folds its style controls behind **Style** so it stays one row on a phone;
 C1.3's inline label and color editing can reuse it.
 
-**C1.3 Context menu (done).** Right-click, or long-press on touch, on empty chart: add
+**C1.3 Context menu (done in PR #112).** Right-click, or long-press on touch, on empty chart: add
 level here, copy price, reset scale, toggle layers. On a level or drawing: edit
 label and color inline, lock, hide, duplicate, delete, and (after C5.1) create
 alert. *Done when:* both menus work by mouse and by touch.
