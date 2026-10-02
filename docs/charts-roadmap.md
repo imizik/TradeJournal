@@ -79,7 +79,7 @@ C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work 
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | done ([PR #106](https://github.com/imizik/TradeJournal/pull/106)) |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done ([PR #111](https://github.com/imizik/TradeJournal/pull/111)) |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
-| C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done |
+| C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done ([PR #113](https://github.com/imizik/TradeJournal/pull/113)) |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | next |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | todo |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
@@ -462,7 +462,7 @@ take a color but no label. A tab on a pre-C1.3 build drops the per-item flags
 when it saves levels or drawings, because the server keeps only top-level
 fields a save leaves out.
 
-**C1.4 Layers panel (done).** A collapsible list grouped as My levels, Drawings, Auto
+**C1.4 Layers panel (done in PR #113).** A collapsible list grouped as My levels, Drawings, Auto
 levels, Options, Journal and Indicators. Each group and item can be hidden,
 locked or deleted, and a click jumps the chart to it. *Done when:* hiding a
 group hides it on all five panels, the state persists, and the panel works as a
