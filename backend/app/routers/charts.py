@@ -145,10 +145,10 @@ def workspace(
     for name, wanted in held.items():
         try:
             other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False)
-            data["extras"][name] = {key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues")}
+            data["extras"][name] = {key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")}
         except ChartFeedError as exc:
             # A held symbol that cannot load leaves the main charts intact.
-            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)]}
+            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None}
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.

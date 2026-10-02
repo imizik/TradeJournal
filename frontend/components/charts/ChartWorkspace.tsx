@@ -7,8 +7,8 @@ import HotkeySheet from "./HotkeySheet";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, staleCandles, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceLevel, SmallChartSize, SymbolPanels } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, todayNewYork, validSymbol } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
 import type { LiveFeed } from "@/lib/chartStore";
@@ -17,14 +17,16 @@ import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
-type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null };
+type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null };
 /** Older history per frame (`symbol|interval`), for one session. */
 type OlderState = { key: string; panels: Partial<Record<string, OlderPanel>> };
 /** A symbol at an interval: what one panel draws, and the key its history is kept under. */
 type Frame = { symbol: string; interval: Interval };
 type Slot = Frame & { index: number };
 const frameKey = (frame: Frame) => `${frame.symbol}|${frame.interval}`;
-const NO_LEVELS: PriceLevel[] = [];
+/** A saved level on the adjusted basis; `was` is its saved price when a split moved it. */
+type ShownLevel = PriceLevel & { was: number | null };
+const NO_LEVELS: ShownLevel[] = [];
 /** Digits typed for the main chart's interval, waiting for Enter (C0.5). */
 type Entry = { typed: string; invalid: boolean };
 const NO_ENTRY: Entry = { typed: "", invalid: false };
@@ -159,7 +161,16 @@ export default function ChartWorkspace() {
     return merged;
   }, [slots, feedFor, currentOlder]);
   const selected = latest?.quotes.find((q) => q.symbol === symbol);
-  const levels = settings.levels[symbol] ?? NO_LEVELS;
+  // Saved levels on the chart's split-adjusted basis: a level drawn before a split moves with the candles.
+  const splitsBySymbol = JSON.stringify([...wanted.keys()].map((name) => [name, feedFor(name)?.adjustment?.splits ?? []]));
+  const shownLevels = useMemo(() => {
+    const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
+    return new Map([...wanted.keys()].map((name) => [name, (settings.levels[name] ?? NO_LEVELS).map((level) => {
+      const on = levelOnBasis(level, splits.get(name) ?? []);
+      return { ...level, price: on.price, was: on.moved ? level.price : null };
+    })]));
+  }, [splitsBySymbol, wanted, settings.levels]);
+  const levels = shownLevels.get(symbol) ?? NO_LEVELS;
 
   useEffect(() => {
     historyFlights.current.forEach((controller) => controller.abort());
@@ -176,6 +187,21 @@ export default function ChartWorkspace() {
     setOlder((state) => Object.keys(state.panels).every((key) => shown.has(key)) ? state
       : { ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => shown.has(key))) });
   }, [framesKey]);
+
+  // A split recorded while the tab is open changes the basis of candles already loaded. Those are dropped,
+  // never mixed with newer pages; scrolling back rereads them on the new basis.
+  const feedBasis = JSON.stringify([...wanted.keys()].map((name) => { const a = feedFor(name)?.adjustment; return [name, a ? splitsKey(a) : null]; }));
+  useEffect(() => {
+    const now = new Map(JSON.parse(feedBasis) as [string, string | null][]);
+    const stale = new Set(slots.filter((slot) => {
+      const loaded = older.panels[frameKey(slot)]?.adjustment;
+      const target = now.get(slot.symbol);
+      return loaded && target != null && splitsKey(loaded) !== target;
+    }).map(frameKey));
+    if (!stale.size) return;
+    stale.forEach((key) => { historyFlights.current.get(key)?.abort(); historyFlights.current.delete(key); visibleTimes.current.delete(key); });
+    setOlder((state) => ({ ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => !stale.has(key))) }));
+  }, [feedBasis, older.panels, slots]);
 
   const loadOlder = useCallback(async (frame: Frame, beforeOverride?: number, retry = false) => {
     const key = frameKey(frame);
@@ -194,6 +220,13 @@ export default function ChartWorkspace() {
       while (!controller.signal.aborted) {
         const page = await fetchChartHistory({ symbol: frame.symbol, interval: frame.interval, session, before, continuation, signal: controller.signal });
         if (controller.signal.aborted) return;
+        if (splitsKey(page.adjustment) !== splitsKey(feed.adjustment)) {
+          // The page and the candles on screen disagree about splits; accepting it would mix two price bases.
+          setOlder((state) => state.key !== session ? state : ({ ...state, panels: { ...state.panels, [key]: {
+            ...(state.panels[key] ?? { bars: [], markers: [], exhausted: false, warmup: "pending" }), loading: false,
+            issue: "A split was recorded while these charts were open. Older candles reload after the next refresh." } } }));
+          break;
+        }
         setOlder((state) => {
           if (state.key !== session) return state;
           const prior = state.panels[key];
@@ -206,7 +239,9 @@ export default function ChartWorkspace() {
           const times = new Set(retained.map((bar) => bar.time));
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
           return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers,
-            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null,
+            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment,
+            // Notes the workspace banner does not already carry (for example a jump that looks like an unrecorded split in older candles).
+            adjustmentNote: page.adjustment.warnings.filter((note) => !feed.adjustment?.warnings.includes(note)).join(" ") || prior?.adjustmentNote || null,
             exhausted: page.exhausted, warmup: page.warmup, issue: page.issue?.code === "pending" ? null : page.issue?.message ?? null,
             loading: !!page.continuation && (!page.issue || page.issue.code === "pending" || page.issue.code === "rate_limited") } } };
         });
@@ -459,7 +494,7 @@ export default function ChartWorkspace() {
     const existing = settings.levels[target] ?? NO_LEVELS;
     if (!Number.isFinite(value) || value <= 0) { setLevelError("Enter a positive price."); return; }
     if (existing.length >= 30) { setLevelError(`Remove a ${target} level before adding another (30 per symbol).`); return; }
-    const level = { id: crypto.randomUUID(), price: value, label: levelLabel.trim().slice(0, 30) || `Level ${existing.length + 1}` };
+    const level = { id: crypto.randomUUID(), price: value, drawn_on: todayNewYork(), label: levelLabel.trim().slice(0, 30) || `Level ${existing.length + 1}` };
     setSettings((s) => ({ ...s, levels: { ...s.levels, [target]: [...(s.levels[target] ?? []), level] } }));
     setDrawing(false); setLevelPrice(""); setLevelLabel(""); setLevelError("");
   };
@@ -483,6 +518,15 @@ export default function ChartWorkspace() {
   const market = latest?.market;
   const holiday = market?.status === "closed" && ![0, 6].includes(new Date(`${market.date}T12:00:00Z`).getUTCDay());
   const marketLabel = market?.note ?? earlyClose(market) ?? (holiday ? market?.description || "Market closed today" : null);
+  // One price basis for every chart: split-adjusted, with what it rests on and what it cannot see.
+  const basis = current?.adjustment ?? null;
+  const basisTitle = basis ? [...(basis.splits.length ? basis.splits.map((s) => `${s.label} split, ex-date ${s.ex_date}`) : ["No splits recorded"]),
+    basis.status === "unknown" ? "Split data unavailable: prices are as the provider supplied them" : `Alpaca corporate actions${basis.as_of ? `, as of ${new Date(basis.as_of * 1000).toLocaleDateString("en-US", { timeZone: "America/New_York" })}` : ""}`,
+    basis.dividends_note].join(" · ") : undefined;
+  const basisNotes = [...new Set([...wanted.keys()].flatMap((name) => {
+    const own = feedFor(name)?.adjustment;
+    return (own?.warnings ?? []).map((note) => `${name}: ${note}`);
+  }))];
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
   // Immersive: the main chart fills the screen below the toolbar. On a tall,
@@ -523,6 +567,8 @@ export default function ChartWorkspace() {
           </form>
           <LiveQuote live={live} quote={selected} candle={latestCandle} />
           {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`rounded px-2 py-1 text-[11px] ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
+          {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`rounded px-2 py-1 text-[11px] ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
+            {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
           <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} />
         </div>
         <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
@@ -549,15 +595,17 @@ export default function ChartWorkspace() {
       {requestFailed && <div role="alert" aria-label="Chart data error" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">{error.message}{current && <span className="ml-1">Showing the last successful data.</span>}</div>}
       {!!issues.length && <div role="alert" aria-label="Chart data warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">Refresh incomplete. {issues.join(" ")} Check timestamps before using these charts.</div>}
 
+      {!!basisNotes.length && <div role="status" aria-label="Price basis warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">{basisNotes.join(" ")}</div>}
+
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {response ? <>
-            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={settings.levels[slot.symbol] ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
+            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
               history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />)}
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={settings.levels[slot.symbol] ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -593,7 +641,7 @@ export default function ChartWorkspace() {
 
           {!immersive && <><section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
             <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2><span className="text-[10px] text-slate-600">{levels.length}/30</span></div>
-            {levels.map((level) => <div key={level.id} className="mb-2 flex items-center gap-2 text-[11px]"><span className="h-px w-3 bg-blue-400" /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span><span className="font-mono text-blue-300">{price(level.price)}</span><button aria-label={`Delete ${level.label}`} onClick={() => setSettings((s) => ({ ...s, levels: { ...s.levels, [s.symbol]: (s.levels[s.symbol] ?? []).filter((v) => v.id !== level.id) } }))} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
+            {levels.map((level) => <div key={level.id} className="mb-2 flex items-center gap-2 text-[11px]"><span className="h-px w-3 bg-blue-400" /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span><span className="font-mono text-blue-300" title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => setSettings((s) => ({ ...s, levels: { ...s.levels, [s.symbol]: (s.levels[s.symbol] ?? []).filter((v) => v.id !== level.id) } }))} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
             {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
             <form onSubmit={(e) => { e.preventDefault(); addLevel(Number(levelPrice)); }} className="space-y-2">
               <input aria-label="Level label" placeholder="Label (optional)" value={levelLabel} maxLength={30} onChange={(e) => setLevelLabel(e.target.value)} className="h-8 w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600" />

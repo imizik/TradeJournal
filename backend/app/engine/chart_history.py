@@ -19,7 +19,9 @@ from uuid import uuid4
 import httpx
 
 from app.engine import alpaca
+from app.engine.chart_adjust import BASIS, adjust_minutes, describe, suspect_gaps
 from app.engine.chart_calendar import ChartCalendar, chart_calendar
+from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
 from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, normalize_bars
 
 FLOOR = date(2016, 1, 1)
@@ -48,8 +50,9 @@ class Work:
 
 
 class ChartHistory:
-    def __init__(self, root: Path = CACHE_DIR, calendar: ChartCalendar | None = None):
+    def __init__(self, root: Path = CACHE_DIR, calendar: ChartCalendar | None = None, splits: ChartSplits | None = None):
         self.root = root
+        self.splits = splits  # None: no split data, disclosed on every page
         self.calendar = calendar  # None: clock hours, disclosed on every page
         self._lock = threading.RLock()  # history-only; never held by Tradier reads
         self._calls: deque[float] = deque()
@@ -213,7 +216,8 @@ class ChartHistory:
                 key = uuid4().hex
                 self._work[key] = work
             work.touched = now
-            deadline = now + 10
+            info = self.splits.get(symbol) if self.splits else UNAVAILABLE  # one read per page, before the work deadline starts
+            deadline = time.monotonic() + 10
             attempts = [0]
             issue: dict | None = None
             try:
@@ -226,7 +230,8 @@ class ChartHistory:
                         continue
                     if hours is None:
                         work.clock_days.add(work.day)
-                    minutes = self._session(symbol, work.day, work, deadline, attempts)
+                    # The cache stays raw; the display basis is applied to a copy.
+                    minutes = adjust_minutes(self._session(symbol, work.day, work, deadline, attempts), work.day, info["splits"])
                     # Each session resamples with its own date's hours (half days end at 13:00).
                     day_bars = [b for b in chart_bars(minutes, [], interval, session, {work.day: hours}) if b["time"] < before]
                     # Full-day resampling supplies VWAP and complete buckets.
@@ -264,8 +269,9 @@ class ChartHistory:
                     "limit": limit, "bars": visible, "older_cursor": visible[0]["time"] if visible else (int(datetime.combine(work.day, wall_time(20), ET).timestamp()) if not exhausted else None),
                     "exhausted": exhausted and len(eligible) <= limit, "continuation": None if ready else key,
                     "warmup": "ready" if warmed else "insufficient" if exhausted else "pending",
-                    "source": "alpaca_sip", "price_basis": "raw", "issue": issue,
+                    "source": "alpaca_sip", "price_basis": BASIS, "issue": issue,
+                    "adjustment": describe(info, suspects=suspect_gaps(visible)),
                     "calendar_note": CLOCK_NOTE if shown & work.clock_days else None}
 
 
-chart_history = ChartHistory(calendar=chart_calendar)
+chart_history = ChartHistory(calendar=chart_calendar, splits=chart_splits)

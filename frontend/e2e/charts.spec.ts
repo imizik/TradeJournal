@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { ChartData, ChartBar, Interval, MarketDay } from "../lib/charts";
+import type { ChartData, ChartBar, Interval, MarketDay, PriceAdjustment } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 
 // Each test starts from empty server settings of its own; tests tagged
@@ -30,6 +30,10 @@ function fixturePanels(intervals: Interval[], offset = 0): ChartData["panels"] {
   return panels;
 }
 
+// Prices are on the chart's split-adjusted basis; this symbol has no recorded splits.
+const ADJUSTED: PriceAdjustment = { basis: "split_adjusted", status: "ok", source: "alpaca_corporate_actions", as_of: 1789000000, splits: [],
+  daily: {}, dividends: "unsupported", dividends_note: "Dividends are not adjusted; prices are split-adjusted only.", warnings: [] };
+
 function fixture(url: string): ChartData {
   const query = new URL(url).searchParams;
   const symbol = query.get("symbol") ?? "MRVL";
@@ -46,7 +50,7 @@ function fixture(url: string): ChartData {
     refresh_seconds: 15, checked_at: now, fetched_at: { intraday: now }, panels,
     quotes: symbols.map((s) => ({ symbol: s, name: `${s} test company`, last: s === "NVDA" ? 189.12 : 262.66,
       change: 2, change_percentage: 1.5, volume: 1200000, previous_close: 260.66, trade_time: now - 2 })),
-    issues: [], intraday_as_of: now - 60, history_note: "Synthetic chart data for browser verification.", fills: [], fills_truncated: false, extras };
+    issues: [], adjustment: ADJUSTED, intraday_as_of: now - 60, history_note: "Synthetic chart data for browser verification.", fills: [], fills_truncated: false, extras };
 }
 
 async function stub(page: Page, onRequest?: (url: string) => void) {
@@ -397,12 +401,12 @@ test("with no intraday bars today (weekend, holiday, overnight) charts open on t
     requests.push({ interval: query.get("interval"), before: Number(query.get("before")) });
     return route.fulfill({ json: { symbol: "MRVL", interval: query.get("interval"), session: "extended", before: Number(query.get("before")),
       limit: 1200, bars: completed, markers: [], older_cursor: completed[0].time, exhausted: false, continuation: null,
-      warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null,
       calendar_note: "Market calendar unavailable: holidays and early closes use regular clock hours." } });
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
-  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
   await expect(page.getByTestId("canvas-Panel 5")).toHaveAttribute("data-bars", "120");
   // One opening request per intraday panel, starting from now; scrolling may add older pages.
   const first = new Map<string | null, number>();
@@ -581,7 +585,7 @@ test("a tick re-renders only the charts whose candles moved, and the clock re-re
     const query = new URL(route.request().url()).searchParams;
     return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"),
       before: Number(query.get("before")), limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
-      warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null } });
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
   });
   await openAt(page, TUESDAY_1032, (url) => currentFixture(url, TUESDAY_1032));
   await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
@@ -671,7 +675,7 @@ async function deepHistoryStub(page: Page, months = 6) {
       limit: 1200, bars: pageBars, markers: pageBars.some((bar) => bar.time === marker.time)
         ? [{ id: "old-fill", time: marker.time, label: "buy to open 1 stock", buy: true }] : [],
       older_cursor: pageBars[0]?.time ?? null, exhausted: pageBars[0]?.time === bars[0].time,
-      continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null,
+      continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null,
     } });
   });
   return { bars, base, requests: () => requests, refreshes: () => refreshes };
@@ -704,7 +708,7 @@ test("New York midnight replaces the completed Tradier day with SIP without wait
     return route.fulfill({ json: { symbol: "MRVL", interval, session: "extended", before,
       limit: 1200, bars: completed, markers: [], older_cursor: completed[0].time,
       exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip",
-      price_basis: "raw", fills_truncated: false, issue: null } });
+      price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
@@ -712,7 +716,7 @@ test("New York midnight replaces the completed Tradier day with SIP without wait
   await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
   await expect.poll(() => requests.some((request) => request.interval === "5m" && request.before === afterMidnight)).toBe(true);
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
-  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
 });
 
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
@@ -766,7 +770,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
   const plot = (await page.getByTestId("canvas-main").boundingBox())!;
   await page.mouse.move(plot.x + plot.width * 0.5, plot.y + plot.height * 0.35);
-  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
   await page.screenshot({ path: test.info().outputPath("deep-history-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: "Latest candles main" }).click();
   await expect.poll(async () => (await visibleRange(page, "main"))?.to ?? 0).toBeGreaterThan(state.bars.at(-1)!.time);
@@ -792,7 +796,7 @@ test("older history failure retries without clearing current candles; a stale re
     const bars = Array.from({ length: 1200 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (1200 - i) * 300, end_time: before - (1199 - i) * 300 }));
     try { await route.fulfill({ json: { symbol: query.get("symbol"), interval: "5m", session: "extended", before, limit: 1200,
       bars, markers: [], older_cursor: bars[0].time, exhausted: false, continuation: null,
-      warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null } }); } catch { /* navigation aborted the old request */ }
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } }); } catch { /* navigation aborted the old request */ }
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
@@ -1337,7 +1341,7 @@ test("a held panel scrolls back its own symbol, and focusing it swaps it with th
     const bars = fixturePanels([interval], HELD_OFFSET[query.get("symbol")!] ?? 0)[interval]!.bars.map((bar) => ({ ...bar,
       time: bar.time - 60 * 86400, end_time: bar.end_time - 60 * 86400, source: "alpaca_sip" as const })).filter((bar) => bar.time < before); // the 60 days before
     return route.fulfill({ json: { symbol: query.get("symbol"), interval, session: query.get("session"), before, limit: 1200, bars, markers: [],
-      older_cursor: bars[0]?.time ?? null, exhausted: true, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "raw", fills_truncated: false, issue: null } });
+      older_cursor: bars[0]?.time ?? null, exhausted: true, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
@@ -1700,6 +1704,98 @@ test.describe("phone layouts", () => {
     await expect(page.getByTestId("chart-workspace")).toHaveAttribute("data-immersive", "true"); // Escape closed the sheet only
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
+});
+
+// ---- C0.6: one split-adjusted price basis ----
+const NVDA_SPLIT: PriceAdjustment = { ...ADJUSTED, splits: [{ ex_date: "2024-06-10", ratio: 10, label: "10-for-1" }] };
+async function stubAdjustment(page: Page, adjustment: PriceAdjustment) {
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...fixture(route.request().url()), adjustment } }));
+}
+
+test("a recorded split labels the basis and moves levels drawn before it", async ({ page, context }) => {
+  const server = await fakeChartSettings(context, { revision: 2, data: { levels: { MRVL: [
+    { id: "old", price: 1210, label: "Old high", drawn_on: "2024-06-07" },
+    { id: "after", price: 120, label: "After split", drawn_on: "2025-01-02" },
+    { id: "legacy", price: 300, label: "Undated" },
+  ] } } });
+  await stubAdjustment(page, NVDA_SPLIT);
+  await page.goto("/charts");
+  const chip = page.getByRole("status", { name: "Price basis", exact: true });
+  await expect(chip).toHaveText("Split-adjusted · 1 split");
+  await expect(chip).toHaveAttribute("title", /10-for-1 split, ex-date 2024-06-10.*Dividends are not adjusted/);
+  const levels = page.getByRole("region", { name: "Saved price levels" });
+  await expect(levels).toContainText("Old high");
+  await expect(levels.locator("div", { hasText: "Old high" }).last()).toContainText("121.00");
+  await expect(levels.locator("div", { hasText: "Old high" }).last()).toContainText("was 1,210.00");
+  await expect(levels.locator("div", { hasText: "After split" }).last()).not.toContainText("was");
+  await expect(levels.locator("div", { hasText: "Undated" }).last()).toContainText("300.00");
+  await expect(page.getByRole("status", { name: "Price basis warning" })).toHaveCount(0);
+  // The stored level is untouched: only its display moved. A new level records the day it was drawn.
+  await page.getByLabel("Level label").fill("Fresh");
+  await page.getByLabel("Level price", { exact: true }).fill("125");
+  await page.getByRole("button", { name: "Save price level" }).click();
+  await expect.poll(() => (server.data?.levels as Record<string, { id: string; price: number; drawn_on?: string }[]>)?.MRVL?.length).toBe(4);
+  const saved = (server.data!.levels as Record<string, { price: number; label: string; drawn_on?: string }[]>).MRVL;
+  expect(saved.find((l) => l.label === "Old high")).toMatchObject({ price: 1210, drawn_on: "2024-06-07" });
+  expect(saved.find((l) => l.label === "Fresh")?.drawn_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+});
+
+test("missing split data says so on the chart instead of guessing", async ({ page }) => {
+  await stubAdjustment(page, { ...ADJUSTED, status: "unknown", as_of: null,
+    warnings: ["Split data is unavailable for this symbol, so prices are shown as the provider supplied them. A stock split would appear as a sudden price cliff."] });
+  await page.goto("/charts");
+  await expect(page.getByRole("status", { name: "Price basis", exact: true })).toHaveText("Splits unknown · prices as supplied");
+  const warning = page.getByRole("status", { name: "Price basis warning" });
+  await expect(warning).toContainText("MRVL: Split data is unavailable");
+  await expect(warning).toContainText("sudden price cliff");
+});
+
+test("a history page on a different split basis than the candles on screen is refused, not mixed in", async ({ page }) => {
+  await registerCharts(page);
+  const base = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...currentFixture(route.request().url(), base), adjustment: NVDA_SPLIT } }));
+  let asked = 0;
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    asked++;
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const template = fixture(route.request().url()).panels["5m"]!.bars[0];
+    // This page was adjusted without the split the workspace already knows about.
+    const bars = Array.from({ length: 1200 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (1200 - i) * 300, end_time: before - (1199 - i) * 300 }));
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: "5m", session: "extended", before, limit: 1200, bars, markers: [],
+      older_cursor: bars[0].time, exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted",
+      adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.waitForTimeout(120);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  await expect(page.getByRole("button", { name: "Retry history" }).first()).toBeVisible();
+  expect(asked).toBeGreaterThan(0);
+  await expect(page.getByText("A split was recorded while these charts were open").first()).toBeVisible();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100"); // nothing from the other basis was drawn
+});
+
+test("a possible unrecorded split in older candles is noted on its panel without shifting the page banner", async ({ page }) => {
+  await registerCharts(page);
+  const base = Math.floor(Date.now() / 1000);
+  const jump = "Price jumps 10x between 2024-06-07 and 2024-06-10, like a forward split that is not in the split data. Prices there are not adjusted.";
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: currentFixture(route.request().url(), base) }));
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const template = fixture(route.request().url()).panels["5m"]!.bars[0];
+    const bars = Array.from({ length: 1200 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (1200 - i) * 300, end_time: before - (1199 - i) * 300 }));
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: "5m", session: "extended", before, limit: 1200, bars, markers: [],
+      older_cursor: bars[0].time, exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted",
+      adjustment: { ...ADJUSTED, warnings: [jump] }, fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.waitForTimeout(120);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" }).getByRole("status")).toContainText("Price jumps 10x between 2024-06-07 and 2024-06-10");
+  await expect(page.getByRole("status", { name: "Price basis warning" })).toHaveCount(0);
 });
 
 // ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----

@@ -337,7 +337,7 @@ def test_history_route_identifies_window_and_returns_bounded_old_markers(route_c
     monkeypatch.setattr(charts.chart_history, "page", lambda symbol, interval, session, cursor, limit, continuation: {
         "symbol": symbol, "interval": interval, "session": session, "before": cursor, "limit": limit,
         "bars": bars, "older_cursor": bars[0]["time"], "exhausted": False, "continuation": None,
-        "warmup": "ready", "source": "alpaca_sip", "price_basis": "raw", "issue": None,
+        "warmup": "ready", "source": "alpaca_sip", "price_basis": "split_adjusted", "issue": None,
     })
     response = route_client.get(f"/charts/history?symbol=SPY&interval=5m&session=regular&before={before}")
     assert response.status_code == 200
@@ -356,7 +356,7 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
             raise ChartFeedError("Tradier could not load these charts.")
         bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
         return {"panels": {f: {"bars": bars, "markers": []} for f in frames}, "fetched_at": {"intraday": 1}, "intraday_as_of": 2,
-                "issues": [], "quotes": [{"symbol": symbol}] if quotes else []}
+                "issues": [], "adjustment": {"basis": "split_adjusted"}, "quotes": [{"symbol": symbol}] if quotes else []}
 
     monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m,1D&watchlist=NVDA&session=regular&extras=SPY:5m.1h,BRK.B:15m").json()
@@ -369,7 +369,7 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
     assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
-                                     "issues": ["Tradier could not load these charts."], "fills_truncated": False}
+                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "fills_truncated": False}
 
 
 def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):
@@ -380,7 +380,7 @@ def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, mo
     db.commit()
     bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
     monkeypatch.setattr(charts.chart_feed, "workspace", lambda symbol, frames, *_, **__: {
-        "panels": {f: {"bars": bars, "markers": []} for f in frames}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "quotes": []})
+        "panels": {f: {"bars": bars, "markers": []} for f in frames}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "adjustment": None, "quotes": []})
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=QQQ:5m,SPY:5m").json()
     assert data["fills_truncated"] is False
     assert data["extras"]["QQQ"]["fills_truncated"] is True and data["extras"]["SPY"]["fills_truncated"] is False

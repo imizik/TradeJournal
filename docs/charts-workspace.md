@@ -41,7 +41,7 @@ The user has free API plans. A read-only market-hours probe at 10:57 ET returned
 |---|---|---|
 | Tradier | HTTP 200 for MRVL/SPY quotes, 4,424 MRVL minute candles over seven calendar days, and 276 daily candles over 400 days. Quote timestamps were current within seconds. Response headers confirmed 120 requests/minute. | Today, quotes, daily/weekly bars and the live stream. |
 | Webull | The existing app key's v3 stock snapshot request returned HTTP 401: the request IP did not match its configured settings. | This proves an IP restriction, not missing market-data entitlement. No allowlist or account settings were changed. |
-| Alpaca Basic | The journal client may default to IEX; its setting is independent of Charts. | Completed intraday sessions request historical SIP with raw adjustment explicitly. No IEX fallback. |
+| Alpaca Basic | The journal client may default to IEX; its setting is independent of Charts. | Completed intraday sessions request historical SIP with raw adjustment explicitly, stored raw; the chart adjusts for splits at display time (C0.6). Alpaca corporate actions supply the split records. No IEX fallback. |
 | Polygon/Massive Basic | Five calls/minute and end-of-day availability. | Keep historical enrichment; unsuitable as this page's live source. |
 
 Webull's [marketing page](https://www.webull.com/open-api) advertises free Level 1
@@ -78,7 +78,7 @@ cd backend
 - EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14).
 - Extended-session shading and regular/extended hours selection. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
-  aggregates. Tradier does not guarantee dividend adjustment.
+  aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
 - Levels, watchlist, intervals, session, indicators, layout and named layouts are saved on the
   server (`GET`/`PUT /charts/settings`, table `chart_settings`), so the phone
@@ -166,7 +166,7 @@ cd backend
   which can show regular-session closes after hours.
 - Intraday charts load older SIP/raw pages when the visible range nears the
   loaded left edge. A 5m chart can navigate six months through pages. The
-  candle hover legend says **SIP raw** or **Tradier**. Today's forming bars and
+  candle hover legend says **SIP** or **Tradier**. Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier.
 - When today has no intraday bars (before 04:00, weekends, holidays), each
   intraday panel opens on the latest completed SIP sessions instead of an
@@ -286,13 +286,66 @@ Without a calendar, clock hours apply and `market.note` or the page's
 `calendar_note` discloses it.
 
 No partial intraday data enters the persistent enrichment caches. No feed
-fallback mixes IEX or unofficial quotes into these charts. Intraday SIP prices
-are raw/unadjusted, so a split may create a discontinuity; daily adjustment
-is still not guaranteed. A failed refresh may
+fallback mixes IEX or unofficial quotes into these charts. A failed refresh may
 retain last-known bars with their original fetch timestamps and an explicit
 warning. Missing credentials/data produces an empty setup state, never sample
 prices. Sandbox data is labeled delayed. Last-trade age is displayed separately
 from refresh time; a successful HTTP call is not proof that a quote is fresh.
+
+### Price basis (C0.6)
+
+Every chart is on one basis: **split-adjusted**. Prices before a split's
+ex-date are divided by its ratio and volume is multiplied by it, so a 10-for-1
+split (NVDA, ex-date 2024-06-10) leaves no cliff and EMAs, VWAP, volume, saved
+levels and journal arrows agree across minute, daily and weekly charts. There
+is no raw toggle: the stored bars stay raw, and a one-line chip in the toolbar
+(`Split-adjusted · 1 split`, hover for each split and its source) states the
+basis. Dividends are **not** adjusted, and the hover text says so.
+
+- **Where splits come from.** `backend/app/engine/chart_splits.py` reads
+  Alpaca's corporate-actions endpoint (`/v1/corporate-actions`, forward and
+  reverse splits from 2016, ratio = `new_rate / old_rate`), one call per symbol
+  per New York date, cached in `backend/data/chart_splits/v1/alpaca/{symbol}.json`
+  with the fetch time. These calls sit apart from the 30-attempt history
+  budget. A split applies from its ex-date; announced future splits wait.
+  A failed refresh keeps the last copy (`stale`); with no copy the symbol is
+  `unknown`. An unknown symbol shows raw prices as supplied, an amber chip and
+  a banner saying a split would appear as a cliff. A split is never inferred.
+- **Display layer.** `backend/app/engine/chart_adjust.py` (pure) adjusts copies of
+  bars. Minute sessions are adjusted before resampling and indicators, per New
+  York date, so a page's EMAs, RSI and VWAP are computed on adjusted prices. The
+  Alpaca session cache is untouched (`adjustment: raw`) and is not keyed by
+  basis. Fills and P&L never pass through it; arrow positions are timestamps,
+  so they cannot move.
+- **Tradier daily/weekly.** Tradier's daily bars were observed already
+  split-adjusted (NVDA, checked 2026-10-01). Each recorded split is still
+  verified against the bars: if the close-to-open jump across the ex-date is
+  still about the ratio, the bars are adjusted here (`adjusted_here`);
+  otherwise the provider's adjustment is kept (`provider_adjusted`); a split
+  with no bar after it is `unverified` and warned about. Weekly bars are built
+  from the adjusted daily bars.
+- **Possible unrecorded splits.** A close-to-open jump within 4% of a common
+  split ratio, in a symbol with no matching record, adds a warning with its
+  dates (in the panel's status line for older pages, so the page does not
+  shift). Prices are never changed on that evidence.
+- **Saved levels.** A level stores the price the user saw and the New York
+  date it was drawn (`drawn_on`). On the adjusted basis it is shown at
+  `price / (product of ratios of splits after drawn_on)`, the same factor the
+  candles got, and the side list shows `was $…` when it moved. Levels drawn
+  after the split are unchanged. Levels saved before C0.6 have no date and are
+  shown as saved. The saved record never changes.
+- **A split recorded while a tab is open.** Older pages loaded before it are on
+  the old basis, so once a refresh brings the new split set they are dropped
+  and scrolling back rereads them adjusted. A history page whose split set
+  differs from the candles on screen is refused (with a retry), never merged.
+  A damaged split cache file is refetched, not trusted.
+- **Not covered.** Dividends, spin-offs and stock dividends; options and SPX.
+- **Live evidence.** `scripts/check_chart_splits.py` is the read-only probe.
+  2026-10-01 20:05 ET, NVDA 10-for-1 (ex-date 2024-06-10), Alpaca corporate
+  actions and SIP, Tradier daily: the 2024-06-07 final minute close of 1,208.65
+  adjusted to 120.865 against Alpaca's split-adjusted daily close of 120.89 and
+  Tradier's 120.88; the ex-date session needed no adjustment (121.65 minute,
+  121.79 daily on both providers).
 
 `backend/app/engine/chart_math.py` is pure. Provider Unix timestamps identify
 minute bars; daily dates map to 09:30 America/New_York. Resampling anchors each
@@ -345,6 +398,13 @@ chart to its latest candle at the same zoom with End (also with linked
 ranges), compare the `?` sheet with the exact binding list, and do the same
 by touch at 390px. A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
+`backend/tests/test_chart_splits.py` pins the basis: a NVDA-shaped split gives
+matching minute, daily and weekly prices whether Tradier's daily bars are
+adjusted or raw, the raw cache stays raw, a missing or stale split source
+warns, a split-like jump with no record only warns, and the provider request
+and daily refresh are fixtured. The browser suite checks the basis chip, a
+level drawn before a split moving with it, new levels recording their date, and
+the missing-split banner.
 `backend/tests/test_chart_stream.py` checks session buckets, invalid event
 filters, and a single upstream subscription shared across tabs.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
