@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
-import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, IPriceLine, Time, UTCTimestamp } from "lightweight-charts";
-import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
+import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
+import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer, Trash2, X } from "lucide-react";
 import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, staleCandles } from "@/lib/charts";
 import type { ChartBar, ChartCommand, ChartCommands, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
 import { useClock, useLivePanel } from "@/lib/chartStore";
+import { DRAG_START, DrawingLayer, MOUSE_SLOP, TOUCH_SLOP } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 
 const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
@@ -76,12 +77,12 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; levels: IPriceLine[];
+  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; drawings: DrawingLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, link, rangeLink, commands, linkRange = false, clock, height, main = false, drawing = false, expanded, history, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, link, rangeLink, commands, linkRange = false, clock, height, main = false, drawing = false, expanded, history, selected = null, showSelection = false, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onSelect, onMove, onDelete, onInterval, onFocus, onExpand }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
@@ -93,6 +94,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   /** Alt+R and End from the workspace: every chart moves its own view. */
   commands: ChartCommands;
   main?: boolean; drawing?: boolean; expanded?: boolean; onDraw(price: number): void;
+  /** The selected level, if it is this symbol's; every panel of the symbol highlights it. */
+  selected?: string | null;
+  /** The panel the level was selected on carries its Delete bar. */
+  showSelection?: boolean;
+  /** Pressing (mouse) or tapping (touch) a level selects it; empty chart space selects nothing. */
+  onSelect?(id: string | null): void;
+  /** A dragged level, dropped at a price on the chart's basis. */
+  onMove?(id: string, price: number): void;
+  onDelete?(id: string): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   onInterval(interval: Interval): void; onFocus?(): void; onExpand?(): void;
@@ -107,7 +117,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending: !!pending });
+  const actions = useRef({ drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove });
   const initial = useRef(true);
   const [hover, setHover] = useState<ChartBar | null>(null);
   // `rest` is the REST snapshot plus older history; streamed trades are applied
@@ -117,14 +127,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const renders = (window as typeof window & { __tjRenders?: RenderCounts }).__tjRenders;
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
-  useEffect(() => { actions.current = { drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending: !!pending }; }, [drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending]);
+  useEffect(() => { actions.current = { drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove }; }, [drawing, onDraw, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
   // changes swap data and panes in place (below), so switching never blanks.
   useEffect(() => {
-    if (!container.current) return;
-    const chart = createChart(container.current, {
+    const element = container.current;
+    if (!element) return;
+    const chart = createChart(element, {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: "#10151e" }, textColor: "#8593a9", fontSize: 10,
         attributionLogo: true, panes: { separatorColor: "#27303d", separatorHoverColor: "#46576b" } },
@@ -146,7 +157,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const lines = {} as Bundle["lines"];
     for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const markers = createSeriesMarkers(candles, []);
-    bundle.current = { chart, candles, volume, shade, lines, markers, levels: [], frame: "" };
+    const drawings = new DrawingLayer();
+    candles.attachPrimitive(drawings);
+    bundle.current = { chart, candles, volume, shade, lines, markers, drawings, frame: "" };
     let syncing = false;
     const stopLink = link.listen((time, source) => {
       if (source === id || syncing) return;
@@ -163,10 +176,92 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
     });
+    // Levels drag in front of the chart: a press on one never reaches the
+    // library, so the chart does not pan under it. A mouse drags any level; a
+    // finger drags only the selected one, so panning across a level never
+    // moves it. A tap selects (the click handler below). `offset` keeps the
+    // line where it was grabbed, so it moves by the drag instead of jumping to the pointer.
+    let drag: { id: string; touch: number | null; from: number; offset: number; price: number; moved: boolean } | null = null;
+    let lastTouch = -Infinity;
+    const local = (clientX: number, clientY: number) => { const box = element.getBoundingClientRect(); return { x: clientX - box.left, y: clientY - box.top }; };
+    const onPlot = (x: number, y: number) => x >= 0 && x <= chart.timeScale().width() && y >= 0 && y <= chart.panes()[0].getHeight();
+    const level = (y: number) => {
+      const value = candles.coordinateToPrice(Math.max(0, Math.min(chart.panes()[0].getHeight(), y)));
+      return value === null || value <= 0 ? null : Math.round(value * 100) / 100;
+    };
+    const grab = (x: number, y: number, touch: number | null) => {
+      const now = actions.current;
+      if (now.drawing || now.pending || !now.onMove || !onPlot(x, y)) return false;
+      const id = touch === null ? drawings.hit(y, MOUSE_SLOP) : now.selected ? drawings.hit(y, TOUCH_SLOP, now.selected) : null;
+      const at = id === null ? null : drawings.y(id);
+      if (id === null || at === null) return false;
+      drag = { id, touch, from: y, offset: at - y, price: 0, moved: false };
+      if (touch === null) now.onSelect?.(id);
+      window.addEventListener("keydown", onEscape, true);
+      return true;
+    };
+    const follow = (y: number) => {
+      if (!drag) return;
+      if (!drag.moved && Math.abs(y - drag.from) < DRAG_START) return;
+      drag.moved = true;
+      const value = level(y + drag.offset);
+      if (value !== null) { drag.price = value; drawings.setPreview({ id: drag.id, price: value }); }
+    };
+    const finish = (commit: boolean) => {
+      const done = drag;
+      drag = null;
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("keydown", onEscape, true);
+      if (!done?.moved) return;
+      if (!commit) { drawings.setPreview(null); return; }
+      // The preview holds the new price until the saved level comes back as a prop.
+      actions.current.onMove?.(done.id, done.price);
+      window.setTimeout(() => { if (!drag) drawings.setPreview(null); }, 1000);
+    };
+    const onEscape = (event: KeyboardEvent) => { if (event.key === "Escape" && drag) { event.preventDefault(); event.stopPropagation(); finish(false); } };
+    const onMouseMove = (event: MouseEvent) => follow(local(event.clientX, event.clientY).y);
+    const onMouseUp = () => finish(true);
+    const onMouseDown = (event: MouseEvent) => {
+      if (event.button !== 0 || drag) return;
+      const at = local(event.clientX, event.clientY);
+      if (!grab(at.x, at.y, null)) return;
+      event.stopPropagation();
+      event.preventDefault();
+      window.addEventListener("mousemove", onMouseMove);
+      window.addEventListener("mouseup", onMouseUp);
+    };
+    const onTouchStart = (event: TouchEvent) => {
+      lastTouch = performance.now();
+      if (drag || event.touches.length !== 1) { if (drag) finish(false); return; }
+      const touch = event.touches[0];
+      const at = local(touch.clientX, touch.clientY);
+      if (grab(at.x, at.y, touch.identifier)) event.stopPropagation();
+    };
+    const ours = (event: TouchEvent) => drag?.touch != null && [...event.changedTouches].find((touch) => touch.identifier === drag!.touch);
+    const onTouchMove = (event: TouchEvent) => {
+      const touch = ours(event);
+      if (!touch) return;
+      event.preventDefault(); // the page must not scroll under a dragged level
+      event.stopPropagation();
+      follow(local(touch.clientX, touch.clientY).y);
+    };
+    const onTouchEnd = (event: TouchEvent) => { if (ours(event)) { event.stopPropagation(); finish(event.type === "touchend"); } };
+    element.addEventListener("mousedown", onMouseDown, true);
+    element.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+    element.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
+    element.addEventListener("touchend", onTouchEnd, true);
+    element.addEventListener("touchcancel", onTouchEnd, true);
     chart.subscribeClick((event) => {
-      if (!actions.current.drawing || !event.point || (event.paneIndex ?? 0) !== 0) return;
-      const value = candles.coordinateToPrice(event.point.y);
-      if (value !== null && value > 0) actions.current.onDraw(Math.round(value * 100) / 100);
+      const now = actions.current;
+      if (!event.point || (event.paneIndex ?? 0) !== 0) { if (!now.drawing) now.onSelect?.(null); return; }
+      if (now.drawing) {
+        const value = candles.coordinateToPrice(event.point.y);
+        if (value !== null && value > 0) now.onDraw(Math.round(value * 100) / 100);
+        return;
+      }
+      const touch = performance.now() - lastTouch < 1000;
+      now.onSelect?.(drawings.hit(event.point.y, touch ? TOUCH_SLOP : MOUSE_SLOP));
     });
     const stopRange = rangeLink.listen(id, (range) => {
       if (!linking.current || !barsRef.current.length) return;
@@ -221,7 +316,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     });
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
-    return () => { stopLink(); stopRange(); stopCommands(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); markers.detach(); chart.remove(); bundle.current = null; barsRef.current = []; };
+    return () => {
+      stopLink(); stopRange(); stopCommands(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id);
+      finish(false);
+      element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
+      element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
+      markers.detach(); candles.detachPrimitive(drawings); chart.remove(); bundle.current = null; barsRef.current = [];
+    };
   }, [id, link, rangeLink, commands, main]);
 
   // RSI lives in a second pane, added and removed in place; the pane goes with its series.
@@ -325,11 +426,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
-    current.levels.forEach((line) => current.candles.removePriceLine(line));
-    current.levels = levels.map((level) => current.candles.createPriceLine({ price: level.price, title: main ? level.label : "", color: "#659ef0", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true }));
-  }, [levels, pending, main]);
+    current.drawings.set(levels.map(({ id, price, label }) => ({ id, price, label })), selected, main);
+    if (container.current) container.current.dataset.levels = levels.map((level) => level.price.toFixed(2)).join(",");
+  }, [levels, pending, main, selected]);
+  useEffect(() => { bundle.current?.drawings.setInteractive(!drawing); }, [drawing]);
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
+  const chosen = selected ? levels.find((level) => level.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
   // header keeps room for its controls at quarter width.
   const timer = !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
@@ -365,7 +468,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
-      <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} style={{ height }} className={`transition-opacity ${drawing ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+      <div className="relative">
+        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={{ height }} className={`transition-opacity ${drawing ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {chosen && showSelection && !pending && <div role="toolbar" aria-label={`Selected level on ${id}`} className="absolute left-2 top-2 z-10 flex max-w-[calc(100%-5rem)] items-center gap-1 rounded-md border border-slate-600 bg-[#121924]/95 py-0.5 pl-2 pr-0.5 text-[11px] shadow-lg">
+          <span className="h-0.5 w-3 shrink-0 bg-[#9cc2ff]" /><span className="min-w-0 truncate text-slate-300">{chosen.label}</span><span className="font-mono text-[#9cc2ff]">{price(chosen.price)}</span>
+          <button aria-label="Delete selected level" title="Delete (Delete or Backspace)" onClick={() => onDelete?.(chosen.id)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-rose-300"><Trash2 size={13} /></button>
+          <button aria-label="Deselect level" title="Deselect (Esc)" onClick={() => onSelect?.(null)} className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200"><X size={13} /></button>
+        </div>}
+      </div>
       {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote || history.adjustmentNote || (history.exhausted && history.historyStart)) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
         {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : [history.exhausted && history.historyStart ? `Tradier daily history starts ${history.historyStart}.` : null, history.calendarNote, history.adjustmentNote].filter(Boolean).join(" ")}
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}

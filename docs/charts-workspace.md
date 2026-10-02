@@ -95,6 +95,25 @@ cd backend
 - A click on **Draw price level** arms the main chart. Click a price to save it,
   or enter a labeled level in the side panel. Levels appear on every timeframe
   of that symbol and can be deleted individually.
+- **Drawing layer (C1.1).** Levels are drawn by one series primitive per chart
+  (`frontend/lib/drawings.ts`) instead of library price lines, anchored to
+  price, so a level is at the same price on every panel of its symbol at any
+  zoom. A mouse press on a level selects it and dragging moves it; the level
+  moves by the drag (it does not jump to the pointer) and the chart does not
+  pan underneath. On touch, a tap within 14px selects a level and only a
+  selected level drags, so panning across a level never moves it, and the page
+  does not scroll during the drag. A selected level is solid with a round
+  handle on every panel of its symbol; the panel it was selected on shows a
+  small bar with its name, price, **Delete** and **Deselect**. A click or tap on
+  empty chart space or Esc deselects, and Esc during a drag puts the level back.
+  A drop saves the price under the pointer (rounded to cents) dated that New
+  York day. Delete or Backspace removes the selected level. Adding, moving and
+  deleting levels can be undone with ⌘Z / Ctrl+Z and redone with ⇧⌘Z /
+  Ctrl+Shift+Z, or the Undo and Redo buttons beside **Draw price level**, whose
+  hover text names the step. Undo is per tab, 100 steps, and replays item by
+  item onto the levels as they are now, so another device's levels are left
+  alone. Levels are still saved in the same `levels` shape, so a tab running
+  an older build keeps reading and merging them.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (header button) saves the current arrangement under a name, such
@@ -382,7 +401,8 @@ basis. Dividends are **not** adjusted, and the hover text says so.
   `price / (product of ratios of splits after drawn_on)`, the same factor the
   candles got, and the side list shows `was $…` when it moved. Levels drawn
   after the split are unchanged. Levels saved before C0.6 have no date and are
-  shown as saved. The saved record never changes.
+  shown as saved. A split never rewrites the saved record; dragging a level
+  (C1.1) saves the price it was dropped at, on today's basis, with today's date.
 - **A split recorded while a tab is open.** Older pages loaded before it are on
   the old basis, so once a refresh brings the new split set they are dropped
   and scrolling back rereads them adjusted. A history page whose split set
@@ -522,7 +542,17 @@ Space and Shift+Space from a clicked button while a Tabbed-to button keeps
 Space, reset every chart's range and price scales with Alt+R, return each
 chart to its latest candle at the same zoom with End (also with linked
 ranges), compare the `?` sheet with the exact binding list, and do the same
-by touch at 390px. A canvas comparison checks that VWAP does not paint across an
+by touch at 390px. Drawing-layer tests drag a level with the mouse on the 5m
+chart and read it at the same price on the 1h chart and in the side list, with
+the chart's range unchanged; cancel a drag with Esc; deselect by clicking empty
+space; delete with Delete (Backspace with nothing selected deletes nothing);
+undo and redo by key and button; reload to the dropped price and date; undo
+an add without touching a level another device added meanwhile; and at 390px
+check that a finger on an unselected level leaves it, a tap selects it, a
+finger then drags it without scrolling the page, and Delete and Undo work by
+tap with 24px targets. Those tests read the prices handed to the layer; what
+the canvas paints (dash, handle, label) is checked by screenshot review only.
+A canvas comparison checks that VWAP does not paint across an
 extended-hours gap while still drawing within the regular session.
 `backend/tests/test_chart_splits.py` pins the basis: a NVDA-shaped split gives
 matching minute, daily and weekly prices whether Tradier's daily bars are

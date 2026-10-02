@@ -2189,6 +2189,7 @@ test("? opens a cheat sheet listing exactly the bindings that exist; ? and Escap
   // Each of these has a test in this file; the sheet lists them and nothing else.
   const bindings = ["1 3 5 15 30 then Enter", "Backspace", "Esc", "H", "4", "D", "W",
     "Space", "Shift + Space", "Alt + ↓ or Alt + ↑", "⌘ + K or Ctrl + K",
+    "Delete or Backspace", "⌘ + Z or Ctrl + Z", "⌘ + Shift + Z or Ctrl + Shift + Z", "Esc",
     "Alt + R", "End", "Esc", "?"];
   expect(await sheet.locator("td[aria-label]").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label")))).toEqual(bindings);
   await expect(sheet.getByRole("row")).toHaveCount(bindings.length);
@@ -2235,6 +2236,176 @@ test.describe("phone hotkey equivalents", () => {
     await page.getByRole("button", { name: "Latest candles main" }).tap();
     await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
     expect(await autoScaled(page, "main")).toEqual([true, true]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});
+
+// ---- Drawing layer (C1.1): levels are drawings you select, drag, delete, undo and redo ----
+
+type SeriesProbe = { seriesType(): string; priceToCoordinate(value: number): number | null; coordinateToPrice(y: number): number | null };
+type PaneRegistry = Map<string, { panes(): { getSeries(): SeriesProbe[] }[] }>;
+/** Where a price sits on a chart's candle pane, in pixels from the top of the chart. */
+const levelY = (page: Page, id: string, value: number) => page.evaluate(([key, at]) => (window as unknown as { __tjCharts: PaneRegistry }).__tjCharts.get(key as string)!
+  .panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!.priceToCoordinate(at as number)!, [id, value] as const);
+const priceAtY = (page: Page, id: string, y: number) => page.evaluate(([key, at]) => (window as unknown as { __tjCharts: PaneRegistry }).__tjCharts.get(key as string)!
+  .panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!.coordinateToPrice(at as number)!, [id, y] as const);
+const drawn = (page: Page, id: string) => page.getByTestId(`canvas-${id}`);
+
+async function mouseDrag(page: Page, id: string, fromY: number, toY: number, options: { escape?: boolean } = {}) {
+  const box = (await drawn(page, id).boundingBox())!;
+  const x = box.x + 220;
+  await page.mouse.move(x, box.y + fromY);
+  await page.mouse.down();
+  for (let step = 1; step <= 6; step++) await page.mouse.move(x, box.y + fromY + (toY - fromY) * step / 6);
+  if (options.escape) await page.keyboard.press("Escape");
+  await page.mouse.up();
+}
+
+test("a level drags with the mouse on the 5m chart, moves on the 1h chart, deletes, undoes, redoes and survives reload", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Breakout", "256.00");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "256.00");
+  const before = await logicalRange(page, "main");
+  const from = await levelY(page, "main", 256);
+
+  // Escape during a drag puts the level back.
+  await mouseDrag(page, "main", from, from + 50, { escape: true });
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", /.+/);
+  await page.keyboard.press("Escape");
+  await expect(drawn(page, "main")).not.toHaveAttribute("data-selected", /.+/);
+
+  // Press on the line, drag down 50px: the level follows and the chart does not pan.
+  const expected = await priceAtY(page, "main", from + 50);
+  await mouseDrag(page, "main", from + 3, from + 53);
+  await expect.poll(async () => Number(await drawn(page, "main").getAttribute("data-levels"))).toBeLessThan(256);
+  const moved = (await drawn(page, "main").getAttribute("data-levels"))!;
+  expect(Math.abs(Number(moved) - expected)).toBeLessThan(0.05);
+  expect(await logicalRange(page, "main")).toEqual(before);
+  // The same level, at the same price, on the 1h chart and in the list.
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", moved);
+  await expect(levelsPanel(page)).toContainText(moved);
+  const selected = page.getByRole("toolbar", { name: "Selected level on main" });
+  await expect(selected).toContainText("Breakout");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-selected", (await drawn(page, "main").getAttribute("data-selected"))!);
+  await page.screenshot({ path: test.info().outputPath("level-selected-desktop.png") });
+
+  await page.keyboard.press("Delete");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "");
+  await expect(selected).toHaveCount(0);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", "256.00");
+  await page.keyboard.press("ControlOrMeta+Shift+z");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
+  // The delete is still there to redo; the buttons name what they would do.
+  await expect(page.getByRole("button", { name: "Redo" })).toHaveAttribute("title", /^Redo deleting Breakout/);
+  await expect(page.getByRole("button", { name: "Undo" })).toHaveAttribute("title", /^Undo moving Breakout/);
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  await page.getByRole("button", { name: "Redo" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
+
+  // A click on empty chart space selects nothing; Backspace then deletes nothing.
+  const box = (await drawn(page, "main").boundingBox())!;
+  const y = await levelY(page, "main", Number(moved));
+  await page.mouse.click(box.x + 220, box.y + y);
+  await expect(selected).toBeVisible();
+  await page.mouse.click(box.x + 220, box.y + (y > 120 ? y - 80 : y + 80));
+  await expect(selected).toHaveCount(0);
+  await page.keyboard.press("Backspace");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
+
+  // Saved as dropped, dated today, and drawn there after a reload.
+  await expect.poll(() => ((server.data?.levels as Record<string, { price: number; drawn_on?: string }[]> | undefined)?.MRVL ?? [])[0]?.price).toBe(Number(moved));
+  expect((server.data!.levels as Record<string, { drawn_on?: string }[]>).MRVL[0].drawn_on).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
+  await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", moved);
+});
+
+test("undo replays onto levels another device changed meanwhile", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Mine", "256.00");
+  await expect.poll(() => server.revision).toBe(1);
+  // Another device adds a level; this page picks it up when it regains focus.
+  const data = server.data as { levels: Record<string, unknown[]> };
+  server.data = { ...data, levels: { MRVL: [...data.levels.MRVL, { id: "phone", price: 254, label: "From phone" }] } };
+  server.revision += 1;
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(levelsPanel(page)).toContainText("From phone");
+  // Undoing this tab's add removes only its own level.
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(levelsPanel(page)).not.toContainText("Mine");
+  await expect(levelsPanel(page)).toContainText("From phone");
+  await expect.poll(() => ((server.data?.levels as Record<string, { label: string }[]> | undefined)?.MRVL ?? []).map((level) => level.label)).toEqual(["From phone"]);
+});
+
+test.describe("phone drawing layer", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("a tap selects a level, a finger drags only a selected level without scrolling the page, and Delete and Undo work by touch", async ({ page }) => {
+    await registerCharts(page);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await addLevel(page, "Support", "256.00");
+    await drawn(page, "main").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const box = (await drawn(page, "main").boundingBox())!;
+    const x = Math.round(box.x + 150);
+    const client = await page.context().newCDPSession(page);
+    const swipe = async (fromY: number, toY: number) => {
+      await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y: Math.round(box.y + fromY) }] });
+      for (let step = 1; step <= 8; step++) {
+        await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: Math.round(box.y + fromY + (toY - fromY) * step / 8) }] });
+        await page.waitForTimeout(16);
+      }
+      await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    };
+    const from = await levelY(page, "main", 256);
+
+    // A finger on a level that is not selected pans the chart; the level stays.
+    await swipe(from, from + 40);
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+    await expect(drawn(page, "main")).not.toHaveAttribute("data-selected", /.+/);
+
+    // A tap within the finger's reach selects it.
+    await page.touchscreen.tap(x, Math.round(box.y + (await levelY(page, "main", 256)) + 8));
+    const selected = page.getByRole("toolbar", { name: "Selected level on main" });
+    await expect(selected).toContainText("Support");
+    const y = await levelY(page, "main", 256);
+    const scrolled = await page.evaluate(() => window.scrollY);
+    const expected = await priceAtY(page, "main", y + 45);
+    await swipe(y + 5, y + 50);
+    await expect.poll(async () => Number(await drawn(page, "main").getAttribute("data-levels"))).toBeLessThan(256);
+    const moved = (await drawn(page, "main").getAttribute("data-levels"))!;
+    expect(Math.abs(Number(moved) - expected)).toBeLessThan(0.1);
+    expect(await page.evaluate(() => window.scrollY)).toBe(scrolled);
+    await page.screenshot({ path: test.info().outputPath("level-selected-phone.png") });
+
+    for (const name of ["Delete selected level", "Deselect level", "Undo", "Redo"]) {
+      const target = (await page.getByRole("button", { name, exact: true }).boundingBox())!;
+      expect(Math.min(target.width, target.height), name).toBeGreaterThanOrEqual(24);
+    }
+    await selected.getByRole("button", { name: "Delete selected level" }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", "");
+    await page.getByRole("button", { name: "Undo", exact: true }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", moved);
+    await page.getByRole("button", { name: "Undo", exact: true }).tap();
+    await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   });
 });

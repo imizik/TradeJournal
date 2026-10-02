@@ -72,8 +72,8 @@ from planned work.
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | done ([PR #102](https://github.com/imizik/TradeJournal/pull/102)) |
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done ([PR #104](https://github.com/imizik/TradeJournal/pull/104)) |
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done ([PR #105](https://github.com/imizik/TradeJournal/pull/105)) |
-| C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | next |
-| C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | todo |
+| C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | done ([PR #106](https://github.com/imizik/TradeJournal/pull/106)) |
+| C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | next |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | todo |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | todo |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
@@ -403,7 +403,7 @@ C0.0's intraday-only scope.
 
 ### Phase 1 — Direct manipulation
 
-**C1.1 Drawing layer.** A series-primitive layer on the candle series renders
+**C1.1 Drawing layer (done in PR #106).** A series-primitive layer on the candle series renders
 drawings and hit-tests the pointer. Selecting a drawing shows its handles; dragging moves it;
 `Delete` or `Backspace` removes it; `Cmd/Ctrl+Z` and `Shift+Cmd/Ctrl+Z` undo and
 redo. Drawings are anchored to **time and price**, never to pixels or bar index,
@@ -411,6 +411,12 @@ so they stay put across zoom, intervals and the five panels. Existing saved
 levels become drawings of the kind "horizontal level". *Done when:* drag, delete
 and undo work with a mouse and by touch, a level dragged on the 5m chart moves on
 the 1h chart, and nothing is lost on reload.
+As built ([Implemented behavior](charts-workspace.md#implemented-behavior)): `frontend/lib/drawings.ts`
+holds the primitive and item-level undo edits. A finger drags only a selected
+level, so panning is never taken for a drag. Levels keep their saved `levels`
+shape, so an open tab on an older build still reads and merges them. C1.2's new
+kinds need a new settings field. An older tab's save would drop a field it does
+not know, because `shared()` keeps only known keys, so plan for that first.
 
 **C1.2 Tools.** Horizontal ray, trendline (with extend left/right), rectangle
 zone and text note. Magnet mode (hold `Cmd/Ctrl` or toggle) snaps anchors to the
