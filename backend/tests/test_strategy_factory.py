@@ -392,13 +392,13 @@ def test_prepare_asks_for_each_missing_day_once_and_skips_market_holidays(script
 def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, monkeypatch):
     paths, args = weekly_paths(tmp_path)
     computed: list[str] = []
-    real = script.discovery_trades
+    real = script.discovery_forward
 
     def counting(spec, load):
         computed.append(spec.family)
         return real(spec, load)
 
-    monkeypatch.setattr(script, "discovery_trades", counting)
+    monkeypatch.setattr(script, "discovery_forward", counting)
     dry = [*args, "week", "--dry-run"]
 
     def unused(system: str, text: str):
@@ -408,6 +408,8 @@ def test_evidence_is_recomputed_when_the_engine_code_changes(script, tmp_path, m
     assert sorted(computed) == ["failed_breakout", "opening_range_breakout", "recovery_swing", "vwap_reclaim"]
     assert script.main(dry, source_factory=StubSource, proposer=unused) == 0
     assert len(computed) == 4  # cached
+    saved = [json.loads(path.read_text()) for path in (paths["out"] / "evidence").glob("*.json")]
+    assert all({"after_fill", "cost_r", "to_close"} <= set(entry["forward"]) for entry in saved)
     fingerprint = script.engine_fingerprint()
     assert {path.name.rsplit("-", 1)[1] for path in (paths["out"] / "evidence").glob("*.json")} == {f"{fingerprint}.json"}
     monkeypatch.setattr(script, "engine_fingerprint", lambda: "changed000")

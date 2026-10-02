@@ -69,7 +69,7 @@ from app.engine.factory_brief import (  # noqa: E402
 from app.engine.factory_data import FEATURES, Series, session_bars  # noqa: E402
 from app.engine.factory_gates import (  # noqa: E402
     Evaluation,
-    discovery_trades,
+    discovery_forward,
     evaluate,
     ledger_record,
     period_of,
@@ -425,7 +425,8 @@ def gather_evidence(records: list[dict], store: BarStore, out: Path,
             found[key] = json.loads(path.read_text())
             continue
         progress(f"  discovery evidence for {key}")
-        found[key] = {"name": spec.name, **evidence(discovery_trades(spec, store.load))}
+        trades, forward = discovery_forward(spec, store.load)
+        found[key] = {"name": spec.name, **evidence(trades), "forward": forward}
         path.parent.mkdir(parents=True, exist_ok=True)
         for stale in path.parent.glob(f"{identifier}-*.json"):
             stale.unlink()

@@ -292,6 +292,8 @@ is verifiable rather than hopeful.
   `test_strategy_factory.py` pins the committed specs' ids.
 - Weekly proposals trade the core universe at the default costs; the review
   refuses a proposal that picks tickers or changes costs.
+- The forward evidence (`discovery_forward`) loads discovery data only and
+  feeds the brief alone; no gate reads it, so it never changes a verdict.
 - Whoever proposes sees only the brief. A Claude Code session answering it
   (`/factory-week`) must not read the ledger, the reports or the trade files
   before its answer is judged, and does not propose again after reading

@@ -463,16 +463,20 @@ Tradier adapters names a Tradier option field.
 `backend/app/engine/options_recorder.py` keeps, once per trading session, the
 open interest and volume of every contract in each in-scope underlying's
 expirations within 45 days. Scope: SPY, QQQ and SPX; the underlyings of open
-positions (Webull is dormant and left out; an SPXW root counts as SPX); and the
-first ten names of the shared chart watchlist. Nothing on the chart reads the
-snapshots yet.
+positions (Webull is dormant and left out; an SPXW root counts as SPX); the
+first ten names of the shared chart watchlist; then the strategy factory's core
+universe (`CORE_UNIVERSE` in `factory_rules.py`), last so the names traded live
+are recorded first if the window runs short. Each name is recorded once, at its
+first place in that order. Nothing on the chart reads the snapshots yet.
 
 - **Storage.** One `option_chain_snapshot` row per (session, underlying,
   expiration) holds the capture time, the chain's newest trade time and every
   contract packed as `[root, "C"|"P", strike, open_interest, volume]`, null
   where Tradier gave nothing. A live dry run on 2026-10-01 stored SPY, QQQ
   and SPX (58 expirations, 21,140 contracts) in 522 KB of packed JSON, so the
-  whole scope is roughly 1 MB a day. One `option_snapshot_day` row per (session,
+  scope before the factory's names was roughly 1 MB a day. The 18 factory
+  names (added 2026-10-02) add about 200 requests a night; their storage is not
+  measured yet. One `option_snapshot_day` row per (session,
   underlying) says `recorded`, `partial` (with what is missing) or
   `unavailable`.
 - **Capture window.** From 15 minutes after the regular close (16:15, or 13:15
