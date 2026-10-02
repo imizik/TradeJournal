@@ -237,3 +237,20 @@ def test_workspace_daily_and_weekly_match_whichever_basis_the_provider_used(monk
     assert raw["adjustment"]["status"] == "unknown" and any("Split data is unavailable" in w for w in raw["adjustment"]["warnings"])
     if not provider_adjusted:
         assert raw["panels"]["1D"]["bars"][0]["close"] == 1200.0 and any("like a forward split" in w for w in raw["adjustment"]["warnings"])
+
+
+@pytest.mark.parametrize("damage", [
+    lambda s: s.pop("ratio"), lambda s: s.update(ratio="10"), lambda s: s.update(ratio=2.0), lambda s: s.update(ex_date="2024-6-10x"),
+])
+def test_a_damaged_split_cache_is_refetched_instead_of_crashing_the_chart(service, damage):
+    splits, calls, replies = service
+    replies.append((200, actions(row("2024-06-10", 10, 1))))
+    today = date(2026, 10, 1)
+    splits.get("NVDA", today)
+    path = splits._path("NVDA")
+    record = json.loads(path.read_text())
+    damage(record["splits"][0])
+    path.write_text(json.dumps(record))
+    replies.append((200, actions(row("2024-06-10", 10, 1))))
+    again = splits.get("NVDA", today)
+    assert len(calls) == 2 and again["status"] == "ok" and again["splits"][0]["ratio"] == 10

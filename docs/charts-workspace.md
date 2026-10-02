@@ -166,7 +166,7 @@ cd backend
   which can show regular-session closes after hours.
 - Intraday charts load older SIP/raw pages when the visible range nears the
   loaded left edge. A 5m chart can navigate six months through pages. The
-  candle hover legend says **SIP raw** or **Tradier**. Today's forming bars and
+  candle hover legend says **SIP** or **Tradier**. Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier.
 - When today has no intraday bars (before 04:00, weekends, holidays), each
   intraday panel opens on the latest completed SIP sessions instead of an
@@ -333,9 +333,12 @@ basis. Dividends are **not** adjusted, and the hover text says so.
   candles got, and the side list shows `was $…` when it moved. Levels drawn
   after the split are unchanged. Levels saved before C0.6 have no date and are
   shown as saved. The saved record never changes.
-- **Not covered.** Dividends, spin-offs and stock dividends; options and SPX;
-  and a split that takes effect while a tab is open (older candles already
-  loaded keep the old basis; the page warns and a reload realigns them).
+- **A split recorded while a tab is open.** Older pages loaded before it are on
+  the old basis, so once a refresh brings the new split set they are dropped
+  and scrolling back rereads them adjusted. A history page whose split set
+  differs from the candles on screen is refused (with a retry), never merged.
+  A damaged split cache file is refetched, not trusted.
+- **Not covered.** Dividends, spin-offs and stock dividends; options and SPX.
 - **Live evidence.** `scripts/check_chart_splits.py` is the read-only probe.
   2026-10-01 20:05 ET, NVDA 10-for-1 (ex-date 2024-06-10), Alpaca corporate
   actions and SIP, Tradier daily: the 2024-06-07 final minute close of 1,208.65

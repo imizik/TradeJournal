@@ -188,6 +188,21 @@ export default function ChartWorkspace() {
       : { ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => shown.has(key))) });
   }, [framesKey]);
 
+  // A split recorded while the tab is open changes the basis of candles already loaded. Those are dropped,
+  // never mixed with newer pages; scrolling back rereads them on the new basis.
+  const feedBasis = JSON.stringify([...wanted.keys()].map((name) => { const a = feedFor(name)?.adjustment; return [name, a ? splitsKey(a) : null]; }));
+  useEffect(() => {
+    const now = new Map(JSON.parse(feedBasis) as [string, string | null][]);
+    const stale = new Set(slots.filter((slot) => {
+      const loaded = older.panels[frameKey(slot)]?.adjustment;
+      const target = now.get(slot.symbol);
+      return loaded && target != null && splitsKey(loaded) !== target;
+    }).map(frameKey));
+    if (!stale.size) return;
+    stale.forEach((key) => { historyFlights.current.get(key)?.abort(); historyFlights.current.delete(key); visibleTimes.current.delete(key); });
+    setOlder((state) => ({ ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => !stale.has(key))) }));
+  }, [feedBasis, older.panels, slots]);
+
   const loadOlder = useCallback(async (frame: Frame, beforeOverride?: number, retry = false) => {
     const key = frameKey(frame);
     const feed = feedFor(frame.symbol);
@@ -205,6 +220,13 @@ export default function ChartWorkspace() {
       while (!controller.signal.aborted) {
         const page = await fetchChartHistory({ symbol: frame.symbol, interval: frame.interval, session, before, continuation, signal: controller.signal });
         if (controller.signal.aborted) return;
+        if (splitsKey(page.adjustment) !== splitsKey(feed.adjustment)) {
+          // The page and the candles on screen disagree about splits; accepting it would mix two price bases.
+          setOlder((state) => state.key !== session ? state : ({ ...state, panels: { ...state.panels, [key]: {
+            ...(state.panels[key] ?? { bars: [], markers: [], exhausted: false, warmup: "pending" }), loading: false,
+            issue: "A split was recorded while these charts were open. Older candles reload after the next refresh." } } }));
+          break;
+        }
         setOlder((state) => {
           if (state.key !== session) return state;
           const prior = state.panels[key];
@@ -502,9 +524,7 @@ export default function ChartWorkspace() {
   const basisNotes = [...new Set([...wanted.keys()].flatMap((name) => {
     const own = feedFor(name)?.adjustment;
     const older = slots.filter((slot) => slot.symbol === name).map((slot) => currentOlder[frameKey(slot)]?.adjustment);
-    const realign = older.some((a) => a && own && splitsKey(a) !== splitsKey(own));
-    return [...(own?.warnings ?? []), ...older.flatMap((a) => a?.warnings ?? []),
-      ...(realign ? ["A split took effect while these charts were open. Reload to realign the older candles."] : [])].map((note) => `${name}: ${note}`);
+    return [...(own?.warnings ?? []), ...older.flatMap((a) => a?.warnings ?? [])].map((note) => `${name}: ${note}`);
   }))];
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";

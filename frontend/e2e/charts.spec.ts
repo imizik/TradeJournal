@@ -406,7 +406,7 @@ test("with no intraday bars today (weekend, holiday, overnight) charts open on t
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
-  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
   await expect(page.getByTestId("canvas-Panel 5")).toHaveAttribute("data-bars", "120");
   // One opening request per intraday panel, starting from now; scrolling may add older pages.
   const first = new Map<string | null, number>();
@@ -716,7 +716,7 @@ test("New York midnight replaces the completed Tradier day with SIP without wait
   await page.getByRole("button", { name: "Refresh charts", exact: true }).click();
   await expect.poll(() => requests.some((request) => request.interval === "5m" && request.before === afterMidnight)).toBe(true);
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "120");
-  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
 });
 
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
@@ -770,7 +770,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
   const plot = (await page.getByTestId("canvas-main").boundingBox())!;
   await page.mouse.move(plot.x + plot.width * 0.5, plot.y + plot.height * 0.35);
-  await expect(page.getByLabel("main candle values")).toContainText("SIP raw");
+  await expect(page.getByLabel("main candle values")).toContainText("SIP");
   await page.screenshot({ path: test.info().outputPath("deep-history-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: "Latest candles main" }).click();
   await expect.poll(async () => (await visibleRange(page, "main"))?.to ?? 0).toBeGreaterThan(state.bars.at(-1)!.time);
@@ -1748,6 +1748,32 @@ test("missing split data says so on the chart instead of guessing", async ({ pag
   const warning = page.getByRole("status", { name: "Price basis warning" });
   await expect(warning).toContainText("MRVL: Split data is unavailable");
   await expect(warning).toContainText("sudden price cliff");
+});
+
+test("a history page on a different split basis than the candles on screen is refused, not mixed in", async ({ page }) => {
+  await registerCharts(page);
+  const base = Math.floor(Date.now() / 1000);
+  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...currentFixture(route.request().url(), base), adjustment: NVDA_SPLIT } }));
+  let asked = 0;
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    asked++;
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const template = fixture(route.request().url()).panels["5m"]!.bars[0];
+    // This page was adjusted without the split the workspace already knows about.
+    const bars = Array.from({ length: 1200 }, (_, i) => ({ ...template, source: "alpaca_sip", time: before - (1200 - i) * 300, end_time: before - (1199 - i) * 300 }));
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: "5m", session: "extended", before, limit: 1200, bars, markers: [],
+      older_cursor: bars[0].time, exhausted: false, continuation: null, warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted",
+      adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await page.waitForTimeout(120);
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  await expect(page.getByRole("button", { name: "Retry history" })).toBeVisible();
+  expect(asked).toBeGreaterThan(0);
+  await expect(page.getByText("A split was recorded while these charts were open").first()).toBeVisible();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100"); // nothing from the other basis was drawn
 });
 
 // ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----

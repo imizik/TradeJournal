@@ -10,6 +10,7 @@ requests are one call per symbol per day, apart from the history budget.
 
 from datetime import date, datetime
 import json
+import math
 from math import isfinite
 from pathlib import Path
 import re
@@ -72,8 +73,13 @@ class ChartSplits:
                 raise ValueError("metadata")
             date.fromisoformat(data["fetched_on"])
             int(data["fetched_at"])
-            parse_actions({"corporate_actions": {"forward_splits": [
-                {"new_rate": s["new_rate"], "old_rate": s["old_rate"], "ex_date": s["ex_date"]} for s in data["splits"]]}}, symbol)
+            parsed = parse_actions({"corporate_actions": {"forward_splits": [
+                {"new_rate": x["new_rate"], "old_rate": x["old_rate"], "ex_date": x["ex_date"]} for x in data["splits"]]}}, symbol)
+            # The stored ratio is what chart math multiplies by: it must be the rates' own, not merely present.
+            if len(parsed) != len(data["splits"]) or any(
+                    x["ex_date"] != y["ex_date"] or not isinstance(y["ratio"], (int, float)) or not math.isclose(x["ratio"], y["ratio"], rel_tol=1e-9)
+                    for x, y in zip(parsed, data["splits"])):
+                raise ValueError("splits")
             return data
         except (OSError, ValueError, TypeError, KeyError):
             return None  # absent or damaged: refetch (splits, unlike sessions, can be refreshed)
