@@ -334,7 +334,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   // header keeps room for its controls at quarter width.
   const timer = !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
   return (
-    <section aria-label={`${symbol} ${interval} chart`} className={`relative min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
+    // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
+    // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
+    <section aria-label={`${symbol} ${interval} chart`} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
         <div className="flex items-center gap-2 text-xs">{onPickSymbol
           ? <button aria-label={`${id} symbol`} title={follows ? "Follows the main symbol. Choose a symbol for this chart." : "Holds its own symbol. Change it, or follow the main symbol."} onClick={onPickSymbol}

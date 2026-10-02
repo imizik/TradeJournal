@@ -391,7 +391,10 @@ settle on the same time window, and exercises full screen on desktop and phone
 and keyboard symbol navigation. Hotkey tests type 1 then 5 then Enter and check
 that no request asked for 1m on the way to 15m, refuse 7, erase with Backspace,
 cancel with Escape (staying in full screen) and with a click, switch with H, 4,
-D and W, stay off in fields, selects, dialogs and the Sync drawer, step the watchlist with
+D and W, stay off in fields, selects, dialogs and the Sync drawer (whose backdrop
+must be the topmost element everywhere beside it: each chart is an `isolate`d
+stacking context because the chart library gives its pane-resize handle
+`z-index: 50`, which otherwise rose above the backdrop's 40), step the watchlist with
 Space and Shift+Space from a clicked button while a Tabbed-to button keeps
 Space, reset every chart's range and price scales with Alt+R, return each
 chart to its latest candle at the same zoom with End (also with linked

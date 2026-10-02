@@ -1,5 +1,5 @@
 {
-  "commit": "2d89686103bb7fe995f27c91051a3f5cd5dda80f",
-  "date": "2026-09-29",
-  "note": "Reconciled 32 code commits (Market Map, fill and expiry time repairs, metric validation, TradingView ingress, autodeploy, phone alerts, the strategy factory): added the factory's rules and weekly process, the gmail worker lane, the two repair scripts and the stalled docs-drift routine; corrected the Neon-era Postgres notes and the Pine compile status."
+  "commit": "8e9283aac88929a89ece5ef0081538e007ba1ec4",
+  "date": "2026-10-01",
+  "note": "Reconciled 32 code commits (the Charts epic C0.0-C0.6, C7.1 and C7.2, the strategy factory's stall exit and opening range breakout, three-minute autodeploy, compact verify output): each claim in architecture, verification, feature-map, deploy, the factory and charts docs was re-read against the code. Fixed: architecture.md now states the split-adjusted price basis; verification.md lists the calendar, split and layout coverage and check_chart_splits.py; charts-workspace.md records why chart sections are isolated above the Sync drawer's backdrop."
 }
