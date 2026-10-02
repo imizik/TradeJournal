@@ -214,7 +214,7 @@ must not be treated as established capability.
 | Option trades stream | Streams OCC symbols per docs; whether trade events carry bid/ask is *unverified* | Indicative | — | Later (flow is out of scope) |
 | Earnings dates | `/beta/markets/fundamentals/calendars` returns NVDA earnings events; accuracy of upcoming dates *unverified* | — | — | Tradier (C2.5) |
 | Macro events (CPI, FOMC, NFP) | — | — | — | None; a hand-kept yearly file if ever wanted |
-| News | — | Benzinga, already in `news.py` | — | Alpaca (Later) |
+| News | — | Benzinga, already in `news.py` | — | Alpaca ([symbol info panel](symbol-info-roadmap.md)) |
 | Futures, Level 2, footprint | — | — | — | **Not available** |
 
 Rate budget, per Tradier token (120 requests/minute, documented and seen in
@@ -485,7 +485,10 @@ chart labels which sessions the baseline covers.
 daily per watchlist symbol. The chart shows a marker on the date and a badge
 ("Earnings in 3 days"), since earnings drive option IV. Verify the accuracy of
 upcoming dates against the company's announcement before shipping, and label the
-source. *Done when:* markers render from a fixture, and an unknown date shows
+source. The data adapter is built as T1.4 of the
+[symbol info roadmap](symbol-info-roadmap.md), which records the calendar's
+duplicate rows and the missing time of day; C2.5 draws the markers from it.
+*Done when:* markers render from a fixture, and an unknown date shows
 nothing rather than a guess.
 
 ### Phase 3 — The journal on the chart
@@ -694,7 +697,7 @@ Worth doing once the phases above have shipped, in roughly this order:
   page, not chart UX.
 - **Options-position context captured at fill**: nearest wall and gamma distance
   stored with each new fill, possible only once the recorder (C4.3) runs.
-- **News markers** from the Alpaca feed already used by reports.
+- **News markers**: moved to T3.5 of the [symbol info roadmap](symbol-info-roadmap.md).
 - **Options flow** from streamed option trades, with at-bid/at-ask inference
   labeled *inferred*. First verify, in regular hours, that streamed option trades
   carry the bid and ask.
