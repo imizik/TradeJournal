@@ -6,7 +6,7 @@ luck, so the factory's main job is to throw those out before anyone trades
 them. Step 1 is the rules engine, the gates and the ledger; step 2 is
 [the weekly loop](#the-weekly-loop), where Claude proposes the next ideas
 from the ledger every Sunday; step 3, paper trading whatever passes, is not
-built yet.
+built yet ([what comes next](#what-comes-next)).
 
 The code: `backend/app/engine/factory_data.py` (bars, splits, indicators,
 features), `factory_rules.py` (entry families, the execution model, specs),
@@ -96,8 +96,9 @@ Every Sunday at 10:00 (New York time on this Mac) launchd runs
    `research/reports/<date>.md`. The brief holds the rules below, the catalog
    of families, settings and features, every idea in the ledger with its
    results, discovery-period evidence (average R by side, time of day, exit,
-   and fifths of each feature, for each family at its defaults and the three
-   latest ideas), and the model's lessons from the last four weeks.
+   and fifths of each feature, plus the [forward evidence](#forward-evidence),
+   for each family at its defaults and the three latest ideas), and the
+   model's lessons from the last four weeks.
 4. Commit `research/` to `factory/ledger` and push it.
 5. `notify`: send the report's summary to the phone through the same ntfy
    topic as the server's alerts, linking to the report on GitHub. A candidate
@@ -121,8 +122,9 @@ does not fit the budget, and the report lists every refusal with its reason.
   two. Hand-run `run` candidates are not counted. `--budget N` lets a run
   someone asks for add N more.
 - **Exam numbers** reach the brief only as passed or failed.
-- **Evidence** comes from discovery data only (`factory_gates.discovery_trades`),
-  cached per idea and per engine version (a hash of the engine modules) in
+- **Evidence** comes from discovery data only (`factory_gates.discovery_forward`,
+  which runs `discovery_trades` and the forward evidence in one load), cached
+  per idea and per engine version (a hash of the engine modules) in
   `backend/data/factory/evidence/`, so a code change recomputes it.
 - **Malformed proposals** are refused with the reason: `parse_spec` checks
   every field's shape and type, and normalizes numbers so 2 and 2.0 are the
@@ -166,6 +168,31 @@ ideas, so each run starts in a fresh session. When the week's three are
 used, the brief step exits with status 3, and `--budget N` on both steps
 runs more on request. A second run on the same day writes its report as
 `<day>b.md`, so neither is overwritten.
+
+### Forward evidence
+
+The screen judges an entry and its exits together, so an entry that knows
+nothing can use up candidate after candidate on exit changes that cannot save
+it: several of the first ideas changed only a target, a hold or a stall exit.
+The forward evidence (`factory_gates.discovery_forward`) asks the entry
+alone. For each discovery trade it reads price after the fill, in R from the
+signal's stop, before costs and whatever the exits would have done:
+
+- `after_fill`: the average move 5, 15, 30 and 60 minutes after the fill, at
+  the session's close and at the next session's close, against random entries
+  (one every 15 minutes in the spec's window, with the family's stop rule) on
+  the same ticker and side: `edge_r`, with t clustered by week. A time that is
+  not a whole number of bars, or that ends after the close, is left out rather
+  than read at the close.
+- `cost_r`: the round-trip slippage in R at the default costs, the number an
+  edge has to clear.
+- `to_close`: the median best (MFE) and worst (MAE) price before the close, in
+  R, and the share whose stop was touched by then, for the idea's entries and
+  for random ones.
+
+An edge near zero at every time says no exit will help; an edge that peaks at
+one time says where a hold or a target belongs; an edge below `cost_r` says the
+trade needs more room. It loads discovery data only, and no gate reads it.
 
 ## Writing a spec
 
@@ -349,6 +376,11 @@ t ≥ 2.61.
   confirmation never loads later data. A learned filter trains on the
   discovery period only and must beat its parent.
 
+- The forward evidence: price read at whole bars that end by the close and at
+  the next close, best and worst prices mirrored for shorts, an open already
+  through the stop skipped, discovery data only, the edge measured against
+  random entries, and the matched random stop at the candidate's median risk.
+
 `backend/tests/test_strategy_factory.py` runs the script with a stub minute
 source: the bar cache, the ledger, reruns, a model spec judging its parent
 first, and the committed specs and ledger. Thirty-nine planted defects (a
@@ -359,6 +391,44 @@ as do twenty more in the moving stops, the newer features and the ids (a
 stop moved within its own bar or moved back, a short's best price taken from
 its highs, a feature read from the same session, an unset setting in the
 hash, and more).
+
+## What comes next
+
+Decided with the user on 2026-10-02.
+
+- **Pine is no longer a research or execution path.** TradingView's strategy
+  tester counts none of the versions tried, which is the problem this factory
+  exists to solve. Strategy Lab stays readable and is not extended; an idea
+  from Pine becomes a factory spec, and hand research done anywhere else goes
+  in the ledger as hand-research lines, as the Market Map runs did.
+- **Step 3, paper trading, runs the family's own code on live bars.** Every
+  family decides one closed bar at a time (`on_bar` in `factory_rules.py`), so
+  a live run feeds each new closed bar to the same code the factory judged and
+  sends a phone alert with the paper trade; there is no port to drift. It is
+  built when the first candidate passes confirmation, not before, and only
+  such candidates get it. Before any live signal is trusted: replaying
+  historical bars through the live path must give exactly `run_candidate`'s
+  signals, and bars built from Tradier's live stream are compared each night
+  with Alpaca's SIP bars for the same minutes, with the mismatch rate kept.
+- **Lead: stocks in play.** Every family so far trades the same 18 large,
+  heavily traded names, and their entries beat random by 0.01 to 0.05R.
+  Zarattini, Barbon and Aziz (2024) report that a plain 5-minute opening range
+  breakout was weak and that trading only each day's top 20 stocks by opening
+  relative volume did nearly all the work. Testing that needs a universe chosen
+  each morning by rule from a broad list (delisted names included, nothing
+  hand-picked), a cost model that scales with the spread, and a check that a
+  few multi-symbol Tradier quote calls can rank opening volume live. It is a
+  person's decision, like any new building block.
+- **Lead: option positioning.** The options recorder has kept end-of-day open
+  interest by strike for these 18 names since 2026-10-02
+  (`docs/charts-workspace.md`), but the factory's history starts in July 2023.
+  Walls become features only with bought history or two to three years of
+  waiting. The first hypothesis with published support is expiration-day
+  pinning near heavily held strikes (Ni, Pearson and Poteshman, 2005); a wall
+  as everyday support or resistance has none yet.
+- **When something reaches the exam:** a check that settings one step either
+  side of the candidate's also hold up, so a lone good value is not mistaken
+  for an edge.
 
 ## Limits
 

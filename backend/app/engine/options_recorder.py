@@ -3,7 +3,9 @@
 Once per trading session the recorder stores open interest and volume for every
 contract of each in-scope underlying's expirations within 45 days. Scope
 (decided 2026-09-30): SPY, QQQ and SPX, the underlyings of open positions, and
-the first ten chart watchlist names. Each expiration becomes one
+the first ten chart watchlist names; then (added 2026-10-02) the strategy
+factory's core universe, so option positioning can later be tested as a factory
+feature on the names the factory trades. Each expiration becomes one
 `option_chain_snapshot` row with its contracts packed as JSON, and each
 underlying gets one `option_snapshot_day` row per session: recorded, partial or
 unavailable.
@@ -43,12 +45,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.engine.chart_math import ET
+from app.engine.factory_rules import CORE_UNIVERSE
 from app.engine.options_chain import SYMBOL, OptionsChainError, TradierOptions, options_chain
 from app.engine.options_models import OptionChain
 from app.models import Account, ChartSettingsRecord, OptionChainSnapshot, OptionSnapshotDay, Trade
 
 FIXED = ("SPY", "QQQ", "SPX")
 WATCHLIST_NAMES = 10
+# Last in scope, so the names traded live are recorded first if the window runs short.
+RESEARCH = CORE_UNIVERSE
 HORIZON_DAYS = 45
 SETTLE_MINUTES = 15
 WINDOW_END = 20 * 60  # minutes of the New York day
@@ -71,7 +76,7 @@ class Calendar(Protocol):
 
 def scope(db: Session, today: date) -> list[str]:
     """SPY, QQQ and SPX, then open positions' underlyings, then the first ten
-    watchlist names; each once, in that order."""
+    watchlist names, then the factory's core universe; each once, in that order."""
     names = list(FIXED)
     positions = db.exec(
         select(Trade.ticker, Trade.instrument_type, Trade.expiration)
@@ -91,6 +96,7 @@ def scope(db: Session, today: date) -> list[str]:
         watchlist = None
     if isinstance(watchlist, list):
         names += [name for name in watchlist if isinstance(name, str)][:WATCHLIST_NAMES]
+    names += RESEARCH
     chosen: list[str] = []
     for name in names:
         symbol = name.strip().upper()

@@ -30,8 +30,9 @@ import math
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from statistics import NormalDist, median
+from typing import Any
 
 from app.engine.factory_data import ET, FeatureContext, Series, Split
 from app.engine.factory_model import LogisticModel, fit_logistic
@@ -398,6 +399,17 @@ class _Stage:
                                            spec.window, spec.limits, _acceptor(spec, features, model))
 
 
+def _baseline_stop(rules: Any, trades: Sequence[Trade]) -> SwingStop | AtrStop:
+    """Random entries' stop: the family's own rule, or for a family whose stop
+    depends on its setup, the candidate's median risk in ATR over `trades`."""
+    rule = rules.baseline_stop()
+    if rule == MATCHED:
+        risks = [t.features.get("risk", NA) for t in trades]
+        risks = [r for r in risks if not math.isnan(r)]
+        rule = AtrStop(median(risks) if risks else 1.0, getattr(rules, "atr_length", 14))
+    return rule
+
+
 def _random_entries(
     ev: Evaluation,
     load: Loader,
@@ -414,11 +426,7 @@ def _random_entries(
     sides = family_sides(rules)
     stops: dict[str, SwingStop | AtrStop] = {}
     for period in periods:
-        rule = rules.baseline_stop()
-        if rule == MATCHED:
-            risks = [t.features.get("risk", NA) for t in _in(trades, [period])]
-            risks = [r for r in risks if not math.isnan(r)]
-            rule = AtrStop(median(risks) if risks else 1.0, getattr(rules, "atr_length", 14))
+        rule = _baseline_stop(rules, _in(trades, [period]))
         stops[period] = rule
         ev.random_stop[period] = rule.describe()
     stride = max(1, BASELINE_MINUTES // spec.timeframe)
@@ -440,12 +448,17 @@ def _random_entries(
     return out
 
 
+def _discovery_run(spec: Spec, series: Series, market: Series | None) -> list[Trade]:
+    features = FeatureContext(series, market)
+    return _in(run_candidate(series, spec.rules().start(series), spec.exits, spec.costs, spec.window, spec.limits,
+                             _acceptor(spec, features, None), features), ["discovery"])
+
+
 def discovery_trades(spec: Spec, load: Loader) -> list[Trade]:
     """A spec's closed discovery-period trades with their features, loading
     discovery data only. A spec with a model is read through its rules
     without it, since its own trades come from a model fitted to these."""
     spec = spec.parent() or spec
-    rules = spec.rules()
     through = PERIODS["discovery"][1]
     market = load(MARKET, spec.timeframe, through)
     trades: list[Trade] = []
@@ -453,10 +466,158 @@ def discovery_trades(spec: Spec, load: Loader) -> list[Trade]:
         series = load(ticker, spec.timeframe, through)
         if series is None or len(series) == 0:
             continue
-        features = FeatureContext(series, market)
-        trades += run_candidate(series, rules.start(series), spec.exits, spec.costs, spec.window, spec.limits,
-                                _acceptor(spec, features, None), features)
-    return _in(trades, ["discovery"])
+        trades += _discovery_run(spec, series, market)
+    return trades
+
+
+# --- after the fill: what an entry knows, whatever its exits -----------------------
+#
+# The screen judges an entry and its exits together, so an entry that knows
+# nothing can use up candidate after candidate on exit changes that cannot
+# save it. This reads price at fixed times after each discovery fill, before
+# costs and whatever the exits would have done, against random entries with
+# the family's stop rule. It is evidence for the weekly brief; no gate reads it.
+
+# Minutes after the fill; then the fill's session close and the next session's.
+FORWARD_MINUTES = (5, 15, 30, 60)
+
+
+def _session_paths(series: Series) -> tuple[list[float], list[float], list[int]]:
+    """For each bar: the highest high and the lowest low from it through its
+    session's last bar, and that last bar's index."""
+    n = len(series)
+    high, low, end = [0.0] * n, [0.0] * n, [0] * n
+    for k in range(n - 1, -1, -1):
+        if series.last[k]:
+            high[k], low[k], end[k] = series.high[k], series.low[k], k
+        else:
+            high[k], low[k], end[k] = max(series.high[k], high[k + 1]), min(series.low[k], low[k + 1]), end[k + 1]
+    return high, low, end
+
+
+def _after_fill(series: Series, paths: tuple[list[float], list[float], list[int]], entry: int, side: int,
+                stop: float) -> dict[str, float] | None:
+    """Price after a fill at bar `entry`'s open, in R from `stop` and before
+    costs: at each of FORWARD_MINUTES that is a whole number of bars and ends
+    by the session's close (a later one is left out, not read at the close),
+    at the close and the next session's close, and the best (`mfe`) and worst
+    (`mae`, positive when against) prices through the close. None when the
+    open is already through the stop."""
+    price = series.open[entry]
+    risk = side * (price - stop)
+    if risk <= 0:
+        return None
+    high, low, end = paths
+    last = end[entry]
+    bar = timedelta(minutes=series.timeframe)
+    out: dict[str, float] = {}
+    for minutes in FORWARD_MINUTES:
+        if minutes % series.timeframe or series.time[entry] + timedelta(minutes=minutes) > series.time[last] + bar:
+            continue
+        k = series.index_at(series.time[entry] + timedelta(minutes=minutes) - bar)
+        out[f"{minutes}m"] = side * (series.close[k] - price) / risk
+    out["close"] = side * (series.close[last] - price) / risk
+    if last + 1 < len(series):
+        out["next_close"] = side * (series.close[end[last + 1]] - price) / risk
+    best, worst = (high[entry], low[entry]) if side == 1 else (low[entry], high[entry])
+    out["mfe"] = side * (best - price) / risk
+    out["mae"] = side * (price - worst) / risk
+    return out
+
+
+def _extremes(moves: Sequence[Mapping[str, float]]) -> dict[str, Any]:
+    if not moves:
+        return {"entries": 0}
+    return {
+        "entries": len(moves),
+        "mfe_r_median": round(median(m["mfe"] for m in moves), 2),
+        "mae_r_median": round(median(m["mae"] for m in moves), 2),
+        "stop_touched_pct": round(100 * sum(m["mae"] >= 1 for m in moves) / len(moves), 1),
+    }
+
+
+def _forward_summary(moves: Sequence[tuple[Trade, Mapping[str, float]]],
+                     random: Mapping[tuple[str, int], Sequence[Mapping[str, float]]],
+                     costs: Sequence[float]) -> dict[str, Any]:
+    keys = [f"{minutes}m" for minutes in FORWARD_MINUTES] + ["close", "next_close"]
+    base: dict[tuple[str, int, str], float] = {}
+    for (ticker, side), rows in random.items():
+        for key in keys:
+            values = [row[key] for row in rows if key in row]
+            if values:
+                base[(ticker, side, key)] = sum(values) / len(values)
+    horizons: dict[str, Any] = {}
+    for key in keys:
+        raw, matched, excess, weeks = [], [], [], []
+        for trade, move in moves:
+            if key in move and (trade.ticker, trade.side, key) in base:
+                raw.append(move[key])
+                matched.append(base[(trade.ticker, trade.side, key)])
+                excess.append(move[key] - matched[-1])
+                weeks.append(signal_day(trade).isocalendar()[:2])
+        if not excess:
+            continue
+        edge, se = clustered_mean(excess, weeks)
+        horizons[key] = {
+            "trades": len(excess),
+            "move_r": round(sum(raw) / len(raw), 3),
+            "random_r": round(sum(matched) / len(matched), 3),
+            "edge_r": round(edge, 3),
+            "t": round(edge / se, 2) if se and not math.isnan(se) else None,
+        }
+    return {
+        "cost_r": round(sum(costs) / len(costs), 3) if costs else None,
+        "after_fill": horizons,
+        "to_close": {"entries": _extremes([m for _, m in moves]),
+                     "random": _extremes([m for rows in random.values() for m in rows])},
+    }
+
+
+def discovery_forward(spec: Spec, load: Loader) -> tuple[list[Trade], dict[str, Any]]:
+    """`discovery_trades`, and how price moved after their fills against
+    random entries (one every BASELINE_MINUTES in the spec's window, with the
+    family's stop rule), per ticker and side, from discovery data only.
+    `cost_r` is the round-trip slippage in R at the default costs."""
+    spec = spec.parent() or spec
+    rules = spec.rules()
+    first, through = PERIODS["discovery"]
+    market = load(MARKET, spec.timeframe, through)
+    trades: list[Trade] = []
+    moves: list[tuple[Trade, dict[str, float]]] = []
+    costs: list[float] = []
+    # Series are kept for the random entries unless they are minute bars, which are too many to hold.
+    kept: dict[str, Series] = {}
+    available: list[str] = []
+    for ticker in spec.tickers:
+        series = load(ticker, spec.timeframe, through)
+        if series is None or len(series) == 0:
+            continue
+        available.append(ticker)
+        if spec.timeframe >= 5:
+            kept[ticker] = series
+        found = _discovery_run(spec, series, market)
+        paths = _session_paths(series)
+        for trade in found:
+            move = _after_fill(series, paths, trade.entry_index, trade.side, trade.stop)
+            if move is not None:
+                moves.append((trade, move))
+                price = series.open[trade.entry_index]
+                costs.append(2 * spec.costs.slip(price) / (trade.side * (price - trade.stop)))
+        trades += found
+    stop = _baseline_stop(rules, trades)
+    sides = family_sides(rules)
+    stride = max(1, BASELINE_MINUTES // spec.timeframe)
+    random: dict[tuple[str, int], list[dict[str, float]]] = defaultdict(list)
+    for ticker in available:
+        series = kept.get(ticker) or load(ticker, spec.timeframe, through)
+        assert series is not None
+        paths = _session_paths(series)
+        for signal in baseline_signals(series, stop, sides, first, through, spec.window, stride):
+            if signal.index + 1 < len(series):
+                move = _after_fill(series, paths, signal.index + 1, signal.side, signal.stop)
+                if move is not None:
+                    random[(ticker, signal.side)].append(move)
+    return trades, _forward_summary(moves, random, costs)
 
 
 def _by_ticker(trades: Sequence[Trade], random: Mapping) -> dict[str, Stats]:

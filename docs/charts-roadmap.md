@@ -82,6 +82,7 @@ from planned work.
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | todo |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | todo |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
+| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
 | C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | todo |
@@ -232,6 +233,7 @@ proposing a new provider.
 |---|---|---|---|
 | Intraday history beyond about 10 days | Scroll-back, past trades on the chart, relative-volume baseline, replay | Alpaca free historical SIP, stored locally: $0 | C0.0 |
 | Open-interest history | Any comparison of positioning over time | Record our own daily snapshots: $0; cannot be backfilled, so start early | C4.3 |
+| Open interest before 2026-10-01 | Testing walls or positioning as a strategy-factory feature, whose history starts July 2023 | Buy end-of-day open interest by strike (ThetaData and ORATS sell it; price it first), or wait two to three years of our own snapshots | Strategy factory, not this epic |
 | Session calendar | Correct holiday and early-close states | Tradier market calendar: $0, verified | C0.1 |
 | Price adjustment consistency | Reliable multi-year indicators, drawings and cross-interval comparison across splits | Define and test one explicit display basis; keep raw cache provenance | C0.6 |
 | Daily/weekly depth beyond the current request | Multi-year daily/weekly navigation | Page existing historical daily data; do not aggregate extended minutes into daily bars | C0.7 |
@@ -559,7 +561,8 @@ assumptions are written in `docs/charts-workspace.md`.
 
 **C4.3 Recorder (done in PR #105).** Each trading session after the calendar's open, snapshot OI and volume per
 strike for SPY, QQQ and SPX, plus the underlyings of open positions and the
-top ten watchlist names (decided 2026-09-30), for expirations within 45 days. Store one row per
+top ten watchlist names (decided 2026-09-30), then the strategy factory's core
+universe (added 2026-10-02), for expirations within 45 days. Store one row per
 (underlying, expiration, day) with the strikes packed in a JSON array: about
 1 GB per year at this scope, versus about 11 million rows if every strike were
 its own row (planning estimates, to be measured on actual payloads). Store the
@@ -579,7 +582,11 @@ whose volume Tradier reports from 20:15, never leaks in. A weekday timer queues
 it at 16:20 with a 19:20 catch-up. Each underlying gets a per-session status
 row, so a missed session is an explicit `unavailable`. A live dry run stored
 SPY, QQQ and SPX in 522 KB, so the whole scope is about 1 MB a day, below the
-1 GB-a-year planning estimate.
+1 GB-a-year planning estimate. The factory's 18 names were added on 2026-10-02
+so option positioning can one day be tested as a factory feature on the names
+the factory trades: about 200 more chain requests a night (roughly seven
+minutes at 30 a minute), recorded last so the names traded live come first.
+Their storage is not measured yet.
 
 **C4.4 Options levels layer.** Draws the call wall, the put wall and the top
 gamma strikes as levels on the price chart. Filters: nearest N (default 3 per
@@ -615,7 +622,23 @@ message names the symbol, level, price and event time, and a live phone delivery
 is observed before claiming it works. Alert subscriptions and REST recovery must
 share the existing token budget with up to three visible symbols.
 Compound conditions ("and relative volume above 2×") wait until users ask for
-them.
+them. An alert made from an options wall (C4.4) is pinned to that wall's strike
+when it is created. Open-interest walls hold still through a session, but a
+volume wall can move to another strike, and a level moving under an alert
+confuses more than it helps: when the wall moves, the chart says so and the
+alert stays where it was. A wall alert is a level alert and claims no edge.
+
+**C5.2 Retire the TradingView alert loop** (decided 2026-10-02). Alerts move
+into the app, and Pine stops being a path for anything. Once C5.1 has
+delivered a live alert to the phone, remove the TradingView webhook ingress
+(port 8090, the only internet-reachable process): its service and deploy unit,
+the webhook-only router and the Pine file. Mark the `v=1` contract retired and
+bring `docs/agent/` up to date in the same PR. Stored `tradingview_alert` rows
+and the Signals pages that read them stay, read-only; deleting the rows and
+dropping the ingress database role wait for the user. *Done when:* a fresh
+deployment starts no ingress service, nothing listens on 8090, the Signals
+pages still render stored rows, and the import-boundary and deploy checks pass
+without the ingress.
 
 ### Phase 6 — Review on the chart
 
@@ -727,12 +750,14 @@ Worth doing once the phases above have shipped, in roughly this order:
 
 ## Decisions
 
-Settled with the user on 2026-09-30. Do not reopen them without the user.
+Settled with the user on 2026-09-30, and items 8 and 9 on 2026-10-02. Do not
+reopen them without the user.
 
 1. **Drawings (Phase 1) come before automatic levels (Phase 2).** Every later
    layer reuses the drawing layer's selection, hover and hide/lock machinery.
 2. **Options recorder scope (C4.3):** SPY, QQQ and SPX, plus the underlyings of
-   open positions and the top ten watchlist names.
+   open positions and the top ten watchlist names, then (widened with the user
+   on 2026-10-02) the strategy factory's core universe.
 3. **Per-panel symbols (C7.1) come after shared workspace foundations.** This
    supersedes the original "stay last" decision in the user-authorized planning
    revision. Everyday SPY/QQQ/name layouts precede specialist analytics.
@@ -745,3 +770,9 @@ Settled with the user on 2026-09-30. Do not reopen them without the user.
 7. **Daily-use readiness comes before advanced analytics.** Level alerts and
    historical trade navigation precede G0; options capture starts early, while
    gamma tools and replay follow the gate. C0.0 remained a single scoped PR.
+8. **Alerts live in the app, and the TradingView alert loop retires (C5.2)**
+   after C5.1 has reached the phone. No Pine runtime, no Pine port.
+9. **Strategy signal alerts are not chart alerts.** An alert that a strategy's
+   setup fired belongs to the strategy factory's paper-trading step, runs that
+   family's own code, and exists only for a candidate that passed the factory
+   (`docs/strategy-factory.md`). This epic's alerts are levels and claim no edge.

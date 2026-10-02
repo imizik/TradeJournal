@@ -17,10 +17,12 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 import app.engine.options_chain as options_module
+import app.engine.options_recorder as recorder_module
 from app.engine.chart_math import ET
 from app.engine.occ import occ_symbol
 from app.engine.options_chain import OptionsChainError, TradierOptions
 from app.engine.options_models import OptionChain, OptionContract
+from app.engine.factory_rules import CORE_UNIVERSE
 from app.engine.options_recorder import RecorderError, record, scope
 from app.models import Account, ChartSettingsRecord, JobRun, OptionChainSnapshot, OptionSnapshotDay, Trade
 from app.routers import sync
@@ -40,6 +42,13 @@ def db():
     with Session(engine) as session:
         yield session
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def indexes_only(monkeypatch):
+    """Most tests read a scope of the three indexes; the factory's names, last
+    in the real scope, have tests of their own that put them back."""
+    monkeypatch.setattr(recorder_module, "RESEARCH", ())
 
 
 class Calendar:
@@ -203,6 +212,32 @@ def test_scope_is_the_indexes_open_positions_then_ten_watchlist_names(db):
         "SPY", "QQQ", "SPX", "NVDA", "AMD",
         "MRVL", "AAPL", "MSFT", "GOOG", "CVNA", "COIN", "LLY",  # the first ten entries, minus repeats
     ]
+
+
+def test_scope_ends_with_the_factory_universe_after_the_names_traded_live(db, monkeypatch):
+    monkeypatch.setattr(recorder_module, "RESEARCH", CORE_UNIVERSE)
+    assert scope(db, THURSDAY) == ["SPY", "QQQ", "SPX", *CORE_UNIVERSE]
+    _trade(db, _account(db), "CVNA")
+    db.add(ChartSettingsRecord(name="default", data_json=json.dumps({"watchlist": ["SNDK", "NVDA"]})))
+    db.commit()
+
+    chosen = scope(db, THURSDAY)
+
+    assert chosen[:5] == ["SPY", "QQQ", "SPX", "CVNA", "SNDK"]
+    # NVDA keeps its watchlist place; the rest of the universe follows in its own order.
+    assert chosen[5:] == ["NVDA", *(name for name in CORE_UNIVERSE if name != "NVDA")]
+    assert len(chosen) == len(set(chosen)) == 5 + len(CORE_UNIVERSE)
+
+
+def test_the_factory_universe_is_recorded_after_the_indexes(db, monkeypatch):
+    monkeypatch.setattr(recorder_module, "RESEARCH", ("NVDA", "AAPL"))
+    client = Client(listed={"SPY": [THURSDAY], "QQQ": [], "SPX": [], "NVDA": [THURSDAY], "AAPL": WITHIN})
+
+    stored, _ = _run(db, client)
+
+    assert [c[1] for c in client.calls if c[0] == "expirations"] == ["SPY", "QQQ", "SPX", "NVDA", "AAPL"]
+    assert stored == 6 and {d.underlying: d.status for d in _days(db).values()} == dict.fromkeys(
+        ["SPY", "QQQ", "SPX", "NVDA", "AAPL"], "recorded")
 
 
 def test_scope_survives_missing_or_damaged_settings(db):

@@ -95,7 +95,10 @@ Tuning a number to history is overfitting.
 fitted to the screen's data, so its real test is confirmation; mark it.
 8. Prefer ideas that answer a documented failure: for example, entries that \
 beat random but lose after costs suggest fewer trades with more room per \
-trade; results that depend on one regime suggest a market filter.
+trade; results that depend on one regime suggest a market filter. Read the \
+forward evidence before changing exits: an entry whose edge after the fill is \
+near zero at every time carries nothing an exit can use, and an edge that \
+peaks at one time says where a hold or a target belongs.
 9. At most two ideas from the same family in one week.
 
 Answer in the given JSON format. Each idea's spec_json is the spec as a JSON \
@@ -352,6 +355,13 @@ def brief(
         "Each entry is one idea's discovery-period trades, with its average R by side, by the signal's time "
         "of day, by exit, and by fifths of each feature (lowest to highest). Entries are keyed by ledger id; "
         "a family name means that family with its default settings.\n"
+        "Each entry's \"forward\" reads price after the fills, before costs and whatever the exits do, in R "
+        "from the signal's stop. \"after_fill\" gives the average move 5, 15, 30 and 60 minutes after the fill "
+        "(only times that are whole bars and end by the close), at the session's close and at the next "
+        "session's close, against random entries with the family's stop rule on the same ticker and side "
+        "(\"edge_r\", with t clustered by week). \"cost_r\" is the round-trip slippage in R at the default "
+        "costs. \"to_close\" is the median best (MFE) and worst (MAE) price before the close, in R, and the "
+        "share of entries whose stop was touched by then, for the idea's entries and for random ones.\n"
         + json.dumps(evidence_by_idea, indent=1, default=str),
     ]
     if lessons:
