@@ -22,14 +22,18 @@ export type Hotkey =
   | { kind: "step"; by: 1 | -1 }
   | { kind: "reset" }
   | { kind: "realtime" }
-  | { kind: "help" };
+  | { kind: "help" }
+  /** Drawings (C1.1): the workspace ignores these when nothing is selected or there is nothing to undo. */
+  | { kind: "delete" }
+  | { kind: "undo" }
+  | { kind: "redo" };
 
 type KeyPress = Pick<KeyboardEvent, "key" | "code" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">;
 
-/** What a key press means, given the digits typed so far. Browser and OS shortcuts (Ctrl, Cmd) are never taken. */
+/** What a key press means, given the digits typed so far. Of the browser's Ctrl and Cmd shortcuts, only undo and redo are taken. */
 export function readHotkey(event: KeyPress, typed: string): Hotkey | null {
   const { key, code, altKey, ctrlKey, metaKey, shiftKey } = event;
-  if (ctrlKey || metaKey) return null;
+  if (ctrlKey || metaKey) return !altKey && key.toLowerCase() === "z" ? { kind: shiftKey ? "redo" : "undo" } : null;
   if (altKey) {
     // Option+R types ® on a Mac, so the reset matches the key's position.
     if (code === "KeyR" && !shiftKey) return { kind: "reset" };
@@ -45,6 +49,7 @@ export function readHotkey(event: KeyPress, typed: string): Hotkey | null {
     if (key === "4") return { kind: "interval", interval: "4h" };
     if (/^[0-9]$/.test(key)) return { kind: "type", typed: key };
   }
+  if (key === "Delete" || key === "Backspace") return { kind: "delete" };
   if (key === " ") return { kind: "step", by: shiftKey ? -1 : 1 };
   if (key === "?") return { kind: "help" };
   if (key === "End") return { kind: "realtime" };
@@ -77,6 +82,12 @@ export const HOTKEY_HELP: { group: string; rows: { keys: string; does: string }[
     { keys: "Shift + Space", does: "Previous symbol in the watchlist" },
     { keys: "Alt + ↓ or Alt + ↑", does: "Next or previous symbol in the watchlist" },
     { keys: "⌘ + K or Ctrl + K", does: "Search symbols" },
+  ] },
+  { group: "Levels", rows: [
+    { keys: "Delete or Backspace", does: "Delete the selected level" },
+    { keys: "⌘ + Z or Ctrl + Z", does: "Undo adding, moving or deleting a level" },
+    { keys: "⌘ + Shift + Z or Ctrl + Shift + Z", does: "Redo" },
+    { keys: "Esc", does: "Deselect the level (while dragging: put it back)" },
   ] },
   { group: "View", rows: [
     { keys: "Alt + R", does: "Reset every chart: latest candles, automatic price scale" },

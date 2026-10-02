@@ -182,7 +182,11 @@ per-panel symbols (SPY and QQQ beside the traded name through switches,
 streaming, pause, scroll-back and focus), and hotkeys (typed minutes on Enter
 without a 1m detour, immediate intervals, Space watchlist steps, Alt+R and End
 on every chart, keys off in fields and dialogs, the `?` sheet against the exact
-binding list, and the 390px touch equivalents), the price basis (the chip, a
+binding list, and the 390px touch equivalents), the drawing layer (a level
+dragged by mouse on the 5m chart read back on the 1h chart, Esc cancel,
+Delete, undo/redo by key and button, reload, undo beside another device's
+level, and tap-to-select then touch drag at 390px without page scroll; the
+painted line and handle are checked by screenshot only), the price basis (the chip, a
 level drawn before a split moving with it, new levels recording their date, the
 missing-split banner, a history page on a different split set refused, and a
 possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year
