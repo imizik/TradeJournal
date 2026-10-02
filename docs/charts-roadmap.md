@@ -71,7 +71,7 @@ from planned work.
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done ([PR #101](https://github.com/imizik/TradeJournal/pull/101)) |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | done ([PR #102](https://github.com/imizik/TradeJournal/pull/102)) |
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done ([PR #104](https://github.com/imizik/TradeJournal/pull/104)) |
-| C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done (PR_LINK) |
+| C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done ([PR #105](https://github.com/imizik/TradeJournal/pull/105)) |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | next |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | todo |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | todo |
@@ -548,7 +548,7 @@ call and put OI, call and put volume, put/call ratios and volume/OI. Then:
 *Done when:* formulas are unit-tested against hand-computed fixtures, and the
 assumptions are written in `docs/charts-workspace.md`.
 
-**C4.3 Recorder (done in PR_NUM).** Each trading session after the calendar's open, snapshot OI and volume per
+**C4.3 Recorder (done in PR #105).** Each trading session after the calendar's open, snapshot OI and volume per
 strike for SPY, QQQ and SPX, plus the underlyings of open positions and the
 top ten watchlist names (decided 2026-09-30), for expirations within 45 days. Store one row per
 (underlying, expiration, day) with the strikes packed in a JSON array: about
