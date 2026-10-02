@@ -229,7 +229,7 @@ export default function ChartWorkspace() {
     return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
   }, [splitsBySymbol, wanted, settings.drawings]);
   // The studies the charts draw: none while the Indicators group is hidden (C1.4).
-  const indicators = useMemo(() => shownIndicators(settings.indicators, settings.hiddenGroups.indicators), [settings.indicators, settings.hiddenGroups.indicators]);
+  const indicators = useMemo(() => shownIndicators(settings.indicators, settings.studiesHidden), [settings.indicators, settings.studiesHidden]);
   // What the charts draw: hidden items and hidden groups (C1.3) are left out, so they neither draw nor select.
   const visibleLevels = useMemo(() => new Map([...shownLevels].map(([name, rows]) => [name, visible(rows, settings.hiddenGroups.levels, NO_LEVELS)])), [shownLevels, settings.hiddenGroups.levels]);
   const visibleDrawings = useMemo(() => new Map([...shownDrawings].map(([name, rows]) => [name, visible(rows, settings.hiddenGroups.drawings, NO_DRAWINGS)])), [shownDrawings, settings.hiddenGroups.drawings]);
@@ -572,15 +572,16 @@ export default function ChartWorkspace() {
   const toggleGroup = (group: keyof HiddenGroups) => {
     const hiding = !settings.hiddenGroups[group];
     setSettings((s) => ({ ...s, hiddenGroups: { ...s.hiddenGroups, [group]: hiding } }));
-    const rows: { id: string }[] = group === "indicators" ? [] : (group === "levels" ? settings.levels : settings.drawings)[selection?.symbol ?? ""] ?? [];
+    const rows: { id: string }[] = (group === "levels" ? settings.levels : settings.drawings)[selection?.symbol ?? ""] ?? [];
     if (hiding && rows.some((row) => row.id === selection?.id)) setSelection(null);
   };
   /** A study or fill arrows on or off as the charts show them; turning a study on shows the Indicators group again. */
   const toggleIndicator = (key: keyof Indicators) => {
     const on = indicators[key];
     setSettings((s) => ({ ...s, indicators: { ...s.indicators, [key]: !on },
-      hiddenGroups: !on && key !== "fills" ? { ...s.hiddenGroups, indicators: false } : s.hiddenGroups }));
+      studiesHidden: !on && key !== "fills" ? false : s.studiesHidden }));
   };
+  const toggleStudies = () => setSettings((s) => ({ ...s, studiesHidden: !s.studiesHidden }));
   /**
    * Lock, unlock or delete every listed level or drawing at once (C1.4): one
    * undo step. Deletions are recorded last-first, so undo puts each back
@@ -774,7 +775,7 @@ export default function ChartWorkspace() {
     { key: "levels", name: "My levels", noun: "levels", hidden: settings.hiddenGroups.levels, items: levelItems },
     { key: "drawings", name: "Drawings", noun: "drawings", hidden: settings.hiddenGroups.drawings, items: drawingItems },
     { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in." },
-    { key: "indicators", name: "Indicators", hidden: settings.hiddenGroups.indicators,
+    { key: "indicators", name: "Indicators", hidden: settings.studiesHidden,
       studies: INDICATORS.filter(([key]) => (STUDIES as readonly string[]).includes(key)).map(([key, label]) => ({ key, label, on: indicators[key] })) },
   ];
   /** A click on an item: the first panel showing its symbol brings it into view and selects it; a phone's sheet closes so the chart shows. */
@@ -801,7 +802,7 @@ export default function ChartWorkspace() {
       name: drawing.kind === "note" ? `Note: ${drawing.text}` : `${TOOL_NAMES[drawing.kind]} ${summary(drawing)}`, show: () => editItem(name, drawing.id, { hidden: false }) })),
   ];
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showLayers(false)}
-    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else toggleGroup(key); }} onGroupLock={lockGroup}
+    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else toggleGroup(key); }} onGroupLock={lockGroup}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
     onJump={jumpTo} onItem={(item, patch) => editItem(item.symbol, item.id, patch)} onDelete={(item) => deleteItem(item.symbol, item.id)}
     onStudy={(key) => toggleIndicator(key as keyof Indicators)} />;
@@ -886,7 +887,7 @@ export default function ChartWorkspace() {
       {drawError && <p className="text-xs text-amber-300" role="alert">{drawError}</p>}
 
       <div className="flex flex-wrap items-center gap-2" aria-label="Chart indicators">
-        {settings.hiddenGroups.indicators && <button onClick={() => toggleGroup("indicators")} title="Indicators are hidden on every chart" className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 px-2.5 py-1 text-[10px] text-amber-300"><EyeOff size={11} />Indicators hidden · Show</button>}
+        {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 px-2.5 py-1 text-[10px] text-amber-300"><EyeOff size={11} />Indicators hidden · Show</button>}
         {INDICATORS.map(([key, label]) => <button key={key} aria-pressed={indicators[key]} onClick={() => toggleIndicator(key)} className={`rounded-full border px-2.5 py-1 text-[10px] ${indicators[key] ? "border-slate-600 bg-slate-800/60 text-slate-200" : "border-slate-800 text-slate-600"}`}>{label}</button>)}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <button aria-pressed={settings.linkRange} onClick={() => setSettings((s) => ({ ...s, linkRange: !s.linkRange }))} title="Scroll and zoom every chart to the same time window"

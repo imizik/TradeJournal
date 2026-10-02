@@ -476,8 +476,9 @@ to levels and drawings (fills and studies have neither). A group lock is not
 a separate flag: it locks or unlocks every item as one undo step, so the
 chart menu and selection bar never disagree with it, and a level added later
 starts unlocked. Group deletes are also one undo step (a new `batch` edit).
-Group hiding is the C1.3 `hiddenGroups` setting plus an `indicators` key; the
-Journal group is the existing fills toggle. Jumps reuse the history loader to
+Group hiding is the C1.3 `hiddenGroups` setting for levels and drawings and a
+top-level `studiesHidden` field for Indicators (a new `hiddenGroups` key would be
+dropped by a pre-C1.4 tab's save); the Journal group is the existing fills toggle. Jumps reuse the history loader to
 reach drawings older than the loaded candles. The panel lists items of every
 symbol on screen (main and held), each going to the first panel showing it.
 
