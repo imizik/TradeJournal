@@ -227,8 +227,12 @@ assessment, including why Tradier is not a candidate for the historical side.
 The private Charts workspace (`/charts`) reads today's Tradier candles and
 batched watchlist quotes through `/charts/workspace`. Completed New York
 intraday sessions load on scroll through `/charts/history` from explicit
-Alpaca SIP/raw minute requests and a persistent complete-session file cache.
-Session hours, holidays and early closes come from Tradier's market calendar,
+Alpaca SIP/raw minute requests and a persistent complete-session file cache,
+and daily/weekly pages (`interval=1D|1W`) come from Tradier's whole daily
+history, read once per symbol per New York date into memory. Every price is
+shown split-adjusted: splits come from Alpaca corporate actions (a small file
+per symbol, refreshed daily) and are applied to copies at display time, so the
+raw caches never change. Session hours, holidays and early closes come from Tradier's market calendar,
 kept on disk per completed month. One API-owned Tradier WebSocket
 fans out valid trade prices through private `/charts/stream` SSE to visible tabs,
 each following up to three symbols (the main one and two held by panels).

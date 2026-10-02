@@ -1,5 +1,5 @@
 {
-  "commit": "8e9283aac88929a89ece5ef0081538e007ba1ec4",
+  "commit": "2a0caf9005cbdbd0dbbac95b4610ea9f5bcd5966",
   "date": "2026-10-01",
-  "note": "Reconciled 32 code commits (the Charts epic C0.0-C0.6, C7.1 and C7.2, the strategy factory's stall exit and opening range breakout, three-minute autodeploy, compact verify output): each claim in architecture, verification, feature-map, deploy, the factory and charts docs was re-read against the code. Fixed: architecture.md now states the split-adjusted price basis; verification.md lists the calendar, split and layout coverage and check_chart_splits.py; charts-workspace.md records why chart sections are isolated above the Sync drawer's backdrop."
+  "note": "Reconciled 32 code commits (Charts C0.0-C0.7: deep history, market calendar, server-saved settings, per-panel symbols, named layouts, hotkeys, the split-adjusted price basis, daily/weekly depth; autodeploy every three minutes; compact verify output; strategy factory exits and families, already documented): added a Charts section to domain-rules.md, the price basis and daily depth to architecture.md and the feature map, the C0.6/C0.7 tests to verification.md, and corrected CLAUDE.md's 'planned' C0.0 contract and the contract's own raw-price note."
 }

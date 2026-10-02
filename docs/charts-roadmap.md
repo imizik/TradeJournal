@@ -25,7 +25,7 @@ Journal analytics pages, options-flow feeds and AI move explanations are listed
 under [Later](#later-not-this-epic) and stay out of scope until this epic's core
 phases have shipped.
 
-**Last reviewed:** 2026-09-30 against `origin/main` at `8fe2141` (PR #87).
+**Last reviewed:** 2026-10-01 against `origin/main` at `f314a35` (PR #101), with C0.7 (PR #102) on top.
 The implementation-readiness review moved everyday chart workflows earlier
 and clarified data correctness. The status board distinguishes shipped work
 from planned work.
@@ -69,8 +69,8 @@ from planned work.
 | C7.2 | Named saved layouts | 7 Layouts | done ([PR #98](https://github.com/imizik/TradeJournal/pull/98)) |
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | done ([PR #99](https://github.com/imizik/TradeJournal/pull/99)) |
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done ([PR #101](https://github.com/imizik/TradeJournal/pull/101)) |
-| C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | todo |
-| C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | todo |
+| C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | done ([PR #102](https://github.com/imizik/TradeJournal/pull/102)) |
+| C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | next |
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | todo |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | todo |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | todo |
@@ -204,7 +204,7 @@ must not be treated as established capability.
 |---|---|---|---|---|
 | Live equity trades | WebSocket, consolidated; one session per token (live since #82) | IEX only: one venue, wide quotes | — | Tradier |
 | Intraday candles | About 10 days of minutes | IEX live; **historical SIP** back to 2016 (not the latest 15 minutes) | 5 calls/min | Tradier for today and live; Alpaca SIP for every earlier session, stored locally (C0.0) |
-| Daily candles | Years; split-adjusted as observed (NVDA, 2026-10-01), checked per split; dividends not adjusted | Yes | Yes, cached for enrichment | Tradier (already) |
+| Daily candles | The whole history in one call (SPY: 7,999 bars from 1994-12-16, 0.45 s); split-adjusted as observed (NVDA, 2026-10-01), checked per split; dividends not adjusted | Yes | Yes, cached for enrichment | Tradier (already) |
 | Market calendar | `/v1/markets/calendar`: holidays and early closes (Thanksgiving closed, 11/27 closes 13:00), back to 2016; next year returns HTTP 400 until published | `/v2/calendar` | — | Tradier (C0.1) |
 | Option chain | One call per expiration: bid/ask/sizes, last, **volume, open interest**, greeks; about 200 ms. SPY nearest expiry: 638 contracts, OI on 498 | Snapshots on the indicative feed, **no open interest** | EOD only | **Tradier** |
 | Expirations | SPY 32, QQQ 30, NVDA 24, SPX 55 (with SPXW); SPY has 14 within 45 days | — | — | Tradier |
@@ -393,7 +393,7 @@ prices and markers in the selected basis, saved drawings remain meaningful,
 and a missing action produces an explicit limitation. A live split example is
 compared and its provider/as-of recorded.
 
-**C0.7 Daily/weekly depth.** Extend the history-page contract to provider daily
+**C0.7 Daily/weekly depth (done; built as documented in [Daily and weekly depth](charts-workspace.md#daily-and-weekly-depth-c07)).** Extend the history-page contract to provider daily
 bars and weekly resampling without constructing daily bars from extended-hour
 minutes. Honor C0.6's price basis and the same memory, warmup and viewport rules.
 *Done when:* a fixture daily chart scrolls ten years (or to listing inception)

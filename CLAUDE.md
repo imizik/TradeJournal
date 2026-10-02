@@ -20,14 +20,14 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | File | For |
 |---|---|
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
-| `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory |
+| `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory, chart price basis |
 | `docs/agent/verification.md` | How to prove a change works |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
-| `docs/charts-deep-history.md` | Implementing C0.0: planned history/cache/API/warmup contract and required evidence |
+| `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 
 Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets

@@ -3,7 +3,10 @@
 Status: **implemented in [PR #89](https://github.com/imizik/TradeJournal/pull/89)**.
 Priority and completion live in the [roadmap](charts-roadmap.md#status-board).
 This document records C0.0's implementation contract; it does not authorize
-other roadmap items.
+other roadmap items. Since it shipped: charts display split-adjusted prices
+(C0.6; the session cache described here stays raw) and `/charts/history` also
+serves 1D/1W pages (C0.7). Where this contract says intraday prices are shown
+raw, `docs/charts-workspace.md` is current.
 
 ## Outcome and scope
 

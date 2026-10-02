@@ -17,7 +17,7 @@ import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
 const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
-type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null };
+type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null; historyStart?: string | null };
 /** Older history per frame (`symbol|interval`), for one session. */
 type OlderState = { key: string; panels: Partial<Record<string, OlderPanel>> };
 /** A symbol at an interval: what one panel draws, and the key its history is kept under. */
@@ -206,7 +206,7 @@ export default function ChartWorkspace() {
   const loadOlder = useCallback(async (frame: Frame, beforeOverride?: number, retry = false) => {
     const key = frameKey(frame);
     const feed = feedFor(frame.symbol);
-    if (!intradayInterval(frame.interval) || historyFlights.current.has(key) || !feed) return;
+    if (historyFlights.current.has(key) || !feed) return;
     const past = currentOlder[key];
     if (((past?.exhausted || past?.issue) && !retry) && beforeOverride === undefined) return;
     const before = beforeOverride ?? past?.bars[0]?.time ?? feed.panels[frame.interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
@@ -239,7 +239,7 @@ export default function ChartWorkspace() {
           const times = new Set(retained.map((bar) => bar.time));
           const markers = [...new Map([...(prior?.markers ?? []), ...page.markers].filter((m) => times.has(m.time)).map((m) => [`${m.id}:${m.time}`, m])).values()];
           return { ...state, panels: { ...state.panels, [key]: { bars: retained, markers,
-            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment,
+            calendarNote: page.calendar_note ?? prior?.calendarNote ?? null, adjustment: page.adjustment, historyStart: page.history_start ?? prior?.historyStart ?? null,
             // Notes the workspace banner does not already carry (for example a jump that looks like an unrecorded split in older candles).
             adjustmentNote: page.adjustment.warnings.filter((note) => !feed.adjustment?.warnings.includes(note)).join(" ") || prior?.adjustmentNote || null,
             exhausted: page.exhausted, warmup: page.warmup, issue: page.issue?.code === "pending" ? null : page.issue?.message ?? null,
