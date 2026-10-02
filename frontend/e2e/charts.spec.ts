@@ -2333,6 +2333,29 @@ test("a level drags with the mouse on the 5m chart, moves on the 1h chart, delet
   await expect(drawn(page, "Panel 3")).toHaveAttribute("data-levels", moved);
 });
 
+test("a level dragged to where the price scale reads zero or below is not saved", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Floor", "256.00");
+  await expect.poll(() => server.revision).toBe(1);
+  // The lower half of the candle pane now reads below zero; the drag jumps straight there.
+  await page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { priceScale(id: string, pane: number): { setVisibleRange(range: { from: number; to: number }): void } }> })
+    .__tjCharts.get("main")!.priceScale("right", 0).setVisibleRange({ from: -300, to: 300 }));
+  const from = await levelY(page, "main", 256);
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 220, box.y + from);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 220, box.y + box.height);
+  await page.mouse.up();
+  await page.waitForTimeout(600); // past the save debounce
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "256.00");
+  expect(server.revision).toBe(1);
+  expect(((server.data?.levels as Record<string, { price: number }[]>).MRVL)[0].price).toBe(256);
+});
+
 test("undo replays onto levels another device changed meanwhile", async ({ page, context }) => {
   const server = await fakeChartSettings(context);
   await registerCharts(page);

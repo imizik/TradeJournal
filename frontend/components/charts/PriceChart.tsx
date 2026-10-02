@@ -181,7 +181,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // finger drags only the selected one, so panning across a level never
     // moves it. A tap selects (the click handler below). `offset` keeps the
     // line where it was grabbed, so it moves by the drag instead of jumping to the pointer.
-    let drag: { id: string; touch: number | null; from: number; offset: number; price: number; moved: boolean } | null = null;
+    let drag: { id: string; touch: number | null; from: number; offset: number; price: number | null; moved: boolean } | null = null;
     let lastTouch = -Infinity;
     const local = (clientX: number, clientY: number) => { const box = element.getBoundingClientRect(); return { x: clientX - box.left, y: clientY - box.top }; };
     const onPlot = (x: number, y: number) => x >= 0 && x <= chart.timeScale().width() && y >= 0 && y <= chart.panes()[0].getHeight();
@@ -195,7 +195,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const id = touch === null ? drawings.hit(y, MOUSE_SLOP) : now.selected ? drawings.hit(y, TOUCH_SLOP, now.selected) : null;
       const at = id === null ? null : drawings.y(id);
       if (id === null || at === null) return false;
-      drag = { id, touch, from: y, offset: at - y, price: 0, moved: false };
+      drag = { id, touch, from: y, offset: at - y, price: null, moved: false };
       if (touch === null) now.onSelect?.(id);
       window.addEventListener("keydown", onEscape, true);
       return true;
@@ -214,7 +214,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       window.removeEventListener("mouseup", onMouseUp);
       window.removeEventListener("keydown", onEscape, true);
       if (!done?.moved) return;
-      if (!commit) { drawings.setPreview(null); return; }
+      // A drag that never reached a valid (positive) price saves nothing.
+      if (!commit || done.price === null) { drawings.setPreview(null); return; }
       // The preview holds the new price until the saved level comes back as a prop.
       actions.current.onMove?.(done.id, done.price);
       window.setTimeout(() => { if (!drag) drawings.setPreview(null); }, 1000);

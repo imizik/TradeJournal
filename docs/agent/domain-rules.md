@@ -311,7 +311,10 @@ is verifiable rather than hopeful.
   split only warns. Dividends are not adjusted and the chart says so.
 - Fills and P&L are never adjusted. Fill arrows are timestamps; a saved level
   keeps the price and the New York date it was drawn (`drawn_on`) and is moved
-  at display time by splits after that date, so the saved record never changes.
+  at display time by splits after that date, so a split never rewrites the
+  saved record. Only the user does: dragging a level (C1.1) saves the price it
+  was dropped at, on the chart's current basis, with that New York date, and
+  undo restores the previous record exactly.
 - Daily and weekly bars come only from Tradier's daily history, never from
   minutes. The whole series is read once per symbol per New York date into
   memory (no disk copy: the provider rewrites adjusted history after each

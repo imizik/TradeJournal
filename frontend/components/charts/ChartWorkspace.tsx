@@ -439,7 +439,7 @@ export default function ChartWorkspace() {
     const rows = settings.levels[target] ?? [];
     const index = rows.findIndex((row) => row.id === id);
     const shown = shownLevels.get(target)?.find((level) => level.id === id);
-    if (index < 0 || !shown || Math.abs(shown.price - value) < 0.005) return;
+    if (index < 0 || !shown || !Number.isFinite(value) || value <= 0 || Math.abs(shown.price - value) < 0.005) return;
     editLevels({ symbol: target, before: rows[index], after: { ...rows[index], price: value, drawn_on: todayNewYork() }, index });
   };
   const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteLevel });
