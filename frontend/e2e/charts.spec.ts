@@ -2070,6 +2070,33 @@ test("H, 4, D and W switch the main chart at once; hotkeys stay off in fields an
   await expect(intervalEntry(page)).toHaveCount(0);
   await expect(mainInterval(page)).toHaveValue("1W");
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+  // The backdrop is the top layer everywhere beside the drawer. Nothing in a chart may paint over it:
+  // the library's pane-resize handle once did, in a 9px strip whose height followed the chart's layout,
+  // so the click below only missed the backdrop on some runs. Check the whole area beside the drawer,
+  // not the clicked point: a grid over it, plus the centre of every element on the page so a small or
+  // thin overlap between grid lines cannot hide.
+  const covered = await page.evaluate(() => {
+    const dialog = document.querySelector('[role="dialog"][aria-label="Background jobs"]')!;
+    const backdrop = dialog.previousElementSibling;
+    const beside = dialog.getBoundingClientRect().right;
+    const points: [number, number][] = [];
+    for (let x = Math.ceil(beside) + 1; x < innerWidth; x += 8) for (let y = 0; y < innerHeight; y += 3) points.push([x, y]);
+    for (const el of document.querySelectorAll("body *")) {
+      if (el === backdrop || dialog.contains(el)) continue;
+      const r = el.getBoundingClientRect();
+      points.push([Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)]);
+    }
+    const stray = new Set<string>();
+    for (const [x, y] of points) {
+      if (x <= beside || x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue; // the drawer's own side, or off screen
+      const top = document.elementFromPoint(x, y);
+      if (top !== backdrop) stray.add(`${top?.tagName}.${String(top?.className).slice(0, 40)} at (${x},${y})`);
+    }
+    return { backdrop: backdrop?.className ?? null, points: points.length, stray: [...stray].slice(0, 5) };
+  });
+  expect(covered.backdrop).toContain("inset-0");
+  expect(covered.points).toBeGreaterThan(1000);
+  expect(covered.stray).toEqual([]);
   await page.mouse.click(1000, 400); // the backdrop beside the drawer closes it
   await expect(page.getByRole("dialog", { name: "Background jobs" })).toHaveCount(0);
   await page.keyboard.press("d");
