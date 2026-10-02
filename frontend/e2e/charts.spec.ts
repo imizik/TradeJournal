@@ -1749,3 +1749,279 @@ test("missing split data says so on the chart instead of guessing", async ({ pag
   await expect(warning).toContainText("MRVL: Split data is unavailable");
   await expect(warning).toContainText("sudden price cliff");
 });
+
+// ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----
+
+type ScaleRegistry = Map<string, { priceScale(id: string, pane?: number): { applyOptions(o: { autoScale: boolean }): void; options(): { autoScale: boolean } };
+  timeScale(): { setVisibleLogicalRange(r: { from: number; to: number }): void } }>;
+const mainInterval = (page: Page) => page.getByLabel("Main interval", { exact: true });
+const intervalEntry = (page: Page) => page.getByRole("status", { name: "Interval entry" });
+const chartedSymbol = (page: Page) => page.getByLabel("Chart symbol");
+/** Zoom and scroll a chart away from its latest candles and stop its price scales autoscaling, as a user dragging the axis does. */
+async function moveAway(page: Page, id: string, range: { from: number; to: number }) {
+  // Lightweight Charts applies a range on its next frame; wait until it has.
+  await expect.poll(async () => {
+    await page.evaluate(({ id, range }) => {
+      const chart = (window as unknown as { __tjCharts: ScaleRegistry }).__tjCharts.get(id)!;
+      chart.timeScale().setVisibleLogicalRange(range);
+      for (const pane of [0, 1]) chart.priceScale("right", pane).applyOptions({ autoScale: false });
+    }, { id, range });
+    await page.waitForTimeout(50);
+    return roundedRange(page, id);
+  }).toEqual(range);
+}
+const autoScaled = (page: Page, id: string) => page.evaluate((id) => {
+  const chart = (window as unknown as { __tjCharts: ScaleRegistry }).__tjCharts.get(id)!;
+  return [0, 1].map((pane) => chart.priceScale("right", pane).options().autoScale);
+}, id);
+const roundedRange = async (page: Page, id: string) => { const range = await logicalRange(page, id); return range && { from: Math.round(range.from), to: Math.round(range.to) }; };
+
+test("typed minutes change the main interval only on Enter; Backspace erases, Escape and a click cancel", async ({ page }) => {
+  // The main chart's interval leads each request, so a 1m detour on the way to 15m would show here.
+  const mains: string[] = [];
+  await stub(page, (url) => { mains.push((new URL(url).searchParams.get("intervals") ?? "").split(",")[0]); });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  const entry = intervalEntry(page);
+  const typed = entry.locator("div").first();
+  await expect(mainInterval(page)).toHaveValue("5m");
+  await page.keyboard.press("1");
+  await expect(typed).toHaveText("1m");
+  await expect(entry).toContainText("Enter to apply · Esc to cancel");
+  await page.keyboard.press("5");
+  await expect(typed).toHaveText("15m");
+  await expect(mainInterval(page)).toHaveValue("5m");
+  await page.screenshot({ path: test.info().outputPath("interval-entry.png") });
+  await page.keyboard.press("Enter");
+  await expect(entry).toHaveCount(0);
+  await expect(mainInterval(page)).toHaveValue("15m");
+  await expect(page.getByRole("region", { name: "MRVL 15m chart" }).first()).toBeVisible();
+  expect(mains).toContain("15m");
+  expect(mains).not.toContain("1m");
+
+  // An interval that does not exist is refused in place; Backspace erases digits.
+  await page.keyboard.press("7");
+  await page.keyboard.press("Enter");
+  await expect(entry).toContainText("No 7m interval. Type 1, 3, 5, 15 or 30.");
+  await expect(mainInterval(page)).toHaveValue("15m");
+  await page.keyboard.press("Backspace");
+  await expect(entry).toHaveCount(0);
+  await page.keyboard.press("3");
+  await page.keyboard.press("5");
+  await page.keyboard.press("Backspace");
+  await expect(typed).toHaveText("3m");
+  await page.keyboard.press("0");
+  await page.keyboard.press("Enter");
+  await expect(mainInterval(page)).toHaveValue("30m");
+  // Typed digits are the main chart's only: 1 then Enter is 1m, and the smaller charts stay.
+  await page.keyboard.press("1");
+  await page.keyboard.press("Enter");
+  await expect(mainInterval(page)).toHaveValue("1m");
+  await expect(page.getByLabel("Panel 2 interval")).toHaveValue("15m");
+
+  // Escape cancels the digits without leaving full screen; the next Escape leaves.
+  await page.getByRole("button", { name: "Enter full-screen charts" }).click();
+  await page.keyboard.press("3");
+  await expect(typed).toHaveText("3m");
+  await page.keyboard.press("Escape");
+  await expect(entry).toHaveCount(0);
+  await expect(page.getByTestId("chart-workspace")).toHaveAttribute("data-immersive", "true");
+  // A click elsewhere drops them too, so a later Enter means nothing.
+  await page.keyboard.press("5");
+  await expect(typed).toHaveText("5m");
+  await page.getByRole("heading", { name: "Charts", exact: true }).click();
+  await expect(entry).toHaveCount(0);
+  await page.keyboard.press("Enter");
+  await expect(mainInterval(page)).toHaveValue("1m");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("chart-workspace")).not.toHaveAttribute("data-immersive", "true");
+});
+
+test("H, 4, D and W switch the main chart at once; hotkeys stay off in fields and under dialogs", async ({ page }) => {
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  for (const [key, interval] of [["h", "1h"], ["4", "4h"], ["Shift+D", "1D"], ["w", "1W"]] as const) {
+    await page.keyboard.press(key);
+    await expect(mainInterval(page)).toHaveValue(interval);
+    await expect(intervalEntry(page)).toHaveCount(0);
+    await expect(page.getByRole("region", { name: `MRVL ${interval} chart` }).first()).toBeVisible();
+  }
+  await expect(page.getByLabel("Panel 2 interval")).toHaveValue("15m");
+
+  // Typing in a field types; it never changes the chart.
+  await chartedSymbol(page).click();
+  await page.keyboard.type("hd 15");
+  await expect(chartedSymbol(page)).toHaveValue("HD 15");
+  await page.getByLabel("Level label").click();
+  await page.keyboard.type("4 W");
+  await expect(page.getByLabel("Level label")).toHaveValue("4 W");
+  await expect(intervalEntry(page)).toHaveCount(0);
+  await page.getByLabel("Panel 2 interval").focus();
+  await page.keyboard.press("h");
+  await expect(page.getByLabel("Panel 2 interval")).toHaveValue("15m");
+  await expect(mainInterval(page)).toHaveValue("1W");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+
+  // With a dialog open the keys belong to it.
+  await page.getByRole("button", { name: /^Layouts/ }).click();
+  await expect(page.getByRole("dialog", { name: "Saved layouts" })).toBeVisible();
+  await page.keyboard.press("d");
+  await page.keyboard.press("Space");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog", { name: "Saved layouts" })).toHaveCount(0);
+  await expect(mainInterval(page)).toHaveValue("1W");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+
+  // So do the app's own overlays: the Sync drawer covers the charts and takes every key.
+  await page.getByTitle("Sync & enrichment status").filter({ visible: true }).click();
+  await expect(page.getByRole("dialog", { name: "Background jobs" })).toBeVisible();
+  // Off the Sync button, which Space would press like any focused button.
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  for (const key of ["d", "Space", "?", "End", "1", "Enter", "ControlOrMeta+k"]) await page.keyboard.press(key);
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Symbol search" })).toHaveCount(0);
+  await expect(intervalEntry(page)).toHaveCount(0);
+  await expect(mainInterval(page)).toHaveValue("1W");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+  await page.mouse.click(1000, 400); // the backdrop beside the drawer closes it
+  await expect(page.getByRole("dialog", { name: "Background jobs" })).toHaveCount(0);
+  await page.keyboard.press("d");
+  await expect(mainInterval(page)).toHaveValue("1D");
+});
+
+test("Space and Shift+Space step through the watchlist; a button reached by keyboard keeps Space", async ({ page }) => {
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  const scrolled = await page.evaluate(() => window.scrollY);
+  // MRVL is third on the default watchlist: SPY, QQQ, MRVL, NVDA, AMD, AAPL, META, MSFT.
+  await page.keyboard.press("Space");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "NVDA");
+  await expect(page.getByRole("region", { name: "NVDA 5m chart" })).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "AMD");
+  await page.keyboard.press("Shift+Space");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "NVDA");
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrolled); // Space does not scroll the page
+  await expect(mainInterval(page)).toHaveValue("5m");
+
+  // After a click on a watchlist row, Space still steps, and both ends wrap.
+  await page.getByRole("button", { name: "Chart SPY", exact: true }).click();
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "SPY");
+  await page.keyboard.press("Shift+Space");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MSFT");
+  await page.keyboard.press("Space");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "SPY");
+
+  // A toggle clicked with the mouse is not pressed again by Space; one reached with Tab is.
+  const linkRanges = page.getByRole("button", { name: "Link time ranges" });
+  await linkRanges.click();
+  await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Space");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
+  await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Tab");
+  const compact = page.getByRole("button", { name: "compact small charts" });
+  await expect(compact).toBeFocused();
+  await page.keyboard.press("Space");
+  await expect(compact).toHaveAttribute("aria-pressed", "true");
+  await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
+});
+
+test("Alt+R resets every chart's scales and End returns every chart to its latest candle at the same zoom", async ({ page }) => {
+  await registerCharts(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+  await expect(page.getByTestId("canvas-Panel 2")).toHaveAttribute("data-bars", "240");
+  // Reset returns each chart to the view it opened on.
+  await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
+  await expect.poll(async () => (await roundedRange(page, "Panel 2"))?.to).toBe(244);
+  const opened = { main: await roundedRange(page, "main"), panel: await roundedRange(page, "Panel 2") };
+  // Well clear of the left edge, so no older page is asked for.
+  await moveAway(page, "main", { from: 120, to: 180 });
+  await moveAway(page, "Panel 2", { from: 150, to: 170 });
+  await page.keyboard.press("End");
+  await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 184, to: 244 });
+  await expect.poll(() => roundedRange(page, "Panel 2")).toEqual({ from: 224, to: 244 });
+  expect(await autoScaled(page, "main")).toEqual([false, false]); // End keeps the price scale as it is
+
+  await moveAway(page, "main", { from: 120, to: 180 });
+  await moveAway(page, "Panel 2", { from: 150, to: 170 });
+  await page.keyboard.press("Alt+r");
+  await expect.poll(() => roundedRange(page, "main")).toEqual(opened.main);
+  await expect.poll(() => roundedRange(page, "Panel 2")).toEqual(opened.panel);
+  expect(await autoScaled(page, "main")).toEqual([true, true]);
+  expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
+
+  // With linked time ranges, each chart still goes to its own latest candle.
+  await page.getByRole("button", { name: "Link time ranges" }).click();
+  await moveAway(page, "main", { from: 120, to: 180 });
+  await moveAway(page, "Panel 2", { from: 150, to: 170 });
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.press("End");
+  await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 184, to: 244 });
+  await page.waitForTimeout(300);
+  expect(await roundedRange(page, "Panel 2")).toEqual({ from: 224, to: 244 });
+});
+
+test("? opens a cheat sheet listing exactly the bindings that exist; ? and Escape close it", async ({ page }) => {
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  await page.keyboard.press("?");
+  const sheet = page.getByRole("dialog", { name: "Keyboard shortcuts" });
+  await expect(sheet).toBeVisible();
+  // Each of these has a test in this file; the sheet lists them and nothing else.
+  const bindings = ["1 3 5 15 30 then Enter", "Backspace", "Esc", "H", "4", "D", "W",
+    "Space", "Shift + Space", "Alt + ↓ or Alt + ↑", "⌘ + K or Ctrl + K",
+    "Alt + R", "End", "Esc", "?"];
+  expect(await sheet.locator("td[aria-label]").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label")))).toEqual(bindings);
+  await expect(sheet.getByRole("row")).toHaveCount(bindings.length);
+  await page.screenshot({ path: test.info().outputPath("hotkey-sheet-desktop.png") });
+  // The sheet is modal: other hotkeys and symbol search wait.
+  await page.keyboard.press("d");
+  await page.keyboard.press("ControlOrMeta+k");
+  await expect(page.getByRole("dialog", { name: "Symbol search" })).toHaveCount(0);
+  await expect(mainInterval(page)).toHaveValue("5m");
+  await page.keyboard.press("Escape");
+  await expect(sheet).toHaveCount(0);
+  await page.getByRole("button", { name: "Keyboard shortcuts" }).click();
+  await expect(sheet).toBeVisible();
+  await page.keyboard.press("?");
+  await expect(sheet).toHaveCount(0);
+  await page.keyboard.press("Shift+Slash");
+  await expect(sheet).toBeVisible();
+  await sheet.getByRole("button", { name: "Close keyboard shortcuts" }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test.describe("phone hotkey equivalents", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("interval buttons, watchlist arrows and the latest-candles button do by touch what the hotkeys do", async ({ page }) => {
+    await registerCharts(page);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+    await expect(page.getByRole("button", { name: "Keyboard shortcuts" })).toBeHidden();
+    await page.getByRole("button", { name: "1h", exact: true }).tap();
+    await expect(mainInterval(page)).toHaveValue("1h");
+    for (const name of ["Next watchlist symbol", "Previous watchlist symbol"]) {
+      const box = (await page.getByRole("button", { name }).boundingBox())!;
+      expect(Math.min(box.width, box.height), name).toBeGreaterThanOrEqual(24);
+    }
+    await page.getByRole("button", { name: "Next watchlist symbol" }).tap();
+    await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "NVDA");
+    await page.getByRole("button", { name: "Previous watchlist symbol" }).tap();
+    await page.getByRole("button", { name: "Previous watchlist symbol" }).tap();
+    await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
+    await expect(mainInterval(page)).toHaveValue("1h");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
+    await moveAway(page, "main", { from: 120, to: 180 });
+    await page.getByRole("button", { name: "Latest candles main" }).tap();
+    await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
+    expect(await autoScaled(page, "main")).toEqual([true, true]);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});

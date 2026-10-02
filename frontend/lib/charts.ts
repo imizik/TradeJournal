@@ -480,3 +480,15 @@ export function createCrosshairLink() {
     emit(time: number | null, source: string) { listeners.forEach((fn) => fn(time, source)); },
   };
 }
+
+/** Alt+R resets a chart's view (latest candles, automatic price scale); End scrolls it to the latest candle at the same zoom. */
+export type ChartCommand = "reset" | "realtime";
+export type ChartCommands = ReturnType<typeof createChartCommands>;
+/** Workspace hotkeys reach every chart through this, as the crosshair link does. */
+export function createChartCommands() {
+  const listeners = new Set<(command: ChartCommand) => void>();
+  return {
+    listen(fn: (command: ChartCommand) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
+    emit(command: ChartCommand) { listeners.forEach((fn) => fn(command)); },
+  };
+}

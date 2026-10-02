@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, Columns3, Crosshair, Expand, LayoutGrid, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Keyboard, LayoutGrid, Link2, Loader2, Maximize2, Pause, Play, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
+import HotkeySheet from "./HotkeySheet";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import SymbolPalette from "./SymbolPalette";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, todayNewYork, validSymbol } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, todayNewYork, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
 import type { LiveFeed } from "@/lib/chartStore";
+import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
@@ -25,6 +27,9 @@ const frameKey = (frame: Frame) => `${frame.symbol}|${frame.interval}`;
 /** A saved level on the adjusted basis; `was` is its saved price when a split moved it. */
 type ShownLevel = PriceLevel & { was: number | null };
 const NO_LEVELS: ShownLevel[] = [];
+/** Digits typed for the main chart's interval, waiting for Enter (C0.5). */
+type Entry = { typed: string; invalid: boolean };
+const NO_ENTRY: Entry = { typed: "", invalid: false };
 
 // The pieces of the toolbar and footer that move with every trade or second
 // subscribe themselves, so the workspace above them does not re-render.
@@ -81,11 +86,15 @@ export default function ChartWorkspace() {
   // The panel the symbol search chooses for: 0 is the main symbol.
   const [palette, setPalette] = useState<number | null>(null);
   const [layoutMenu, setLayoutMenu] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [entry, setEntry] = useState<Entry>(NO_ENTRY);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 900 });
   const link = useMemo(() => createCrosshairLink(), []);
   const rangeLink = useMemo(() => createRangeLink(), []);
+  const commands = useMemo(() => createChartCommands(), []);
   const stream = useMemo(() => createStreamStore(), []);
+  const root = useRef<HTMLDivElement>(null);
   const inFlight = useRef(false);
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
@@ -338,6 +347,7 @@ export default function ChartWorkspace() {
     return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
   }, [ready, hasData, paused, symbolsKey, streamKey, stream]);
 
+  const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? value : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
@@ -367,31 +377,80 @@ export default function ChartWorkspace() {
   const renameLayout = (id: string, name: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, name } : layout) }));
   const updateLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, ...arrangementOf(s) } : layout) }));
   const deleteLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.filter((layout) => layout.id !== id) }));
-  const choose = useRef(chooseSymbol);
-  const keys = useRef({ palette: palette !== null, layoutMenu, immersive, watchlist: settings.watchlist, symbol: settings.symbol });
+  const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value) });
+  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed });
   useEffect(() => {
-    choose.current = chooseSymbol;
-    keys.current = { palette: palette !== null, layoutMenu, immersive, watchlist: settings.watchlist, symbol: settings.symbol };
+    actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value) };
+    keys.current = { palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed };
   });
+  // Hotkeys (lib/hotkeys.ts, listed by the ? sheet). They act on the main
+  // chart's interval, the watchlist and every chart's view.
   useEffect(() => {
+    // Space presses a control reached with the keyboard. One focused by a click
+    // or tap does not keep it, so Space steps the watchlist after a click.
+    let pointer = false;
+    let keyboardFocus: EventTarget | null = null;
+    const onPointer = () => { pointer = true; };
+    const onKeyboard = () => { pointer = false; };
+    const onFocus = (event: FocusEvent) => { keyboardFocus = pointer ? null : event.target; };
     const onKey = (event: KeyboardEvent) => {
       const state = keys.current;
-      // One dialog at a time: with the layouts dialog open, symbol search stays closed.
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); if (!state.layoutMenu) setPalette((v) => v === null ? 0 : null); return; }
-      if (state.palette || state.layoutMenu) return;
-      if (event.key === "Escape" && state.immersive) { setImmersive(false); return; }
-      const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable=true]")) return;
-      if (event.altKey && (event.key === "ArrowDown" || event.key === "ArrowUp") && state.watchlist.length) {
+      // An app overlay over the charts (the Sync drawer, the phone menu) owns every key.
+      if ([...document.querySelectorAll('[aria-modal="true"]')].some((dialog) => !root.current?.contains(dialog))) return;
+      // One dialog at a time: with the layouts dialog or the shortcuts open, symbol search stays closed.
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        const index = state.watchlist.indexOf(state.symbol);
-        const next = index < 0 ? 0 : (index + (event.key === "ArrowDown" ? 1 : -1) + state.watchlist.length) % state.watchlist.length;
-        choose.current(state.watchlist[next]);
+        if (!state.layoutMenu && !state.help) { setEntry(NO_ENTRY); setPalette((v) => v === null ? 0 : null); }
+        return;
       }
+      if (state.palette || state.layoutMenu) return;
+      if (state.help) {
+        if (event.key === "?" || event.key === "Escape") { event.preventDefault(); setHelp(false); }
+        return;
+      }
+      // A watchlist row moving focus has already used this key.
+      if (event.defaultPrevented) return;
+      const target = event.target as HTMLElement | null;
+      const typing = !!target?.closest("input, textarea, select, [contenteditable=true]");
+      const hotkey = typing ? null : readHotkey(event, state.typed);
+      if (!hotkey) {
+        if (event.key === "Escape" && state.immersive) setImmersive(false);
+        return;
+      }
+      if (event.key === " " && target === keyboardFocus && target?.closest("button, a[href], [role=button], summary")) return;
+      event.preventDefault();
+      if (event.repeat) return;
+      if (hotkey.kind === "type") { setEntry({ typed: hotkey.typed, invalid: false }); return; }
+      if (hotkey.kind === "commit") {
+        const interval = TYPED_INTERVALS[state.typed];
+        if (interval) { actions.current.interval(interval); setEntry(NO_ENTRY); }
+        else setEntry({ typed: state.typed, invalid: true });
+        return;
+      }
+      // Any other hotkey ends a typed interval.
+      setEntry(NO_ENTRY);
+      if (hotkey.kind === "interval") actions.current.interval(hotkey.interval);
+      else if (hotkey.kind === "step") { const next = stepWatchlist(state.watchlist, state.symbol, hotkey.by); if (next) actions.current.choose(next); }
+      else if (hotkey.kind === "reset" || hotkey.kind === "realtime") commands.emit(hotkey.kind);
+      else if (hotkey.kind === "help") setHelp(true);
     };
+    window.addEventListener("pointerdown", onPointer, true);
+    window.addEventListener("keydown", onKeyboard, true);
+    window.addEventListener("focusin", onFocus);
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+    return () => {
+      window.removeEventListener("pointerdown", onPointer, true); window.removeEventListener("keydown", onKeyboard, true);
+      window.removeEventListener("focusin", onFocus); window.removeEventListener("keydown", onKey);
+    };
+  }, [commands]);
+  // A click or focus elsewhere drops typed digits, so a later Enter is not taken for them.
+  useEffect(() => {
+    if (!entry.typed) return;
+    const cancel = () => setEntry(NO_ENTRY);
+    window.addEventListener("pointerdown", cancel);
+    window.addEventListener("focusin", cancel);
+    return () => { window.removeEventListener("pointerdown", cancel); window.removeEventListener("focusin", cancel); };
+  }, [entry.typed]);
   const watchKey = (event: React.KeyboardEvent<HTMLButtonElement>) => {
     const rows = [...(event.currentTarget.closest("section")?.querySelectorAll<HTMLButtonElement>("[data-watch-row]") ?? [])];
     const index = rows.indexOf(event.currentTarget);
@@ -406,7 +465,6 @@ export default function ChartWorkspace() {
     if (!validSymbol(symbol)) { setSymbolError("Enter a US stock or ETF ticker, such as MRVL."); return; }
     chooseSymbol(symbol);
   };
-  const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? value : v) }));
   // Levels belong to a symbol: one drawn on a panel holding SPY is an SPY level.
   const addLevel = (value: number, target = symbol) => {
     const existing = settings.levels[target] ?? NO_LEVELS;
@@ -458,7 +516,7 @@ export default function ChartWorkspace() {
   const showAside = !immersive || settings.immersiveWatchlist;
 
   return (
-    <div data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
+    <div ref={root} data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
       ? "fixed inset-0 z-[70] space-y-2 overflow-y-auto overscroll-contain bg-[#0b1017] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] text-slate-300 sm:px-3"
       : "space-y-4 text-slate-300"}>
       <header className={`flex flex-wrap items-center justify-between gap-3 ${immersive ? "sticky top-0 z-20 -mx-2 bg-[#0b1017]/95 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-3 sm:px-3" : ""}`}>
@@ -467,6 +525,7 @@ export default function ChartWorkspace() {
         <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
           <span role="status" aria-label="Chart settings" className={`mr-1 hidden items-center gap-1.5 text-[11px] lg:flex ${sync === "offline" || merged ? "text-amber-300" : "text-slate-500"}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
           <button className={`${button} hidden sm:inline-flex`} onClick={() => setPalette(0)} aria-label="Search symbols (Ctrl or Cmd+K)" title="Search symbols (⌘K / Ctrl+K)"><Search size={13} /><kbd className="text-[10px] text-slate-500">⌘K</kbd></button>
+          <button className={`${button} hidden sm:inline-flex`} onClick={() => { if (palette === null && !layoutMenu) setHelp(true); }} aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-expanded={help} title="Keyboard shortcuts (?)"><Keyboard size={13} /></button>
           {immersive && <button className={button} aria-pressed={settings.immersiveWatchlist} onClick={() => setSettings((s) => ({ ...s, immersiveWatchlist: !s.immersiveWatchlist }))}>{settings.immersiveWatchlist ? "Hide watchlist" : "Watchlist"}</button>}
           <button className={button} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} />Layouts{inUse && <span className="max-w-24 truncate text-sky-300">{inUse.name}</span>}</button>
           <button className={button} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"}>
@@ -520,12 +579,12 @@ export default function ChartWorkspace() {
       <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
         <div className="min-w-0 space-y-3">
           {response ? <>
-            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
+            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight} drawing={drawing} onDraw={addLevel} onInterval={(i) => setIntervalAt(0, i)}
               history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />)}
             {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={settings.indicators} levels={shownLevels.get(slot.symbol) ?? NO_LEVELS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -543,7 +602,11 @@ export default function ChartWorkspace() {
         {showAside && <aside className="min-w-0 space-y-3">
           <section className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]" aria-label="Watchlist">
             <div className="flex items-center justify-between border-b border-slate-700/40 px-3 py-3"><h2 className="text-xs font-medium text-slate-200">Watchlist <span className="ml-1 text-slate-500">{settings.watchlist.length}</span></h2>
-              <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className="rounded p-1 hover:bg-slate-800 disabled:opacity-30"><Plus size={14} /></button></div>
+              <div className="flex items-center gap-0.5">
+                {([[-1, "Previous", "Shift+Space", ChevronUp], [1, "Next", "Space", ChevronDown]] as const).map(([by, name, key, Icon]) => <button key={name} aria-label={`${name} watchlist symbol`} title={`${name} symbol (${key})`} disabled={!settings.watchlist.length}
+                  onClick={() => { const next = stepWatchlist(settings.watchlist, settings.symbol, by); if (next) chooseSymbol(next); }} className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30"><Icon size={14} /></button>)}
+                <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className="rounded p-1.5 hover:bg-slate-800 disabled:opacity-30"><Plus size={14} /></button>
+              </div></div>
             <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Quote</span><span className="text-right">Chg%</span></div>
             {settings.watchlist.map((symbol) => {
               const quote = latest?.quotes.find((q) => q.symbol === symbol);
@@ -575,6 +638,11 @@ export default function ChartWorkspace() {
       {palette !== null && <SymbolPalette current={palette ? slots.find((slot) => slot.index === palette)?.symbol ?? symbol : symbol} recent={settings.recent} watchlist={settings.watchlist} quotes={latest?.quotes ?? []}
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
+      {help && <HotkeySheet onClose={() => setHelp(false)} />}
+      {entry.typed && <div role="status" aria-label="Interval entry" className="pointer-events-none fixed left-1/2 top-1/2 z-[75] min-w-56 -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-600 bg-[#121924]/95 px-4 py-3 text-center shadow-2xl">
+        <div className="font-mono text-2xl font-medium text-slate-100">{entry.typed}<span className="text-base text-slate-500">m</span></div>
+        <p className={`mt-1 text-[11px] ${entry.invalid ? "text-amber-300" : "text-slate-400"}`}>{entry.invalid ? `No ${entry.typed}m interval. Type 1, 3, 5, 15 or 30.` : "Enter to apply · Esc to cancel"}</p>
+      </div>}
       {layoutMenu && <LayoutMenu layouts={settings.layouts} current={arrangementOf(settings)} onApply={chooseLayout} onSave={saveLayout} onRename={renameLayout}
         onUpdate={updateLayout} onDelete={deleteLayout} onClose={() => setLayoutMenu(false)} />}
       {!immersive && <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
