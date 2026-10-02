@@ -70,7 +70,7 @@ from planned work.
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | done ([PR #99](https://github.com/imizik/TradeJournal/pull/99)) |
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done ([PR #101](https://github.com/imizik/TradeJournal/pull/101)) |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | done ([PR #102](https://github.com/imizik/TradeJournal/pull/102)) |
-| C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done (PR_LINK) |
+| C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done ([PR #104](https://github.com/imizik/TradeJournal/pull/104)) |
 | C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | next |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | todo |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | todo |
@@ -511,7 +511,7 @@ and no Alpaca IEX (single-venue) bars ever mix into consolidated candles.
 
 ### Phase 4 — Options positioning on the chart
 
-**C4.1 Chain adapter (done in PR_NUM).** A Tradier adapter (for example
+**C4.1 Chain adapter (done in PR #104).** A Tradier adapter (for example
 `backend/app/engine/options_chain.py`) fetches one expiration per call and
 returns normalized, provider-independent contracts: underlying, expiration,
 strike, call/put, bid, ask, last, volume, open interest, IV and the provider's
