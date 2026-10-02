@@ -70,8 +70,8 @@ from planned work.
 | C0.5 | Hotkeys: timeframe keys, next/previous symbol, reset scale, back to realtime, `?` help | 0 Foundations | done ([PR #99](https://github.com/imizik/TradeJournal/pull/99)) |
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done ([PR #101](https://github.com/imizik/TradeJournal/pull/101)) |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | done ([PR #102](https://github.com/imizik/TradeJournal/pull/102)) |
-| C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | next |
-| C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | todo |
+| C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done (PR_LINK) |
+| C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | next |
 | C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | todo |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | todo |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | todo |
@@ -511,12 +511,17 @@ and no Alpaca IEX (single-venue) bars ever mix into consolidated candles.
 
 ### Phase 4 — Options positioning on the chart
 
-**C4.1 Chain adapter.** A Tradier adapter (for example
+**C4.1 Chain adapter (done in PR_NUM).** A Tradier adapter (for example
 `backend/app/engine/options_chain.py`) fetches one expiration per call and
 returns normalized, provider-independent contracts: underlying, expiration,
 strike, call/put, bid, ask, last, volume, open interest, IV and the provider's
 timestamps. *Done when:* unit tests parse a recorded fixture, and nothing outside
 the adapter reads a Tradier field name.
+As built ([Option chains](charts-workspace.md#option-chains-c41)): the models
+are a separate pure module (`options_models.py`) so C4.2 and C4.3 can read them
+without the client. One SPX date can carry both SPX and SPXW contracts, so
+every contract keeps its root. The adapter owns the 30/minute options budget;
+a background caller may wait for a slot.
 
 **C4.2 Positioning engine** (pure). Per strike and expiration, and in aggregate:
 call and put OI, call and put volume, put/call ratios and volume/OI. Then:

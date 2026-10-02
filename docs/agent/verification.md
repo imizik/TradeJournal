@@ -200,10 +200,14 @@ weekly prices, the raw cache untouched, missing, stale and damaged split data),
 1D/1W paging equal to the continuous series, workspace seam, new listing, one
 provider call per symbol per date, coded failures, a split effective today in
 raw bars, the route) and `backend/tests/test_chart_stream.py`
-verify private routes and provider/indicator boundaries. Actual Tradier/Webull
+verify private routes and provider/indicator boundaries.
+`backend/tests/test_options_chain.py` parses recorded production Tradier option
+chains (SPY, and SPX with both roots) and pins the options budget, coded
+failures and that Tradier option field names stay in the adapters. Actual Tradier/Webull
 access is checked separately by `backend/scripts/check_chart_feed.py`, split
 records and the adjusted prices against both providers by
-`backend/scripts/check_chart_splits.py` (read-only, a real split), and a
+`backend/scripts/check_chart_splits.py` (read-only, a real split), live option
+chains by `backend/scripts/check_options_chain.py` (read-only), and a
 separate configured-account SIP/raw probe checks Alpaca entitlement; browser fixtures
 do not establish live entitlement or TradingView parity.
 

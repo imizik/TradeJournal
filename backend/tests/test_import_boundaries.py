@@ -90,6 +90,9 @@ PURE_MODULES = {
     "app.engine.occ",
     "app.engine.chart_math",  # chart-only resampling and indicator math
     "app.engine.chart_adjust",  # chart-only split adjustment of supplied bars
+    # Option chain models. The Tradier adapter (options_chain) fills them; the
+    # positioning engine and recorder must be able to read them without it.
+    "app.engine.options_models",
 }
 # Third-party packages a pure module may reach. httpx, yfinance, anthropic,
 # googleapiclient and grpc are deliberately absent: reaching any of them, even
