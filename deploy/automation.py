@@ -81,14 +81,31 @@ def sync_pipeline(retry_seconds: float = 600, pause: float = 15) -> None:
         time.sleep(pause)
 
 
+def options_snapshot(retry_seconds: float = 600, pause: float = 15) -> None:
+    """Queue the options snapshot, waiting out a running sync. A session's open
+    interest cannot be recorded later, so failing to queue is a unit failure
+    (which alerts.py reports), not a quiet skip."""
+    deadline = time.monotonic() + retry_seconds
+    while True:
+        status, response = request("/sync/jobs/options_snapshot/run", "POST")
+        if status != 409:
+            print(f"Options snapshot queued: {response['run_id']}")
+            return
+        if time.monotonic() >= deadline:
+            raise SystemExit("Options snapshot not queued: another sync or enrichment job stayed active")
+        time.sleep(pause)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline"])
+    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline", "options-snapshot"])
     args = parser.parse_args()
     if args.action == "gmail-sync":
         gmail_sync()
     elif args.action == "sync-pipeline":
         sync_pipeline()
+    elif args.action == "options-snapshot":
+        options_snapshot()
 
 
 if __name__ == "__main__":

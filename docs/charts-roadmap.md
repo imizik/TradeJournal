@@ -71,8 +71,8 @@ from planned work.
 | C0.6 | Explicit, consistent price basis across stock splits and chart intervals | 0 Foundations | done ([PR #101](https://github.com/imizik/TradeJournal/pull/101)) |
 | C0.7 | Daily/weekly history pagination beyond the current three-year window | 0 Foundations | done ([PR #102](https://github.com/imizik/TradeJournal/pull/102)) |
 | C4.1 | Options chain adapter and normalized models (Tradier) | 4 Options on the chart | done ([PR #104](https://github.com/imizik/TradeJournal/pull/104)) |
-| C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | next |
-| C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | todo |
+| C4.3 | Positioning recorder: one daily snapshot, kept | 4 Options on the chart | done ([PR #105](https://github.com/imizik/TradeJournal/pull/105)) |
+| C1.1 | Drawing layer: select, drag, delete, undo/redo; levels become draggable objects | 1 Direct manipulation | next |
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | todo |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | todo |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | todo |
@@ -548,7 +548,7 @@ call and put OI, call and put volume, put/call ratios and volume/OI. Then:
 *Done when:* formulas are unit-tested against hand-computed fixtures, and the
 assumptions are written in `docs/charts-workspace.md`.
 
-**C4.3 Recorder.** Each trading session after the calendar's open, snapshot OI and volume per
+**C4.3 Recorder (done in PR #105).** Each trading session after the calendar's open, snapshot OI and volume per
 strike for SPY, QQQ and SPX, plus the underlyings of open positions and the
 top ten watchlist names (decided 2026-09-30), for expirations within 45 days. Store one row per
 (underlying, expiration, day) with the strikes packed in a JSON array: about
@@ -563,6 +563,14 @@ runs within its API budget, holidays are skipped, and restarting mid-run resumes
 idempotently. A missed historical snapshot is recorded as unavailable, never
 backfilled with today's chain under yesterday's date. This item runs immediately
 after C4.1 in board order, before the positioning engine or UI.
+As built ([Options snapshots](charts-workspace.md#options-snapshots-c43)): the
+snapshot is taken after the close, from 16:15 to 20:00 New York, not in the
+morning. That way volume covers the whole session and SPX's overnight session,
+whose volume Tradier reports from 20:15, never leaks in. A weekday timer queues
+it at 16:20 with a 19:20 catch-up. Each underlying gets a per-session status
+row, so a missed session is an explicit `unavailable`. A live dry run stored
+SPY, QQQ and SPX in 522 KB, so the whole scope is about 1 MB a day, below the
+1 GB-a-year planning estimate.
 
 **C4.4 Options levels layer.** Draws the call wall, the put wall and the top
 gamma strikes as levels on the price chart. Filters: nearest N (default 3 per

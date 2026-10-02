@@ -190,6 +190,11 @@ The release installs five timers:
   Polygon, Alpaca, path metrics) at 08:00 and 17:00 New York time. It waits
   up to ten minutes for a running sync to finish instead of skipping, and
   `Persistent=true` runs a missed slot after downtime.
+- `tradejournal-options-snapshot.timer` queues the options positioning snapshot
+  at 16:20 New York on weekdays, with a 19:20 catch-up that costs no Tradier
+  request once the session is recorded; holidays record nothing. A session's
+  open interest cannot be captured after 20:00, so if the job cannot be queued
+  within ten minutes the unit fails and the phone alert says so.
 - `tradejournal-alerts.timer` checks every two minutes whether anything above,
   the API or real-time Gmail has stopped working, and sends a phone alert.
   Without `/etc/tradejournal/alerts.env` the check is skipped; see
@@ -367,8 +372,8 @@ clears. It never repeats an alert.
 | TradeJournal isn't responding | any of its API requests fails | 5 min |
 | Gmail needs reconnecting / Robinhood import stopped | `GET /gmail/health` is `down` or `degraded` | 10 min |
 | *Job* failed | the newest finished run of a job type failed; listeners are excluded, and Gmail jobs wait 10 min and stay quiet while the Gmail alert is active | — |
-| Nightly backup, Offsite backup or Scheduled Sync Everything failed | its systemd service is `failed` | — |
-| *Schedule* is switched off | the backup, offsite, Sync Everything or Gmail-check timer is not active | 15 min |
+| Nightly backup, Offsite backup, Scheduled Sync Everything or Options snapshot failed | its systemd service is `failed` | — |
+| *Schedule* is switched off | the backup, offsite, Sync Everything, Gmail-check or options-snapshot timer is not active | 15 min |
 
 Failures that finished before the first check are history and never alerted.
 A reboot clears systemd's failed state; only a later successful run counts as

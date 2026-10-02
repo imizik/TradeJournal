@@ -203,7 +203,10 @@ raw bars, the route) and `backend/tests/test_chart_stream.py`
 verify private routes and provider/indicator boundaries.
 `backend/tests/test_options_chain.py` parses recorded production Tradier option
 chains (SPY, and SPX with both roots) and pins the options budget, coded
-failures and that Tradier option field names stay in the adapters. Actual Tradier/Webull
+failures and that Tradier option field names stay in the adapters.
+`backend/tests/test_options_recorder.py` covers the daily options snapshot job:
+its capture window, resume after a restart, missed sessions marked unavailable
+and the real adapter's budget. Actual Tradier/Webull
 access is checked separately by `backend/scripts/check_chart_feed.py`, split
 records and the adjusted prices against both providers by
 `backend/scripts/check_chart_splits.py` (read-only, a real split), live option

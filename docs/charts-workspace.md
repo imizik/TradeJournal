@@ -458,6 +458,47 @@ Tradier adapters names a Tradier option field.
   option reads for a minute. A background caller passes `wait=True` to sleep
   for a slot; any other caller is refused at once with `rate_limited`.
 
+### Options snapshots (C4.3)
+
+`backend/app/engine/options_recorder.py` keeps, once per trading session, the
+open interest and volume of every contract in each in-scope underlying's
+expirations within 45 days. Scope: SPY, QQQ and SPX; the underlyings of open
+positions (Webull is dormant and left out; an SPXW root counts as SPX); and the
+first ten names of the shared chart watchlist. Nothing on the chart reads the
+snapshots yet.
+
+- **Storage.** One `option_chain_snapshot` row per (session, underlying,
+  expiration) holds the capture time, the chain's newest trade time and every
+  contract packed as `[root, "C"|"P", strike, open_interest, volume]`, null
+  where Tradier gave nothing. A live dry run on 2026-10-01 stored SPY, QQQ
+  and SPX (58 expirations, 21,140 contracts) in 522 KB of packed JSON, so the
+  whole scope is roughly 1 MB a day. One `option_snapshot_day` row per (session,
+  underlying) says `recorded`, `partial` (with what is missing) or
+  `unavailable`.
+- **Capture window.** From 15 minutes after the regular close (16:15, or 13:15
+  after a 13:00 close) to 20:00 New York, so volume covers the whole session;
+  other times record nothing. Later is refused because SPX's overnight session
+  opens at 20:15: at 21:38 on 2026-10-01, 728 SPX contracts that had traded that
+  day showed volume 0. Open interest is OCC's overnight figure for the previous
+  close. Holidays and weekends follow the market calendar; without a calendar
+  nothing is recorded.
+- **Never backfilled.** A snapshot is written only for the session in progress
+  and never replaced. A later run marks an open session with no rows at all as
+  `unavailable` for the underlyings the session before it held (looking back 31
+  days). A day the calendar cannot describe waits for a later run.
+- **Resume.** Each expiration commits on its own and every underlying is marked
+  `partial` until it finishes. A rerun skips stored expirations and complete
+  underlyings, so a complete session costs no request.
+- **Budget and schedule.** Reads use the C4.1 adapter with `wait=True` and sleep
+  for the 30-per-minute options budget. That dry run made 61 requests for SPY,
+  QQQ and SPX (15, 15 and 28 expirations plus a list each) in 121 seconds,
+  never more than 30 in a minute; each single name adds about eight, so a full
+  run takes several minutes. It is the
+  `options_snapshot` job in the sync lane, queued at 16:20 and 19:20 New York on
+  weekdays by `tradejournal-options-snapshot.timer` or from the Sync Center.
+  When anything in scope is still missing, the job fails with that first, so
+  the phone alert names it; what was recorded stays.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
@@ -546,6 +587,17 @@ that no module outside the Tradier adapters names a Tradier option field.
 `backend/scripts/check_options_chain.py` reads live chains (read-only, two
 requests per symbol); on 2026-10-01 after the close it listed 342 SPY, 602 SPXW
 and 160 NVDA contracts for 2026-10-02.
+`backend/tests/test_options_recorder.py` covers the scope, packing with roots
+and missing values, the capture window (weekend, holiday, during the session,
+early close, after 20:00), an unavailable calendar, a restart that fetches only
+what was missed, a snapshot another run stored first, partial sessions and
+their retry, a refused token, the window closing mid-run, missed sessions
+marked unavailable (never on holidays, and only after the recorder first ran),
+the real adapter's budget across 63 requests, and the Sync Center job. The
+timer and its automation are in `backend/tests/test_deployment.py`. The live
+dry run above (after hours, its clock pinned to 16:30, into a throwaway
+database) recorded all three fixed underlyings completely; the first scheduled
+run after deployment is the production evidence.
 
 Live-provider probes establish actual Tradier access; stubbed browser tests do
 not. Neither establishes full TradingView parity. This version has no Pine

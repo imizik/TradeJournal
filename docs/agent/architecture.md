@@ -246,7 +246,10 @@ calculations and temporary bars are separate from historical enrichment, and
 execution markers are read-only journal views. Layouts, watchlist and
 horizontal levels are one JSON document in `chart_settings` (`/charts/settings`,
 saved only on top of the revision the client last saw), with a browser copy
-for when the server is unreachable. See [chart boundaries](../charts-workspace.md).
+for when the server is unreachable. Daily option open interest and volume
+snapshots (`option_chain_snapshot`, with a per-session status in
+`option_snapshot_day`) are written only by the after-close `options_snapshot`
+sync job. See [chart boundaries](../charts-workspace.md).
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when

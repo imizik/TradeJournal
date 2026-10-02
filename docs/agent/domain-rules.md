@@ -318,6 +318,11 @@ is verifiable rather than hopeful.
   split) and indicators are computed over it whole, so pages are slices.
 - Charts pass `feed=sip` explicitly on every Alpaca request and never change
   `ALPACA_DATA_FEED`; IEX bars never reach a chart.
+- Option snapshots (`options_recorder.py`) are taken only for the session in
+  progress, between 15 minutes after the regular close and 20:00 New York, and
+  never rewritten. Open interest history cannot be fetched later: a missed
+  session is marked `unavailable`, and a later capture is never filed under an
+  earlier date. SPX and SPXW contracts stay apart by root.
 
 ## TradingView live alerts
 
