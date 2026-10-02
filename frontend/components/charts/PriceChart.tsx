@@ -10,6 +10,7 @@ import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
 import SelectionBar from "./SelectionBar";
+import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
 
 const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
@@ -62,6 +63,9 @@ type LayerRegistry = Map<string, DrawingLayer>;
 const PLACE_TEXT: Record<Tool, string> = { level: "Click a price to save a level", ray: "Click where the ray starts", trend: "Click the first point of the line",
   zone: "Click one corner of the zone", note: "Click where the note goes" };
 const SECOND_TEXT: Partial<Record<Tool, string>> = { trend: "Click the second point", zone: "Click the opposite corner" };
+/** A finger held this long without moving opens the chart menu (C1.3); moving further than `HOLD_SLOP` first is a pan or a crosshair scrub. */
+const LONG_PRESS = 500;
+const HOLD_SLOP = 10;
 /** What the countdown needs besides the clock and the candles. */
 export type ClockFeed = { session: "regular" | "extended"; market?: MarketDay | null; paused: boolean; delayed: boolean; failed: boolean; fetched?: number };
 
@@ -91,7 +95,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, expanded, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, expanded, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onExpand }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -123,6 +127,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   /** A drawing dragged (new points, on the chart's basis) or restyled from its bar. */
   onEditDrawing?(id: string, patch: DrawingPatch): void;
   onDelete?(id: string): void;
+  /** Right-click, or a long press on touch: the menu for the item there, or for the chart (C1.3). */
+  onMenu?(request: MenuRequest): void;
+  /** The selection bar's lock, on a locked item. */
+  onUnlock?(id: string): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   onInterval(interval: Interval): void; onFocus?(): void; onExpand?(): void;
@@ -137,7 +145,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu });
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
   const placing = useRef<{ kind: DrawingKind; first: Anchor } | null>(null);
   const [second, setSecond] = useState(false);
@@ -150,7 +158,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const renders = (window as typeof window & { __tjRenders?: RenderCounts }).__tjRenders;
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing]);
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -240,7 +248,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       if (now.tool || now.pending || !onPlot(x, y)) return false;
       const hit = touch === null ? layer.hit(x, y, MOUSE_SLOP) : now.selected ? layer.hit(x, y, TOUCH_SLOP, now.selected) : null;
       const base = hit && layer.item(hit.id);
-      if (!hit || !base || !(base.kind === "level" ? now.onMove : now.onEditDrawing)) return false;
+      // A locked item selects (the click handler) but never drags: the press pans the chart.
+      if (!hit || !base || base.locked || !(base.kind === "level" ? now.onMove : now.onEditDrawing)) return false;
       const at = base.kind === "level" ? layer.y(hit.id) : y;
       if (at === null) return false;
       const near = (layer.anchors(hit.id) ?? []).reduce<{ index: number; distance: number }>((best, point, index) => {
@@ -335,6 +344,44 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const at = local(event.clientX, event.clientY);
       if (event.button === 0) release(at.x, at.y, DRAG_START);
     };
+    // The chart menu (C1.3): the item under the pointer, or the chart with the
+    // price there (the magnet applies, as it does to a placed level). A press
+    // on a price or time scale, or the RSI pane, has no price.
+    const openMenu = (clientX: number, clientY: number, touch: boolean) => {
+      const now = actions.current;
+      if (now.pending || !now.onMenu) return;
+      const at = local(clientX, clientY);
+      const plot = onPlot(at.x, at.y);
+      const hit = plot && !now.tool ? layer.hit(at.x, at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
+      const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, reset: () => { quiet(); moveView(chart, barsRef.current.length, main, "reset"); } });
+    };
+    // A finger held still: its own timer, since browsers differ on whether a
+    // long press fires `contextmenu` (Android does, iOS does not; whichever
+    // comes first opens the menu). The library's own long tap (a crosshair
+    // scrub) starts sooner and still works by moving before this fires; once
+    // the menu opens, the lift is not a tap.
+    let hold: { touch: number; x: number; y: number; timer: number } | null = null;
+    let tapsOffUntil = 0;
+    const dropHold = () => { if (hold) window.clearTimeout(hold.timer); hold = null; };
+    const fireHold = () => {
+      const done = hold;
+      dropHold();
+      if (!done) return;
+      finish(false); // a selected item pressed for its menu does not drag
+      tapsOffUntil = Infinity;
+      openMenu(done.x, done.y, true);
+    };
+    const startHold = (touch: Touch) => {
+      dropHold();
+      if (actions.current.tool || actions.current.pending || !actions.current.onMenu) return;
+      hold = { touch: touch.identifier, x: touch.clientX, y: touch.clientY, timer: window.setTimeout(fireHold, LONG_PRESS) };
+    };
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault(); // never the browser's menu over the chart
+      if (performance.now() - lastTouch < 1000) { fireHold(); return; }
+      if (!drag) openMenu(event.clientX, event.clientY, false);
+    };
     const onMouseMove = (event: MouseEvent) => { const at = local(event.clientX, event.clientY); follow(at.x, at.y, modifier(event)); };
     const onMouseUp = () => finish(true);
     const onMouseDown = (event: MouseEvent) => {
@@ -349,14 +396,18 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     };
     const onTouchStart = (event: TouchEvent) => {
       lastTouch = performance.now();
-      if (drag || event.touches.length !== 1) { if (drag) finish(false); return; }
+      tapsOffUntil = 0;
+      if (drag || event.touches.length !== 1) { dropHold(); if (drag) finish(false); return; }
       const touch = event.touches[0];
+      startHold(touch);
       const at = local(touch.clientX, touch.clientY);
       if (pressTool(at.x, at.y, touch.identifier, false)) return;
       if (grab(at.x, at.y, touch.identifier)) event.stopPropagation();
     };
     const ours = (event: TouchEvent) => drag?.touch != null && [...event.changedTouches].find((touch) => touch.identifier === drag!.touch);
     const onTouchMove = (event: TouchEvent) => {
+      const held = hold && [...event.changedTouches].find((touch) => touch.identifier === hold!.touch);
+      if (held && Math.hypot(held.clientX - hold!.x, held.clientY - hold!.y) > HOLD_SLOP) dropHold();
       const touch = ours(event);
       if (!touch) return;
       event.preventDefault(); // the page must not scroll under a dragged item
@@ -365,6 +416,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       follow(at.x, at.y, false);
     };
     const onTouchEnd = (event: TouchEvent) => {
+      lastTouch = performance.now();
+      dropHold();
+      if (tapsOffUntil === Infinity) tapsOffUntil = performance.now() + 500;
       const tapped = press?.touch != null && [...event.changedTouches].find((touch) => touch.identifier === press!.touch);
       if (tapped) { const at = local(tapped.clientX, tapped.clientY); if (event.type === "touchend") release(at.x, at.y, 10); else press = null; }
       if (ours(event)) { event.stopPropagation(); finish(event.type === "touchend"); }
@@ -374,9 +428,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("touchmove", onTouchMove, { capture: true, passive: false });
     element.addEventListener("touchend", onTouchEnd, true);
     element.addEventListener("touchcancel", onTouchEnd, true);
+    element.addEventListener("contextmenu", onContextMenu, true);
     chart.subscribeClick((event) => {
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
+      if (performance.now() < tapsOffUntil) return; // the lift after a long press
       if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); return; }
       const touch = performance.now() - lastTouch < 1000;
       now.onSelect?.(layer.hit(event.point.x, event.point.y, touch ? TOUCH_SLOP : MOUSE_SLOP)?.id ?? null);
@@ -436,8 +492,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     registry?.set(id, chart);
     return () => {
       stopLink(); stopRange(); stopCommands(); chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id);
-      finish(false);
-      window.removeEventListener("mouseup", onPlaceUp);
+      finish(false); dropHold();
+      window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       markers.detach(); candles.detachPrimitive(layer); chart.remove(); bundle.current = null; barsRef.current = [];
@@ -599,9 +655,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
       <div className="relative">
-        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={{ height }} className={`transition-opacity ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={{ height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
-          onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} />}
+          onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>
       {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote || history.adjustmentNote || (history.exhausted && history.historyStart)) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
         {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : [history.exhausted && history.historyStart ? `Tradier daily history starts ${history.historyStart}.` : null, history.calendarNote, history.adjustmentNote].filter(Boolean).join(" ")}
