@@ -1932,6 +1932,22 @@ test("H, 4, D and W switch the main chart at once; hotkeys stay off in fields an
   await expect(intervalEntry(page)).toHaveCount(0);
   await expect(mainInterval(page)).toHaveValue("1W");
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "MRVL");
+  // The backdrop is the top layer everywhere beside the drawer. Nothing in a chart may paint over it:
+  // the library's pane-resize handle once did, in a 9px strip whose height followed the chart's layout,
+  // so the click below only missed the backdrop on some runs. Scan every row, not just the clicked one.
+  const covered = await page.evaluate(() => {
+    const backdrop = document.querySelector('[role="dialog"][aria-label="Background jobs"]')?.previousElementSibling;
+    const stray: string[] = [];
+    for (const x of [300, 650, 1000, innerWidth - 1]) {
+      for (let y = 0; y < innerHeight; y++) {
+        const top = document.elementFromPoint(x, y);
+        if (top !== backdrop) stray.push(`(${x},${y}) ${top?.tagName}`);
+      }
+    }
+    return { backdrop: backdrop?.className ?? null, stray: stray.slice(0, 5) };
+  });
+  expect(covered.backdrop).toContain("inset-0");
+  expect(covered.stray).toEqual([]);
   await page.mouse.click(1000, 400); // the backdrop beside the drawer closes it
   await expect(page.getByRole("dialog", { name: "Background jobs" })).toHaveCount(0);
   await page.keyboard.press("d");
