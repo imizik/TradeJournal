@@ -222,24 +222,28 @@ def test_before_four_am_today_is_not_requested_so_quotes_and_daily_bars_still_lo
     assert calls[3][0].endswith("/timesales") and calls[3][1]["start"] == "2026-10-01 04:00"
 
 
-def test_three_symbol_layout_from_two_tabs_stays_within_the_chart_budget(provider):
+@pytest.mark.parametrize("levels,expected", [(False, 17), (True, 19)])
+def test_three_symbol_layout_from_two_tabs_stays_within_the_chart_budget(provider, levels, expected):
     """MRVL (five panels) plus SPY and QQQ held by panels, refreshed every 15 s by two tabs."""
     feed, calls, clock, _ = provider
     watchlist = ["SPY", "QQQ", "MRVL", "NVDA"]
+    stored = (lambda symbol, day: None) if levels else None
     per_minute = []
     for _minute in range(3):
         start = len(calls)
         for _refresh in range(4):
             for _tab in range(2):
-                feed.workspace("MRVL", ["5m", "15m", "1h", "1D", "1m"], watchlist, "extended")
-                feed.workspace("SPY", ["5m", "1h"], [], "extended", quotes=False)
-                feed.workspace("QQQ", ["15m"], [], "extended", quotes=False)
+                feed.workspace("MRVL", ["5m", "15m", "1h", "1D", "1m"], watchlist, "extended", stored_session=stored)
+                feed.workspace("SPY", ["5m", "1h"], [], "extended", quotes=False, stored_session=stored)
+                feed.workspace("QQQ", ["15m"], [], "extended", quotes=False, stored_session=stored)
             clock[0] += 15.01
         per_minute.append(len(calls) - start)
     # Each 15 s: three minute reads and one quote batch; MRVL's daily bars once a minute.
     # Held symbols never read quotes, and the second tab is served from the shared cache.
-    assert per_minute[1:] == [17, 17]
-    assert max(per_minute) <= 20 < 60  # one third of the chart budget; Tradier allows 120
+    # Automatic levels (C2.3) also read SPY's and QQQ's daily bars once a minute; the previous session comes from disk.
+    assert per_minute[1:] == [expected, expected]
+    # The first minute adds each symbol's whole daily series, read once per date.
+    assert max(per_minute) <= 22 < 60  # about a third of the chart budget; Tradier allows 120
     assert sum("quotes" in url for url, _ in calls) == 12
     assert {params["symbol"] for url, params in calls if "timesales" in url} == {"MRVL", "SPY", "QQQ"}
 
@@ -350,8 +354,9 @@ def test_history_route_identifies_window_and_returns_bounded_old_markers(route_c
 def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route_client, monkeypatch):
     calls = []
 
-    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True):
+    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True, stored_session=None):
         calls.append((symbol, frames, watchlist, quotes))
+        assert stored_session == charts.chart_history.stored  # every symbol gets its automatic levels
         if symbol == "BAD":
             raise ChartFeedError("Tradier could not load these charts.")
         bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
@@ -369,7 +374,7 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
     assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
-                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "fills_truncated": False}
+                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "fills_truncated": False}
 
 
 def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):

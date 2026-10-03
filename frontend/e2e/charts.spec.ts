@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import type { ChartData, ChartBar, Interval, MarketDay, PriceAdjustment } from "../lib/charts";
+import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 
 // Each test starts from empty server settings of its own; tests tagged
@@ -1071,7 +1071,7 @@ type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | nu
 const EMPTY_SETTINGS = {
   levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false, proportions: null, layoutProportions: {},
   intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
-  watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false,
+  watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
 };
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
@@ -4202,4 +4202,144 @@ test.describe("phone dividers and maximize", () => {
     await expect(drawn(page, "main")).toBeVisible();
     expect(await sameCharts(page)).toBe(true);
   });
+});
+
+// ---- Automatic levels (C2.3): the nearest three each side, a card on hover or tap, hidden as a group ----
+
+const ROUND = { evidence: "calculated", timeframe: null, source: null, bar_time: null, formed_at: null } as const;
+const autoMember = (kind: string, label: string, value: number, extra: Partial<AutoLevel> = {}): AutoLevel => ({ kind, label, price: value,
+  evidence: "calculated", timeframe: "1m", source: "tradier", bar_time: FIXTURE_START, formed_at: FIXTURE_START + 300, developing: false, ...extra });
+function autoZone(members: AutoLevel[], score = members.length): AutoZone {
+  const prices = members.map((member) => member.price);
+  return { id: members.map((member) => `${member.kind}@${member.price}`).join("|"), low: Math.min(...prices), high: Math.max(...prices),
+    label: members.map((member) => member.label).join(" + "), score, members };
+}
+// The fixture's last close is about 257.34: 256, the 254 zone and 252 are the nearest below; 258.50, 260 and 262 above.
+const AUTO_ZONES = [
+  autoZone([autoMember("round", "250", 250, ROUND)]), autoZone([autoMember("round", "252", 252, ROUND)]),
+  autoZone([autoMember("prior_day_high", "PDH", 254.3, { evidence: "observed", timeframe: "1D", formed_at: Date.parse("2026-09-11T16:00:00-04:00") / 1000 }), autoMember("round", "254", 254, ROUND)]),
+  autoZone([autoMember("premarket_low", "PML", 256)]), autoZone([autoMember("overnight_high", "ONH", 258.5, { source: "alpaca_sip" })]),
+  autoZone([autoMember("round", "260", 260, ROUND)]), autoZone([autoMember("round", "262", 262, ROUND)]),
+  autoZone([autoMember("swing_high", "Swing high", 264, { evidence: "inferred", timeframe: "1D" })]),
+];
+const NEAREST_IDS = AUTO_ZONES.slice(1, 7).map((zone) => zone.id).join(",");
+const at = (clock: string) => Date.parse(`2026-09-14T${clock}:00-04:00`) / 1000;
+const AUTO_EVENTS: Record<string, LevelInteraction> = Object.fromEntries(AUTO_ZONES.map((zone) => [zone.id, { state: "untested", events: [], at_level: false }]));
+AUTO_EVENTS[AUTO_ZONES[2].id] = { state: "broken", events: [{ event: "tested", time: at("10:05") }, { event: "broken", time: at("11:40") }], at_level: false };
+
+async function stubAutoLevels(page: Page) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: { overnight: "No minute bars for 2026-09-11.", opening_range_15m: "Forms at 09:45." } };
+    for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D" && interval !== "1W") panel.level_events = AUTO_EVENTS;
+    await route.fulfill({ json: data });
+  });
+}
+type AutoProbe = Map<string, { y(id: string): number | null }>;
+const registerAutoLevels = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjAutoLevels?: Map<string, unknown> }).__tjAutoLevels = new Map(); });
+const autoY = (page: Page, panel: string, id: string) => page.evaluate(([key, zone]) => (window as unknown as { __tjAutoLevels: AutoProbe }).__tjAutoLevels.get(key)!.y(zone)!, [panel, id] as const);
+
+test("automatic levels draw the nearest three each side, a hover shows each one's card, and the group hides on every chart", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-auto-levels", NEAREST_IDS);
+
+  // Hovering the 254 zone on the 5m chart reads its card: members, sources, and today's tests and breaks.
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[2].id));
+  const card = page.getByRole("tooltip", { name: "PDH + 254 level card" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("254.00–254.30 · 2 independent sources");
+  await expect(card.getByLabel("Interactions today")).toContainText("Broken");
+  await expect(card).toContainText("Tested 10:05 AM");
+  await expect(card).toContainText("Broken 11:40 AM");
+  await expect(card).toContainText("Today, on closed 5m bars, within ±0.55 (a tenth of the daily ATR).");
+  await expect(card).toContainText("PDH Prior day high254.30");
+  await expect(card).toContainText("observed · Tradier daily bar · formed Sep 11, 2026 4:00 PM");
+  await expect(card).toContainText("calculated · price rule");
+  await page.screenshot({ path: test.info().outputPath("auto-level-card.png") });
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+  await expect(card).toHaveCount(0);
+
+  // A daily chart draws the same levels; how price met them is read on intraday charts.
+  const daily = (await drawn(page, "Panel 4").boundingBox())!;
+  await page.mouse.move(daily.x + 100, daily.y + await autoY(page, "Panel 4", AUTO_ZONES[4].id));
+  const onDaily = page.getByRole("tooltip", { name: "ONH level card" });
+  await expect(onDaily).toContainText("How price met it today is read on intraday charts.");
+  await expect(onDaily).toContainText("calculated · SIP minute");
+  await page.mouse.move(daily.x + 100, daily.y + 5);
+
+  // The Layers panel lists what is missing and hides the group on all five charts, through a reload.
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const group = layerGroup(page, "Auto levels");
+  await expect(group).toContainText("Not shown for MRVL: No minute bars for 2026-09-11.");
+  await expect(group).not.toContainText("Forms at");
+  await group.getByRole("button", { name: "Hide Auto levels" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-auto-levels", "");
+  await expect.poll(() => server.data?.autoLevelsHidden).toBe(true);
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", "");
+  // The chart menu's Layers shows them again.
+  await rightClick(page, "main", EMPTY);
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Auto levels" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-auto-levels", NEAREST_IDS);
+  await expect.poll(() => server.data?.autoLevelsHidden).toBe(false);
+  expect(errors).toEqual([]);
+});
+
+test.describe("phone automatic levels", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("a tap opens a level's card and it stays until Close", async ({ page }) => {
+    await registerCharts(page);
+    await registerAutoLevels(page);
+    await stubAutoLevels(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await drawn(page, "main").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(250);
+    const box = (await drawn(page, "main").boundingBox())!;
+    await page.touchscreen.tap(Math.round(box.x + 150), Math.round(box.y + await autoY(page, "main", AUTO_ZONES[4].id) + 8));
+    const card = page.getByRole("tooltip", { name: "ONH level card" });
+    await expect(card).toBeVisible();
+    await expect(card.getByLabel("Interactions today")).toContainText("Untested");
+    const close = card.getByRole("button", { name: "Close level card" });
+    expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(24);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("auto-level-card-phone.png") });
+    await close.tap();
+    await expect(card).toHaveCount(0);
+  });
+});
+
+test("a card kept open by a click gives way to hovering once its level is no longer drawn", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  // NVDA's levels lack the ONH zone that MRVL's card is kept open on.
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    const zones = data.symbol === "NVDA" ? AUTO_ZONES.filter((zone) => zone !== AUTO_ZONES[4]) : AUTO_ZONES;
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, zones, missing: {} };
+    await route.fulfill({ json: data });
+  });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.click(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(page.getByRole("tooltip", { name: "ONH level card" })).toBeVisible();
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await expect(page.getByRole("region", { name: /^NVDA 5m chart/ })).toHaveCount(1);
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", /swing_high/);
+  await expect(page.getByRole("tooltip", { name: "ONH level card" })).toHaveCount(0);
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[5].id));
+  await expect(page.getByRole("tooltip", { name: "260 level card" })).toBeVisible();
 });

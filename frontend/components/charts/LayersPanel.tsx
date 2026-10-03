@@ -9,7 +9,7 @@ export type LayerItem = { id: string; symbol: string; name: string; detail: stri
 export type ItemGroup = "levels" | "drawings";
 export type LayerGroup =
   | { key: ItemGroup; name: string; noun: string; hidden: boolean; items: LayerItem[] }
-  | { key: "journal"; name: string; hidden: boolean; note: string }
+  | { key: "journal" | "auto"; name: string; hidden: boolean; note: string }
   | { key: "indicators"; name: string; hidden: boolean; studies: { key: string; label: string; on: boolean }[] };
 
 const COLLAPSED_KEY = "tradejournal.charts.layers.collapsed.v1";
@@ -20,12 +20,12 @@ function readCollapsed(): string[] {
 
 /**
  * The layers panel (C1.4): what the charts draw, grouped as My levels,
- * Drawings, Journal and Indicators. Every group hides on all five charts;
+ * Drawings, Auto levels, Journal and Indicators. Every group hides on all five charts;
  * levels and drawings also lock and delete as a group (one undo step) and
  * item by item, and a click on an item brings the chart to it. Groups fold
  * (remembered on this device). A tab of the side dock on a desktop (C7.3); a
- * bottom sheet with 44px targets on a phone. Auto levels and options join
- * when their layers exist (C2.3, C4.4).
+ * bottom sheet with 44px targets on a phone. Auto levels (C2.3) hide as a
+ * group; options join when their layer exists (C4.4).
  */
 export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onGroupLock, onGroupDelete, onJump, onItem, onDelete, onStudy }: {
   groups: LayerGroup[]; sheet: boolean; onClose(): void;

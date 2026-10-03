@@ -1,0 +1,58 @@
+"use client";
+
+import type { CSSProperties } from "react";
+import { X } from "lucide-react";
+import { etTime, intradayInterval, price } from "@/lib/charts";
+import type { AutoLevels, AutoZone, Interval, LevelInteraction } from "@/lib/charts";
+import { formedName, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
+
+const EVENT_NAMES: Record<string, string> = { tested: "Tested", broken: "Broken", reclaimed: "Reclaimed" };
+const STATE_STYLE: Record<LevelInteraction["state"], string> = {
+  untested: "bg-slate-800 text-slate-300", tested: "bg-sky-400/10 text-sky-300", broken: "bg-rose-400/10 text-rose-300",
+  reclaimed: "bg-emerald-400/10 text-emerald-300", developing: "bg-amber-400/10 text-amber-300",
+};
+
+/**
+ * An automatic level's card (C2.3): what each member level is, where it came
+ * from, when it formed and what kind of number it is, and how price has treated
+ * it today on this chart's closed bars. Hovering a level shows it; a tap or click
+ * keeps it open until the next one.
+ */
+export default function LevelCard({ zone, auto, interaction, interval, pinned, style, onClose }: {
+  zone: AutoZone; auto: AutoLevels; interaction?: LevelInteraction; interval: Interval; pinned: boolean; style: CSSProperties; onClose(): void;
+}) {
+  const several = zone.members.length > 1;
+  return <div role="tooltip" aria-label={`${zone.label} level card`} style={style}
+    className={`absolute left-2 z-10 w-72 max-w-[calc(100%-1rem)] rounded-md border border-slate-600/60 bg-[#141b26]/95 p-2.5 text-[11px] text-slate-300 shadow-lg ${pinned ? "" : "pointer-events-none"}`}>
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-slate-100">{zone.label}</div>
+        <div className="font-mono text-[10px] text-slate-400">{spanName(zone)}{several && ` · ${zone.score} independent source${zone.score === 1 ? "" : "s"}`}</div>
+      </div>
+      {pinned && <button aria-label="Close level card" onClick={onClose} className="-m-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200"><X size={13} /></button>}
+    </div>
+    <div className="mt-2" aria-label="Interactions today">
+      {!intradayInterval(interval) ? <p className="text-slate-500">How price met it today is read on intraday charts.</p>
+        : !interaction ? <p className="text-slate-500">{auto.band === null ? "No daily ATR yet, so interactions are not read." : "Interactions are not read yet."}</p>
+        : <>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATE_STYLE[interaction.state]}`}>{STATE_NAMES[interaction.state]}</span>
+            {interaction.at_level && <span className="text-[10px] text-amber-300">Price is at it now</span>}
+          </div>
+          {interaction.events.length > 0 && <ol className="mt-1 flex flex-wrap gap-x-2 font-mono text-[10px] text-slate-400">
+            {interaction.events.map((event) => <li key={`${event.event}${event.time}`}>{EVENT_NAMES[event.event]} {etTime(event.time)}</li>)}
+          </ol>}
+          {auto.band !== null && <p className="mt-1 text-[10px] text-slate-500">Today, on closed {interval} bars, within ±{price(auto.band)} (a tenth of the daily ATR).</p>}
+        </>}
+    </div>
+    <ul className="mt-2 space-y-1 border-t border-slate-700/50 pt-2">
+      {zone.members.map((member) => <li key={`${member.kind}@${member.price}@${member.bar_time}`}>
+        <div className="flex justify-between gap-2">
+          <span className="min-w-0 truncate"><span className="text-slate-200">{member.label}</span> <span className="text-slate-500">{KIND_NAMES[member.kind] ?? member.kind}</span></span>
+          <span className="shrink-0 font-mono">{price(member.price)}</span>
+        </div>
+        <div className="text-[10px] text-slate-500">{[member.evidence, sourceName(member), formedName(member)].filter(Boolean).join(" · ")}</div>
+      </li>)}
+    </ul>
+  </div>;
+}

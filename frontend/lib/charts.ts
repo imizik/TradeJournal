@@ -24,7 +24,30 @@ export type PriceAdjustment = {
   dividends: "unsupported"; dividends_note: string; warnings: string[];
 };
 export type FillMarker = { id: string; time: number; label: string; buy: boolean };
-export type ChartPanelData = { bars: ChartBar[]; markers: FillMarker[] };
+/**
+ * One automatic level (C2.1), on the chart's basis. `evidence` says what kind of
+ * number it is: a provider field (observed), a formula over bars (calculated) or
+ * a heuristic (inferred). `bar_time` is the start of the bar that set it;
+ * `formed_at` is when it became final, null while `developing` and for round numbers.
+ */
+export type AutoLevel = {
+  kind: string; label: string; price: number; evidence: "observed" | "calculated" | "inferred";
+  timeframe: "1m" | "1D" | null; source: "tradier" | "alpaca_sip" | null;
+  bar_time: number | null; formed_at: number | null; developing: boolean;
+};
+/** Levels within one band of each other (C2.2); a lone level is a zone of one. `score` counts independent sources. */
+export type AutoZone = { id: string; low: number; high: number; label: string; score: number; members: AutoLevel[] };
+/**
+ * A symbol's automatic levels for `day` (the session in progress, or the next
+ * one). `band` is a tenth of the daily ATR, null without one; `missing` says
+ * why a group of levels is absent.
+ */
+export type AutoLevels = { day: string; as_of: number; atr: number | null; band: number | null; zones: AutoZone[]; missing: Record<string, string> };
+export type LevelEvent = { event: "tested" | "broken" | "reclaimed"; time: number };
+/** How price treated a zone today on one intraday panel's closed bars (C2.3). */
+export type LevelInteraction = { state: "untested" | "tested" | "broken" | "reclaimed" | "developing"; events: LevelEvent[]; at_level: boolean };
+/** `level_events` (intraday panels of a workspace response): each automatic zone's interactions, by zone id. */
+export type ChartPanelData = { bars: ChartBar[]; markers: FillMarker[]; level_events?: Record<string, LevelInteraction> };
 export type HistoryPage = {
   symbol: string; interval: Interval; session: ChartSettings["session"]; before: number; limit: number;
   bars: ChartBar[]; markers: FillMarker[]; older_cursor: number | null; exhausted: boolean;
@@ -52,6 +75,8 @@ export type SymbolPanels = {
   /** Fill markers stop at the newest 1,000 in the window; the chart says so. */
   fills_truncated?: boolean;
   adjustment?: PriceAdjustment | null;
+  /** Absent from a backend older than C2.3. */
+  auto_levels?: AutoLevels | null;
 };
 export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
@@ -211,6 +236,8 @@ export type ChartSettings = {
    * would drop a key it does not know, while the server keeps a field left out.
    */
   studiesHidden: boolean;
+  /** Automatic levels hidden from every chart (C2.3); a field of its own for the same reason. */
+  autoLevelsHidden: boolean;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -232,7 +259,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
@@ -280,6 +307,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       magnet: value.magnet === true,
       hiddenGroups: { levels: value.hiddenGroups?.levels === true, drawings: value.hiddenGroups?.drawings === true },
       studiesHidden: value.studiesHidden === true,
+      autoLevelsHidden: value.autoLevelsHidden === true,
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
