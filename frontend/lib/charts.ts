@@ -111,16 +111,87 @@ export const shownIndicators = (indicators: Indicators, groupHidden: boolean): I
   groupHidden ? { ...indicators, ...Object.fromEntries(STUDIES.map((key) => [key, false])) } : indicators;
 export type SmallChartSize = "compact" | "normal" | "tall";
 /**
+ * How a wide screen shares the chart grid (C7.4): the smaller row's share of
+ * the height the main chart and that row split, and each smaller chart's share
+ * of the row's width (four, summing to 1). A phone ignores them and keeps its
+ * S/M/L heights.
+ */
+export type Proportions = { lower: number; columns: number[] };
+/** The smaller row's share, at least and at most; the screen's own minimum sizes apply on top. */
+export const LOWER_SHARE = { min: 0.15, max: 0.6 } as const;
+/** No smaller chart narrower than this share of the row. */
+export const COLUMN_MIN = 0.1;
+/** On screen, in pixels: the main chart (C7.3's minimum), a smaller chart with its header, and a smaller chart's width. */
+export const MAIN_MIN_PX = 320;
+export const LOWER_MIN_PX = 180;
+export const COLUMN_MIN_PX = 160;
+/**
+ * The smaller row's share that reproduces C7.3's S/M/L heights (226, 311 and
+ * 426px with headers) in a 1440×900 window, whose grid gives 823px to the two
+ * rows. A layout saved before C7.4 opens at the size it had.
+ */
+export const SMALL_SHARES: Record<SmallChartSize, number> = { compact: 0.275, normal: 0.378, tall: 0.518 };
+const EQUAL_COLUMNS = [0.25, 0.25, 0.25, 0.25];
+export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.normal, columns: EQUAL_COLUMNS };
+const thousandths = (value: number) => Math.round(value * 1000) / 1000;
+/**
+ * Proportions from outside this code, kept to what the dividers can make: the
+ * row share clamped into range, the columns scaled to sum to 1 with none under
+ * `COLUMN_MIN`, everything to three decimals so equal sizes compare equal.
+ * No usable row share means none at all (null: follow the S/M/L size);
+ * unusable columns become equal ones.
+ */
+export function cleanProportions(value: unknown): Proportions | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { lower, columns } = value as { lower?: unknown; columns?: unknown };
+  if (typeof lower !== "number" || !Number.isFinite(lower)) return null;
+  return { lower: thousandths(Math.min(LOWER_SHARE.max, Math.max(LOWER_SHARE.min, lower))), columns: cleanColumns(columns) };
+}
+function cleanColumns(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length !== 4 || !value.every((share) => typeof share === "number" && Number.isFinite(share) && share >= 0)) return EQUAL_COLUMNS;
+  const total = value.reduce((sum, share) => sum + share, 0);
+  if (total <= 0) return EQUAL_COLUMNS;
+  const raw = value.map((share) => share / total);
+  // Lift any column under the minimum, taking the difference from the others in proportion to how far each is above it.
+  const short = raw.reduce((sum, share) => sum + Math.max(0, COLUMN_MIN - share), 0);
+  const spare = raw.reduce((sum, share) => sum + Math.max(0, share - COLUMN_MIN), 0);
+  const fair = short ? raw.map((share) => share <= COLUMN_MIN ? COLUMN_MIN : share - short * (share - COLUMN_MIN) / spare) : raw;
+  const rounded = fair.map(thousandths);
+  // Rounding leaves at most a few thousandths over or under 1: the widest column absorbs it.
+  const widest = rounded.indexOf(Math.max(...rounded));
+  rounded[widest] = thousandths(rounded[widest] + 1 - rounded.reduce((sum, share) => sum + share, 0));
+  return rounded;
+}
+/** The proportions an arrangement shows: its own, or those matching its S/M/L size when it has none (saved before C7.4). */
+export const sizesOf = ({ proportions, smallSize }: { proportions?: Proportions | null; smallSize: SmallChartSize }): Proportions =>
+  proportions ?? { lower: SMALL_SHARES[smallSize], columns: EQUAL_COLUMNS };
+/** The smaller row's share that leaves both rows their minimum on screen, given the height they split; null when they cannot both fit. */
+export function lowerLimits(space: number): { min: number; max: number } | null {
+  const min = Math.max(LOWER_SHARE.min, LOWER_MIN_PX / space);
+  const max = Math.min(LOWER_SHARE.max, (space - MAIN_MIN_PX) / space);
+  return space > 0 && min <= max ? { min, max } : null;
+}
+/** The narrowest a smaller chart may be dragged, in pixels, given the four charts' total width. */
+export const columnMinPx = (total: number) => Math.max(COLUMN_MIN_PX, COLUMN_MIN * total);
+/** The side dock's width on a wide screen (per device): bounds and default, and the chart grid it must leave. */
+export const DOCK_WIDTH = { min: 200, max: 480, default: 256 } as const;
+export const GRID_MIN_PX = 640;
+/**
  * How the panels are arranged, and nothing about what they show beyond the
  * symbols panels hold: the main symbol, levels, watchlist and indicators belong
  * to the workspace, so switching layouts never moves them. Keys match
- * `ChartSettings` so an arrangement spreads straight into it.
+ * `ChartSettings` so an arrangement spreads straight into it. `proportions` is
+ * C7.4's: a saved layout keeps them beside itself, in `layoutProportions`.
  */
 export type Arrangement = {
   layout: "multi" | "single"; intervals: Interval[]; panelSymbols: (string | null)[]; smallSize: SmallChartSize; linkRange: boolean;
+  proportions?: Proportions | null;
 };
-/** A named arrangement ("0DTE SPY", "Names"), saved with the workspace. */
-export type SavedLayout = Arrangement & { id: string; name: string };
+/**
+ * A named arrangement ("0DTE SPY", "Names"), saved with the workspace. Saved
+ * exactly as C7.2 saved one, so a tab still on an older build keeps it.
+ */
+export type SavedLayout = Omit<Arrangement, "proportions"> & { id: string; name: string };
 export type ChartSettings = {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: "regular" | "extended";
   /** Per panel, aligned with `intervals`: a symbol the panel holds, or null to follow `symbol`. The main panel always follows. */
@@ -140,8 +211,21 @@ export type ChartSettings = {
    * would drop a key it does not know, while the server keeps a field left out.
    */
   studiesHidden: boolean;
-  recent: string[]; linkRange: boolean; smallSize: SmallChartSize; immersiveWatchlist: boolean;
+  recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
+  /**
+   * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
+   * choice; this is read once to seed it and left alone for older tabs.
+   */
+  immersiveWatchlist: boolean;
   layouts: SavedLayout[];
+  /** The chart grid's shares on a wide screen (C7.4); null follows `smallSize`, as before C7.4. */
+  proportions: Proportions | null;
+  /**
+   * Each saved layout's proportions, by layout id. Kept beside the layouts, not
+   * in them: the server keeps a top-level field a save leaves out, while a tab on
+   * an older build rebuilds every layout from the keys it knows.
+   */
+  layoutProportions: Record<string, Proportions>;
 };
 export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
@@ -149,6 +233,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -179,6 +264,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
         levels[symbol] = rows.map(cleanLevel).filter((row): row is PriceLevel => !!row).slice(0, 30);
       }
     }
+    const layouts = sanitizeLayouts(value.layouts);
     return {
       ...DEFAULT_SETTINGS,
       symbol: typeof value.symbol === "string" && validSymbol(value.symbol) ? value.symbol : DEFAULT_SETTINGS.symbol,
@@ -198,7 +284,9 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
       immersiveWatchlist: value.immersiveWatchlist === true,
-      layouts: sanitizeLayouts(value.layouts),
+      layouts,
+      proportions: cleanProportions(value.proportions),
+      layoutProportions: cleanLayoutProportions(value.layoutProportions, layouts),
     };
   } catch { return DEFAULT_SETTINGS; }
 }
@@ -226,6 +314,14 @@ function sanitizeLayouts(value: unknown): SavedLayout[] {
     out.push({ id: row.id, name, ...arrangement });
   }
   return uniqueLayoutNames(out);
+}
+
+/** Saved layouts' proportions, for layouts that exist; one an older tab deleted lets its proportions go. */
+export function cleanLayoutProportions(value: unknown, layouts: SavedLayout[]): Record<string, Proportions> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const ids = new Set(layouts.map((layout) => layout.id));
+  return Object.fromEntries(Object.entries(value).filter(([id]) => ids.has(id))
+    .map(([id, row]) => [id, cleanProportions(row)] as const).filter((entry): entry is [string, Proportions] => !!entry[1]));
 }
 
 /** An arrangement exactly as the page saves one (main panel following, at most two held symbols), or null. */
@@ -261,14 +357,25 @@ export function uniqueLayoutNames(layouts: SavedLayout[]): SavedLayout[] {
   });
 }
 
-/** The current arrangement, keys in a fixed order so equal arrangements compare equal as text. */
-export const arrangementOf = ({ layout, intervals, panelSymbols, smallSize, linkRange }: Arrangement): Arrangement =>
+/** A layout's keys as C7.2 saved them, in a fixed order: what goes in the saved list. */
+export const layoutKeys = ({ layout, intervals, panelSymbols, smallSize, linkRange }: Arrangement): Omit<Arrangement, "proportions"> =>
   ({ layout, intervals, panelSymbols, smallSize, linkRange });
+/** The current arrangement with the proportions it shows, keys in a fixed order so equal arrangements compare equal as text. */
+export const arrangementOf = (arrangement: Arrangement): Required<Arrangement> => ({ ...layoutKeys(arrangement), proportions: sizesOf(arrangement) });
 export const sameArrangement = (a: Arrangement, b: Arrangement) => JSON.stringify(arrangementOf(a)) === JSON.stringify(arrangementOf(b));
-/** The saved layout the panels are arranged as right now, if any; editing a panel afterwards leaves none. */
-export const activeLayout = (settings: ChartSettings) => settings.layouts.find((layout) => sameArrangement(layout, settings));
+/** A saved layout with its proportions (none for one saved before C7.4, or by an older tab). */
+export const layoutWithSizes = (settings: ChartSettings, layout: SavedLayout): SavedLayout & Arrangement => ({ ...layout, proportions: settings.layoutProportions[layout.id] ?? null });
+/** The saved layout the panels are arranged as right now, if any; editing a panel or dragging a divider afterwards leaves none. */
+export const activeLayout = (settings: ChartSettings) => settings.layouts.find((layout) => sameArrangement(layoutWithSizes(settings, layout), settings));
 /** Switching layouts changes how panels are arranged and leaves the main symbol, levels and watchlist where they are. */
-export const applyLayout = (settings: ChartSettings, layout: SavedLayout): ChartSettings => ({ ...settings, ...arrangementOf(layout) });
+export const applyLayout = (settings: ChartSettings, layout: SavedLayout): ChartSettings => ({ ...settings, ...arrangementOf(layoutWithSizes(settings, layout)) });
+/** Save the current arrangement as layout `id` (a new one, or one replaced), its proportions beside it. */
+export const storeLayout = (settings: ChartSettings, id: string, name: string): Pick<ChartSettings, "layouts" | "layoutProportions"> => {
+  const saved = { id, name, ...layoutKeys(settings) };
+  const exists = settings.layouts.some((layout) => layout.id === id);
+  return { layouts: exists ? settings.layouts.map((layout) => layout.id === id ? saved : layout) : [...settings.layouts, saved],
+    layoutProportions: { ...settings.layoutProportions, [id]: sizesOf(settings) } };
+};
 /** "5m | 15m | 1h | 1D | 1m · SPY, QQQ" (just the main chart's interval for a single chart). */
 export const layoutSummary = (layout: Arrangement) => {
   const held = heldSymbols(layout.panelSymbols);

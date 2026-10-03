@@ -93,7 +93,8 @@ export const HOTKEY_HELP: { group: string; rows: { keys: string; does: string }[
   { group: "View", rows: [
     { keys: "Alt + R", does: "Reset every chart: latest candles, automatic price scale" },
     { keys: "End", does: "Every chart back to the latest candle, same zoom" },
-    { keys: "Esc", does: "Leave full screen" },
+    { keys: "Esc", does: "Restore a maximized chart, then leave full screen" },
+    { keys: "↑ ↓ ← →", does: "With a divider focused: resize (Shift: bigger steps; Home, End: limits; Enter: reset; Esc while dragging: put it back)" },
     { keys: "?", does: "Show or hide this list" },
   ] },
 ];

@@ -1,9 +1,11 @@
 import type { BrowserContext } from "@playwright/test";
 
 /**
- * An in-memory `/charts/settings` with the real endpoint's revision rule, so
- * chart tests start from empty server settings and never share state through
- * the e2e database. Tests edit `revision`/`data` to play another device.
+ * An in-memory `/charts/settings` with the real endpoint's rules, so chart
+ * tests start from empty server settings and never share state through the e2e
+ * database: a save must be based on the current revision, and it keeps any
+ * top-level field the save leaves out (as a tab on an older build does). Tests
+ * edit `revision`/`data` to play another device.
  */
 export type SettingsStore = {
   revision: number; data: Record<string, unknown> | null; offline: boolean;
@@ -24,7 +26,7 @@ export async function fakeChartSettings(context: BrowserContext, store: Partial<
     state.saves.push({ base: body.base_revision, data: body.data, status: stale ? 409 : 200 });
     if (stale) return route.fulfill({ status: 409, json: { detail: { code: "revision_conflict", message: "Changed on another device.", current: copy() } } });
     state.revision += 1;
-    state.data = body.data;
+    state.data = { ...Object.fromEntries(Object.entries(state.data ?? {}).filter(([key]) => !(key in body.data))), ...body.data };
     return route.fulfill({ json: copy() });
   });
   return state;

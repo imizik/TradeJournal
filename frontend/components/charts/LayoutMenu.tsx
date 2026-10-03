@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Pencil, RefreshCw, Trash2, X } from "lucide-react";
+import { Check, Pencil, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
 import { LAYOUT_NAME_MAX, MAX_LAYOUTS, layoutName, layoutSummary, nameTaken, sameArrangement } from "@/lib/charts";
 import type { Arrangement, SavedLayout } from "@/lib/charts";
 
@@ -11,13 +11,15 @@ const field = "h-9 min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] p
 /**
  * Named layouts: pick one to arrange the panels that way, save the current
  * arrangement, rename, replace or delete. A bottom sheet on a phone. It reads
- * and writes only the arrangement (intervals, held symbols, chart size, linked
- * ranges); symbols, levels and the watchlist are untouched by every action.
+ * and writes only the arrangement (intervals, held symbols, chart sizes,
+ * linked ranges); symbols, levels and the watchlist are untouched by every
+ * action. On a wide screen it also puts the dividers back (C7.4).
  */
-export default function LayoutMenu({ layouts, current, onApply, onSave, onRename, onUpdate, onDelete, onClose }: {
-  layouts: SavedLayout[]; current: Arrangement;
+export default function LayoutMenu({ layouts, current, onApply, onSave, onRename, onUpdate, onDelete, onResetSizes, onClose }: {
+  /** Each with its proportions, so the one in use is found by its chart sizes too. */
+  layouts: (SavedLayout & Arrangement)[]; current: Arrangement;
   onApply(id: string): void; onSave(name: string): void; onRename(id: string, name: string): void;
-  onUpdate(id: string): void; onDelete(id: string): void; onClose(): void;
+  onUpdate(id: string): void; onDelete(id: string): void; onResetSizes?(): void; onClose(): void;
 }) {
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -104,8 +106,12 @@ export default function LayoutMenu({ layouts, current, onApply, onSave, onRename
             <button type="submit" className="h-9 shrink-0 rounded-md border border-slate-700/60 px-3 text-xs hover:bg-slate-800 sm:h-8">Save layout</button>
           </div>
           {error && <p role="alert" className="text-[11px] text-amber-300">{error}</p>}
-          <p className="text-[10px] leading-4 text-slate-500">A layout keeps the intervals, the symbols charts hold, the chart height and linked time ranges. The main symbol, levels and watchlist stay as they are.</p>
+          <p className="text-[10px] leading-4 text-slate-500">A layout keeps the intervals, the symbols charts hold, the chart sizes and linked time ranges. The main symbol, levels and watchlist stay as they are.</p>
         </form>
+        {onResetSizes && <div className="flex items-center justify-between gap-2 border-t border-slate-700/60 px-3 py-2">
+          <span className="text-[10px] leading-4 text-slate-500">Dividers moved too far? Put every chart and the side panel back to their default sizes.</span>
+          <button className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs hover:bg-slate-800" onClick={onResetSizes}><RotateCcw size={12} />Reset chart sizes</button>
+        </div>}
       </div>
     </div>
   );
