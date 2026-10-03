@@ -88,7 +88,7 @@ These rows describe future work, not implemented recording or broker controls.
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done ([PR #113](https://github.com/imizik/TradeJournal/pull/113)) |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done ([PR #118](https://github.com/imizik/TradeJournal/pull/118)) |
-| C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done (PR pending) |
+| C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | next |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | todo |
