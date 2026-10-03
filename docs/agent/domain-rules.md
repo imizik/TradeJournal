@@ -345,7 +345,9 @@ is verifiable rather than hopeful.
   opening ranges and the prior day from the fill-context functions in
   `indicators.py`, so the chart and stored fill context agree on the same
   bars; do not re-derive them in chart code. A level whose bars are missing is
-  absent with a reason, never taken from an older session.
+  absent with a reason, never taken from an older session. Zones and
+  interactions use one band, a tenth of the daily ATR; nothing on the chart
+  calls a level a signal.
 - The chart settings document belongs to the frontend, but a save never drops
   a top-level field it leaves out (`PUT /charts/settings` keeps the stored
   value). A tab still running an older build cannot erase a field a newer build
