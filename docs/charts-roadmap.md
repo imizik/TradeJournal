@@ -34,6 +34,12 @@ from planned work.
 user's TradingView screenshot and the current layout code. They run **after
 C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work only.
 
+**Pre-trade capture planning update (2026-10-03):** C3.4–C3.6 add a five-second
+template path, short voice recordings with transcription, and execution linking
+with capture-adherence tracking. They are planned after G0 and before options
+analytics; C7.4 remains `next`. See [the capture specification](#pre-trade-capture-contract-c34c36).
+These rows describe future work, not implemented recording or broker controls.
+
 ## How to work from this file
 
 1. Take the first item in the [status board](#status-board) whose status is
@@ -93,6 +99,9 @@ C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work 
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
 | C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | todo |
 | G0 | Daily chart replacement acceptance: real market session, desktop and phone | Gate | todo |
+| C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | todo |
+| C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | todo |
+| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | todo |
 | C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | todo |
 | C4.4 | Options levels layer with filters | 4 Options on the chart | todo |
 | C4.5 | Strike ladder side panel | 4 Options on the chart | todo |
@@ -107,6 +116,9 @@ Historical trade navigation makes the new history useful before rich trade cards
 After the drawing tools, context menu and layers panel settle, reclaim screen
 space before automatic levels add more controls. C7.3 establishes the shell;
 C7.4 adds resizing to that shell. Both precede G0, options analytics and replay.
+Once G0 is satisfied, capture the user's intent before execution, through both
+click and voice paths, before expanding options analytics. This does not add
+pre-trade capture to G0's acceptance requirements.
 
 Dependencies beyond board order: C7.1 needs C0.2/C0.3; C7.2 needs C0.4/C7.1;
 C4.3 needs C4.1/C0.1 and the durable job framework, not C4.2; C2.1 needs C0.1
@@ -114,6 +126,10 @@ for session boundaries; C7.3 needs C0.2/C0.3/C1.2/C1.3/C1.4;
 C7.4 needs C7.3/C7.2/C0.4; C2.4 and C3.3 need C0.0; C5.1 needs C1.3/C2.3 plus
 durable alert state; C4.4 needs C2.2/C4.2; C6.1 needs C3.3. G0 precedes
 advanced analytics, not every possible future feature.
+C3.4 reuses C0.4's persistence patterns and C7.3's chart shell; C3.5 needs C3.4;
+C3.6 needs C3.4/C3.5 and C3.1's trade-card surface. These are three separate
+implementation slices, in that order, not permission to implement all three
+when asked for one.
 
 ## Ground truth this plan rests on
 
@@ -563,6 +579,208 @@ Candles come from the deep-history store (C0.0). A banner shows the date with a
 "Back to live" button.
 *Done when:* a trade from months ago opens with its arrows on the right candles,
 and no Alpaca IEX (single-venue) bars ever mix into consolidated candles.
+
+#### Pre-trade capture contract (C3.4–C3.6)
+
+**Product goal.** Capture intent before a new trade without asking the user to
+write a journal entry. The normal path takes four actions and targets five
+seconds after initial setup. Voice is an equally supported alternative when a
+template does not express the thought. Neither path recommends a trade or
+submits an order. Capturing intent and evaluating its quality are separate.
+
+**Scope.** The first version covers the initial entry of a reconstructed journal
+trade, including stocks and options, with partial opening fills treated as one
+trade for adherence. Separate plans for scale-ins, exits, multi-leg strategies,
+order routing and broker-enforced gates are later work. Broker execution still
+happens outside TradeJournal; the app cannot guarantee capture before every
+order. No new broker integration, analytics overhaul, AI coaching, sentiment
+scoring, inferred rationale or experiment tracker is part of these items.
+
+**Shared capture and provenance rules:**
+
+- A capture is its own durable user record, not a field on a rebuildable trade
+  or part of the chart-settings JSON. Use additive Alembic migrations. Keep
+  raw captures, templates and execution links separate from derived journal
+  rows; rebuilding trades must not erase or change what the user recorded.
+- Store an idempotent client capture ID, server receipt timestamps in UTC,
+  account, underlying, explicit instrument/side, capture mode, immutable
+  submitted text/template copy or original audio, and the chart-context
+  snapshot. Templates have revisions; changing one never edits old captures.
+- Freeze symbol, account and panel identity when the capture sheet opens. Show
+  them prominently. A chart symbol switch must not silently retarget an open
+  capture or recording. Let the user explicitly change them before submission.
+- Snapshot the selected chart's interval, session, visible time range, price
+  basis/split metadata, displayed price and its source/as-of/stale state, and
+  visible levels/drawings. Freeze this data at submission. Save a bounded image
+  of that chart as a supporting artifact, disclosing any omitted overlays. Do
+  not screenshot other apps or invent missing indicators/context. Use existing
+  chart state; capture must not trigger market-data provider requests.
+- Image upload is independent of saving intent. Failure leaves an explicit
+  image-unavailable state and a retry for the original frozen image, never a
+  screenshot of the later market labeled as the original. Historical/replay
+  captures are review records and cannot count as live pre-entry captures.
+- The qualifying capture time is when the server durably receives the complete
+  intent: submitted template/text, or the complete original audio file. Opening
+  the sheet, starting a recording, receiving an empty placeholder, or a client
+  clock timestamp is not proof of a completed pre-entry capture. Preserve client
+  capture times separately for delayed/offline uploads, labeled unverified.
+- Store immutable originals plus timestamped corrections/reflections. Later
+  transcript corrections, template edits or linking cannot backdate intent.
+  A corrected transcript displays alongside the original provider result and
+  audio. Later additions are visibly retrospective.
+- Show distinct saving, saved, pending upload and failed states. Only server
+  acknowledgement may say "Saved". Retain pending text/audio locally for
+  explicit retry where browser storage permits; disclose storage failure.
+  Repeated taps, requests and retries must not duplicate a capture or job.
+- Audio and images live in private durable storage outside release directories,
+  with database metadata and inclusion in backup/restore. Access uses the
+  existing private application boundary, never the public TradingView ingress
+  or public artifact URLs. Bound file sizes and validate uploads. Archiving a
+  capture does not erase the historical adherence record.
+
+**C3.4 Five-second capture (planned).** Add a persistent **Plan trade** button
+beside the main chart, plus **Alt+P** registered in the existing hotkey system
+and help sheet. Use the physical key code on Mac; ignore repeats, typing and
+other open dialogs. The button remains reachable with the side dock collapsed
+and at 390px. Desktop uses a compact sheet; phone uses a bottom sheet.
+
+One-time setup, outside the trading path: select a default journal account and
+save up to three favorite templates. Each template bundles a setup label with
+the user's own invalidation/exit-plan wording. Names such as "Reclaim" and
+"Pullback" may be examples, but no trading rule is silently adopted. Editing
+templates and changing the default account remain accessible later.
+
+The normal click path is:
+
+1. Open **Plan trade** (or Alt+P). Show the chart ticker and the saved account.
+2. Select instrument/side. Show favorite explicit choices, such as **Buy calls**,
+   **Buy puts**, **Buy stock**, with other supported opening sides under More.
+   Do not infer buy/sell exposure from call/put alone or silently reuse a side.
+3. Tap a template. Its full saved wording stays visible before confirmation.
+4. Tap **Save plan** (or Enter when enabled). Close after acknowledgement and
+   show the saved plan in a compact, dismissible strip beside the chart.
+
+No mandatory paragraph, mood rating, confidence score, quantity, strike,
+expiration, stop price or price target. Exact contract and sizing fields are
+optional; capture matching must tolerate their absence without guessing.
+Provide **Discretionary / no explicit plan** as an honest alternative and an
+optional short text field. Record this as captured intent with plan detail
+unspecified, not as a complete exit plan. Users without configured favorites
+can use that path or write a short note; setup never blocks capture.
+
+The saved strip shows ticker, side, setup/wording and capture time, with an
+expand action and **Did not take trade**. Unexecuted plans are valid records.
+Do not treat a saved plan as an actual position until journal evidence exists.
+
+*Done when:*
+
+- The configured route takes exactly open, side, template, save; a human
+  walkthrough measures the five-second target separately from fixture tests
+  and reports network save latency separately. No extra confirmation dialog.
+- Desktop and 390px browser tests cover template and discretionary/text paths, keyboard/input isolation,
+  changing symbols while open, snapshot failure, rejected saves, reload and
+  duplicate submission. Saved records are available across browser contexts.
+- SQLite/Postgres migration coverage, immutable template copies and append-only
+  corrections are tested. Existing chart hotkeys, drawings and settings remain
+  intact. No source fills, P&L or enrichment rows are modified.
+
+**C3.5 Voice capture and transcription (planned).** The same sheet offers a
+clearly labeled microphone action alongside templates. Retain explicit account,
+ticker and instrument/side selection; a template is optional for voice.
+An optional prompt reads: "What am I taking, why here, and what would change
+my mind?" It is guidance, not three mandatory answers.
+
+- Support hold-to-record/release-to-save and an accessible tap-to-start,
+  **Stop & save** alternative. Explain that saving also requests transcription.
+  Request microphone permission only after the user activates recording.
+- Limit clips to 30 seconds with a visible timer. At the limit stop and offer
+  Save or Discard. Pointer cancellation, tab hiding or device interruption stops
+  recording and offers recovery; do not silently keep recording or upload a
+  discarded clip. First-time permission handling must not lose the gesture.
+- Persist original audio first. Show "Recording saved — transcribing" after
+  durable server acknowledgement. The user can return to execution immediately;
+  transcription never blocks saving intent or pins the sheet open.
+- Use a backend speech-to-text adapter with one configured provider. Provider
+  credentials stay server-side. At implementation, verify the chosen API's
+  current audio formats/limits and available configuration; existing Claude
+  review credentials are not assumed to provide speech transcription. State
+  the provider and that audio leaves the app before first use, without a
+  repeated per-clip confirmation. No new paid plan is assumed authorized.
+- Persist transcription work and status using the existing durable job
+  framework. Give it execution capacity independent of long broker/enrichment
+  jobs; include any worker/deployment configuration in this item's scope.
+  Do not rely on an untracked request thread. Use bounded provider timeouts,
+  deduplicated jobs and an explicit retry after failure/interruption; an
+  uncertain provider response must not trigger unlimited paid retries.
+- Show pending, transcribing, ready, failed and not-configured states. A provider
+  outage never loses a saved recording. Playback and retry remain available.
+  Transcription stays literal: no generated rationale, plan scoring or automatic
+  changes to ticker/account/side. Unclear speech may remain unclear.
+- Permission denial, unsupported recording or unavailable private microphone
+  access leaves the click/text path usable. Verify microphone access on the
+  actual private desktop/phone origin; do not expose the unauthenticated API
+  to make recording work. Do not claim real-device support from a fake stream.
+
+*Done when:* real desktop and phone recording, playback and one live provider
+transcription are reported separately from browser/provider fixtures. Fixtures
+cover both gestures, cancellation, the time limit, silence/invalid uploads,
+permission denial, save failures, pending-upload recovery, provider failure,
+restart, retry dedupe and later transcript correction. Audio acknowledged
+before an entry remains pre-entry evidence when its transcript arrives later;
+audio only uploaded after entry remains late/unverified regardless of when
+recording started. Backup/restore preserves playable attachments and metadata.
+
+**C3.6 Execution links and capture adherence (planned).** Surface the saved
+intent beside its linked trade in C3.1 and trade detail, with the original
+snapshot/audio/transcript accessible. Add a compact **Needs linking** view
+reachable from the saved strip; do not build a new analytics dashboard.
+
+- Suggest, but do not silently confirm, matches using exact account, underlying,
+  compatible opening side and first entry execution time. The initial candidate
+  window is the ten minutes after the qualifying capture time. If supplied,
+  exact contract fields must also agree. Multiple possibilities require an
+  explicit choice; absence of a contract is not permission to pick one.
+- One capture links to one reconstructed trade; multiple partial opening fills
+  within that trade do not consume multiple plans. A re-entry is a new trade
+  and needs its own capture. Later scale-ins are excluded from this version's
+  adherence claim. Do not infer order/decision counts from raw fill count.
+- Allow manual linking outside the suggestion window and corrections/unlinking
+  with history. Linking a post-entry note is allowed but labeled retrospective;
+  changing the link does not alter the original capture timestamp.
+- Anchor links in stable source-fill identity (account plus source dedupe key),
+  resolving current trade membership through fill links. A trade UUID alone is
+  insufficient because trades are rebuilt. Retain the recorded source identity
+  even across resync; missing or ambiguous resolutions become unresolved, never
+  cascaded deletion or a silent link to a different trade. Revalidate timing and
+  membership after reconstruction or source-time corrections.
+- Compare server UTC receipt against the first entry's execution time converted
+  from the journal's America/New_York convention, not import time. Unknown,
+  coarse/tied or ambiguous execution times are timing-unverified. Only clearly
+  earlier, complete intent qualifies as confirmed pre-entry evidence.
+- Enable tracking from an explicit activation timestamp and selected accounts.
+  For eligible new trades since then, show **X of Y recorded trades have a
+  confirmed pre-entry capture**, plus counts for needs-linking, no capture,
+  retrospective and timing-unverified. The denominator is recorded trades with
+  reliable entry times in that scope, including pending matches; show excluded
+  trades separately. Never claim coverage of executions missing from ingestion.
+- A delayed import is evaluated by execution time. Refresh after import/rebuild
+  through existing refresh mechanisms, not per-trade polling. Resolve pending
+  suggestions before calling them missed captures; show a quiet reminder after
+  refresh and a persistent count. No modal blocks, repeated nags, fake broker
+  lockout, streak penalties or new phone-notification infrastructure.
+- Keep the strip useful during a position: show the user's original intent.
+  Do not claim compliance with exit rules or assess plan quality. Captured
+  discretionary intent is distinguishable from an explicit template/voice plan;
+  the adherence number measures capture, not trading discipline or profitability.
+
+*Done when:* tests cover delayed ingestion, same-ticker ambiguous options,
+account/side mismatch, partial opening fills, re-entry, scale-ins, DST/tied
+times, late uploads, late transcripts, manual linking, unexecuted plans,
+activation boundaries, pending/excluded denominators, and rebuild/resync with
+stable and missing source identities. A browser scenario captures a plan,
+introduces a fixture fill, confirms a suggested link, then reads the preserved
+intent and correctly labeled adherence. A late reflection cannot become a
+pre-entry plan through editing or linking.
 
 ### Phase 4 — Options positioning on the chart
 
