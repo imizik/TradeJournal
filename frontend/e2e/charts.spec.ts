@@ -3752,6 +3752,11 @@ test("the dividers between the smaller charts and the dock's edge resize, stop a
   await dragDivider(page, columnDivider(page, 3), 2000, 0);
   await expect.poll(async () => near((await lowerRow(page))[2].width, least)).toBe(true);
   expect((await lowerRow(page)).every((box) => box.width >= least - 1)).toBe(true);
+  // At its narrowest a chart's header buttons stay whole and usable.
+  for (const name of ["Maximize 1D chart", "Focus 1D chart", "Latest candles Panel 4"]) await expect(page.getByRole("button", { name, exact: true })).toBeInViewport({ ratio: 1 });
+  const header = await section(page, "Panel 4");
+  const maximize = (await page.getByRole("button", { name: "Focus 1D chart", exact: true }).boundingBox())!;
+  expect(maximize.x + maximize.width).toBeLessThanOrEqual(header.x + header.width);
   await page.screenshot({ path: test.info().outputPath("dividers-columns-1440.png") });
   await columnDivider(page, 4).focus();
   await page.keyboard.press("Enter"); // every smaller chart back to a quarter of the row
@@ -3901,8 +3906,12 @@ test("maximize and restore each chart: the same instances, view, selection and s
 
   // Escape: the selection first, then the maximized chart, then full screen.
   await page.getByRole("button", { name: "Enter full-screen charts" }).click();
-  await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
-  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+  await expect(page.getByTestId("chart-workspace")).toHaveAttribute("data-immersive", "true");
+  // The chart resizes into full screen: the level's place is read again until the click lands on it.
+  await expect(async () => {
+    await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
+    await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot, { timeout: 1000 });
+  }).toPass();
   await page.getByRole("button", { name: "Maximize 5m chart", exact: true }).click();
   await page.keyboard.press("Escape");
   await expect(drawn(page, "main")).not.toHaveAttribute("data-selected", pivot);
@@ -3952,9 +3961,22 @@ test("a shrinking window clamps the dividers on screen without saving them, and 
     expect(at.pageWidth, `${width}×${height}: no sideways scrolling`).toBeLessThanOrEqual(width);
     expect(Math.round((await section(page, "main")).height), `${width}×${height}: main chart minimum`).toBeGreaterThanOrEqual(MAIN_MIN);
     for (const box of await lowerRow(page)) expect(Math.round(box.height), `${width}×${height}: smaller chart minimum`).toBeGreaterThanOrEqual(LOWER_MIN);
-    expect(Math.min(...(await lowerRow(page)).map((box) => box.width)), `${width}×${height}: smaller chart width`).toBeGreaterThanOrEqual(Math.min(159, ((await lowerRow(page)).reduce((sum, box) => sum + box.width, 0)) / 4 - 1));
+    expect(Math.min(...(await lowerRow(page)).map((box) => box.width)), `${width}×${height}: smaller chart width`).toBeGreaterThanOrEqual(159);
     await page.screenshot({ path: test.info().outputPath(`dividers-clamped-${width}x${height}.png`) });
   }
+  // The navigation expanded beside a 1024px window leaves too little width for four 160px charts:
+  // the smaller row scrolls sideways inside the grid; neither the page nor a chart is squeezed.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.getByRole("button", { name: "Expand navigation" }).click();
+  const row = chartGrid(page).locator("> div").nth(2);
+  await expect.poll(() => row.evaluate((el) => el.scrollWidth > el.clientWidth + 1)).toBe(true);
+  for (const box of await lowerRow(page)) expect(Math.round(box.width)).toBeGreaterThanOrEqual(159);
+  expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
+  await row.evaluate((el) => el.scrollTo({ left: el.scrollWidth }));
+  await expect(drawn(page, "Panel 5")).toBeInViewport({ ratio: 0.9 });
+  await expect(page.getByRole("button", { name: "Maximize 1m chart", exact: true })).toBeInViewport({ ratio: 1 });
+  await page.screenshot({ path: test.info().outputPath("dividers-1024-navigation-expanded.png") });
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
   await page.setViewportSize({ width: 1920, height: 1080 });
   await expect.poll(async () => (await Promise.all(ALL_PANELS.map((id) => section(page, id)))).every((box, at) => near(box.height, wide[at].height, 1) && near(box.width, wide[at].width, 1))).toBe(true);
   await page.waitForTimeout(800);

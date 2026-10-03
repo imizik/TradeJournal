@@ -1170,7 +1170,8 @@ export default function ChartWorkspace() {
               now={Math.round((1 - sizes.lower) * 100)} min={Math.round((1 - LOWER_SHARE.max) * 100)} max={Math.round((1 - LOWER_SHARE.min) * 100)} text={`Main chart ${Math.round((1 - sizes.lower) * 100)}% of the height`}
               onDrag={dragRows} onStep={stepRows} onEdge={edgeRows} onReset={() => setSizes((current) => ({ ...current, lower: DEFAULT_PROPORTIONS.lower }))} /> : null}
             {multi && <div ref={lowerBox} style={sized ? { flexGrow: grow(sizes.lower), flexBasis: 0 } : undefined}
-              className={sized ? "flex min-h-[180px] min-w-0" : "grid min-w-0 shrink-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4"}>
+              // Too narrow for four smaller charts at their minimum (a 1024px window with the navigation expanded), the row scrolls sideways inside the grid.
+              className={sized ? "flex min-h-[180px] min-w-0 overflow-x-auto overflow-y-hidden overscroll-contain" : "grid min-w-0 shrink-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4"}>
               {slots.slice(1).flatMap((slot) => { const index = slot.index - 1; return [
                 index > 0 && sized ? <Splitter key={`column-${index}`} label={`Resize Panel ${index + 1} and Panel ${index + 2}`} orientation="vertical" className={`w-1 ${cover ? "invisible" : ""}`}
                   now={Math.round(sizes.columns.slice(0, index).reduce((sum, share) => sum + share, 0) * 100)}
@@ -1179,7 +1180,7 @@ export default function ChartWorkspace() {
                   text={`Panel ${index + 1} ${Math.round(sizes.columns[index - 1] * 100)}%, Panel ${index + 2} ${Math.round(sizes.columns[index] * 100)}% of the row`}
                   onDrag={() => dragColumn(index - 1)} onStep={(by) => stepColumn(index - 1, by)} onEdge={(to) => stepColumn(index - 1, to)} onReset={resetColumns} /> : null,
                 <div key={slot.index} ref={(box) => { columnBoxes.current[index] = box; }}
-                  style={sized ? { flexGrow: grow(sizes.columns[index]), flexBasis: 0, minWidth: `min(${COLUMN_MIN_PX}px, calc(25% - 3px))` } : undefined}
+                  style={sized ? { flexGrow: grow(sizes.columns[index]), flexBasis: 0, minWidth: COLUMN_MIN_PX } : undefined}
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}

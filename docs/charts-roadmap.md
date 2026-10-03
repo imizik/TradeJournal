@@ -1066,8 +1066,8 @@ layouts keep exactly C7.2's keys, including a valid `smallSize`, so an older
 build never drops one. Settings and layouts without proportions follow their
 S/M/L size: 0.275, 0.378 and 0.518 reproduce C7.3's 226, 311 and 426px rows
 in a 1440×900 window. On screen the main chart keeps 320px, a smaller chart
-180px with its header and 160px of width; a smaller window clamps the view
-and saves nothing. The S/M/L buttons left the desktop toolbar (the divider
+180px with its header and 160px of width (a row too narrow for four scrolls
+sideways inside the grid); a smaller window clamps the view and saves nothing. The S/M/L buttons left the desktop toolbar (the divider
 replaced them) and stay in the phone's More menu. Dragging a divider counts
 as editing the layout, like an interval change. Maximize replaced the smaller
 charts' Expand toggle and is on the main chart too: the chart is placed over

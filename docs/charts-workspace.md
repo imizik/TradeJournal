@@ -150,7 +150,10 @@ cd backend
   C7.3's medium height in a 1440×900 window), the smaller charts the row's
   width by four shares (none under 10%), and on screen the main chart keeps
   at least 320px, each smaller chart at least 180px with its header and
-  160px of width. A window too small for a saved proportion shows it clamped
+  160px of width; a row too narrow for four of those (a 1024px window with
+  the navigation expanded) scrolls sideways inside the grid, and a narrow
+  chart clips its symbol and interval, never its header buttons. A window
+  too small for a saved proportion shows it clamped
   and keeps it unchanged for a larger one: nothing is saved by resizing the
   window. The proportions are a shared setting (`proportions`), so another
   computer opens at the same split; a phone ignores them and keeps the S/M/L
@@ -797,8 +800,10 @@ streamed trade, survives a symbol, interval and dock change, ends on a
 layout switch, Focus and making it the main chart, and Escape drops the
 selection, then restores it, then leaves full screen. Shrinking a 1920×1080
 window with dragged dividers to 1280×720, 1024×768 and 1100×600 keeps both
-minimums, the page unscrolled and the saved shares untouched, and growing it
-back gives the same boxes. Layouts saved before C7.4 open within 8px of their
+minimums, the page unscrolled and the saved shares untouched; with the
+navigation expanded at 1024×768 the smaller row keeps 160px charts and
+scrolls sideways inside the grid; and growing the window back gives the same
+boxes. Layouts saved before C7.4 open within 8px of their
 S/M/L height, unusable or orphaned layout proportions are dropped, the saved
 list keeps exactly C7.2's keys, and seven kinds of malformed proportions
 (strings, null, out-of-range shares, three columns, zero and lopsided

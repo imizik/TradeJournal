@@ -172,7 +172,7 @@ export function lowerLimits(space: number): { min: number; max: number } | null 
   return space > 0 && min <= max ? { min, max } : null;
 }
 /** The narrowest a smaller chart may be dragged, in pixels, given the four charts' total width. */
-export const columnMinPx = (total: number) => Math.max(Math.min(COLUMN_MIN_PX, total / 4), COLUMN_MIN * total);
+export const columnMinPx = (total: number) => Math.max(COLUMN_MIN_PX, COLUMN_MIN * total);
 /** The side dock's width on a wide screen (per device): bounds and default, and the chart grid it must leave. */
 export const DOCK_WIDTH = { min: 200, max: 480, default: 256 } as const;
 export const GRID_MIN_PX = 640;
