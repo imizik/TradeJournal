@@ -711,6 +711,47 @@ first place in that order. Nothing on the chart reads the snapshots yet.
   When anything in scope is still missing, the job fails with that first, so
   the phone alert names it; what was recorded stays.
 
+### Automatic levels (C2.1)
+
+`backend/app/engine/chart_levels.py` computes the session and structure levels
+for one New York session from bars it is handed. Nothing on the chart uses it
+yet: confluence (C2.2) and the levels layer (C2.3) are its first callers. It is
+pure (no provider calls, no database), so C2.3 feeds it bars the chart already
+loaded, on the chart's split-adjusted basis. `compute_levels(day, minutes,
+daily, as_of, calendar)` returns the levels known at `as_of` and, by group, why
+any are missing. Only bars complete by `as_of` count.
+
+| Level | Label | Definition | Formed at |
+|---|---|---|---|
+| Prior day high, low, close | PDH, PDL, PDC | The last daily bar before the session (`indicators.get_previous_day_data`, as fill context uses) | That session's close (13:00 on a half day) |
+| Prior week high, low | PWH, PWL | Highest high and lowest low of the previous Monday–Friday week's daily bars | That week's last close |
+| Premarket high, low | PMH, PML | 04:00–09:30 minutes (`indicators.analyze_minute_bars`, as fill context uses) | 09:30; shown as developing before |
+| Overnight high, low | ONH, ONL | The previous session's postmarket (from its close, 13:00 after a half day, to four hours later) and this session's premarket, from the calendar | The regular open; shown as developing before |
+| 5- and 15-minute opening ranges | OR5 high/low, OR15 high/low | 09:30–09:35 and 09:30–09:45 minutes (`analyze_minute_bars`) | 09:35 and 09:45; absent until then |
+| Swing highs and lows | Swing high/low | Daily pivots in the last 60 completed sessions: a high above the two sessions before it and at least as high as the two after (equal highs mark the first); lows mirrored | Close of the second session after it |
+| Round numbers | 600, 21,500 | Multiples of 1 or 5 × 10^k, whichever is nearest by ratio to 1% of the last completed close (SPY near 660 steps by 5, NVDA near 180 by 1); three at or below it and three above | — |
+
+- **Same as fill context.** The premarket range, opening ranges and prior day
+  call the fill-context functions, so on the same bars the chart and a fill's
+  stored context agree. Those definitions are clock hours: on a day the
+  calendar opens at another time they are listed as missing, not shifted.
+- **What each level carries.** Kind, label, price, `evidence` (*observed* for
+  the prior day's provider fields, *calculated* for ranges and round numbers,
+  *inferred* for swings), the bars' `timeframe` (`1m` or `1D`), the `source` of
+  the bar that set it (`tradier` or `alpaca_sip`), that bar's start
+  (`bar_time`), `formed_at`, and `developing` while its window is still open.
+  One bar can set several levels (a premarket high is often the overnight
+  high); `bar_time` lets confluence count it once. Round numbers have no bar,
+  source or formation time.
+- **Missing stays missing.** A session the calendar (or, without one, the clock)
+  says traded but that has no daily bar removes what depends on it: the prior
+  day and swings when it is the latest session, the prior week when it falls
+  in that week. Nothing older is relabeled as "prior". Without the calendar a
+  holiday therefore reads as a missing bar.
+  The overnight range needs the previous session's minutes loaded, since an
+  absent postmarket cannot be told from a quiet one. A closed day has no
+  session levels; its prior-day, prior-week and swing levels remain.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
@@ -839,6 +880,14 @@ level drawn before a split moving with it, new levels recording their date, and
 the missing-split banner.
 `backend/tests/test_chart_stream.py` checks session buckets, invalid event
 filters, and a single upstream subscription shared across tabs.
+`backend/tests/test_chart_levels.py` pins every automatic level on fixture
+bars: a DST Monday (Friday's postmarket in EST, Monday's premarket and opening
+ranges in EDT, read in UTC), the session after a 13:00 half day and the half
+day itself across Thanksgiving, a late open, a closed day, developing and
+still-forming bars, missing daily and minute bars, swing confirmation and
+lookback, and round-number spacing. It also feeds the same bars to the
+fill-context functions at four fill times and checks that the chart's
+premarket, opening-range and prior-day levels equal them.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's

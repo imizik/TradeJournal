@@ -88,8 +88,8 @@ These rows describe future work, not implemented recording or broker controls.
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done ([PR #113](https://github.com/imizik/TradeJournal/pull/113)) |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done ([PR #118](https://github.com/imizik/TradeJournal/pull/118)) |
-| C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | next |
-| C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | todo |
+| C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done (PR pending) |
+| C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | next |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | todo |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | todo |
@@ -510,6 +510,16 @@ Where `indicators.py` already defines a level for fill context, call that code
 rather than re-deriving it. *Done when:* unit tests pin each level on fixture
 bars, including a DST day and a half day, and a test proves chart and
 fill-context levels agree on the same bars.
+As built ([Automatic levels](charts-workspace.md#automatic-levels-c21)):
+`backend/app/engine/chart_levels.py` is pure and not yet called; C2.3 wires it
+to the workspace. The premarket range, opening ranges and prior day call
+`analyze_minute_bars` and `get_previous_day_data`. Overnight is the previous
+session's postmarket plus this premarket, from the calendar. Round numbers step
+by 1 or 5 × 10^k near 1% of price; swings are two-session daily pivots over 60
+sessions. For C2.2, each level carries `bar_time`, the bar that set it: the
+independent-source rule counts levels that share a bar once. Its `evidence`
+says observed, calculated or inferred. A level the bars cannot support is
+absent with a reason, never taken from an older session.
 
 **C2.2 Confluence.** Levels closer than a threshold merge into one zone. The
 threshold is a fraction of ATR, not a fixed price, so it scales from SPY to
