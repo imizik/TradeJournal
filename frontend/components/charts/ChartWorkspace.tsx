@@ -12,6 +12,7 @@ import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import Sheet from "./Sheet";
 import SymbolPalette from "./SymbolPalette";
+import SymbolInfo from "./SymbolInfo";
 import ToolbarMenu from "./ToolbarMenu";
 import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownIndicators, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
@@ -917,6 +918,7 @@ export default function ChartWorkspace() {
       })}
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
+    <SymbolInfo symbol={settings.symbol} />
     <section className="border-t border-slate-700/40 p-3" aria-label="Saved price levels">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
         {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button>
