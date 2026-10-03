@@ -81,8 +81,8 @@ C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work 
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done ([PR #113](https://github.com/imizik/TradeJournal/pull/113)) |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
-| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | next |
-| C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
+| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done (PR pending) |
+| C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | next |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | todo |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | todo |
@@ -799,7 +799,7 @@ replace them. The desktop toolbar wraps to a second row below about 1280px
 instead of collapsing into an overflow menu. Browser fullscreen (the
 Fullscreen API) is not used.
 
-**C7.4 Resizable chart grid and dock (planned).** Let the user distribute space
+**C7.4 Resizable chart grid and dock (done, PR pending).** Let the user distribute space
 within C7.3's shell: drag the main/lower-row divider, the dividers between the
 four lower charts and the right dock's edge. Start with the existing five panel
 slots; arbitrary docking, variable panel counts and a new layout library are
@@ -837,6 +837,26 @@ safely. Two browser contexts prove saved proportions and conflict handling,
 while dock geometry stays local. Chart instances and viewport state survive;
 resize operations issue no additional provider requests. Record desktop/phone
 screenshots and bounded size measurements separately from live-session proof.
+
+As built (`docs/charts-workspace.md` has the detail): the shared setting is
+`proportions` (the smaller row's share of the height, 0.15–0.6, and four
+column shares, each at least 0.1), and each saved layout's proportions are a
+top-level `layoutProportions` map by layout id rather than a key inside the
+layout, because a tab on an older build rebuilds layouts from the keys it
+knows and the server keeps only top-level fields a save leaves out. Saved
+layouts keep exactly C7.2's keys, including a valid `smallSize`, so an older
+build never drops one. Settings and layouts without proportions follow their
+S/M/L size: 0.275, 0.378 and 0.518 reproduce C7.3's 226, 311 and 426px rows
+in a 1440×900 window. On screen the main chart keeps 320px, a smaller chart
+180px with its header and 160px of width; a smaller window clamps the view
+and saves nothing. The S/M/L buttons left the desktop toolbar (the divider
+replaced them) and stay in the phone's More menu. Dragging a divider counts
+as editing the layout, like an interval change. Maximize replaced the smaller
+charts' Expand toggle and is on the main chart too: the chart is placed over
+the grid while the others stay mounted at their size, hidden. The dock is
+200–480px (256px by default) and never leaves the charts under 640px; its
+width and full screen's dock choice are stored per device, the latter seeded
+once from the shared `immersiveWatchlist`, which stays for older tabs.
 
 ### G0 — Daily chart replacement acceptance
 

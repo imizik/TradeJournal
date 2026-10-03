@@ -83,9 +83,9 @@ cd backend
   (`frontend/components/AppMain.tsx`), and an actionable Gmail banner still
   sits above the charts. One toolbar row holds the symbol field, the quote,
   the main chart's intervals, the session, **Indicators** (a menu of the
-  studies and fill arrows), **Layouts**, Focus, **Link time ranges**, the
-  small-chart height, pause, refresh, shortcuts, full screen, and the dock's
-  two tabs, **Watchlist** and **Layers**; below about 1280px it wraps to a
+  studies and fill arrows), **Layouts**, Focus, **Link time ranges**, pause,
+  refresh, shortcuts, full screen, and the dock's two tabs, **Watchlist** and
+  **Layers**; below about 1280px it wraps to a
   second row rather than hiding anything. Undo, redo and the drawing tools
   are a slim rail left of the charts. The dock on the right shows one panel at
   a time: the watchlist with the main symbol's levels and latest fills under
@@ -97,20 +97,53 @@ cd backend
   an **About chart data** note and the Lightweight Charts attribution in view
   however dense the charts get; data warnings sit as one-line banners under
   the toolbar. The charts are sized by the browser from the space left (CSS
-  flex and each chart's `autoSize`), not from a viewport estimate: the smaller
-  charts keep their S/M/L height and the main chart takes the rest, never
-  less than 320px tall. When that does not fit (1280×720 with tall smaller
-  charts) the chart grid scrolls inside itself and the page never does; Focus
-  gives one chart the whole grid. Opening and closing the dock or the
+  flex and each chart's `autoSize`), not from a viewport estimate, in the
+  proportions the dividers set (C7.4, below). When the main chart's and the
+  smaller row's minimums do not both fit (a window about 540px tall) the chart
+  grid scrolls inside itself and the page never does; Focus gives one chart
+  the whole grid. Opening and closing the dock or the
   navigation and resizing the window keep every chart instance, the selection,
   a scrolled-back view and the stream, and fetch nothing. The Indicators menu
   is not modal (hotkeys keep working); Escape closes it before it puts a tool
   away or leaves full screen. Below 1024px the page scrolls as before: the
   toolbar wraps into rows of 44px controls (the intervals scroll sideways in
-  theirs), the drawing tools are a toolbar row, the link, height, pause,
-  refresh and shortcut controls, the data note and the attribution move into
-  a **More chart controls** menu, and the dock is a bottom sheet over the
-  charts (charting a symbol from it closes it; the arrows keep it open).
+  theirs), the drawing tools are a toolbar row, the link, pause, refresh and
+  shortcut controls, the smaller charts' S/M/L height, the data note and the
+  attribution move into a **More chart controls** menu, and the dock is a
+  bottom sheet over the charts (charting a symbol from it closes it; the
+  arrows keep it open).
+- **Dividers and maximize (C7.4).** On a screen at least 1024px wide the
+  four-pixel gaps of the five-chart grid are dividers: one between the main
+  chart and the smaller row, one between each pair of smaller charts, and
+  the dock's left edge (`frontend/components/charts/Splitter.tsx`). Drag one
+  with a mouse, pen or finger, or focus it (Tab reaches each, in the order
+  of the charts they sit between) and use the arrow keys (Shift for steps of
+  10%, or 64px for the dock), Home and End for its limits; Enter or a
+  double-click resets it, and Escape during a drag puts it back without
+  saving. **Reset chart sizes** in the Layouts menu resets all of them. A
+  drag moves the boxes directly, re-rendering no chart, and is saved once
+  when the button is released. The main chart and the smaller row share the
+  height by the smaller row's share (15% to 60%; 37.8% by default, which is
+  C7.3's medium height in a 1440×900 window), the smaller charts the row's
+  width by four shares (none under 10%), and on screen the main chart keeps
+  at least 320px, each smaller chart at least 180px with its header and
+  160px of width. A window too small for a saved proportion shows it clamped
+  and keeps it unchanged for a larger one: nothing is saved by resizing the
+  window. The proportions are a shared setting (`proportions`), so another
+  computer opens at the same split; a phone ignores them and keeps the S/M/L
+  height in its More menu. Settings saved before C7.4 have none, and the
+  share then follows the S/M/L size (27.5%, 37.8% or 51.8%), which is the
+  height that size had in a 1440×900 window. The dock is 200 to 480px wide
+  (256px by default), never leaving the charts less than 640px, and its width
+  is this device's only. Every chart header has **Maximize**: the chart
+  covers the whole grid while the others stay mounted at their size beneath
+  it, hidden, still receiving the stream; **Restore charts** (or Escape,
+  after a menu, a tool and a selection, and before full screen) puts the grid
+  back exactly, with every chart's view, selection and drawings unchanged.
+  Maximizing is this device's, for the moment: it lasts through a symbol or
+  interval change, the dock and full screen, and ends on reload, a layout
+  switch, Focus, or making that chart the main one. On a phone a maximized
+  chart is the only one shown, 410px tall (the whole screen in full screen).
 - Intervals: 1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D and 1W. Select a smaller chart to
   make it the main one; all panels follow the selected symbol and crosshair.
 - EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14).
@@ -237,11 +270,17 @@ cd backend
 - **Layouts** (toolbar button) saves the current arrangement under a name, such
   as "0DTE SPY" (1m | 5m | 15m ...) or "Names" (the traded name beside SPY and QQQ),
   and switches to it in one click or tap. A layout is the chart mode (five
-  charts or one), the five intervals, the symbols panels hold, the small-chart
-  height and linked time ranges. The main symbol, levels, watchlist, session
+  charts or one), the five intervals, the symbols panels hold, the phone's
+  small-chart height, the dividers' proportions (C7.4) and linked time ranges.
+  The proportions are kept beside the saved list, by layout id
+  (`layoutProportions`), not inside it: a tab on an older build rebuilds each
+  layout from the keys it knows and saves the list whole, while the server
+  keeps a top-level field a save leaves out. A layout saved before C7.4 opens
+  at the proportion of its S/M/L size, and a layout's proportions go when it
+  is deleted. The main symbol, levels, watchlist, session
   and indicators belong to the workspace, so switching never moves them. The
   button shows the layout the panels are arranged as right now; after a panel
-  is edited no layout is in use until one is replaced with **Update**. Rows
+  is edited or a divider moved no layout is in use until one is replaced with **Update**. Rows
   rename, replace with the current arrangement, and delete after a
   confirmation. Names are single-spaced, up to 30 characters and unique
   ignoring case, and twelve layouts can be saved. A saved layout whose
@@ -334,11 +373,12 @@ cd backend
 - **Full screen** is the same workspace over the app navigation and the Gmail
   banner, with an **Exit** button in the toolbar (on a phone a highlighted
   close button); Escape also exits, after it has closed a menu, put a tool
-  away or dropped a selection. It keeps its own choice of dock, closed until
-  asked for (the shared `immersiveWatchlist` setting). On a phone the main
+  away or dropped a selection and restored a maximized chart. It keeps its
+  own choice of dock, closed until asked for, on each device since C7.4 (a
+  device without one starts from the `immersiveWatchlist` setting C7.3
+  shared, which stays in the settings for older tabs). On a phone the main
   chart fills the screen under the toolbar and the smaller charts scroll
-  below it. Smaller charts have a saved S/M/L height and a per-chart expand
-  toggle.
+  below it.
 - **Symbol search** (Cmd/Ctrl+K) lists the typed ticker, the last eight symbols
   and the watchlist; arrows move, Enter charts, Escape closes. Watchlist rows
   take Up/Down/Home/End, and Alt+Up/Down steps the charted symbol through the
@@ -714,6 +754,39 @@ the secondary controls and the attribution, and the watchlist sheet (44px
 targets) overlays the chart without shrinking it and closes by Esc, backdrop
 or charting a symbol. Measurements are of the stubbed fixture, not a live
 session.
+Divider tests (C7.4), at 1440×900 against the stubbed fixture: the default
+smaller row is C7.3's 311px; a drag of the main divider moves it by the
+dragged pixels and saves the share once; the arrow keys step 2% and 10%,
+Home, End and a drag past the end stop at the limits (the main chart never
+under 320px), and Enter, a double-click and **Reset chart sizes** reset;
+Escape mid-drag restores the sizes and saves nothing, and End and Enter on a
+divider move neither the charts' view nor a typed interval. The column
+dividers move only their two charts and stop at 160px; the dock's edge stops
+at 200 and 480px, keeps the grid at least 640px wide, survives a reload and
+never reaches the server. During a twenty-step drag of each divider no chart
+renders and nothing is saved; on release one save follows (none for the
+dock), with the same five chart instances, the same stream and no requests
+beyond the 15-second refresh. Each of the five charts is maximized and
+restored while the main chart and Panel 2 are scrolled back and a level is
+selected: it covers the grid, the others are hidden, and afterwards every
+box is within a pixel and every visible range is the same; it takes a
+streamed trade, survives a symbol, interval and dock change, ends on a
+layout switch, Focus and making it the main chart, and Escape drops the
+selection, then restores it, then leaves full screen. Shrinking a 1920×1080
+window with dragged dividers to 1280×720, 1024×768 and 1100×600 keeps both
+minimums, the page unscrolled and the saved shares untouched, and growing it
+back gives the same boxes. Layouts saved before C7.4 open within 8px of their
+S/M/L height, unusable or orphaned layout proportions are dropped, the saved
+list keeps exactly C7.2's keys, and seven kinds of malformed proportions
+(strings, null, out-of-range shares, three columns, zero and lopsided
+columns) load as the nearest proportions the dividers could make, with no
+page error. Two browsers on the e2e server share the proportions but not the
+dock's width, a save refused as stale keeps the other browser's interval and
+this one's divider, a save without the new fields (as an older build makes)
+leaves them on the server, and a layout an older tab deletes loses its
+proportions on the next save. At 390px there are no dividers, S/M/L stays in
+the More menu, and Maximize shows one 410px chart (the screen in full
+screen) and restores the others at their heights.
 Layers-panel tests (C1.4) hide My levels and Drawings from the panel and read
 them gone on all five charts, still gone (panel still open) after a reload,
 and back; hide and show one level; lock all as one undo step and lock one;

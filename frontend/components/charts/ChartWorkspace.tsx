@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, Maximize2, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, SlidersHorizontal, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import ChartMenu from "./ChartMenu";
 import type { HiddenItem, LayerToggle, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
 import HotkeySheet from "./HotkeySheet";
@@ -11,10 +11,12 @@ import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
 import Sheet from "./Sheet";
+import Splitter from "./Splitter";
+import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import ToolbarMenu from "./ToolbarMenu";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownIndicators, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
 import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLOR, MAX_DRAWINGS, MAX_LEVELS, MAX_UNDO, TOOL_NAMES } from "@/lib/drawings";
@@ -76,6 +78,14 @@ type DockTab = "watchlist" | "layers";
 const DOCK_KEY = "tradejournal.charts.dock.v1";
 /** C1.4 remembered only an open layers panel; a device that left it open opens the dock on Layers. */
 const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
+/** The dock's width on this device (C7.4), and whether full screen shows the dock here ("1" or "0"). */
+const DOCK_WIDTH_KEY = "tradejournal.charts.dock.width.v1";
+const FULL_DOCK_KEY = "tradejournal.charts.dock.fullscreen.v1";
+/** A share as a flex-grow weight: thousandths, so the weights of a row always add up to at least 1. */
+const grow = (share: number) => Math.round(share * 1000);
+const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
+/** The chart grid's widest dock in a row of this width: the dock may not leave the charts and tool rail less than this. */
+const dockMax = (row: number) => Math.max(DOCK_WIDTH.min, Math.min(DOCK_WIDTH.max, row - GRID_MIN_PX - 40));
 /**
  * From this width the workspace fills the screen: a toolbar, a tool rail, the
  * charts and the dock. Below it (a phone, a narrow window) the page scrolls, the
@@ -159,13 +169,22 @@ export default function ChartWorkspace() {
   const [layoutMenu, setLayoutMenu] = useState(false);
   const [help, setHelp] = useState(false);
   const [entry, setEntry] = useState<Entry>(NO_ENTRY);
-  const [expanded, setExpanded] = useState<number | null>(null);
+  // The chart maximized over the grid (C7.4), by slot: this device's view for the moment, never saved.
+  const [maximized, setMaximized] = useState<number | null>(null);
+  // The dock's width, and full screen's own choice of showing it: this device's (C7.4).
+  const [dockWidth, setDockWidth] = useState<number>(DOCK_WIDTH.default);
+  const [fullDock, setFullDock] = useState<boolean | null>(null);
   const [width, setWidth] = useState(1280);
   const link = useMemo(() => createCrosshairLink(), []);
   const rangeLink = useMemo(() => createRangeLink(), []);
   const commands = useMemo(() => createChartCommands(), []);
   const stream = useMemo(() => createStreamStore(), []);
   const root = useRef<HTMLDivElement>(null);
+  // The boxes the dividers resize (C7.4): the main chart's, the smaller row's, each smaller chart's and the dock.
+  const mainBox = useRef<HTMLDivElement>(null);
+  const lowerBox = useRef<HTMLDivElement>(null);
+  const columnBoxes = useRef<(HTMLDivElement | null)[]>([]);
+  const dockBox = useRef<HTMLElement>(null);
   const inFlight = useRef(false);
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
@@ -376,8 +395,21 @@ export default function ChartWorkspace() {
       const saved = JSON.parse(localStorage.getItem(DOCK_KEY) ?? "null") as { open?: unknown; tab?: unknown } | null;
       if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" ? "layers" : "watchlist" });
       else if (localStorage.getItem(LAYERS_OPEN_KEY) === "1") setDock({ open: true, tab: "layers" });
-    } catch { /* open on the watchlist */ }
+      const wide = Number(localStorage.getItem(DOCK_WIDTH_KEY));
+      if (Number.isFinite(wide) && wide > 0) setDockWidth(clamp(Math.round(wide), DOCK_WIDTH.min, DOCK_WIDTH.max));
+    } catch { /* open on the watchlist, at the default width */ }
   }, []);
+  // Full screen's dock was shared until C7.4: a device without its own choice yet starts from the shared one, once loaded.
+  useEffect(() => {
+    if (!ready || fullDock !== null) return;
+    let own: boolean | null = null;
+    try { const saved = localStorage.getItem(FULL_DOCK_KEY); if (saved === "1" || saved === "0") own = saved === "1"; } catch { /* use the shared choice */ }
+    if (own === null) {
+      own = settings.immersiveWatchlist;
+      try { localStorage.setItem(FULL_DOCK_KEY, own ? "1" : "0"); } catch { /* remembered for this visit only */ }
+    }
+    setFullDock(own);
+  }, [ready, fullDock, settings.immersiveWatchlist]);
   useEffect(() => {
     if (!notice) return;
     const timer = window.setTimeout(() => setNotice(""), 2500);
@@ -487,16 +519,18 @@ export default function ChartWorkspace() {
   // Named layouts (C7.2) are arrangements saved in the shared settings: they
   // move intervals, held symbols, chart height and linked ranges, never the
   // main symbol, levels or watchlist.
+  // The chart grid's proportions (C7.4) are part of a layout too.
   const inUse = activeLayout(settings);
   const chooseLayout = (id: string) => {
     setSettings((s) => { const layout = s.layouts.find((other) => other.id === id); return layout ? applyLayout(s, layout) : s; });
-    setExpanded(null); setSymbolError(""); setLayoutMenu(false);
+    setMaximized(null); setSymbolError(""); setLayoutMenu(false);
   };
   const saveLayout = (name: string) => setSettings((s) => s.layouts.length >= MAX_LAYOUTS || nameTaken(s.layouts, name) ? s
-    : { ...s, layouts: [...s.layouts, { id: crypto.randomUUID(), name, ...arrangementOf(s) }] });
+    : { ...s, ...storeLayout(s, crypto.randomUUID(), name) });
   const renameLayout = (id: string, name: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, name } : layout) }));
-  const updateLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.map((layout) => layout.id === id ? { ...layout, ...arrangementOf(s) } : layout) }));
-  const deleteLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.filter((layout) => layout.id !== id) }));
+  const updateLayout = (id: string) => setSettings((s) => { const layout = s.layouts.find((other) => other.id === id); return layout ? { ...s, ...storeLayout(s, id, layout.name) } : s; });
+  const deleteLayout = (id: string) => setSettings((s) => ({ ...s, layouts: s.layouts.filter((layout) => layout.id !== id),
+    layoutProportions: Object.fromEntries(Object.entries(s.layoutProportions).filter(([other]) => other !== id)) }));
   // Every change to a level or drawing goes through here, so it can be undone.
   const editItems = (edit: DrawingEdit) => {
     setSettings((s) => applyEdit(s, edit, "after") ?? s);
@@ -649,10 +683,12 @@ export default function ChartWorkspace() {
     editItems({ symbol: target, layer: "levels", before: rows[index], after: cleanLevel({ ...rows[index], price: value, drawn_on: todayNewYork() })!, index });
   };
   const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem });
-  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu });
+  // A maximized chart counts only while five charts show.
+  const shown = settings.layout === "multi" ? maximized : null;
+  const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, maximized: shown !== null, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu });
   useEffect(() => {
     actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem };
-    keys.current = { palette: palette !== null, layoutMenu, help, immersive, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu };
+    keys.current = { palette: palette !== null, layoutMenu, help, immersive, maximized: shown !== null, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu };
   });
   // Hotkeys (lib/hotkeys.ts, listed by the ? sheet). They act on the main
   // chart's interval, the watchlist and every chart's view.
@@ -688,6 +724,7 @@ export default function ChartWorkspace() {
       if (!hotkey) {
         if (event.key === "Escape" && state.tool) setTool(null);
         else if (event.key === "Escape" && state.selected) setSelection(null);
+        else if (event.key === "Escape" && state.maximized) setMaximized(null);
         else if (event.key === "Escape" && state.immersive) setImmersive(false);
         return;
       }
@@ -841,21 +878,139 @@ export default function ChartWorkspace() {
   // A desktop and full screen fill their box: the main chart takes the height
   // the smaller charts leave, measured by the browser, not estimated (C7.3).
   const fill = !narrow || immersive;
-  const dockShown = narrow ? sheet : immersive ? settings.immersiveWatchlist : dock.open;
+  const dockShown = narrow ? sheet : immersive ? fullDock ?? settings.immersiveWatchlist : dock.open;
   /**
    * Open the dock on a tab, or close it (null). A desktop remembers both on
-   * this device. Full screen keeps its own choice of showing it, shared like
-   * before; a phone's sheet is never remembered open.
+   * this device. Full screen keeps its own choice of showing it, on this
+   * device too since C7.4; a phone's sheet is never remembered open.
    */
   const showDock = (tab: DockTab | null) => {
     const open = tab !== null;
     const next = narrow || immersive ? { ...dock, tab: tab ?? dock.tab } : { open, tab: tab ?? dock.tab };
     if (narrow) setSheet(open);
-    else if (immersive) setSettings((s) => s.immersiveWatchlist === open ? s : { ...s, immersiveWatchlist: open });
+    else if (immersive) {
+      setFullDock(open);
+      try { localStorage.setItem(FULL_DOCK_KEY, open ? "1" : "0"); } catch { /* remembered for this visit only */ }
+    }
     setDock(next);
     try { localStorage.setItem(DOCK_KEY, JSON.stringify(next)); } catch { /* remembered for this visit only */ }
   };
   const toggleDock = (tab: DockTab) => showDock(dockShown && dock.tab === tab ? null : tab);
+
+  // ---- C7.4: dividers and maximize ----
+  // A wide screen shares the grid by proportions: the dividers set them, and a
+  // phone keeps its S/M/L heights. A drag previews by writing flex weights and
+  // widths straight to the boxes; the setting changes once, when it ends.
+  const sized = !narrow && multi;
+  const sizes = sizesOf(settings);
+  // A maximized chart covers the grid; the others stay mounted at their size underneath, hidden.
+  const cover = fill && shown !== null;
+  const setSizes = (change: (current: Proportions) => Proportions) =>
+    setSettings((s) => { const next = cleanProportions(change(sizesOf(s))); return next ? { ...s, proportions: next } : s; });
+  /** The height the main chart and the smaller row share, and the smaller row's share of it as shown. */
+  const rows = () => {
+    const main = mainBox.current?.getBoundingClientRect().height ?? 0;
+    const lower = lowerBox.current?.getBoundingClientRect().height ?? 0;
+    return { space: main + lower, share: main + lower > 0 ? lower / (main + lower) : sizes.lower };
+  };
+  const dragRows = (): SplitDrag | null => {
+    const main = mainBox.current, lower = lowerBox.current;
+    const { space, share: start } = rows();
+    const limits = lowerLimits(space);
+    if (!main || !lower || !limits) return null;
+    const was = [main.style.flexGrow, lower.style.flexGrow];
+    let share: number | null = null;
+    return {
+      move(delta) {
+        share = clamp(start - delta / space, limits.min, limits.max);
+        main.style.flexGrow = String(grow(1 - share)); lower.style.flexGrow = String(grow(share));
+      },
+      end(keep) {
+        const chosen = share;
+        if (keep && chosen !== null) setSizes((current) => ({ ...current, lower: chosen }));
+        else [main.style.flexGrow, lower.style.flexGrow] = was;
+      },
+    };
+  };
+  // Down (+) gives the main chart more; Home makes it smallest.
+  const stepRows = (by: number) => {
+    const { space, share } = rows();
+    const limits = lowerLimits(space);
+    if (limits) setSizes((current) => ({ ...current, lower: clamp(share - by * 0.02, limits.min, limits.max) }));
+  };
+  const edgeRows = (to: "min" | "max") => {
+    const limits = lowerLimits(rows().space);
+    if (limits) setSizes((current) => ({ ...current, lower: to === "min" ? limits.max : limits.min }));
+  };
+  /** The smaller charts' widths on screen, and the narrowest one may be made. */
+  const columns = () => {
+    const widths = columnBoxes.current.slice(0, 4).map((box) => box?.getBoundingClientRect().width ?? 0);
+    const total = widths.reduce((sum, value) => sum + value, 0);
+    return { widths, total, least: columnMinPx(total) };
+  };
+  /** Move the divider after column `index`: `left` is the share of the pair's width the left chart gets. */
+  const pairShares = (current: Proportions, index: number, left: number) => {
+    const pair = current.columns[index] + current.columns[index + 1];
+    return { ...current, columns: current.columns.map((share, i) => i === index ? pair * left : i === index + 1 ? pair * (1 - left) : share) };
+  };
+  const dragColumn = (index: number): SplitDrag | null => {
+    const a = columnBoxes.current[index], b = columnBoxes.current[index + 1];
+    const { widths, least } = columns();
+    const pair = widths[index] + widths[index + 1];
+    if (!a || !b || pair < least * 2) return null;
+    const was = [a.style.flexGrow, b.style.flexGrow];
+    const weight = sizes.columns[index] + sizes.columns[index + 1];
+    let left: number | null = null;
+    return {
+      move(delta) {
+        left = clamp(widths[index] + delta, least, pair - least) / pair;
+        a.style.flexGrow = String(grow(weight * left)); b.style.flexGrow = String(grow(weight * (1 - left)));
+      },
+      end(keep) {
+        const chosen = left;
+        if (keep && chosen !== null) setSizes((current) => pairShares(current, index, chosen));
+        else [a.style.flexGrow, b.style.flexGrow] = was;
+      },
+    };
+  };
+  const stepColumn = (index: number, by: number | "min" | "max") => {
+    const { widths, total, least } = columns();
+    const pair = widths[index] + widths[index + 1];
+    if (pair < least * 2) return;
+    const left = by === "min" ? least : by === "max" ? pair - least : clamp(widths[index] + by * 0.02 * total, least, pair - least);
+    setSizes((current) => pairShares(current, index, left / pair));
+  };
+  const resetColumns = () => setSizes((current) => ({ ...current, columns: DEFAULT_PROPORTIONS.columns }));
+  /** The dock's width: dragged here, kept on this device. */
+  const keepDockWidth = (value: number) => {
+    const next = clamp(Math.round(value), DOCK_WIDTH.min, DOCK_WIDTH.max);
+    setDockWidth(next);
+    try { localStorage.setItem(DOCK_WIDTH_KEY, String(next)); } catch { /* remembered for this visit only */ }
+  };
+  const dockLimit = () => dockMax(dockBox.current?.parentElement?.getBoundingClientRect().width ?? 0);
+  const dragDock = (): SplitDrag | null => {
+    const box = dockBox.current;
+    if (!box) return null;
+    const start = box.getBoundingClientRect().width;
+    const most = dockLimit();
+    const was = box.style.width;
+    let next: number | null = null;
+    return {
+      move(delta) { next = clamp(start - delta, DOCK_WIDTH.min, most); box.style.width = `${next}px`; },
+      end(keep) { if (keep && next !== null) keepDockWidth(next); else box.style.width = was; },
+    };
+  };
+  const resetSizes = () => { setSizes(() => DEFAULT_PROPORTIONS); keepDockWidth(DOCK_WIDTH.default); setLayoutMenu(false); };
+  /** Maximize a chart, or restore the grid when it is the one maximized. */
+  const toggleMaximized = (index: number) => setMaximized((current) => current === index ? null : index);
+  /**
+   * The others while one chart is maximized: hidden at their size where the
+   * grid fills the screen (under the maximized one), and out of the page's
+   * flow on a phone, their canvases keeping their fixed heights.
+   */
+  const slotHidden = (index: number) => shown === null || shown === index ? "" : fill ? "invisible" : "h-0 overflow-hidden invisible";
+  /** A chart's box inside its slot: over the whole grid when maximized there, else filling the slot where slots are sized. */
+  const slotInner = (index: number, flexed: boolean) => shown === index && fill ? "absolute inset-1 z-20 flex flex-col bg-[#0b1017]" : flexed ? "flex min-h-0 flex-1 flex-col" : "";
   // A phone or a narrow window gets 44px touch targets; a desktop gets compact ones.
   const tap = narrow ? "h-11 w-11" : "h-7 w-7";
   const control = narrow ? "h-11 min-w-11 px-2" : "h-7 min-w-7 px-1.5";
@@ -866,13 +1021,14 @@ export default function ChartWorkspace() {
   const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"]] as const).map(([tab, name, Icon, hint]) =>
     <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab)} ${control}`}><Icon size={14} /></button>);
 
-  // Linked ranges and the smaller charts' height sit in the toolbar on a desktop and in its More menu on a phone, with pause, refresh and the shortcuts.
+  // Linked ranges sit in the toolbar on a desktop; on a phone they and the smaller charts' height are in its More menu, with pause, refresh and the shortcuts.
   const secondary = <>
     <button aria-label="Link time ranges" aria-pressed={settings.linkRange} onClick={() => setSettings((s) => ({ ...s, linkRange: !s.linkRange }))} title="Scroll and zoom every chart to the same time window"
       className={`${plain(settings.linkRange)} ${control} text-[11px]`}><Link2 size={13} /><span className={label}>Link time ranges</span></button>
-    {multi && <div role="group" aria-label="Small chart height" title="Height of the smaller charts" className="flex shrink-0 overflow-hidden rounded border border-slate-700/70 text-[10px]">
+    {/* On a wide screen the divider above the smaller charts sets their height (C7.4). */}
+    {multi && narrow && <div role="group" aria-label="Small chart height" title="Height of the smaller charts" className="flex shrink-0 overflow-hidden rounded border border-slate-700/70 text-[10px]">
       {(["compact", "normal", "tall"] as SmallChartSize[]).map((size) => <button key={size} aria-pressed={settings.smallSize === size} aria-label={`${size} small charts`} onClick={() => setSettings((s) => ({ ...s, smallSize: size }))}
-        className={`${narrow ? "h-11 min-w-11" : "h-6 min-w-6"} px-1.5 ${settings.smallSize === size ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{size === "compact" ? "S" : size === "normal" ? "M" : "L"}</button>)}
+        className={`h-11 min-w-11 px-1.5 ${settings.smallSize === size ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{size === "compact" ? "S" : size === "normal" ? "M" : "L"}</button>)}
     </div>}
   </>;
   const pauseButton = <button className={`${plain(paused, "bg-amber-400/15 text-amber-300")} ${control} text-[11px]`} onClick={() => setPaused((v) => !v)} aria-label={paused ? "Resume chart updates" : "Pause chart updates"} title={paused ? "Resume updates" : "Pause updates"}>{paused ? <Play size={13} /> : <Pause size={13} />}<span className={label}>{paused ? "Resume" : "Pause"}</span></button>;
@@ -969,8 +1125,8 @@ export default function ChartWorkspace() {
           </div>}><SlidersHorizontal size={13} aria-hidden /><span className={narrow ? "sr-only" : ""}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
         {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className={`${plain(false)} ${control} gap-1 text-[10px] !text-amber-300`}><EyeOff size={11} />Indicators hidden · Show</button>}
         <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={narrow ? "sr-only" : ""}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
-        <button className={`${plain(false)} ${control} text-[11px]`} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"} title={settings.layout === "multi" ? "One chart" : "Five charts"}>
-          {settings.layout === "multi" ? <Maximize2 size={13} /> : <Columns3 size={13} />}{!narrow && <span className={label}>{settings.layout === "multi" ? "Focus" : "Five charts"}</span>}</button>
+        <button className={`${plain(false)} ${control} text-[11px]`} onClick={() => { setMaximized(null); setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" })); }} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"} title={settings.layout === "multi" ? "One chart" : "Five charts"}>
+          {settings.layout === "multi" ? <Square size={13} /> : <Columns3 size={13} />}{!narrow && <span className={label}>{settings.layout === "multi" ? "Focus" : "Five charts"}</span>}</button>
         {!narrow && secondary}
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {narrow
@@ -991,29 +1147,50 @@ export default function ChartWorkspace() {
 
       <div className={fill ? "flex min-h-0 flex-1" : ""}>
         {!narrow && <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-slate-700/50 py-1">{tools}</div>}
-        <div data-testid="chart-grid" className={fill ? "flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-1" : "space-y-2"}>
+        {/* A maximized chart is placed over this box, outside the grid's scrolling (C7.4). */}
+        <div className={fill ? "relative flex min-h-0 min-w-0 flex-1" : "relative"}>
+        <div data-testid="chart-grid" data-maximized={shown ?? undefined} className={fill ? `flex min-h-0 min-w-0 flex-1 flex-col ${sized ? "" : "gap-1"} ${cover ? "overflow-hidden" : "overflow-y-auto"} overscroll-contain p-1` : "space-y-2"}>
           {response ? <>
-            {/* Desktop: the main chart takes what the smaller row leaves, never less than a usable minimum; below that this area scrolls. Phone full screen: the main chart is the screen, the others below it. */}
-            {slots.slice(0, 1).map((slot) => <div key={slot.index} className={fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px] flex-1" : "min-h-0 flex-1"}` : ""}>
+            {/* Desktop: the main chart and the smaller row share the height by the divider between them, each keeping a usable minimum; below that this area scrolls. Phone full screen: the main chart is the screen, the others below it. */}
+            {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
+              className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
+              <div className={slotInner(0, fill)}>
               <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                 onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
+                maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined}
                 history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />
+              </div>
             </div>)}
-            {multi && <div className="grid min-w-0 shrink-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4">
-              {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 lg:col-span-4" : "min-w-0"}>
+            {sized ? <Splitter key="rows" label="Resize main chart and smaller charts" orientation="horizontal" className={`h-1 ${cover ? "invisible" : ""}`}
+              now={Math.round((1 - sizes.lower) * 100)} min={Math.round((1 - LOWER_SHARE.max) * 100)} max={Math.round((1 - LOWER_SHARE.min) * 100)} text={`Main chart ${Math.round((1 - sizes.lower) * 100)}% of the height`}
+              onDrag={dragRows} onStep={stepRows} onEdge={edgeRows} onReset={() => setSizes((current) => ({ ...current, lower: DEFAULT_PROPORTIONS.lower }))} /> : null}
+            {multi && <div ref={lowerBox} style={sized ? { flexGrow: grow(sizes.lower), flexBasis: 0 } : undefined}
+              className={sized ? "flex min-h-[180px] min-w-0" : "grid min-w-0 shrink-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4"}>
+              {slots.slice(1).flatMap((slot) => { const index = slot.index - 1; return [
+                index > 0 && sized ? <Splitter key={`column-${index}`} label={`Resize Panel ${index + 1} and Panel ${index + 2}`} orientation="vertical" className={`w-1 ${cover ? "invisible" : ""}`}
+                  now={Math.round(sizes.columns.slice(0, index).reduce((sum, share) => sum + share, 0) * 100)}
+                  min={Math.round((sizes.columns.slice(0, index - 1).reduce((sum, share) => sum + share, 0) + COLUMN_MIN) * 100)}
+                  max={Math.round((sizes.columns.slice(0, index + 1).reduce((sum, share) => sum + share, 0) - COLUMN_MIN) * 100)}
+                  text={`Panel ${index + 1} ${Math.round(sizes.columns[index - 1] * 100)}%, Panel ${index + 2} ${Math.round(sizes.columns[index] * 100)}% of the row`}
+                  onDrag={() => dragColumn(index - 1)} onStep={(by) => stepColumn(index - 1, by)} onEdge={(to) => stepColumn(index - 1, to)} onReset={resetColumns} /> : null,
+                <div key={slot.index} ref={(box) => { columnBoxes.current[index] = box; }}
+                  style={sized ? { flexGrow: grow(sizes.columns[index]), flexBasis: 0, minWidth: `min(${COLUMN_MIN_PX}px, calc(25% - 3px))` } : undefined}
+                  className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
+                <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
                   notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
-                  height={expanded === index ? Math.max(smallHeight, 420) : smallHeight} expanded={expanded === index}
-                  onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
+                  height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
+                  onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
                   selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}
                   onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                   onMenu={openMenu(slot.symbol, `Panel ${slot.index + 1}`)} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
-                  onFocus={() => { setExpanded(null); setSettings((s) => focusPanel(s, slot.index)); }} />
-              </div>; })}
+                  onFocus={() => { setMaximized(null); setSettings((s) => focusPanel(s, slot.index)); }} />
+                </div>
+              </div>]; })}
             </div>}
           </> : <div className={`flex flex-col items-center justify-center rounded-lg border border-slate-700/50 bg-[#10151e] px-8 text-center ${fill ? "min-h-0 flex-1" : "min-h-[490px]"}`}>
             {loading ? <Loader2 className="mb-4 animate-spin text-sky-300" size={28} /> : <ChartCandlestick className="mb-4 text-slate-600" size={36} />}
@@ -1021,7 +1198,13 @@ export default function ChartWorkspace() {
             <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved to your workspace on every device."}</p>
           </div>}
         </div>
-        {!narrow && dockShown && <aside aria-label="Side panel" className="w-64 shrink-0 overflow-y-auto overscroll-contain border-l border-slate-700/50 bg-[#121924]">
+        </div>
+        {/* The dock's edge is its divider (C7.4): this device's width, never less than the charts need. */}
+        {!narrow && dockShown && <Splitter label="Resize side panel" orientation="vertical" className="w-px bg-slate-700/50"
+          now={dockWidth} min={DOCK_WIDTH.min} max={DOCK_WIDTH.max} text={`Side panel ${dockWidth} pixels wide`}
+          onDrag={dragDock} onStep={(by) => { const most = dockLimit(); keepDockWidth(clamp((dockBox.current?.getBoundingClientRect().width ?? dockWidth) - by * 16, DOCK_WIDTH.min, most)); }}
+          onEdge={(to) => keepDockWidth(to === "min" ? DOCK_WIDTH.min : dockLimit())} onReset={() => keepDockWidth(DOCK_WIDTH.default)} />}
+        {!narrow && dockShown && <aside ref={dockBox} aria-label="Side panel" style={{ width: dockWidth, maxWidth: `max(${DOCK_WIDTH.min}px, calc(100% - ${GRID_MIN_PX + 40}px))` }} className="shrink-0 overflow-y-auto overscroll-contain bg-[#121924]">
           {dock.tab === "layers" ? layersPanel(false) : watchlistPanel}
         </aside>}
       </div>
@@ -1055,8 +1238,8 @@ export default function ChartWorkspace() {
         <div className="font-mono text-2xl font-medium text-slate-100">{entry.typed}<span className="text-base text-slate-500">m</span></div>
         <p className={`mt-1 text-[11px] ${entry.invalid ? "text-amber-300" : "text-slate-400"}`}>{entry.invalid ? `No ${entry.typed}m interval. Type 1, 3, 5, 15 or 30.` : "Enter to apply · Esc to cancel"}</p>
       </div>}
-      {layoutMenu && <LayoutMenu layouts={settings.layouts} current={arrangementOf(settings)} onApply={chooseLayout} onSave={saveLayout} onRename={renameLayout}
-        onUpdate={updateLayout} onDelete={deleteLayout} onClose={() => setLayoutMenu(false)} />}
+      {layoutMenu && <LayoutMenu layouts={settings.layouts.map((layout) => layoutWithSizes(settings, layout))} current={arrangementOf(settings)} onApply={chooseLayout} onSave={saveLayout} onRename={renameLayout}
+        onUpdate={updateLayout} onDelete={deleteLayout} onResetSizes={narrow ? undefined : resetSizes} onClose={() => setLayoutMenu(false)} />}
     </div>
   );
 }

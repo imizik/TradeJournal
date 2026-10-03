@@ -98,7 +98,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, expanded, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onExpand }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -113,7 +113,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   height?: number;
   /** Alt+R and End from the workspace: every chart moves its own view. */
   commands: ChartCommands;
-  main?: boolean; expanded?: boolean;
+  main?: boolean;
+  /** This chart covers the grid (C7.4); its button restores every chart. */
+  maximized?: boolean;
   /** The tool the next click places with (the main chart only), the magnet, and the armed tool's style. */
   tool?: Tool | null; magnet?: boolean; toolStyle?: ToolStyle;
   onDraw(price: number): void;
@@ -138,7 +140,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onUnlock?(id: string): void;
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
-  onInterval(interval: Interval): void; onFocus?(): void; onExpand?(): void;
+  onInterval(interval: Interval): void; onFocus?(): void; onMaximize?(): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const bundle = useRef<Bundle | null>(null);
@@ -697,7 +699,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         <div className="flex min-w-0 items-center gap-1">
           {main && timer}
           <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) moveView(bundle.current.chart, barsRef.current.length, main, "reset"); }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
-          {onExpand && <button title={expanded ? "Shrink chart" : "Expand chart"} aria-label={`${expanded ? "Shrink" : "Expand"} ${interval} chart`} aria-pressed={!!expanded} onClick={onExpand} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200">{expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
+          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded p-1.5 hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
         </div>
       </div>

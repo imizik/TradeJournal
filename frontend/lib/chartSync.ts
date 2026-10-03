@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetStateAction } from "react";
 import { apiUrl } from "@/lib/api";
-import { DEFAULT_SETTINGS, LAYER_GROUPS, MAX_KEPT_LAYOUTS, STORAGE_KEY, arrangementOf, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
+import { DEFAULT_SETTINGS, LAYER_GROUPS, MAX_KEPT_LAYOUTS, STORAGE_KEY, cleanLayoutProportions, cleanProportions, layoutKeys, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
 import type { ChartSettings, Indicators } from "@/lib/charts";
 import { cleanDrawings, cleanToolStyles, DRAWING_KINDS, MAX_DRAWINGS } from "@/lib/drawings";
 
 /**
  * Chart settings saved on the server, so the phone and the desktop share
- * levels, watchlist, intervals, indicators, layout and saved layouts.
+ * levels, watchlist, intervals, indicators, layout, saved layouts and the
+ * chart grid's proportions (C7.4; the dock's width stays on each device).
  *
  * The symbol on screen and the recent symbols stay per device: switching
  * symbols is constant and must never race another device's save. Browser
@@ -27,9 +28,13 @@ const json = (value: unknown) => JSON.stringify(value);
 
 /** The shared part of the settings in a canonical key order, so equal settings compare equal. */
 export function shared(settings: ChartSettings): SharedSettings {
-  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, hiddenGroups, studiesHidden, linkRange, smallSize, immersiveWatchlist, layouts } = settings;
+  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, hiddenGroups, studiesHidden, linkRange, smallSize, immersiveWatchlist, layouts, proportions, layoutProportions } = settings;
+  const kept = layouts.map(({ id, name, ...arrangement }) => ({ id, name, ...layoutKeys(arrangement) }));
+  const sizes = cleanLayoutProportions(layoutProportions, kept);
   return { intervals, panelSymbols, watchlist, session, layout, indicators, linkRange, smallSize, immersiveWatchlist,
-    layouts: layouts.map(({ id, name, ...arrangement }) => ({ id, name, ...arrangementOf(arrangement) })),
+    layouts: kept,
+    // Top-level fields, which a tab on an older build leaves out of its saves and the server therefore keeps.
+    proportions: cleanProportions(proportions), layoutProportions: Object.fromEntries(Object.keys(sizes).sort().map((id) => [id, sizes[id]])),
     levels: Object.fromEntries(Object.keys(levels).sort().filter((symbol) => levels[symbol].length).map((symbol) => [symbol, levels[symbol]])),
     // Always sent, even empty: the server keeps a field a save leaves out, so omitting it could never clear it.
     drawings: cleanDrawings(Object.fromEntries(Object.keys(drawings).sort().map((symbol) => [symbol, drawings[symbol]])), validSymbol),
@@ -48,17 +53,29 @@ function mergeItems<T>(base: T[], mine: T[], theirs: T[], id: (item: T) => strin
   return [...out, ...[...changed.values()].filter((item) => !present.has(id(item)))];
 }
 
+/** `theirs` with each key whose value this device changed since `base` (added, changed or removed) taken from `mine`. */
+function mergeKeys<T>(base: Record<string, T>, mine: Record<string, T>, theirs: Record<string, T>): Record<string, T> {
+  const out = { ...theirs };
+  for (const key of new Set([...Object.keys(base), ...Object.keys(mine)])) {
+    if (json(mine[key]) === json(base[key])) continue;
+    if (key in mine) out[key] = mine[key];
+    else delete out[key];
+  }
+  return out;
+}
+
 /**
  * Three-way merge: re-apply this device's edits since `base` to `theirs`, the
  * newer copy another device saved. Levels, drawings, the watchlist and saved
  * layouts merge item by item (a layout or a drawing is one item: saved, changed
- * or deleted whole, so hiding or locking one is a change to it); indicators,
- * tool styles and hidden groups merge key by key; any other setting this
- * device changed keeps this device's value.
+ * or deleted whole, so hiding or locking one is a change to it), and a saved
+ * layout's proportions with it, by its id; indicators, tool styles and hidden
+ * groups merge key by key; any other setting this device changed keeps this
+ * device's value (the grid's proportions are one value).
  */
 export function rebase(base: SharedSettings, mine: SharedSettings, theirs: SharedSettings): SharedSettings {
   const out: SharedSettings = { ...theirs, indicators: { ...theirs.indicators } };
-  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden"] as const;
+  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "proportions"] as const;
   for (const key of scalars) if (json(mine[key]) !== json(base[key])) Object.assign(out, { [key]: mine[key] });
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];
@@ -68,6 +85,7 @@ export function rebase(base: SharedSettings, mine: SharedSettings, theirs: Share
   for (const kind of DRAWING_KINDS) if (json(mine.toolStyles[kind]) !== json(base.toolStyles[kind])) out.toolStyles[kind] = mine.toolStyles[kind];
   out.watchlist = mergeItems(base.watchlist, mine.watchlist, theirs.watchlist, (symbol) => symbol).slice(0, 30);
   out.layouts = uniqueLayoutNames(mergeItems(base.layouts, mine.layouts, theirs.layouts, (layout) => layout.id).slice(0, MAX_KEPT_LAYOUTS));
+  out.layoutProportions = mergeKeys(base.layoutProportions, mine.layoutProportions, theirs.layoutProportions); // shared() drops those of deleted layouts
   const levels = { ...theirs.levels };
   for (const symbol of new Set([...Object.keys(base.levels), ...Object.keys(mine.levels)])) {
     const merged = mergeItems(base.levels[symbol] ?? [], mine.levels[symbol] ?? [], theirs.levels[symbol] ?? [], (level) => level.id).slice(0, 30);

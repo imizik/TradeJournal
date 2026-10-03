@@ -1,4 +1,4 @@
-import { expect, test, type BrowserContext, type Page } from "@playwright/test";
+import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type { ChartData, ChartBar, Interval, MarketDay, PriceAdjustment } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 
@@ -938,7 +938,7 @@ test("linked time ranges follow the chart being moved, by time, without feedback
   expect(moved).not.toEqual(lead);
 });
 
-test("full-screen mode covers the navigation in the same shell, closes the dock, and resizes smaller charts", async ({ page }) => {
+test("full-screen mode covers the navigation in the same shell, closes the dock, and resizes and maximizes charts", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await stub(page);
   await page.goto("/charts");
@@ -957,21 +957,24 @@ test("full-screen mode covers the navigation in the same shell, closes the dock,
   expect((await main.boundingBox())!.height).toBeGreaterThanOrEqual(normal.height - 1);
   await page.getByRole("button", { name: "Watchlist", exact: true }).click();
   await expect(page.getByRole("region", { name: "Watchlist" })).toBeVisible();
-  await page.getByRole("button", { name: "compact small charts" }).click();
-  await expect.poll(async () => (await page.getByTestId("canvas-Panel 3").boundingBox())!.height).toBe(160);
-  // The main chart takes the height the smaller charts give up.
+  // The divider above the smaller charts at its lowest: the main chart takes the height they give up (C7.4).
+  await rowDivider(page).focus();
+  await page.keyboard.press("End");
   await expect.poll(async () => (await main.boundingBox())!.height).toBeGreaterThan(normal.height + 60);
-  await page.getByRole("button", { name: "Expand 15m chart" }).click();
-  await expect.poll(async () => (await page.getByTestId("canvas-Panel 2").boundingBox())!.height).toBeGreaterThan(400);
+  const smaller = (await page.getByTestId("canvas-Panel 3").boundingBox())!.height;
+  await page.getByRole("button", { name: "Maximize 15m chart" }).click();
+  await expect.poll(async () => (await page.getByTestId("canvas-Panel 2").boundingBox())!.height).toBeGreaterThan(600);
   await expect.poll(async () => (await page.getByTestId("canvas-Panel 2").boundingBox())!.width).toBeGreaterThan(900);
   await page.screenshot({ path: test.info().outputPath("charts-immersive-desktop.png") });
-  await page.getByRole("button", { name: "Shrink 15m chart" }).click();
+  await page.getByRole("button", { name: "Restore charts" }).click();
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("chart-workspace")).not.toHaveAttribute("data-immersive", "true");
   await expect(page.getByRole("region", { name: "Saved price levels" })).toBeVisible();
-  // Height preference is saved; expansion is not.
+  // The divider's place is saved; a maximized chart is not.
+  await page.getByRole("button", { name: "Maximize 15m chart" }).click();
   await page.reload();
-  await expect.poll(async () => (await page.getByTestId("canvas-Panel 3").boundingBox())!.height).toBe(160);
+  await expect.poll(async () => Math.abs((await page.getByTestId("canvas-Panel 3").boundingBox())!.height - smaller)).toBeLessThanOrEqual(2);
+  await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
 });
 
 test("full-screen mode works on a phone with a reachable exit", async ({ page }) => {
@@ -1066,7 +1069,7 @@ type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | nu
 // field at the page's default; otherwise one run's intervals or held symbols
 // carry into the next run against the same e2e database.
 const EMPTY_SETTINGS = {
-  levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false,
+  levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false, proportions: null, layoutProportions: {},
   intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false,
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
@@ -1453,11 +1456,16 @@ test("named layouts save, switch, rename, update and delete without moving the s
   await followMain(page, "Panel 5", "MRVL");
   for (const [id, interval] of [["Main", "1m"], ["Panel 2", "3m"], ["Panel 3", "5m"], ["Panel 4", "15m"], ["Panel 5", "30m"]]) await page.getByLabel(`${id} interval`, { exact: true }).selectOption(interval);
   await page.getByRole("button", { name: "Link time ranges" }).click();
-  await page.getByRole("button", { name: "tall small charts" }).click();
+  await rowDivider(page).focus();
+  await page.keyboard.press("Home"); // smaller charts as tall as the main chart's minimum allows
   await expect(layoutsButton(page)).toHaveText("Layouts"); // edited: no saved layout matches
   await saveLayout(page, "Scalp");
   await expect.poll(() => layoutNames(server)).toEqual(["Names", "Scalp"]);
-  expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "tall", linkRange: true });
+  expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: true });
+  // A layout's proportions sit beside the list, by its id, so an older tab keeps both (C7.4).
+  expect(Object.keys(layoutsOn(server)[1]).sort()).toEqual(LAYOUT_KEYS);
+  expect(proportionsOn(server, layoutsOn(server)[1].id)!.lower).toBeGreaterThan(0.4); // the default is 0.378
+  expect(proportionsOn(server, layoutsOn(server)[0].id)).toEqual({ lower: 0.378, columns: [0.25, 0.25, 0.25, 0.25] });
 
   // Switching back restores intervals, symbol groups, chart height and range linking.
   await useLayout(page, "Names");
@@ -1465,7 +1473,7 @@ test("named layouts save, switch, rename, update and delete without moving the s
   await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
   await expect(page.getByRole("region", { name: "QQQ 1m chart" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Link time ranges" })).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByRole("button", { name: "normal small charts" })).toHaveAttribute("aria-pressed", "true");
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
   await expect(layoutsButton(page)).toContainText("Names");
 
   // The main symbol, levels and watchlist belong to the workspace, not to a layout.
@@ -2162,10 +2170,10 @@ test("Space and Shift+Space step through the watchlist; a button reached by keyb
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
   await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Tab");
-  const compact = page.getByRole("button", { name: "compact small charts" });
-  await expect(compact).toBeFocused();
+  const pause = page.getByRole("button", { name: "Pause chart updates" });
+  await expect(pause).toBeFocused();
   await page.keyboard.press("Space");
-  await expect(compact).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Resume chart updates" })).toBeFocused();
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
 });
 
@@ -3335,6 +3343,21 @@ test.describe("phone layers panel", () => {
 // ---- C7.3: a workspace that fills the screen ----
 
 const chartGrid = (page: Page) => page.getByTestId("chart-grid");
+// ---- C7.4 helpers: the dividers and the boxes they size ----
+const rowDivider = (page: Page) => page.getByRole("separator", { name: "Resize main chart and smaller charts" });
+const columnDivider = (page: Page, left: number) => page.getByRole("separator", { name: `Resize Panel ${left} and Panel ${left + 1}` });
+const dockDivider = (page: Page) => page.getByRole("separator", { name: "Resize side panel" });
+/** A chart's whole box (header, legend and canvas), as the dividers size it. */
+const section = async (page: Page, id: string) => (await page.getByTestId(`canvas-${id}`).evaluate((el) => { const box = el.closest("section")!.getBoundingClientRect(); return { x: box.x, y: box.y, width: box.width, height: box.height }; }));
+const MAIN_MIN = 320;
+const LOWER_MIN = 180;
+/** A saved layout's keys exactly as C7.2 saved them; an older tab drops a layout with anything else missing. */
+const LAYOUT_KEYS = ["id", "intervals", "layout", "linkRange", "name", "panelSymbols", "smallSize"];
+type Sizes = { lower: number; columns: number[] };
+const proportionsOn = (server: SettingsStore, id?: string) => {
+  const data = server.data as { proportions?: Sizes | null; layoutProportions?: Record<string, Sizes> } | null;
+  return id ? data?.layoutProportions?.[id] : data?.proportions;
+};
 const sidePanel = (page: Page) => page.getByRole("complementary", { name: "Side panel" });
 /** A click on the status strip's plain text: somewhere that is not a chart, a field or a control. */
 const clickAway = (page: Page) => page.locator("footer[aria-label='Chart status']").getByText(/New York time|Last minute candle/).click();
@@ -3390,7 +3413,7 @@ for (const [width, height] of [[1440, 900], [1920, 1080]] as const) {
   });
 }
 
-test("at 1280×720 the main chart keeps a usable height, taller smaller charts scroll inside the grid, and Focus gives one chart all of it", async ({ page }) => {
+test("at 1280×720 the main chart keeps a usable height however the divider sits, a shorter window scrolls the grid, and Focus gives one chart all of it", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 });
   await gmail(page, true);
   await stub(page);
@@ -3399,20 +3422,26 @@ test("at 1280×720 the main chart keeps a usable height, taller smaller charts s
   let at = await fit(page);
   expect(at.pageHeight).toBeLessThanOrEqual(720);
   expect(at.pageWidth).toBeLessThanOrEqual(1280);
-  expect(at.grid.scrolls).toBe(false); // five charts fit at the default height
+  expect(at.grid.scrolls).toBe(false); // five charts fit at the default proportions
   expect((await drawn(page, "main").boundingBox())!.height).toBeGreaterThanOrEqual(230);
   await page.screenshot({ path: test.info().outputPath("workspace-1280x720.png") });
-  // Taller smaller charts would crush the main chart: it keeps its minimum and the grid scrolls instead, never the page.
-  await page.getByRole("button", { name: "tall small charts" }).click();
-  await expect.poll(async () => (await drawn(page, "Panel 3").boundingBox())!.height).toBe(360);
+  // The tallest smaller charts the divider allows still leave the main chart its minimum, in view.
+  await rowDivider(page).focus();
+  await page.keyboard.press("Home");
+  await expect.poll(async () => Math.round((await section(page, "main")).height)).toBe(MAIN_MIN);
   at = await fit(page);
-  expect(at.grid.scrolls).toBe(true);
+  expect(at.grid.scrolls).toBe(false);
   expect(at.pageHeight).toBeLessThanOrEqual(720);
-  expect((await drawn(page, "main").boundingBox())!.height).toBeGreaterThanOrEqual(230);
   await page.screenshot({ path: test.info().outputPath("workspace-1280x720-tall.png") });
+  // A window too short for both minimums scrolls the grid, never the page.
+  await page.setViewportSize({ width: 1280, height: 540 });
+  await expect.poll(async () => (await fit(page)).grid.scrolls).toBe(true);
+  expect((await fit(page)).pageHeight).toBeLessThanOrEqual(540);
+  expect(Math.round((await section(page, "main")).height)).toBeGreaterThanOrEqual(MAIN_MIN);
+  expect(Math.round((await section(page, "Panel 3")).height)).toBeGreaterThanOrEqual(LOWER_MIN);
   await chartGrid(page).evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await expect(drawn(page, "Panel 3")).toBeInViewport({ ratio: 1 });
-  expect((await fit(page)).pageHeight).toBeLessThanOrEqual(720);
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.getByRole("button", { name: "Show single chart" }).click();
   await expect.poll(async () => (await drawn(page, "main").boundingBox())!.height).toBeGreaterThan(500);
   expect((await fit(page)).grid.scrolls).toBe(false);
@@ -3578,10 +3607,489 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   await page.getByRole("button", { name: "Magnet" }).focus();
   await page.keyboard.press("Tab");
   await expect(mainInterval(page)).toBeFocused();
-  // Past the last chart (each chart's own attribution link takes a stop), the dock is next.
+  // Past the last chart (each chart's own attribution link takes a stop), the dock's edge is next, then the dock.
   await page.getByRole("button", { name: "Focus 1m chart" }).focus();
   for (let stops = 0; stops < 4 && await page.evaluate(() => !!document.activeElement?.closest("[data-testid=chart-grid]")); stops++) await page.keyboard.press("Tab");
+  await expect(dockDivider(page)).toBeFocused();
+  await page.keyboard.press("Tab");
   await expect(page.getByRole("button", { name: "Previous watchlist symbol" })).toBeFocused();
+});
+
+// ---- C7.4: dividers, the dock's edge and maximize ----
+
+/** Drag a divider by (dx, dy) with the mouse, in steps; `release: false` leaves the button down. */
+async function dragDivider(page: Page, divider: Locator, dx: number, dy: number, release = true) {
+  const box = (await divider.boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx / 2, y + dy / 2, { steps: 5 });
+  await page.mouse.move(x + dx, y + dy, { steps: 5 });
+  if (release) await page.mouse.up();
+}
+const near = (value: number, target: number, within = 2) => Math.abs(value - target) <= within;
+/** At 1440×900 the main chart and the smaller row share 823px (C7.3's grid less its padding and divider). */
+const ROWS_1440 = 823;
+/** The four smaller charts' boxes, left to right. */
+const lowerRow = (page: Page) => Promise.all(["Panel 2", "Panel 3", "Panel 4", "Panel 5"].map((id) => section(page, id)));
+type LiveWindow = typeof window & { __streams: number; __chartTick?: (value: unknown) => void; __tjRenders?: Map<string, number> };
+/** A stand-in for the chart stream that counts connections and takes ticks from the test. */
+const mockStream = (page: Page) => page.addInitScript(() => {
+  type Listener = (event: MessageEvent) => void;
+  const win = window as LiveWindow;
+  win.__streams = 0;
+  win.__tjRenders = new Map();
+  class MockEventSource {
+    static current: MockEventSource | null = null;
+    listeners = new Map<string, Listener>();
+    closed = false;
+    constructor() { win.__streams++; MockEventSource.current = this; queueMicrotask(() => this.emit("status", { state: "connected" })); }
+    addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
+    emit(type: string, value: unknown) { if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+    close() { this.closed = true; }
+  }
+  win.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+  window.EventSource = MockEventSource as unknown as typeof EventSource;
+});
+const sendTrade = (page: Page, value: number) => {
+  const at = Math.floor(Date.now() / 1000) + 2;
+  return page.evaluate((tick) => (window as LiveWindow).__chartTick!(tick), { type: "tick", symbol: "MRVL", at, minute: Math.floor(at / 60) * 60, session: "post",
+    price: value, open: value, high: value, low: value, buckets: { "5m": { time: Math.floor(at / 300) * 300, end_time: Math.floor(at / 300) * 300 + 300, extended: true } } });
+};
+const markCharts = (page: Page) => page.evaluate(() => { for (const [id, chart] of (window as unknown as { __tjCharts: Map<string, Record<string, unknown>> }).__tjCharts) chart.__was = id; });
+const sameCharts = (page: Page) => page.evaluate(() => [...(window as unknown as { __tjCharts: Map<string, Record<string, unknown>> }).__tjCharts].every(([id, chart]) => chart.__was === id)
+  && (window as unknown as { __tjCharts: Map<string, unknown> }).__tjCharts.size === 5);
+
+test("the divider above the smaller charts drags, steps by keyboard, stops at its limits, resets, and Escape mid-drag puts it back", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const server = await fakeChartSettings(context);
+  await gmail(page, true);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  // The defaults reproduce C7.3's geometry: smaller charts 311px tall with their headers.
+  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  await expect(rowDivider(page)).toHaveAttribute("aria-orientation", "horizontal");
+  await page.screenshot({ path: test.info().outputPath("dividers-default-1440.png") });
+
+  // A drag up 120px gives the smaller charts 120px and saves their share once.
+  await dragDivider(page, rowDivider(page), 0, -120);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431)).toBe(true);
+  expect(near((await section(page, "main")).height, ROWS_1440 - 431)).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.lower).toBeCloseTo(431 / ROWS_1440, 2);
+  expect(proportionsOn(server)?.columns).toEqual([0.25, 0.25, 0.25, 0.25]);
+  await page.screenshot({ path: test.info().outputPath("dividers-dragged-1440.png") });
+
+  // Keyboard: Down gives the main chart 2% more, Shift+Down 10%; Home and End are the limits; Enter resets.
+  await rowDivider(page).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431 - 0.02 * ROWS_1440)).toBe(true);
+  await page.keyboard.press("Shift+ArrowDown");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431 - 0.12 * ROWS_1440)).toBe(true);
+  await page.keyboard.press("Home");
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "40");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 0.6 * ROWS_1440)).toBe(true);
+  await page.keyboard.press("End");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, LOWER_MIN)).toBe(true);
+  // Dragged past its limit, the divider stops there: the main chart never goes under its minimum.
+  await dragDivider(page, rowDivider(page), 0, -2000);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 0.6 * ROWS_1440)).toBe(true);
+  expect((await section(page, "main")).height).toBeGreaterThanOrEqual(MAIN_MIN);
+  await rowDivider(page).focus();
+  await page.keyboard.press("Enter");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  // End did not jump every chart to its latest candle, and Enter typed no interval: the divider kept those keys.
+  await expect(page.getByRole("status", { name: "Interval entry" })).toHaveCount(0);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.378);
+
+  // A double-click resets it too.
+  await dragDivider(page, rowDivider(page), 0, 80);
+  await expect.poll(() => proportionsOn(server)?.lower).toBeLessThan(0.3);
+  const bar = (await rowDivider(page).boundingBox())!;
+  await page.mouse.dblclick(bar.x + bar.width / 2, bar.y + bar.height / 2);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.378);
+  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+
+  // Escape during a drag puts the divider back and saves nothing; the Escape goes no further.
+  await page.waitForTimeout(600);
+  const saves = server.saves.length;
+  await dragDivider(page, rowDivider(page), 0, -90, false);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 401)).toBe(true);
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await page.waitForTimeout(800);
+  expect(server.saves.length).toBe(saves);
+});
+
+test("the dividers between the smaller charts and the dock's edge resize, stop at their limits and reset; the dock's width stays on this device", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const server = await fakeChartSettings(context);
+  await gmail(page, true);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  let row = await lowerRow(page);
+  const total = row.reduce((sum, box) => sum + box.width, 0);
+  for (const box of row) expect(near(box.width, total / 4)).toBe(true);
+
+  // Panel 2 takes 60px from Panel 3; the others keep their widths.
+  await dragDivider(page, columnDivider(page, 2), 60, 0);
+  await expect.poll(async () => near((await lowerRow(page))[0].width, total / 4 + 60)).toBe(true);
+  row = await lowerRow(page);
+  expect(near(row[1].width, total / 4 - 60)).toBe(true);
+  expect(near(row[2].width, total / 4) && near(row[3].width, total / 4)).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.columns[0]).toBeCloseTo((total / 4 + 60) / total, 2);
+  // Keyboard, then the limits: no smaller chart narrower than 160px or a tenth of the row.
+  const least = Math.max(160, total * 0.1);
+  await columnDivider(page, 3).focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect.poll(async () => near((await lowerRow(page))[1].width, total / 4 - 60 - 0.02 * total)).toBe(true);
+  await page.keyboard.press("Home");
+  await expect.poll(async () => near((await lowerRow(page))[1].width, least)).toBe(true);
+  await dragDivider(page, columnDivider(page, 3), 2000, 0);
+  await expect.poll(async () => near((await lowerRow(page))[2].width, least)).toBe(true);
+  expect((await lowerRow(page)).every((box) => box.width >= least - 1)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("dividers-columns-1440.png") });
+  await columnDivider(page, 4).focus();
+  await page.keyboard.press("Enter"); // every smaller chart back to a quarter of the row
+  await expect.poll(async () => (await lowerRow(page)).every((box) => near(box.width, total / 4))).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.columns).toEqual([0.25, 0.25, 0.25, 0.25]);
+
+  // The dock's edge: 256px to start, wider to the left, within 200px and the room the charts need.
+  const dock = async () => Math.round((await sidePanel(page).boundingBox())!.width);
+  expect(await dock()).toBe(256);
+  await dragDivider(page, dockDivider(page), -100, 0);
+  await expect.poll(dock).toBe(356);
+  await dockDivider(page).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect.poll(dock).toBe(340);
+  await page.keyboard.press("Home");
+  await expect.poll(dock).toBe(200);
+  await page.keyboard.press("End");
+  await expect.poll(dock).toBe(480);
+  expect((await fit(page)).grid.width).toBeGreaterThanOrEqual(640);
+  await page.keyboard.press("Enter");
+  await expect.poll(dock).toBe(256);
+  await dragDivider(page, dockDivider(page), -44, 0);
+  await expect.poll(dock).toBe(300);
+  // Kept on this device across a reload, and never sent to the server.
+  await page.waitForTimeout(600);
+  await page.reload();
+  await expect(sidePanel(page)).toBeVisible();
+  await expect.poll(dock).toBe(300);
+  expect(Object.keys(server.data ?? {}).filter((key) => /dock/i.test(key))).toEqual([]);
+
+  // Reset chart sizes puts the dividers and the dock back.
+  await rowDivider(page).focus();
+  await page.keyboard.press("Home");
+  await dragDivider(page, columnDivider(page, 2), -40, 0);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.6);
+  const menu = await openLayouts(page);
+  await menu.getByRole("button", { name: "Reset chart sizes" }).click();
+  await expect(menu).toHaveCount(0);
+  await expect.poll(dock).toBe(256);
+  await expect.poll(() => proportionsOn(server)).toEqual({ lower: 0.378, columns: [0.25, 0.25, 0.25, 0.25] });
+  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+});
+
+test("a divider drag re-renders no chart while it moves, saves once when released, and fetches nothing", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await mockStream(page);
+  let requests = 0;
+  await gmail(page, true);
+  await stub(page, () => { requests++; });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(page.getByText("Tradier stream · studies refresh 15s")).toBeVisible();
+  await markCharts(page);
+  await page.waitForTimeout(600);
+  const renders = () => page.evaluate(() => Object.fromEntries((window as LiveWindow).__tjRenders!));
+  const streams = await page.evaluate(() => (window as LiveWindow).__streams);
+  const started = Date.now();
+  const fetched = requests;
+  for (const [name, divider, dx, dy] of [["rows", rowDivider(page), 0, -100], ["columns", columnDivider(page, 3), 70, 0], ["dock", dockDivider(page), -60, 0]] as const) {
+    const saves = server.saves.length;
+    const before = await renders();
+    const sizes = [await section(page, "Panel 3"), (await sidePanel(page).boundingBox())!];
+    await dragDivider(page, divider, dx, dy, false);
+    // Twenty pointer moves later the boxes have moved, and nothing re-rendered or saved.
+    await expect.poll(async () => JSON.stringify([await section(page, "Panel 3"), (await sidePanel(page).boundingBox())!]), `${name}: previewed`).not.toBe(JSON.stringify(sizes));
+    expect(await renders(), `${name}: no chart rendered while dragging`).toEqual(before);
+    expect(server.saves.length, `${name}: nothing saved while dragging`).toBe(saves);
+    await page.mouse.up();
+    if (name === "dock") {
+      await page.waitForTimeout(800);
+      expect(server.saves.length, "the dock's width is not a shared setting").toBe(saves);
+    } else {
+      await expect.poll(() => server.saves.length, `${name}: saved on release`).toBe(saves + 1);
+      await page.waitForTimeout(800);
+      expect(server.saves.length, `${name}: saved once`).toBe(saves + 1);
+    }
+  }
+  expect(await sameCharts(page)).toBe(true);
+  expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams);
+  expect(requests - fetched).toBeLessThanOrEqual(Math.floor((Date.now() - started) / 15_000));
+});
+
+test("maximize and restore each chart: the same instances, view, selection and stream, with no requests; Escape restores after the selection and before full screen", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await mockStream(page);
+  const requests: number[] = [];
+  await gmail(page, true);
+  await stub(page, () => { requests.push(Date.now()); });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Pivot", "250.00");
+  await expect.poll(() => savedLevels(server).length).toBe(1);
+  const pivot = savedLevels(server)[0].id;
+  await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+  await moveAway(page, "main", { from: 100, to: 160 });
+  await moveAway(page, "Panel 2", { from: 150, to: 190 });
+  await markCharts(page);
+  const streams = await page.evaluate(() => (window as LiveWindow).__streams);
+  const started = Date.now();
+  const before = requests.length;
+  const boxes = async () => Promise.all(ALL_PANELS.map((id) => section(page, id)));
+  const ranges = async () => Promise.all(ALL_PANELS.map((id) => roundedRange(page, id)));
+  const grid = await fit(page);
+  const geometry = await boxes();
+  const views = await ranges();
+  const intervals = ["5m", "15m", "1h", "1D", "1m"];
+  for (const [index, id] of ALL_PANELS.entries()) {
+    await page.getByRole("button", { name: `Maximize ${intervals[index]} chart`, exact: true }).click();
+    await expect(chartGrid(page)).toHaveAttribute("data-maximized", String(index));
+    // It covers the grid; the others are hidden at their size underneath.
+    await expect.poll(async () => (await section(page, id)).width).toBeGreaterThan(grid.grid.width - 12);
+    expect((await section(page, id)).height).toBeGreaterThan(grid.grid.height - 12);
+    for (const other of ALL_PANELS.filter((name) => name !== id)) await expect(drawn(page, other)).not.toBeVisible();
+    if (index === 1) await page.screenshot({ path: test.info().outputPath("maximized-15m-1440.png") });
+    await page.getByRole("button", { name: "Restore charts" }).click();
+    await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
+    await expect.poll(async () => (await boxes()).every((box, at) => near(box.x, geometry[at].x, 1) && near(box.y, geometry[at].y, 1) && near(box.width, geometry[at].width, 1) && near(box.height, geometry[at].height, 1)), `${id}: geometry restored`).toBe(true);
+    expect(await ranges(), `${id}: every chart's view as it was`).toEqual(views);
+  }
+  expect(await sameCharts(page)).toBe(true);
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+
+  // While maximized the chart takes ticks; it stays maximized through a symbol, an interval and the dock.
+  await page.getByRole("button", { name: "Maximize 5m chart", exact: true }).click();
+  await sendTrade(page, 281.5);
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("281.50");
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await page.getByLabel("Main interval", { exact: true }).selectOption("15m");
+  await expect(page.getByRole("region", { name: "NVDA 15m chart" }).first()).toBeVisible();
+  await expect(chartGrid(page)).toHaveAttribute("data-maximized", "0");
+  await page.getByRole("button", { name: "Restore charts" }).click();
+  await page.getByLabel("Main interval", { exact: true }).selectOption("5m");
+  await page.getByRole("button", { name: "Chart MRVL", exact: true }).click();
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" })).toBeVisible();
+  expect(await sameCharts(page)).toBe(true);
+  expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams + 2); // two symbol switches, nothing else
+  // Maximizing and restoring fetched nothing: only the two symbol and two interval switches, and the regular refresh.
+  await expect.poll(() => requests.length - before).toBeGreaterThanOrEqual(4);
+  expect(requests.length - before - 4).toBeLessThanOrEqual(Math.floor((Date.now() - started) / 15_000));
+
+  // Escape: the selection first, then the maximized chart, then full screen.
+  await page.getByRole("button", { name: "Enter full-screen charts" }).click();
+  await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+  await page.getByRole("button", { name: "Maximize 5m chart", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect(drawn(page, "main")).not.toHaveAttribute("data-selected", pivot);
+  await expect(chartGrid(page)).toHaveAttribute("data-maximized", "0");
+  await page.keyboard.press("Escape");
+  await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
+  await expect(page.getByTestId("chart-workspace")).toHaveAttribute("data-immersive", "true");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("chart-workspace")).not.toHaveAttribute("data-immersive", "true");
+
+  // Switching layouts, Focus and "make main chart" each end it.
+  await saveLayout(page, "Plain");
+  await page.getByRole("button", { name: "Maximize 1h chart", exact: true }).click();
+  await useLayout(page, "Plain");
+  await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
+  await page.getByRole("button", { name: "Maximize 1h chart", exact: true }).click();
+  await page.getByRole("button", { name: "Show single chart" }).click();
+  await page.getByRole("button", { name: "Show five charts" }).click();
+  await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
+  await page.getByRole("button", { name: "Maximize 1h chart", exact: true }).click();
+  await page.getByRole("button", { name: "Focus 1h chart" }).click();
+  await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
+  await expect(mainInterval(page)).toHaveValue("1h"); // the panel became the main chart, as before
+});
+
+test("a shrinking window clamps the dividers on screen without saving them, and growing back restores the same sizes", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const server = await fakeChartSettings(context);
+  await gmail(page, true);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  await rowDivider(page).focus();
+  await page.keyboard.press("Home");
+  await dragDivider(page, columnDivider(page, 2), 150, 0);
+  await expect.poll(() => proportionsOn(server)?.columns[0]).toBeGreaterThan(0.3);
+  await page.waitForTimeout(600);
+  const saved = JSON.stringify(proportionsOn(server));
+  const saves = server.saves.length;
+  const wide = await Promise.all(ALL_PANELS.map((id) => section(page, id)));
+  for (const [width, height] of [[1280, 720], [1024, 768], [1100, 600]] as const) {
+    await page.setViewportSize({ width, height });
+    await expect.poll(async () => (await fit(page)).width).toBe(width);
+    await page.waitForTimeout(200);
+    const at = await fit(page);
+    expect(at.pageHeight, `${width}×${height}: no page scrolling`).toBeLessThanOrEqual(height);
+    expect(at.pageWidth, `${width}×${height}: no sideways scrolling`).toBeLessThanOrEqual(width);
+    expect(Math.round((await section(page, "main")).height), `${width}×${height}: main chart minimum`).toBeGreaterThanOrEqual(MAIN_MIN);
+    for (const box of await lowerRow(page)) expect(Math.round(box.height), `${width}×${height}: smaller chart minimum`).toBeGreaterThanOrEqual(LOWER_MIN);
+    expect(Math.min(...(await lowerRow(page)).map((box) => box.width)), `${width}×${height}: smaller chart width`).toBeGreaterThanOrEqual(Math.min(159, ((await lowerRow(page)).reduce((sum, box) => sum + box.width, 0)) / 4 - 1));
+    await page.screenshot({ path: test.info().outputPath(`dividers-clamped-${width}x${height}.png`) });
+  }
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await expect.poll(async () => (await Promise.all(ALL_PANELS.map((id) => section(page, id)))).every((box, at) => near(box.height, wide[at].height, 1) && near(box.width, wide[at].width, 1))).toBe(true);
+  await page.waitForTimeout(800);
+  expect(server.saves.length, "resizing the window saved nothing").toBe(saves);
+  expect(JSON.stringify(proportionsOn(server))).toBe(saved);
+});
+
+test("saved layouts keep their chart sizes, layouts saved before the dividers open at their S/M/L height, and malformed sizes load safely", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const old = (name: string, smallSize: string) => ({ id: `id-${name}`, name, layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], smallSize, linkRange: false });
+  const server = await fakeChartSettings(context, { revision: 1, data: {
+    layouts: [old("Tall", "tall"), old("Compact", "compact")],
+    // Not proportions at all, and one for a layout an older tab deleted.
+    layoutProportions: { "id-Tall": "bad", "id-Gone": { lower: 0.3, columns: [0.25, 0.25, 0.25, 0.25] } },
+  } });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await gmail(page, true);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  // C7.3's S/M/L heights at this window: 426, 311 and 226px with headers.
+  await useLayout(page, "Tall");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 426, 8)).toBe(true);
+  await expect(layoutsButton(page)).toContainText("Tall");
+  await useLayout(page, "Compact");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 226, 8)).toBe(true);
+  await expect.poll(() => (server.data as { layoutProportions?: object }).layoutProportions).toEqual({}); // the unusable and the orphaned are gone
+  // A layout saved now keeps its proportions, and the list keeps exactly the keys an older tab reads.
+  await dragDivider(page, rowDivider(page), 0, -150);
+  await dragDivider(page, columnDivider(page, 4), -50, 0);
+  await expect(layoutsButton(page)).toHaveText("Layouts");
+  await saveLayout(page, "Mine");
+  await expect.poll(() => layoutNames(server)).toEqual(["Tall", "Compact", "Mine"]);
+  for (const layout of layoutsOn(server)) expect(Object.keys(layout).sort()).toEqual(LAYOUT_KEYS);
+  const mine = layoutsOn(server)[2].id;
+  await expect.poll(() => proportionsOn(server, mine)?.columns[2]).toBeLessThan(0.25);
+  const shaped = await lowerRow(page);
+  await useLayout(page, "Tall");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 426, 8)).toBe(true);
+  await useLayout(page, "Mine");
+  await expect.poll(async () => (await lowerRow(page)).every((box, at) => near(box.width, shaped[at].width, 1) && near(box.height, shaped[at].height, 1))).toBe(true);
+  // Deleting a layout drops its proportions with it.
+  const menu = await openLayouts(page);
+  await menu.getByRole("button", { name: "Delete Mine" }).click();
+  await menu.getByRole("button", { name: "Delete", exact: true }).click();
+  await page.keyboard.press("Escape");
+  await expect.poll(() => Object.keys((server.data as { layoutProportions: object }).layoutProportions)).toEqual([]);
+
+  // Proportions nobody could have saved are repaired into ones the dividers could make:
+  // the main divider's value is the main chart's share, each column divider's the share of the row to its left.
+  const cases: [unknown, string, string[]][] = [
+    [{ lower: "0.3" }, "62", ["25", "50", "75"]],
+    ["nonsense", "62", ["25", "50", "75"]],
+    [{ lower: null, columns: [0.4, 0.2, 0.2, 0.2] }, "62", ["25", "50", "75"]],
+    [{ lower: 0.95, columns: [1, 1, 1] }, "40", ["25", "50", "75"]],
+    [{ lower: -1, columns: [0, 0, 0, 1] }, "85", ["10", "20", "30"]],
+    [{ lower: 0.3, columns: [0.97, 0.01, 0.01, 0.01] }, "70", ["70", "80", "90"]],
+    [{ lower: 0.3, columns: [2, 2, 2, 2] }, "70", ["25", "50", "75"]],
+  ];
+  for (const [bad, valuenow, columns] of cases) {
+    server.data = { ...(server.data as object), proportions: bad, smallSize: "normal" }; // without proportions the share follows S/M/L
+    server.revision += 1;
+    await page.reload();
+    await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+    await expect(rowDivider(page), JSON.stringify(bad)).toHaveAttribute("aria-valuenow", valuenow);
+    for (const [at, value] of columns.entries()) await expect(columnDivider(page, at + 2), JSON.stringify(bad)).toHaveAttribute("aria-valuenow", value);
+    // On screen no smaller chart is narrower than 160px, however small its share.
+    for (const box of await lowerRow(page)) expect(Math.round(box.width), JSON.stringify(bad)).toBeGreaterThanOrEqual(159);
+    expect(Math.round((await section(page, "Panel 2")).height)).toBeGreaterThanOrEqual(LOWER_MIN);
+    expect(Math.round((await section(page, "main")).height)).toBeGreaterThanOrEqual(MAIN_MIN);
+  }
+  expect(errors).toEqual([]);
+});
+
+test("two browsers share the chart proportions but not the dock's width, merge a conflicting save, and keep proportions through an older build's save", { tag: "@real-settings" }, async ({ page, browser, request }) => {
+  const settingsNow = async () => (await (await request.get("/api/backend/charts/settings")).json()) as { revision: number; data: Record<string, unknown> & { proportions?: Sizes | null; layoutProportions?: Record<string, Sizes>; layouts?: SavedLayouts; intervals?: string[] } };
+  const start = await settingsNow();
+  if (start.revision) expect((await request.put("/api/backend/charts/settings", { data: { base_revision: start.revision, data: EMPTY_SETTINGS } })).ok()).toBe(true);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await gmail(page, true);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  await dragDivider(page, rowDivider(page), 0, -100);
+  await expect.poll(async () => (await settingsNow()).data?.proportions?.lower).toBeCloseTo(411 / ROWS_1440, 2);
+  await dragDivider(page, dockDivider(page), -80, 0);
+  await expect.poll(async () => Math.round((await sidePanel(page).boundingBox())!.width)).toBe(336);
+  await expect(syncStatus(page)).toHaveText("Saved");
+
+  // A second browser (its own storage, like another computer) opens at the same proportions and its own dock width.
+  const other = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const second = await other.newPage();
+  await gmail(second, true);
+  await stub(second);
+  await second.goto("/charts");
+  await expect(drawn(second, "Panel 5").locator("canvas").first()).toBeVisible();
+  await expect.poll(async () => near((await section(second, "Panel 2")).height, (await section(page, "Panel 2")).height)).toBe(true);
+  await expect.poll(async () => Math.round((await sidePanel(second).boundingBox())!.width)).toBe(256);
+
+  // It changes an interval; the first browser, not yet refreshed, drags a divider: the refused save merges both.
+  await second.getByLabel("Panel 4 interval", { exact: true }).selectOption("4h");
+  await expect.poll(async () => (await settingsNow()).data?.intervals?.[3]).toBe("4h");
+  await dragDivider(page, columnDivider(page, 2), 60, 0);
+  await expect(syncStatus(page)).toHaveText("Merged with changes from another device");
+  await expect.poll(async () => (await settingsNow()).data?.proportions?.columns[0] ?? 0).toBeGreaterThan(0.27);
+  const merged = await settingsNow();
+  expect(merged.data.intervals?.[3]).toBe("4h");
+  expect(merged.data.proportions?.lower).toBeCloseTo(411 / ROWS_1440, 2);
+  await expect(page.getByLabel("Panel 4 interval", { exact: true })).toHaveValue("4h");
+
+  // A saved layout: the list keeps C7.2's keys, its proportions sit beside it.
+  await saveLayout(page, "Wide main");
+  await expect.poll(async () => (await settingsNow()).data?.layouts?.map((layout) => layout.name)).toEqual(["Wide main"]);
+  const saved = await settingsNow();
+  const id = saved.data.layouts![0].id;
+  expect(Object.keys(saved.data.layouts![0]).sort()).toEqual(LAYOUT_KEYS);
+  expect(saved.data.layoutProportions?.[id]).toEqual(saved.data.proportions);
+
+  // A tab on an older build saves without the fields it does not know: the server keeps them.
+  const { proportions, layoutProportions, ...older } = saved.data;
+  expect((await request.put("/api/backend/charts/settings", { data: { base_revision: saved.revision, data: { ...older, session: "regular" } } })).ok()).toBe(true);
+  const after = await settingsNow();
+  expect(after.data.proportions).toEqual(proportions);
+  expect(after.data.layoutProportions).toEqual(layoutProportions);
+  expect(after.data.session).toBe("regular");
+  // The older tab deletes the layout; this browser's next save lets its proportions go.
+  expect((await request.put("/api/backend/charts/settings", { data: { base_revision: after.revision, data: { ...older, session: "regular", layouts: [] } } })).ok()).toBe(true);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(page.getByRole("button", { name: "Extended hours on" })).toHaveCount(0);
+  await rowDivider(page).focus();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(async () => (await settingsNow()).data?.layoutProportions).toEqual({});
+  expect((await settingsNow()).data.proportions?.lower).toBeCloseTo(411 / ROWS_1440 - 0.02, 2);
+  await other.close();
 });
 
 test.describe("phone workspace", () => {
@@ -3636,5 +4144,40 @@ test.describe("phone workspace", () => {
     await page.touchscreen.tap(195, 30);
     await expect(sheet).toHaveCount(0);
     expect((await fit(page)).pageWidth).toBeLessThanOrEqual(390);
+  });
+});
+
+test.describe("phone dividers and maximize", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("a phone has no dividers, keeps S/M/L in its More menu, and maximizes and restores a chart", async ({ page }) => {
+    await registerCharts(page);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "Panel 5")).toHaveAttribute("data-bars", "240");
+    await expect(page.getByRole("separator")).toHaveCount(0);
+    await page.getByRole("button", { name: "More chart controls" }).tap();
+    await expect(page.getByRole("group", { name: "More chart controls" }).getByRole("button", { name: "tall small charts" })).toBeInViewport();
+    await page.keyboard.press("Escape");
+    await markCharts(page);
+    const before = await Promise.all(ALL_PANELS.map((id) => drawn(page, id).boundingBox()));
+    await page.getByRole("button", { name: "Maximize 1h chart", exact: true }).tap();
+    await expect(chartGrid(page)).toHaveAttribute("data-maximized", "2");
+    await expect.poll(async () => (await drawn(page, "Panel 3").boundingBox())!.height).toBe(410);
+    for (const other of ALL_PANELS.filter((id) => id !== "Panel 3")) await expect(drawn(page, other)).not.toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("phone-maximized.png") });
+    await page.getByRole("button", { name: "Restore charts" }).tap();
+    await expect(chartGrid(page)).not.toHaveAttribute("data-maximized");
+    const after = await Promise.all(ALL_PANELS.map((id) => drawn(page, id).boundingBox()));
+    expect(after.map((box) => Math.round(box!.height))).toEqual(before.map((box) => Math.round(box!.height)));
+    // Full screen: the maximized chart covers the screen under the toolbar.
+    await page.getByRole("button", { name: "Enter full-screen charts" }).tap();
+    await page.getByRole("button", { name: "Maximize 15m chart", exact: true }).tap();
+    await expect.poll(async () => (await drawn(page, "Panel 2").boundingBox())!.height).toBeGreaterThan(500);
+    await expect(drawn(page, "main")).not.toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("phone-fullscreen-maximized.png") });
+    await page.getByRole("button", { name: "Restore charts" }).tap();
+    await expect(drawn(page, "main")).toBeVisible();
+    expect(await sameCharts(page)).toBe(true);
   });
 });
