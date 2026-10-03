@@ -23,7 +23,7 @@ one of these by a row link or a button.
 | Symbol info / You | `/charts`, below the watchlist | `components/charts/SymbolInfo.tsx`, `components/charts/SymbolInfoYou.tsx`, `lib/symbolInfo.ts` | — | `GET /charts/symbol/{symbol}/you`: all-account completed-trade stats, open records and recent links; You only, other tabs are placeholders; device-local tab choice and collapsed phone panel; `tests/test_symbol_info.py`, `e2e/symbol-info.spec.ts` |
 | Daily Review | `/daily` → `/daily/{YYYY-MM-DD}` | `app/daily/page.tsx`, `app/daily/[day]/page.tsx` | `GET /daily-review`; per day `/daily-review/{day}`, `/trades`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/accounts`, quotes | `DailyAiPanel`: `POST /daily-review` |
 | Trades | `/trades` → `/trades/{id}` | `app/trades/page.tsx`, `app/trades/[id]/page.tsx`, `components/TradesTable.tsx` | list: `GET /trades?status=&ticker=&account=&type=`, `/accounts`. Detail (client page): `/trades/{id}`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/market-context/trade/{id}` | `AuditPanel`: `GET /market-context/audit/{id}`; review button: `POST /trades/{id}/review` |
-| Analytics | `/analytics` | `app/analytics/page.tsx` | `GET /stats` | — |
+| Analytics | `/analytics` | `app/analytics/page.tsx`, `components/AnalyticsExplorer.tsx` | `GET /stats/analytics`, `/accounts`; pure metrics in `app/engine/analytics.py`; [definitions and proof](../analytics.md) | local grouping/sorting/drill-down, links to trade details |
 | Fills | `/fills` → `/fills/{id}` | `app/fills/page.tsx`, `app/fills/[id]/page.tsx` | `GET /fills`, `/accounts`; edit: `/fills/{id}` | `ManualFillForm`: `POST /fills`, `PUT /fills/{id}` |
 | Strategy Lab | `/strategy-lab` → `/strategies/{id}`, `/strategies/{id}/versions/new`, `/versions/{id}`, `/versions/{id}/import`, `/runs/{id}` | `app/strategy-lab/**`, `components/strategy-lab/`, `lib/strategy-lab/api.ts` | `GET /strategy-lab/strategies`, `/strategies/{id}`, `/versions/{id}`, `/runs`, `/runs/{id}`, `/runs/{id}/trades`, `/runs/{id}/metrics` | forms and wizard: `POST /strategy-lab/strategies`, `/strategies/{id}/versions`, `/versions/{id}/fork`, `/imports/preview`, `/runs/import`, `/runs/{id}/metrics/recalculate`; `PATCH /strategies/{id}`, `/versions/{id}` |
 | Research | `/research/ai-buildout` | `app/research/ai-buildout/page.tsx`, `components/research/`, `lib/research/` | — | `GET`/`PUT /research/workspaces/{slug}` |
@@ -34,9 +34,9 @@ Things worth knowing before you touch a page:
 - Pages under `app/` are server components that call the API from the Next
   server through `lib/api.ts` (`NEXT_PUBLIC_API_URL`, default
   `http://localhost:8080`), except `/trades/{id}`, which is a client page.
-  Every component marked `"use client"` fetches from the browser instead,
-  which is why the backend's CORS allowlist must include the frontend origin
-  (`verification.md`, browser tests).
+  Client components may fetch from the browser; AnalyticsExplorer instead
+  receives server-calculated metrics and trade rows as page props, so changing
+  its grouping, sorting or drill-down does not fetch per-trade data.
 - Row links go to `/trades/{id}` from the dashboard tables, the trades table
   and the daily review; the daily review also links each fill to
   `/fills/{id}?returnTo=`. The trade detail page links nowhere.
