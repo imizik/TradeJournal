@@ -63,6 +63,7 @@ PURE_MODULES = {
     "app.engine.reconstructor",
     "app.engine.email_parser",
     "app.engine.behavior",
+    "app.engine.analytics",  # read-only metrics over supplied journal history
     "app.engine.research",
     "app.engine.strategy_csv",
     "app.engine.strategy_metrics",

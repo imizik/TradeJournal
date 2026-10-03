@@ -86,7 +86,7 @@ export type Stats = {
   total_trades: number;
   open_trades: number;
   closed_trades: number;
-  win_rate: number;
+  win_rate: number | null;
   total_pnl: number;
   total_premium_risked: number;
   today_pnl: number;
@@ -94,10 +94,40 @@ export type Stats = {
   avg_loss_pct: number | null;
   avg_hold_mins: number | null;
   expired_worthless_rate: number;
-  by_ticker: Record<string, { count: number; win_rate: number; total_pnl: number; avg_pnl_pct: number }>;
-  by_tag: Record<string, { count: number; win_rate: number; total_pnl: number; avg_pnl_pct: number }>;
-  by_time_bucket: Record<string, { count: number; win_rate: number; total_pnl: number; avg_pnl_pct: number }>;
+  by_ticker: Record<string, { count: number; win_rate: number | null; total_pnl: number; avg_pnl_pct: number | null }>;
+  by_tag: Record<string, { count: number; win_rate: number | null; total_pnl: number; avg_pnl_pct: number | null }>;
+  by_time_bucket: Record<string, { count: number; win_rate: number | null; total_pnl: number; avg_pnl_pct: number | null }>;
   behavioral_flags: Record<string, number>;
+};
+
+export type AnalyticsSummary = {
+  count: number;
+  pnl_count: number;
+  percentage_count: number;
+  entry_days: number;
+  total_pnl: number | null;
+  expectancy: number | null;
+  median_pnl: number | null;
+  win_rate: number | null;
+  profit_factor: number | null;
+  no_losses: boolean;
+  avg_winner: number | null;
+  avg_loser: number | null;
+  avg_pnl_pct: number | null;
+};
+
+export type AnalyticsGroup = AnalyticsSummary & { label: string; trade_ids: string[] };
+export type AnalyticsDimension = "ticker" | "entry_time" | "tag" | "hold_duration" | "instrument" | "repeat_entry";
+export type Analytics = {
+  summary: AnalyticsSummary & { max_drawdown: number | null };
+  coverage: { missing_pnl: number; missing_percentage: number; undated_closed_in_scope: number };
+  curve: { date: string; pnl: number; cumulative_pnl: number }[];
+  concentration: {
+    limit: number; removed_count: number; winner_pnl: number | null;
+    gross_profit_share: number | null; remaining_pnl: number | null; trade_ids: string[];
+  }[];
+  breakdowns: Record<AnalyticsDimension, AnalyticsGroup[]>;
+  trades: (Pick<Trade, "id" | "account_id" | "ticker" | "instrument_type" | "option_type" | "strike" | "expiration" | "opened_at" | "status" | "realized_pnl" | "pnl_pct"> & { closed_at: string })[];
 };
 
 export type PositionQuote = {
@@ -594,6 +624,7 @@ export const api = {
   fills: () => get<Fill[]>("/fills"),
   fill: (id: string) => get<Fill>(`/fills/${id}`),
   stats: (params?: string) => get<Stats>(`/stats${params ? `?${params}` : ""}`),
+  analytics: (params?: string) => get<Analytics>(`/stats/analytics${params ? `?${params}` : ""}`),
   createFill: (body: FillWriteInput) => post<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>("/fills", body),
   updateFill: (id: string, body: FillWriteInput) => put<{ fill: Fill; trades_rebuilt: number; anomalies: string[] }>(`/fills/${id}`, body),
   importFills: () => post<{ saved: number; skipped: number; enrich_started: boolean; enrich_total: number }>("/fills/import"),

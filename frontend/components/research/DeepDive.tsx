@@ -103,7 +103,7 @@ export default function DeepDive({
         />
         <Metric
           label="Win rate"
-          value={stat ? `${(stat.win_rate * 100).toFixed(0)}%` : "—"}
+          value={stat?.win_rate != null ? `${(stat.win_rate * 100).toFixed(0)}%` : "—"}
         />
         <Link
           href={`/trades?ticker=${ticker}`}

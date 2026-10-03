@@ -374,7 +374,10 @@ Be honest about this when reporting work:
   so a broken edge case inside a working page goes unnoticed.
 - **The browser tests are smoke depth, not feature depth.** They assert that
   seeded values reach the DOM on the main pages. Filtering, sorting, forms,
-  editing and Strategy Lab workflows are not exercised.
+  editing and Strategy Lab workflows are generally not exercised. Analytics
+  additionally covers date/account/instrument filters, grouping, minimum
+  samples, empty/error states, and drill-down links in
+  `frontend/e2e/analytics.spec.ts` against isolated seeded data.
 - **No integration tests against live Gmail/Polygon/Alpaca/Tradier/Webull.**
   Those paths are only covered where they are stubbed. The real-time Gmail
   listener is tested with a fake Pub/Sub subscriber and a fake Gmail service;
