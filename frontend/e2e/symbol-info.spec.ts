@@ -66,9 +66,11 @@ test("placeholder tabs persist per device and rapid symbol steps fetch only the 
   await page.reload();
   await expect(info.getByRole("tab", { name: "Forecast", exact: true })).toHaveAttribute("aria-selected", "true");
   expect(reads).toHaveLength(1);
-  // Install the clock after hydration, then advance less than the debounce.
-  await page.clock.install();
-  await page.clock.pauseAt(new Date());
+  // Anchor both operations to one fixed time. Pausing at wall-clock "now"
+  // races the browser advancing while the command travels to it on CI.
+  const clockStart = new Date("2026-10-02T16:00:00Z");
+  await page.clock.install({ time: clockStart });
+  await page.clock.pauseAt(new Date(clockStart.getTime() + 60_000));
   await info.getByRole("tab", { name: "You", exact: true }).click();
   await choose(page, "SPY");
   await page.clock.runFor(100);
