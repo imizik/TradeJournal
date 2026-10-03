@@ -86,7 +86,7 @@ test("five charts render, symbols link, and levels survive reload", async ({ pag
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Focus 1h chart" }).click();
   await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue("1h");
-  await page.screenshot({ path: "/tmp/tradejournal-charts-desktop.png", fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("charts-desktop.png"), fullPage: true });
   expect(errors).toEqual([]);
 });
 
@@ -226,7 +226,7 @@ test("mobile layout stays within the viewport and chart controls work", async ({
   await page.getByRole("button", { name: "Show single chart" }).click();
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-  await page.screenshot({ path: "/tmp/tradejournal-charts-mobile.png", fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
 });
 
 test("VWAP draws inside the session without painting through an extended-hours gap", async ({ page }) => {
