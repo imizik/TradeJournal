@@ -89,8 +89,8 @@ These rows describe future work, not implemented recording or broker controls.
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done ([PR #118](https://github.com/imizik/TradeJournal/pull/118)) |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
-| C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
-| C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
+| C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done (PR pending) |
+| C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done (PR pending) |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | next |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | todo |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
@@ -512,7 +512,7 @@ bars, including a DST day and a half day, and a test proves chart and
 fill-context levels agree on the same bars.
 As built ([Automatic levels](charts-workspace.md#automatic-levels-c21)):
 `backend/app/engine/chart_levels.py` is pure; C2.3 calls it from the workspace.
-C2.1–C2.3 shipped in one PR at the user's request. The premarket range, opening ranges and prior day call
+C2.2 and C2.3 shipped together in one PR at the user's request. The premarket range, opening ranges and prior day call
 `analyze_minute_bars` and `get_previous_day_data`. Overnight is the previous
 session's postmarket plus this premarket, from the calendar. Round numbers step
 by 1 or 5 × 10^k near 1% of price; swings are two-session daily pivots over 60
