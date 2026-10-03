@@ -2225,7 +2225,7 @@ test("? opens a cheat sheet listing exactly the bindings that exist; ? and Escap
   const bindings = ["1 3 5 15 30 then Enter", "Backspace", "Esc", "H", "4", "D", "W",
     "Space", "Shift + Space", "Alt + ↓ or Alt + ↑", "⌘ + K or Ctrl + K",
     "Delete or Backspace", "⌘ + Z or Ctrl + Z", "⌘ + Shift + Z or Ctrl + Shift + Z", "Esc", "Hold ⌘ or Ctrl",
-    "Alt + R", "End", "Esc", "?"];
+    "Alt + R", "End", "Esc", "↑ ↓ ← →", "?"];
   expect(await sheet.locator("td[aria-label]").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label")))).toEqual(bindings);
   await expect(sheet.getByRole("row")).toHaveCount(bindings.length);
   await page.screenshot({ path: test.info().outputPath("hotkey-sheet-desktop.png") });
