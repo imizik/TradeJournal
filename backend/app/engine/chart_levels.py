@@ -1,4 +1,5 @@
-"""Automatic chart levels (Charts C2.1): session and structure levels from supplied bars.
+"""Automatic chart levels: session and structure levels (C2.1), merged into
+confluence zones (C2.2), with how price has interacted with each today (C2.3).
 
 Pure: no network, no database, no provider calls, held that way by
 `tests/test_import_boundaries.py`. The caller hands in bars the chart already
@@ -27,13 +28,16 @@ from math import floor, log, log10
 from typing import Mapping
 
 from app.engine.chart_math import ET, EXTENDED_END, PRE_START, REGULAR_CLOSE, REGULAR_OPEN, session_windows
-from app.engine.indicators import analyze_minute_bars, get_previous_day_data
+from app.engine.indicators import analyze_minute_bars, compute_daily_indicators, get_previous_day_data
 
 SWING_LOOKBACK = 60  # completed sessions searched for swings, about three months
 SWING_SIDE = 2  # sessions on each side a swing high must stand above (a low, below)
 ROUND_TARGET = 0.01  # round-number spacing aims at about 1% of price
 ROUND_EACH_SIDE = 3  # round numbers at or below the price, and as many above
 DAILY_TAIL = SWING_LOOKBACK + SWING_SIDE + 10  # daily bars any level reads
+# One band, a tenth of the daily ATR(14), scales from SPY to CVNA: levels closer
+# than it merge into one zone (C2.2), and price within it of a level tests it (C2.3).
+BAND_ATR = 0.1
 
 Calendar = Mapping[date, dict | None] | None
 
@@ -60,6 +64,19 @@ class LevelSet:
     as_of: int
     levels: tuple[Level, ...]
     missing: dict[str, str] = field(default_factory=dict)  # group -> why it is absent
+    # Wilder ATR(14) of the completed daily bars, as fill context computes it; None without enough of them.
+    atr: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class Zone:
+    """Levels within one band of each other (C2.2). A lone level is a zone of one."""
+    id: str  # stable while its members keep their kinds and prices
+    low: float  # the members' lowest and highest prices, as they are: never rounded or padded
+    high: float
+    label: str  # the members' labels, highest price first: "PDH + 21,500 + OR15 high"
+    score: int  # independent sources: members set by the same bar count once
+    members: tuple[Level, ...]
 
 
 def compute_levels(day: date, minutes: list[dict], daily: list[dict], as_of: int,
@@ -86,7 +103,94 @@ def compute_levels(day: date, minutes: list[dict], daily: list[dict], as_of: int
     if reference is None:
         reference = _last_close(minutes, as_of) or (completed[-1]["close"] if completed and not stale else None)
     _round_numbers(reference, levels, missing)
-    return LevelSet(day, as_of, tuple(levels), missing)
+    atr = compute_daily_indicators([_alpaca(b) for b in completed]).get(_date(completed[-1]).isoformat(), {}).get("atr_14") if len(completed) > 14 else None
+    return LevelSet(day, as_of, tuple(levels), missing, atr)
+
+
+def session_day(today: date, calendar: Calendar = None) -> date:
+    """The session levels are for: today when it trades, otherwise the next one."""
+    return next((d for d in _days(today, today + timedelta(days=10)) if _regular(d, calendar)), today)
+
+
+def previous_session(day: date, calendar: Calendar = None) -> date | None:
+    """The last date before ``day`` with a regular session, within two weeks."""
+    return next((d for d in _days(day - timedelta(days=14), day)[::-1] if _regular(d, calendar)), None)
+
+
+def confluence(levels: tuple[Level, ...] | list[Level], band: float | None) -> list[Zone]:
+    """Merge levels closer than ``band`` into zones, lowest first.
+
+    A level joins the zone below it when it is within one band of that zone's
+    highest member, so a zone spans exactly its members' prices. Without a band
+    (no ATR) only levels at the same price merge.
+    """
+    zones: list[list[Level]] = []
+    for level in sorted(levels, key=lambda item: item.price):
+        gap = level.price - zones[-1][-1].price if zones else None
+        # Prices are floats: 100.1 - 100.0 is a hair under 0.1, which is not closer than a 0.1 band.
+        if gap is not None and (gap + 1e-9 < band if band else gap == 0):
+            zones[-1].append(level)
+        else:
+            zones.append([level])
+    out = []
+    for members in zones:
+        shown = sorted(members, key=lambda item: -item.price)  # stable: same-price members keep their group order
+        sources = {(m.timeframe, m.bar_time) if m.bar_time is not None else (m.kind, m.price) for m in members}
+        labels = list(dict.fromkeys(m.label for m in shown))  # "Swing high ×2", not the same name twice
+        counts = {name: sum(m.label == name for m in shown) for name in labels}
+        out.append(Zone("|".join(sorted(f"{m.kind}@{m.price!r}" for m in members)), members[0].price, members[-1].price,
+                        " + ".join(name if counts[name] == 1 else f"{name} ×{counts[name]}" for name in labels), len(sources), tuple(shown)))
+    return out
+
+
+def zone_start(zone: Zone) -> int | None:
+    """From when price can interact with a zone: its earliest formed member (round numbers and
+    levels from earlier sessions count from the first bar). None while every member is developing."""
+    formed = [m.formed_at or 0 for m in zone.members if not m.developing]
+    return min(formed) if formed else None
+
+
+def interactions(low: float, high: float, band: float, bars: list[dict], start: int) -> dict:
+    """How price treated the span ``low``..``high`` on closed bars of one interval (C2.3).
+
+    The tolerance band extends the span by ``band`` on each side. Price's side
+    is set by the last close before ``start`` (or the first bar's open), or, if
+    that sat inside the band, by the first close outside it (price was then at the
+    level, so moving away from it is a test). Then, bar by bar:
+
+    - *broken*: a close beyond the band on the other side from where price started;
+    - *reclaimed*: after a break, a close back beyond the band on the starting side;
+    - *tested*: a bar reached the band, and a later bar lies wholly outside it on
+      the side price came from (it moved away). A retest after a break is a test too.
+
+    The state is the last break or reclaim, else tested, else untested.
+    ``at_level`` says the last bar reached the band.
+    """
+    top, bottom = high + band, low - band
+    earlier = [b for b in bars if b["time"] < start]
+    counted = [b for b in bars if b["time"] >= start]
+    def where(value):
+        return "above" if value > top else "below" if value < bottom else None
+    side = where(earlier[-1]["close"]) if earlier else where(counted[0]["open"]) if counted else None
+    origin, touching, events, crossed = side, False, [], None
+    for bar in counted:
+        closed = where(bar["close"])
+        if side is None:
+            side = origin = closed
+            touching = closed is not None
+            continue
+        if closed is not None and closed != side:
+            crossed = "broken" if side == origin else "reclaimed"
+            events.append({"event": crossed, "time": bar["time"]})
+            side, touching = closed, False
+        elif bar["low"] <= top and bar["high"] >= bottom:
+            touching = True
+        elif touching:
+            events.append({"event": "tested", "time": bar["time"]})
+            touching = False
+    state = crossed or ("tested" if events else "untested")
+    last = counted[-1] if counted else None
+    return {"state": state, "events": events, "at_level": bool(last and last["low"] <= top and last["high"] >= bottom)}
 
 
 def round_step(price: float) -> float:
@@ -209,7 +313,7 @@ def _intraday(day, minutes, as_of, calendar, levels, missing):
 
 def _overnight(day, minutes, as_of, calendar, windows, levels, missing):
     """From the previous session's close to this session's open: its postmarket and this premarket."""
-    previous = next((d for d in _days(day - timedelta(days=14), day)[::-1] if _regular(d, calendar)), None)
+    previous = previous_session(day, calendar)
     if previous is None:
         missing["overnight"] = "No previous session in the last two weeks."
         return

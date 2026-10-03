@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
 import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, staleCandles } from "@/lib/charts";
-import type { ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
+import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
+import { AutoLevelLayer, nearestZones } from "@/lib/autoLevels";
+import LevelCard from "./LevelCard";
 import SelectionBar from "./SelectionBar";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
@@ -59,6 +61,10 @@ type ChartRegistry = Map<string, IChartApi>;
 type RenderCounts = Map<string, number>;
 /** Browser tests register a map here to read where drawings are drawn; production never defines it. */
 type LayerRegistry = Map<string, DrawingLayer>;
+/** Browser tests register a map here to read which automatic levels are drawn, and where; production never defines it. */
+type AutoRegistry = Map<string, AutoLevelLayer>;
+/** An automatic level's open card: hovered, or kept open by a tap or click (`pinned`), beside the pointer's height. */
+type Card = { id: string; pinned: boolean; y: number; above: boolean };
 /** What the chart says while a tool waits for a click; `second` is a two-point tool's second click. */
 const PLACE_TEXT: Record<Tool, string> = { level: "Click a price to save a level", ray: "Click where the ray starts", trend: "Click the first point of the line",
   zone: "Click one corner of the zone", note: "Click where the note goes" };
@@ -93,15 +99,17 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
+  /** This symbol's automatic levels (C2.3), null while hidden, and this chart's interactions with them. */
+  autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
@@ -160,6 +168,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const [second, setSecond] = useState(false);
   const initial = useRef(true);
   const [hover, setHover] = useState<ChartBar | null>(null);
+  const [card, setCard] = useState<Card | null>(null);
   // `rest` is the REST snapshot plus older history; streamed trades are applied
   // here, per panel, so a tick re-renders only the charts whose candles moved.
   const panel = useLivePanel(live, interval, rest);
@@ -201,9 +210,19 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
     const layer = new DrawingLayer(timeline);
     candles.attachPrimitive(layer);
-    bundle.current = { chart, candles, volume, shade, lines, markers, layer, frame: "" };
+    const autoLayer = new AutoLevelLayer();
+    candles.attachPrimitive(autoLayer);
+    bundle.current = { chart, candles, volume, shade, lines, markers, layer, auto: autoLayer, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
+    const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
+    autoLayers?.set(id, autoLayer);
+    // An automatic level's card: hovering one shows it (unless the user's own level or drawing is
+    // there); a tap or click keeps it open until the next one. It opens above the pointer in the lower half.
+    const opened = (zone: string, y: number, pinned: boolean): Card => ({ id: zone, pinned, y, above: y > element.clientHeight / 2 });
+    // A kept card gives way once its zone is no longer drawn (another symbol, a level that moved).
+    const hoverCard = (zone: string | null, y: number) => setCard((open) => (open?.pinned && autoLayer.shown().includes(open.id)) || (open?.id ?? null) === zone ? open : zone ? opened(zone, y, false) : null);
+    const tapCard = (zone: string | null, y: number) => setCard(zone ? opened(zone, y, true) : null);
     // The magnet is on, or Cmd/Ctrl is held for this click or move.
     const magnetOn = (held: boolean) => actions.current.magnet || held;
     const modifier = (event?: { metaKey: boolean; ctrlKey: boolean }) => !!(event?.metaKey || event?.ctrlKey);
@@ -227,6 +246,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const time = typeof event.time === "number" ? event.time : null;
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
+      const at = event.point && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
+      hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
       if (!kind || !main) return;
@@ -443,9 +464,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
       if (performance.now() < tapsOffUntil) return; // the lift after a long press
-      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); return; }
+      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); return; }
       const touch = performance.now() - lastTouch < 1000;
-      now.onSelect?.(layer.hit(event.point.x, event.point.y, touch ? TOUCH_SLOP : MOUSE_SLOP)?.id ?? null);
+      const slop = touch ? TOUCH_SLOP : MOUSE_SLOP;
+      const hit = layer.hit(event.point.x, event.point.y, slop)?.id ?? null;
+      now.onSelect?.(hit);
+      tapCard(hit ? null : autoLayer.hit(event.point.y, slop), event.point.y);
     });
     const stopRange = rangeLink.listen(id, (range) => {
       if (!linking.current || !barsRef.current.length) return;
@@ -549,12 +573,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
     return () => {
-      stopLink(); stopRange(); stopCommands(); stopJumps(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id);
+      stopLink(); stopRange(); stopCommands(); stopJumps(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
-      markers.detach(); candles.detachPrimitive(layer); chart.remove(); bundle.current = null; barsRef.current = [];
+      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]);
 
@@ -666,6 +690,17 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       container.current.dataset.drawings = drawings.map((drawing) => drawing.kind).join(",");
     }
   }, [levels, drawings, pending, main, selected]);
+  // Automatic levels: the nearest few above and below the latest price, moving with it.
+  const lastClose = panel?.bars.at(-1)?.close;
+  const zones = useMemo(() => nearestZones(autoLevels?.zones ?? [], lastClose), [autoLevels, lastClose]);
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current || pending) return; // the next symbol's levels wait for its candles
+    current.auto.set(zones, main);
+    if (container.current) container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
+  }, [zones, pending, main]);
+  const cardZone = card && !pending ? autoLevels?.zones.find((zone) => zone.id === card.id) : undefined;
+  useEffect(() => { bundle.current?.auto.setHovered(cardZone?.id ?? null); }, [cardZone]);
   // Arming, switching or dropping a tool forgets a half-placed drawing.
   useEffect(() => {
     bundle.current?.layer.setInteractive(!tool);
@@ -716,6 +751,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
+          style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)` } : { top: Math.round(card.y) + 12 }} onClose={() => setCard(null)} />}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>

@@ -315,3 +315,183 @@ def test_chart_levels_equal_fill_context_levels_on_the_same_bars(fill_at):
     assert len(fill_levels) == {"08:10": 5, "09:37": 7, "09:44": 7, "11:00": 9}[fill_at[11:16]]
     for kind in shared:
         assert chart[kind].bar_time is not None and chart[kind].source is not None
+
+
+# ---------------------------------------------------------------------------
+# Confluence (C2.2)
+# ---------------------------------------------------------------------------
+
+def level(kind, label, price, timeframe="1m", bar_time=None, developing=False, formed_at=None):
+    from app.engine.chart_levels import Level
+    return Level(kind, label, price, "calculated", timeframe, "tradier" if bar_time else None, bar_time, formed_at, developing)
+
+
+def test_levels_within_one_band_merge_into_a_zone_spanning_their_prices():
+    from app.engine.chart_levels import confluence
+    levels = [level("prior_day_high", "PDH", 21500.0, "1D", 1), level("opening_range_15m_high", "OR15 high", 21497.25, bar_time=2),
+              level("round", "21,500", 21500.0), level("prior_day_low", "PDL", 21300.0, "1D", 1)]
+    zones = confluence(levels, band=5.0)
+    assert [(z.low, z.high, z.label, z.score) for z in zones] == [
+        (21300.0, 21300.0, "PDL", 1),
+        (21497.25, 21500.0, "PDH + 21,500 + OR15 high", 3),  # the members' own prices, highest first
+    ]
+    assert zones[1].id == "opening_range_15m_high@21497.25|prior_day_high@21500.0|round@21500.0"
+
+
+def test_levels_a_band_or_more_apart_stay_apart_and_a_chain_merges_whole():
+    from app.engine.chart_levels import confluence
+    apart = confluence([level("premarket_high", "PMH", 100.0, bar_time=1), level("overnight_high", "ONH", 100.1, bar_time=2)], band=0.1)
+    assert [z.label for z in apart] == ["PMH", "ONH"]
+    chain = confluence([level("a", "A", 100.0, bar_time=1), level("b", "B", 100.08, bar_time=2), level("c", "C", 100.16, bar_time=3)], band=0.1)
+    assert [(z.low, z.high, z.score) for z in chain] == [(100.0, 100.16, 3)]
+    # Without a band (no ATR yet) only levels at the very same price merge.
+    assert [z.label for z in confluence([level("a", "A", 100.0, bar_time=1), level("b", "B", 100.01, bar_time=2), level("round", "100", 100.0)], None)] == ["A + 100", "B"]
+
+
+def test_levels_set_by_the_same_bar_count_as_one_source():
+    from app.engine.chart_levels import confluence
+    same_minute = [level("premarket_high", "PMH", 50.0, bar_time=7), level("overnight_high", "ONH", 50.0, bar_time=7)]
+    assert confluence(same_minute, 0.2)[0].score == 1
+    same_day = [level("prior_day_high", "PDH", 50.0, "1D", 9), level("prior_week_high", "PWH", 50.0, "1D", 9), level("swing_high", "Swing high", 50.05, "1D", 9)]
+    assert confluence(same_day, 0.2)[0].score == 1
+    # A minute and a daily bar that start at the same second are still different bars; a round number is its own source.
+    mixed = [level("premarket_high", "PMH", 50.0, "1m", 9), level("prior_day_high", "PDH", 50.0, "1D", 9), level("round", "50", 50.0)]
+    assert confluence(mixed, 0.2)[0].score == 3
+
+
+# ---------------------------------------------------------------------------
+# Interactions (C2.3): level 100, band 0.5, so the band is 99.5..100.5
+# ---------------------------------------------------------------------------
+
+def candle(index, open_, high, low, close):
+    return {"time": 1000 + index * 300, "open": open_, "high": high, "low": low, "close": close}
+
+
+def read(bars, start=0, low=100.0, high=100.0):
+    from app.engine.chart_levels import interactions
+    result = interactions(low, high, 0.5, bars, start)
+    return result["state"], [(e["event"], (e["time"] - 1000) // 300) for e in result["events"]], result["at_level"]
+
+
+def test_price_that_never_reaches_the_band_leaves_a_level_untested():
+    assert read([candle(0, 102, 103, 101.5, 102.5), candle(1, 102.5, 102.8, 100.6, 101)]) == ("untested", [], False)
+
+
+def test_a_touch_counts_as_a_test_once_price_moves_away():
+    bars = [candle(0, 102, 102.2, 101.2, 101.5), candle(1, 101.5, 101.6, 100.3, 101), candle(2, 101, 101.8, 101.1, 101.6)]
+    assert read(bars[:2]) == ("untested", [], True)  # still at the level: not yet a test
+    assert read(bars) == ("tested", [("tested", 2)], False)
+    # A close inside the band is not a break; the move away afterwards completes the test.
+    inside = [candle(0, 102, 102.2, 101.2, 101.5), candle(1, 101.5, 101.5, 99.6, 99.8), candle(2, 99.8, 101.9, 99.7, 101.7), candle(3, 101.7, 102, 101, 101.9)]
+    assert read(inside) == ("tested", [("tested", 3)], False)
+
+
+def test_a_close_beyond_the_band_breaks_and_a_close_back_reclaims():
+    bars = [candle(0, 102, 102.2, 101.2, 101.5), candle(1, 101.5, 101.6, 100.3, 101), candle(2, 101, 101.8, 101.1, 101.6),
+            candle(3, 101.6, 101.7, 99.0, 99.2), candle(4, 99.2, 99.4, 98.5, 98.8), candle(5, 98.8, 101.0, 98.7, 100.8)]
+    assert read(bars[:4]) == ("broken", [("tested", 2), ("broken", 3)], True)
+    assert read(bars) == ("reclaimed", [("tested", 2), ("broken", 3), ("reclaimed", 5)], True)
+    # A gap through the band breaks without touching it.
+    assert read([candle(0, 102, 103, 101.5, 102), candle(1, 98, 98.5, 97.5, 98)]) == ("broken", [("broken", 1)], False)
+
+
+def test_a_retest_from_the_other_side_after_a_break_is_a_test_and_the_break_stands():
+    bars = [candle(0, 102, 102, 101, 101.2), candle(1, 101.2, 101.3, 99, 99.1), candle(2, 99.1, 99.8, 98.9, 99.2), candle(3, 99.2, 99.3, 98.5, 98.6)]
+    assert read(bars) == ("broken", [("broken", 1), ("tested", 3)], False)
+
+
+def test_only_bars_from_when_the_level_formed_count_but_the_close_before_sets_the_side():
+    bars = [candle(0, 99, 99.2, 98, 98.5), candle(1, 98.5, 100.2, 98.4, 100.1), candle(2, 100.1, 101.2, 99.9, 101)]
+    # From bar 2 only: bar 1 closed inside the band, so the side is unknown and bar 2's close above sets it.
+    assert read(bars, start=1000 + 2 * 300) == ("untested", [], True)
+    # Counting from bar 0: price came from below and closed above, a break.
+    assert read(bars) == ("broken", [("broken", 2)], True)
+
+
+def test_price_that_starts_at_the_level_and_leaves_it_has_tested_it():
+    bars = [candle(0, 100.2, 100.4, 99.8, 100.1), candle(1, 100.1, 101.2, 100.0, 101.0), candle(2, 101.0, 101.6, 100.8, 101.4)]
+    assert read(bars) == ("tested", [("tested", 2)], False)
+    # Leaving downward through the band is not a break: there was no side to break from.
+    down = [candle(0, 100.2, 100.4, 99.8, 100.1), candle(1, 100.1, 100.2, 99.0, 99.2), candle(2, 99.2, 99.4, 98.6, 98.8)]
+    assert read(down) == ("tested", [("tested", 2)], False)
+
+
+def test_a_zone_extends_the_band_from_its_lowest_to_its_highest_member():
+    bars = [candle(0, 103, 103.5, 102, 102.5), candle(1, 102.5, 102.6, 101.6, 102), candle(2, 102, 102.8, 102.1, 102.6)]
+    assert read(bars, low=100.0, high=101.2) == ("tested", [("tested", 2)], False)
+    assert read(bars, low=100.0, high=100.5)[0] == "untested"
+
+
+def test_a_zone_counts_from_its_earliest_formed_member_and_waits_while_all_develop():
+    from app.engine.chart_levels import confluence, zone_start
+    developing = confluence([level("premarket_high", "PMH", 10.0, bar_time=5, developing=True)], 0.1)[0]
+    assert zone_start(developing) is None
+    mixed = confluence([level("opening_range_5m_high", "OR5 high", 10.0, bar_time=5, formed_at=500), level("round", "10", 10.0)], 0.1)[0]
+    assert zone_start(mixed) == 0
+    later = confluence([level("opening_range_5m_high", "OR5 high", 10.0, bar_time=5, formed_at=500), level("premarket_high", "PMH", 10.0, bar_time=6, developing=True)], 0.1)[0]
+    assert zone_start(later) == 500
+
+
+# ---------------------------------------------------------------------------
+# The workspace carries the levels (C2.3)
+# ---------------------------------------------------------------------------
+
+def test_the_workspace_sends_zones_and_each_intraday_panels_interactions(monkeypatch):
+    import httpx
+    from app.engine import chart_feed as feed_module
+    from app.engine.chart_feed import ChartFeed
+
+    now = datetime(2026, 9, 30, 10, 2, tzinfo=ET)  # a Wednesday, 32 minutes into the session
+
+    class Fixed(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz)
+
+    monkeypatch.setattr(feed_module, "datetime", Fixed)
+    monkeypatch.setattr(feed_module.time, "time", lambda: now.timestamp())
+    monkeypatch.setattr(feed_module.tradier, "TRADIER_API_KEY", "test-secret")
+    monkeypatch.setattr(feed_module.tradier, "TRADIER_BASE_URL", "https://api.tradier.com")
+    days = weekdays("2026-08-03", "2026-09-30")
+    today_rows = [{"timestamp": ny(f"2026-09-30T{t}"), "open": c, "high": h, "low": low, "close": c, "volume": 1000}
+                  for t, h, low, c in [("08:00", 101.0, 100.4, 100.6), ("09:30", 100.9, 100.1, 100.5), ("09:35", 101.6, 100.7, 101.4),
+                                       ("09:40", 102.4, 101.5, 102.2), ("09:45", 102.5, 101.8, 102.0), ("09:50", 102.6, 101.9, 102.3)]]
+
+    def get(url, params, headers, timeout):
+        if "timesales" in url:
+            payload = {"series": {"data": today_rows}}
+        elif "history" in url:
+            rows = [{"date": d, "open": 99, "high": 101 + i % 3, "low": 97 - i % 2, "close": 100, "volume": 1e6}
+                    for i, d in enumerate(days) if params["start"] <= d <= params["end"]]
+            payload = {"history": {"day": rows}}
+        else:
+            payload = {"quotes": {"quote": []}}
+        return httpx.Response(200, json=payload, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(feed_module.httpx, "get", get)
+    asked = []
+
+    def stored(symbol, day):
+        asked.append((symbol, day))
+        return [minute("2026-09-29T17:00", 103.0, 102.0, "alpaca_sip")]
+
+    data = ChartFeed().workspace("SPY", ["5m", "1D"], [], "extended", stored_session=stored)
+    auto = data["auto_levels"]
+    assert asked == [("SPY", date(2026, 9, 29))]
+    assert auto["day"] == "2026-09-30" and auto["atr"] > 0 and auto["band"] == pytest.approx(auto["atr"] * 0.1)
+    members = {m["kind"]: m for z in auto["zones"] for m in z["members"]}
+    assert members["overnight_high"]["price"] == 103.0 and members["overnight_high"]["source"] == "alpaca_sip"
+    assert members["premarket_high"]["price"] == 101.0 and members["opening_range_5m_high"]["price"] == 100.9
+    assert members["opening_range_15m_high"]["price"] == 102.4 and members["opening_range_15m_high"]["formed_at"] == ny("2026-09-30T09:45")
+    # Each intraday panel reads its own closed bars; a daily panel reads none.
+    events = data["panels"]["5m"]["level_events"]
+    assert set(events) == {z["id"] for z in auto["zones"]} and "level_events" not in data["panels"]["1D"]
+    zone = {z["label"]: z for z in auto["zones"]}
+    # Opened inside the morning's zone and left upward at 09:40, then stayed clear of it: a test.
+    morning = next(z for z in auto["zones"] if z["low"] <= 100.5 <= z["high"])
+    assert events[morning["id"]] == {"state": "tested", "events": [{"event": "tested", "time": ny("2026-09-30T09:45")}], "at_level": False}
+    assert events[zone["OR15 high + 102"]["id"]] == {"state": "untested", "events": [], "at_level": True}
+    assert zone["104"]["score"] == 1 and events[zone["104"]["id"]]["state"] == "untested"
+    assert "Swing high ×" in next(label for label in zone if label.startswith("PDH"))
+    # A layout without a daily panel still reads daily bars for the levels, and does not report their failures as chart issues.
+    assert ChartFeed().workspace("SPY", ["5m"], [], "extended", stored_session=stored)["auto_levels"]["zones"]

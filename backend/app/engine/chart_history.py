@@ -96,6 +96,14 @@ class ChartHistory:
         except (OSError, ValueError, TypeError, KeyError, OverflowError) as exc:
             raise HistoryError(f"Completed chart cache is invalid for {symbol} {day}; deliberate repair is required.", "cache_invalid") from exc
 
+    def stored(self, symbol: str, day: date) -> list[dict] | None:
+        """A completed session's raw minutes from disk, or None when it is not stored
+        (or unreadable). Never a provider request, so a workspace refresh can afford it."""
+        try:
+            return self._cached(symbol, day)
+        except HistoryError:
+            return None
+
     def _publish(self, symbol: str, day: date, minutes: list[dict]) -> None:
         path = self._path(symbol, day)
         start, end = self._bounds(day)

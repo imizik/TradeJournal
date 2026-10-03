@@ -241,8 +241,8 @@ cd backend
   44px rows, closed by its backdrop. On empty chart space it offers **Add level
   at** and **Copy price** for the price under the pointer (to the cent; the
   magnet applies, as it does to a placed level), **Reset chart scale** for that
-  chart alone, and **Layers**: show or hide My levels, Drawings, My fills and
-  each study on every chart, plus a **Show** for each of the symbol's items
+  chart alone, and **Layers**: show or hide My levels, Drawings, Auto levels,
+  My fills and each study on every chart, plus a **Show** for each of the symbol's items
   hidden one by one. On a price scale, a time scale or the RSI pane there is no
   price, so only the reset and Layers appear. On a level or drawing it selects
   the item and offers its label (a level's name, a note's text) and color
@@ -289,8 +289,26 @@ cd backend
   again, and the studies in the toolbar's Indicators menu read off beside an
   **Indicators hidden · Show** chip. Turning one study on (Indicators menu,
   chart menu or panel) shows the group again, so
-  the studies that were on come back with it. Auto levels and options join the
-  panel when their layers exist (C2.3, C4.4).
+  the studies that were on come back with it. **Auto levels** (C2.3) sits
+  between Drawings and Journal: it hides the automatic levels on every chart
+  (an `autoLevelsHidden` field of its own, for the same reason) and lists any
+  levels the main symbol is missing and why. Options join when their layer
+  exists (C4.4).
+- **Automatic levels (C2.3).** Every chart draws the
+  [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
+  dimmer than the user's own: a lone level as a thin dotted line, a confluence
+  zone as a shaded band, named at the left on the main chart (three names at
+  most, then "+2"). Only the nearest three zones above and below the latest
+  price show, plus any price is inside; they follow the price as it streams.
+  Hovering one (not on the user's own level or drawing) opens its card beside
+  the pointer: the members, each with its price, what it is, whether it is
+  observed, calculated or inferred, its source and when it formed, the number
+  of independent sources, and how price met it today on that chart's closed
+  bars (untested, tested, broken or reclaimed, with times, and whether price is
+  at it now). A tap, or a click, keeps the card open until the next tap or its
+  **Close**. A daily or weekly chart draws the same levels; its card says
+  interactions are read on intraday charts. The levels arrive with each
+  15-second workspace refresh; nothing here reads a provider.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (toolbar button) saves the current arrangement under a name, such
@@ -455,8 +473,9 @@ All five panels share these reads. A lock coalesces concurrent misses; a bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable
 symbol normally uses about nine upstream requests per minute after its
-three-request first load; with SPY and QQQ held by panels it uses about 17,
-and a second tab with the same layout adds none.
+three-request first load; with SPY and QQQ held by panels it uses about 19
+(their automatic levels read each held symbol's daily bars once a minute, as a
+daily panel would), and a second tab with the same layout adds none.
 A 429 stops upstream chart calls for a minute. The existing
 position-quote client remains separate and can still share the token's allowance.
 These are single-API-process caches, matching the current deployment.
@@ -714,12 +733,11 @@ first place in that order. Nothing on the chart reads the snapshots yet.
 ### Automatic levels (C2.1)
 
 `backend/app/engine/chart_levels.py` computes the session and structure levels
-for one New York session from bars it is handed. Nothing on the chart uses it
-yet: confluence (C2.2) and the levels layer (C2.3) are its first callers. It is
-pure (no provider calls, no database), so C2.3 feeds it bars the chart already
-loaded, on the chart's split-adjusted basis. `compute_levels(day, minutes,
-daily, as_of, calendar)` returns the levels known at `as_of` and, by group, why
-any are missing. Only bars complete by `as_of` count.
+for one New York session from bars it is handed, merges nearby ones into
+zones (C2.2) and reads how price has met each zone (C2.3). It is pure (no
+provider calls, no database). `compute_levels(day, minutes, daily, as_of,
+calendar)` returns the levels known at `as_of`, the daily ATR(14) and, by
+group, why any are missing. Only bars complete by `as_of` count.
 
 | Level | Label | Definition | Formed at |
 |---|---|---|---|
@@ -751,6 +769,54 @@ any are missing. Only bars complete by `as_of` count.
   The overnight range needs the previous session's minutes loaded, since an
   absent postmarket cannot be told from a quiet one. A closed day has no
   session levels; its prior-day, prior-week and swing levels remain.
+
+**The band.** One band, a tenth of the daily ATR(14) (Wilder, from the
+completed daily bars, as fill context computes `atr_14`), scales from SPY to
+CVNA. Without an ATR (under 15 daily bars) nothing merges except levels at the
+same price, no interactions are read, and `missing.confluence` says so.
+
+**Confluence zones (C2.2).** Levels are sorted by price; each joins the zone
+below it when it is less than one band above that zone's highest member, so a
+run of close levels merges whole. A zone spans its members' own prices (never
+rounded or padded) and is named by them, highest first, a repeated name
+counted ("PDH + 21,500 + OR15 high", "Swing high ×2"). Its score is the number
+of independent sources: members set by the same bar (`timeframe` and
+`bar_time`) count once, so a premarket high that is also the overnight high, or
+a prior-day high that is also the week's, is one source; a round number is its
+own. A lone level is a zone of one. Its id is the members' kinds and prices.
+
+**Interactions (C2.3).** Read for each intraday panel on its closed bars of
+the session's date, from when the zone formed: its earliest formed member, so
+a level from an earlier session or a round number counts from the first bar,
+and a zone whose members are all still developing reads `developing`. The
+tolerance band is the zone widened by one band on each side. Price's side is
+set by the last close before that start (or the first bar's open); if that
+was inside the band, the first close outside sets it, and moving away from
+there counts as a test.
+
+- *tested*: a bar reached the band, and a later bar lies wholly outside it on
+  the side price came from. A retest from the other side after a break is a
+  test too.
+- *broken*: a close beyond the band on the other side from where price started.
+  A close inside the band breaks nothing.
+- *reclaimed*: after a break, a close back beyond the band on the starting side.
+  Another break after that is *broken* again.
+
+The state shown is the latest break or reclaim, else *tested*, else
+*untested*; the card lists every event with its bar's time, and `at_level`
+says the latest closed bar reached the band. A daily or weekly panel reads no
+interactions.
+
+**Delivery.** `GET /charts/workspace` sends `auto_levels` for the main symbol
+and each held symbol (`day`, `as_of`, `atr`, `band`, `zones`, `missing`), and
+each intraday panel's `level_events` by zone id. The session is today when it
+trades, otherwise the next one. The previous session's minutes come only from
+the completed-session cache on disk (`ChartHistory.stored`); until a history
+page has stored them, the overnight range is missing for a refresh or two.
+Today's minutes and the daily bars are the reads the workspace makes anyway;
+a layout without a daily panel now reads the daily bars too, and a failure
+there is the levels' to report, not a chart issue. The calendar covers three
+weeks back and ten days ahead (months not yet published read as clock hours).
 
 ## Verification and remaining scope
 
@@ -887,7 +953,22 @@ day itself across Thanksgiving, a late open, a closed day, developing and
 still-forming bars, missing daily and minute bars, swing confirmation and
 lookback, and round-number spacing. It also feeds the same bars to the
 fill-context functions at four fill times and checks that the chart's
-premarket, opening-range and prior-day levels equal them.
+premarket, opening-range and prior-day levels equal them. Confluence tests
+cover merging, levels a band apart staying apart, a chain merging whole, no
+band, and the independent-source rule; interaction tests pin untested, a test
+that completes only on moving away, a close inside the band, broken, a gap
+through, reclaimed, a retest after a break, starting inside the band, the
+formation start and zone width. A workspace test checks the levels, the
+stored previous session and each panel's interactions in the response.
+Browser tests (C2.3) stub the response: every chart draws exactly the nearest
+three zones each side, hovering a zone on the 5m chart reads its card (members,
+sources, evidence, formation, two independent sources, a test and a break with
+times), a daily chart's card defers interactions to intraday charts, moving
+off closes it, the Layers group lists what is missing, hides the levels on all
+five charts through a reload, and the chart menu shows them again. A card
+kept open by a click gives way to hovering once a symbol switch removes its
+level. At 390px a tap opens a card that stays until its 32px Close. What the canvas paints is
+checked by screenshot review only.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's
@@ -915,7 +996,8 @@ chart is neither recreated nor redrawn), route each streamed trade to its own
 symbol's chart, pause and resume all three, keep linked time ranges, refuse a
 fourth symbol, scroll a held chart back through its own history, and focus a
 held chart into the main one. `backend/tests/test_charts.py` bounds a
-three-symbol layout from two tabs to 17 upstream requests a minute, and
+three-symbol layout from two tabs to 17 upstream requests a minute without
+automatic levels and 19 with them, and
 `backend/tests/test_chart_stream.py` routes several symbols per tab over one
 upstream subscription. Settings tests save a
 level in one browser context and read it in a second one through the e2e

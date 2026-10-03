@@ -89,9 +89,9 @@ These rows describe future work, not implemented recording or broker controls.
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
 | C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done ([PR #118](https://github.com/imizik/TradeJournal/pull/118)) |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
-| C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | next |
-| C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
-| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | todo |
+| C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
+| C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
+| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | next |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | todo |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
@@ -511,8 +511,8 @@ rather than re-deriving it. *Done when:* unit tests pin each level on fixture
 bars, including a DST day and a half day, and a test proves chart and
 fill-context levels agree on the same bars.
 As built ([Automatic levels](charts-workspace.md#automatic-levels-c21)):
-`backend/app/engine/chart_levels.py` is pure and not yet called; C2.3 wires it
-to the workspace. The premarket range, opening ranges and prior day call
+`backend/app/engine/chart_levels.py` is pure; C2.3 calls it from the workspace.
+C2.2 and C2.3 shipped together in one PR at the user's request. The premarket range, opening ranges and prior day call
 `analyze_minute_bars` and `get_previous_day_data`. Overnight is the previous
 session's postmarket plus this premarket, from the calendar. Round numbers step
 by 1 or 5 × 10^k near 1% of price; swings are two-session daily pivots over 60
@@ -528,6 +528,10 @@ the members' actual prices, never more precise than they are. The score is the
 count of **independent** sources, so two levels derived from the same bar count
 once. *Done when:* unit tests cover merging, non-merging and the
 independent-source rule.
+As built ([Automatic levels](charts-workspace.md#automatic-levels-c21)): the
+threshold is a tenth of the daily ATR(14), the same band C2.3 tests with.
+Merging is single-linkage by price, so a run of close levels merges whole and
+the zone spans exactly its members. Without an ATR only same-price levels merge.
 
 **C2.3 Levels layer.** Auto levels appear as thin labeled lines, and confluence
 zones as shaded bands, behind candles and dimmer than the user's own levels. Only
@@ -544,6 +548,17 @@ Each event is defined on closed bars of the panel's interval with the same
 tolerance band, and the definitions are written in `docs/charts-workspace.md`.
 *Done when:* a browser test hovers a level and reads its card, and unit tests pin
 each interaction event on fixture bars.
+As built ([Implemented behavior](charts-workspace.md#implemented-behavior)): the
+backend computes levels, zones and each intraday panel's interactions with
+every 15-second workspace refresh (`auto_levels`, `level_events`). The
+previous session comes only from the history cache on disk. The nearest three
+zones each side show by default, on every chart. A tap or click keeps a card
+open. Levels show by default because this item says "by default". The
+**Auto levels** group (Layers panel and chart menu) hides them and lists
+what is missing. Daily and weekly charts draw the levels but read no
+interactions. With levels on, a held symbol without a daily panel reads its
+daily bars once a minute: 19 requests a minute for a three-symbol layout
+instead of 17.
 
 **C2.4 Relative volume.** A baseline of average cumulative volume by minute of
 day over the last 20 sessions, computed nightly per watchlist symbol from the
