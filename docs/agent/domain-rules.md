@@ -100,6 +100,21 @@ trusting the numbers above, and re-decide if the delta stops being noise. The
 seed fixture exposes a changed tie-break as a failing test, so a future change
 is verifiable rather than hopeful.
 
+## Journal analytics
+
+- Analytics filters final close dates in New York time and uses exact account
+  IDs. Only dated closed/expired positions belong; open positions and their
+  partial realized P&L are excluded. Missing P&L and returns stay unavailable
+  and have explicit coverage counts.
+- Win rate uses recorded P&L, including breakevens in its denominator. Dollar
+  expectancy is mean P&L, not an R-multiple. Closed-trade drawdown aggregates
+  simultaneous closes before measuring peaks; it is not account drawdown.
+- Repeat-entry classification uses full same-account/ticker/day trade history
+  before filtering. Simultaneous first entries share a group; scale-in fills
+  inside a position do not become separate trades. Tags may overlap.
+- [Analytics definitions](../analytics.md) describe the concentration,
+  breakdown, sample, and coverage semantics.
+
 ## Accounts
 
 - Roth IRA `8267` and Individual `1113` are the live accounts.
