@@ -87,7 +87,7 @@ These rows describe future work, not implemented recording or broker controls.
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done ([PR #113](https://github.com/imizik/TradeJournal/pull/113)) |
 | C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
-| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done (PR pending) |
+| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | done ([PR #118](https://github.com/imizik/TradeJournal/pull/118)) |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | next |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | todo |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
@@ -1017,7 +1017,7 @@ replace them. The desktop toolbar wraps to a second row below about 1280px
 instead of collapsing into an overflow menu. Browser fullscreen (the
 Fullscreen API) is not used.
 
-**C7.4 Resizable chart grid and dock (done, PR pending).** Let the user distribute space
+**C7.4 Resizable chart grid and dock (done in PR #118).** Let the user distribute space
 within C7.3's shell: drag the main/lower-row divider, the dividers between the
 four lower charts and the right dock's edge. Start with the existing five panel
 slots; arbitrary docking, variable panel counts and a new layout library are
