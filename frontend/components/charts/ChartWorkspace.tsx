@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, Loader2, Lock, Magnet, Maximize2, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, Maximize2, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, SlidersHorizontal, Trash2, Type, Undo2, X } from "lucide-react";
 import ChartMenu from "./ChartMenu";
 import type { HiddenItem, LayerToggle, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
 import HotkeySheet from "./HotkeySheet";
@@ -10,7 +10,9 @@ import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
 import PriceChart from "./PriceChart";
+import Sheet from "./Sheet";
 import SymbolPalette from "./SymbolPalette";
+import ToolbarMenu from "./ToolbarMenu";
 import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, createChartCommands, createCrosshairLink, createRangeLink, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, heldSymbols, INTERVALS, intradayInterval, levelOnBasis, liveTick, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownIndicators, shownPrice, SMALL_HEIGHTS, splitsKey, staleCandles, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
@@ -23,7 +25,10 @@ import { summary } from "./SelectionBar";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
-const button = "inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-slate-700/60 px-2.5 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40";
+/** A bordered button; its height comes with it (`h-8 px-2.5` on a desktop, larger for touch). */
+const button = (size = "h-8 px-2.5") => `inline-flex ${size} items-center justify-center gap-1.5 rounded-md border border-slate-700/60 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40`;
+/** A borderless toolbar or rail button; `on` is a selected tool or an open panel. */
+const plain = (on: boolean, tone = "bg-sky-400/15 text-sky-300") => `inline-flex shrink-0 items-center justify-center gap-1 rounded text-xs transition-colors disabled:opacity-30 ${on ? tone : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`;
 type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null; historyStart?: string | null };
 /** Older history per frame (`symbol|interval`), for one session. */
 type OlderState = { key: string; panels: Partial<Record<string, OlderPanel>> };
@@ -62,9 +67,20 @@ async function copyText(text: string): Promise<boolean> {
 }
 /** "moving Breakout" or "adding trend line", with the symbol when it is not the one on screen: what Undo or Redo would do. */
 const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} ${editName(edit)}${edit.symbol === symbol || !edit.symbol ? "" : ` (${edit.symbol})`}`;
-/** Whether the layers panel was left open, on this device only (C1.4); a phone always starts with it closed. */
+/**
+ * The side dock (C7.3): one panel at a time, the watchlist (with the main
+ * symbol's levels and fills) or the layers. Whether it is open, and on which,
+ * is this device's choice; a phone's sheet always starts closed.
+ */
+type DockTab = "watchlist" | "layers";
+const DOCK_KEY = "tradejournal.charts.dock.v1";
+/** C1.4 remembered only an open layers panel; a device that left it open opens the dock on Layers. */
 const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
-/** Below this width the aside sits under the charts, so the layers panel is a bottom sheet. */
+/**
+ * From this width the workspace fills the screen: a toolbar, a tool rail, the
+ * charts and the dock. Below it (a phone, a narrow window) the page scrolls, the
+ * tools join the toolbar and the dock is a bottom sheet.
+ */
 const WIDE = 1024;
 /** The toolbar's drawing tools, in order (C1.2). */
 const TOOLS: [Tool, typeof Crosshair][] = [["level", Crosshair], ["ray", MoveRight], ["trend", Slash], ["zone", RectangleHorizontal], ["note", Type]];
@@ -82,30 +98,31 @@ function LiveQuote({ live, quote, candle }: { live: LiveFeed; quote?: ChartQuote
   const shown = shownPrice({ tick, quote, candle, scope: live });
   const change = shown.price != null && quote?.previous_close && quote.previous_close > 0
     ? (shown.price / quote.previous_close - 1) * 100 : quote?.change_percentage;
-  return <div className="flex min-w-0 items-baseline gap-3" aria-label="Selected symbol quote"><span className="text-sm font-medium text-slate-200">{live.symbol}</span><span className="font-mono text-2xl font-medium tracking-tight text-white">{price(shown.price)}</span>
-    <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span><span className="text-[10px] text-slate-500">{shown.source}</span></div>;
+  return <div className="flex min-w-0 items-baseline gap-2" aria-label="Selected symbol quote"><span className="sr-only">{live.symbol}</span><span className="font-mono text-base font-medium tracking-tight text-white">{price(shown.price)}</span>
+    <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span>{/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-slate-500 2xl:not-sr-only">{shown.source}</span></div>;
 }
 
 function FeedStatus({ live, paused, delayed, hasData, failed, loading }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean }) {
   const stale = useClock((now) => staleCandles(now, live.fetched));
   const streaming = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
-  return <div className="ml-auto flex items-center gap-2 text-[11px] text-slate-400" role="status">
+  return <div className="flex shrink-0 items-center gap-1.5 text-slate-400" role="status">
     <span className={`h-1.5 w-1.5 rounded-full ${paused || failed || stale || delayed ? "bg-amber-400" : hasData ? "bg-sky-400" : "bg-slate-600"}`} />
     {paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
     {loading && <Loader2 size={12} className="animate-spin" />}
   </div>;
 }
 
-function LiveFooter({ live, quote, candle, asOf }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; asOf?: number | null }) {
+/** The status strip's freshness: the newest minute candle (left out when `brief`, on a phone in full screen) and the shown price's age. */
+function LiveFooter({ live, quote, candle, asOf, brief = false }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; asOf?: number | null; brief?: boolean }) {
   const minute = useStream(live, (ticks) => asOf === undefined ? 0
     : ticks.reduce((latest, tick) => liveTick(tick, live) ? Math.max(latest, tick.minute) : latest, asOf ?? 0));
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
   const shown = shownPrice({ tick, quote, candle, scope: live });
   const age = useClock((now) => shown.at ? Math.max(0, Math.floor(now - shown.at)) : null);
-  return <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[10px] text-slate-500">
-    <span>{minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET · latest candle may be forming` : "New York time"}</span>
-    <span>{age !== null ? `${shown.source} ${age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`} ago` : "No price timestamp"}</span>
-  </div>;
+  return <>
+    {!brief && <span className="min-w-0 truncate">{minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET · latest candle may be forming` : "New York time"}</span>}
+    <span className="shrink-0">{age !== null ? `${shown.source} ${age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`} ago` : "No price timestamp"}</span>
+  </>;
 }
 
 export default function ChartWorkspace() {
@@ -129,7 +146,9 @@ export default function ChartWorkspace() {
   const [levelError, setLevelError] = useState("");
   const [selection, setSelection] = useState<Selection | null>(null);
   const [menu, setMenu] = useState<OpenMenu | null>(null);
-  const [layersOpen, setLayersOpen] = useState(false);
+  const [dock, setDock] = useState<{ open: boolean; tab: DockTab }>({ open: true, tab: "watchlist" });
+  // A phone's dock: a sheet over the charts, closed until asked for.
+  const [sheet, setSheet] = useState(false);
   // A short message after a menu action ("Copied 256.12"), cleared after a moment.
   const [notice, setNotice] = useState("");
   // Level and drawing edits made in this tab, for undo and redo (C1.1, C1.2).
@@ -141,7 +160,7 @@ export default function ChartWorkspace() {
   const [help, setHelp] = useState(false);
   const [entry, setEntry] = useState<Entry>(NO_ENTRY);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [viewport, setViewport] = useState({ width: 1280, height: 900 });
+  const [width, setWidth] = useState(1280);
   const link = useMemo(() => createCrosshairLink(), []);
   const rangeLink = useMemo(() => createRangeLink(), []);
   const commands = useMemo(() => createChartCommands(), []);
@@ -347,13 +366,17 @@ export default function ChartWorkspace() {
     setRollover((current) => current === rollover ? { ...current, pending: current.pending.filter((key) => !available.includes(key)) } : current);
   }, [rollover, session, data, older, slots, loadOlder]);
   useEffect(() => {
-    const measure = () => setViewport({ width: window.innerWidth, height: window.innerHeight });
+    const measure = () => setWidth(window.innerWidth);
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, []);
   useEffect(() => {
-    try { if (window.innerWidth >= WIDE && localStorage.getItem(LAYERS_OPEN_KEY) === "1") setLayersOpen(true); } catch { /* starts closed */ }
+    try {
+      const saved = JSON.parse(localStorage.getItem(DOCK_KEY) ?? "null") as { open?: unknown; tab?: unknown } | null;
+      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" ? "layers" : "watchlist" });
+      else if (localStorage.getItem(LAYERS_OPEN_KEY) === "1") setDock({ open: true, tab: "layers" });
+    } catch { /* open on the watchlist */ }
   }, []);
   useEffect(() => {
     if (!notice) return;
@@ -788,7 +811,7 @@ export default function ChartWorkspace() {
     if (!points.length) return;
     commands.jump({ panel, times: points.flatMap((point) => point.time === null ? [] : [point.time]), prices: points.map((point) => point.price) });
     setSelection({ symbol: item.symbol, id: item.id, panel }); setFresh(null);
-    if (narrow) setLayersOpen(false);
+    if (narrow) setSheet(false);
   };
   const lockGroup = (layer: ItemGroup) => {
     const items = layer === "levels" ? levelItems : drawingItems;
@@ -801,7 +824,7 @@ export default function ChartWorkspace() {
     ...(shownDrawings.get(name) ?? NO_DRAWINGS).filter((drawing) => drawing.hidden).map((drawing) => ({ id: drawing.id,
       name: drawing.kind === "note" ? `Note: ${drawing.text}` : `${TOOL_NAMES[drawing.kind]} ${summary(drawing)}`, show: () => editItem(name, drawing.id, { hidden: false }) })),
   ];
-  const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showLayers(false)}
+  const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
     onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else toggleGroup(key); }} onGroupLock={lockGroup}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
     onJump={jumpTo} onItem={(item, patch) => editItem(item.symbol, item.id, patch)} onDelete={(item) => deleteItem(item.symbol, item.id)}
@@ -814,111 +837,177 @@ export default function ChartWorkspace() {
   };
   const smallHeight = SMALL_HEIGHTS[settings.smallSize];
   const multi = settings.layout === "multi";
-  // Immersive: the main chart fills the screen below the toolbar. On a tall,
-  // wide screen the row of smaller charts also fits without scrolling.
-  const fillHeight = viewport.height - 260;
-  const withRow = multi && viewport.width >= 1280 && fillHeight - smallHeight - 70 >= 520;
-  const mainHeight = immersive ? Math.max(420, withRow ? fillHeight - smallHeight - 70 : fillHeight) : 410;
-  // The layers panel: beside the charts when there is room, otherwise a bottom sheet.
-  const narrow = viewport.width < WIDE;
-  const showLayers = (open: boolean) => {
-    setLayersOpen(open);
-    if (!narrow) try { localStorage.setItem(LAYERS_OPEN_KEY, open ? "1" : "0"); } catch { /* remembered for this visit only */ }
+  const narrow = width < WIDE;
+  // A desktop and full screen fill their box: the main chart takes the height
+  // the smaller charts leave, measured by the browser, not estimated (C7.3).
+  const fill = !narrow || immersive;
+  const dockShown = narrow ? sheet : immersive ? settings.immersiveWatchlist : dock.open;
+  /**
+   * Open the dock on a tab, or close it (null). A desktop remembers both on
+   * this device. Full screen keeps its own choice of showing it, shared like
+   * before; a phone's sheet is never remembered open.
+   */
+  const showDock = (tab: DockTab | null) => {
+    const open = tab !== null;
+    const next = narrow || immersive ? { ...dock, tab: tab ?? dock.tab } : { open, tab: tab ?? dock.tab };
+    if (narrow) setSheet(open);
+    else if (immersive) setSettings((s) => s.immersiveWatchlist === open ? s : { ...s, immersiveWatchlist: open });
+    setDock(next);
+    try { localStorage.setItem(DOCK_KEY, JSON.stringify(next)); } catch { /* remembered for this visit only */ }
   };
-  const showAside = !immersive || settings.immersiveWatchlist || (layersOpen && !narrow);
-  const watchlistShown = !immersive || settings.immersiveWatchlist;
+  const toggleDock = (tab: DockTab) => showDock(dockShown && dock.tab === tab ? null : tab);
+  // A phone or a narrow window gets 44px touch targets; a desktop gets compact ones.
+  const tap = narrow ? "h-11 w-11" : "h-7 w-7";
+  const control = narrow ? "h-11 min-w-11 px-2" : "h-7 min-w-7 px-1.5";
+  const sep = <span aria-hidden className="mx-0.5 h-5 shrink-0 border-l border-slate-700/70" />;
+  // Text beside a toolbar icon on a wide screen; in a phone's More menu it always shows.
+  const label = narrow ? "" : "hidden 2xl:inline";
+  // The dock's tabs: a press opens that panel, a second press closes the dock.
+  const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"]] as const).map(([tab, name, Icon, hint]) =>
+    <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab)} ${control}`}><Icon size={14} /></button>);
+
+  // Linked ranges and the smaller charts' height sit in the toolbar on a desktop and in its More menu on a phone, with pause, refresh and the shortcuts.
+  const secondary = <>
+    <button aria-label="Link time ranges" aria-pressed={settings.linkRange} onClick={() => setSettings((s) => ({ ...s, linkRange: !s.linkRange }))} title="Scroll and zoom every chart to the same time window"
+      className={`${plain(settings.linkRange)} ${control} text-[11px]`}><Link2 size={13} /><span className={label}>Link time ranges</span></button>
+    {multi && <div role="group" aria-label="Small chart height" title="Height of the smaller charts" className="flex shrink-0 overflow-hidden rounded border border-slate-700/70 text-[10px]">
+      {(["compact", "normal", "tall"] as SmallChartSize[]).map((size) => <button key={size} aria-pressed={settings.smallSize === size} aria-label={`${size} small charts`} onClick={() => setSettings((s) => ({ ...s, smallSize: size }))}
+        className={`${narrow ? "h-11 min-w-11" : "h-6 min-w-6"} px-1.5 ${settings.smallSize === size ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{size === "compact" ? "S" : size === "normal" ? "M" : "L"}</button>)}
+    </div>}
+  </>;
+  const pauseButton = <button className={`${plain(paused, "bg-amber-400/15 text-amber-300")} ${control} text-[11px]`} onClick={() => setPaused((v) => !v)} aria-label={paused ? "Resume chart updates" : "Pause chart updates"} title={paused ? "Resume updates" : "Pause updates"}>{paused ? <Play size={13} /> : <Pause size={13} />}<span className={label}>{paused ? "Resume" : "Pause"}</span></button>;
+  const refreshButton = <button className={`${plain(false)} ${control}`} disabled={loading} aria-label="Refresh charts" title="Refresh now" onClick={() => { if (!inFlight.current) refreshNow.current(); }}><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>;
+  const keysButton = <button className={`${plain(help)} ${control} hidden sm:inline-flex`} onClick={() => { if (palette === null && !layoutMenu) setHelp(true); }} aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-expanded={help} title="Keyboard shortcuts (?)"><Keyboard size={13} /></button>;
+
+  // What the data is, and the chart library's attribution: in the status strip on a desktop, in the More menu on a phone.
+  const about = <p className="w-72 whitespace-normal text-[11px] leading-5 text-slate-300">{latest?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>;
+  const attribution = <span><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="hover:text-slate-300">TradingView Lightweight Charts™</a> <a href="/lightweight-charts-NOTICE.txt" className="hover:text-slate-300">Copyright (с) 2025 TradingView, Inc.</a></span>;
+  // Undo, redo and the drawing tools (C1.1, C1.2): a slim rail beside the charts on a desktop, a toolbar row on a phone.
+  const tools = <>
+    {([["Undo", "before", edits.undo, Undo2, "⌘Z / Ctrl+Z"], ["Redo", "after", edits.redo, Redo2, "⇧⌘Z / Ctrl+Shift+Z"]] as const).map(([name, side, stack, Icon, key]) => <button key={name} aria-label={name} disabled={!stack.length}
+      title={stack.length ? `${name} ${describeEdit(stack.at(-1)!, symbol)} (${key})` : `Nothing to ${name.toLowerCase()}`} onClick={() => replay(side)}
+      className={`${plain(false)} ${narrow ? "h-11 w-11" : "h-8 w-8"}`}><Icon size={14} /></button>)}
+    <span aria-hidden className={narrow ? "mx-0.5 h-5 border-l border-slate-700" : "my-1 w-5 border-t border-slate-700"} />
+    <div role="group" aria-label="Drawing tools" className={`flex items-center ${narrow ? "" : "flex-col gap-0.5"}`}>
+      {TOOLS.map(([kind, Icon]) => <button key={kind} aria-label={`Draw ${TOOL_NAMES[kind].toLowerCase()}`} aria-pressed={tool === kind} title={tool === kind ? "Cancel drawing (Esc)" : TOOL_NAMES[kind]} onClick={() => chooseTool(kind)}
+        className={`${plain(tool === kind, "bg-blue-400/15 text-blue-300")} ${narrow ? "h-11 w-11" : "h-8 w-8"}`}><Icon size={14} /></button>)}
+      <button aria-label="Magnet" aria-pressed={settings.magnet} title="Magnet: anchors snap to the nearest open, high, low or close (or hold ⌘/Ctrl)" onClick={() => setSettings((s) => ({ ...s, magnet: !s.magnet }))}
+        className={`${plain(settings.magnet, "bg-amber-400/15 text-amber-300")} ${narrow ? "h-11 w-11" : "h-8 w-8"}`}><Magnet size={14} /></button>
+    </div>
+  </>;
+
+  // The watchlist tab: the list, then the main symbol's levels and its latest fills, like a details pane under a watchlist.
+  const watchlistPanel = <>
+    <section aria-label="Watchlist">
+      <div className="flex items-center justify-between border-b border-slate-700/40 py-1 pl-3 pr-1"><h2 className="text-xs font-medium text-slate-200">Watchlist <span className="ml-1 text-slate-500">{settings.watchlist.length}</span></h2>
+        <div className="flex items-center gap-0.5">
+          {([[-1, "Previous", "Shift+Space", ChevronUp], [1, "Next", "Space", ChevronDown]] as const).map(([by, name, key, Icon]) => <button key={name} aria-label={`${name} watchlist symbol`} title={`${name} symbol (${key})`} disabled={!settings.watchlist.length}
+            onClick={() => { const next = stepWatchlist(settings.watchlist, settings.symbol, by); if (next) chooseSymbol(next); }} className={`${plain(false)} ${tap}`}><Icon size={14} /></button>)}
+          <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className={`${plain(false)} ${tap}`}><Plus size={14} /></button>
+          <button aria-label="Close watchlist" title="Close the side panel" onClick={() => showDock(null)} className={`${plain(false)} ${tap}`}><X size={14} /></button>
+        </div></div>
+      <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Quote</span><span className="text-right">Chg%</span></div>
+      {settings.watchlist.map((symbol) => {
+        const quote = latest?.quotes.find((q) => q.symbol === symbol);
+        return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
+          {/* On a phone, charting a symbol closes the sheet so the chart shows. */}
+          <button data-watch-row onKeyDown={watchKey} onClick={() => { chooseSymbol(symbol); if (narrow) setSheet(false); }} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className={`grid min-w-0 flex-1 grid-cols-[1fr_60px_54px] items-center gap-1 pl-2.5 pr-1 text-[11px] ${narrow ? "min-h-11 py-2" : "py-2.5"}`}><span className="truncate text-left font-medium text-slate-200">{symbol}</span><span className="text-right font-mono text-slate-400">{price(quote?.last)}</span><span className={`text-right font-mono ${quote?.change_percentage != null && quote.change_percentage < 0 ? "text-rose-400" : "text-emerald-400"}`}>{quote?.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${quote.change_percentage.toFixed(2)}`}</span></button>
+          <button aria-label={`Remove ${symbol} from watchlist`} className={`inline-flex shrink-0 items-center justify-center rounded text-slate-600 hover:text-rose-300 ${narrow ? "h-11 w-11" : "mr-2 p-0.5"}`} onClick={() => setSettings((s) => ({ ...s, watchlist: s.watchlist.filter((v) => v !== symbol) }))}><X size={12} /></button>
+        </div>;
+      })}
+      {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
+    </section>
+    <section className="border-t border-slate-700/40 p-3" aria-label="Saved price levels">
+      <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
+        {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button>
+          : <span className="text-[10px] text-slate-600">{levels.length}/30</span>}</div>
+      {levels.map((level) => <div key={level.id} className={`mb-2 flex items-center gap-2 text-[11px] ${level.hidden ? "opacity-60" : ""}`}><span className="h-px w-3" style={{ background: level.color ?? "#60a5fa" }} /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span>
+        {level.locked && <Lock size={11} className="text-slate-500" aria-label="Locked" />}
+        {level.hidden && <button aria-label={`Show ${level.label}`} title="Hidden on the charts. Show it." onClick={() => editItem(settings.symbol, level.id, { hidden: false })} className={`inline-flex items-center justify-center text-slate-500 hover:text-slate-200 ${narrow ? "h-11 w-11" : "p-1"}`}><Eye size={12} /></button>}
+        <span className="font-mono text-blue-300" style={level.color ? { color: level.color } : undefined} title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteItem(settings.symbol, level.id)} className={`inline-flex items-center justify-center text-slate-600 hover:text-rose-300 ${narrow ? "h-11 w-11" : "p-1"}`}><Trash2 size={12} /></button></div>)}
+      {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
+      <form onSubmit={(e) => { e.preventDefault(); addLevel(Number(levelPrice)); }} className="space-y-2">
+        <input aria-label="Level label" placeholder="Label (optional)" value={levelLabel} maxLength={30} onChange={(e) => setLevelLabel(e.target.value)} className={`w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600 ${narrow ? "h-11" : "h-8"}`} />
+        <div className="flex gap-2"><input aria-label="Level price" type="number" step="any" min="0.000001" required placeholder="Price" value={levelPrice} onChange={(e) => setLevelPrice(e.target.value)} className={`min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 font-mono text-xs outline-none focus:border-sky-600 ${narrow ? "h-11" : "h-8"}`} /><button type="submit" aria-label="Save price level" className={button(narrow ? "h-11 w-11" : "h-8 px-2.5")}><Plus size={14} /></button></div>
+      </form>
+      {levelError && <p role="alert" className="mt-2 text-[11px] text-amber-300">{levelError}</p>}
+    </section>
+    <section className="border-t border-slate-700/40 p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
+      {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
+    </section>
+  </>;
+  const alerts = [
+    symbolError && <p key="symbol" className="text-xs text-amber-300" role="alert">{symbolError}</p>,
+    drawError && <p key="draw" className="text-xs text-amber-300" role="alert">{drawError}</p>,
+    requestFailed && <div key="error" role="alert" aria-label="Chart data error" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">{error.message}{current && <span className="ml-1">Showing the last successful data.</span>}</div>,
+    !!issues.length && <div key="issues" role="alert" aria-label="Chart data warning" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">Refresh incomplete. {issues.join(" ")} Check timestamps before using these charts.</div>,
+    !!basisNotes.length && <div key="basis" role="status" aria-label="Price basis warning" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">{basisNotes.join(" ")}</div>,
+  ].filter(Boolean);
 
   return (
-    <div ref={root} data-testid="chart-workspace" data-immersive={immersive || undefined} className={immersive
-      ? "fixed inset-0 z-[70] space-y-2 overflow-y-auto overscroll-contain bg-[#0b1017] px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] text-slate-300 sm:px-3"
-      : "space-y-4 text-slate-300"}>
-      <header className={`flex flex-wrap items-center justify-between gap-3 ${immersive ? "sticky top-0 z-20 -mx-2 bg-[#0b1017]/95 px-2 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] backdrop-blur sm:-mx-3 sm:px-3" : ""}`}>
-        <div>{!immersive && <div className="mb-1 flex items-center gap-2 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500"><span className="h-1.5 w-1.5 rounded-full bg-sky-400" />Trade Journal / Markets</div>}
-          <h1 className={`${immersive ? "text-base" : "text-2xl"} font-semibold tracking-tight text-slate-100`}>Charts</h1></div>
-        <div className="flex flex-wrap items-center justify-end gap-2 text-xs">
-          <span role="status" aria-label="Chart settings" className={`mr-1 hidden items-center gap-1.5 text-[11px] lg:flex ${sync === "offline" || merged ? "text-amber-300" : "text-slate-500"}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
-          <button className={`${button} hidden sm:inline-flex`} onClick={() => setPalette(0)} aria-label="Search symbols (Ctrl or Cmd+K)" title="Search symbols (⌘K / Ctrl+K)"><Search size={13} /><kbd className="text-[10px] text-slate-500">⌘K</kbd></button>
-          <button className={`${button} hidden sm:inline-flex`} onClick={() => { if (palette === null && !layoutMenu) setHelp(true); }} aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-expanded={help} title="Keyboard shortcuts (?)"><Keyboard size={13} /></button>
-          {immersive && <button className={button} aria-pressed={settings.immersiveWatchlist} onClick={() => setSettings((s) => ({ ...s, immersiveWatchlist: !s.immersiveWatchlist }))}>{settings.immersiveWatchlist ? "Hide watchlist" : "Watchlist"}</button>}
-          <button className={button} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} />Layouts{inUse && <span className="max-w-24 truncate text-sky-300">{inUse.name}</span>}</button>
-          <button className={button} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"}>
-            {settings.layout === "multi" ? <Maximize2 size={13} /> : <Columns3 size={13} />}{settings.layout === "multi" ? "Focus" : "Five charts"}</button>
-          <button className={button} onClick={() => setPaused((v) => !v)} aria-label={paused ? "Resume chart updates" : "Pause chart updates"}>{paused ? <Play size={13} /> : <Pause size={13} />}{paused ? "Resume" : "Pause"}</button>
-          <button className={button} disabled={loading} aria-label="Refresh charts" onClick={() => { if (!inFlight.current) refreshNow.current(); }}><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
-          {immersive
-            ? <button className={`${button} border-sky-500/60 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25`} onClick={() => setImmersive(false)} aria-label="Exit full-screen charts"><X size={14} />Exit</button>
-            : <button className={button} onClick={() => setImmersive(true)} aria-label="Enter full-screen charts" title="Full-screen charts"><Expand size={13} /><span className="hidden sm:inline">Full screen</span></button>}
+    <div ref={root} data-testid="chart-workspace" data-immersive={immersive || undefined} className={`text-slate-300 ${immersive
+      ? "fixed inset-0 z-[70] flex flex-col bg-[#0b1017] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
+      : fill ? "flex min-h-0 flex-1 flex-col bg-[#0b1017]" : "space-y-2"}`}>
+      <header aria-label="Chart toolbar" className={`flex flex-wrap items-center gap-1 ${fill ? "shrink-0 border-b border-slate-700/50 bg-[#0e131b] px-2 py-1" : "pb-1"} ${immersive ? "pt-[max(0.25rem,env(safe-area-inset-top))]" : ""}`}>
+        <h1 className="sr-only">Charts</h1>
+        <form onSubmit={submitSymbol} className={`relative flex shrink-0 items-center rounded-md border border-slate-700 bg-[#10151e] ${narrow ? "h-11" : "h-8"}`}>
+          <button type="button" aria-label="Open symbol search" title="Search symbols (⌘K / Ctrl+K)" onClick={() => setPalette(0)} className={`${plain(false)} ${tap}`}><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-20 bg-transparent px-1 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-200" />
+          <button type="submit" aria-label="Load symbol" className={`${plain(false)} ${tap}`}><ArrowUpRight size={14} /></button>
+        </form>
+        <LiveQuote live={live} quote={selected} candle={latestCandle} />
+        {/* A phone keeps the dock's buttons beside the quote; the intervals get a row of their own that scrolls sideways. */}
+        {narrow ? <div className="ml-auto flex shrink-0 items-center">{dockTabs}</div> : sep}
+        <div role="group" aria-label="Main chart interval" className={`flex items-center ${narrow ? "min-w-0 basis-full overflow-x-auto" : ""}`}>
+          {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`${plain(settings.intervals[0] === interval)} ${control} text-[11px]`}>{interval}</button>)}
         </div>
+        <button aria-pressed={settings.session === "extended"} title="Show premarket and after-hours candles, or the regular session only" onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(false)} ${control} whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? "Extended hours on" : "Regular hours only"}</button>
+        {!narrow && sep}
+        <ToolbarMenu label="Chart indicators" title="Studies and fill arrows on every chart" className={`${plain(false)} ${control} text-[11px]`}
+          content={() => <div className="flex w-44 flex-col">
+            {INDICATORS.map(([key, name]) => <button key={key} aria-pressed={indicators[key]} onClick={() => toggleIndicator(key)}
+              className={`flex items-center justify-between gap-2 rounded px-2 text-left text-[11px] hover:bg-slate-800 ${narrow ? "min-h-11" : "min-h-7"} ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{name}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
+          </div>}><SlidersHorizontal size={13} aria-hidden /><span className={narrow ? "sr-only" : ""}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
+        {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className={`${plain(false)} ${control} gap-1 text-[10px] !text-amber-300`}><EyeOff size={11} />Indicators hidden · Show</button>}
+        <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={narrow ? "sr-only" : ""}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
+        <button className={`${plain(false)} ${control} text-[11px]`} onClick={() => setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" }))} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"} title={settings.layout === "multi" ? "One chart" : "Five charts"}>
+          {settings.layout === "multi" ? <Maximize2 size={13} /> : <Columns3 size={13} />}{!narrow && <span className={label}>{settings.layout === "multi" ? "Focus" : "Five charts"}</span>}</button>
+        {!narrow && secondary}
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
+          {narrow
+            // A phone keeps one row of controls: the rest wait in a menu.
+            ? <ToolbarMenu label="More chart controls" align="right" title="More chart controls" className={`${plain(false)} ${control}`}
+              content={() => <div className="flex w-72 flex-wrap items-center gap-1">{secondary}{pauseButton}{refreshButton}{keysButton}
+                <div className="mt-1 w-full space-y-2 border-t border-slate-700/60 pt-2 text-[10px] text-slate-500">{about}{attribution}</div></div>}><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More chart controls</span></ToolbarMenu>
+            : <>{pauseButton}{refreshButton}{keysButton}</>}
+          {immersive
+            ? <button className={`${button(narrow ? "h-11 w-11" : "h-7 px-2.5")} !border-sky-500/60 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25`} onClick={() => setImmersive(false)} aria-label="Exit full-screen charts" title="Exit full screen (Esc)"><X size={14} />{!narrow && "Exit"}</button>
+            : <button className={`${plain(false)} ${control}`} onClick={() => setImmersive(true)} aria-label="Enter full-screen charts" title="Full screen: hide the app navigation"><Expand size={13} /></button>}
+          {!narrow && <>{sep}{dockTabs}</>}
+        </div>
+        {narrow && <div className="flex basis-full flex-wrap items-center">{tools}</div>}
       </header>
 
-      <div className="rounded-xl border border-slate-700/50 bg-[#141b25]">
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-3 border-b border-slate-700/40 p-3">
-          <form onSubmit={submitSymbol} className="relative flex h-9 items-center rounded-md border border-slate-700 bg-[#10151e]">
-            <button type="button" aria-label="Open symbol search" onClick={() => setPalette(0)} className="ml-2 rounded p-1 text-slate-500 hover:text-slate-200"><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-28 bg-transparent px-2 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-300" />
-            <button type="submit" aria-label="Load symbol" className="mr-1 rounded p-1.5 hover:bg-slate-800"><ArrowUpRight size={14} /></button>
-          </form>
-          <LiveQuote live={live} quote={selected} candle={latestCandle} />
-          {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`rounded px-2 py-1 text-[11px] ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
-          {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`rounded px-2 py-1 text-[11px] ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
-            {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
-          <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} />
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
-          {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`rounded px-2 py-1.5 text-[11px] ${settings.intervals[0] === interval ? "bg-sky-400/15 text-sky-300" : "text-slate-400 hover:bg-slate-800"}`}>{interval}</button>)}
-          <span className="mx-1 h-4 border-l border-slate-700" />
-          <button className="rounded px-2 py-1.5 text-[11px] text-slate-400 hover:bg-slate-800" aria-pressed={settings.session === "extended"} onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))}>{settings.session === "extended" ? "Extended hours on" : "Regular hours only"}</button>
-          <div className="ml-auto flex items-center gap-0.5">
-            {([["Undo", "before", edits.undo, Undo2, "⌘Z / Ctrl+Z"], ["Redo", "after", edits.redo, Redo2, "⇧⌘Z / Ctrl+Shift+Z"]] as const).map(([name, side, stack, Icon, key]) => <button key={name} aria-label={name} disabled={!stack.length}
-              title={stack.length ? `${name} ${describeEdit(stack.at(-1)!, symbol)} (${key})` : `Nothing to ${name.toLowerCase()}`} onClick={() => replay(side)}
-              className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30"><Icon size={13} /></button>)}
-            <span className="mx-1 h-4 border-l border-slate-700" />
-            <div role="group" aria-label="Drawing tools" className="flex items-center gap-0.5">
-              {TOOLS.map(([kind, Icon]) => <button key={kind} aria-label={`Draw ${TOOL_NAMES[kind].toLowerCase()}`} aria-pressed={tool === kind} title={tool === kind ? "Cancel drawing (Esc)" : TOOL_NAMES[kind]} onClick={() => chooseTool(kind)}
-                className={`inline-flex h-7 w-7 items-center justify-center rounded ${tool === kind ? "bg-blue-400/15 text-blue-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Icon size={13} /></button>)}
-              <button aria-label="Magnet" aria-pressed={settings.magnet} title="Magnet: anchors snap to the nearest open, high, low or close (or hold ⌘/Ctrl)" onClick={() => setSettings((s) => ({ ...s, magnet: !s.magnet }))}
-                className={`ml-0.5 inline-flex h-7 w-7 items-center justify-center rounded ${settings.magnet ? "bg-amber-400/15 text-amber-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><Magnet size={13} /></button>
-            </div>
-            <button aria-label="Layers" aria-expanded={layersOpen} title="Layers: show, hide, lock and delete what the charts draw" onClick={() => showLayers(!layersOpen)}
-              className={`ml-0.5 inline-flex h-7 w-7 items-center justify-center rounded ${layersOpen ? "bg-sky-400/15 text-sky-300" : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`}><LayersIcon size={13} /></button>
-          </div>
-        </div>
-      </div>
-      {symbolError && <p className="text-xs text-amber-300" role="alert">{symbolError}</p>}
-      {drawError && <p className="text-xs text-amber-300" role="alert">{drawError}</p>}
+      {!!alerts.length && <div className={fill ? "max-h-28 shrink-0 space-y-1 overflow-y-auto px-2 pt-1" : "space-y-2"}>{alerts}</div>}
 
-      <div className="flex flex-wrap items-center gap-2" aria-label="Chart indicators">
-        {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 px-2.5 py-1 text-[10px] text-amber-300"><EyeOff size={11} />Indicators hidden · Show</button>}
-        {INDICATORS.map(([key, label]) => <button key={key} aria-pressed={indicators[key]} onClick={() => toggleIndicator(key)} className={`rounded-full border px-2.5 py-1 text-[10px] ${indicators[key] ? "border-slate-600 bg-slate-800/60 text-slate-200" : "border-slate-800 text-slate-600"}`}>{label}</button>)}
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          <button aria-pressed={settings.linkRange} onClick={() => setSettings((s) => ({ ...s, linkRange: !s.linkRange }))} title="Scroll and zoom every chart to the same time window"
-            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] ${settings.linkRange ? "border-sky-500/50 bg-sky-400/10 text-sky-200" : "border-slate-800 text-slate-500"}`}><Link2 size={11} />Link time ranges</button>
-          {multi && <div role="group" aria-label="Small chart height" className="flex overflow-hidden rounded-full border border-slate-800 text-[10px]">
-            {(["compact", "normal", "tall"] as SmallChartSize[]).map((size) => <button key={size} aria-pressed={settings.smallSize === size} aria-label={`${size} small charts`} onClick={() => setSettings((s) => ({ ...s, smallSize: size }))}
-              className={`px-2 py-1 ${settings.smallSize === size ? "bg-slate-800 text-slate-200" : "text-slate-500"}`}>{size === "compact" ? "S" : size === "normal" ? "M" : "L"}</button>)}
-          </div>}
-        </div>
-      </div>
-
-      {requestFailed && <div role="alert" aria-label="Chart data error" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">{error.message}{current && <span className="ml-1">Showing the last successful data.</span>}</div>}
-      {!!issues.length && <div role="alert" aria-label="Chart data warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">Refresh incomplete. {issues.join(" ")} Check timestamps before using these charts.</div>}
-
-      {!!basisNotes.length && <div role="status" aria-label="Price basis warning" className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-200">{basisNotes.join(" ")}</div>}
-
-      <div className={`grid min-w-0 gap-3 ${showAside ? "lg:grid-cols-[minmax(0,1fr)_230px]" : ""}`}>
-        <div className="min-w-0 space-y-3">
+      <div className={fill ? "flex min-h-0 flex-1" : ""}>
+        {!narrow && <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-slate-700/50 py-1">{tools}</div>}
+        <div data-testid="chart-grid" className={fill ? "flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-y-auto overscroll-contain p-1" : "space-y-2"}>
           {response ? <>
-            {slots.slice(0, 1).map((slot) => <PriceChart key={slot.index} id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={mainHeight}
-              tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
-              selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
-              onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
-              onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
-              history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />)}
-            {multi && <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-              {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 xl:col-span-4" : "min-w-0"}>
+            {/* Desktop: the main chart takes what the smaller row leaves, never less than a usable minimum; below that this area scrolls. Phone full screen: the main chart is the screen, the others below it. */}
+            {slots.slice(0, 1).map((slot) => <div key={slot.index} className={fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px] flex-1" : "min-h-0 flex-1"}` : ""}>
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+                tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
+                selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
+                onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
+                onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
+                history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />
+            </div>)}
+            {multi && <div className="grid min-w-0 shrink-0 grid-cols-1 gap-1 sm:grid-cols-2 lg:grid-cols-4">
+              {slots.slice(1).map((slot) => { const index = slot.index - 1; return <div key={slot.index} className={expanded === index ? "sm:col-span-2 lg:col-span-4" : "min-w-0"}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
                   notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
-                  height={expanded === index ? Math.max(smallHeight, immersive ? Math.round(viewport.height * 0.6) : 420) : smallHeight} expanded={expanded === index}
+                  height={expanded === index ? Math.max(smallHeight, 420) : smallHeight} expanded={expanded === index}
                   onExpand={() => setExpanded((v) => v === index ? null : index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
                   selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === `Panel ${slot.index + 1}`} fresh={fresh} onSelect={select(slot.symbol, `Panel ${slot.index + 1}`)}
                   onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -926,61 +1015,37 @@ export default function ChartWorkspace() {
                   onFocus={() => { setExpanded(null); setSettings((s) => focusPanel(s, slot.index)); }} />
               </div>; })}
             </div>}
-          </> : <div className="flex min-h-[490px] flex-col items-center justify-center rounded-lg border border-slate-700/50 bg-[#10151e] px-8 text-center">
+          </> : <div className={`flex flex-col items-center justify-center rounded-lg border border-slate-700/50 bg-[#10151e] px-8 text-center ${fill ? "min-h-0 flex-1" : "min-h-[490px]"}`}>
             {loading ? <Loader2 className="mb-4 animate-spin text-sky-300" size={28} /> : <ChartCandlestick className="mb-4 text-slate-600" size={36} />}
             <p className="text-sm font-medium text-slate-200">{loading ? `Loading ${settings.symbol} candles…` : "Your chart workspace is ready"}</p>
             <p className="mt-2 max-w-md text-xs leading-6 text-slate-500">{loading ? "Loading shared intraday and daily history from Tradier." : "Charts appear when Tradier market data is available. Your watchlist, intervals, and levels are saved to your workspace on every device."}</p>
           </div>}
-          <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={current ? current.intraday_as_of : undefined} />
         </div>
-
-        {showAside && <aside className="min-w-0 space-y-3">
-          {watchlistShown && <section className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]" aria-label="Watchlist">
-            <div className="flex items-center justify-between border-b border-slate-700/40 px-3 py-3"><h2 className="text-xs font-medium text-slate-200">Watchlist <span className="ml-1 text-slate-500">{settings.watchlist.length}</span></h2>
-              <div className="flex items-center gap-0.5">
-                {([[-1, "Previous", "Shift+Space", ChevronUp], [1, "Next", "Space", ChevronDown]] as const).map(([by, name, key, Icon]) => <button key={name} aria-label={`${name} watchlist symbol`} title={`${name} symbol (${key})`} disabled={!settings.watchlist.length}
-                  onClick={() => { const next = stepWatchlist(settings.watchlist, settings.symbol, by); if (next) chooseSymbol(next); }} className="rounded p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30"><Icon size={14} /></button>)}
-                <button aria-label={`Add ${settings.symbol} to watchlist`} title={`Add ${settings.symbol}`} disabled={settings.watchlist.includes(settings.symbol) || settings.watchlist.length >= 30} onClick={() => setSettings((s) => ({ ...s, watchlist: [...s.watchlist, s.symbol] }))} className="rounded p-1.5 hover:bg-slate-800 disabled:opacity-30"><Plus size={14} /></button>
-              </div></div>
-            <div className="grid grid-cols-[1fr_60px_54px_18px] gap-1 px-3 py-2 text-[9px] uppercase tracking-wider text-slate-600"><span>Symbol</span><span className="text-right">Quote</span><span className="text-right">Chg%</span></div>
-            {settings.watchlist.map((symbol) => {
-              const quote = latest?.quotes.find((q) => q.symbol === symbol);
-              return <div key={symbol} className={`group flex items-center border-l-2 ${settings.symbol === symbol ? "border-sky-400 bg-sky-400/5" : "border-transparent hover:bg-slate-800/50"}`}>
-                <button data-watch-row onKeyDown={watchKey} onClick={() => chooseSymbol(symbol)} aria-label={`Chart ${symbol}`} aria-current={settings.symbol === symbol || undefined} className="grid min-w-0 flex-1 grid-cols-[1fr_60px_54px] items-center gap-1 py-3 pl-2.5 pr-1 text-[11px]"><span className="truncate text-left font-medium text-slate-200">{symbol}</span><span className="text-right font-mono text-slate-400">{price(quote?.last)}</span><span className={`text-right font-mono ${quote?.change_percentage != null && quote.change_percentage < 0 ? "text-rose-400" : "text-emerald-400"}`}>{quote?.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${quote.change_percentage.toFixed(2)}`}</span></button>
-                <button aria-label={`Remove ${symbol} from watchlist`} className="mr-2 rounded p-0.5 text-slate-600 hover:text-rose-300" onClick={() => setSettings((s) => ({ ...s, watchlist: s.watchlist.filter((v) => v !== symbol) }))}><X size={12} /></button>
-              </div>;
-            })}
-            {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
-          </section>}
-          {layersOpen && !narrow && layersPanel(false)}
-
-          {!immersive && <><section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Saved price levels">
-            <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
-              {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className="inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800"><EyeOff size={11} />Hidden · Show</button>
-                : <span className="text-[10px] text-slate-600">{levels.length}/30</span>}</div>
-            {levels.map((level) => <div key={level.id} className={`mb-2 flex items-center gap-2 text-[11px] ${level.hidden ? "opacity-60" : ""}`}><span className="h-px w-3" style={{ background: level.color ?? "#60a5fa" }} /><span className="min-w-0 flex-1 truncate text-slate-400">{level.label}</span>
-              {level.locked && <Lock size={11} className="text-slate-500" aria-label="Locked" />}
-              {level.hidden && <button aria-label={`Show ${level.label}`} title="Hidden on the charts. Show it." onClick={() => editItem(settings.symbol, level.id, { hidden: false })} className="p-1 text-slate-500 hover:text-slate-200"><Eye size={12} /></button>}
-              <span className="font-mono text-blue-300" style={level.color ? { color: level.color } : undefined} title={level.was != null ? `Saved as ${price(level.was)} before a split` : undefined}>{price(level.price)}{level.was != null && <span className="ml-1 text-[10px] text-slate-500">was {price(level.was)}</span>}</span><button aria-label={`Delete ${level.label}`} onClick={() => deleteItem(settings.symbol, level.id)} className="p-1 text-slate-600 hover:text-rose-300"><Trash2 size={12} /></button></div>)}
-            {!levels.length && <p className="mb-3 text-[11px] leading-5 text-slate-500">Save support, resistance, or a price you’re watching.</p>}
-            <form onSubmit={(e) => { e.preventDefault(); addLevel(Number(levelPrice)); }} className="space-y-2">
-              <input aria-label="Level label" placeholder="Label (optional)" value={levelLabel} maxLength={30} onChange={(e) => setLevelLabel(e.target.value)} className="h-8 w-full rounded border border-slate-700 bg-[#10151e] px-2 text-xs outline-none focus:border-sky-600" />
-              <div className="flex gap-2"><input aria-label="Level price" type="number" step="any" min="0.000001" required placeholder="Price" value={levelPrice} onChange={(e) => setLevelPrice(e.target.value)} className="h-8 min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 font-mono text-xs outline-none focus:border-sky-600" /><button type="submit" aria-label="Save price level" className={button}><Plus size={14} /></button></div>
-            </form>
-            {levelError && <p role="alert" className="mt-2 text-[11px] text-amber-300">{levelError}</p>}
-          </section>
-
-          <section className="rounded-lg border border-slate-700/50 bg-[#141b25] p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
-            {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
-          </section></>}
+        {!narrow && dockShown && <aside aria-label="Side panel" className="w-64 shrink-0 overflow-y-auto overscroll-contain border-l border-slate-700/50 bg-[#121924]">
+          {dock.tab === "layers" ? layersPanel(false) : watchlistPanel}
         </aside>}
       </div>
+
+      {/* Provider, freshness, session and price basis stay in view however dense the charts get; attribution too. */}
+      <footer aria-label="Chart status" className={`flex items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 ${fill && !narrow ? "h-6 shrink-0 whitespace-nowrap border-t border-slate-700/50 px-2" : fill ? "shrink-0 flex-wrap border-t border-slate-700/50 px-2 py-1" : "flex-wrap px-1 pt-1"}`}>
+        <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} />
+        {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`shrink-0 rounded px-1.5 py-px ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
+        {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`shrink-0 rounded px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
+          {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
+        <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />
+        <div className={`ml-auto flex items-center gap-x-3 gap-y-1 ${fill && !narrow ? "shrink-0" : "min-w-0 flex-wrap"}`}>
+          <span role="status" aria-label="Chart settings" className={`flex items-center gap-1 ${sync === "offline" || merged ? "text-amber-300" : ""}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
+          {!narrow && <ToolbarMenu label="About chart data" above align="right" title="About this data" className={`${plain(false)} h-5 w-5`} content={() => about}>
+            <Info size={12} aria-hidden /><span className="sr-only">About chart data</span></ToolbarMenu>}
+          {!narrow && attribution}
+        </div>
+      </footer>
 
       {palette !== null && <SymbolPalette current={palette ? slots.find((slot) => slot.index === palette)?.symbol ?? symbol : symbol} recent={settings.recent} watchlist={settings.watchlist} quotes={latest?.quotes ?? []}
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
-      {layersOpen && narrow && layersPanel(true)}
+      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
@@ -992,10 +1057,6 @@ export default function ChartWorkspace() {
       </div>}
       {layoutMenu && <LayoutMenu layouts={settings.layouts} current={arrangementOf(settings)} onApply={chooseLayout} onSave={saveLayout} onRename={renameLayout}
         onUpdate={updateLayout} onDelete={deleteLayout} onClose={() => setLayoutMenu(false)} />}
-      {!immersive && <footer className="flex flex-wrap items-start justify-between gap-3 border-t border-slate-800 pt-3 text-[10px] leading-5 text-slate-600">
-        <p className="max-w-3xl">{latest?.history_note ?? "US stock and ETF charts powered by Tradier."} RTH VWAP uses minute HLC3 and resets at 9:30 ET. Live trade prices update candles while connected; volume and studies reconcile from Tradier every 15 seconds. Watchlist quotes may show the regular close after hours.</p>
-        <div className="text-right"><a href="https://www.tradingview.com/" target="_blank" rel="noreferrer" className="text-slate-500 hover:text-slate-300">TradingView Lightweight Charts™</a><a href="/lightweight-charts-NOTICE.txt" className="block">Copyright (с) 2025 TradingView, Inc.</a></div>
-      </footer>}
     </div>
   );
 }

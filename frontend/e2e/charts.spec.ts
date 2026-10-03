@@ -65,7 +65,7 @@ test("five charts render, symbols link, and levels survive reload", async ({ pag
   page.on("pageerror", (error) => errors.push(error.message));
   await stub(page);
   await page.goto("/charts");
-  await expect(page.getByRole("heading", { name: "Charts", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Charts", exact: true })).toHaveCount(1);
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
   await expect(page.getByLabel("Selected symbol quote")).toContainText("262.66");
@@ -81,8 +81,9 @@ test("five charts render, symbols link, and levels survive reload", async ({ pag
   await expect(page.getByRole("region", { name: "Saved price levels" })).not.toContainText("Breakout");
   await page.getByRole("button", { name: "Chart MRVL", exact: true }).click();
   await expect(page.getByRole("region", { name: "Saved price levels" })).toContainText("Breakout");
-  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
-  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
+  await (await indicator(page, "RSI 14")).click();
+  await (await indicator(page, "RSI 14")).click();
+  await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "Focus 1h chart" }).click();
   await expect(page.getByLabel("Main interval", { exact: true })).toHaveValue("1h");
   await page.screenshot({ path: "/tmp/tradejournal-charts-desktop.png", fullPage: true });
@@ -250,7 +251,10 @@ test("VWAP draws inside the session without painting through an extended-hours g
   const clip = { x: Math.floor(bounds.x + (bounds.width - 66) * 0.45), y: Math.floor(bounds.y + 10), width: 40, height: 260 };
   const gapWithVwap = await page.screenshot({ clip, path: test.info().outputPath("gap-vwap-on.png") });
   const chartWithVwap = await canvas.screenshot({ path: test.info().outputPath("chart-vwap-on.png") });
-  await page.getByRole("button", { name: "RTH VWAP", exact: true }).click();
+  await (await indicator(page, "RTH VWAP")).click();
+  await page.keyboard.press("Escape"); // the menu closes before the screenshots
+  await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
+  await page.mouse.move(1, 1); // off the chart, so no crosshair is drawn
   const gapWithoutVwap = await page.screenshot({ clip, path: test.info().outputPath("gap-vwap-off.png") });
   const chartWithoutVwap = await canvas.screenshot({ path: test.info().outputPath("chart-vwap-off.png") });
   expect(gapWithVwap.equals(gapWithoutVwap)).toBe(true);
@@ -546,10 +550,11 @@ test("switching symbol, interval, session and RSI keeps every chart instance and
   // RSI adds and removes its pane on the same chart.
   const panes = () => page.evaluate(() => (window as unknown as KeepAliveWindow).__tjCharts.get("main")!.panes().length);
   expect(await panes()).toBe(2);
-  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
+  await (await indicator(page, "RSI 14")).click();
   await expect.poll(panes).toBe(1);
-  await page.getByRole("button", { name: "RSI 14", exact: true }).click();
+  await (await indicator(page, "RSI 14")).click();
   await expect.poll(panes).toBe(2);
+  await page.keyboard.press("Escape");
 
   // A symbol that fails to load clears the charts rather than leaving another symbol's candles under its name.
   await page.getByLabel("Chart symbol").fill("ZZZZ");
@@ -933,24 +938,29 @@ test("linked time ranges follow the chart being moved, by time, without feedback
   expect(moved).not.toEqual(lead);
 });
 
-test("full-screen mode hides navigation, grows the main chart, and resizes smaller charts", async ({ page }) => {
+test("full-screen mode covers the navigation in the same shell, closes the dock, and resizes smaller charts", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await stub(page);
   await page.goto("/charts");
   const main = page.getByTestId("canvas-main");
   await expect(main).toBeVisible();
-  const normal = (await main.boundingBox())!.height;
+  const normal = (await main.boundingBox())!;
   await page.getByRole("button", { name: "Enter full-screen charts" }).click();
   await expect(page.getByTestId("chart-workspace")).toHaveAttribute("data-immersive", "true");
   // The app navigation sits at the left edge; the workspace now covers it.
   expect(await page.evaluate(() => !!document.elementFromPoint(8, 450)?.closest("[data-testid=chart-workspace]"))).toBe(true);
-  expect((await main.boundingBox())!.height).toBeGreaterThan(normal);
+  await expect(page.getByRole("button", { name: "Exit full-screen charts" })).toBeInViewport();
+  // Full screen keeps its own choice of dock (closed until asked for), so the main chart gains the navigation's and the dock's width.
   await expect(page.getByRole("region", { name: "Watchlist" })).toHaveCount(0);
   await expect(page.getByRole("region", { name: "Saved price levels" })).toHaveCount(0);
+  await expect.poll(async () => (await main.boundingBox())!.width).toBeGreaterThan(normal.width + 250);
+  expect((await main.boundingBox())!.height).toBeGreaterThanOrEqual(normal.height - 1);
   await page.getByRole("button", { name: "Watchlist", exact: true }).click();
   await expect(page.getByRole("region", { name: "Watchlist" })).toBeVisible();
   await page.getByRole("button", { name: "compact small charts" }).click();
   await expect.poll(async () => (await page.getByTestId("canvas-Panel 3").boundingBox())!.height).toBe(160);
+  // The main chart takes the height the smaller charts give up.
+  await expect.poll(async () => (await main.boundingBox())!.height).toBeGreaterThan(normal.height + 60);
   await page.getByRole("button", { name: "Expand 15m chart" }).click();
   await expect.poll(async () => (await page.getByTestId("canvas-Panel 2").boundingBox())!.height).toBeGreaterThan(400);
   await expect.poll(async () => (await page.getByTestId("canvas-Panel 2").boundingBox())!.width).toBeGreaterThan(900);
@@ -976,11 +986,12 @@ test("full-screen mode works on a phone with a reachable exit", async ({ page })
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   expect(await page.getByTestId("chart-workspace").evaluate((el) => el.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-immersive-mobile.png") });
-  // Scrolled down to the smaller charts, the sticky exit stays on screen.
-  await page.getByTestId("chart-workspace").evaluate((el) => el.scrollTo(0, 900));
+  // Scrolled down to the smaller charts (the chart grid scrolls under the toolbar), the exit stays on screen.
+  await page.getByTestId("chart-grid").evaluate((el) => el.scrollTo(0, 900));
+  await expect(page.getByTestId("canvas-Panel 2")).toBeInViewport();
   await expect(exit).toBeInViewport();
   await exit.click();
-  await expect(page.getByRole("heading", { name: "Charts", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open menu" })).toBeVisible(); // the app's phone bar is back
   await expect(page.getByTestId("chart-workspace")).not.toHaveAttribute("data-immersive", "true");
 });
 
@@ -1037,11 +1048,18 @@ test("Cmd/Ctrl+K and the watchlist switch symbols by keyboard and keep timeframe
 
 const levelsPanel = (page: Page) => page.getByRole("region", { name: "Saved price levels" });
 const syncStatus = (page: Page) => page.getByRole("status", { name: "Chart settings" });
+/** Save a level from the watchlist's level form, opening the dock first when it is closed (on a phone, a sheet it then closes). */
 async function addLevel(page: Page, label: string, value: string) {
+  const opened = !(await page.getByLabel("Level label").isVisible());
+  if (opened) await page.getByRole("button", { name: "Watchlist", exact: true }).click();
   await page.getByLabel("Level label").fill(label);
   await page.getByLabel("Level price", { exact: true }).fill(value);
   await page.getByRole("button", { name: "Save price level" }).click();
   await expect(levelsPanel(page)).toContainText(label);
+  if (opened && await page.getByRole("dialog", { name: "Watchlist" }).isVisible()) {
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog", { name: "Watchlist" })).toHaveCount(0);
+  }
 }
 type SavedLevels = { data: { levels?: Record<string, { label: string }[]> } | null; revision: number };
 // The server keeps a field a save leaves out, so starting over saves every shared
@@ -1142,12 +1160,12 @@ for (const outcome of ["arrive", "fail"] as const) {
     await page.goto("/charts");
     await expect(syncStatus(page)).toHaveText("Loading saved settings");
     await expect(levelsPanel(page)).toContainText("Desk level"); // this browser's copy, not the defaults
-    await page.getByRole("button", { name: "EMA 200", exact: true }).click();
+    await (await indicator(page, "EMA 200")).click();
     await addLevel(page, "While loading", "264.00");
     await expect(syncStatus(page)).toHaveText("Loading saved settings"); // both changes made before the server answered
     release();
     await expect(syncStatus(page)).toHaveText(outcome === "arrive" ? "Saved" : "Saved in this browser · server unavailable");
-    await expect(page.getByRole("button", { name: "EMA 200", exact: true })).toHaveAttribute("aria-pressed", "true");
+    await expect(await indicator(page, "EMA 200")).toHaveAttribute("aria-pressed", "true");
     await expect(levelsPanel(page)).toContainText("While loading");
     await expect(levelsPanel(page)).toContainText("Desk level");
     if (outcome === "fail") return;
@@ -1175,12 +1193,12 @@ test("a save refused as stale keeps the other device's change and this one", asy
   await addLevel(page, "Second", "264.00");
   await expect(syncStatus(page)).toHaveText("Merged with changes from another device");
   await expect(levelsPanel(page)).toContainText("Other device");
-  await expect(page.getByRole("button", { name: "EMA 200", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(await indicator(page, "EMA 200")).toHaveAttribute("aria-pressed", "true");
   await expect.poll(() => server.revision).toBe(3);
   expect(server.saves.map((save) => [save.base, save.status])).toEqual([[0, 200], [1, 409], [2, 200]]);
   const levels = (server.data as { levels: Record<string, { label: string }[]> }).levels.MRVL.map((level) => level.label);
   expect(levels).toEqual(["First", "Other device", "Second"]);
-  await page.getByRole("button", { name: "Volume", exact: true }).click();
+  await (await indicator(page, "Volume")).click();
   await expect(syncStatus(page)).toHaveText("Saved");
 });
 
@@ -2024,7 +2042,7 @@ test("typed minutes change the main interval only on Enter; Backspace erases, Es
   // A click elsewhere drops them too, so a later Enter means nothing.
   await page.keyboard.press("5");
   await expect(typed).toHaveText("5m");
-  await page.getByRole("heading", { name: "Charts", exact: true }).click();
+  await clickAway(page);
   await expect(entry).toHaveCount(0);
   await page.keyboard.press("Enter");
   await expect(mainInterval(page)).toHaveValue("1m");
@@ -2230,9 +2248,11 @@ test.describe("phone hotkey equivalents", () => {
     await expect(page.getByRole("button", { name: "Keyboard shortcuts" })).toBeHidden();
     await page.getByRole("button", { name: "1h", exact: true }).tap();
     await expect(mainInterval(page)).toHaveValue("1h");
+    // The watchlist is a sheet on a phone (C7.3).
+    await page.getByRole("button", { name: "Watchlist", exact: true }).tap();
     for (const name of ["Next watchlist symbol", "Previous watchlist symbol"]) {
       const box = (await page.getByRole("button", { name }).boundingBox())!;
-      expect(Math.min(box.width, box.height), name).toBeGreaterThanOrEqual(24);
+      expect(Math.min(box.width, box.height), name).toBeGreaterThanOrEqual(44);
     }
     await page.getByRole("button", { name: "Next watchlist symbol" }).tap();
     await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "NVDA");
@@ -2240,6 +2260,7 @@ test.describe("phone hotkey equivalents", () => {
     await page.getByRole("button", { name: "Previous watchlist symbol" }).tap();
     await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
     await expect(mainInterval(page)).toHaveValue("1h");
+    await page.getByRole("button", { name: "Close watchlist" }).tap();
     await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
     await moveAway(page, "main", { from: 120, to: 180 });
     await page.getByRole("button", { name: "Latest candles main" }).tap();
@@ -2793,13 +2814,15 @@ const chartMenu = (page: Page) => page.getByRole("dialog", { name: "Chart menu" 
 const itemMenu = (page: Page, name: string) => page.getByRole("dialog", { name: `${name} menu` });
 type SavedLevel = { id: string; price: number; label: string; color?: string; hidden?: boolean; locked?: boolean };
 const savedLevels = (server: SettingsStore, symbol = "MRVL") => (server.data?.levels as Record<string, SavedLevel[]> | undefined)?.[symbol] ?? [];
+/** Empty chart space on the main chart: near the top of the candle pane, above every candle and the levels these tests draw (the chart's height follows the window since C7.3). */
+const EMPTY = { x: 300, y: 30 };
 async function rightClick(page: Page, id: string, at: Point) {
   const box = (await drawn(page, id).boundingBox())!;
   await page.mouse.click(box.x + at.x, box.y + at.y, { button: "right" });
 }
 /** Open the chart menu on empty chart space and switch it to Layers. */
 async function openLayers(page: Page) {
-  await rightClick(page, "main", { x: 300, y: 150 });
+  await rightClick(page, "main", EMPTY);
   await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
 }
 const plotWidth = (page: Page) => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { timeScale(): { width(): number } }> }).__tjCharts.get("main")!.timeScale().width());
@@ -2850,7 +2873,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
   await moveAway(page, "main", { from: 120, to: 180 });
   await moveAway(page, "Panel 2", { from: 150, to: 170 });
-  await rightClick(page, "main", { x: 300, y: 150 });
+  await rightClick(page, "main", EMPTY);
   await chartMenu(page).getByRole("menuitem", { name: "Reset chart scale" }).click();
   await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
   expect(await autoScaled(page, "main")).toEqual([true, true]);
@@ -2858,11 +2881,11 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   expect(await autoScaled(page, "Panel 2")).toEqual([false, false]);
 
   // On the price scale there is no price to add or copy; the rest of the menu is there.
-  await rightClick(page, "main", { x: (await plotWidth(page)) + 20, y: 150 });
+  await rightClick(page, "main", { x: (await plotWidth(page)) + 20, y: EMPTY.y });
   await expect(chartMenu(page).getByRole("menuitem", { name: "Reset chart scale" })).toBeVisible();
   await expect(chartMenu(page).getByRole("menuitem", { name: /^(Add level|Copy price)/ })).toHaveCount(0);
   // A click elsewhere closes it, and the browser's own menu never shows over a chart.
-  await page.getByRole("heading", { name: "Charts" }).click();
+  await clickAway(page);
   await expect(chartMenu(page)).toHaveCount(0);
 
   // Layers: hiding My levels takes the level off all five charts, is saved, and survives reload.
@@ -2873,7 +2896,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await expect(levelsShown).toHaveAttribute("aria-checked", "false");
   for (const panel of ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"]) await expect(drawn(page, panel)).toHaveAttribute("data-levels", "");
   await chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume" }).click();
-  await expect(page.getByRole("button", { name: "Volume", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(chartMenu(page).getByRole("menuitemcheckbox", { name: "Volume" })).toHaveAttribute("aria-checked", "false");
   await page.keyboard.press("Escape");
   await expect(chartMenu(page)).toHaveCount(0);
   await expect.poll(() => server.data?.hiddenGroups).toEqual({ levels: true, drawings: false });
@@ -2889,7 +2912,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
 
   // With a tool armed, right-click only puts the tool away.
   await tool(page, "trend line").click();
-  await rightClick(page, "main", { x: 300, y: 150 });
+  await rightClick(page, "main", EMPTY);
   await expect(tool(page, "trend line")).toHaveAttribute("aria-pressed", "false");
   await expect(chartMenu(page)).toHaveCount(0);
 });
@@ -3216,7 +3239,8 @@ test("the layers panel hides, locks and deletes by group and by item, and a clic
   await layerGroup(page, "Indicators").getByRole("button", { name: "Hide Indicators" }).click();
   await expect.poll(() => paneCount(page, "main")).toBe(1);
   await expect(page.getByRole("region", { name: "MRVL 5m chart" })).not.toContainText("EMA9");
-  await expect(page.getByRole("button", { name: "EMA 9", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(await indicator(page, "EMA 9")).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
   await expect(page.getByRole("button", { name: "Indicators hidden · Show" })).toBeVisible();
   await expect.poll(() => server.data?.studiesHidden).toBe(true);
   expect(server.data?.hiddenGroups).toEqual({ levels: false, drawings: false });
@@ -3225,7 +3249,8 @@ test("the layers panel hides, locks and deletes by group and by item, and a clic
   await expect.poll(() => paneCount(page, "main")).toBe(2);
   await expect(page.getByRole("button", { name: "Indicators hidden · Show" })).toHaveCount(0);
   await layerGroup(page, "Journal").getByRole("button", { name: "Hide Journal" }).click();
-  await expect(page.getByRole("button", { name: "My fills", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(await indicator(page, "My fills")).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
   await expect.poll(() => (server.data?.indicators as Record<string, boolean>).fills).toBe(false);
 
   // Delete all asks first; Cancel keeps them, Delete removes them as one undo step that puts them back in order.
@@ -3304,5 +3329,312 @@ test.describe("phone layers panel", () => {
     await page.touchscreen.tap(195, 30);
     await expect(sheet).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  });
+});
+
+// ---- C7.3: a workspace that fills the screen ----
+
+const chartGrid = (page: Page) => page.getByTestId("chart-grid");
+const sidePanel = (page: Page) => page.getByRole("complementary", { name: "Side panel" });
+/** A click on the status strip's plain text: somewhere that is not a chart, a field or a control. */
+const clickAway = (page: Page) => page.locator("footer[aria-label='Chart status']").getByText(/New York time|Last minute candle/).click();
+/** The studies are in the toolbar's Indicators menu; this opens it when it is closed. */
+async function indicator(page: Page, name: string) {
+  const menu = page.getByRole("group", { name: "Chart indicators" });
+  if (!(await menu.isVisible())) await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  return menu.getByRole("button", { name, exact: true });
+}
+/**
+ * The Gmail state the app shows (the e2e backend has no Gmail, so it reports a
+ * disconnected one and the app puts its Reconnect banner above the charts).
+ * Layout measurements pin it, so they measure the workspace itself.
+ */
+const gmail = (page: Page, connected: boolean) => page.route("**/api/backend/gmail/health", (route) => route.fulfill({ json: {
+  status: connected ? "live" : "down", message: connected ? "Live" : "Gmail is disconnected, so new Robinhood fills can't be imported. Reconnect Gmail.",
+  action: connected ? null : "reconnect_gmail", listener_enabled: connected, last_notification_at: null, last_import_at: null, watch_expires_at: null, data_version: "e2e" } }));
+/** The page's scroll size, the window, and the chart grid's box and scroll height. */
+const fit = (page: Page) => page.evaluate(() => {
+  const grid = document.querySelector<HTMLElement>("[data-testid=chart-grid]")!;
+  const box = grid.getBoundingClientRect();
+  return { pageHeight: document.documentElement.scrollHeight, pageWidth: document.documentElement.scrollWidth, width: innerWidth, height: innerHeight,
+    grid: { top: box.top, bottom: box.bottom, width: Math.round(box.width), height: Math.round(box.height), scrolls: grid.scrollHeight > grid.clientHeight + 1 } };
+});
+
+for (const [width, height] of [[1440, 900], [1920, 1080]] as const) {
+  test(`at ${width}×${height} the five charts fill the window without page scrolling, with the dock open or closed`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await gmail(page, true);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+    await expect(sidePanel(page)).toBeVisible(); // a desktop opens with the watchlist docked
+    for (const docked of [true, false]) {
+      if (!docked) {
+        await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+        await expect(sidePanel(page)).toHaveCount(0);
+      }
+      await expect.poll(async () => (await fit(page)).grid.width).toBeGreaterThan(docked ? width * 0.7 : width * 0.9);
+      const at = await fit(page);
+      expect(at.pageHeight, "no page scrolling").toBeLessThanOrEqual(height);
+      expect(at.pageWidth, "no sideways scrolling").toBeLessThanOrEqual(width);
+      expect(at.grid.scrolls, "all five charts in view").toBe(false);
+      for (const id of ALL_PANELS) expect((await drawn(page, id).boundingBox())!.y + (await drawn(page, id).boundingBox())!.height).toBeLessThanOrEqual(at.grid.bottom + 1);
+      if (!docked) {
+        // The grid, with its panel headers, scales and study panes, is most of the window.
+        expect(at.grid.height).toBeGreaterThanOrEqual(height * 0.8);
+        expect(at.grid.width).toBeGreaterThanOrEqual(width * 0.9);
+      }
+      test.info().annotations.push({ type: "layout", description: `${width}×${height} dock ${docked ? "open" : "closed"}: grid ${at.grid.width}×${at.grid.height}, main canvas ${JSON.stringify(await drawn(page, "main").boundingBox())}` });
+      await page.screenshot({ path: test.info().outputPath(`workspace-${width}x${height}-dock-${docked ? "open" : "closed"}.png`) });
+    }
+  });
+}
+
+test("at 1280×720 the main chart keeps a usable height, taller smaller charts scroll inside the grid, and Focus gives one chart all of it", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await gmail(page, true);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  let at = await fit(page);
+  expect(at.pageHeight).toBeLessThanOrEqual(720);
+  expect(at.pageWidth).toBeLessThanOrEqual(1280);
+  expect(at.grid.scrolls).toBe(false); // five charts fit at the default height
+  expect((await drawn(page, "main").boundingBox())!.height).toBeGreaterThanOrEqual(230);
+  await page.screenshot({ path: test.info().outputPath("workspace-1280x720.png") });
+  // Taller smaller charts would crush the main chart: it keeps its minimum and the grid scrolls instead, never the page.
+  await page.getByRole("button", { name: "tall small charts" }).click();
+  await expect.poll(async () => (await drawn(page, "Panel 3").boundingBox())!.height).toBe(360);
+  at = await fit(page);
+  expect(at.grid.scrolls).toBe(true);
+  expect(at.pageHeight).toBeLessThanOrEqual(720);
+  expect((await drawn(page, "main").boundingBox())!.height).toBeGreaterThanOrEqual(230);
+  await page.screenshot({ path: test.info().outputPath("workspace-1280x720-tall.png") });
+  await chartGrid(page).evaluate((el) => el.scrollTo(0, el.scrollHeight));
+  await expect(drawn(page, "Panel 3")).toBeInViewport({ ratio: 1 });
+  expect((await fit(page)).pageHeight).toBeLessThanOrEqual(720);
+  await page.getByRole("button", { name: "Show single chart" }).click();
+  await expect.poll(async () => (await drawn(page, "main").boundingBox())!.height).toBeGreaterThan(500);
+  expect((await fit(page)).grid.scrolls).toBe(false);
+  await page.screenshot({ path: test.info().outputPath("workspace-1280x720-focus.png") });
+});
+
+test("a Gmail warning stays above the charts with its Reconnect button, and the page still does not scroll", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await gmail(page, false);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
+  const reconnect = page.getByRole("button", { name: "Reconnect Gmail" });
+  await expect(reconnect).toBeInViewport({ ratio: 1 });
+  const banner = (await page.getByRole("alert").filter({ has: reconnect }).boundingBox())!;
+  expect(banner.y + banner.height).toBeLessThanOrEqual((await page.locator("header[aria-label='Chart toolbar']").boundingBox())!.y);
+  const at = await fit(page);
+  expect(at.pageHeight).toBeLessThanOrEqual(720); // the charts give up the banner's height; the grid scrolls if it must
+  expect(at.pageWidth).toBeLessThanOrEqual(1280);
+  expect((await drawn(page, "main").boundingBox())!.height).toBeGreaterThanOrEqual(230);
+});
+
+test("on the charts page the journal navigation is a rail that expands and is remembered; other pages keep the sidebar", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main").locator("canvas").first()).toBeVisible();
+  const rail = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Expand navigation" }) });
+  expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(48);
+  // Every page is still a named link, the current one marked, with sync status and the Sync drawer reachable.
+  for (const name of ["Dashboard", "Daily Review", "Trades", "Analytics", "Fills", "Signals", "Strategy Lab", "Research"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  await expect(rail.getByRole("link", { name: "Charts", exact: true })).toHaveAttribute("aria-current", "page");
+  await expect(rail.getByTitle("Sync & enrichment status")).toBeVisible();
+  const narrow = (await drawn(page, "main").boundingBox())!.width;
+  await rail.getByRole("button", { name: "Expand navigation" }).click();
+  await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
+  await expect.poll(async () => (await drawn(page, "main").boundingBox())!.width).toBeLessThan(narrow - 150);
+  expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1440);
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
+  await expect(rail).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Expand navigation" })).toBeVisible();
+  // Other pages keep the full sidebar.
+  await rail.getByRole("link", { name: "Fills", exact: true }).click();
+  await expect(page).toHaveURL(/\/fills$/);
+  await expect(page.getByRole("button", { name: "Expand navigation" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeVisible();
+});
+
+test("dock, navigation and window resizes keep every chart, the selection, the scrolled-back view and the live stream, with no new requests", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const server = await fakeChartSettings(context);
+  await registerCharts(page);
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    const win = window as typeof window & { __streams: number; __chartTick?: (value: unknown) => void };
+    win.__streams = 0;
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      closed = false;
+      constructor() { win.__streams++; MockEventSource.current = this; queueMicrotask(() => this.emit("status", { state: "connected" })); }
+      addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
+      emit(type: string, value: unknown) { if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+      close() { this.closed = true; }
+    }
+    win.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+  const requests: number[] = [];
+  await stub(page, () => { requests.push(Date.now()); });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await addLevel(page, "Pivot", "250.00");
+  await expect.poll(() => savedLevels(server).length).toBe(1);
+  const pivot = savedLevels(server)[0].id;
+  await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+  await moveAway(page, "main", { from: 100, to: 160 });
+  await page.evaluate(() => { for (const [id, chart] of (window as unknown as { __tjCharts: Map<string, Record<string, unknown>> }).__tjCharts) chart.__was = id; });
+  const streams = await page.evaluate(() => (window as unknown as { __streams: number }).__streams);
+  const started = Date.now();
+  const before = requests.length;
+  const unchanged = async (step: string) => {
+    await page.waitForTimeout(250);
+    expect(await page.evaluate(() => [...(window as unknown as { __tjCharts: Map<string, Record<string, unknown>> }).__tjCharts].map(([id, chart]) => chart.__was === id)), `${step}: same chart instances`).toEqual([true, true, true, true, true]);
+    await expect(drawn(page, "main"), `${step}: still selected`).toHaveAttribute("data-selected", pivot);
+    expect((await roundedRange(page, "main"))!.to, `${step}: still scrolled back`).toBe(160);
+    expect(await page.evaluate(() => (window as unknown as { __streams: number }).__streams), `${step}: same stream`).toBe(streams);
+    // Only the regular 15-second refresh may have run meanwhile.
+    expect(requests.length - before, `${step}: no new requests`).toBeLessThanOrEqual(Math.floor((Date.now() - started) / 15_000));
+  };
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await expect(sidePanel(page)).toHaveCount(0);
+  await unchanged("dock closed");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Layers" })).toBeVisible();
+  await unchanged("layers docked");
+  await page.getByRole("button", { name: "Expand navigation" }).click();
+  await unchanged("navigation expanded");
+  await page.getByRole("button", { name: "Collapse navigation" }).click();
+  await page.setViewportSize({ width: 1180, height: 760 });
+  await unchanged("window shrunk");
+  await page.setViewportSize({ width: 1700, height: 1000 });
+  await unchanged("window grown");
+  await page.getByRole("button", { name: "Enter full-screen charts" }).click();
+  await unchanged("full screen");
+  await page.keyboard.press("Escape"); // drops the selection first
+  await expect(drawn(page, "main")).not.toHaveAttribute("data-selected", pivot);
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("chart-workspace")).not.toHaveAttribute("data-immersive", "true");
+
+  // The charts still work after all that: a streamed trade moves the quote, a drag moves the level.
+  const at = Math.floor(Date.now() / 1000) + 2;
+  await page.evaluate((tick) => (window as unknown as { __chartTick: (value: unknown) => void }).__chartTick(tick),
+    { type: "tick", symbol: "MRVL", at, minute: Math.floor(at / 60) * 60, session: "post", price: 281.5, open: 281.5, high: 281.5, low: 281.5,
+      buckets: { "5m": { time: Math.floor(at / 300) * 300, end_time: Math.floor(at / 300) * 300 + 300, extended: true } } });
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("281.50");
+  await page.keyboard.press("Alt+r");
+  await expect.poll(async () => (await roundedRange(page, "main"))?.to).toBeGreaterThanOrEqual(244); // the trade opened a newer candle
+  await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
+  await mouseDrag(page, "main", await levelY(page, "main", 250), await levelY(page, "main", 252));
+  await expect.poll(() => savedLevels(server)[0].price).toBeGreaterThan(251);
+});
+
+test("the toolbar fits a 1024px window, its menus close on Escape before anything else, and Tab runs toolbar, tools, charts, dock", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main").locator("canvas").first()).toBeVisible();
+  const toolbar = page.locator("header[aria-label='Chart toolbar']");
+  expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
+  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers"]) {
+    const control = name === "Chart symbol" ? page.getByLabel(name) : page.getByRole("button", { name, exact: name !== "Layouts" });
+    await expect(control.first(), name).toBeInViewport();
+  }
+  await page.screenshot({ path: test.info().outputPath("toolbar-1024.png") });
+
+  // The Indicators menu: toggles keep their pressed state; Escape closes it before it puts a tool away.
+  await tool(page, "trend line").click();
+  const rsi = await indicator(page, "RSI 14");
+  await expect(rsi).toHaveAttribute("aria-pressed", "true");
+  await rsi.click();
+  await expect(rsi).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Indicators", exact: true })).toBeFocused();
+  await expect(tool(page, "trend line")).toHaveAttribute("aria-pressed", "true");
+  await page.keyboard.press("Escape");
+  await expect(tool(page, "trend line")).toHaveAttribute("aria-pressed", "false");
+  // A press outside closes it too.
+  await indicator(page, "RSI 14");
+  await clickAway(page);
+  await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
+
+  // Focus order: the toolbar's last control, then the tool rail, then the charts, with the dock last.
+  await page.getByRole("button", { name: "Layers", exact: true }).focus();
+  await page.keyboard.press("Tab");
+  await expect(tool(page, "price level")).toBeFocused(); // Undo and Redo are disabled, so the first tool is next
+  await page.getByRole("button", { name: "Magnet" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(mainInterval(page)).toBeFocused();
+  // Past the last chart (each chart's own attribution link takes a stop), the dock is next.
+  await page.getByRole("button", { name: "Focus 1m chart" }).focus();
+  for (let stops = 0; stops < 4 && await page.evaluate(() => !!document.activeElement?.closest("[data-testid=chart-grid]")); stops++) await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Previous watchlist symbol" })).toBeFocused();
+});
+
+test.describe("phone workspace", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("toolbar controls are 44px, the dock is a sheet over the chart, and nothing scrolls sideways", async ({ page }) => {
+    await stub(page);
+    await page.goto("/charts");
+    await expect(drawn(page, "main").locator("canvas").first()).toBeVisible();
+    const toolbar = page.locator("header[aria-label='Chart toolbar']");
+    for (const target of await toolbar.getByRole("button").all()) {
+      if (!(await target.isVisible())) continue;
+      const size = (await target.boundingBox())!;
+      expect(Math.min(size.width, size.height), (await target.getAttribute("aria-label")) ?? (await target.textContent())!).toBeGreaterThanOrEqual(44);
+    }
+    expect((await fit(page)).pageWidth).toBeLessThanOrEqual(390);
+    const canvas = (await drawn(page, "main").boundingBox())!;
+    expect(canvas.height).toBeGreaterThanOrEqual(400);
+    await page.screenshot({ path: test.info().outputPath("phone-toolbar.png"), fullPage: true });
+
+    // The secondary controls, the data note and the library's attribution wait in the More menu.
+    await page.getByRole("button", { name: "More chart controls" }).tap();
+    const more = page.getByRole("group", { name: "More chart controls" });
+    for (const name of ["Link time ranges", "Pause chart updates", "Refresh charts", "compact small charts"]) await expect(more.getByRole("button", { name })).toBeInViewport();
+    await expect(more.getByRole("link", { name: "TradingView Lightweight Charts™" })).toBeInViewport();
+    expect((await fit(page)).pageWidth).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("phone-more-menu.png") });
+    await page.keyboard.press("Escape");
+    await expect(more).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Watchlist", exact: true }).tap();
+    const sheet = page.getByRole("dialog", { name: "Watchlist" });
+    await expect(sheet).toBeVisible();
+    const box = (await sheet.boundingBox())!;
+    expect(box.width).toBeGreaterThanOrEqual(389);
+    expect(Math.abs(box.y + box.height - 844)).toBeLessThan(2);
+    for (const target of await sheet.getByRole("button").all()) {
+      const size = (await target.boundingBox())!;
+      expect(size.height, (await target.getAttribute("aria-label")) ?? (await target.textContent())!).toBeGreaterThanOrEqual(44);
+    }
+    expect((await drawn(page, "main").boundingBox())!.height).toBe(canvas.height); // over the chart, not squeezing it
+    await page.screenshot({ path: test.info().outputPath("phone-watchlist-sheet.png") });
+    await sheet.getByRole("button", { name: "Next watchlist symbol" }).tap();
+    await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "NVDA");
+    await expect(sheet).toBeVisible(); // stepping keeps it open
+    await sheet.getByRole("button", { name: "Chart AMD", exact: true }).tap();
+    await expect(sheet).toHaveCount(0); // charting a row shows the chart
+    await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "AMD");
+    await page.getByRole("button", { name: "Watchlist", exact: true }).tap();
+    await page.keyboard.press("Escape");
+    await expect(sheet).toHaveCount(0);
+    await page.getByRole("button", { name: "Watchlist", exact: true }).tap();
+    await page.touchscreen.tap(195, 30);
+    await expect(sheet).toHaveCount(0);
+    expect((await fit(page)).pageWidth).toBeLessThanOrEqual(390);
   });
 });
