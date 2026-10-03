@@ -167,6 +167,14 @@ The browser clock is advanced rather than waiting 30 seconds per poll. This
 proves rendering and private reads; it does not exercise TradingView delivery
 or a live Alpaca verdict.
 
+`frontend/e2e/symbol-info.spec.ts` reads the real journal endpoint against
+`seed_dev_data.py`'s disposable data, with only market charts/settings stubbed.
+It covers completed/expired results, separate accounts' open trades, record
+links, empty symbols, remembered placeholder tabs, debouncing, late-response
+rejection, failure/retry and the collapsed 390 px layout. It makes no claim
+about live provider feeds. `backend/tests/test_symbol_info.py` covers missing
+results, zero-duration holds, recent-record limits and the two-query adapter.
+
 `frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
 quote responses: five canvases, symbol linking, saved levels, streamed trade updates,
 refresh visibility, pause/error behavior, phone overflow, the next-bar countdown
