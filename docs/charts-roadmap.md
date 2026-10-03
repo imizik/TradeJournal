@@ -80,8 +80,8 @@ C1.2, C1.3 and C1.4**, before automatic overlays. This update plans future work 
 | C1.2 | Tools: horizontal ray, trendline, rectangle zone, text note; magnet to OHLC | 1 Direct manipulation | done ([PR #111](https://github.com/imizik/TradeJournal/pull/111)) |
 | C1.3 | Right-click (long-press on phone) context menu for chart, level and drawing | 1 Direct manipulation | done ([PR #112](https://github.com/imizik/TradeJournal/pull/112)) |
 | C1.4 | Layers panel: show, hide, lock and delete by group | 1 Direct manipulation | done ([PR #113](https://github.com/imizik/TradeJournal/pull/113)) |
-| C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | next |
-| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | todo |
+| C7.3 | Viewport-filling chart workspace: compact controls, collapsible navigation and side dock | 7 Layouts | done ([PR #116](https://github.com/imizik/TradeJournal/pull/116)) |
+| C7.4 | Resizable chart grid and side dock; maximize any panel and restore saved proportions | 7 Layouts | next |
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | todo |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | todo |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | todo |
@@ -725,7 +725,7 @@ variable panel count is not part of it. The main symbol, levels, watchlist,
 session and indicators stay workspace-wide, and switching changes the shared
 intervals and held symbols, so the other device's panels follow.
 
-**C7.3 Viewport-filling chart workspace (planned).** Make `/charts` use the
+**C7.3 Viewport-filling chart workspace (done in PR #116).** Make `/charts` use the
 available browser content area in ordinary use, like the supplied TradingView
 view: a compact top toolbar, narrow tool rail, chart grid and optional right
 dock. Keep the existing one-large-plus-four-small arrangement and single-chart
@@ -781,6 +781,23 @@ Implementation plan:
   entry/exit. Resizing/toggling preserves instances, drawings, selection,
   scroll-back position and live updates; it creates no extra data fetches or
   stream connections. Existing drawing, hotkey and phone regressions pass.
+
+As built (`docs/charts-workspace.md` has the detail): the shell applies from
+1024px wide; below that the page scrolls as before, with 44px controls, the
+drawing tools as a toolbar row, a **More chart controls** menu for the
+secondary controls, the data note and the attribution, and the dock as a
+bottom sheet. The dock shows one panel at a time; its tabs (**Watchlist**,
+**Layers**) are the toolbar's last buttons rather than a separate right rail,
+which keeps the closed-dock grid above 90% of a 1440px window. The watchlist
+tab carries the main symbol's levels form and latest fills under the list,
+where the [symbol info panel](symbol-info-roadmap.md) can join it. Dock state
+and navigation collapse are per device; full screen keeps the shared
+`immersiveWatchlist` as its own dock choice until C7.4 moves it to local view
+state. The studies became an **Indicators** menu. The main chart's minimum is
+320px; the smaller charts keep their S/M/L heights until C7.4's dividers
+replace them. The desktop toolbar wraps to a second row below about 1280px
+instead of collapsing into an overflow menu. Browser fullscreen (the
+Fullscreen API) is not used.
 
 **C7.4 Resizable chart grid and dock (planned).** Let the user distribute space
 within C7.3's shell: drag the main/lower-row divider, the dividers between the

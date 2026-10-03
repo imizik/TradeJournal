@@ -108,7 +108,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   pending?: string | null;
   /** A limitation of what this chart shows, such as capped fill markers. */
   notice?: string | null;
-  link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed; height: number;
+  link: CrosshairLink; rangeLink: RangeLink; linkRange?: boolean; clock: ClockFeed;
+  /** The canvas height. Without one the chart fills the box it is placed in (C7.3), and follows that box as it resizes. */
+  height?: number;
   /** Alt+R and End from the workspace: every chart moves its own view. */
   commands: ChartCommands;
   main?: boolean; expanded?: boolean;
@@ -680,8 +682,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   return (
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
-    <section aria-label={`${symbol} ${interval} chart`} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
-      <div className="flex h-10 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
+    <section aria-label={`${symbol} ${interval} chart`} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
+      <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
         <div className="flex items-center gap-2 text-xs">{onPickSymbol
           ? <button aria-label={`${id} symbol`} title={follows ? "Follows the main symbol. Choose a symbol for this chart." : "Holds its own symbol. Change it, or follow the main symbol."} onClick={onPickSymbol}
             className={`-ml-1 inline-flex items-center gap-1 rounded px-1 py-0.5 font-semibold tracking-wide hover:bg-slate-800 ${follows ? "text-slate-200" : "text-sky-200"}`}>
@@ -699,26 +701,26 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
         </div>
       </div>
-      <div className="flex h-6 min-w-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
+      <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
         {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && <span>Vol {bar.volumePending ? "pending" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume)}</span>}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span></> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
       </div>
-      {main && <div className="flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
+      {main && <div className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
         {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
       </div>}
-      <div className="relative">
-        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={{ height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+      <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
+        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>
-      {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote || history.adjustmentNote || (history.exhausted && history.historyStart)) && <div className="flex items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
+      {history && (history.loading || history.issue || history.warmup === "insufficient" || history.calendarNote || history.adjustmentNote || (history.exhausted && history.historyStart)) && <div className="flex shrink-0 items-center gap-2 px-3 py-1 text-[10px] text-amber-300" role="status">
         {history.loading ? "Loading older candles and indicator warmup…" : history.issue ? history.issue : history.warmup === "insufficient" ? "Earlier indicator history is insufficient." : [history.exhausted && history.historyStart ? `Tradier daily history starts ${history.historyStart}.` : null, history.calendarNote, history.adjustmentNote].filter(Boolean).join(" ")}
         {history.issue && <button className="underline" onClick={onRetryHistory}>Retry history</button>}
       </div>}
-      {notice && !pending && <p className="px-3 py-1 text-[10px] text-amber-300">{notice}</p>}
+      {notice && !pending && <p className="shrink-0 px-3 py-1 text-[10px] text-amber-300">{notice}</p>}
       {pending ? <div role="status" className="pointer-events-none absolute inset-x-0 top-1/2 flex -translate-y-1/2 justify-center"><span className="rounded-md border border-slate-700/60 bg-[#10151e]/90 px-3 py-1.5 text-sm text-slate-200">{pending}</span></div>
         : !panel?.bars.length && <div className="pointer-events-none absolute inset-x-0 top-1/2 text-center text-sm text-slate-500">No candles available</div>}
       {tool && <div role="status" aria-label="Drawing tool" className="pointer-events-none absolute left-3 top-24 rounded bg-blue-500/90 px-3 py-1.5 text-xs text-white">{(second && SECOND_TEXT[tool]) || PLACE_TEXT[tool]}</div>}

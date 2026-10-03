@@ -38,6 +38,9 @@ test("You renders seeded completed results, account-separated open trades and an
   await expect(tradeLink).toHaveAttribute("href", /\/trades\/[0-9a-f-]+$/);
   await expect(info).toContainText("No open positions");
   expect(reads).toHaveLength(1);
+  // Dense journal content scrolls inside the dock, preserving C7.3's shell.
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: "/tmp/tradejournal-symbol-info-desktop.png", fullPage: true });
   await choose(page, "AAPL");
   await expect(info).toContainText("Open positions · 2 trades");
@@ -114,24 +117,38 @@ test("a late result from the previous symbol cannot overwrite the current journa
   await expect(panel(page)).toContainText("Open positions · 2 trades");
 });
 
-test("390px starts collapsed, expands cleanly, and follows watchlist visibility in immersive mode", async ({ page }) => {
+test("390px opens collapsed inside the watchlist sheet and follows its visibility in immersive mode", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const reads: string[] = [];
   page.on("request", (request) => { if (/\/charts\/symbol\//.test(request.url())) reads.push(request.url()); });
   await page.goto("/charts");
   const info = panel(page);
+  await expect(info).toHaveCount(0);
+  expect(reads).toHaveLength(0);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const canvasHeight = (await page.getByTestId("canvas-main").boundingBox())!.height;
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Watchlist", exact: true });
+  await expect(sheet).toBeVisible();
   const disclosure = info.getByRole("button", { name: "NVDA symbol info" });
   await expect(disclosure).toHaveAttribute("aria-expanded", "false");
   expect(reads).toHaveLength(0);
   await disclosure.click();
   await expect(info.locator("dl")).toContainText("$1,300.00");
+  expect((await page.getByTestId("canvas-main").boundingBox())!.height).toBe(canvasHeight);
   await expect(info.getByRole("tab", { name: "Overview", exact: true })).toBeVisible();
+  for (const target of await info.getByRole("button").all()) {
+    expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: "/tmp/tradejournal-symbol-info-phone.png", fullPage: true });
+  await sheet.getByRole("button", { name: "Close watchlist" }).click();
+  await expect(info).toHaveCount(0);
   await page.getByRole("button", { name: "Enter full-screen charts" }).click();
   await expect(info).toHaveCount(0);
   await page.getByRole("button", { name: "Watchlist", exact: true }).click();
   await expect(info).toBeVisible();
   await expect(info.getByRole("button", { name: "NVDA symbol info" })).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("dialog", { name: "Watchlist", exact: true }).getByRole("button", { name: "Close watchlist" }).click();
   await page.getByRole("button", { name: "Exit full-screen charts" }).click();
 });

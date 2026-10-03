@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, LockOpen, Trash2, X } from "lucide-react";
+import Sheet from "./Sheet";
 
 /** One level or drawing in the panel. `name` and `detail` ("Breakout", "256.00") name its buttons. */
 export type LayerItem = { id: string; symbol: string; name: string; detail: string; color: string; line: boolean; hidden: boolean; locked: boolean };
@@ -23,7 +23,7 @@ function readCollapsed(): string[] {
  * Drawings, Journal and Indicators. Every group hides on all five charts;
  * levels and drawings also lock and delete as a group (one undo step) and
  * item by item, and a click on an item brings the chart to it. Groups fold
- * (remembered on this device). A section beside the charts on a desktop; a
+ * (remembered on this device). A tab of the side dock on a desktop (C7.3); a
  * bottom sheet with 44px targets on a phone. Auto levels and options join
  * when their layers exist (C2.3, C4.4).
  */
@@ -35,20 +35,11 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
 }) {
   const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
   const [confirming, setConfirming] = useState<ItemGroup | null>(null);
-  const panel = useRef<HTMLDivElement>(null);
   const fold = (key: string) => setCollapsed((keys) => {
     const next = keys.includes(key) ? keys.filter((other) => other !== key) : [...keys, key];
     try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch { /* folding still works for this visit */ }
     return next;
   });
-  useEffect(() => {
-    if (!sheet) return;
-    panel.current?.focus({ preventScroll: true });
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); onClose(); } };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [sheet, onClose]);
-
   const size = sheet ? "h-11 w-11" : "h-6 w-6";
   const icon = sheet ? 16 : 12;
   const button = `inline-flex ${size} shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200 disabled:opacity-30 disabled:hover:bg-transparent`;
@@ -124,12 +115,6 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
     })}
   </>;
 
-  if (sheet) return createPortal(<div className="fixed inset-0 z-[80] flex items-end bg-black/60" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-    <div ref={panel} role="dialog" aria-modal="true" aria-label="Layers" tabIndex={-1}
-      className="max-h-[75vh] w-full overflow-y-auto overscroll-contain rounded-t-xl border-t border-slate-600 bg-[#121924] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-2xl outline-none">
-      <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-slate-600" aria-hidden />
-      {body}
-    </div>
-  </div>, document.body);
-  return <section aria-label="Layers" className="overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">{body}</section>;
+  if (sheet) return <Sheet label="Layers" onClose={onClose}>{body}</Sheet>;
+  return <section aria-label="Layers">{body}</section>;
 }
