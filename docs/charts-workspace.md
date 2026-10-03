@@ -23,7 +23,8 @@ and [attribution instructions](https://github.com/tradingview/lightweight-charts
 
 Preserve the upstream notices and license. The current source enables
 `attributionLogo` in `PriceChart.tsx`, links TradingView and its notice in the
-workspace footer, and ships `frontend/public/lightweight-charts-NOTICE.txt`
+workspace's status strip (in the toolbar's More menu on a phone, in full screen
+too), and ships `frontend/public/lightweight-charts-NOTICE.txt`
 and `frontend/public/lightweight-charts-LICENSE.txt`. Keep attribution available
 in full screen and on phone layouts when those views change.
 
@@ -73,6 +74,43 @@ cd backend
 ## Implemented behavior
 
 - One main chart and four smaller linked charts, or one focused chart.
+- **Workspace shell (C7.3).** On a screen at least 1024px wide `/charts` fills
+  the browser window like TradingView: no page padding and no page scrolling.
+  The journal navigation is an icon rail (`frontend/components/Nav.tsx`; each
+  page a named link with a tooltip, sync state and the Sync drawer at the
+  bottom) that **Expand navigation** widens to the full sidebar, remembered on
+  the device; other pages keep the sidebar and their padding
+  (`frontend/components/AppMain.tsx`), and an actionable Gmail banner still
+  sits above the charts. One toolbar row holds the symbol field, the quote,
+  the main chart's intervals, the session, **Indicators** (a menu of the
+  studies and fill arrows), **Layouts**, Focus, **Link time ranges**, the
+  small-chart height, pause, refresh, shortcuts, full screen, and the dock's
+  two tabs, **Watchlist** and **Layers**; below about 1280px it wraps to a
+  second row rather than hiding anything. Undo, redo and the drawing tools
+  are a slim rail left of the charts. The dock on the right shows one panel at
+  a time: the watchlist with the main symbol's levels and latest fills under
+  it, or the layers panel. Pressing the open tab's button closes the dock;
+  whether it is open, and on which tab, is remembered on the device (a device
+  that had left the C1.4 layers panel open opens it on Layers). A status strip
+  at the foot keeps the feed state, holiday or early-close label, price basis,
+  the newest minute candle and the shown price's age, the settings save state,
+  an **About chart data** note and the Lightweight Charts attribution in view
+  however dense the charts get; data warnings sit as one-line banners under
+  the toolbar. The charts are sized by the browser from the space left (CSS
+  flex and each chart's `autoSize`), not from a viewport estimate: the smaller
+  charts keep their S/M/L height and the main chart takes the rest, never
+  less than 320px tall. When that does not fit (1280×720 with tall smaller
+  charts) the chart grid scrolls inside itself and the page never does; Focus
+  gives one chart the whole grid. Opening and closing the dock or the
+  navigation and resizing the window keep every chart instance, the selection,
+  a scrolled-back view and the stream, and fetch nothing. The Indicators menu
+  is not modal (hotkeys keep working); Escape closes it before it puts a tool
+  away or leaves full screen. Below 1024px the page scrolls as before: the
+  toolbar wraps into rows of 44px controls (the intervals scroll sideways in
+  theirs), the drawing tools are a toolbar row, the link, height, pause,
+  refresh and shortcut controls, the data note and the attribution move into
+  a **More chart controls** menu, and the dock is a bottom sheet over the
+  charts (charting a symbol from it closes it; the arrows keep it open).
 - Intervals: 1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D and 1W. Select a smaller chart to
   make it the main one; all panels follow the selected symbol and crosshair.
 - EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14).
@@ -168,11 +206,10 @@ cd backend
   hotkeys are off while the menu is open (Esc closes it; arrow keys move
   between its rows). A label typed in the menu is saved when the menu closes,
   unless Esc closed it.
-- **Layers panel (C1.4).** The **Layers** button at the end of the drawing
-  tools opens `frontend/components/charts/LayersPanel.tsx`: a section beside the
-  charts on a screen at least 1024px wide (its open state remembered on that
-  device), and a bottom sheet with 44px targets below that, closed by its
-  backdrop, its close button or Esc. Groups: **My levels** and **Drawings** (the
+- **Layers panel (C1.4).** The **Layers** button at the end of the toolbar
+  opens `frontend/components/charts/LayersPanel.tsx`: the dock's Layers tab on
+  a screen at least 1024px wide (C7.3), and a bottom sheet with 44px targets
+  below that, closed by its backdrop, its close button or Esc. Groups: **My levels** and **Drawings** (the
   items of every symbol on screen, under a symbol heading when there is more
   than one), **Journal** (the fill arrows) and **Indicators** (each study).
   Every group hides on all five charts. Levels and drawings also **lock all**
@@ -190,13 +227,14 @@ cd backend
   rather than a `hiddenGroups` key, because a tab on an older build saves
   `hiddenGroups` whole and would drop a key it does not know, while the server
   keeps a top-level field a save leaves out. While it is hidden no study draws, each keeps its own setting for when the group shows
-  again, and the study chips read off with a **Indicators hidden · Show**
-  chip. Turning one study on (chip, menu or panel) shows the group again, so
+  again, and the studies in the toolbar's Indicators menu read off beside an
+  **Indicators hidden · Show** chip. Turning one study on (Indicators menu,
+  chart menu or panel) shows the group again, so
   the studies that were on come back with it. Auto levels and options join the
   panel when their layers exist (C2.3, C4.4).
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
-- **Layouts** (header button) saves the current arrangement under a name, such
+- **Layouts** (toolbar button) saves the current arrangement under a name, such
   as "0DTE SPY" (1m | 5m | 15m ...) or "Names" (the traded name beside SPY and QQQ),
   and switches to it in one click or tap. A layout is the chart mode (five
   charts or one), the five intervals, the symbols panels hold, the small-chart
@@ -293,10 +331,14 @@ cd backend
   and its last buckets end at 13:00. Only unusual days get a label beside the
   quote: *Early close 1:00 PM ET*, the closure's name on a weekday holiday, or
   a warning that clock hours apply because the calendar is unavailable.
-- **Full screen** covers the app navigation, hides the side panels (the
-  watchlist can be toggled back), and gives the main chart the screen height
-  below a sticky toolbar with an Exit button; Escape also exits. Smaller charts
-  have a saved S/M/L height and a per-chart expand toggle.
+- **Full screen** is the same workspace over the app navigation and the Gmail
+  banner, with an **Exit** button in the toolbar (on a phone a highlighted
+  close button); Escape also exits, after it has closed a menu, put a tool
+  away or dropped a selection. It keeps its own choice of dock, closed until
+  asked for (the shared `immersiveWatchlist` setting). On a phone the main
+  chart fills the screen under the toolbar and the smaller charts scroll
+  below it. Smaller charts have a saved S/M/L height and a per-chart expand
+  toggle.
 - **Symbol search** (Cmd/Ctrl+K) lists the typed ticker, the last eight symbols
   and the watchlist; arrows move, Enter charts, Escape closes. Watchlist rows
   take Up/Down/Home/End, and Alt+Up/Down steps the charted symbol through the
@@ -651,6 +693,27 @@ text inline. At 390px a swipe and a tap open nothing, a held finger opens
 the chart menu and a level's menu as bottom sheets with 44px rows and swatches,
 a held finger on a selected level opens its menu without moving it, and the
 backdrop closes the sheet.
+Workspace-shell tests (C7.3) measure the page and the chart grid at 1440×900
+and 1920×1080 with the dock open and closed (no page scrolling, all five
+charts in view, and with the dock closed a grid at least 80% of the window's
+height and 90% of its width) and save screenshots; at 1280×720 five charts
+fit, taller smaller charts keep the main chart at its minimum and scroll the
+grid instead of the page, and Focus fills it; with Gmail disconnected the
+Reconnect banner stays above the toolbar and the page still does not scroll
+(the measurements pin the Gmail state, because the e2e backend has no Gmail
+and reports it disconnected). They expand, collapse and
+reload the navigation rail, close and switch the dock, resize the window and
+enter full screen while a level is selected and the main chart is scrolled
+back, checking the same five chart instances, selection, range and stream
+and no requests beyond the 15-second refresh, then move the quote with a
+streamed trade and drag the level. At 1024px the toolbar does not overflow,
+the Indicators menu keeps pressed states and Escape closes it before an
+armed tool, and Tab runs toolbar, tool rail, charts, dock. At 390px every
+toolbar button is at least 44px, nothing scrolls sideways, the More menu holds
+the secondary controls and the attribution, and the watchlist sheet (44px
+targets) overlays the chart without shrinking it and closes by Esc, backdrop
+or charting a symbol. Measurements are of the stubbed fixture, not a live
+session.
 Layers-panel tests (C1.4) hide My levels and Drawings from the panel and read
 them gone on all five charts, still gone (panel still open) after a reload,
 and back; hide and show one level; lock all as one undo step and lock one;
