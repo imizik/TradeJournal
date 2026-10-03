@@ -91,8 +91,8 @@ These rows describe future work, not implemented recording or broker controls.
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
-| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | next |
-| C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | todo |
+| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done (PR pending) |
+| C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | next |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
@@ -107,6 +107,7 @@ These rows describe future work, not implemented recording or broker controls.
 | C4.5 | Strike ladder side panel | 4 Options on the chart | todo |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
+| C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
 
 Why this order: history, correct sessions and smooth updates come first; then
 shared state and SPY/QQQ/name layouts. Record options snapshots early because
@@ -130,6 +131,7 @@ C3.4 reuses C0.4's persistence patterns and C7.3's chart shell; C3.5 needs C3.4;
 C3.6 needs C3.4/C3.5 and C3.1's trade-card surface. These are three separate
 implementation slices, in that order, not permission to implement all three
 when asked for one.
+C2.6 needs C2.4; each history page's sessions need their own 20-session baselines.
 
 ## Ground truth this plan rests on
 
@@ -567,6 +569,22 @@ bars are shaded by relative volume, and the legend reads "RVol 2.6× for 10:17".
 Until the baseline exists, say so rather than guessing. *Done when:* the
 calculation matches `compute_rvol_time_adjusted()` on the same inputs, and the
 chart labels which sessions the baseline covers.
+As built ([Relative volume](charts-workspace.md#relative-volume-c24)):
+`backend/app/engine/chart_rvol.py` is pure, and every 1m, 5m and 1h candle's
+RVol equals `compute_rvol_time_adjusted` for a fill at the candle's end on the
+same bars. What runs nightly is the storing, not the arithmetic: the
+`rvol_history` job (06:00 and 08:40 New York on weekdays) stores the 20 SIP
+sessions before today for each watchlist name, and the workspace builds the
+390-number baseline from those files, read once per process, so it costs no
+provider request and is on today's split basis. Any charted symbol whose
+sessions are stored gets one, not only watchlist names. Only today's
+regular-session candles have RVol; older sessions keep plain volume colors
+(C2.6). A live probe found that Alpaca answers a day without minutes (SPX, or
+CRWV before it listed) with `"bars": null`, which C0.0 called malformed; it now
+reads "no minute bars" and is still not stored, and the job notes such names
+instead of failing. The main chart's study row reads "RVol 2.6× for 10:17 AM" and names the
+sessions; a smaller chart shows "RVol 2.6×" in place of its volume, because
+its row beside the countdown has no room for both.
 
 **C2.5 Earnings.** Earnings dates from Tradier's corporate calendar, cached
 daily per watchlist symbol. The chart shows a marker on the date and a badge

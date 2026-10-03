@@ -25,7 +25,7 @@ Four execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
-| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review, confirmed resync and the after-close options snapshot |
+| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review, confirmed resync, the after-close options snapshot and the morning relative-volume history |
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
@@ -38,7 +38,10 @@ The options snapshot paces itself to Tradier's options budget, so after the
 close it can hold the sync lane for about ten minutes (on the order of 300
 requests at 30 a minute since the factory's 18 names joined its scope); a
 Gmail push that arrives meanwhile waits for it. An interrupted snapshot keeps every expiration it
-committed, and the next run fetches only the rest.
+committed, and the next run fetches only the rest. The relative-volume
+history (06:00 and 08:40 New York) holds the lane for about a minute each
+morning; its first run, 20 sessions for each watchlist name at 30 requests a
+minute, stops after ten minutes and the next run continues.
 
 On worker startup and each idle poll:
 

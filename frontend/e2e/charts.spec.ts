@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment } from "../lib/charts";
+import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 
 // Each test starts from empty server settings of its own; tests tagged
@@ -4342,4 +4342,105 @@ test("a card kept open by a click gives way to hovering once its level is no lon
   await expect(page.getByRole("tooltip", { name: "ONH level card" })).toHaveCount(0);
   await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[5].id));
   await expect(page.getByRole("tooltip", { name: "260 level card" })).toBeVisible();
+});
+
+// ---- Relative volume (C2.4): today's candles shaded by RVol, the legend's value and what the baseline covers ----
+
+// 20 sessions before 2026-09-17, across Labor Day.
+const RVOL_SESSIONS = ["2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01",
+  "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16"];
+const READY: RvolBaseline = { state: "ready", day: "2026-09-17", sessions: RVOL_SESSIONS, traded: 20, missing: [], message: null };
+const BUILDING: RvolBaseline = { state: "building", day: "2026-09-17", sessions: RVOL_SESSIONS, traded: 0, missing: ["2026-09-15", "2026-09-16"],
+  message: "RVol needs the 20 sessions before today; 2 not stored yet. Watchlist names are stored each morning before the open, and any symbol's sessions as its older candles load." };
+// The 5m fixture's last six candles (2026-09-17, 09:30-09:55) are today's.
+const TODAY_RVOL = [0.3, 1, 2.6, 2, null, 1.2];
+
+async function stubRvol(page: Page, baseline: RvolBaseline) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.rvol = baseline;
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][]) {
+      if (interval === "5m") panel.bars = panel.bars.map((bar, i) => i < 234 ? bar : { ...bar, rvol: baseline.state === "ready" ? TODAY_RVOL[i - 234] : null });
+      // The 1m fixture is one session from 09:30: its 228th candle, 13:17, is in view.
+      if (interval === "1m") panel.bars = panel.bars.map((bar, i) => ({ ...bar, rvol: baseline.state === "ready" ? (i === 227 ? 2.6 : 1.1) : null }));
+    }
+    await route.fulfill({ json: data });
+  });
+}
+type VolumeProbe = Map<string, { panes(): { getSeries(): { options(): { priceScaleId?: string }; data(): readonly { color?: string }[] }[] }[] }>;
+const volumeColors = (page: Page, id: string, count: number) => page.evaluate(([key, last]) => {
+  const chart = (window as unknown as { __tjCharts: VolumeProbe }).__tjCharts.get(key as string)!;
+  const series = chart.panes()[0].getSeries().find((item) => item.options().priceScaleId === "volume")!;
+  return series.data().slice(-(last as number)).map((point) => point.color);
+}, [id, count] as const);
+const candleX = (page: Page, id: string, time: number) => page.evaluate(([key, at]) =>
+  (window as unknown as { __tjCharts: Map<string, { timeScale(): { timeToCoordinate(t: number): number | null } }> }).__tjCharts.get(key as string)!.timeScale().timeToCoordinate(at as number)!, [id, time] as const);
+
+test("relative volume shades today's volume bars and the legend reads each candle's RVol and the sessions it is measured against", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await stubRvol(page, READY);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+
+  // The main chart names the baseline's sessions, and its latest candle's RVol.
+  const studies = page.getByLabel("main study values");
+  await expect(studies.getByRole("note", { name: "Relative volume baseline" })).toHaveText("RVol vs 20 sessions Aug 19 – Sep 16");
+  await expect(studies).toContainText("RVol 1.2× for 9:55 AM");
+  // Brighter with RVol, faint below 0.5×; a candle without RVol, and every earlier session's, keeps the plain shade.
+  expect(await volumeColors(page, "main", 8)).toEqual(["#2bc9a43d", "#2bc9a43d", "#2bc9a41f", "#2bc9a43d", "#2bc9a4d9", "#2bc9a480", "#2bc9a43d", "#2bc9a43d"]);
+
+  // Hovering a candle reads its own RVol.
+  const box = (await drawn(page, "main").boundingBox())!;
+  const nineForty = FIXTURE_START + 3 * 86400 + 2 * 300;
+  await page.mouse.move(box.x + await candleX(page, "main", nineForty), box.y + box.height * 0.4);
+  await expect(studies).toContainText("RVol 2.6× for 9:40 AM");
+  await page.mouse.move(box.x + await candleX(page, "main", nineForty + 600), box.y + box.height * 0.4);
+  await expect(studies.getByText("RVol —")).toHaveAttribute("title", "Fewer than five of the baseline sessions had traded by this minute.");
+  await page.mouse.move(1, 1);
+
+  // A smaller chart's row is tight beside its countdown: RVol takes the volume's place, with the volume, candle and sessions on hover.
+  const minute = values(page, "Panel 5");
+  await expect(minute).toContainText("RVol 1.1×");
+  await expect(minute).not.toContainText("Vol 64");
+  const row = (await minute.boundingBox())!;
+  const shown = (await minute.getByText("RVol 1.1×").boundingBox())!;
+  expect(shown.x + shown.width).toBeLessThanOrEqual(row.x + row.width);
+  await expect(values(page, "Panel 2")).toContainText(/Vol [\d.]+K/); // no RVol on these 15m candles
+  const small = (await drawn(page, "Panel 5").boundingBox())!;
+  await page.mouse.move(small.x + await candleX(page, "Panel 5", FIXTURE_START + 227 * 60), small.y + small.height * 0.4);
+  await expect(minute.getByText("RVol 2.6×")).toHaveAttribute("title", /^Vol [\d.]+K\. RVol 2\.6× for 1:17\sPM\. RVol vs 20 sessions Aug 19 – Sep 16: /);
+  await expect(values(page, "Panel 4")).not.toContainText("RVol");
+  await page.screenshot({ path: test.info().outputPath("rvol-desktop.png") });
+});
+
+test("without a baseline the chart says so and shades nothing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await stubRvol(page, BUILDING);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const note = page.getByRole("note", { name: "Relative volume baseline" });
+  await expect(note).toHaveText("RVol baseline not built yet");
+  await expect(note).toHaveAttribute("title", BUILDING.message!);
+  await expect(page.getByLabel("main study values").getByText("RVol —")).toHaveAttribute("title", BUILDING.message!);
+  expect(new Set(await volumeColors(page, "main", 240))).toEqual(new Set(["#2bc9a43d"]));
+});
+
+test.describe("phone relative volume", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the main chart's RVol and its sessions wrap into view on a phone", async ({ page }) => {
+    await registerCharts(page);
+    await stubRvol(page, READY);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    const studies = page.getByLabel("main study values");
+    for (const text of [/^RVol 1\.2× for 9:55\sAM$/, /^RVol vs 20 sessions Aug 19 – Sep 16$/]) {
+      const shown = (await studies.getByText(text).boundingBox())!;
+      expect(shown.x).toBeGreaterThanOrEqual(0);
+      expect(shown.x + shown.width).toBeLessThanOrEqual(390);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("rvol-phone.png") });
+  });
 });

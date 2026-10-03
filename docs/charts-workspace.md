@@ -172,7 +172,9 @@ cd backend
   chart is the only one shown, 410px tall (the whole screen in full screen).
 - Intervals: 1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D and 1W. Select a smaller chart to
   make it the main one; all panels follow the selected symbol and crosshair.
-- EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14).
+- EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14). Today's
+  regular-session volume bars are shaded by relative volume (C2.4; see
+  [Relative volume](#relative-volume-c24)).
 - Extended-session shading and regular/extended hours selection. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
@@ -495,7 +497,10 @@ record, including an empty session, has no TTL and costs zero provider calls
 across API restarts. Corrupt records require deliberate repair. The separate
 Alpaca chart budget is 30 actual HTTP attempts per rolling minute in one API
 process; a 429 honors Retry-After. No Alpaca request targets the latest
-15 minutes. The frontend keeps at most 12,000 normalized candles per panel,
+15 minutes. Alpaca answers a symbol or day without a single minute (an index
+such as SPX, or a stock before it listed; seen 2026-10-03) with `"bars": null`;
+that is reported as *Alpaca has no minute bars for SPX on 2026-10-02* and not
+stored, so scroll-back never walks an index's empty days back to 2016. The frontend keeps at most 12,000 normalized candles per panel,
 including the current tail, and rereads evicted pages from this disk cache.
 
 `backend/app/engine/chart_calendar.py` adapts Tradier's `/v1/markets/calendar`
@@ -818,6 +823,71 @@ a layout without a daily panel now reads the daily bars too, and a failure
 there is the levels' to report, not a chart issue. The calendar covers three
 weeks back and ten days ahead (months not yet published read as clock hours).
 
+### Relative volume (C2.4)
+
+A candle's RVol is today's cumulative regular-session volume through that
+candle over the average cumulative volume through the same minute of day in
+the 20 sessions before today. `backend/app/engine/chart_rvol.py` (pure) is fill
+context's `indicators.compute_rvol_time_adjusted` evaluated at every minute:
+on the same bars a candle's RVol equals the fill-context RVol of a fill at the
+end of that candle.
+
+- **What counts.** Volume counts from 09:30 New York by the clock. A session
+  counts toward a minute once it has traded at or after 09:30 by then, and a
+  minute that fewer than five sessions had reached has no RVol. A half day in
+  the window counts its whole session for the minutes after its 13:00 close,
+  as fill context does. Only today's regular-session candles have an RVol:
+  premarket, postmarket, older sessions (history pages) and daily and weekly
+  charts have none. On a day whose regular session opens at another time
+  there is none either, since its minutes cannot be compared.
+- **Through which minute.** A completed candle counts through its last minute
+  (a 5m candle at 10:15 through 10:19). A candle still forming counts through
+  the newest minute bar, so its volume so far is set against the baseline so
+  far. A candle's RVol therefore changes only while it forms.
+- **The baseline.** 390 numbers per symbol per day, one for each minute from
+  09:30 through 15:59, over the market calendar's 20 sessions before today.
+  They are read from the completed SIP sessions on disk
+  (`ChartHistory.volume_profile` reads each file once per process and keeps
+  its profile), multiplied by every split from that session up to today, so
+  they are on today's basis. Every one of the 20 must be stored: until then
+  there is no baseline (`building`, listing what is missing), never one over
+  fewer sessions. A session stored empty (the symbol did not trade, for
+  example before it listed) stays in the window and adds nothing; with fewer
+  than five sessions that traded the state is `insufficient`. Without the
+  market calendar it is `unavailable`. A workspace refresh makes no provider
+  request for any of this.
+- **Storing the sessions.** Charting a symbol stores its sessions as its older
+  candles load (C0.0). `backend/app/engine/rvol_history.py` stores them ahead
+  of time for every name on the shared chart watchlist: it is the
+  `rvol_history` job in the sync lane, queued at 06:00 and 08:40 New York on
+  weekdays by `tradejournal-rvol-history.timer` or from the Sync Center. It
+  uses the chart history's Alpaca budget in its own process (30 requests a
+  minute), sleeps when that is spent, and stops after ten minutes; the next
+  run continues. A stored session is never fetched again, so after the first
+  run each morning costs one request per name. Sessions are fetched newest
+  first. A day Alpaca has no minutes for (an index such as SPX, or a stock
+  before it listed) is not stored, so that name has no baseline until it has
+  20 sessions; the job notes it and moves on without failing. Refused
+  credentials stop it; a session that fails otherwise is named in the job's
+  error after the rest are stored, so the phone alert says which.
+- **On the chart.** Volume bars keep their up/down color and brighten with
+  RVol: faint under 0.5×, as before up to 1.5×, brighter to 2.5× and
+  brightest beyond; a candle without RVol keeps the plain shade. The main
+  chart's study row reads *RVol 2.6× for 10:17 AM* for the hovered (or latest)
+  candle and names the sessions the baseline covers (*RVol vs 20 sessions
+  Sep 4 – Oct 1*, or *vs 18 of 20* when two never traded), or says *RVol
+  baseline not built yet* or *RVol unavailable* with the reason on hover. A
+  regular-session candle of today without a value reads *RVol —*, with why on
+  hover. A smaller chart's row is too tight beside its countdown, so there a
+  candle with RVol shows *RVol 2.6×* in place of its volume, and the volume,
+  candle time and sessions are on hover. Hiding Volume hides RVol too.
+- **Delivery.** `GET /charts/workspace` sends `rvol` for the main symbol and
+  each held symbol (`state`, `day`, `sessions`, `traded`, `missing`,
+  `message`; null on a day without a session), and every intraday candle of
+  today carries `rvol`, null where there is none. The forming candle's RVol
+  updates with the 15-second refresh, as its volume does; a streamed new
+  candle has none until then.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
@@ -969,6 +1039,27 @@ five charts through a reload, and the chart menu shows them again. A card
 kept open by a click gives way to hovering once a symbol switch removes its
 level. At 390px a tap opens a card that stays until its 32px Close. What the canvas paints is
 checked by screenshot review only.
+`backend/tests/test_chart_rvol.py` builds twenty sessions across Labor Day
+(one that traded only premarket, one stored empty, one that starts at 09:47
+with every third minute missing, one that stops at 13:00) and a morning with
+two missing minutes, and checks that every 1m, 5m and 1h candle's RVol equals
+`compute_rvol_time_adjusted` for a fill at that candle's end (the forming
+candle at the newest minute). It also pins the five-session minimum per minute,
+the calendar window, today's regular candles only, the workspace values and
+states (ready, building, insufficient, unavailable, a closed day, a late open),
+a split inside the window, the profile read once per process and one session
+fetched once for the job. `backend/tests/test_rvol_history.py` covers the job's
+scope, a rerun that costs nothing, a weekend run, waiting out the budget,
+refused credentials, a failed session named after the rest are stored, the
+ten-minute stop and resume, a missing calendar and the Sync Center job; the
+timer is in `backend/tests/test_deployment.py`. Browser tests (C2.4) stub the
+response: the main chart names the sessions and reads the latest candle's RVol,
+the volume colors follow each candle's RVol, hovering reads a candle's own value
+and *RVol —* with its reason, a 1m smaller chart shows *RVol 1.1×* in place of
+its volume without clipping and gives the candle and sessions on hover, a daily
+chart shows none, a baseline still building says so and shades nothing, and at
+390px the main chart's RVol and sessions wrap into view. What the canvas paints
+is checked by screenshot review only.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's

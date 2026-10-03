@@ -250,7 +250,10 @@ top-level field a save leaves out), with a browser copy
 for when the server is unreachable. Daily option open interest and volume
 snapshots (`option_chain_snapshot`, with a per-session status in
 `option_snapshot_day`) are written only by the after-close `options_snapshot`
-sync job. See [chart boundaries](../charts-workspace.md).
+sync job. The morning `rvol_history` sync job writes nothing to the database:
+it stores completed SIP sessions in the chart history's disk cache, from which
+the workspace builds each symbol's relative-volume baseline. See
+[chart boundaries](../charts-workspace.md).
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when

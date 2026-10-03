@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, staleCandles } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
+import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
@@ -36,7 +36,8 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
   return { time: b.time as UTCTimestamp, value: b[name] as number, ...(gapAfter ? { color: "transparent" } : {}) };
 }
 const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close });
-const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? "#2bc9a43d" : "#ee617a3d" });
+// Up or down by the candle, brighter with its relative volume (C2.4).
+const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: (b.close >= b.open ? "#2bc9a4" : "#ee617a") + volumeAlpha(b.rvol) });
 const shadePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: 1, color: b.extended ? "#6b84bd10" : "transparent" });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
 /**
@@ -104,12 +105,14 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, rvol = null, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
   /** This symbol's automatic levels (C2.3), null while hidden, and this chart's interactions with them. */
   autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
+  /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
+  rvol?: RvolBaseline | null;
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
@@ -711,6 +714,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   }, [tool]);
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
+  // Relative volume (C2.4) beside a regular-session candle of today: its value, or why it has none.
+  const showRvol = indicators.volume && intradayInterval(interval);
+  // The main chart's study row says it in full. A smaller chart's row is already tight beside its
+  // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
+  const volumeText = bar ? Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume) : "";
+  const rvolValue = showRvol && bar && bar.rvol !== undefined && !bar.extended ? (typeof bar.rvol === "number"
+    ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
+      RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
+    : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
   const chosenLevel = selected ? levels.find((level) => level.id === selected) : undefined;
   const chosenDrawing = selected ? drawings.find((drawing) => drawing.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
@@ -741,13 +753,16 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       </div>
       <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
-        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && <span>Vol {bar.volumePending ? "pending" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume)}</span>}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span></> : <span>No candles in this window</span>}
+        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span></> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
       </div>
-      {main && <div className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
+      {main && <div aria-label={`${id} study values`} className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
         {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
+        {rvolValue}
+        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
+          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
       </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />

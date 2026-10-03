@@ -96,9 +96,25 @@ def options_snapshot(retry_seconds: float = 600, pause: float = 15) -> None:
         time.sleep(pause)
 
 
+def rvol_history(retry_seconds: float = 600, pause: float = 15) -> None:
+    """Queue the morning relative-volume history, waiting out a running sync. Missing
+    a slot costs only RVol until the next one (08:40, or tomorrow), so it is a skip,
+    not a unit failure."""
+    deadline = time.monotonic() + retry_seconds
+    while True:
+        status, response = request("/sync/jobs/rvol_history/run", "POST")
+        if status != 409:
+            print(f"Relative volume history queued: {response['run_id']}")
+            return
+        if time.monotonic() >= deadline:
+            print("Relative volume history skipped: another sync or enrichment job stayed active")
+            return
+        time.sleep(pause)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline", "options-snapshot"])
+    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline", "options-snapshot", "rvol-history"])
     args = parser.parse_args()
     if args.action == "gmail-sync":
         gmail_sync()
@@ -106,6 +122,8 @@ def main() -> None:
         sync_pipeline()
     elif args.action == "options-snapshot":
         options_snapshot()
+    elif args.action == "rvol-history":
+        rvol_history()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,13 @@ export type ChartBar = {
   volumePending?: boolean;
   extended: boolean; ema9: number | null; ema20: number | null; ema50: number | null; ema200: number | null;
   vwap: number | null; rsi: number | null;
+  /**
+   * Relative volume (C2.4): today's regular-session volume through this candle over the
+   * baseline's average through the same minute. Present on a workspace response's intraday
+   * candles when the symbol trades today; null where there is none (outside regular hours,
+   * no baseline yet, or too few baseline sessions had traded by then). History pages omit it.
+   */
+  rvol?: number | null;
 };
 /** One recorded split, from the provider named in `PriceAdjustment.source`. */
 export type SplitRecord = { ex_date: string; ratio: number; label: string };
@@ -46,6 +53,15 @@ export type AutoLevels = { day: string; as_of: number; atr: number | null; band:
 export type LevelEvent = { event: "tested" | "broken" | "reclaimed"; time: number };
 /** How price treated a zone today on one intraday panel's closed bars (C2.3). */
 export type LevelInteraction = { state: "untested" | "tested" | "broken" | "reclaimed" | "developing"; events: LevelEvent[]; at_level: boolean };
+/**
+ * What today's relative volume is measured against (C2.4): the market calendar's 20
+ * sessions before `day`, of which `traded` had regular-session volume. Only `ready`
+ * has candle values; otherwise `message` says why and `missing` lists sessions not stored yet.
+ */
+export type RvolBaseline = {
+  state: "ready" | "building" | "insufficient" | "unavailable"; day: string; sessions: string[];
+  traded: number; missing: string[]; message: string | null;
+};
 /** `level_events` (intraday panels of a workspace response): each automatic zone's interactions, by zone id. */
 export type ChartPanelData = { bars: ChartBar[]; markers: FillMarker[]; level_events?: Record<string, LevelInteraction> };
 export type HistoryPage = {
@@ -77,6 +93,8 @@ export type SymbolPanels = {
   adjustment?: PriceAdjustment | null;
   /** Absent from a backend older than C2.3. */
   auto_levels?: AutoLevels | null;
+  /** Today's relative-volume baseline; null on a day with no session, absent from a backend older than C2.4. */
+  rvol?: RvolBaseline | null;
 };
 export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
@@ -543,6 +561,25 @@ export function shownPrice({ tick, quote, candle, scope }: {
 /** Intraday candles older than 45 seconds read as stale: the countdown and status stop implying freshness. */
 export const staleCandles = (now: number, fetched: number | undefined) => !!fetched && Math.floor(now - fetched) > 45;
 
+/**
+ * A volume bar's opacity by relative volume (C2.4): faint under 0.5×, as before up to
+ * 1.5×, brighter to 2.5×, brightest beyond. A candle without RVol keeps the plain shade.
+ */
+export function volumeAlpha(rvol: number | null | undefined): string {
+  if (rvol == null) return "3d";
+  return rvol < 0.5 ? "1f" : rvol < 1.5 ? "3d" : rvol < 2.5 ? "80" : "d9";
+}
+const sessionDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+/** "RVol vs 20 sessions Sep 1 – Sep 28", or "vs 18 of 20" when some never traded in regular hours. */
+export function rvolCoverage(baseline: RvolBaseline): string {
+  const days = baseline.sessions;
+  if (!days.length) return "RVol: no sessions";
+  const span = `${sessionDay.format(new Date(`${days[0]}T12:00:00Z`))} – ${sessionDay.format(new Date(`${days.at(-1)}T12:00:00Z`))}`;
+  return `RVol vs ${baseline.traded === days.length ? days.length : `${baseline.traded} of ${days.length}`} sessions ${span}`;
+}
+/** "2.6×", with two decimals under 0.1× so a quiet candle never reads 0.0×. */
+export const rvolText = (rvol: number) => `${rvol.toFixed(rvol < 0.1 ? 2 : 1)}×`;
+
 export const price = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const etTime = (stamp: number, daily = false) => new Date(stamp * 1000).toLocaleString("en-US", {
   timeZone: "America/New_York", ...(daily ? { month: "short", day: "numeric", year: "numeric" } : { hour: "numeric", minute: "2-digit" }),
@@ -633,7 +670,7 @@ export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" |
   if (a.time !== b.time) return "reset";
   return sameBar(a, b) ? "same" : "last";
 }
-const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi"] as const;
+const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi", "rvol"] as const;
 const sameBar = (a: ChartBar, b: ChartBar) => a === b || BAR_KEYS.every((key) => a[key] === b[key]);
 
 export type TimeRange = { from: number; to: number };

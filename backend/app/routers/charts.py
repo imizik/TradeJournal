@@ -150,18 +150,20 @@ def workspace(
     if symbol in held or len(held) > MAX_SYMBOLS - 1 or any(not f or len(f) > 5 or any(i not in INTERVALS for i in f) for f in held.values()):
         raise HTTPException(422, f"Panels can hold up to {MAX_SYMBOLS - 1} other symbols, each with up to 5 supported intervals.")
     try:
-        data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored)
+        data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
+                                    volume_profile=chart_history.volume_profile)
     except ChartFeedError as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
     data["extras"] = {}
     for name, wanted in held.items():
         try:
-            other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored)
+            other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
+                                         volume_profile=chart_history.volume_profile)
             data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
-                                     "auto_levels": other.get("auto_levels")}
+                                     "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol")}
         except ChartFeedError as exc:
             # A held symbol that cannot load leaves the main charts intact.
-            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None}
+            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.

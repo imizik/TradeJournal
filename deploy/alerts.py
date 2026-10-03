@@ -49,6 +49,9 @@ SERVICES = {
     "tradejournal-options-snapshot.service": (
         "Options snapshot", "Today's after-close options snapshot couldn't be queued; it can't be taken after 8 PM New York."
     ),
+    "tradejournal-rvol-history.service": (
+        "Relative volume history", "The morning relative-volume history couldn't be started, so chart RVol may be missing today."
+    ),
 }
 TIMERS = {
     "tradejournal-backup.timer": "Nightly backup",
@@ -56,6 +59,7 @@ TIMERS = {
     "tradejournal-sync-pipeline.timer": "Scheduled Sync Everything",
     "tradejournal-gmail-sync.timer": "Five-minute Gmail check",
     "tradejournal-options-snapshot.timer": "After-close options snapshot",
+    "tradejournal-rvol-history.timer": "Morning relative volume history",
 }
 
 
