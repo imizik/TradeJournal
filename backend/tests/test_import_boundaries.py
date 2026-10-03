@@ -91,6 +91,7 @@ PURE_MODULES = {
     "app.engine.occ",
     "app.engine.chart_math",  # chart-only resampling and indicator math
     "app.engine.chart_adjust",  # chart-only split adjustment of supplied bars
+    "app.engine.chart_levels",  # automatic chart levels from supplied bars
     "app.engine.symbol_info",  # summaries of supplied stored journal results
     # Option chain models. The Tradier adapter (options_chain) fills them; the
     # positioning engine and recorder must be able to read them without it.
