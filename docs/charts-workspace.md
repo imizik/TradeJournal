@@ -13,6 +13,28 @@ Advanced Charts library. No TradingView subscription or paid data upgrade is
 required by this feature. The Tradier account still needs production market-data
 access. Keys remain on the private backend.
 
+## Symbol info panel
+
+The section below the watchlist in the Watchlist dock tab follows the main
+chart's underlying. On a phone it lives inside the Watchlist bottom sheet. Its
+**You** tab reads all accounts' journal history through
+`GET /charts/symbol/{symbol}/you`, independently of candles or the stream.
+It shows completed-trade count, realized P&L, win rate, average stored hold
+time, best/worst trades, the latest actual fill time, separate open trades,
+and five recent records with links. Closed and expired trades count as
+completed; partial-exit P&L on open trades stays separate. Missing P&L makes
+the total and win rate unavailable, and missing hold times are excluded with
+the sample count on hover. Results sum stored FIFO P&L without reconstructing
+it. Account names accompany each record; positions are not merged across
+accounts. The source and read time are shown, with calculated/observed labels.
+
+Overview, News, Events and Forecast are placeholders for the
+[symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
+on this device. Only an expanded You tab fetches, once after the ticker
+settles for 300 ms; old requests are cancelled. The panel starts collapsed
+below 1024 px and follows the watchlist's visibility in full-screen mode.
+There are no external calls, new tables or migrations for this panel.
+
 ## License and data costs
 
 The frontend lockfile selects **Lightweight Charts 5.2.1**, distributed under
@@ -88,8 +110,9 @@ cd backend
   **Layers**; below about 1280px it wraps to a
   second row rather than hiding anything. Undo, redo and the drawing tools
   are a slim rail left of the charts. The dock on the right shows one panel at
-  a time: the watchlist with the main symbol's levels and latest fills under
-  it, or the layers panel. Pressing the open tab's button closes the dock;
+  a time: the watchlist with the symbol info panel, the main symbol's levels
+  and latest fills under it, or the layers panel. Pressing the open tab's
+  button closes the dock;
   whether it is open, and on which tab, is remembered on the device (a device
   that had left the C1.4 layers panel open opens it on Layers). A status strip
   at the foot keeps the feed state, holiday or early-close label, price basis,
