@@ -91,7 +91,7 @@ These rows describe future work, not implemented recording or broker controls.
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
-| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done (PR pending) |
+| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | next |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
