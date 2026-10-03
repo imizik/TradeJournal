@@ -44,8 +44,10 @@ native PowerShell launcher for the app itself.
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
 CI (`.github/workflows/ci.yml`) runs backend, frontend, browser and Postgres
-jobs on every pull request. Postgres parity, migration-path and role checks
-are additional to the local script. `.github/workflows/deployment.yml` also
+jobs on every pull request, and posts the browser tests' pictures on pull
+requests that change the frontend (see [browser tests](#browser-tests)).
+Postgres parity, migration-path and role checks are additional to the local
+script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
 Postgres. It also exercises the optional ingress, its restricted DB/OS roles,
@@ -272,6 +274,19 @@ Notes that will save you time:
   `backend/tests/test_seed_dev_data.py` independently verifies the
   reconstructor still produces. If the fixture changes, that test fails first,
   in the fast run.
+- **Pull requests that change `frontend/` get the pictures as a comment.**
+  CI's Screenshots job collects every picture the tests save into their
+  output folder (`test.info().outputPath(...)`; a picture saved anywhere else
+  is not posted) and keeps one comment on the pull request with them folded
+  into a section per test file and screen size
+  (`frontend/scripts/screenshot-gallery.mjs`). This is where "checked by
+  screenshot only" above gets looked at; nothing compares the pictures
+  automatically. That was tried and dropped: two identical runs differ in 32
+  of 43 pictures, because chart fixtures are built from the current time, the
+  status bar shows a live clock and quote age, and the journal panel can still
+  be loading. A comparison needs those tests on a frozen clock first. The
+  images live on the orphan `ci-screenshots` branch: one commit, never
+  merged, with a pull request's folder removed after it closes.
 
 ## Postgres parity
 

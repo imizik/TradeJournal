@@ -41,7 +41,7 @@ test("You renders seeded completed results, account-separated open trades and an
   // Dense journal content scrolls inside the dock, preserving C7.3's shell.
   expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: "/tmp/tradejournal-symbol-info-desktop.png", fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("symbol-info-desktop.png"), fullPage: true });
   await choose(page, "AAPL");
   await expect(info).toContainText("Open positions · 2 trades");
   await expect(info).toContainText("8267");
@@ -141,7 +141,7 @@ test("390px opens collapsed inside the watchlist sheet and follows its visibilit
     expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   }
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.screenshot({ path: "/tmp/tradejournal-symbol-info-phone.png", fullPage: true });
+  await page.screenshot({ path: test.info().outputPath("symbol-info-phone.png"), fullPage: true });
   await sheet.getByRole("button", { name: "Close watchlist" }).click();
   await expect(info).toHaveCount(0);
   await page.getByRole("button", { name: "Enter full-screen charts" }).click();
