@@ -242,7 +242,11 @@ chains (SPY, and SPX with both roots) and pins the options budget, coded
 failures and that Tradier option field names stay in the adapters.
 `backend/tests/test_options_recorder.py` covers the daily options snapshot job:
 its capture window, resume after a restart, missed sessions marked unavailable
-and the real adapter's budget. Actual Tradier/Webull
+and the real adapter's budget. `backend/tests/test_chart_rvol.py` holds every
+chart candle's relative volume equal to fill context's
+`compute_rvol_time_adjusted` on the same bars, and
+`backend/tests/test_rvol_history.py` covers the morning job that stores the
+sessions it needs. Actual Tradier/Webull
 access is checked separately by `backend/scripts/check_chart_feed.py`, split
 records and the adjusted prices against both providers by
 `backend/scripts/check_chart_splits.py` (read-only, a real split), live option

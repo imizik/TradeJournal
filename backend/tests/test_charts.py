@@ -354,9 +354,10 @@ def test_history_route_identifies_window_and_returns_bounded_old_markers(route_c
 def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route_client, monkeypatch):
     calls = []
 
-    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True, stored_session=None):
+    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True, stored_session=None, volume_profile=None):
         calls.append((symbol, frames, watchlist, quotes))
         assert stored_session == charts.chart_history.stored  # every symbol gets its automatic levels
+        assert volume_profile == charts.chart_history.volume_profile  # and its relative volume
         if symbol == "BAD":
             raise ChartFeedError("Tradier could not load these charts.")
         bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
@@ -374,7 +375,8 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
     assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
-                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "fills_truncated": False}
+                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "rvol": None,
+                                     "fills_truncated": False}
 
 
 def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):

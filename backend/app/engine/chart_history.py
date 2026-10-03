@@ -5,7 +5,7 @@ changes the journal feed setting. A completed file is immutable until an
 operator deliberately removes it.
 """
 
-from collections import deque
+from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from datetime import date, datetime, time as wall_time, timedelta, timezone
 import json
@@ -18,7 +18,7 @@ from uuid import uuid4
 
 import httpx
 
-from app.engine import alpaca
+from app.engine import alpaca, chart_rvol
 from app.engine.chart_adjust import BASIS, adjust_minutes, describe, suspect_gaps
 from app.engine.chart_calendar import ChartCalendar, chart_calendar
 from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
@@ -28,6 +28,7 @@ FLOOR = date(2016, 1, 1)
 SCHEMA = 1
 WARMUP = 1400
 PAGE = 1200
+PROFILES = 1000  # stored sessions' RVol profiles kept in memory: 30 watchlist names' windows, with room
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "chart_history" / "v1" / "stocks" / "1Min" / "sip" / "raw"
 
@@ -58,6 +59,8 @@ class ChartHistory:
         self._calls: deque[float] = deque()
         self._cooldown = 0.0
         self._work: dict[str, Work] = {}
+        self._profiles: OrderedDict[tuple[str, date], chart_rvol.Profile] = OrderedDict()
+        self._profile_lock = threading.Lock()  # never the history lock: a workspace refresh must not wait on Alpaca
 
     def _path(self, symbol: str, day: date) -> Path:
         if not SYMBOL.fullmatch(symbol):
@@ -103,6 +106,35 @@ class ChartHistory:
             return self._cached(symbol, day)
         except HistoryError:
             return None
+
+    def volume_profile(self, symbol: str, day: date) -> chart_rvol.Profile | None:
+        """A stored session's cumulative regular-session volume by minute (C2.4), on the raw
+        basis, or None when it is not stored. The file is read once per process; a session
+        not stored costs one existence check, so a workspace refresh can afford twenty."""
+        key = (symbol, day)
+        with self._profile_lock:
+            if key in self._profiles:
+                self._profiles.move_to_end(key)
+                return self._profiles[key]
+        minutes = self.stored(symbol, day)
+        if minutes is None:
+            return None
+        profile = chart_rvol.session_profile(minutes)
+        with self._profile_lock:
+            self._profiles[key] = profile
+            while len(self._profiles) > PROFILES:
+                self._profiles.popitem(last=False)
+        return profile
+
+    def session(self, symbol: str, day: date) -> list[dict]:
+        """One completed session's raw minutes: from disk, or fetched once and stored. For
+        work outside a chart page (C2.4's morning job). Raises HistoryError; ``rate_limited``
+        and ``pending`` carry ``retry_at``. Same budget, batch bounds and lock as a page."""
+        if not SYMBOL.fullmatch(symbol):
+            raise HistoryError("Invalid chart symbol.", "invalid_request")
+        with self._lock:
+            work = Work((symbol, "1m", "extended", 0, 0), day)
+            return self._session(symbol, day, work, time.monotonic() + 10, [0])
 
     def _publish(self, symbol: str, day: date, minutes: list[dict]) -> None:
         path = self._path(symbol, day)
@@ -166,6 +198,11 @@ class ChartHistory:
             body = response.json()
         except ValueError as exc:
             raise HistoryError("Alpaca returned malformed history data.", "malformed") from exc
+        if isinstance(body, dict) and body.get("bars") is None and body.get("symbol") == symbol and body.get("next_page_token") is None:
+            # Alpaca's answer for a symbol or day without a single minute (seen 2026-10-03 for SPX, and for
+            # CRWV before it listed). Not stored as an empty session: scroll-back would then walk an index's
+            # empty days one request at a time to 2016.
+            raise HistoryError(f"Alpaca has no minute bars for {symbol} on {day}.", "no_data")
         if not isinstance(body, dict) or not isinstance(body.get("bars"), list) or (body.get("next_page_token") is not None and not isinstance(body["next_page_token"], str)):
             raise HistoryError("Alpaca returned malformed history data.", "malformed")
         return body

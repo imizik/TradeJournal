@@ -348,6 +348,11 @@ is verifiable rather than hopeful.
   absent with a reason, never taken from an older session. Zones and
   interactions use one band, a tenth of the daily ATR; nothing on the chart
   calls a level a signal.
+- Chart relative volume (`chart_rvol.py`, pure) is fill context's
+  `compute_rvol_time_adjusted` evaluated at every minute, and a test holds
+  them equal on the same bars; change both or neither. The baseline needs all
+  20 calendar sessions before today stored on disk: until then there is none,
+  never one over fewer sessions. Only today's regular-session candles have RVol.
 - The chart settings document belongs to the frontend, but a save never drops
   a top-level field it leaves out (`PUT /charts/settings` keeps the stored
   value). A tab still running an older build cannot erase a field a newer build

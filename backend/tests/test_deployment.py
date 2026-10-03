@@ -384,6 +384,29 @@ def test_an_options_snapshot_that_cannot_be_queued_fails_the_unit(monkeypatch):
     assert "tradejournal-options-snapshot.timer" in alerts.TIMERS
 
 
+def test_rvol_history_is_queued_before_the_open_and_skips_when_the_lane_stays_busy(monkeypatch, capsys):
+    automation = load("automation")
+    responses = [(409, {"detail": "busy"}), (200, {"run_id": "run-1"})]
+    calls = []
+    monkeypatch.setattr(automation, "request", lambda path, method="GET": calls.append((path, method)) or responses.pop(0))
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    automation.rvol_history()
+    assert calls == [("/sync/jobs/rvol_history/run", "POST")] * 2
+    assert "queued: run-1" in capsys.readouterr().out
+    # A missed slot costs only today's RVol until the catch-up: a skip, never a unit failure.
+    monkeypatch.setattr(automation, "request", lambda *_args, **_kwargs: (409, {"detail": "busy"}))
+    automation.rvol_history(retry_seconds=0)
+    assert "skipped" in capsys.readouterr().out
+    timer = (Path(__file__).resolve().parents[2] / "deploy/systemd/tradejournal-rvol-history.timer").read_text()
+    # After New York midnight (yesterday's SIP session is complete) and before the open, with a catch-up.
+    assert "OnCalendar=Mon..Fri *-*-* 06:00:00 America/New_York" in timer
+    assert "OnCalendar=Mon..Fri *-*-* 08:40:00 America/New_York" in timer
+    assert "tradejournal-rvol-history.timer" in load("control").TIMERS
+    alerts = load("alerts")
+    assert "tradejournal-rvol-history.service" in alerts.SERVICES
+    assert "tradejournal-rvol-history.timer" in alerts.TIMERS
+
+
 @pytest.fixture
 def alerts(tmp_path, monkeypatch):
     module = load("alerts")
