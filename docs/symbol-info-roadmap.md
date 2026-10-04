@@ -45,7 +45,7 @@ after them, clearly labelled.
 | T1.1 | Panel shell and the **You** tab: your own trades on this underlying | 1 Core | done ([PR #115](https://github.com/imizik/TradeJournal/pull/115)) |
 | T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga) | 1 Core | next |
 | T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | todo |
-| T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | todo |
+| T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | todo |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |
 | T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Yahoo, unofficial) | 2 Forecast | todo (needs [decision 1](#open-decisions)) |
@@ -103,7 +103,12 @@ and the item that consumes the data owns the test.
   listing and ignore the rest. Do not merge fields across classes. (T1.3)
 - **Calendars can hold two "next earnings" rows.** CVNA had Q3 results on
   2026-10-28 *Confirmed* and 2026-10-29 *Estimated*. A confirmed row wins for
-  the same fiscal quarter. (T1.4)
+  the same fiscal quarter. (T1.4) By 2026-10-04 the estimated row was gone;
+  the recorded fixture keeps it.
+- **Estimates lag announcements.** On 2026-10-04 Tradier still had TSLA's Q3
+  report as 2026-10-22 *Estimated*, a day after the 2026-10-21 Tesla announced
+  that day; CVNA's *Confirmed* 2026-10-28 matched Carvana's release. Show the
+  status every time a date is shown. (T1.4, C2.5)
 - **Sources disagree on dates.** NVDA's next report: Tradier 2026-11-19
   *Estimated*, Yahoo 2026-11-17. Show the source and status, prefer a
   confirmed date from either, and never present an estimate as a date. (T1.4,
@@ -214,6 +219,17 @@ the CVNA duplicate-row fixture resolves to the confirmed date, a symbol with
 only estimated rows shows the *Estimated* label, an unknown date shows
 nothing rather than a guess, and the badge appears and disappears around the
 14-day line in a test with a fixed clock.
+As built ([Events tab](charts-workspace.md#symbol-info-panel), [chart
+earnings](charts-workspace.md#earnings-c25)): `GET /charts/symbol/{symbol}/events`
+answers from `backend/app/engine/symbol_info_tradier.py`, which reads the
+three Tradier datasets with its own budget of 10 a minute and keeps the
+normalized rows (pure normalizers in `symbol_info_events.py`) in memory and on
+disk for 12 or 24 hours. Earnings are quarterly *result* rows only (Tradier
+event types 7-10), one date per fiscal quarter. Past reports are confirmed
+dates only: an estimate whose day passed was never a report. Each symbol's
+rows come from one share class, the one with the most rows. No upcoming row
+means "Not announced"; nothing is projected from earlier quarters. Ex-dividend
+dates show the next announced one and the last; splits the last two years.
 
 ### Phase 2 — Forecast, for an options trader
 

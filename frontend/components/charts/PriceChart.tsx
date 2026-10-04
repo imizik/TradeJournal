@@ -4,12 +4,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import type { Earnings } from "@/lib/symbolInfo";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
 import { AutoLevelLayer, nearestZones } from "@/lib/autoLevels";
+import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
 import SelectionBar from "./SelectionBar";
 import type { MenuRequest } from "./ChartMenu";
@@ -105,7 +107,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, rvol = null, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, rvol = null, earnings = null, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -113,6 +115,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
   /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
   rvol?: RvolBaseline | null;
+  /** This symbol's earnings (C2.5): markers on report dates, and the header badge. */
+  earnings?: Earnings | null;
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
@@ -677,12 +681,18 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   }, [indicators]);
 
   const markers = panel?.markers;
+  // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
+  const earningsKey = useMemo(() => JSON.stringify(earningsMarks(panel?.bars ?? [], earnings, interval)), [panel?.bars, earnings, interval]);
   useEffect(() => {
     if (pending) return;
-    bundle.current?.markers.setMarkers(indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
+    const reports = (JSON.parse(earningsKey) as EarningsMark[]).map((m) => ({ time: m.time as UTCTimestamp, position: "belowBar" as const,
+      shape: "circle" as const, color: m.estimated ? "#a78bfa99" : "#a78bfa", text: m.estimated ? "E?" : "E", id: `earnings:${m.date}` }));
+    const fills = indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
       position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
-      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : []);
-  }, [markers, pending, indicators.fills, main]);
+      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : [];
+    bundle.current?.markers.setMarkers([...fills, ...reports].sort((a, b) => a.time - b.time));
+    if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
+  }, [markers, earningsKey, pending, indicators.fills, main]);
 
   useEffect(() => {
     const current = bundle.current;
@@ -743,6 +753,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
             {INTERVALS.map((i) => <option key={i}>{i}</option>)}
           </select>
           {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
+          {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {main && timer}
@@ -766,6 +777,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
+        {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
         {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)` } : { top: Math.round(card.y) + 12 }} onClose={() => setCard(null)} />}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}

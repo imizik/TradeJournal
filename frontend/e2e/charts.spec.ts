@@ -1,6 +1,7 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
+import type { Earnings } from "../lib/symbolInfo";
 
 // Each test starts from empty server settings of its own; tests tagged
 // @real-settings use the e2e backend's endpoint instead.
@@ -4442,5 +4443,91 @@ test.describe("phone relative volume", () => {
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({ path: test.info().outputPath("rvol-phone.png") });
+  });
+});
+
+// ---- Earnings (C2.5): markers on report dates and the header badge, from the workspace's cached calendar ----
+
+const EARNINGS: Earnings = { state: "ready", source: "Tradier corporate calendar", fetched_at: FIXTURE_START, message: null,
+  next: { date: "2026-10-28", status: "confirmed", label: "Q3 FY2026" },
+  reports: [{ date: "2026-09-15", label: "Q2 FY2026" }, { date: "2026-06-01", label: "Q1 FY2026" }] };
+
+async function stubEarnings(page: Page, bySymbol: Record<string, Earnings>) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.earnings = bySymbol[data.symbol] ?? null;
+    for (const [name, other] of Object.entries(data.extras ?? {})) other.earnings = bySymbol[name] ?? null;
+    await route.fulfill({ json: data });
+  });
+}
+
+test("earnings dates mark the candles that hold them, intraday and daily, and an unknown date marks nothing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await stubEarnings(page, { MRVL: EARNINGS, NVDA: { ...EARNINGS, next: null, reports: [] }, SPY: { ...EARNINGS, state: "none", next: null, reports: [] } });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Intraday, the date's first candle (09:30 New York): the report's time of day is unknown.
+  const sept15 = FIXTURE_START + 86400;
+  await expect(drawn(page, "main")).toHaveAttribute("data-earnings", `2026-09-15@${sept15}`);
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-earnings", `2026-09-15@${sept15}`);
+  // The synthetic daily candles run on past the next report, so it is marked as well; June 1 is before them.
+  await expect(drawn(page, "Panel 4")).toHaveAttribute("data-earnings", `2026-09-15@${sept15},2026-10-28@${FIXTURE_START + 44 * 86400}`);
+  // The 1m candles are one session, Sept 14: no report that day.
+  await expect(drawn(page, "Panel 5")).toHaveAttribute("data-earnings", "");
+  // Scrolled back to Sept 15 (the 79th 5m candle) for the screenshot.
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 50, to: 110 }));
+  await page.screenshot({ path: test.info().outputPath("earnings-markers.png") });
+  for (const symbol of ["NVDA", "SPY"]) {
+    await page.getByRole("button", { name: `Chart ${symbol}`, exact: true }).click();
+    await expect(page.getByRole("region", { name: new RegExp(`^${symbol} 5m chart`) })).toHaveCount(1);
+    await expect(drawn(page, "main")).toHaveAttribute("data-earnings", "");
+    await expect(drawn(page, "Panel 4")).toHaveAttribute("data-earnings", "");
+  }
+  await expect(page.getByRole("note", { name: /^Earnings/ })).toHaveCount(0);
+});
+
+test("the earnings badge appears 14 days out, counts New York days and disappears after the report", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context, { revision: 1, data: { symbol: "MRVL", panelSymbols: [null, "NVDA", null, null, null] } });
+  await stubEarnings(page, { MRVL: EARNINGS, NVDA: { ...EARNINGS, next: { date: "2026-10-23", status: "estimated", label: "Q3 FY2027" } } });
+  await page.clock.install({ time: new Date("2026-10-13T16:00:00Z") });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const main = page.getByRole("region", { name: /^MRVL 5m chart/ });
+  const held = page.getByRole("region", { name: /^NVDA 15m chart/ });
+  // Fifteen days before MRVL's report: no badge. NVDA, held by a smaller chart, is ten days out.
+  await expect(main.getByRole("note", { name: /^Earnings/ })).toHaveCount(0);
+  const estimate = held.getByRole("note", { name: "Earnings in 10 d · est.", exact: true });
+  await expect(estimate).toHaveText("E 10 d?");
+  await expect(estimate).toHaveAttribute("title", "Q3 FY2027 earnings Fri, Oct 23, 2026: Tradier's estimate; the company has not confirmed it. Time of day not published. Tradier corporate calendar.");
+  await page.clock.setSystemTime(new Date("2026-10-14T16:00:00Z"));
+  const badge = main.getByRole("note", { name: "Earnings in 14 d", exact: true });
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute("title", "Q3 FY2026 earnings Wed, Oct 28, 2026: confirmed. Time of day not published. Tradier corporate calendar.");
+  await page.screenshot({ path: test.info().outputPath("earnings-badge.png") });
+  // 23:30 on the 27th in New York is still the day before, though UTC has turned.
+  await page.clock.setSystemTime(new Date("2026-10-28T03:30:00Z"));
+  await expect(main.getByRole("note", { name: "Earnings tomorrow", exact: true })).toBeVisible();
+  await page.clock.setSystemTime(new Date("2026-10-28T16:00:00Z"));
+  await expect(main.getByRole("note", { name: "Earnings today", exact: true })).toBeVisible();
+  await page.clock.setSystemTime(new Date("2026-10-29T04:30:00Z"));
+  await expect(page.getByRole("note", { name: /^Earnings/ })).toHaveCount(0);
+});
+
+test.describe("phone earnings badge", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the main chart's badge takes its short form and stays inside the header", async ({ page }) => {
+    await stubEarnings(page, { MRVL: EARNINGS });
+    await page.clock.install({ time: new Date("2026-10-23T16:00:00Z") });
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    const badge = page.getByRole("note", { name: "Earnings in 5 d", exact: true });
+    await expect(badge).toBeVisible();
+    await expect(badge.getByText("E 5 d", { exact: true })).toBeVisible();
+    const shown = (await badge.boundingBox())!;
+    expect(shown.x + shown.width).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("earnings-badge-phone.png") });
   });
 });

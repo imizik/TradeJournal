@@ -21,6 +21,7 @@ from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
+from app.engine import symbol_info_tradier
 from app.models import ChartSettingsRecord, Fill
 
 router = APIRouter()
@@ -164,6 +165,12 @@ def workspace(
         except ChartFeedError as exc:
             # A held symbol that cannot load leaves the main charts intact.
             data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
+
+    # Earnings (C2.5) come from the cache only; stale symbols refresh in the background.
+    earnings = symbol_info_tradier.symbol_events.chart_earnings([symbol, *held], symbols, datetime.now(ET).date())
+    data["earnings"] = earnings[symbol]
+    for name, other in data["extras"].items():
+        other["earnings"] = earnings[name]
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.

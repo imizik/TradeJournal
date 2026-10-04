@@ -176,6 +176,10 @@ links, empty symbols, remembered placeholder tabs, debouncing, late-response
 rejection, failure/retry and the collapsed 390 px layout. It makes no claim
 about live provider feeds. `backend/tests/test_symbol_info.py` covers missing
 results, zero-duration holds, recent-record limits and the two-query adapter.
+Its Events tests stub `/charts/symbol/{symbol}/events`; the earnings
+normalizers and cache are proven on recorded Tradier responses in
+`backend/tests/test_symbol_info_events.py`. A live Tradier read, and whether an
+estimated date matches the company's announcement, are outside the suite.
 
 `frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
 quote responses: five canvases, symbol linking, saved levels, streamed trade updates,

@@ -1,6 +1,7 @@
 import { apiUrl } from "@/lib/api";
 import { cleanDrawings, cleanToolStyles, DEFAULT_TOOL_STYLES } from "./drawings";
 import type { Drawing, DrawingKind, ToolStyle } from "./drawings";
+import type { Earnings } from "./symbolInfo";
 
 export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as const;
 export type Interval = typeof INTERVALS[number];
@@ -95,6 +96,8 @@ export type SymbolPanels = {
   auto_levels?: AutoLevels | null;
   /** Today's relative-volume baseline; null on a day with no session, absent from a backend older than C2.4. */
   rvol?: RvolBaseline | null;
+  /** The symbol's earnings from the backend's cache (C2.5); absent from a backend older than C2.5. */
+  earnings?: Earnings | null;
 };
 export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
@@ -589,6 +592,36 @@ export function barAt(bars: ChartBar[], time: number): ChartBar | undefined {
   while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= time) low = mid + 1; else high = mid; }
   const bar = bars[low - 1];
   return bar && time < bar.end_time ? bar : undefined;
+}
+
+/** An earnings date on the candle that holds it (C2.5). */
+export type EarningsMark = { time: number; date: string; label: string; estimated: boolean };
+/**
+ * Each report date with a loaded candle, past reports and the next one alike.
+ * A daily or weekly candle holds the date's New York midday. Intraday, the
+ * date's first candle carries it, because the report's time of day is unknown.
+ * A date without a loaded candle (a future one, or older than the history) has none.
+ */
+export function earningsMarks(bars: ChartBar[], earnings: Earnings | null | undefined, interval: Interval): EarningsMark[] {
+  if (!earnings || !bars.length) return [];
+  const dates = [...earnings.reports.map((report) => ({ ...report, estimated: false })),
+    ...(earnings.next ? [{ date: earnings.next.date, label: earnings.next.label, estimated: earnings.next.status === "estimated" }] : [])];
+  const marks: EarningsMark[] = [];
+  for (const entry of dates) {
+    const midnight = Date.parse(`${entry.date}T00:00:00Z`) / 1000;
+    if (!intradayInterval(interval)) {
+      // 16:30 UTC is 12:30 New York in summer and 11:30 in winter: inside every regular session.
+      const bar = barAt(bars, midnight + 16.5 * 3600);
+      if (bar) marks.push({ ...entry, time: bar.time });
+      continue;
+    }
+    // New York's midnight is 04:00 or 05:00 UTC; no candle starts between 20:00 and 04:00 New York.
+    const after = midnight + 4 * 3600;
+    let low = 0, high = bars.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time < after) low = mid + 1; else high = mid; }
+    if (low < bars.length && nyDate.format(bars[low].time * 1000) === entry.date) marks.push({ ...entry, time: bars[low].time });
+  }
+  return marks.sort((a, b) => a.time - b.time);
 }
 
 export const INTERVAL_SECONDS: Record<Interval, number> = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 };

@@ -2,18 +2,25 @@
 
 import { useEffect, useId, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fetchSymbolJournal } from "@/lib/symbolInfo";
-import type { SymbolJournal } from "@/lib/symbolInfo";
+import { fetchSymbolEvents, fetchSymbolJournal } from "@/lib/symbolInfo";
+import type { SymbolEvents, SymbolJournal } from "@/lib/symbolInfo";
+import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoYou from "./SymbolInfoYou";
 
 const TABS = ["Overview", "News", "Events", "Forecast", "You"] as const;
 type Tab = typeof TABS[number];
 const TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
+/** The tabs built so far: one request each, for the open tab only. */
+const BUILT = {
+  You: { load: fetchSymbolJournal, name: "journal" },
+  Events: { load: fetchSymbolEvents, name: "events" },
+} satisfies Partial<Record<Tab, { load(symbol: string, signal: AbortSignal): Promise<unknown>; name: string }>>;
+const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
 
 export default function SymbolInfo({ symbol }: { symbol: string }) {
   const id = useId();
   const [view, setView] = useState<{ ready: boolean; expanded: boolean; tab: Tab }>({ ready: false, expanded: false, tab: "You" });
-  const [result, setResult] = useState<{ symbol: string; data?: SymbolJournal; error?: string } | null>(null);
+  const [result, setResult] = useState<{ key: string; data?: unknown; error?: string } | null>(null);
   const [retry, setRetry] = useState(0);
 
   useEffect(() => {
@@ -24,15 +31,17 @@ export default function SymbolInfo({ symbol }: { symbol: string }) {
   }, []);
 
   useEffect(() => {
-    if (!view.ready || !view.expanded || view.tab !== "You") return;
+    const tab = view.tab;
+    if (!view.ready || !view.expanded || !built(tab)) return;
     const controller = new AbortController();
     let active = true;
+    const key = `${tab}|${symbol}`;
     const timer = setTimeout(() => {
       setResult(null);
-      fetchSymbolJournal(symbol, controller.signal).then((data) => {
-        if (active) setResult({ symbol, data });
+      BUILT[tab].load(symbol, controller.signal).then((data) => {
+        if (active) setResult({ key, data });
       }).catch(() => {
-        if (active) setResult({ symbol, error: "Journal unavailable. Try again." });
+        if (active) setResult({ key, error: `${tab === "You" ? "Journal" : "Events"} unavailable. Try again.` });
       });
     }, 300);
     return () => { active = false; clearTimeout(timer); controller.abort(); };
@@ -43,7 +52,7 @@ export default function SymbolInfo({ symbol }: { symbol: string }) {
     try { localStorage.setItem(TAB_KEY, tab); } catch { /* keep working without storage */ }
   }
 
-  const shown = result?.symbol === symbol ? result : null;
+  const shown = result?.key === `${view.tab}|${symbol}` ? result : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -57,10 +66,10 @@ export default function SymbolInfo({ symbol }: { symbol: string }) {
           }} className={`min-h-11 min-w-0 flex-1 px-1 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
-        {view.tab !== "You" ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
-          : shown?.data ? <SymbolInfoYou data={shown.data} />
-          : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry journal</button></div>
-          : <p role="status" className="text-xs text-slate-500">Loading journal…</p>}
+        {!built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
+          : shown?.data ? (view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : <SymbolInfoEvents data={shown.data as SymbolEvents} />)
+          : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
+          : <p role="status" className="text-xs text-slate-500">Loading {BUILT[view.tab].name}…</p>}
       </div>
     </div>}
   </section>;
