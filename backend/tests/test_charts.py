@@ -16,6 +16,7 @@ from app.database import get_session
 from app.engine import chart_feed as feed_module
 from app.engine.chart_feed import ChartFeed, ChartFeedError
 from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, market_day, normalize_bars, session_part
+from app.engine.symbol_info_tradier import SymbolEvents
 from app.models import Account, ChartSettingsRecord, Fill
 from app.routers import charts
 
@@ -296,7 +297,7 @@ def test_missing_key_and_denied_access_do_not_fall_back_to_other_feeds(provider,
 
 
 @pytest.fixture
-def route_client(monkeypatch):
+def route_client(monkeypatch, tmp_path):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
@@ -319,6 +320,9 @@ def route_client(monkeypatch):
         return {"panels": {"5m": {"bars": chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular"), "markers": []}}}
 
     monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    # Earnings come from the cache only; no key here, so none are read.
+    monkeypatch.setattr(charts.symbol_info_tradier, "symbol_events", SymbolEvents(root=tmp_path, spawn=lambda work: None))
+    monkeypatch.setattr(charts.symbol_info_tradier.tradier, "TRADIER_API_KEY", "")
     with TestClient(app) as client:
         yield client
     engine.dispose()
@@ -374,9 +378,11 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     # A held symbol that fails leaves the main charts and the other held symbol intact.
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
-    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
-                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "rvol": None,
-                                     "fills_truncated": False}
+    assert data["extras"].pop("BAD") | {"earnings": None} == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
+                                                         "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "rvol": None,
+                                                         "fills_truncated": False, "earnings": None}
+    # Every symbol on screen carries its earnings (C2.5), even one whose candles failed.
+    assert data["earnings"]["state"] == "unavailable" and data["extras"]["SPY"]["earnings"]["source"] == "Tradier corporate calendar"
 
 
 def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):

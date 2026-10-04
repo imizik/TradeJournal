@@ -28,12 +28,27 @@ the sample count on hover. Results sum stored FIFO P&L without reconstructing
 it. Account names accompany each record; positions are not merged across
 accounts. The source and read time are shown, with calculated/observed labels.
 
-Overview, News, Events and Forecast are placeholders for the
+Its **Events** tab (T1.4) reads `GET /charts/symbol/{symbol}/events`: the
+next earnings date with Tradier's status (*Confirmed*, or *Estimated*: Tradier's
+estimate, which the company has not announced), days away in New York calendar
+days, the fiscal quarter, and "Time of day not published", because Tradier's
+calendar has dates only; then the last eight confirmed report dates, the next
+announced and the last ex-dividend date with amount and pay date, and splits
+in the last two years. Each block names its source and when Tradier was read,
+and degrades on its own: an ETF's calendar reads "Tradier lists no earnings",
+a failed read shows why and any older copy. No upcoming date reads "Not
+announced"; nothing is guessed. The backend keeps Tradier's normalized rows
+in memory and under `backend/data/symbol_info/v1/tradier/` for 12 hours
+(calendar) or 24 (dividends, splits) and reads Tradier at most 10 times a
+minute, apart from the chart feed's budget and cooldowns; a cold symbol costs
+three requests, a warm one none.
+
+Overview, News and Forecast are placeholders for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
-on this device. Only an expanded You tab fetches, once after the ticker
-settles for 300 ms; old requests are cancelled. The panel starts collapsed
-below 1024 px and follows the watchlist's visibility in full-screen mode.
-There are no external calls, new tables or migrations for this panel.
+on this device. Only an expanded You or Events tab fetches, once after the
+ticker settles for 300 ms; old requests are cancelled. The panel starts
+collapsed below 1024 px and follows the watchlist's visibility in full-screen
+mode. There are no new tables or migrations for this panel.
 
 ## License and data costs
 
@@ -175,6 +190,8 @@ cd backend
 - EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14). Today's
   regular-session volume bars are shaded by relative volume (C2.4; see
   [Relative volume](#relative-volume-c24)).
+- Earnings (C2.5): an **E** below each report date's candle and an
+  "Earnings in 5 d" badge in the header (see [Earnings](#earnings-c25)).
 - Extended-session shading and regular/extended hours selection. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
@@ -888,6 +905,36 @@ end of that candle.
   updates with the 15-second refresh, as its volume does; a streamed new
   candle has none until then.
 
+### Earnings (C2.5)
+
+Report dates come from Tradier's corporate calendar through the same cache as
+the Events tab ([Symbol info panel](#symbol-info-panel)); the normalizing and
+its traps are in the [symbol info roadmap](symbol-info-roadmap.md#data-traps-the-probes-found).
+
+- **Markers.** Every chart marks each report date it has a candle for with a
+  violet **E** below the candle: past confirmed reports and the next date
+  alike, through every page of older history. A daily or weekly candle holds
+  the date. On an intraday chart the date's first candle carries it, because
+  the report's time of day (before the open or after the close) is not
+  published. An estimated date's marker reads **E?**. A date without a
+  candle, such as the next report before its day, has no marker; the badge
+  covers it. Earnings markers do not follow the Journal (fills) layer.
+- **Badge.** From 14 days before the next report through its day, the main
+  chart's header reads *Earnings in 5 d*, *Earnings tomorrow* or *Earnings
+  today*, with *· est.* when Tradier's date is an estimate. Days are New York
+  calendar days and turn at New York's midnight. The quarter, the date, the
+  status and the source are on hover. A smaller chart holding its own symbol
+  shows the short form (*E 5 d?*) on its canvas, where its header has no room;
+  on a phone the main chart uses the short form too. No upcoming date, or one
+  more than 14 days out, shows nothing.
+- **Delivery.** `GET /charts/workspace` sends `earnings` for the main symbol
+  and each held symbol (`state`: `ready`, `none` for an ETF or index, `loading`
+  or `unavailable`; `next`, every past report, `source`, `fetched_at`,
+  `message`). It answers from the cache only. Symbols whose copy is missing or
+  older than 12 hours, the watchlist's included, are read on a background
+  thread in one batched request per ten symbols, so a chart never waits on
+  Tradier's fundamentals; the next 15-second refresh carries them.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
@@ -1060,6 +1107,25 @@ its volume without clipping and gives the candle and sessions on hover, a daily
 chart shows none, a baseline still building says so and shades nothing, and at
 390px the main chart's RVol and sessions wrap into view. What the canvas paints
 is checked by screenshot review only.
+`backend/tests/test_symbol_info_events.py` runs the normalizers on recorded,
+trimmed Tradier responses (`tests/fixtures/tradier/fundamentals_2026-10-04.json`):
+CVNA's confirmed and estimated rows for one quarter resolve to the confirmed
+date and the leftover estimate never becomes a second report, NVDA's next date
+stays *estimated*, conference calls and conferences are not reports, an ETF
+has no calendar, no upcoming row gives no date, rows come from one share class,
+and dividends and splits read every table shape. It also covers the cache: the
+chart never waits, one batched call covers the watchlist, the 12-hour refresh,
+the disk copy after a restart, a failure's cooldown with the older copy kept,
+10 reads a minute and a missing key, and the Events route's blocks. Browser
+tests (C2.5) stub the workspace: an **E** lands on the date's first 5m and 15m
+candle and on the daily candle, a 1m session without a report and a symbol
+without dates have none, and with a fixed clock the badge is absent 15 days out,
+appears at 14, turns *tomorrow* at 23:30 New York though UTC has turned, reads
+*today*, and is gone the day after; an estimated date held by a smaller chart
+reads *E 10 d?*, and at 390px the short form stays in the header. The Events
+tab's browser tests stub its route. The live calendar was read on 2026-10-04 for
+twelve watchlist names; what the canvas paints is checked by screenshot review
+only.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's

@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
+import type { Earnings, SymbolEvents } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
@@ -62,7 +63,7 @@ test("placeholder tabs persist per device and rapid symbol steps fetch only the 
   await page.goto("/charts");
   const info = panel(page);
   await expect(info.locator("dl")).toContainText("$1,300.00");
-  for (const tab of ["Overview", "News", "Events", "Forecast"]) {
+  for (const tab of ["Overview", "News", "Forecast"]) {
     await info.getByRole("tab", { name: tab, exact: true }).click();
     await expect(info).toContainText(`${tab} is coming soon.`);
   }
@@ -151,4 +152,95 @@ test("390px opens collapsed inside the watchlist sheet and follows its visibilit
   await expect(info.getByRole("button", { name: "NVDA symbol info" })).toHaveAttribute("aria-expanded", "false");
   await page.getByRole("dialog", { name: "Watchlist", exact: true }).getByRole("button", { name: "Close watchlist" }).click();
   await page.getByRole("button", { name: "Exit full-screen charts" }).click();
+});
+
+// ---- Events (T1.4): Tradier's dates, stubbed; the backend tests normalize the recorded responses ----
+
+const READ = Date.parse("2026-10-05T13:40:00Z") / 1000;
+const block = { source: "Tradier corporate calendar", fetched_at: READ, message: null };
+const NVDA_LABELS = ["Q2 FY2027", "Q1 FY2027", "Q4 FY2026", "Q3 FY2026", "Q2 FY2026", "Q1 FY2026", "Q4 FY2025", "Q3 FY2025"];
+const NVDA_REPORTS = ["2026-08-26", "2026-05-20", "2026-02-25", "2025-11-19", "2025-08-27", "2025-05-28", "2025-02-26", "2024-11-20"];
+function events(symbol: string): SymbolEvents {
+  const none = { state: "none" as const, source: "Tradier dividends", fetched_at: READ, message: null };
+  const earnings: Earnings = symbol === "NVDA"
+    ? { ...block, state: "ready", next: { date: "2026-11-19", status: "estimated", label: "Q3 FY2027" },
+      reports: NVDA_REPORTS.map((date, i) => ({ date, label: NVDA_LABELS[i] })) }
+    : symbol === "AAPL" ? { ...block, state: "ready", next: { date: "2026-10-30", status: "confirmed", label: "Q4 FY2026" }, reports: [{ date: "2026-07-30", label: "Q3 FY2026" }] }
+    : symbol === "AMD" ? { ...block, state: "unavailable", fetched_at: null, message: "Tradier could not read the corporate calendar (503).", next: null, reports: [] }
+    : symbol === "TSLA" ? { ...block, state: "ready", next: null, reports: [{ date: "2026-07-22", label: "Q2 FY2026" }] }
+    : { ...block, state: "none", next: null, reports: [] };
+  const dividend = (ex_date: string, amount: number, pay_date: string) => ({ ex_date, amount, currency: "USD", pay_date, record_date: ex_date, declared: null, frequency: 4, type: "CD" });
+  return { symbol, today: "2026-10-05", time_zone: "America/New_York",
+    earnings: { ...earnings, time_note: "Time of day not published. Tradier's calendar has dates only, so before the open or after the close is unknown." },
+    dividends: symbol === "SPY" ? { ...none, state: "ready", next: null, last: dividend("2026-09-18", 1.888834, "2026-10-30") }
+      : symbol === "NVDA" ? { ...none, state: "ready", next: dividend("2026-12-03", 0.25, "2026-12-26"), last: dividend("2026-09-10", 0.25, "2026-10-01") }
+      : { ...none, next: null, last: null },
+    splits: { ...none, source: "Tradier corporate actions", state: symbol === "SPY" ? "none" : "ready",
+      rows: symbol === "AAPL" ? [{ ex_date: "2026-05-08", from: 1, to: 5, label: "5-for-1" }] : [] } };
+}
+
+test("Events shows the next report with its status, the last eight reports, dividends and splits, and an ETF's missing calendar", async ({ page }) => {
+  const reads: string[] = [];
+  page.on("request", (request) => { if (/\/charts\/symbol\/[^/]+\/events/.test(request.url())) reads.push(request.url()); });
+  await page.route("**/api/backend/charts/symbol/*/events", async (route) => {
+    const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
+    await route.fulfill({ json: events(symbol) });
+  });
+  // New York's 2026-10-05, so "in N days" is fixed.
+  await page.clock.install({ time: new Date("2026-10-05T14:00:00Z") });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Events", exact: true }).click();
+  const next = info.getByRole("region", { name: "Next earnings" });
+  await expect(next).toContainText("Thu, Nov 19, 2026");
+  await expect(next.getByText("Estimated", { exact: true })).toHaveAttribute("title", /Tradier's estimate; the company has not announced this date/);
+  await expect(next).toContainText("in 45 days · Q3 FY2027");
+  await expect(next.getByText("Time of day not published")).toHaveAttribute("title", /dates only/);
+  await expect(next.getByRole("listitem")).toHaveCount(8);
+  await expect(next.getByRole("listitem").first()).toContainText("Wed, Aug 26, 2026");
+  await expect(next).toContainText("Tradier corporate calendar · read Oct 5, 9:40 AM ET");
+  const dividends = info.getByRole("region", { name: "Dividends" });
+  await expect(dividends).toContainText("Next ex-dividend");
+  await expect(dividends).toContainText("Thu, Dec 3, 2026 · $0.25 · pays Sat, Dec 26, 2026");
+  await expect(info.getByRole("region", { name: "Splits · last two years" })).toContainText("No splits in the last two years");
+  expect(reads).toHaveLength(1);
+  // Dense content scrolls inside the dock; the page itself does not grow.
+  expect(await page.evaluate(() => document.documentElement.scrollHeight <= window.innerHeight)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("symbol-info-events.png"), fullPage: true });
+
+  await choose(page, "AAPL");
+  await expect(next).toContainText("Fri, Oct 30, 2026");
+  await expect(next.getByText("Confirmed", { exact: true })).toBeVisible();
+  await expect(next).toContainText("in 25 days · Q4 FY2026");
+  await expect(info.getByRole("region", { name: "Splits · last two years" })).toContainText("5-for-1");
+  await expect(dividends).toContainText(`No cash dividends on record for AAPL.`);
+  // A past report but no upcoming date: nothing is guessed.
+  await choose(page, "TSLA");
+  await expect(next).toContainText("Not announced. Nothing is shown until Tradier lists a date.");
+  await expect(next).toContainText("Wed, Jul 22, 2026");
+  await choose(page, "SPY");
+  await expect(next).toContainText("Tradier lists no earnings for SPY. ETFs, funds and indices do not report them.");
+  await expect(dividends).toContainText("Last ex-dividend");
+  await expect(dividends).toContainText("$1.888834");
+  await expect(dividends).toContainText("None announced");
+  // A failed calendar degrades only its own block.
+  await choose(page, "AMD");
+  await expect(next).toContainText("Tradier could not read the corporate calendar (503).");
+  await expect(next).toContainText("not read yet");
+  await expect(info.getByRole("region", { name: "Splits · last two years" })).toContainText("No splits in the last two years");
+  expect(reads.map((url) => url.split("/").at(-2))).toEqual(["NVDA", "AAPL", "TSLA", "SPY", "AMD"]);
+});
+
+test("a failed events request retries", async ({ page }) => {
+  let attempts = 0;
+  await page.route("**/api/backend/charts/symbol/NVDA/events", async (route) => {
+    attempts += 1;
+    await route.fulfill(attempts === 1 ? { status: 503, body: "Unavailable" } : { json: events("NVDA") });
+  });
+  await page.goto("/charts");
+  await panel(page).getByRole("tab", { name: "Events", exact: true }).click();
+  await expect(panel(page).getByRole("alert")).toContainText("Events unavailable. Try again.");
+  await panel(page).getByRole("button", { name: "Retry events" }).click();
+  await expect(panel(page).getByRole("region", { name: "Next earnings" })).toContainText("Q3 FY2027");
+  expect(attempts).toBe(2);
 });

@@ -92,8 +92,8 @@ These rows describe future work, not implemented recording or broker controls.
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
-| C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | next |
-| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
+| C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with symbol info T1.4) |
+| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | next |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
@@ -241,7 +241,7 @@ must not be treated as established capability.
 | Open interest history | Current only; OCC publishes once overnight | — | — | **Record our own** (C4.3); it cannot be backfilled |
 | Option minute history | `timesales` on an OCC symbol returned `series: null` | Option bars (already used by `trade_path.py`) | — | Alpaca, when ever needed |
 | Option trades stream | Streams OCC symbols per docs; whether trade events carry bid/ask is *unverified* | Indicative | — | Later (flow is out of scope) |
-| Earnings dates | `/beta/markets/fundamentals/calendars` returns NVDA earnings events; accuracy of upcoming dates *unverified* | — | — | Tradier (C2.5) |
+| Earnings dates | `/beta/markets/fundamentals/calendars`: dates only, each *Confirmed* or *Estimated*. Checked 2026-10-04: CVNA's confirmed Oct 28 matched Carvana's announcement; TSLA's estimated Oct 22 was a day off the Oct 21 Tesla announced that day | — | — | Tradier (C2.5, done) |
 | Macro events (CPI, FOMC, NFP) | — | — | — | None; a hand-kept yearly file if ever wanted |
 | News | — | Benzinga, already in `news.py` | — | Alpaca ([symbol info panel](symbol-info-roadmap.md)) |
 | Futures, Level 2, footprint | — | — | — | **Not available** |
@@ -266,7 +266,7 @@ proposing a new provider.
 | Price adjustment consistency | Reliable multi-year indicators, drawings and cross-interval comparison across splits | Define and test one explicit display basis; keep raw cache provenance | C0.6 |
 | Daily/weekly depth beyond the current request | Multi-year daily/weekly navigation | Page existing historical daily data; do not aggregate extended minutes into daily bars | C0.7 |
 | SPX index history and live compatibility | Claiming index-chart replacement | Probe index support separately; disclose unsupported coverage | Separate scope decision before including SPX in G0 |
-| Upcoming earnings accuracy | Earnings markers | Tradier corporate calendar, checked against company announcements | C2.5 |
+| Upcoming earnings accuracy | Earnings markers | Tradier's corporate calendar with its status shown: confirmed dates matched the company; estimates can be a day off, so they read *est.* | C2.5 (done) |
 | Macro events (CPI, FOMC, NFP) | Event markers | A small hand-kept yearly file | Later |
 | Streamed option trades with bid/ask | Options flow | A regular-hours probe of the existing Tradier stream | Later |
 | Futures (NQ, ES), footprint, depth of book | Nothing the user needs | Not needed: no futures are traded or watched | Not building |
@@ -595,6 +595,17 @@ source. The data adapter is built as T1.4 of the
 duplicate rows and the missing time of day; C2.5 draws the markers from it.
 *Done when:* markers render from a fixture, and an unknown date shows
 nothing rather than a guess.
+As built ([Earnings](charts-workspace.md#earnings-c25)), in one PR with T1.4 at
+the user's request: every chart marks each report date it has a candle for with
+a violet **E** below the candle. A daily or weekly candle holds the date; on an
+intraday chart the date's first candle does, since the time of day is unknown.
+The main chart's header shows the badge from 14 days before the report through
+the day itself; a smaller chart holding its own symbol shows a short one on its
+canvas. Estimated dates read *est.* (*E?* on a marker). The workspace response
+carries each symbol's earnings from the cache only; stale symbols, the
+watchlist's included, refresh on a background thread in one batched call, so a
+chart never waits for them. Upcoming dates were checked against company
+announcements on 2026-10-04 (see Data this plan can rely on).
 
 ### Phase 3 — The journal on the chart
 
