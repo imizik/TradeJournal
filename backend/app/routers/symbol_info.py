@@ -3,12 +3,13 @@
 from datetime import datetime
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session
 
 from app.database import get_session
 from app.engine.chart_math import ET
 from app.engine import symbol_info_tradier
+from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 
 router = APIRouter()
@@ -30,3 +31,14 @@ def you(symbol: str, db: Session = Depends(get_session)):
 def events(symbol: str):
     """Next earnings, past report dates, dividends and splits (T1.4), from Tradier's cached fundamentals."""
     return symbol_info_tradier.symbol_events.events(_ticker(symbol), datetime.now(ET).date())
+
+
+@router.get("/symbol/{symbol:path}/forecast")
+def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
+    """The implied move (T2.1): the at-the-money straddle at ``spot`` (the chart's latest price)
+    for the nearest expiration, the nearest Friday and the first expiration after the next report."""
+    symbol = _ticker(symbol)
+    today = datetime.now(ET).date()
+    # The next report from the Events cache only; a stale one refreshes in the background.
+    earnings = symbol_info_tradier.symbol_events.chart_earnings([symbol], [], today)[symbol].get("next")
+    return options_feed.forecast(symbol, spot, earnings)

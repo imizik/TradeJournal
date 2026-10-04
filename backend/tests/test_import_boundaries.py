@@ -99,6 +99,8 @@ PURE_MODULES = {
     # Option chain models. The Tradier adapter (options_chain) fills them; the
     # positioning engine and recorder must be able to read them without it.
     "app.engine.options_models",
+    "app.engine.options_positioning",  # positioning, gamma and option levels from supplied chains
+    "app.engine.options_implied",  # the at-the-money straddle from a supplied chain
 }
 # Third-party packages a pure module may reach. httpx, yfinance, anthropic,
 # googleapiclient and grpc are deliberately absent: reaching any of them, even

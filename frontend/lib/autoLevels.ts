@@ -1,5 +1,5 @@
 import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, SeriesType, Time } from "lightweight-charts";
-import type { AutoLevel, AutoZone, LevelInteraction } from "./charts";
+import type { AutoLevel, AutoLevels, AutoZone, LevelInteraction } from "./charts";
 import { etTime, price } from "./charts";
 
 /**
@@ -9,13 +9,61 @@ import { etTime, price } from "./charts";
  * level as a thin dotted line, a zone as a shaded band. It takes no pointer
  * events of its own, so panning, the crosshair and the user's levels and
  * drawings work through it; the chart asks `hit` where to show a level's card.
+ *
+ * Option strikes (C4.4) join the same zones on the backend, so a call wall at
+ * the prior day's high is one zone. A zone with an option member is tinted by
+ * it: calls teal, puts rose, other ranked strikes violet, the gamma flip amber.
+ * A strike chosen on the ladder (C4.5) draws as a solid highlighted line.
  */
 
 /** Zones shown on each side of price. */
 export const NEAREST = 3;
 const LINE = "#8b97ab";
 const HOVER = "#c9d3e2";
+const HIGHLIGHT = "#7dd3fc";
+/** An option zone's tint, by its most telling member. */
+function tint(zone: AutoZone): string {
+  const kinds = new Set(zone.members.map((member) => member.kind));
+  if (kinds.has("call_wall") || kinds.has("call_volume_wall")) return "#4fd1b5";
+  if (kinds.has("put_wall") || kinds.has("put_volume_wall")) return "#f08aa0";
+  if (kinds.has("gamma_flip")) return "#f5c76b";
+  return zone.members.some(isOption) ? "#a99af0" : LINE;
+}
 const FONT = "ui-sans-serif, system-ui, sans-serif";
+
+/** Option strike kinds (C4.4); the walls and the flip always draw while the layer is on. */
+const OPTION_KINDS = new Set(["call_wall", "put_wall", "call_volume_wall", "put_volume_wall", "options_oi", "options_volume", "options_gamma", "gamma_flip"]);
+const ALWAYS = new Set(["call_wall", "put_wall", "call_volume_wall", "put_volume_wall", "gamma_flip"]);
+export const isOption = (level: AutoLevel) => OPTION_KINDS.has(level.kind);
+const hasOption = (zone: AutoZone) => zone.members.some(isOption);
+const hasAuto = (zone: AutoZone) => zone.members.some((member) => !isOption(member));
+
+/**
+ * The zones a chart may show of what the backend sent, by which groups are on.
+ * The backend merges only the groups asked for; until a response for a changed
+ * choice arrives, a zone without a member of a shown group is left out.
+ */
+export function autoLevelsShown(levels: AutoLevels | null | undefined, auto: boolean, options: boolean): AutoLevels | null {
+  if (!levels || (!auto && !options)) return null;
+  if (auto && options) return levels;
+  const zones = levels.zones.filter(auto ? hasAuto : hasOption);
+  return zones.length === levels.zones.length ? levels : { ...levels, zones };
+}
+
+/**
+ * The zones to draw: the nearest automatic ones (C2.3) and, with the options
+ * layer on, the nearest `options` option zones each side plus every wall and
+ * the flip, lowest first. A zone of both kinds counts for each.
+ */
+export function shownZones(zones: AutoZone[], at: number | undefined, options: number | null): AutoZone[] {
+  if (at === undefined) return [];
+  const chosen = new Map(nearestZones(zones.filter(hasAuto), at).map((zone) => [zone.id, zone]));
+  if (options !== null) {
+    for (const zone of nearestZones(zones.filter(hasOption), at, options)) chosen.set(zone.id, zone);
+    for (const zone of zones) if (zone.members.some((member) => ALWAYS.has(member.kind))) chosen.set(zone.id, zone);
+  }
+  return [...chosen.values()].sort((a, b) => a.low - b.low);
+}
 
 /** The zones to draw: any that price is inside, and the nearest `count` wholly above and wholly below it. */
 export function nearestZones(zones: AutoZone[], at: number | undefined, count = NEAREST): AutoZone[] {
@@ -38,11 +86,16 @@ export const KIND_NAMES: Record<string, string> = {
   opening_range_5m_high: "5-minute opening range high", opening_range_5m_low: "5-minute opening range low",
   opening_range_15m_high: "15-minute opening range high", opening_range_15m_low: "15-minute opening range low",
   swing_high: "Swing high (daily pivot)", swing_low: "Swing low (daily pivot)", round: "Round number",
+  call_wall: "Call wall: most call open interest", put_wall: "Put wall: most put open interest",
+  call_volume_wall: "Call volume wall: most calls traded", put_volume_wall: "Put volume wall: most puts traded",
+  options_oi: "Open interest, ranked", options_volume: "Option volume, ranked", options_gamma: "Gamma, ranked",
+  gamma_flip: "Gamma flip: signed gamma crosses zero",
 };
 export const STATE_NAMES: Record<LevelInteraction["state"], string> = { untested: "Untested", tested: "Tested", broken: "Broken", reclaimed: "Reclaimed", developing: "Still forming" };
 
 /** Where a level came from, in words: "Tradier daily bar", "SIP minute", or the rule a round number follows. */
 export function sourceName(level: AutoLevel): string {
+  if (isOption(level)) return "Tradier option chains";
   if (!level.source) return "price rule";
   const provider = level.source === "alpaca_sip" ? "SIP" : "Tradier";
   return `${provider} ${level.timeframe === "1D" ? "daily bar" : "minute"}`;
@@ -50,6 +103,8 @@ export function sourceName(level: AutoLevel): string {
 
 /** When it formed: "formed Oct 2, 2026 4:00 PM", "still forming", or nothing for a round number. */
 export function formedName(level: AutoLevel): string | null {
+  // Open interest holds still through a session; volume trades and gamma follows the price.
+  if (isOption(level)) return level.developing ? "moves during the session" : null;
   if (level.developing) return "still forming";
   return level.formed_at === null ? null : `formed ${etTime(level.formed_at, true)} ${etTime(level.formed_at)}`;
 }
@@ -65,6 +120,7 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
   private labels = false;
   private hovered: string | null = null;
   private placed: Placed[] = [];
+  private highlight: { price: number; y: number | null } | null = null;
   private series: ISeriesApi<SeriesType, Time> | null = null;
   private requestUpdate: (() => void) | null = null;
   private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
@@ -94,6 +150,13 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
     this.update();
   }
 
+  /** A strike chosen on the ladder (C4.5), drawn as a solid line until another or none. */
+  setHighlight(value: number | null) {
+    if (value === (this.highlight?.price ?? null)) return;
+    this.highlight = value === null ? null : { price: value, y: null };
+    this.update();
+  }
+
   /** Ids of the zones drawn, lowest first; browser tests read it. */
   shown(): string[] { return this.zones.map((zone) => zone.id); }
 
@@ -119,6 +182,7 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
       const [top, bottom] = [series.priceToCoordinate(zone.high), series.priceToCoordinate(zone.low)];
       return top === null || bottom === null ? [] : [{ zone, top, bottom }];
     }) : [];
+    if (this.highlight) this.highlight.y = series?.priceToCoordinate(this.highlight.price) ?? null;
   }
 
   paneViews() { return this.views; }
@@ -135,11 +199,12 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
         const [upper, lower] = [Math.round(top * v), Math.round(bottom * v)];
         if (lower < -2 * v || upper > bitmapSize.height + 2 * v) continue;
         const hovered = zone.id === this.hovered;
-        const color = hovered ? HOVER : LINE;
+        const base = tint(zone);
+        const color = hovered ? HOVER : base;
         const band = lower - upper >= 3 * v;
         if (band) {
           context.globalAlpha = hovered ? 0.2 : 0.1;
-          context.fillStyle = LINE;
+          context.fillStyle = base;
           context.fillRect(0, upper, bitmapSize.width, lower - upper);
         }
         context.globalAlpha = hovered ? 0.95 : 0.55;
@@ -162,6 +227,22 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
           context.textBaseline = "bottom";
           context.fillText(shortLabel(zone.label), Math.round(6 * h), upper - Math.round(2 * v));
         }
+      }
+      const marked = this.highlight;
+      if (marked && marked.y !== null) {
+        const row = Math.round(marked.y * v) + 0.5;
+        context.globalAlpha = 0.95;
+        context.strokeStyle = HIGHLIGHT;
+        context.lineWidth = Math.max(1, Math.floor(v));
+        context.beginPath();
+        context.moveTo(0, row);
+        context.lineTo(bitmapSize.width, row);
+        context.stroke();
+        context.font = `${Math.round(10 * v)}px ${FONT}`;
+        context.fillStyle = HIGHLIGHT;
+        context.textAlign = "left";
+        context.textBaseline = "bottom";
+        context.fillText(`Strike ${price(marked.price)}`, Math.round(6 * h), row - Math.round(2 * v));
       }
       context.restore();
     });

@@ -100,7 +100,9 @@ class ChartFeed:
 
     def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None, quotes: bool = True,
                   stored_session: Callable[[str, date], list[dict] | None] | None = None,
-                  volume_profile: Callable[[str, date], chart_rvol.Profile | None] | None = None) -> dict:
+                  volume_profile: Callable[[str, date], chart_rvol.Profile | None] | None = None,
+                  extra_levels: Callable[[str, float | None], tuple[list[chart_levels.Level], dict]] | None = None,
+                  auto: bool = True) -> dict:
         """One symbol's panels, plus batched quotes unless ``quotes`` is off (a
         panel holding its own symbol needs only candles).
 
@@ -109,6 +111,9 @@ class ChartFeed:
         cost no provider request beyond the daily bars a daily panel reads anyway.
         With ``volume_profile`` (a stored session's RVol profile, or None) each
         intraday candle of today carries its relative volume (C2.4), from disk only.
+        With ``extra_levels`` (more levels for the symbol at its latest price, and what
+        to say about them: the options layer, C4.4) those join the automatic levels
+        before they merge into zones; ``auto=False`` leaves the automatic ones out.
         """
         now = datetime.now(ET)
         today = now.date()
@@ -202,7 +207,7 @@ class ChartFeed:
             "history_note": "Completed intraday sessions load on scroll from cached Alpaca SIP bars (from 2016); today uses Tradier. Daily and weekly charts scroll back through Tradier's whole daily history, read once per day and kept in memory. Prices are split-adjusted from recorded splits, as of each split's ex-date; the stored bars stay raw. Dividends are not adjusted.",
         }
         if stored_session:
-            data["auto_levels"] = self._levels(symbol, today, minutes, daily, info, calendar, stored_session, panels)
+            data["auto_levels"] = self._levels(symbol, today, minutes, daily, info, calendar, stored_session, panels, extra_levels, auto)
         if volume_profile:
             data["rvol"] = rvol
         return data
@@ -241,9 +246,10 @@ class ChartFeed:
                          f"{chart_rvol.MIN_SESSIONS}.", days, found.traded), None
         return state("ready", None, days, found.traded), found.average
 
-    def _levels(self, symbol, today, minutes, daily, info, calendar, stored_session, panels) -> dict:
-        """Automatic levels for the session in progress (or the next one), merged into zones,
-        and each intraday panel's interactions with them on its closed bars today."""
+    def _levels(self, symbol, today, minutes, daily, info, calendar, stored_session, panels, extra_levels=None, auto=True) -> dict:
+        """Automatic levels for the session in progress (or the next one), with any extra
+        ones, merged into zones, and each intraday panel's interactions with them on its
+        closed bars today."""
         now = int(time.time())
         # The dates any level reads: three weeks back and the next ten days (unpublished months read as clock hours).
         known = {d: calendar.hours(d) if calendar is not None else None for d in (today + timedelta(days=i) for i in range(-21, 11))}
@@ -254,8 +260,11 @@ class ChartFeed:
         before = adjust_minutes(stored, previous, info["splits"]) if stored else []
         found = chart_levels.compute_levels(day, before + (minutes if day == today else []), daily, now, known)
         band = chart_levels.BAND_ATR * found.atr if found.atr else None
-        zones = chart_levels.confluence(found.levels, band)
-        missing = dict(found.missing)
+        # The latest price: today's newest minute, else the last daily close.
+        spot = minutes[-1]["close"] if minutes else daily[-1]["close"] if daily else None
+        extra, about = extra_levels(symbol, spot) if extra_levels else ([], None)
+        zones = chart_levels.confluence([*(found.levels if auto else ()), *extra], band)
+        missing = dict(found.missing) if auto else {}
         if band is None:
             missing["confluence"] = "No daily ATR yet, so nearby levels are not merged and interactions are not read."
         for interval, panel in panels.items():
@@ -268,7 +277,8 @@ class ChartFeed:
                 events[zone.id] = {"state": "developing", "events": [], "at_level": False} if start is None \
                     else chart_levels.interactions(zone.low, zone.high, band, bars, start)
             panel["level_events"] = events
-        return {"day": day.isoformat(), "as_of": now, "atr": found.atr, "band": band, "missing": missing,
+        return {"day": day.isoformat(), "as_of": now, "atr": found.atr, "band": band, "missing": missing, "auto": auto,
+                **({"options": about} if extra_levels else {}),
                 "zones": [{"id": z.id, "low": z.low, "high": z.high, "label": z.label, "score": z.score,
                            "members": [asdict(m) for m in z.members]} for z in zones]}
 

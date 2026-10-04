@@ -85,3 +85,25 @@ def test_route_filters_underlying_keeps_accounts_and_uses_two_queries():
             assert client.get("/charts/symbol/BRK%2FB/you").json()["symbol"] == "BRK/B"
             assert client.get("/charts/symbol/bad%24/you").status_code == 422
     engine.dispose()
+
+
+def test_forecast_route_passes_the_price_and_the_next_report_from_the_events_cache(monkeypatch):
+    calls = []
+
+    class Events:
+        def chart_earnings(self, wanted, watchlist, today):
+            return {symbol: {"next": {"date": "2026-10-28", "status": "estimated", "label": "Q3"}} for symbol in wanted}
+
+    class Options:
+        def forecast(self, symbol, spot, earnings):
+            calls.append((symbol, spot, earnings["date"]))
+            return {"moves": []}
+
+    monkeypatch.setattr(symbol_info.symbol_info_tradier, "symbol_events", Events())
+    monkeypatch.setattr(symbol_info, "options_feed", Options())
+    app = FastAPI()
+    app.include_router(symbol_info.router, prefix="/charts")
+    with TestClient(app) as client:
+        assert client.get("/charts/symbol/nvda/forecast?spot=182.4").json() == {"moves": []}
+        assert client.get("/charts/symbol/NVDA/forecast?spot=0").status_code == 422
+    assert calls == [("NVDA", 182.4, "2026-10-28")]

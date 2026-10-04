@@ -22,6 +22,8 @@ from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
 from app.engine import symbol_info_tradier
+from app.engine.options_feed import Layer, options_feed
+from app.engine.options_positioning import SCOPES
 from app.routers.level_alerts import listing as alert_listing
 from app.models import ChartSettingsRecord, Fill
 
@@ -134,10 +136,17 @@ def workspace(
     watchlist: str = Query("SPY,QQQ,MRVL,NVDA,AMD,META", max_length=500),
     session: str = Query("extended", pattern="^(regular|extended)$"),
     extras: str = Query("", max_length=120),
+    options: str = Query("", max_length=20),
+    auto: bool = Query(True),
     db: Session = Depends(get_session),
 ):
     """The main symbol's panels and quotes, plus panels for up to two symbols
-    that panels hold on their own (``extras=SPY:5m.1h,QQQ:15m``)."""
+    that panels hold on their own (``extras=SPY:5m.1h,QQQ:15m``).
+
+    ``options=oi.week.0`` (measure, scope, signed) adds the options levels layer
+    (C4.4) to the automatic levels, from the option chain cache only: the main
+    symbol in that scope, a held symbol at its nearest expiration. ``auto=0``
+    then leaves the automatic levels out of the zones."""
     symbol = symbol.upper().strip()
     symbols = list(dict.fromkeys(s.strip().upper() for s in watchlist.split(",") if s.strip()))
     frames = list(dict.fromkeys(s.strip() for s in intervals.split(",") if s.strip()))
@@ -152,15 +161,26 @@ def workspace(
     if symbol in held or len(held) > MAX_SYMBOLS - 1 or any(not f or len(f) > 5 or any(i not in INTERVALS for i in f) for f in held.values()):
         raise HTTPException(422, f"Panels can hold up to {MAX_SYMBOLS - 1} other symbols, each with up to 5 supported intervals.")
     try:
+        layer = Layer.parse(options) if options else None
+    except ValueError:
+        raise HTTPException(422, "Options levels take a measure (oi, volume or gamma), a scope (nearest, week or all) and 0 or 1.") from None
+
+    def levels_for(scope: str | None):
+        if layer is None:
+            return {}
+        held_layer = Layer(layer.measure, scope or layer.scope, layer.signed)
+        return {"extra_levels": lambda name, spot: options_feed.chart(name, held_layer, spot), "auto": auto}
+
+    try:
         data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
-                                    volume_profile=chart_history.volume_profile)
+                                    volume_profile=chart_history.volume_profile, **levels_for(None))
     except ChartFeedError as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
     data["extras"] = {}
     for name, wanted in held.items():
         try:
             other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
-                                         volume_profile=chart_history.volume_profile)
+                                         volume_profile=chart_history.volume_profile, **levels_for("nearest"))
             data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
                                      "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol")}
         except ChartFeedError as exc:
@@ -181,6 +201,17 @@ def workspace(
     # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
     data["alerts"] = alert_listing(db)
     return data
+
+
+@router.get("/options/{symbol:path}/ladder")
+def options_ladder(symbol: str, scope: str = Query("week", max_length=10), signed: bool = Query(False),
+                   spot: float | None = Query(None, gt=0)):
+    """The strike ladder (C4.5): open interest, volume and gamma by strike around ``spot``
+    (the chart's latest price), over the scope's expirations. Reads stale chains first."""
+    symbol = symbol.upper().strip()
+    if not SYMBOL.fullmatch(symbol) or scope not in SCOPES:
+        raise HTTPException(422, "Use a US stock or ETF ticker and a scope of nearest, week or all.")
+    return options_feed.ladder(symbol, scope, signed, spot)
 
 
 class ChartSettingsSave(BaseModel):

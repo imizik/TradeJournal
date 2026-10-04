@@ -46,7 +46,7 @@ after them, clearly labelled.
 | T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga) | 1 Core | next |
 | T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | todo |
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
-| T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | todo |
+| T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |
 | T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Yahoo, unofficial) | 2 Forecast | todo (needs [decision 1](#open-decisions)) |
 | T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
@@ -246,6 +246,16 @@ or one-sided markets (no bid) show "market too wide" instead of a number.
 *Done when:* a fixture chain test proves the straddle choice (nearest strike
 to spot, both legs quoted), the earnings expiry is chosen from T1.4's date,
 and a no-bid fixture renders the refusal.
+
+As built ([Forecast tab](charts-workspace.md#symbol-info-panel)):
+`GET /charts/symbol/{symbol}/forecast?spot=` with the chart's latest price.
+`backend/app/engine/options_implied.py` (pure) takes the strike nearest the
+price that lists both a call and a put (a tie takes the lower); a leg with no
+bid or no ask, a crossed quote, or a spread wider than its own mid shows
+"Market too wide" with the reason. The earnings row is the first expiration
+strictly after the next report, since the report's time of day is unknown.
+Chains come through the chart's option feed, 60 seconds fresh, inside its
+share of the 30-a-minute budget; the tab reads again each minute while open.
 
 **T2.2 Earnings reactions.** For the last eight reports (dates from T1.4's
 history), the gap (open versus prior close) and the full-day move (close

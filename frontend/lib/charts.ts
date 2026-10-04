@@ -35,12 +35,13 @@ export type PriceAdjustment = {
 export type FillMarker = { id: string; time: number; label: string; buy: boolean };
 /**
  * One automatic level (C2.1), on the chart's basis. `evidence` says what kind of
- * number it is: a provider field (observed), a formula over bars (calculated) or
- * a heuristic (inferred). `bar_time` is the start of the bar that set it;
- * `formed_at` is when it became final, null while `developing` and for round numbers.
+ * number it is: a provider field (observed), a formula over bars (calculated), a
+ * heuristic (inferred) or a convention (assumed: signed gamma and the gamma flip,
+ * C4.4). `bar_time` is the start of the bar that set it; `formed_at` is when it
+ * became final, null while `developing`, for round numbers and for option strikes.
  */
 export type AutoLevel = {
-  kind: string; label: string; price: number; evidence: "observed" | "calculated" | "inferred";
+  kind: string; label: string; price: number; evidence: "observed" | "calculated" | "inferred" | "assumed";
   timeframe: "1m" | "1D" | null; source: "tradier" | "alpaca_sip" | null;
   bar_time: number | null; formed_at: number | null; developing: boolean;
 };
@@ -51,7 +52,48 @@ export type AutoZone = { id: string; low: number; high: number; label: string; s
  * one). `band` is a tenth of the daily ATR, null without one; `missing` says
  * why a group of levels is absent.
  */
-export type AutoLevels = { day: string; as_of: number; atr: number | null; band: number | null; zones: AutoZone[]; missing: Record<string, string> };
+export type AutoLevels = {
+  day: string; as_of: number; atr: number | null; band: number | null; zones: AutoZone[]; missing: Record<string, string>;
+  /** False when the zones leave the automatic levels out (only options levels asked for); absent before C4.4. */
+  auto?: boolean;
+  /** The options levels layer (C4.4) when asked for: what its strikes are and why any are missing. */
+  options?: OptionsInfo;
+};
+/** One strike's open interest and volume (observed) and dollar gamma for a 1% move (calculated), across a scope's expirations (C4.2). */
+export type OptionStrike = {
+  strike: number; call_oi: number | null; put_oi: number | null; call_volume: number | null; put_volume: number | null;
+  call_gamma: number | null; put_gamma: number | null;
+  /** Both sides' dollar gamma: summed, or the calls' less the puts' when signed (assumed). */
+  gamma: number | null;
+  /** Its place by the layer's measure on both sides together, then by each side's open interest and volume. */
+  rank: number | null; call_oi_rank: number | null; put_oi_rank: number | null; call_volume_rank: number | null; put_volume_rank: number | null;
+};
+export type OptionsMeasure = "oi" | "volume" | "gamma";
+export type OptionsScope = "nearest" | "week" | "all";
+/** Where signed gamma crosses zero near the price: a model estimate on an assumed dealer side; null price when it does not cross. */
+export type GammaFlip = { price: number | null; low: number; high: number; note: string; assumption: string };
+export type OptionsTotals = {
+  call_oi: number; put_oi: number; call_volume: number; put_volume: number;
+  put_call_oi: number | null; put_call_volume: number | null; call_volume_oi: number | null; put_volume_oi: number | null;
+};
+/**
+ * What the options levels (C4.4) or the strike ladder (C4.5) rest on. `spot` is
+ * the price gamma was computed at; `fetched_at` the oldest chain's read time
+ * (seconds); `greeks_updated_at` the provider's IV stamp, verbatim.
+ */
+export type OptionsInfo = {
+  state: "ready" | "loading" | "unavailable" | "none"; message: string | null;
+  symbol: string; root: string; scope: OptionsScope; source: string; spot: number | null;
+  expirations: string[]; scope_note: string | null;
+  mode?: OptionsMeasure; signed?: boolean;
+  fetched_at?: number; last_trade_at?: number | null; greeks_updated_at?: string | null;
+  excluded?: Record<string, number>; missing?: Record<string, number>; totals?: OptionsTotals;
+  strikes?: OptionStrike[]; flip?: GammaFlip | null;
+};
+export type OptionsLadder = OptionsInfo & {
+  signed: boolean; rows: OptionStrike[];
+  walls: Partial<Record<"call_oi" | "put_oi" | "call_volume" | "put_volume", number | null>>;
+};
 export type LevelEvent = { event: "tested" | "broken" | "reclaimed"; time: number };
 /** How price treated a zone today on one intraday panel's closed bars (C2.3). */
 export type LevelInteraction = { state: "untested" | "tested" | "broken" | "reclaimed" | "developing"; events: LevelEvent[]; at_level: boolean };
@@ -262,6 +304,8 @@ export type ChartSettings = {
   studiesHidden: boolean;
   /** Automatic levels hidden from every chart (C2.3); a field of its own for the same reason. */
   autoLevelsHidden: boolean;
+  /** The options levels layer (C4.4): off until asked for, and its filters. */
+  optionsLayer: OptionsLayer;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -278,12 +322,37 @@ export type ChartSettings = {
    */
   layoutProportions: Record<string, Proportions>;
 };
+/**
+ * The options levels layer (C4.4): hidden until asked for. `mode` ranks strikes by
+ * open interest, volume or gamma; `scope` is the nearest expiration (0DTE when it
+ * is today's), the nearest one's week, or every one within 45 days; `nearest` is
+ * how many option zones each side of the price draw besides the walls; `signed`
+ * gives gamma an assumed dealer side and, on SPY, QQQ and SPX, the gamma flip.
+ */
+export type OptionsLayer = { hidden: boolean; mode: OptionsMeasure; scope: OptionsScope; nearest: number; signed: boolean };
+export const OPTIONS_NEAREST = { min: 1, max: 5 } as const;
+export const DEFAULT_OPTIONS_LAYER: OptionsLayer = { hidden: true, mode: "oi", scope: "week", nearest: 3, signed: false };
+export function cleanOptionsLayer(input: unknown): OptionsLayer {
+  const value = (input && typeof input === "object" ? input : {}) as Partial<Record<keyof OptionsLayer, unknown>>;
+  const nearest = Number(value.nearest);
+  return {
+    hidden: value.hidden !== false,
+    mode: value.mode === "volume" || value.mode === "gamma" ? value.mode : "oi",
+    scope: value.scope === "nearest" || value.scope === "all" ? value.scope : "week",
+    nearest: Number.isInteger(nearest) && nearest >= OPTIONS_NEAREST.min && nearest <= OPTIONS_NEAREST.max ? nearest : DEFAULT_OPTIONS_LAYER.nearest,
+    signed: value.signed === true,
+  };
+}
+/** The workspace's `options` query for a shown layer (measure, scope, signed), or null while it is hidden. Only gamma has a sign. */
+export const optionsQuery = (layer: OptionsLayer) => layer.hidden ? null : `${layer.mode}.${layer.scope}.${layer.signed && layer.mode === "gamma" ? 1 : 0}`;
+
 export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
+  optionsLayer: DEFAULT_OPTIONS_LAYER, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
@@ -332,6 +401,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       hiddenGroups: { levels: value.hiddenGroups?.levels === true, drawings: value.hiddenGroups?.drawings === true },
       studiesHidden: value.studiesHidden === true,
       autoLevelsHidden: value.autoLevelsHidden === true,
+      optionsLayer: cleanOptionsLayer(value.optionsLayer),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
@@ -461,16 +531,28 @@ export function focusPanel(settings: ChartSettings, index: number): ChartSetting
 }
 
 /** `extras` lists the intervals each symbol held by a panel needs. */
-export async function fetchChartData({ symbol, intervals, watchlist, session, extras }: {
+/** `options` asks for the options levels layer (`optionsQuery`); `auto: false` then leaves the automatic levels out of the zones. */
+export async function fetchChartData({ symbol, intervals, watchlist, session, extras, options = null, auto = true }: {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: ChartSettings["session"]; extras: Record<string, Interval[]>;
+  options?: string | null; auto?: boolean;
 }, signal: AbortSignal): Promise<ChartData> {
   const query = new URLSearchParams({ symbol, intervals: intervals.join(","), watchlist: watchlist.join(","), session });
   const held = Object.entries(extras).map(([name, frames]) => `${name}:${frames.join(".")}`).join(",");
   if (held) query.set("extras", held);
+  if (options) { query.set("options", options); if (!auto) query.set("auto", "0"); }
   const response = await fetch(apiUrl(`/charts/workspace?${query}`), { cache: "no-store", signal });
   const body = await response.json();
   if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Unable to load chart data.");
   return body;
+}
+
+/** The strike ladder (C4.5) around `spot`, the chart's latest price. */
+export async function fetchOptionsLadder({ symbol, scope, signed, spot }: { symbol: string; scope: OptionsScope; signed: boolean; spot: number | null }, signal: AbortSignal): Promise<OptionsLadder> {
+  const query = new URLSearchParams({ scope, signed: signed ? "1" : "0" });
+  if (spot && spot > 0) query.set("spot", String(spot));
+  const response = await fetch(apiUrl(`/charts/options/${encodeURIComponent(symbol)}/ladder?${query}`), { cache: "no-store", signal });
+  if (!response.ok) throw new Error("The strike ladder is unavailable. Try again.");
+  return response.json();
 }
 
 export async function fetchChartHistory({ symbol, interval, session, before, continuation, signal }: {

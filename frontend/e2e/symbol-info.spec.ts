@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
-import type { Earnings, SymbolEvents } from "../lib/symbolInfo";
+import type { Earnings, SymbolEvents, SymbolForecast } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
@@ -63,12 +63,12 @@ test("placeholder tabs persist per device and rapid symbol steps fetch only the 
   await page.goto("/charts");
   const info = panel(page);
   await expect(info.locator("dl")).toContainText("$1,300.00");
-  for (const tab of ["Overview", "News", "Forecast"]) {
+  for (const tab of ["Overview", "News"]) {
     await info.getByRole("tab", { name: tab, exact: true }).click();
     await expect(info).toContainText(`${tab} is coming soon.`);
   }
   await page.reload();
-  await expect(info.getByRole("tab", { name: "Forecast", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(info.getByRole("tab", { name: "News", exact: true })).toHaveAttribute("aria-selected", "true");
   expect(reads).toHaveLength(1);
   // Anchor both operations to one fixed time. Pausing at wall-clock "now"
   // races the browser advancing while the command travels to it on CI.
@@ -243,4 +243,46 @@ test("a failed events request retries", async ({ page }) => {
   await panel(page).getByRole("button", { name: "Retry events" }).click();
   await expect(panel(page).getByRole("region", { name: "Next earnings" })).toContainText("Q3 FY2027");
   expect(attempts).toBe(2);
+});
+
+// ---- Forecast (T2.1): the implied move from stubbed chains; the backend tests choose the straddle and refuse wide markets ----
+
+const QUOTED = Date.parse("2026-10-05T14:28:00Z") / 1000;
+function forecast(symbol: string, spot: number): SymbolForecast {
+  return { symbol, today: "2026-10-05", source: "Tradier option chains", spot, state: "ready", message: null,
+    earnings: { date: "2026-11-19", status: "estimated", label: "Q3 FY2027" }, earnings_note: null,
+    moves: [
+      { tags: ["nearest", "friday"], expiration: "2026-10-09", days: 4, state: "ready", strike: 100, move: 4.4, percent: 4.4 / spot, iv: 0.512,
+        quoted_at: QUOTED, fetched_at: QUOTED + 60, call: { symbol: "NVDA261009C00100000", bid: 2.2, ask: 2.3, iv: 0.5 }, put: { symbol: "NVDA261009P00100000", bid: 2.1, ask: 2.2, iv: 0.524 } },
+      { tags: ["earnings"], expiration: "2026-11-20", days: 46, state: "too_wide", strike: 100, reason: "The 100 put has no bid.", quoted_at: null,
+        call: { symbol: "NVDA261120C00100000", bid: 6.1, ask: 6.4, iv: 0.55 }, put: { symbol: "NVDA261120P00100000", bid: 0, ask: 7.5, iv: null } },
+    ] };
+}
+
+test("Forecast shows the implied move at the chart's price for the nearest expiration, Friday and after earnings, and refuses a one-sided market", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/forecast**", async (route) => {
+    const url = new URL(route.request().url());
+    reads.push(url.pathname + url.search);
+    await route.fulfill({ json: forecast(decodeURIComponent(url.pathname.split("/").at(-2)!), Number(url.searchParams.get("spot"))) });
+  });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Forecast", exact: true }).click();
+  const moves = info.getByRole("region", { name: "Implied move" });
+  // The chart's latest price (the fixture's candles close at 101) goes with the request.
+  await expect(moves).toContainText("Nearest · This Friday");
+  expect(reads[0]).toMatch(/\/NVDA\/forecast\?spot=101$/);
+  const nearest = moves.getByRole("listitem").first();
+  await expect(nearest).toContainText("±$4.40 ±4.4%");
+  await expect(nearest).toContainText("100 straddle: call 2.20 × 2.30, put 2.10 × 2.20 · IV 51.2% · quoted 10:28 AM ET");
+  const earnings = moves.getByRole("listitem").nth(1);
+  await expect(earnings).toContainText("After earnings Thu, Nov 19 (est.)");
+  await expect(earnings).toContainText("Market too wide");
+  await expect(earnings).toContainText("The 100 put has no bid.");
+  await expect(moves.getByText("calculated", { exact: true })).toBeVisible();
+  await expect(moves).toContainText("What the options market prices for a move either way by expiry, at 101.00: not a direction or a forecast of one.");
+  await page.screenshot({ path: test.info().outputPath("symbol-info-forecast.png"), fullPage: true });
+  await choose(page, "AAPL");
+  await expect.poll(() => reads.at(-1)).toMatch(/\/AAPL\/forecast\?spot=101$/);
 });

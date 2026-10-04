@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
 import ChartMenu from "./ChartMenu";
 import type { HiddenItem, LayerToggle, MenuAlerts, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
@@ -10,6 +10,7 @@ import HotkeySheet from "./HotkeySheet";
 import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
+import OptionsLadder from "./OptionsLadder";
 import PriceChart from "./PriceChart";
 import Sheet from "./Sheet";
 import Splitter from "./Splitter";
@@ -17,8 +18,9 @@ import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
 import ToolbarMenu from "./ToolbarMenu";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, parseChartTick, price, retainHistory, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, optionsQuery, parseChartTick, price, retainHistory, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, OptionsLayer, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
 import { alertText, createAlert, rearmAlert, removeAlert } from "@/lib/alerts";
@@ -79,7 +81,7 @@ const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} $
  * symbol's levels and fills) or the layers. Whether it is open, and on which,
  * is this device's choice; a phone's sheet always starts closed.
  */
-type DockTab = "watchlist" | "layers";
+type DockTab = "watchlist" | "layers" | "options";
 const DOCK_KEY = "tradejournal.charts.dock.v1";
 /** C1.4 remembered only an open layers panel; a device that left it open opens the dock on Layers. */
 const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
@@ -178,6 +180,8 @@ export default function ChartWorkspace() {
   const [entry, setEntry] = useState<Entry>(NO_ENTRY);
   // The chart maximized over the grid (C7.4), by slot: this device's view for the moment, never saved.
   const [maximized, setMaximized] = useState<number | null>(null);
+  // A strike chosen on the ladder (C4.5), marked on that symbol's charts until chosen again.
+  const [strike, setStrike] = useState<{ symbol: string; price: number } | null>(null);
   // The dock's width, and full screen's own choice of showing it: this device's (C7.4).
   const [dockWidth, setDockWidth] = useState<number>(DOCK_WIDTH.default);
   const [fullDock, setFullDock] = useState<boolean | null>(null);
@@ -220,7 +224,11 @@ export default function ChartWorkspace() {
   const symbolsKey = [...wanted.keys()].sort().join(",");
   const framesKey = [...new Set(slots.map(frameKey))].sort().join(",");
   const watchlistKey = settings.watchlist.join(",");
-  const requestKey = `${symbol}|${session}|${intervalKey}|${extrasKey}|${watchlistKey}`;
+  // The options layer (C4.4) asks the workspace for its strikes; with it on, hidden automatic levels are left out of the zones there.
+  const optionsKey = optionsQuery(settings.optionsLayer);
+  const optionsOn = optionsKey !== null;
+  const autoParam = !optionsOn || !settings.autoLevelsHidden;
+  const requestKey = `${symbol}|${session}|${intervalKey}|${extrasKey}|${watchlistKey}|${optionsKey ?? ""}|${autoParam}`;
   const streamKey = `${symbolsKey}|${session}`;
   const data = response?.key === requestKey ? response.data : null;
   // Candles depend only on the symbol and session. While a request for a new
@@ -273,8 +281,8 @@ export default function ChartWorkspace() {
     const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
     return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
   }, [splitsBySymbol, wanted, settings.drawings]);
-  // Automatic levels (C2.3) as the backend sent them, on the chart's basis already; none while their group is hidden.
-  const autoFor = (name: string) => settings.autoLevelsHidden ? null : feedFor(name)?.auto_levels ?? null;
+  // Automatic levels (C2.3) and option strikes (C4.4) as the backend merged them, on the chart's basis already; only the groups shown.
+  const autoFor = (name: string) => autoLevelsShown(feedFor(name)?.auto_levels, !settings.autoLevelsHidden, optionsOn);
   // Level alerts (C5.1): every alert, each one's price on the chart's basis where its symbol is on screen, and a bell for each chart.
   const alertData = alertEdit && (!latest?.alerts || alertEdit.at >= latest.checked_at) ? alertEdit.data : latest?.alerts ?? alertEdit?.data ?? null;
   const alertPrices = useMemo(() => {
@@ -287,6 +295,12 @@ export default function ChartWorkspace() {
     for (const alert of alertData?.alerts ?? []) marks.set(alert.symbol, [...marks.get(alert.symbol) ?? [], { id: alert.id, price: alertPrices.get(alert.id) ?? alert.price, fired: alert.state === "fired" }]);
     return marks;
   }, [alertData, alertPrices]);
+  // An alert made from an option strike keeps its price; once that strike no longer carries the level (a volume wall moved), its row says so.
+  const movedWalls = new Set((alertData?.alerts ?? []).filter((alert) => {
+    const levels = optionsOn ? feedFor(alert.symbol)?.auto_levels : undefined;
+    return alert.source_kind === "auto" && /(wall|options_[a-z]+|gamma_flip)@/.test(alert.source_id ?? "") && levels?.options?.state === "ready"
+      && !levels.zones.some((zone) => zone.id === alert.source_id);
+  }).map((alert) => alert.id));
   // Which side an alert waits on: the newest streamed trade, else the newest candle, else the quote.
   const referenceFor = (name: string): number | null => {
     const state = stream.get();
@@ -437,7 +451,7 @@ export default function ChartWorkspace() {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(DOCK_KEY) ?? "null") as { open?: unknown; tab?: unknown } | null;
-      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" ? "layers" : "watchlist" });
+      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" || saved.tab === "options" ? saved.tab : "watchlist" });
       else if (localStorage.getItem(LAYERS_OPEN_KEY) === "1") setDock({ open: true, tab: "layers" });
       const wide = Number(localStorage.getItem(DOCK_WIDTH_KEY));
       if (Number.isFinite(wide) && wide > 0) setDockWidth(clamp(Math.round(wide), DOCK_WIDTH.min, DOCK_WIDTH.max));
@@ -475,6 +489,8 @@ export default function ChartWorkspace() {
       const [name, frames] = part.split(":");
       return [name, frames.split(".") as Interval[]];
     }));
+    // Options levels still loading (a first look reads its chains in the background) are asked for again soon.
+    let soon: number | undefined;
     const load = async () => {
       if (!alive || busy || document.hidden) return;
       busy = true;
@@ -483,7 +499,7 @@ export default function ChartWorkspace() {
       setLoading(true);
       try {
         const result = await fetchChartData({ symbol, session, intervals: intervalKey.split(",") as Interval[],
-          watchlist: watchlistKey ? watchlistKey.split(",") : [], extras }, controller.signal);
+          watchlist: watchlistKey ? watchlistKey.split(",") : [], extras, options: optionsKey, auto: autoParam }, controller.signal);
         if (alive) {
           const day = new Date(result.checked_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
           if (lastWorkspaceDay.current?.key === session && lastWorkspaceDay.current.day !== day) {
@@ -492,6 +508,8 @@ export default function ChartWorkspace() {
           }
           lastWorkspaceDay.current = { key: session, day };
           setResponse({ key: requestKey, session, data: result }); setError(null);
+          const waiting = [result.auto_levels, ...Object.values(result.extras ?? {}).map((other) => other.auto_levels)].some((levels) => levels?.options?.state === "loading");
+          if (waiting && soon === undefined) soon = window.setTimeout(() => { soon = undefined; void load(); }, 4000);
         }
       } catch (err) {
         if (alive && !controller.signal.aborted) setError({ key: requestKey, message: err instanceof Error ? err.message : "Unable to refresh charts." });
@@ -507,8 +525,8 @@ export default function ChartWorkspace() {
     const onVisible = () => { if (!paused && !document.hidden) void load(); };
     const timer = paused ? undefined : window.setInterval(load, 15_000);
     document.addEventListener("visibilitychange", onVisible);
-    return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); };
-  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused]);
+    return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); window.clearTimeout(soon); document.removeEventListener("visibilitychange", onVisible); };
+  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, autoParam]);
 
   // One stream for every symbol on screen; each chart applies only its own symbol's trades.
   useEffect(() => {
@@ -547,7 +565,7 @@ export default function ChartWorkspace() {
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
-    setTool(null); setSelection(null); setMenu(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null);
+    setTool(null); setSelection(null); setMenu(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null); setStrike(null);
   };
   // A panel holds its own symbol (null: follow the main one). Two held symbols at most.
   const choosePanelSymbol = (index: number, held: string | null) => {
@@ -684,6 +702,15 @@ export default function ChartWorkspace() {
   };
   const toggleStudies = () => setSettings((s) => ({ ...s, studiesHidden: !s.studiesHidden }));
   const toggleAuto = () => setSettings((s) => ({ ...s, autoLevelsHidden: !s.autoLevelsHidden }));
+  const setOptions = (patch: Partial<OptionsLayer>) => setSettings((s) => ({ ...s, optionsLayer: cleanOptionsLayer({ ...s.optionsLayer, ...patch }) }));
+  const toggleOptions = () => setOptions({ hidden: !settings.optionsLayer.hidden });
+  /** A strike chosen on the ladder: marked on its symbol's charts and brought onto the main chart's price scale; chosen again, unmarked. */
+  const chooseStrike = (value: number) => {
+    if (strike?.symbol === symbol && strike.price === value) { setStrike(null); return; }
+    setStrike({ symbol, price: value });
+    commands.jump({ panel: "main", times: [], prices: [value] });
+    if (narrow) setSheet(false);
+  };
   /**
    * Lock, unlock or delete every listed level or drawing at once (C1.4): one
    * undo step. Deletions are recorded last-first, so undo puts each back
@@ -888,6 +915,7 @@ export default function ChartWorkspace() {
   const layerToggles: LayerToggle[] = [
     ...GROUP_NAMES.map(([group, label]) => ({ key: group, label, on: !settings.hiddenGroups[group], toggle: () => toggleGroup(group) })),
     { key: "auto", label: "Auto levels", on: !settings.autoLevelsHidden, toggle: toggleAuto },
+    { key: "options", label: "Options levels", on: optionsOn, toggle: toggleOptions },
     ...[...INDICATORS.slice(-1), ...INDICATORS.slice(0, -1)].map(([key, label]) => ({ key, label, on: indicators[key], toggle: () => toggleIndicator(key) })),
   ];
   // The layers panel (C1.4): the items of every symbol on screen, main symbol first.
@@ -903,6 +931,10 @@ export default function ChartWorkspace() {
       "Prior day and week, premarket, overnight, opening ranges, daily swings and round numbers; nearby ones merge into zones. The nearest three above and below price show. Hover or tap one for its card.",
       ...Object.values(feedFor(symbol)?.auto_levels?.missing ?? {}).filter((reason) => !reason.startsWith("Forms at")).map((reason) => `Not shown for ${symbol}: ${reason}`),
     ].join(" ") },
+    { key: "options", name: "Options levels", hidden: settings.optionsLayer.hidden, filters: settings.optionsLayer, note: [
+      "The call and put walls (most open interest, or most traded in volume mode) and the strikes ranked by the measure, from Tradier option chains; a strike near another level joins its zone. Hover or tap one for its card. Panels holding their own symbol show its nearest expiration.",
+      ...(optionsOn ? [optionsStatus(symbol)] : []),
+    ].filter(Boolean).join(" ") },
     { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in." },
     { key: "indicators", name: "Indicators", hidden: settings.studiesHidden,
       studies: INDICATORS.filter(([key]) => (STUDIES as readonly string[]).includes(key)).map(([key, label]) => ({ key, label, on: indicators[key] })) },
@@ -930,8 +962,18 @@ export default function ChartWorkspace() {
     ...(shownDrawings.get(name) ?? NO_DRAWINGS).filter((drawing) => drawing.hidden).map((drawing) => ({ id: drawing.id,
       name: drawing.kind === "note" ? `Note: ${drawing.text}` : `${TOOL_NAMES[drawing.kind]} ${summary(drawing)}`, show: () => editItem(name, drawing.id, { hidden: false }) })),
   ];
+  /** What the Layers panel says about the main symbol's options levels: their expirations, or why they are not drawn yet. */
+  function optionsStatus(name: string): string {
+    const info = feedFor(name)?.auto_levels?.options;
+    if (!info) return `Loading ${name} option chains…`;
+    if (info.state === "ready") return `${name}: ${info.scope_note ?? ""}.`;
+    if (info.state === "loading") return `Loading ${name} option chains… ${info.message ?? ""}`.trim();
+    return `Not shown for ${name}: ${info.message ?? "no option chains."}`;
+  }
+  const ladderPanel = (sheet: boolean) => <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
+    highlight={strike?.symbol === symbol ? strike.price : null} sheet={sheet} onStrike={chooseStrike} onLayer={setOptions} onClose={() => showDock(null)} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
-    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else toggleGroup(key); }} onGroupLock={lockGroup}
+    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
     onJump={jumpTo} onItem={(item, patch) => editItem(item.symbol, item.id, patch)} onDelete={(item) => deleteItem(item.symbol, item.id)}
     onStudy={(key) => toggleIndicator(key as keyof Indicators)} />;
@@ -1086,9 +1128,13 @@ export default function ChartWorkspace() {
   const sep = <span aria-hidden className="mx-0.5 h-5 shrink-0 border-l border-slate-700/70" />;
   // Text beside a toolbar icon on a wide screen; in a phone's More menu it always shows.
   const label = narrow ? "" : "hidden 2xl:inline";
-  // The dock's tabs: a press opens that panel, a second press closes the dock.
-  const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"]] as const).map(([tab, name, Icon, hint]) =>
+  // The dock's tabs: a press opens that panel, a second press closes the dock. A phone's top row has room for two;
+  // its strike ladder opens from the More menu.
+  const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"],
+    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"]] as const).filter(([tab]) => !narrow || tab !== "options").map(([tab, name, Icon, hint]) =>
     <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab)} ${control}`}><Icon size={14} /></button>);
+  const ladderButton = (close: () => void) => <button aria-label="Strike ladder" title="Strike ladder: open interest, volume and gamma by strike" onClick={() => { close(); showDock("options"); }}
+    className={`${plain(false)} ${control} text-[11px]`}><Rows3 size={13} /><span>Strike ladder</span></button>;
 
   // Linked ranges sit in the toolbar on a desktop; on a phone they and the smaller charts' height are in its More menu, with pause, refresh and the shortcuts.
   const secondary = <>
@@ -1142,7 +1188,7 @@ export default function ChartWorkspace() {
       })}
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
-    <SymbolInfo symbol={settings.symbol} />
+    <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} />
     <section className="border-t border-slate-700/40 p-3" aria-label="Saved price levels">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
         {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button>
@@ -1158,7 +1204,7 @@ export default function ChartWorkspace() {
       </form>
       {levelError && <p role="alert" className="mt-2 text-[11px] text-amber-300">{levelError}</p>}
     </section>
-    <AlertsPanel data={alertData} prices={alertPrices} narrow={narrow} onRearm={rearm} onRemove={dropAlert} />
+    <AlertsPanel data={alertData} prices={alertPrices} moved={movedWalls} narrow={narrow} onRearm={rearm} onRemove={dropAlert} />
     <section className="border-t border-slate-700/40 p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
       {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
     </section>
@@ -1203,7 +1249,7 @@ export default function ChartWorkspace() {
           {narrow
             // A phone keeps one row of controls: the rest wait in a menu.
             ? <ToolbarMenu label="More chart controls" align="right" title="More chart controls" className={`${plain(false)} ${control}`}
-              content={() => <div className="flex w-72 flex-wrap items-center gap-1">{secondary}{pauseButton}{refreshButton}{keysButton}
+              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{secondary}{ladderButton(close)}{pauseButton}{refreshButton}{keysButton}
                 <div className="mt-1 w-full space-y-2 border-t border-slate-700/60 pt-2 text-[10px] text-slate-500">{about}{attribution}</div></div>}><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More chart controls</span></ToolbarMenu>
             : <>{pauseButton}{refreshButton}{keysButton}</>}
           {immersive
@@ -1226,7 +1272,7 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -1253,7 +1299,7 @@ export default function ChartWorkspace() {
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -1277,7 +1323,7 @@ export default function ChartWorkspace() {
           onDrag={dragDock} onStep={(by) => { const most = dockLimit(); keepDockWidth(clamp((dockBox.current?.getBoundingClientRect().width ?? dockWidth) - by * 16, DOCK_WIDTH.min, most)); }}
           onEdge={(to) => keepDockWidth(to === "min" ? DOCK_WIDTH.min : dockLimit())} onReset={() => keepDockWidth(DOCK_WIDTH.default)} />}
         {!narrow && dockShown && <aside ref={dockBox} aria-label="Side panel" style={{ width: dockWidth, maxWidth: `max(${DOCK_WIDTH.min}px, calc(100% - ${GRID_MIN_PX + 40}px))` }} className="shrink-0 overflow-y-auto overscroll-contain bg-[#121924]">
-          {dock.tab === "layers" ? layersPanel(false) : watchlistPanel}
+          {dock.tab === "layers" ? layersPanel(false) : dock.tab === "options" ? ladderPanel(false) : watchlistPanel}
         </aside>}
       </div>
 
@@ -1300,7 +1346,7 @@ export default function ChartWorkspace() {
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
-      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
+      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
