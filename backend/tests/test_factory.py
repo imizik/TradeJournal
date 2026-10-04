@@ -53,6 +53,7 @@ from app.engine.factory_gates import (
 from app.engine.factory_model import LogisticModel, fit_logistic
 from app.engine.factory_rules import (
     FAMILIES,
+    MATCHED,
     MODEL_DEFAULT_FEATURES,
     AtrStop,
     Context,
@@ -1122,6 +1123,80 @@ def test_discovery_evidence_reads_only_discovery_data(dip_family):
     assert all(t.closed and set(t.features) == set(FEATURES) for t in trades)
     learned = parse_spec({"family": "dip_buyer", "tickers": ["AAA", "BBB"], "model": {"kind": "logistic"}})
     assert len(discovery_trades(learned, loader)) == len(trades)  # read through its rules without the model
+
+
+# --- the forward evidence: price after the fill -------------------------------------
+
+
+def rising(day: date, count: int, tf: int, price: float = 100.0, step: float = 0.1) -> list[Bar]:
+    """`count` bars from 09:30, each opening where the last closed and rising `step`."""
+    return [bar(day, 570 + tf * k, price + step * k, price + step * (k + 1) + 0.05, price + step * k - 0.05,
+                price + step * (k + 1)) for k in range(count)]
+
+
+def test_price_after_a_fill_is_read_at_whole_bars_that_end_by_the_close():
+    d1, d2 = weekdays(date(2024, 3, 4), 2)
+    series = Series.build("X", rising(d1, 78, 5) + flat(d2, 3, 5, 108.0), 5)
+    paths = factory_gates._session_paths(series)
+
+    # The fill is bar 2's open, 100.2; the stop at 99.2 makes 1 R a dollar.
+    assert factory_gates._after_fill(series, paths, 2, 1, 99.2) == pytest.approx({
+        "5m": 0.1, "15m": 0.3, "30m": 0.6, "60m": 1.2,  # the closes of bars 2, 4, 7 and 13
+        "close": 7.6, "next_close": 7.8, "mfe": 7.65, "mae": 0.05,
+    })
+    short = factory_gates._after_fill(series, paths, 2, -1, 101.2)
+    assert (short["30m"], short["mfe"], short["mae"]) == pytest.approx((-0.6, 0.05, 7.65))
+    assert factory_gates._after_fill(series, paths, 2, 1, 100.5) is None  # the open is through the stop
+
+    late = factory_gates._after_fill(series, paths, 70, 1, series.open[70] - 1)  # 15:20: an hour ends after 16:00
+    assert set(late) == {"5m", "15m", "30m", "close", "next_close", "mfe", "mae"}
+    assert "next_close" not in factory_gates._after_fill(series, paths, 78, 1, 107.0)  # the data's last session
+
+    quarter = Series.build("X", rising(d1, 26, 15), 15)
+    first = factory_gates._after_fill(quarter, factory_gates._session_paths(quarter), 0, 1, 99.0)
+    assert "5m" not in first and first["15m"] == pytest.approx(0.1)  # five minutes is not a whole bar
+
+
+def test_the_forward_evidence_reads_discovery_data_only_and_measures_against_random_entries(dip_family):
+    loader = StubLoader({"AAA": pattern(START, END, every_fifth), "BBB": pattern(START, END, every_fifth)})
+
+    trades, forward = factory_gates.discovery_forward(dip_family, loader)
+
+    assert {through for _, through in loader.requests} == {PERIODS["discovery"][1]}
+    again = discovery_trades(dip_family, StubLoader({"AAA": pattern(START, END, every_fifth),
+                                                     "BBB": pattern(START, END, every_fifth)}))
+    assert [(t.ticker, t.signal_time, t.r) for t in trades] == [(t.ticker, t.signal_time, t.r) for t in again]
+    after = forward["after_fill"]
+    assert set(after) == {"30m", "60m", "close", "next_close"}  # thirty-minute bars: no 5 or 15 minute reading
+    # From the 99.0 fill with the stop at 98.95, a good day closes the 10:30 bar and the session at 99.5
+    # (+10R) and a bad day at 98.6 (-8R).
+    expected = sum(10 if t.r > 0 else -8 for t in trades) / len(trades)
+    assert after["30m"]["move_r"] == pytest.approx(expected, abs=1e-3)
+    assert after["close"]["move_r"] == pytest.approx(expected, abs=1e-3)
+    assert after["30m"]["trades"] == len(trades)
+    assert after["30m"]["edge_r"] == pytest.approx(after["30m"]["move_r"] - after["30m"]["random_r"], abs=2e-3)
+    assert after["30m"]["edge_r"] > 1 and after["30m"]["t"] > 2
+    assert forward["cost_r"] == pytest.approx(0.4)  # a tick each way on 0.05 of risk
+    entries, random_ = forward["to_close"]["entries"], forward["to_close"]["random"]
+    assert entries["stop_touched_pct"] == pytest.approx(round(100 * sum(t.r < 0 for t in trades) / len(trades), 1))
+    assert entries["entries"] == len(trades) < random_["entries"]
+
+
+def test_random_entries_for_a_setup_stop_use_the_candidates_median_risk():
+    class Setup:
+        atr_length = 10
+
+        def baseline_stop(self):
+            return MATCHED
+
+    def trade(risk: float) -> Trade:
+        moment = datetime(2024, 3, 4, 10, 0, tzinfo=ET)
+        return Trade("X", 1, 0, moment, 1, moment, 100.0, 99.0, None, features={"risk": risk})
+
+    trades = [trade(1.0), trade(4.0), trade(2.0), trade(math.nan)]
+    assert factory_gates._baseline_stop(Setup(), trades) == AtrStop(2.0, 10)
+    assert factory_gates._baseline_stop(Setup(), []) == AtrStop(1.0, 10)
+    assert factory_gates._baseline_stop(DipBuyer(), trades) == SwingStop(1, 0.0)
 
 
 def test_a_learned_filter_trains_on_discovery_only_and_must_beat_its_parent(dip_family):

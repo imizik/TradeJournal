@@ -1,160 +1,67 @@
+import Link from "next/link";
 import { api } from "@/lib/api";
+import AnalyticsExplorer from "@/components/AnalyticsExplorer";
 
-function pnlColor(val: number | null | undefined) {
-  if (val == null) return "text-muted-foreground";
-  return val >= 0 ? "text-emerald-400" : "text-red-400";
-}
+type Params = { start?: string; end?: string; account_id?: string; instrument_type?: string };
 
-function fmtPct(val: number | null | undefined) {
-  if (val == null) return "—";
-  return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
-}
+export default async function AnalyticsPage({ searchParams }: { searchParams: Promise<Params> }) {
+  const params = await searchParams;
+  const query = new URLSearchParams();
+  for (const name of ["start", "end", "account_id", "instrument_type"] as const) {
+    if (typeof params[name] === "string" && params[name]) query.set(name, params[name]);
+  }
+  const [accounts, result] = await Promise.allSettled([api.accounts(), api.analytics(query.toString())]);
+  const accountOptions = accounts.status === "fulfilled" ? accounts.value : [];
+  const invalidFilters = result.status === "rejected" && /-> (400|404|422)/.test(String(result.reason));
 
-function fmt$(val: number | null | undefined) {
-  if (val == null) return "—";
-  return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
-}
-
-function WinBar({ rate }: { rate: number }) {
-  const pct = Math.round(rate * 100);
   return (
-    <div className="flex items-center gap-2">
-      <div className="flex-1 rounded-full bg-secondary h-2 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${pct >= 50 ? "bg-emerald-400" : "bg-red-400"}`}
-          style={{ width: `${pct}%` }}
-        />
+    <div className="min-w-0 space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">Analytics</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Explore your results and the trades behind them.</p>
       </div>
-      <span className="text-xs tabular-nums w-10 text-right">{pct}%</span>
-    </div>
-  );
-}
-
-export default async function AnalyticsPage() {
-  const stats = await api.stats();
-
-  return (
-    <div className="space-y-8">
-      <h1 className="text-xl font-semibold text-foreground">Analytics</h1>
-
-      {/* By ticker */}
-      <Section title="By Ticker">
-        <table className="w-full text-sm">
-          <thead className="bg-muted text-xs text-muted-foreground uppercase">
-            <tr>
-              <Th>Ticker</Th>
-              <Th>Trades</Th>
-              <Th>Win Rate</Th>
-              <Th>Total P&L</Th>
-              <Th>Avg P&L %</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border">
-            {Object.entries(stats.by_ticker)
-              .sort((a, b) => b[1].total_pnl - a[1].total_pnl)
-              .map(([ticker, s]) => (
-                <tr key={ticker} className="hover:bg-muted/50">
-                  <Td><span className="font-semibold">{ticker}</span></Td>
-                  <Td>{s.count}</Td>
-                  <Td><WinBar rate={s.win_rate} /></Td>
-                  <Td><span className={pnlColor(s.total_pnl)}>{fmt$(s.total_pnl)}</span></Td>
-                  <Td><span className={pnlColor(s.avg_pnl_pct)}>{fmtPct(s.avg_pnl_pct)}</span></Td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
-      </Section>
-
-      {/* By time bucket */}
-      <Section title="By Entry Time">
-        {Object.keys(stats.by_time_bucket).length === 0 ? (
-          <p className="text-sm text-muted-foreground px-4 py-3">No data yet.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-muted text-xs text-muted-foreground uppercase">
-              <tr>
-                <Th>Bucket</Th>
-                <Th>Trades</Th>
-                <Th>Win Rate</Th>
-                <Th>Total P&L</Th>
-                <Th>Avg P&L %</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {Object.entries(stats.by_time_bucket).map(([bucket, s]) => (
-                <tr key={bucket} className="hover:bg-muted/50">
-                  <Td><span className="font-semibold capitalize">{bucket}</span></Td>
-                  <Td>{s.count}</Td>
-                  <Td><WinBar rate={s.win_rate} /></Td>
-                  <Td><span className={pnlColor(s.total_pnl)}>{fmt$(s.total_pnl)}</span></Td>
-                  <Td><span className={pnlColor(s.avg_pnl_pct)}>{fmtPct(s.avg_pnl_pct)}</span></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-
-      {/* By tag */}
-      <Section title="By Tag">
-        {Object.keys(stats.by_tag).length === 0 ? (
-          <p className="text-sm text-muted-foreground px-4 py-3">No tags yet. Add tags from trade detail pages.</p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-muted text-xs text-muted-foreground uppercase">
-              <tr>
-                <Th>Tag</Th>
-                <Th>Trades</Th>
-                <Th>Win Rate</Th>
-                <Th>Total P&L</Th>
-                <Th>Avg P&L %</Th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {Object.entries(stats.by_tag).map(([tag, s]) => (
-                <tr key={tag} className="hover:bg-muted/50">
-                  <Td><span className="font-semibold">{tag}</span></Td>
-                  <Td>{s.count}</Td>
-                  <Td><WinBar rate={s.win_rate} /></Td>
-                  <Td><span className={pnlColor(s.total_pnl)}>{fmt$(s.total_pnl)}</span></Td>
-                  <Td><span className={pnlColor(s.avg_pnl_pct)}>{fmtPct(s.avg_pnl_pct)}</span></Td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-
-      {/* Behavioral flags */}
-      {Object.keys(stats.behavioral_flags).length > 0 && (
-        <Section title="Behavioral Flags">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 p-4">
-            {Object.entries(stats.behavioral_flags).map(([flag, count]) => (
-              <div key={flag} className="rounded-md bg-amber-900/20 border border-amber-900/40 p-3">
-                <p className="text-xs font-medium text-amber-300">{flag.replace(/_/g, " ")}</p>
-                <p className="mt-1 text-2xl font-semibold text-amber-200">{count}</p>
-              </div>
-            ))}
-          </div>
-        </Section>
+      <form action="/analytics" className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2 lg:grid-cols-5">
+        <label className="min-w-0 text-xs text-muted-foreground">
+          Closed from
+          <input aria-label="Closed from" name="start" type="date" defaultValue={params.start ?? ""}
+            className="mt-1 block w-full min-w-0 rounded-md border bg-background p-2 text-sm text-foreground" />
+        </label>
+        <label className="min-w-0 text-xs text-muted-foreground">
+          Closed through
+          <input aria-label="Closed through" name="end" type="date" defaultValue={params.end ?? ""}
+            className="mt-1 block w-full min-w-0 rounded-md border bg-background p-2 text-sm text-foreground" />
+        </label>
+        <label className="text-xs text-muted-foreground">
+          Account
+          <select aria-label="Account" name="account_id" defaultValue={params.account_id ?? ""}
+            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm text-foreground">
+            <option value="">All accounts</option>
+            {accountOptions.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.last4}</option>)}
+          </select>
+        </label>
+        <label className="text-xs text-muted-foreground">
+          Instrument
+          <select aria-label="Instrument" name="instrument_type" defaultValue={params.instrument_type ?? ""}
+            className="mt-1 block w-full rounded-md border bg-background p-2 text-sm text-foreground">
+            <option value="">All instruments</option>
+            <option value="stock">Stocks</option>
+            <option value="option">Options</option>
+          </select>
+        </label>
+        <div className="flex items-end gap-3">
+          <button type="submit" className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background">Apply filters</button>
+          <Link href="/analytics" className="py-2 text-sm text-muted-foreground hover:text-foreground">Reset</Link>
+        </div>
+      </form>
+      {result.status === "fulfilled" ? (
+        <AnalyticsExplorer key={query.toString()} data={result.value} accounts={accountOptions} />
+      ) : (
+        <p role="alert" className="rounded-lg border bg-card p-4 text-sm">
+          {invalidFilters
+            ? "Check your filters: use valid dates with the start on or before the end, and select an available account and instrument."
+            : "Analytics could not load. Try again in a moment."}
+        </p>
       )}
     </div>
   );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section>
-      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
-      <div className="rounded-lg border bg-card overflow-hidden">{children}</div>
-    </section>
-  );
-}
-
-function Th({ children }: { children: React.ReactNode }) {
-  return <th className="px-4 py-2 text-left font-medium">{children}</th>;
-}
-
-function Td({ children }: { children: React.ReactNode }) {
-  return <td className="px-4 py-3">{children}</td>;
 }

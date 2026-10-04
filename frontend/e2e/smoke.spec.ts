@@ -139,12 +139,12 @@ test.describe("analytics", () => {
 
     await expect(page.getByRole("heading", { name: "Analytics" })).toBeVisible();
 
-    const byTicker = page.getByRole("table").first();
+    const byTicker = page.getByRole("table", { name: "Analytics breakdown" });
     await expect(byTicker.getByText("NVDA")).toBeVisible();
-    await expect(byTicker.getByText("+$1300")).toBeVisible();
+    await expect(byTicker.getByRole("row").filter({ has: page.getByRole("button", { name: "NVDA", exact: true }) }).locator("td").nth(2)).toHaveText("+$1,300.00");
     // The expired TSLA position: a full loss, and negative values render.
     await expect(byTicker.getByText("TSLA")).toBeVisible();
-    await expect(byTicker.getByText("$-300")).toBeVisible();
+    await expect(byTicker.getByRole("row").filter({ has: page.getByRole("button", { name: "TSLA", exact: true }) }).locator("td").nth(2)).toHaveText("−$300.00");
   });
 });
 

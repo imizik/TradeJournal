@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
 import GmailStatusBanner from "@/components/GmailStatusBanner";
+import AppMain from "@/components/AppMain";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -34,10 +35,7 @@ export default function RootLayout({
       <body className={inter.className} suppressHydrationWarning>
         <div className="flex min-h-screen flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row">
           <Nav />
-          <main className="min-w-0 flex-1 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:p-6 md:pb-6">
-            <GmailStatusBanner />
-            {children}
-          </main>
+          <AppMain banner={<GmailStatusBanner />}>{children}</AppMain>
         </div>
       </body>
     </html>

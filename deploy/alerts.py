@@ -46,12 +46,16 @@ SERVICES = {
     "tradejournal-sync-pipeline.service": (
         "Scheduled Sync Everything", "The 8 AM / 5 PM Sync Everything couldn't be started."
     ),
+    "tradejournal-options-snapshot.service": (
+        "Options snapshot", "Today's after-close options snapshot couldn't be queued; it can't be taken after 8 PM New York."
+    ),
 }
 TIMERS = {
     "tradejournal-backup.timer": "Nightly backup",
     "tradejournal-offsite-backup.timer": "Offsite backup",
     "tradejournal-sync-pipeline.timer": "Scheduled Sync Everything",
     "tradejournal-gmail-sync.timer": "Five-minute Gmail check",
+    "tradejournal-options-snapshot.timer": "After-close options snapshot",
 }
 
 

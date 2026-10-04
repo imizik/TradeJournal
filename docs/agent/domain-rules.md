@@ -100,6 +100,21 @@ trusting the numbers above, and re-decide if the delta stops being noise. The
 seed fixture exposes a changed tie-break as a failing test, so a future change
 is verifiable rather than hopeful.
 
+## Journal analytics
+
+- Analytics filters final close dates in New York time and uses exact account
+  IDs. Only dated closed/expired positions belong; open positions and their
+  partial realized P&L are excluded. Missing P&L and returns stay unavailable
+  and have explicit coverage counts.
+- Win rate uses recorded P&L, including breakevens in its denominator. Dollar
+  expectancy is mean P&L, not an R-multiple. Closed-trade drawdown aggregates
+  simultaneous closes before measuring peaks; it is not account drawdown.
+- Repeat-entry classification uses full same-account/ticker/day trade history
+  before filtering. Simultaneous first entries share a group; scale-in fills
+  inside a position do not become separate trades. Tags may overlap.
+- [Analytics definitions](../analytics.md) describe the concentration,
+  breakdown, sample, and coverage semantics.
+
 ## Accounts
 
 - Roth IRA `8267` and Individual `1113` are the live accounts.
@@ -292,10 +307,63 @@ is verifiable rather than hopeful.
   `test_strategy_factory.py` pins the committed specs' ids.
 - Weekly proposals trade the core universe at the default costs; the review
   refuses a proposal that picks tickers or changes costs.
+- The forward evidence (`discovery_forward`) loads discovery data only and
+  feeds the brief alone; no gate reads it, so it never changes a verdict.
 - Whoever proposes sees only the brief. A Claude Code session answering it
   (`/factory-week`) must not read the ledger, the reports or the trade files
   before its answer is judged, and does not propose again after reading
   results; the next run starts in a fresh session.
+
+## Charts
+
+- Chart data is display-only. Candles, adjustments and indicators never write
+  to fills, trades, P&L or the enrichment caches, and chart code never reads
+  those caches as chart history.
+- One price basis, **split-adjusted**, for every interval. It is a display
+  layer over raw bars (`chart_adjust.py`, pure): the stored Alpaca SIP session
+  files stay raw and are never rewritten, and a split is adjusted exactly once
+  (Tradier's daily bars are checked per split, not assumed). Split records come
+  only from Alpaca corporate actions (`chart_splits.py`); a missing record is
+  disclosed on the chart and never guessed, and a jump that merely looks like a
+  split only warns. Dividends are not adjusted and the chart says so.
+- Fills and P&L are never adjusted. Fill arrows are timestamps; a saved level
+  keeps the price and the New York date it was drawn (`drawn_on`) and is moved
+  at display time by splits after that date, so a split never rewrites the
+  saved record. Only the user does: dragging a level (C1.1) saves the price it
+  was dropped at, on the chart's current basis, with that New York date, and
+  undo restores the previous record exactly. Drawings (C1.2) follow the same
+  rule: every anchor is a time and a price, never a pixel or a bar index; a
+  split after the drawing's `drawn_on` divides all its prices; and a drag saves
+  every anchor on the current basis dated that day, while a color, width or
+  text change keeps the saved prices and date. The context menu (C1.3) changes
+  only a level's label or color, an item's `hidden` or `locked` flag, or adds
+  a duplicate that keeps the original's prices and `drawn_on`; none of them
+  moves a price. The layers panel (C1.4) locks, unlocks or deletes many items
+  as one undo step under the same rule, and going to an item moves only the
+  view.
+- Automatic levels (`chart_levels.py`, pure) take the premarket range, the
+  opening ranges and the prior day from the fill-context functions in
+  `indicators.py`, so the chart and stored fill context agree on the same
+  bars; do not re-derive them in chart code. A level whose bars are missing is
+  absent with a reason, never taken from an older session. Zones and
+  interactions use one band, a tenth of the daily ATR; nothing on the chart
+  calls a level a signal.
+- The chart settings document belongs to the frontend, but a save never drops
+  a top-level field it leaves out (`PUT /charts/settings` keeps the stored
+  value). A tab still running an older build cannot erase a field a newer build
+  added; clearing a field means saving it empty, and the frontend always sends
+  every field it knows.
+- Daily and weekly bars come only from Tradier's daily history, never from
+  minutes. The whole series is read once per symbol per New York date into
+  memory (no disk copy: the provider rewrites adjusted history after each
+  split) and indicators are computed over it whole, so pages are slices.
+- Charts pass `feed=sip` explicitly on every Alpaca request and never change
+  `ALPACA_DATA_FEED`; IEX bars never reach a chart.
+- Option snapshots (`options_recorder.py`) are taken only for the session in
+  progress, between 15 minutes after the regular close and 20:00 New York, and
+  never rewritten. Open interest history cannot be fetched later: a missed
+  session is marked `unavailable`, and a later capture is never filed under an
+  earlier date. SPX and SPXW contracts stay apart by root.
 
 ## TradingView live alerts
 

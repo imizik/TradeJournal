@@ -224,14 +224,33 @@ assessment, including why Tradier is not a candidate for the historical side.
 
 ## Frontend
 
-The private Charts workspace (`/charts`) reads Tradier candles and batched
-watchlist quotes through `/charts/workspace`. One API-owned Tradier WebSocket
-fans out valid trade prices through private `/charts/stream` SSE to visible tabs.
+The private Charts workspace (`/charts`) reads today's Tradier candles and
+batched watchlist quotes through `/charts/workspace`. Completed New York
+intraday sessions load on scroll through `/charts/history` from explicit
+Alpaca SIP/raw minute requests and a persistent complete-session file cache,
+and daily/weekly pages (`interval=1D|1W`) come from Tradier's whole daily
+history, read once per symbol per New York date into memory. Every price is
+shown split-adjusted: splits come from Alpaca corporate actions (a small file
+per symbol, refreshed daily) and are applied to copies at display time, so the
+raw caches never change. Session hours, holidays and early closes come from Tradier's market calendar,
+kept on disk per completed month. One API-owned Tradier WebSocket
+fans out valid trade prices through private `/charts/stream` SSE to visible tabs,
+each following up to three symbols (the main one and two held by panels).
 The 15-second REST refresh reconciles candles, volume and studies and remains
-the fallback when streaming is unavailable. Chart
+the fallback when streaming is unavailable. Every chart is on one
+split-adjusted price basis: Alpaca corporate actions (one small cached file per
+symbol, refetched once per New York date) say which splits happened, and
+`chart_adjust.py` adjusts copies of bars at display time, so the raw history
+cache is never edited and dividends are not adjusted. Chart
 calculations and temporary bars are separate from historical enrichment, and
-execution markers are read-only journal views. Layouts and horizontal levels
-are saved in the browser. See [chart boundaries](../charts-workspace.md).
+execution markers are read-only journal views. Layouts, watchlist,
+horizontal levels and drawings are one JSON document in `chart_settings` (`/charts/settings`,
+saved only on top of the revision the client last saw, and never losing a
+top-level field a save leaves out), with a browser copy
+for when the server is unreachable. Daily option open interest and volume
+snapshots (`option_chain_snapshot`, with a per-session status in
+`option_snapshot_day`) are written only by the after-close `options_snapshot`
+sync job. See [chart boundaries](../charts-workspace.md).
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when

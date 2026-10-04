@@ -1,13 +1,40 @@
 from collections import defaultdict
 from datetime import date
+from typing import Literal
+from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select
 
 from app.database import get_session
 from app.models import Account, Tag, Trade, TradeTag
+from app.engine.analytics import analyze
 
 router = APIRouter()
+
+
+@router.get("/analytics")
+async def get_analytics(
+    account_id: UUID | None = None,
+    instrument_type: Literal["stock", "option"] | None = None,
+    start: date | None = None,
+    end: date | None = None,
+    session: Session = Depends(get_session),
+):
+    if start and end and start > end:
+        raise HTTPException(400, "Start date must be on or before end date.")
+    if account_id is not None and session.get(Account, account_id) is None:
+        raise HTTPException(404, "Account not found.")
+    # Four batched reads, never a tag/fill request per trade. Full position
+    # history is needed to determine repeat-entry state before date filtering.
+    trades = session.exec(select(Trade)).all()
+    names = {tag.id: tag.name for tag in session.exec(select(Tag)).all()}
+    tags: dict[str, list[str]] = defaultdict(list)
+    for link in session.exec(select(TradeTag)).all():
+        if link.tag_id in names:
+            tags[str(link.trade_id)].append(names[link.tag_id])
+    return analyze(trades, tags, account_id=str(account_id) if account_id else None,
+                   instrument_type=instrument_type, start=start, end=end)
 
 
 @router.get("")
@@ -33,7 +60,8 @@ async def get_stats(
     total_pnl = sum((float(t.realized_pnl) for t in closed if t.realized_pnl is not None), start=0.0)
     total_premium_risked = sum((float(t.total_premium_paid) for t in trades), start=0.0)
 
-    win_rate = len(winners) / len(closed) if closed else 0.0
+    priced_closed = [t for t in closed if t.realized_pnl is not None]
+    win_rate = len(winners) / len(priced_closed) if priced_closed else None
     avg_win_pct  = _avg([t.pnl_pct for t in winners if t.pnl_pct is not None])
     avg_loss_pct = _avg([t.pnl_pct for t in losers  if t.pnl_pct is not None])
     avg_hold_mins = _avg([t.hold_duration_mins for t in closed if t.hold_duration_mins])
@@ -90,7 +118,7 @@ async def get_stats(
         "total_trades": len(trades),
         "open_trades": len(open_trades),
         "closed_trades": len(closed),
-        "win_rate": round(win_rate, 4),
+        "win_rate": round(win_rate, 4) if win_rate is not None else None,
         "total_pnl": round(total_pnl, 2),
         "total_premium_risked": round(total_premium_risked, 2),
         "today_pnl": round(today_pnl, 2),
@@ -118,13 +146,12 @@ def _trade_summary(trades: list[Trade]) -> dict:
     closed = [t for t in trades if t.realized_pnl is not None]
     winners = [t for t in closed if t.realized_pnl > 0]
     pnl = sum((float(t.realized_pnl) for t in closed), start=0.0)
+    average_pct = _avg([t.pnl_pct for t in closed if t.pnl_pct is not None])
     return {
         "count": len(trades),
-        "win_rate": round(len(winners) / len(closed), 4) if closed else 0.0,
+        "win_rate": round(len(winners) / len(closed), 4) if closed else None,
         "total_pnl": round(pnl, 2),
-        "avg_pnl_pct": round(
-            _avg([t.pnl_pct for t in closed if t.pnl_pct is not None]) or 0, 4
-        ),
+        "avg_pnl_pct": round(average_pct, 4) if average_pct is not None else None,
     }
 
 

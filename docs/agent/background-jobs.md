@@ -25,7 +25,7 @@ Four execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
-| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review and confirmed resync |
+| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review, confirmed resync and the after-close options snapshot |
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
@@ -34,6 +34,11 @@ Pipeline children execute inside the parent's sync lane. Polygon is queued
 independently, so provider pacing cannot block pipeline completion. Additional
 workers in the same lane provide no extra concurrency. This serializes queued
 job execution; direct synchronous API mutations are outside this mechanism.
+The options snapshot paces itself to Tradier's options budget, so after the
+close it can hold the sync lane for about ten minutes (on the order of 300
+requests at 30 a minute since the factory's 18 names joined its scope); a
+Gmail push that arrives meanwhile waits for it. An interrupted snapshot keeps every expiration it
+committed, and the next run fetches only the rest.
 
 On worker startup and each idle poll:
 

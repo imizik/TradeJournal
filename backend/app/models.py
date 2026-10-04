@@ -218,6 +218,61 @@ class ResearchWorkspace(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class ChartSettingsRecord(SQLModel, table=True):
+    """The Charts workspace every browser shares: levels, watchlist, intervals,
+    indicators and layout, as one JSON document the frontend validates. The
+    symbol on screen stays per device. ``revision`` is bumped on every save and
+    a save based on an older revision is refused, so a phone and a desktop
+    cannot silently overwrite each other. The app uses the ``default`` row."""
+
+    __tablename__ = "chart_settings"
+
+    name: str = Field(primary_key=True)
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = Field(default=0)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class OptionChainSnapshot(SQLModel, table=True):
+    """Open interest and volume for every contract of one underlying's
+    expiration, as one trading session left them (Charts C4.3). Written once by
+    ``engine/options_recorder.py`` and never rewritten or backfilled: open
+    interest history cannot be fetched later. ``data_json`` is
+    ``{"columns": [...], "rows": [[root, "C"|"P", strike, open_interest, volume]]}``
+    with null where the provider gave no value."""
+
+    __tablename__ = "option_chain_snapshot"
+    __table_args__ = (
+        UniqueConstraint("session_date", "underlying", "expiration", name="uq_option_chain_snapshot_session"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_date: date  # the New York trading session captured
+    underlying: str
+    expiration: date
+    provider: str  # "tradier"
+    captured_at: datetime  # UTC; when the chain was received
+    last_trade_at: Optional[datetime] = None  # UTC; the chain's newest trade, so how current its volume is
+    contracts: int
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+
+
+class OptionSnapshotDay(SQLModel, table=True):
+    """What the recorder holds for one underlying and trading session:
+    ``recorded`` (every expiration within the horizon), ``partial`` (some are
+    missing) or ``unavailable`` (the session passed without a snapshot)."""
+
+    __tablename__ = "option_snapshot_day"
+
+    session_date: date = Field(primary_key=True)
+    underlying: str = Field(primary_key=True)
+    status: str
+    expirations: int = 0  # listed within the horizon that session
+    recorded: int = 0
+    note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class StrategyDefinition(SQLModel, table=True):
     """Named Pine strategy whose code and assumptions evolve through versions."""
 

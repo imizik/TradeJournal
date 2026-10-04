@@ -1,5 +1,5 @@
 {
-  "commit": "2d89686103bb7fe995f27c91051a3f5cd5dda80f",
-  "date": "2026-09-29",
-  "note": "Reconciled 32 code commits (Market Map, fill and expiry time repairs, metric validation, TradingView ingress, autodeploy, phone alerts, the strategy factory): added the factory's rules and weekly process, the gmail worker lane, the two repair scripts and the stalled docs-drift routine; corrected the Neon-era Postgres notes and the Pine compile status."
+  "commit": "2a0caf9005cbdbd0dbbac95b4610ea9f5bcd5966",
+  "date": "2026-10-01",
+  "note": "Reconciled 32 code commits (Charts C0.0-C0.7: deep history, market calendar, server-saved settings, per-panel symbols, named layouts, hotkeys, the split-adjusted price basis, daily/weekly depth; autodeploy every three minutes; compact verify output; strategy factory exits and families, already documented): added a Charts section to domain-rules.md, the price basis and daily depth to architecture.md and the feature map, the C0.6/C0.7 tests to verification.md, and corrected CLAUDE.md's 'planned' C0.0 contract and the contract's own raw-price note."
 }

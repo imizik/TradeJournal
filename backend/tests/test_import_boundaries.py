@@ -63,6 +63,7 @@ PURE_MODULES = {
     "app.engine.reconstructor",
     "app.engine.email_parser",
     "app.engine.behavior",
+    "app.engine.analytics",  # read-only metrics over supplied journal history
     "app.engine.research",
     "app.engine.strategy_csv",
     "app.engine.strategy_metrics",
@@ -89,6 +90,12 @@ PURE_MODULES = {
     # exactly the direction a network import would travel.
     "app.engine.occ",
     "app.engine.chart_math",  # chart-only resampling and indicator math
+    "app.engine.chart_adjust",  # chart-only split adjustment of supplied bars
+    "app.engine.chart_levels",  # automatic chart levels from supplied bars
+    "app.engine.symbol_info",  # summaries of supplied stored journal results
+    # Option chain models. The Tradier adapter (options_chain) fills them; the
+    # positioning engine and recorder must be able to read them without it.
+    "app.engine.options_models",
 }
 # Third-party packages a pure module may reach. httpx, yfinance, anthropic,
 # googleapiclient and grpc are deliberately absent: reaching any of them, even

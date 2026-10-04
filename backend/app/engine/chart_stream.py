@@ -5,11 +5,12 @@ remain the authority for volume, studies, and recovery after a missed event.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import date, datetime
 import json
 import logging
 import math
 import time
+from typing import Callable, Iterable
 
 import httpx
 from websockets.asyncio.client import connect
@@ -22,8 +23,12 @@ _log = logging.getLogger(__name__)
 _INTRADAY = {name: width for name, width in INTERVALS.items() if name not in ("1D", "1W")}
 
 
-def trade_event(row: dict, *, now: float | None = None) -> dict | None:
-    """Reject stale, invalid and correction events before they reach a chart."""
+def trade_event(row: dict, *, now: float | None = None, calendar: Callable[[date], dict | None] | None = None) -> dict | None:
+    """Reject stale, invalid and correction events before they reach a chart.
+
+    `calendar` returns the cached market day (never a provider call); without
+    one the clock hours apply, as they do for bars when the calendar is missing.
+    """
     if row.get("type") != "timesale" or str(row.get("cancel")).lower() == "true" or str(row.get("correction")).lower() == "true":
         return None
     try:
@@ -38,7 +43,7 @@ def trade_event(row: dict, *, now: float | None = None) -> dict | None:
         dt = datetime.fromtimestamp(at, ET)
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    part = session_part(dt)
+    part = session_part(dt, calendar(dt.date()) if calendar else None)
     if part is None:
         return None
     minute = dt.hour * 60 + dt.minute
@@ -58,18 +63,21 @@ def trade_event(row: dict, *, now: float | None = None) -> dict | None:
 class ChartMarketStream:
     """Demand-driven single connection, fan-out and bounded reconnects."""
 
-    def __init__(self):
-        self._clients: dict[int, tuple[str, asyncio.Queue]] = {}
+    def __init__(self, calendar: Callable[[date], dict | None] | None = None):
+        self._calendar = calendar
+        # Each client (one browser tab) follows up to three symbols; the one
+        # upstream connection subscribes to the union of every client's set.
+        self._clients: dict[int, tuple[frozenset[str], asyncio.Queue]] = {}
         self._next_id = 0
         self._task: asyncio.Task | None = None
         self._stopping = False
         self._pending: dict[tuple[str, int], dict] = {}
         self._latest_at: dict[str, float] = {}
 
-    def subscribe(self, symbol: str) -> tuple[int, asyncio.Queue]:
+    def subscribe(self, symbols: str | Iterable[str]) -> tuple[int, asyncio.Queue]:
         self._next_id += 1
         queue: asyncio.Queue = asyncio.Queue(maxsize=64)
-        self._clients[self._next_id] = (symbol, queue)
+        self._clients[self._next_id] = (frozenset([symbols] if isinstance(symbols, str) else symbols), queue)
         queue.put_nowait({"type": "status", "state": "connecting"})
         if self._task is None or self._task.done():
             self._stopping = False
@@ -91,8 +99,8 @@ class ChartMarketStream:
             self._task = None
 
     def _publish(self, event: dict) -> None:
-        for symbol, queue in self._clients.values():
-            if event["type"] == "tick" and event["symbol"] != symbol:
+        for symbols, queue in self._clients.values():
+            if event["type"] == "tick" and event["symbol"] not in symbols:
                 continue
             if queue.full():
                 queue.get_nowait()
@@ -101,7 +109,7 @@ class ChartMarketStream:
     def _receive(self, message: str | bytes) -> None:
         if isinstance(message, bytes):
             message = message.decode("utf-8", errors="replace")
-        wanted = {symbol for symbol, _ in self._clients.values()}
+        wanted = self._wanted()
         for line in message.splitlines():
             try:
                 row = json.loads(line)
@@ -111,7 +119,7 @@ class ChartMarketStream:
                 continue
             if row.get("error"):
                 raise ValueError("Tradier rejected the market-stream subscription")
-            tick = trade_event(row)
+            tick = trade_event(row, calendar=self._calendar)
             if tick is None or tick["symbol"] not in wanted:
                 continue
             symbol = tick["symbol"]
@@ -127,6 +135,9 @@ class ChartMarketStream:
                 pending["low"] = min(pending["low"], tick["price"])
                 pending["at"] = tick["at"]
                 pending["price"] = tick["price"]
+
+    def _wanted(self) -> set[str]:
+        return set().union(*(symbols for symbols, _ in self._clients.values()))
 
     def _flush(self) -> None:
         pending = sorted(self._pending.values(), key=lambda tick: tick["at"])
@@ -161,7 +172,7 @@ class ChartMarketStream:
                         last_flush = session_started
                         delay = 1
                         while self._clients and not self._stopping:
-                            wanted = {symbol for symbol, _ in self._clients.values()}
+                            wanted = self._wanted()
                             if wanted != subscribed:
                                 if subscribed and time.monotonic() - session_started > 240:
                                     break  # Renew the short-lived session before changing symbols.

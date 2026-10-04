@@ -28,6 +28,7 @@ from app.engine.jobs import (
 )
 from app.engine.job_runtime import execute_job, in_sync_worker, submit_job
 from app.engine.enricher import polygon_calls_per_minute
+from app.engine.options_recorder import record as record_option_snapshots
 from app.models import Fill, JobRun, Trade
 from app.environment import require_destructive_confirmation
 from app.routers.fills import (
@@ -47,6 +48,7 @@ JOB_DAILY_REVIEW = "daily_review"
 JOB_FULL_PIPELINE = "full_pipeline"
 JOB_GMAIL_PUSH = "gmail_push"
 JOB_RESYNC_ALL = "resync_all"
+JOB_OPTIONS_SNAPSHOT = "options_snapshot"
 
 JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False, "progress_unit": "step"},
@@ -57,6 +59,7 @@ JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_TRADE_PATH, "label": "Path metrics calculation", "description": "Compute closed-trade MFE, MAE, and exit efficiency.", "advanced": False, "progress_unit": "trade", "api_provider": "Alpaca", "rate_limit_per_minute": 60.0},
     {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False, "progress_unit": "step"},
+    {"job_type": JOB_OPTIONS_SNAPSHOT, "label": "Options positioning snapshot", "description": "Keep today's option open interest and volume for SPY, QQQ, SPX, open positions and watchlist names (16:15-20:00 New York).", "advanced": False, "progress_unit": "underlying", "api_provider": "Tradier", "rate_limit_per_minute": 30.0},
 ]
 
 _EXTRA_JOB_CONFIG: dict[str, dict[str, Any]] = {
@@ -213,6 +216,11 @@ def _run_trade_rebuild(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
     session.commit()
     suffix = f" {len(anomalies)} anomaly/anomalies logged." if anomalies else ""
     return rebuilt, f"Rebuilt {rebuilt} trade(s).{suffix}"
+
+
+def _run_options_snapshot(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
+    # The recorder commits each expiration as it goes, so a restart resumes.
+    return record_option_snapshots(session, progress=lambda done, total, text: _set_job(job_id, done=done, total=total, current=text))
 
 
 def _latest_review_day(session: Session) -> tuple[date, list[uuid.UUID]] | None:
@@ -607,6 +615,7 @@ async def run_sync_job(job_type: str, range: str = "week", force: bool = False, 
         JOB_FILL_CHECK: _run_fill_check,
         JOB_TRADE_REBUILD: _run_trade_rebuild,
         JOB_DAILY_REVIEW: _run_daily_review,
+        JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
     }
     runner = runners.get(job_type)
     if not runner:
@@ -680,6 +689,7 @@ def execute_sync_job(job: JobRun) -> None:
             JOB_DAILY_REVIEW: _run_daily_review,
             JOB_RESYNC_ALL: _run_resync_all,
             JOB_GMAIL_WATCH_RENEW: _run_gmail_watch_renew,
+            JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
         }
         runner = runners.get(job.job_type)
         if runner is None:

@@ -159,6 +159,165 @@ jobs:
           path: frontend/test-results/
           retention-days: 7
 
+      # A pull request's pictures, for the Screenshots job to post. It never
+      # fails this job.
+      - name: Upload screenshots
+        if: success() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: frontend/test-results/**/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+  screenshots:
+    name: Screenshots
+    needs: e2e
+    # Same-repository pull requests only: a fork's token cannot write the
+    # comment, and nothing here should hold write access over a fork's code.
+    # Report-only, and absent from pushes to main, so it never gates a release.
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # the ci-screenshots branch that hosts the comment's images
+      pull-requests: write # the comment itself
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      E2E_RESULT: ${{ needs.e2e.result }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      STORE_BRANCH: ci-screenshots
+      # Unique per run, so GitHub's image cache never shows an older picture.
+      STORE_DIR: pr/${{ github.event.pull_request.number }}/${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      # Pictures are only worth a look when the pull request changes what the
+      # app shows, so backend-only pull requests get no comment.
+      - name: Check for screen changes
+        id: scope
+        run: |
+          set -euo pipefail
+          FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
+          if grep -q '^frontend/' <<< "$FILES"; then
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No frontend files changed; nothing to post."
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.scope.outputs.frontend == 'true' && needs.e2e.result == 'success'
+
+      - name: Download this run's screenshots
+        if: steps.scope.outputs.frontend == 'true' && needs.e2e.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: screenshots
+          path: ${{ runner.temp }}/pictures
+
+      # A failure here leaves no comment.md, and the next step says so on the
+      # pull request instead of failing it.
+      - name: Build the comment
+        if: steps.scope.outputs.frontend == 'true' && needs.e2e.result == 'success'
+        continue-on-error: true
+        run: |
+          node frontend/scripts/screenshot-gallery.mjs \
+            --pictures "$RUNNER_TEMP/pictures" \
+            --out "$RUNNER_TEMP/screenshot-report" \
+            --image-url "https://raw.githubusercontent.com/$REPO/$STORE_BRANCH/$STORE_DIR" \
+            --label "${HEAD_SHA:0:7}" \
+            --run-url "$RUN_URL"
+
+      # Images live on an orphan branch that is never merged and holds one
+      # commit, replaced on every update, so it cannot grow a history. Each
+      # pull request's folder is replaced by its newest run and removed once
+      # the pull request is closed.
+      - name: Publish images and comment
+        if: ${{ !cancelled() && steps.scope.outputs.frontend == 'true' }}
+        run: |
+          set -euo pipefail
+          REPORT="$RUNNER_TEMP/screenshot-report"
+          BODY="$RUNNER_TEMP/comment.md"
+          if [ -f "$REPORT/comment.md" ]; then
+            cp "$REPORT/comment.md" "$BODY"
+          elif [ "$E2E_RESULT" = "failure" ]; then
+            printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \
+              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report\` download: [test run]($RUN_URL)." \
+              > "$BODY"
+          else
+            printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \
+              "Could not post the pictures for ${HEAD_SHA:0:7}. See the Screenshots job: [test run]($RUN_URL)." \
+              > "$BODY"
+          fi
+
+          gh auth setup-git
+          STORE="$RUNNER_TEMP/store"
+          for attempt in 1 2 3 4 5; do
+            rm -rf "$STORE" && git init -q "$STORE"
+            git -C "$STORE" remote add origin "https://github.com/$REPO.git"
+            TIP=$(git -C "$STORE" ls-remote origin "refs/heads/$STORE_BRANCH" | cut -f1)
+            if [ -n "$TIP" ]; then
+              git -C "$STORE" fetch -q --depth 1 origin "$TIP"
+              git -C "$STORE" checkout -q FETCH_HEAD
+            fi
+            rm -rf "$STORE/pr/$PR"
+            if [ -d "$REPORT/images" ] && [ -n "$(ls -A "$REPORT/images")" ]; then
+              mkdir -p "$STORE/$STORE_DIR"
+              cp "$REPORT/images/"*.png "$STORE/$STORE_DIR/"
+            fi
+            for dir in "$STORE"/pr/*/; do
+              [ -d "$dir" ] || continue
+              state=$(gh pr view "$(basename "$dir")" -R "$REPO" --json state --jq .state 2>/dev/null || echo UNKNOWN)
+              if [ "$state" = "CLOSED" ] || [ "$state" = "MERGED" ]; then
+                rm -rf "$dir"
+              fi
+            done
+            git -C "$STORE" add -A
+            [ -n "$TIP" ] || [ -n "$(git -C "$STORE" ls-files)" ] || break
+            TREE=$(git -C "$STORE" write-tree)
+            if [ -n "$TIP" ] && [ "$TREE" = "$(git -C "$STORE" rev-parse 'HEAD^{tree}')" ]; then
+              break
+            fi
+            COMMIT=$(git -C "$STORE" -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit-tree "$TREE" -m "Screenshots for pull request #$PR")
+            # The lease refuses the push if another run moved the branch since
+            # it was read; start over from the new tip rather than drop its work.
+            if git -C "$STORE" push -q --force-with-lease="refs/heads/$STORE_BRANCH:$TIP" \
+                origin "$COMMIT:refs/heads/$STORE_BRANCH"; then
+              break
+            fi
+            [ "$attempt" -lt 5 ] || { echo "Could not update $STORE_BRANCH after 5 attempts."; exit 1; }
+            sleep $((attempt * 3))
+          done
+
+          # GitHub's image proxy can fetch a just-pushed file before the raw
+          # host serves it; wait for one so the comment never opens broken.
+          FIRST=$(ls "$REPORT/images" 2>/dev/null | head -n 1 || true)
+          if [ -n "$FIRST" ]; then
+            for _ in $(seq 1 12); do
+              curl -sfo /dev/null "https://raw.githubusercontent.com/$REPO/$STORE_BRANCH/$STORE_DIR/$FIRST" && break
+              sleep 5
+            done
+          fi
+
+          # One comment per pull request, edited in place on every run.
+          IDS=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("<!-- ci-screenshots -->"))) | .id')
+          ID=${IDS%%$'\n'*}
+          if [ -n "$ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F body=@"$BODY" > /dev/null
+          else
+            gh api "repos/$REPO/issues/$PR/comments" -F body=@"$BODY" > /dev/null
+          fi
+
   postgres:
     name: Postgres parity
     runs-on: ubuntu-latest

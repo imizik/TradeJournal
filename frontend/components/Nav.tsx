@@ -3,11 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight, Menu, X } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
 import type { GmailHealth } from "@/lib/api";
+import { fullScreenRoute } from "@/components/AppMain";
+
+/** Whether the charts page shows the full sidebar instead of the icon rail, on this device only (C7.3). */
+const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -40,8 +44,22 @@ function SyncStatusLine() {
   );
 }
 
-/** Opens the sync/enrichment drawer. Shared by the sidebar and the phone bar. */
-function SyncTrigger({ open, running, onToggle }: { open: boolean; running: boolean; onToggle: () => void }) {
+/** The rail's sync state: a dot, named for screen readers and in its tooltip. */
+function SyncStatusDot() {
+  const health = useGmailHealth();
+  if (!health) return null;
+  const { label, dot } = SYNC_STATUS[health.status];
+  const text = health.action === "reconnect_gmail" ? "Gmail disconnected" : label;
+  return (
+    <span role="status" title={`${text}. ${health.message}`} className="flex h-6 w-10 items-center justify-center">
+      <span className={cn("inline-block h-2 w-2 rounded-full", dot)} />
+      <span className="sr-only">{text}</span>
+    </span>
+  );
+}
+
+/** Opens the sync/enrichment drawer. Shared by the sidebar, the charts rail and the phone bar. */
+function SyncTrigger({ open, running, onToggle, compact = false }: { open: boolean; running: boolean; onToggle: () => void; compact?: boolean }) {
   return (
     <button
       onClick={onToggle}
@@ -58,12 +76,12 @@ function SyncTrigger({ open, running, onToggle }: { open: boolean; running: bool
         </span>
       )}
       <span className="text-[11px] font-medium">Sync</span>
-      <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")} />
+      {!compact && <ChevronRight className={cn("h-3.5 w-3.5 transition-transform duration-200", open && "rotate-180")} />}
     </button>
   );
 }
 
-function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
   return (
     <ul className="space-y-1">
       {navItems.map(({ href, label, icon: Icon }) => {
@@ -73,16 +91,22 @@ function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () 
             <Link
               href={href}
               onClick={onNavigate}
+              // The rail shows icons only: the name is the link's label and its tooltip.
+              aria-label={rail ? label : undefined}
+              aria-current={isActive ? "page" : undefined}
+              title={rail ? label : undefined}
               className={cn(
                 // min-h-11 keeps every row a comfortable tap target on a phone.
-                "flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                rail
+                  ? "flex h-10 w-10 items-center justify-center rounded-md transition-colors"
+                  : "flex min-h-11 items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
                 isActive
                   ? "bg-secondary text-foreground"
                   : "text-muted-foreground hover:bg-secondary hover:text-foreground"
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {label}
+              {!rail && label}
             </Link>
           </li>
         );
@@ -96,6 +120,17 @@ export function Nav() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const anyRunning = useAnyJobRunning();
+  // On the charts page the sidebar is a rail of icons unless this device asked for the full one.
+  const chartsRoute = fullScreenRoute(pathname);
+  const [wide, setWide] = useState(false);
+  useEffect(() => {
+    try { if (localStorage.getItem(CHARTS_NAV_KEY) === "expanded") setWide(true); } catch { /* the rail */ }
+  }, []);
+  const expand = (next: boolean) => {
+    setWide(next);
+    try { localStorage.setItem(CHARTS_NAV_KEY, next ? "expanded" : "collapsed"); } catch { /* remembered for this visit only */ }
+  };
+  const rail = chartsRoute && !wide;
 
   // A tap on a link should land on the page, not leave the menu covering it.
   useEffect(() => setMenuOpen(false), [pathname]);
@@ -127,7 +162,7 @@ export function Nav() {
       </header>
 
       {menuOpen && (
-        <div className="fixed inset-0 z-50 md:hidden">
+        <div role="dialog" aria-modal="true" aria-label="Menu" className="fixed inset-0 z-50 md:hidden">
           <div className="absolute inset-0 bg-black/60" onClick={() => setMenuOpen(false)} aria-hidden />
           <nav className="absolute inset-y-0 left-0 flex w-64 max-w-[80%] flex-col overflow-y-auto border-r bg-card p-4 pt-[calc(1rem+env(safe-area-inset-top))]">
             <div className="mb-6 flex items-start justify-between gap-2">
@@ -148,11 +183,41 @@ export function Nav() {
         </div>
       )}
 
+      {/* Desktop: on the charts page, a rail of icons that gives the charts the width */}
+      {rail && (
+        <nav className="sticky top-0 hidden h-screen w-12 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r bg-card py-2 md:flex">
+          <button
+            onClick={() => expand(true)}
+            aria-label="Expand navigation"
+            title="Expand navigation"
+            className="mb-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+          <NavLinks pathname={pathname} rail />
+          <div className="mt-auto" />
+          <SyncStatusDot />
+          <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} compact />
+        </nav>
+      )}
+
       {/* Desktop sidebar */}
-      <nav className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-card p-4 md:flex">
-        <div className="mb-6">
-          <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
-          <SyncStatusLine />
+      <nav className={cn("sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r bg-card p-4", !rail && "md:flex")}>
+        <div className="mb-6 flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
+            <SyncStatusLine />
+          </div>
+          {chartsRoute && (
+            <button
+              onClick={() => expand(false)}
+              aria-label="Collapse navigation"
+              title="Collapse navigation"
+              className="-mr-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
+            >
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
+          )}
         </div>
 
         <NavLinks pathname={pathname} />

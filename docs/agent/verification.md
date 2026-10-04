@@ -19,7 +19,10 @@ A Claude Code cloud session clones the repository without `backend/.venv` or
 Chromium that `verify.sh` finds on its own (see [browser tests](#browser-tests)).
 
 `verify.sh` runs every check even after one fails, so one run reports every
-problem. It exits non-zero if any check failed.
+problem. It exits non-zero if any check failed. Passing checks print their last
+result line, including pytest's warning count. A failed check prints the last
+40 lines and the path to its complete log. Failed runs retain all check logs in
+a private temporary directory; successful runs remove them.
 
 On Windows, run these through Git Bash or WSL. `startdev.ps1` remains the
 native PowerShell launcher for the app itself.
@@ -33,7 +36,7 @@ native PowerShell launcher for the app itself.
 | Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Docs | `cd backend && pytest tests/test_docs_freshness.py -q` | That the drift pass above is overdue: it counts code commits since `docs/agent/last-reconciled.json` and fails past 30. It cannot check that the pass happened, only that someone was asked. CI runs it on pull requests only, so it never blocks a release from `main` |
 | Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
-| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port and the strategy factory on synthetic bars, and the import boundaries again |
+| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port, the strategy factory on synthetic bars, the Charts routes, session calendar, history cache, stream and split-adjusted price basis on fixtures, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
@@ -41,8 +44,10 @@ native PowerShell launcher for the app itself.
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
 CI (`.github/workflows/ci.yml`) runs backend, frontend, browser and Postgres
-jobs on every pull request. Postgres parity, migration-path and role checks
-are additional to the local script. `.github/workflows/deployment.yml` also
+jobs on every pull request, and posts the browser tests' pictures on pull
+requests that change the frontend (see [browser tests](#browser-tests)).
+Postgres parity, migration-path and role checks are additional to the local
+script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
 Postgres. It also exercises the optional ingress, its restricted DB/OS roles,
@@ -164,15 +169,85 @@ The browser clock is advanced rather than waiting 30 seconds per poll. This
 proves rendering and private reads; it does not exercise TradingView delivery
 or a live Alpaca verdict.
 
+`frontend/e2e/symbol-info.spec.ts` reads the real journal endpoint against
+`seed_dev_data.py`'s disposable data, with only market charts/settings stubbed.
+It covers completed/expired results, separate accounts' open trades, record
+links, empty symbols, remembered placeholder tabs, debouncing, late-response
+rejection, failure/retry and the collapsed 390 px layout. It makes no claim
+about live provider feeds. `backend/tests/test_symbol_info.py` covers missing
+results, zero-duration holds, recent-record limits and the two-query adapter.
+
 `frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
 quote responses: five canvases, symbol linking, saved levels, streamed trade updates,
 refresh visibility, pause/error behavior, phone overflow, the next-bar countdown
-states, in-place candle updates versus resets, linked time ranges, full screen and
-keyboard symbol search. Lightweight Charts internals are read through a test-only
-`window.__tjCharts` map the spec installs; production never defines it. `backend/tests/test_charts.py`
-and `backend/tests/test_chart_stream.py` verify
-private routes and provider/indicator boundaries. Actual Tradier/Webull access
-is checked separately by `backend/scripts/check_chart_feed.py`; browser fixtures
+states, in-place candle updates versus resets, linked time ranges, full screen,
+keyboard symbol search, six-month 5m scroll-back under ticks/REST, rollover,
+failure retry, eviction and 390px touch navigation, render counts proving
+that a tick re-renders only the charts whose candles moved and the clock
+re-renders none, chart instances surviving symbol, interval, session and
+RSI switches without the loading card, and server-saved settings: a level
+shared between two browser contexts through the e2e backend, a refused stale
+save, a merged conflict, the first-visit merge and the offline copy, and
+per-panel symbols (SPY and QQQ beside the traded name through switches,
+streaming, pause, scroll-back and focus), and hotkeys (typed minutes on Enter
+without a 1m detour, immediate intervals, Space watchlist steps, Alt+R and End
+on every chart, keys off in fields and dialogs, the `?` sheet against the exact
+binding list, and the 390px touch equivalents), the drawing layer (a level
+dragged by mouse on the 5m chart read back on the 1h chart, Esc cancel,
+Delete, undo/redo by key and button, reload, undo beside another device's
+level, and tap-to-select then touch drag at 390px without page scroll; the
+painted line and handle are checked by screenshot only), the drawing tools (a
+trend line placed by two clicks, dragged by a handle and by its body in whole
+bars, extended, recolored and widened, deleted and undone, and drawn inside the
+right hour on the 1h chart; a ray, a zone resized by a corner and a note's
+text; the magnet against the fixture's known OHLC by toggle, by a dragged
+handle and while Cmd/Ctrl is held; a pre-split drawing moving with the
+candles; and at 390px two taps to place, tap to select, a handle dragged by
+finger without page scroll, a one-row bar and 24px style targets; the painted
+shapes are checked by screenshot only and anchors are read through a test-only
+`window.__tjDrawings` map), the context menu (right-click on the chart for the
+price there, copy, add level, one chart's reset, Layers hiding levels and
+Volume through a reload, an armed tool put away, arrow keys; on a level an
+inline label and color, Esc discarding a label, lock against a drag, unlock,
+duplicate, hide and show, delete and undo; on drawings color, lock, hide and
+the Drawings group, and a note's text; at 390px a long press opening bottom
+sheets with 44px rows while a swipe or tap opens nothing; the menu's look is
+checked by screenshot only), the layers panel (groups hidden on all five
+charts through a reload, one item hidden, lock all as one undo step, a level
+off the price scale and a scrolled-away trend line brought into view, the
+Indicators group hidden and shown by one study, the Journal hidden, delete all
+confirmed and undone in order, a drawing two history pages back reached, and
+at 390px a bottom sheet with 44px buttons; its look is checked by screenshot
+only), the price basis (the chip, a
+level drawn before a split moving with it, new levels recording their date, the
+missing-split banner, a history page on a different split set refused, and a
+possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year
+1D chart and a 30-year 1W chart panned page by page to their first bar with a
+stable zoom and the start-of-history label, 1D to 1W to 5m switching, and a
+390px touch pan). Chart
+tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
+unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
+read through test-only `window.__tjCharts`, `window.__tjRenders` and `window.__tjDrawings` maps the
+spec installs; production never defines them. `backend/tests/test_charts.py`,
+`backend/tests/test_chart_history.py`, `backend/tests/test_chart_calendar.py`,
+`backend/tests/test_chart_splits.py` (the split basis: matching minute, daily and
+weekly prices, the raw cache untouched, missing, stale and damaged split data),
+`backend/tests/test_chart_daily_history.py` (12+ years of fixture daily rows:
+1D/1W paging equal to the continuous series, workspace seam, new listing, one
+provider call per symbol per date, coded failures, a split effective today in
+raw bars, the route) and `backend/tests/test_chart_stream.py`
+verify private routes and provider/indicator boundaries.
+`backend/tests/test_options_chain.py` parses recorded production Tradier option
+chains (SPY, and SPX with both roots) and pins the options budget, coded
+failures and that Tradier option field names stay in the adapters.
+`backend/tests/test_options_recorder.py` covers the daily options snapshot job:
+its capture window, resume after a restart, missed sessions marked unavailable
+and the real adapter's budget. Actual Tradier/Webull
+access is checked separately by `backend/scripts/check_chart_feed.py`, split
+records and the adjusted prices against both providers by
+`backend/scripts/check_chart_splits.py` (read-only, a real split), live option
+chains by `backend/scripts/check_options_chain.py` (read-only), and a
+separate configured-account SIP/raw probe checks Alpaca entitlement; browser fixtures
 do not establish live entitlement or TradingView parity.
 
 Notes that will save you time:
@@ -199,6 +274,19 @@ Notes that will save you time:
   `backend/tests/test_seed_dev_data.py` independently verifies the
   reconstructor still produces. If the fixture changes, that test fails first,
   in the fast run.
+- **Pull requests that change `frontend/` get the pictures as a comment.**
+  CI's Screenshots job collects every picture the tests save into their
+  output folder (`test.info().outputPath(...)`; a picture saved anywhere else
+  is not posted) and keeps one comment on the pull request with them folded
+  into a section per test file and screen size
+  (`frontend/scripts/screenshot-gallery.mjs`). This is where "checked by
+  screenshot only" above gets looked at; nothing compares the pictures
+  automatically. That was tried and dropped: two identical runs differ in 32
+  of 43 pictures, because chart fixtures are built from the current time, the
+  status bar shows a live clock and quote age, and the journal panel can still
+  be loading. A comparison needs those tests on a frozen clock first. The
+  images live on the orphan `ci-screenshots` branch: one commit, never
+  merged, with a pull request's folder removed after it closes.
 
 ## Postgres parity
 
@@ -309,7 +397,10 @@ Be honest about this when reporting work:
   so a broken edge case inside a working page goes unnoticed.
 - **The browser tests are smoke depth, not feature depth.** They assert that
   seeded values reach the DOM on the main pages. Filtering, sorting, forms,
-  editing and Strategy Lab workflows are not exercised.
+  editing and Strategy Lab workflows are generally not exercised. Analytics
+  additionally covers date/account/instrument filters, grouping, minimum
+  samples, empty/error states, and drill-down links in
+  `frontend/e2e/analytics.spec.ts` against isolated seeded data.
 - **No integration tests against live Gmail/Polygon/Alpaca/Tradier/Webull.**
   Those paths are only covered where they are stubbed. The real-time Gmail
   listener is tested with a fake Pub/Sub subscriber and a fake Gmail service;
