@@ -42,7 +42,7 @@ These rows describe future work, not implemented recording or broker controls.
 
 **Out-of-order update (2026-10-04):** at the user's request, the options
 analytics C4.2, C4.4 and C4.5 were built before G0, C5.2 and Phase 3, in one
-PR together with symbol info T2.1 (the implied move reads the same option
+PR ([PR #128](https://github.com/imizik/TradeJournal/pull/128)) together with symbol info T2.1 (the implied move reads the same option
 chains). This sets aside decision 7's "gamma tools follow the gate" for these
 three items only; G0 still precedes replay and the pre-trade capture work, and
 the board's `next` is unchanged (C5.2, once C5.1 reaches the phone). C4.6,
@@ -103,9 +103,9 @@ rather than built.
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with symbol info T1.4) |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | built ([PR #126](https://github.com/imizik/TradeJournal/pull/126)); done once a live alert is seen on the phone |
-| C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | done (this PR; built before G0 at the user's request, with symbol info T2.1) |
-| C4.4 | Options levels layer with filters | 4 Options on the chart | done (this PR; built before G0 at the user's request) |
-| C4.5 | Strike ladder side panel | 4 Options on the chart | done (this PR; built before G0 at the user's request) |
+| C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request, with symbol info T2.1) |
+| C4.4 | Options levels layer with filters | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
+| C4.5 | Strike ladder side panel | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | next, after C5.1's live phone check |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
