@@ -10,6 +10,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.engine import trade_path
 from app.engine.alpaca_enricher import _build_context
 from app.engine.indicators import analyze_minute_bars, compute_flags
+from app.engine.metric_versions import CONTEXT_VERSION, PATH_VERSION
 from app.models import Account, DailyReviewRecord, Fill, FillMarketContext, Tag, Trade, TradeTag, TradePathMetrics
 from app.routers.fills import _rebuild_trades
 
@@ -45,6 +46,25 @@ def test_entry_context_excludes_future_and_unfinished_ranges():
     assert analyze_minute_bars(bars, datetime(2026, 9, 24, 9, 35))["opening_range_5m_high"] == 150
 
 
+@pytest.mark.parametrize("price,high,low,expected", [(664.37,664.44,653.24,99.38),
+    (13.11,13.245,12.765,71.88), (462.955,463.16,456.6,96.88)], ids=["SPY", "BULL", "MSFT"])
+def test_entry_range_rounds_exact_decimal_ties(price, high, low, expected):
+    bars = [dict(t="2026-09-24T13:30:00Z", o=price, h=high, l=low, c=price, v=100)]
+    assert analyze_minute_bars(bars, datetime(2026,9,24,9,31))["entry_day_range_used_pct"] == expected
+
+
+def test_entry_vwap_decimal_tie_and_derived_percentage():
+    # The five completed FMST bars in the frozen production evidence.
+    bars = [dict(t="2025-10-02T14:05:00Z", o=3.14, h=3.14, l=3.14, c=3.14, v=100),
+            dict(t="2025-10-02T15:27:00Z", o=2.995, h=2.995, l=2.995, c=2.995, v=100),
+            dict(t="2025-10-02T16:32:00Z", o=2.96, h=2.96, l=2.96, c=2.96, v=100),
+            dict(t="2025-10-02T17:46:00Z", o=2.975, h=2.975, l=2.97, c=2.97, v=300),
+            dict(t="2025-10-02T18:07:00Z", o=2.97, h=2.97, l=2.97, c=2.97, v=200)]
+    result = analyze_minute_bars(bars, datetime(2025,10,2,14,19))
+    assert result["entry_vwap"] == 2.9938  # exact volume-weighted value is 2.99375
+    assert result["entry_vs_vwap_pct"] == -0.795
+
+
 @pytest.mark.parametrize("option_type,side,aligned", [("call", "buy_to_open", 1), ("put", "buy_to_open", 0),
     ("put", "sell_to_open", 1), ("call", "sell_to_open", 0), (None, "buy_to_open", None)])
 def test_flags_follow_underlying_direction(option_type, side, aligned):
@@ -66,7 +86,7 @@ def test_gap_uses_actual_open(monkeypatch):
     daily = {"AMD": [dict(t="2026-09-23T04:00:00Z", o=100, h=101, l=99, c=100, v=100)]}
     ctx = _build_context(f, daily, {}, {"AMD": bars})
     assert ctx.entry_gap_pct == 0
-    assert ctx.calculation_version == "entry-context-v2"
+    assert ctx.calculation_version == CONTEXT_VERSION
 
 
 def test_partial_exit_reduces_later_exposure():
@@ -191,13 +211,55 @@ def test_short_option_path_has_signed_exposure():
     assert result["option_exit_efficiency"] == 100
 
 
+@pytest.mark.parametrize("price,qty,exit_price", [(220, 2, 63), (415, 1, 390)], ids=["RDDT", "NFLX"])
+def test_zero_peak_from_audited_premiums_has_no_capture_ratios(price, qty, exit_price):
+    # These premiums reproduced the production bug: 2.2*100 and 4.15*100
+    # leave a positive float residue even though the observed peak is zero.
+    fills = [fill(qty=qty, price=price), fill("sell_to_close", 10, qty, exit_price)]
+    realized = (exit_price - price) * qty
+    bars = [dict(t="2026-09-24T14:01:00Z", o=price/100, h=price/100,
+                 l=exit_price/100, c=exit_price/100, v=100)]
+    result = trade_path.option_position_path(trade(fills, realized), fills, bars)
+    assert result["option_mfe_pct"] == 0
+    assert result["option_peak_total_pnl"] == 0
+    assert result["option_giveback_from_peak"] == -realized
+    assert result["option_exit_efficiency"] is None
+    assert result["option_giveback_pct"] is None
+    assert result["time_to_option_mfe_minutes"] is None
+
+
+def test_short_zero_peak_has_no_capture_ratios():
+    fills = [fill("sell_to_open", price=230), fill("buy_to_close", 10, price=240)]
+    bars = [dict(t="2026-09-24T14:01:00Z", o=2.3, h=2.4, l=2.3, c=2.4, v=100)]
+    result = trade_path.option_position_path(trade(fills, -10), fills, bars)
+    assert result["option_peak_total_pnl"] == 0
+    assert result["option_exit_efficiency"] is None
+    assert result["option_giveback_pct"] is None
+    assert result["time_to_option_mfe_minutes"] is None
+
+
+@pytest.mark.parametrize("high,peak,efficiency", [(2.000000001, 0, None), (2.0000001, 0.00001, -100000000)])
+def test_capture_ratios_require_a_peak_representable_at_stored_dollar_precision(high, peak, efficiency):
+    fills = [fill(price=200), fill("sell_to_close", 10, price=190)]
+    bars = [dict(t="2026-09-24T14:01:00Z", o=2, h=high, l=1.9, c=2, v=100)]
+    result = trade_path.option_position_path(trade(fills, -10), fills, bars)
+    assert result["option_peak_total_pnl"] == peak
+    assert result["option_exit_efficiency"] == efficiency
+    if efficiency is None:
+        assert result["option_giveback_pct"] is None
+        assert result["time_to_option_mfe_minutes"] is None
+    else:
+        assert result["option_giveback_pct"] == 100000100
+        assert result["time_to_option_mfe_minutes"] == 1
+
+
 def test_ambiguous_fill_allocation_stays_missing():
     fills = [fill(), fill("sell_to_close", 10, 2, 110)]
     result = trade_path.option_position_path(trade(fills, 10), fills, [bar(1)])
     assert result == {"option_path_quality": "unavailable_fill_allocation"}
 
 
-def test_context_change_reselects_a_current_complete_path():
+def test_version_and_context_change_reselect_a_current_complete_path():
     engine = create_engine("sqlite:///:memory:")
     SQLModel.metadata.create_all(engine)
     with Session(engine) as session:
@@ -214,9 +276,18 @@ def test_context_change_reselects_a_current_complete_path():
         session.add(ctx)
         session.flush()
         session.add(TradePathMetrics(trade_id=t.id, data_source="alpaca_iex", fetched_at=datetime.now(),
-            calculation_version="position-path-v2", underlying_mfe_pct=2, mfe_atr_multiple=1, attr_delta_pnl=1,
+            calculation_version=PATH_VERSION, underlying_mfe_pct=2, mfe_atr_multiple=1, attr_delta_pnl=1,
             inputs_fingerprint=trade_path.trade_inputs_fingerprint(t, fills),
             market_inputs_fingerprint=trade_path.market_inputs_fingerprint(fills, {str(ctx.fill_id): ctx})))
+        session.commit()
+        assert trade_path.trades_needing_path_metrics(session, [t]) == []
+        metrics = session.get(TradePathMetrics, t.id)
+        metrics.calculation_version = "position-path-v2"
+        session.add(metrics)
+        session.commit()
+        assert trade_path.trades_needing_path_metrics(session, [t]) == [t.id]
+        metrics.calculation_version = PATH_VERSION
+        session.add(metrics)
         session.commit()
         assert trade_path.trades_needing_path_metrics(session, [t]) == []
         ctx.entry_atr_14 = 3
