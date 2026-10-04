@@ -376,6 +376,14 @@ is verifiable rather than hopeful.
   never rewritten. Open interest history cannot be fetched later: a missed
   session is marked `unavailable`, and a later capture is never filed under an
   earlier date. SPX and SPXW contracts stay apart by root.
+- Option positioning (`options_positioning.py`, pure) reads one root at a
+  time and labels every number: open interest and volume observed, walls,
+  ranks and gamma calculated (Black-Scholes at the chart's price, never the
+  provider's hourly greek), signed gamma and the flip assumed and off unless
+  asked for. A missing input leaves a value unavailable, never zero or a
+  contract size of 100. Interactive option reads (`options_feed.py`) never
+  wait for a budget slot and take at most 24 of the 30 a minute; only the
+  nightly recorder waits.
 
 ## TradingView live alerts
 

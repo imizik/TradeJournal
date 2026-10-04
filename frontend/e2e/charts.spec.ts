@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment, RvolBaseline } from "../lib/charts";
+import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 import type { Earnings } from "../lib/symbolInfo";
 import type { AlertsPayload, LevelAlert } from "../lib/alerts";
@@ -1074,6 +1074,7 @@ const EMPTY_SETTINGS = {
   levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false, proportions: null, layoutProportions: {},
   intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
+  optionsLayer: { hidden: true, mode: "oi", scope: "week", nearest: 3, signed: false },
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
 };
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
@@ -3579,7 +3580,7 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   const toolbar = page.locator("header[aria-label='Chart toolbar']");
   expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
-  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers"]) {
+  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder"]) {
     const control = name === "Chart symbol" ? page.getByLabel(name) : page.getByRole("button", { name, exact: name !== "Layouts" });
     await expect(control.first(), name).toBeInViewport();
   }
@@ -3602,8 +3603,8 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   await clickAway(page);
   await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
 
-  // Focus order: the toolbar's last control, then the tool rail, then the charts, with the dock last.
-  await page.getByRole("button", { name: "Layers", exact: true }).focus();
+  // Focus order: the toolbar's last control (the strike ladder's dock tab, C4.5), then the tool rail, then the charts, with the dock last.
+  await page.getByRole("button", { name: "Strike ladder", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(tool(page, "price level")).toBeFocused(); // Undo and Redo are disabled, so the first tool is next
   await page.getByRole("button", { name: "Magnet" }).focus();
@@ -4662,5 +4663,221 @@ test.describe("phone alerts list", () => {
     for (const button of await item.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({ path: test.info().outputPath("alerts-phone.png") });
+  });
+});
+
+// ---- Options levels (C4.4) and the strike ladder (C4.5): stubbed chains; the backend tests compute and merge them ----
+
+// The fixture's last close is about 257.34. The backend merges strikes into the automatic levels' zones; this fixture
+// does the same within the 0.55 band, so a strike at 254.40 joins the PDH zone and one at 260 the round 260.
+const OPTION_READ = Date.parse("2026-10-05T14:31:00Z") / 1000;
+const optionMember = (kind: string, label: string, value: number, evidence: AutoLevel["evidence"] = "calculated", developing = false): AutoLevel => ({
+  kind, label, price: value, evidence, timeframe: null, source: "tradier", bar_time: null, formed_at: null, developing });
+function optionMembers(mode: string, signed: boolean): AutoLevel[] {
+  if (mode === "volume") return [optionMember("call_volume_wall", "Call vol wall", 257.5, "calculated", true), optionMember("put_volume_wall", "Put vol wall", 255, "calculated", true),
+    optionMember("options_volume", "Vol #3", 260, "calculated", true), optionMember("options_volume", "Vol #4", 252.5, "calculated", true)];
+  const walls = [optionMember("call_wall", "Call wall", 265), optionMember("put_wall", "Put wall", 250)];
+  if (mode === "gamma") return [...walls, optionMember("options_gamma", "Gamma #1", 257.5, signed ? "assumed" : "calculated", true),
+    optionMember("options_gamma", "Gamma #2", 255, signed ? "assumed" : "calculated", true), ...(signed ? [optionMember("gamma_flip", "Gamma flip", 256.2, "assumed", true)] : [])];
+  return [...walls, ...([[254.4, 3], [257.5, 4], [260, 5], [255, 6], [263, 7], [247.5, 8], [270, 9]] as const).map(([value, rank]) => optionMember("options_oi", `OI #${rank}`, value))];
+}
+function mergeZones(base: AutoZone[], members: AutoLevel[]): AutoZone[] {
+  const zones = base.map((zone) => [...zone.members]);
+  for (const member of members) {
+    const into = zones.find((group) => group.some((other) => Math.abs(other.price - member.price) < 0.55));
+    if (into) into.push(member); else zones.push([member]);
+  }
+  return zones.map((group) => autoZone([...group].sort((a, b) => b.price - a.price), new Set(group.map((m) => `${m.kind}@${m.price}`)).size)).sort((a, b) => a.low - b.low);
+}
+const optionRow = (strike: number, rank: number | null): OptionStrike => ({ strike, call_oi: 1200 + strike, put_oi: 900 + strike, call_volume: 340, put_volume: 120,
+  call_gamma: 2_400_000, put_gamma: 1_100_000, gamma: 3_500_000, rank, call_oi_rank: rank, put_oi_rank: null, call_volume_rank: null, put_volume_rank: null });
+function optionInfo(mode: string, scope: string, signed: boolean, members: AutoLevel[]): OptionsInfo {
+  return { state: "ready", message: null, symbol: "MRVL", root: "MRVL", scope: scope as OptionsInfo["scope"], source: "Tradier option chains", spot: 257.34,
+    expirations: ["2026-10-09"], scope_note: scope === "nearest" ? "Next expiration Fri Oct 9 (no 0DTE today)" : "Week of Oct 5: 1 expiration",
+    mode: mode as OptionsInfo["mode"], signed, fetched_at: OPTION_READ, last_trade_at: OPTION_READ - 30, greeks_updated_at: "2026-10-05 14:00:05",
+    excluded: {}, missing: {}, totals: { call_oi: 52000, put_oi: 61000, call_volume: 9000, put_volume: 7000, put_call_oi: 1.17, put_call_volume: 0.78, call_volume_oi: 0.17, put_volume_oi: 0.11 },
+    strikes: members.filter((m) => m.kind !== "gamma_flip").map((m) => optionRow(m.price, Number(/#(\d)/.exec(m.label)?.[1] ?? 1))),
+    flip: signed ? { price: 256.2, low: 244.47, high: 270.21, note: "Model estimate: Dealers long calls and short puts: call gamma counts positive, put gamma negative.", assumption: "Dealers long calls and short puts: call gamma counts positive, put gamma negative." } : null };
+}
+async function stubOptions(page: Page, requests: string[]) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const url = route.request().url();
+    requests.push(url);
+    const query = new URL(url).searchParams;
+    const data = fixture(url);
+    const layer = query.get("options");
+    const auto = query.get("auto") !== "0";
+    const [mode, scope, signed] = (layer ?? "oi.week.0").split(".");
+    const members = layer ? optionMembers(mode, signed === "1") : [];
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, missing: {}, auto,
+      zones: mergeZones(auto ? AUTO_ZONES : [], members), ...(layer ? { options: optionInfo(mode, scope, signed === "1", members) } : {}) };
+    await route.fulfill({ json: data });
+  });
+}
+const optionLevels = (page: Page, panel = "main") => drawn(page, panel).getAttribute("data-option-levels");
+const OI_LEVELS = "250 + Put wall,OI #3 + PDH + 254,OI #6,OI #4,260 + OI #5,OI #7,Call wall";
+
+test("options levels draw the walls and the nearest strikes, follow every filter, merge with automatic levels and explain themselves", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubOptions(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Off until asked for: the workspace asks for no options at all.
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "");
+  expect(requests.every((url) => !new URL(url).searchParams.has("options"))).toBe(true);
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const group = layerGroup(page, "Options levels");
+  await group.getByRole("button", { name: "Show Options levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("options=oi.week.0");
+  // The walls always, and the three nearest option zones on each side; the 247.50 and 270 strikes are further out.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", OI_LEVELS);
+  await expect(group).toContainText("MRVL: Week of Oct 5: 1 expiration.");
+  await expect.poll(() => (server.data?.optionsLayer as { hidden?: boolean } | undefined)?.hidden).toBe(false);
+
+  // The nearest count is drawn from what is loaded: no request. One each side drops the 263 strike; the
+  // zones a strike shares with PDH and with 260 still draw among the nearest automatic levels.
+  const asked = requests.length;
+  await group.getByLabel("Strikes each side").selectOption("1");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "250 + Put wall,OI #3 + PDH + 254,OI #6,OI #4,260 + OI #5,Call wall");
+  expect(requests.length).toBe(asked);
+  await group.getByLabel("Strikes each side").selectOption("3");
+
+  // Hovering the zone a strike shares with the prior day's high: both members, the strike's numbers, and how old they are.
+  const box = (await drawn(page, "main").boundingBox())!;
+  const pdh = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("options_oi@254.4"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", pdh));
+  const card = page.getByRole("tooltip", { name: "OI #3 + PDH + 254 level card" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("OI #3 Open interest, ranked254.40");
+  await expect(card).toContainText("calculated · Tradier option chains");
+  const numbers = card.getByLabel("Strike 254.40");
+  await expect(numbers).toContainText("OI 1.5K (#3) · Vol 340");
+  await expect(numbers).toContainText("#3 by open interest · -1.14% from 257.34");
+  await expect(numbers).toContainText("$3.5M per 1% (calculated)");
+  await expect(card).toContainText("open interest is OCC's overnight figure for the prior close");
+  await expect(card).toContainText("PDH Prior day high254.30");
+  await page.screenshot({ path: test.info().outputPath("options-level-card.png") });
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // Volume mode asks for volume walls; 0DTE / nearest narrows the expirations.
+  await group.getByRole("button", { name: "Volume", exact: true }).click();
+  await expect.poll(() => requests.at(-1)).toContain("options=volume.week.0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", /Call vol wall/);
+  await group.getByRole("button", { name: "0DTE / nearest" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("options=volume.nearest.0");
+  await expect(group).toContainText("MRVL: Next expiration Fri Oct 9 (no 0DTE today).");
+  // A sign is only for gamma; signed gamma adds the flip, labelled assumed.
+  await expect(group.getByLabel("Signed gamma and flip (assumed)")).toBeDisabled();
+  await group.getByRole("button", { name: "Gamma", exact: true }).click();
+  await group.getByLabel("Signed gamma and flip (assumed)").check();
+  await expect.poll(() => requests.at(-1)).toContain("options=gamma.nearest.1");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", /Gamma flip \+ PML/);
+  const flip = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("gamma_flip"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", flip));
+  const flipCard = page.getByRole("tooltip", { name: "Gamma flip + PML level card" });
+  await expect(flipCard).toContainText("assumed · Tradier option chains · moves during the session");
+  await expect(flipCard).toContainText("Model estimate: Dealers long calls and short puts");
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // Hiding the automatic levels with options on asks for the strikes alone.
+  await layerGroup(page, "Auto levels").getByRole("button", { name: "Hide Auto levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("auto=0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "Put wall,Gamma #2,Gamma flip,Gamma #1,Call wall");
+  await expect.poll(() => server.data?.optionsLayer).toEqual({ hidden: false, mode: "gamma", scope: "nearest", nearest: 3, signed: true });
+
+  // Through a reload, then off again from the chart menu's Layers.
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "Put wall,Gamma #2,Gamma flip,Gamma #1,Call wall");
+  await rightClick(page, "main", EMPTY);
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Options levels" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", "");
+  await expect.poll(() => (server.data?.optionsLayer as { hidden?: boolean } | undefined)?.hidden).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+function ladder(url: string): OptionsLadder {
+  const query = new URL(url).searchParams;
+  const rows = Array.from({ length: 13 }, (_, i) => 245 + i * 2.5).map((strike) => ({ ...optionRow(strike, null),
+    gamma: query.get("signed") === "1" ? (strike > 256 ? 1 : -1) * (5_000_000 - Math.abs(strike - 257.5) * 300_000) : 5_000_000 - Math.abs(strike - 257.5) * 300_000 }));
+  return { ...optionInfo("gamma", query.get("scope") ?? "week", query.get("signed") === "1", []), spot: Number(query.get("spot")) || null, rows,
+    signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 } };
+}
+
+test("the strike ladder centres on the price, marks a strike on the charts and shares the layer's scope", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  const reads: string[] = [];
+  await stub(page);
+  await page.route("**/api/backend/charts/options/*/ladder?**", async (route) => {
+    reads.push(route.request().url());
+    await route.fulfill({ json: ladder(route.request().url()) });
+  });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  expect(reads).toHaveLength(0); // off until opened
+  await page.getByRole("button", { name: "Strike ladder", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Strike ladder" });
+  await expect(panel.getByRole("button", { name: /^Strike / })).toHaveCount(13);
+  // The chart's latest price goes with the request and sits between the strikes around it.
+  expect(new URL(reads[0]).searchParams.get("spot")).toMatch(/^257\.3/);
+  await expect(panel.getByRole("separator", { name: /^Price 257\.3/ })).toBeVisible();
+  const order = await panel.locator("button[aria-label^='Strike '], [role='separator']").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
+  const at = order.findIndex((label) => label?.startsWith("Price"));
+  expect([order[at - 1], order[at + 1]]).toEqual(["Strike 255.00", "Strike 257.50"]);
+  await expect(panel.getByRole("button", { name: "Strike 265.00, call wall" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Strike 250.00, put wall" })).toBeVisible();
+  await expect(panel).toContainText("P/C OI 1.17 · P/C vol 0.78");
+  await page.screenshot({ path: test.info().outputPath("strike-ladder.png") });
+
+  // A click marks the strike on every chart of the symbol; a second click clears it.
+  await panel.getByRole("button", { name: "Strike 260.00" }).click();
+  for (const id of ALL_PANELS) await expect(drawn(page, id)).toHaveAttribute("data-highlight", "260");
+  await expect(panel.getByRole("button", { name: "Strike 260.00" })).toHaveAttribute("aria-pressed", "true");
+  await panel.getByRole("button", { name: "Strike 260.00" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "");
+
+  // Its expirations and sign are the options layer's, saved with the workspace.
+  await panel.getByRole("button", { name: "Within 45 days" }).click();
+  await expect.poll(() => reads.at(-1)).toContain("scope=all");
+  await panel.getByLabel("Signed gamma (assumed dealer side)").check();
+  await expect.poll(() => reads.at(-1)).toContain("signed=1");
+  await expect.poll(() => server.data?.optionsLayer).toEqual({ hidden: true, mode: "oi", scope: "all", nearest: 3, signed: true });
+  // Another symbol's ladder; the mark belonged to MRVL.
+  await panel.getByRole("button", { name: "Strike 255.00" }).click();
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await page.getByRole("button", { name: "Strike ladder", exact: true }).click();
+  await expect.poll(() => reads.at(-1)).toContain("/options/NVDA/ladder");
+  await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "");
+});
+
+test.describe("phone strike ladder", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the ladder is a bottom sheet, and a tap marks the strike and shows the chart", async ({ page }) => {
+    await stub(page);
+    await page.route("**/api/backend/charts/options/*/ladder?**", (route) => route.fulfill({ json: ladder(route.request().url()) }));
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    // The top row keeps room for the chart: the ladder opens from the More menu.
+    await page.getByRole("button", { name: "More chart controls" }).tap();
+    await page.getByRole("button", { name: "Strike ladder", exact: true }).tap();
+    const sheet = page.getByRole("dialog", { name: "Strike ladder" });
+    await expect(sheet.getByRole("button", { name: /^Strike / })).toHaveCount(13);
+    for (const target of await sheet.getByRole("button").all()) expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("strike-ladder-phone.png") });
+    await sheet.getByRole("button", { name: "Strike 262.50" }).tap();
+    await expect(sheet).toHaveCount(0);
+    await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "262.5");
   });
 });

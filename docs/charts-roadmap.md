@@ -40,6 +40,15 @@ with capture-adherence tracking. They are planned after G0 and before options
 analytics; they do not change the order of the items before G0. See [the capture specification](#pre-trade-capture-contract-c34c36).
 These rows describe future work, not implemented recording or broker controls.
 
+**Out-of-order update (2026-10-04):** at the user's request, the options
+analytics C4.2, C4.4 and C4.5 were built before G0, C5.2 and Phase 3, in one
+PR together with symbol info T2.1 (the implied move reads the same option
+chains). This sets aside decision 7's "gamma tools follow the gate" for these
+three items only; G0 still precedes replay and the pre-trade capture work, and
+the board's `next` is unchanged (C5.2, once C5.1 reaches the phone). C4.6,
+open-interest change from the recorded snapshots, was added as a new row
+rather than built.
+
 ## How to work from this file
 
 1. Take the first item in the [status board](#status-board) whose status is
@@ -94,6 +103,9 @@ These rows describe future work, not implemented recording or broker controls.
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with symbol info T1.4) |
 | C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | built ([PR #126](https://github.com/imizik/TradeJournal/pull/126)); done once a live alert is seen on the phone |
+| C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | done (this PR; built before G0 at the user's request, with symbol info T2.1) |
+| C4.4 | Options levels layer with filters | 4 Options on the chart | done (this PR; built before G0 at the user's request) |
+| C4.5 | Strike ladder side panel | 4 Options on the chart | done (this PR; built before G0 at the user's request) |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | next, after C5.1's live phone check |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
@@ -102,9 +114,7 @@ These rows describe future work, not implemented recording or broker controls.
 | C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | todo |
 | C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | todo |
 | C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | todo |
-| C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | todo |
-| C4.4 | Options levels layer with filters | 4 Options on the chart | todo |
-| C4.5 | Strike ladder side panel | 4 Options on the chart | todo |
+| C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | todo |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
 | C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
@@ -132,6 +142,7 @@ C3.6 needs C3.4/C3.5 and C3.1's trade-card surface. These are three separate
 implementation slices, in that order, not permission to implement all three
 when asked for one.
 C2.6 needs C2.4; each history page's sessions need their own 20-session baselines.
+C4.6 needs C4.3's snapshots and C4.5's ladder.
 
 ## Ground truth this plan rests on
 
@@ -874,6 +885,15 @@ call and put OI, call and put volume, put/call ratios and volume/OI. Then:
 
 *Done when:* formulas are unit-tested against hand-computed fixtures, and the
 assumptions are written in `docs/charts-workspace.md`.
+As built ([Options positioning](charts-workspace.md#options-positioning-c42)):
+`backend/app/engine/options_positioning.py` is pure. Gamma uses a zero rate and
+dividend, calendar time to 16:00 New York (the calendar's close on an early
+close, 09:30 for AM-settled SPX), and the provider's mid IV (its smoothed IV
+when the mid is missing). One positioning reads one root: SPX's chart reads
+SPXW, and adjusted roots are counted as left out. Signed gamma takes dealers
+long calls and short puts. The flip is searched within 5% of the price, each
+strike's IV and the time held, and only for SPY, QQQ and SPX. Hand-worked
+fixtures pin gamma, dollar gamma and a flip with a closed-form crossing.
 
 **C4.3 Recorder (done in PR #105).** Each trading session after the calendar's open, snapshot OI and volume per
 strike for SPY, QQQ and SPX, plus the underlyings of open positions and the
@@ -913,11 +933,34 @@ seconds, plus SPY and QQQ 0DTE. It reuses the confluence engine, so a wall at
 PDH becomes one zone. *Done when:* the layer respects every filter in a browser
 test, and its request count stays inside the 30-per-minute budget in a backend
 test.
+As built ([Options levels](charts-workspace.md#options-levels-c44)): off by
+default; Layers → Options levels shows it, with its measure (open interest,
+volume or gamma), scope (0DTE or the nearest expiration, the nearest one's
+week, or 45 days), strikes each side (1–5, default 3) and signed gamma. The
+workspace request carries the choice; strikes join the automatic levels
+before confluence on the backend, from the option chain cache only, and
+refresh in the background (`backend/app/engine/options_feed.py`). Walls and
+the flip always draw; the nearest strikes each side follow the filter. A
+panel holding its own symbol reads only its nearest expiration. The feed
+takes at most 24 of the 30 option reads a minute; an hour's simulated polling
+with the ladder and the Forecast tab open peaks at 19 and settles near 8.
 
 **C4.5 Strike ladder.** A side panel, collapsible and off by default, centered
 on spot: put OI and volume to the left of each strike, calls to the right, and
 gamma as a bar. Clicking a strike highlights it on the chart. *Done when:* it
 renders from a fixture on desktop and as a bottom sheet on a phone.
+As built ([Strike ladder](charts-workspace.md#strike-ladder-c45)): a third
+dock tab, 25 strikes each side of the chart's price over the options layer's
+scope, refreshed each minute while visible; a click marks the strike on that
+symbol's charts and brings it onto the main chart's price scale.
+
+**C4.6 Open-interest change.** The recorder (C4.3) has kept each session's
+open interest by strike since 2026-10-01. Show each strike's change since the
+previous recorded session in the ladder and the strike card, labelled with
+both sessions' dates; a session marked unavailable leaves the change
+unavailable, never measured against an older one. *Done when:* a fixture with
+a missed session and a new strike proves both, and the change reads from the
+stored rows with no provider request.
 
 ### Phase 5 — Alerts on the chart
 
@@ -1215,7 +1258,7 @@ Worth doing once the phases above have shipped, in roughly this order:
 
 ## Decisions
 
-Settled with the user on 2026-09-30, and items 8–10 on 2026-10-02. Do not
+Settled with the user on 2026-09-30, items 8–10 on 2026-10-02, and 11 on 2026-10-04. Do not
 reopen them without the user.
 
 1. **Drawings (Phase 1) come before automatic levels (Phase 2).** Every later
@@ -1245,3 +1288,7 @@ reopen them without the user.
     a TradingView-like use of the available screen while Claude works on C1.2.
     C7.3/C7.4 are future `todo` items after C1.4; they do not change C1.2 or
     start its implementation. The compact shell precedes resizable geometry.
+11. **Options analytics before G0 (2026-10-04).** At the user's request, C4.2,
+    C4.4 and C4.5 were built ahead of G0, C5.2 and Phase 3, with symbol info
+    T2.1 in the same PR. The rest of decision 7 stands: replay and pre-trade
+    capture still follow G0.

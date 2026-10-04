@@ -497,3 +497,67 @@ def test_chart_settings_refuse_oversized_documents(route_client):
     response = route_client.put("/charts/settings", json={"base_revision": 0, "data": huge})
     assert response.status_code == 413 and response.json()["detail"]["code"] == "too_large"
     assert route_client.get("/charts/settings").json()["revision"] == 0
+
+
+# --- the options levels layer (C4.4) and the strike ladder (C4.5) -----------
+
+
+def test_options_levels_join_the_automatic_levels_before_they_merge():
+    from app.engine.chart_levels import Level
+    weekdays = [date(2026, 8, 3) + timedelta(days=i) for i in range(56)]
+    daily = normalize_bars([{"date": d.isoformat(), "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}
+                            for d in weekdays if d.weekday() < 5], daily=True)
+    asked = []
+
+    def options(symbol, spot):
+        asked.append((symbol, spot))
+        return [Level("call_wall", "Call wall", 101.1, "calculated", None, "tradier")], {"state": "ready"}
+
+    feed = ChartFeed()
+    found = feed._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, options, True)
+    # The latest price is the last daily close when today has no minutes yet.
+    assert asked == [("SPY", 100)]
+    # ATR 2, so a band of 0.2: the wall 0.1 above the prior day's high is one zone with it.
+    zone = next(z for z in found["zones"] if any(m["kind"] == "call_wall" for m in z["members"]))
+    assert {"call_wall", "prior_day_high"} <= {m["kind"] for m in zone["members"]}
+    assert found["options"] == {"state": "ready"} and found["auto"] is True
+    # With the automatic levels hidden, the options levels merge only among themselves.
+    alone = feed._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, options, False)
+    assert [[m["kind"] for m in z["members"]] for z in alone["zones"]] == [["call_wall"]]
+    assert alone["auto"] is False and "prior_day" not in alone["missing"]
+
+
+def test_workspace_route_asks_options_for_the_main_scope_and_the_held_nearest(route_client, monkeypatch):
+    seen, asked = [], []
+
+    def fake_workspace(symbol, frames, watchlist, session, **kwargs):
+        seen.append((symbol, kwargs.get("auto")))
+        kwargs["extra_levels"](symbol, 100.0)
+        return {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "adjustment": None, "quotes": []}
+
+    class Options:
+        def chart(self, symbol, layer, spot):
+            asked.append((symbol, layer.measure, layer.scope, layer.signed, spot))
+            return [], {}
+
+    monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    monkeypatch.setattr(charts, "options_feed", Options())
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&extras=SPY:5m&options=gamma.all.1&auto=0").status_code == 200
+    assert seen == [("MRVL", False), ("SPY", False)]
+    # Panels holding their own symbol read only its nearest expiration (SPY and QQQ 0DTE).
+    assert asked == [("MRVL", "gamma", "all", True, 100.0), ("SPY", "gamma", "nearest", True, 100.0)]
+
+
+@pytest.mark.parametrize("options", ["gamma", "oi.year.0", "delta.week.0", "oi.week.yes"])
+def test_workspace_route_refuses_a_malformed_options_layer(route_client, options):
+    assert route_client.get(f"/charts/workspace?symbol=MRVL&intervals=5m&options={options}").status_code == 422
+
+
+def test_ladder_route_checks_its_scope_and_passes_the_price(route_client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(charts, "options_feed", type("Options", (), {"ladder": lambda self, *args: calls.append(args) or {"rows": []}})())
+    assert route_client.get("/charts/options/spy/ladder?scope=all&signed=1&spot=660.5").json() == {"rows": []}
+    assert calls == [("SPY", "all", True, 660.5)]
+    assert route_client.get("/charts/options/BRK%2FB/ladder").status_code == 200  # a class share's slash
+    assert route_client.get("/charts/options/SPY/ladder?scope=month").status_code == 422
+    assert route_client.get("/charts/options/SPY/ladder?spot=-1").status_code == 422

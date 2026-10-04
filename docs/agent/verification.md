@@ -180,6 +180,9 @@ Its Events tests stub `/charts/symbol/{symbol}/events`; the earnings
 normalizers and cache are proven on recorded Tradier responses in
 `backend/tests/test_symbol_info_events.py`. A live Tradier read, and whether an
 estimated date matches the company's announcement, are outside the suite.
+Its Forecast test stubs `/charts/symbol/{symbol}/forecast`; the straddle choice,
+its refusals and the earnings expiration are proven in
+`backend/tests/test_options_feed.py` with a fake chain client.
 
 `frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
 quote responses: five canvases, symbol linking, saved levels, streamed trade updates,
@@ -246,7 +249,11 @@ chains (SPY, and SPX with both roots) and pins the options budget, coded
 failures and that Tradier option field names stay in the adapters.
 `backend/tests/test_options_recorder.py` covers the daily options snapshot job:
 its capture window, resume after a restart, missed sessions marked unavailable
-and the real adapter's budget. `backend/tests/test_chart_rvol.py` holds every
+and the real adapter's budget. `backend/tests/test_options_positioning.py`
+pins positioning, gamma and the flip to hand-worked numbers, and
+`backend/tests/test_options_feed.py` the chart's option cache, cadence and an
+hour of polling inside the budget, all with fake chains; live option data with
+a moving price is not covered. `backend/tests/test_chart_rvol.py` holds every
 chart candle's relative volume equal to fill context's
 `compute_rvol_time_adjusted` on the same bars, and
 `backend/tests/test_rvol_history.py` covers the morning job that stores the

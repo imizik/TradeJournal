@@ -3,8 +3,9 @@
 import type { CSSProperties } from "react";
 import { X } from "lucide-react";
 import { etTime, intradayInterval, price } from "@/lib/charts";
-import type { AutoLevels, AutoZone, Interval, LevelInteraction } from "@/lib/charts";
-import { formedName, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
+import type { AutoLevel, AutoLevels, AutoZone, Interval, LevelInteraction, OptionsInfo } from "@/lib/charts";
+import { formedName, isOption, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
+import { contracts, gammaText, optionsAsOf } from "@/lib/optionsView";
 
 const EVENT_NAMES: Record<string, string> = { tested: "Tested", broken: "Broken", reclaimed: "Reclaimed" };
 const STATE_STYLE: Record<LevelInteraction["state"], string> = {
@@ -23,7 +24,7 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
 }) {
   const several = zone.members.length > 1;
   return <div role="tooltip" aria-label={`${zone.label} level card`} style={style}
-    className={`absolute left-2 z-10 w-72 max-w-[calc(100%-1rem)] rounded-md border border-slate-600/60 bg-[#141b26]/95 p-2.5 text-[11px] text-slate-300 shadow-lg ${pinned ? "" : "pointer-events-none"}`}>
+    className={`absolute left-2 z-10 w-72 max-w-[calc(100%-1rem)] overflow-y-auto overscroll-contain rounded-md border border-slate-600/60 bg-[#141b26]/95 p-2.5 text-[11px] text-slate-300 shadow-lg ${pinned ? "" : "pointer-events-none"}`}>
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
         <div className="font-medium text-slate-100">{zone.label}</div>
@@ -52,7 +53,25 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
           <span className="shrink-0 font-mono">{price(member.price)}</span>
         </div>
         <div className="text-[10px] text-slate-500">{[member.evidence, sourceName(member), formedName(member)].filter(Boolean).join(" · ")}</div>
+        {isOption(member) && auto.options && <OptionDetail member={member} options={auto.options} />}
       </li>)}
     </ul>
+    {zone.members.some(isOption) && auto.options && <p className="mt-2 border-t border-slate-700/50 pt-1.5 text-[10px] leading-4 text-slate-500">{optionsAsOf(auto.options)}</p>}
   </div>;
+}
+
+/** An option strike's numbers (C4.4): open interest and volume per side with their ranks, gamma, and how far it is from the price. */
+function OptionDetail({ member, options }: { member: AutoLevel; options: OptionsInfo }) {
+  if (member.kind === "gamma_flip") return <p className="mt-0.5 text-[10px] leading-4 text-amber-200/80">
+    {options.flip?.note} Searched {price(options.flip?.low)}–{price(options.flip?.high)}, each strike&apos;s IV and the time held.</p>;
+  const row = options.strikes?.find((strike) => strike.strike === member.price);
+  if (!row) return null;
+  const away = options.spot ? (row.strike / options.spot - 1) * 100 : null;
+  const measure = options.mode === "volume" ? "volume" : options.mode === "gamma" ? "gamma" : "open interest";
+  return <dl aria-label={`Strike ${price(row.strike)}`} className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 font-mono text-[10px] text-slate-400">
+    <dt className="font-sans text-slate-500">Calls</dt><dd>OI {contracts(row.call_oi)}{row.call_oi_rank ? ` (#${row.call_oi_rank})` : ""} · Vol {contracts(row.call_volume)}{row.call_volume_rank ? ` (#${row.call_volume_rank})` : ""}</dd>
+    <dt className="font-sans text-slate-500">Puts</dt><dd>OI {contracts(row.put_oi)}{row.put_oi_rank ? ` (#${row.put_oi_rank})` : ""} · Vol {contracts(row.put_volume)}{row.put_volume_rank ? ` (#${row.put_volume_rank})` : ""}</dd>
+    <dt className="font-sans text-slate-500">Gamma</dt><dd>{gammaText(row.gamma, !!options.signed && options.mode === "gamma")}</dd>
+    <dt className="font-sans text-slate-500">Strike</dt><dd>{row.rank ? `#${row.rank} by ${measure}` : `not ranked by ${measure}`}{away === null ? "" : ` · ${away >= 0 ? "+" : ""}${away.toFixed(2)}% from ${price(options.spot)}`}</dd>
+  </dl>;
 }

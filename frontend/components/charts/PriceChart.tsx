@@ -10,7 +10,7 @@ import type { Earnings } from "@/lib/symbolInfo";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
-import { AutoLevelLayer, nearestZones } from "@/lib/autoLevels";
+import { AutoLevelLayer, isOption, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
 import type { AlertMark } from "@/lib/alerts";
 import EarningsBadge from "./EarningsBadge";
@@ -110,12 +110,16 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
   /** This symbol's automatic levels (C2.3), null while hidden, and this chart's interactions with them. */
   autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
+  /** With the options layer on (C4.4), how many option zones each side of the price draw besides the walls; null while it is off. */
+  optionsNearest?: number | null;
+  /** A strike chosen on the ladder (C4.5), drawn as a solid line. */
+  highlight?: number | null;
   /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
   rvol?: RvolBaseline | null;
   /** This symbol's earnings (C2.5): markers on report dates, and the header badge. */
@@ -717,15 +721,22 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     bundle.current?.bells.set(alerts);
     if (container.current) container.current.dataset.alerts = alerts.map((mark) => `${mark.price.toFixed(2)}:${mark.fired ? "fired" : "active"}`).join(",");
   }, [alerts, pending]);
-  // Automatic levels: the nearest few above and below the latest price, moving with it.
+  // Automatic levels: the nearest few above and below the latest price, moving with it, and option strikes with the layer on.
   const lastClose = panel?.bars.at(-1)?.close;
-  const zones = useMemo(() => nearestZones(autoLevels?.zones ?? [], lastClose), [autoLevels, lastClose]);
+  const zones = useMemo(() => shownZones(autoLevels?.zones ?? [], lastClose, optionsNearest), [autoLevels, lastClose, optionsNearest]);
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
     current.auto.set(zones, main);
-    if (container.current) container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
+    if (container.current) {
+      container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
+      container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
+    }
   }, [zones, pending, main]);
+  useEffect(() => {
+    bundle.current?.auto.setHighlight(pending ? null : highlight);
+    if (container.current) container.current.dataset.highlight = highlight === null || pending ? "" : String(highlight);
+  }, [highlight, pending]);
   const cardZone = card && !pending ? autoLevels?.zones.find((zone) => zone.id === card.id) : undefined;
   useEffect(() => { bundle.current?.auto.setHovered(cardZone?.id ?? null); }, [cardZone]);
   // Arming, switching or dropping a tool forgets a half-placed drawing.
@@ -794,7 +805,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
         {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
         {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
-          style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)` } : { top: Math.round(card.y) + 12 }} onClose={() => setCard(null)} />}
+          // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
+          style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
+            : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>

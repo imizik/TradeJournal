@@ -43,9 +43,22 @@ in memory and under `backend/data/symbol_info/v1/tradier/` for 12 hours
 minute, apart from the chart feed's budget and cooldowns; a cold symbol costs
 three requests, a warm one none.
 
-Overview, News and Forecast are placeholders for the
+Its **Forecast** tab (T2.1) reads `GET /charts/symbol/{symbol}/forecast`
+with the chart's latest price: the implied move, the at-the-money straddle's
+mid (*calculated*) for the nearest expiration, the nearest Friday, and the
+first expiration strictly after the next report (from the Events cache; the
+report's time of day is unknown, so an expiration on its date may close before
+it). Each row shows ±$ and ±% of the price, the strike, both legs' bid and
+ask, the IV and the staler leg's quote time. The strike is the one nearest the
+price listing both a call and a put; a leg with no bid or ask, a crossed
+quote, or a spread wider than its own mid reads "Market too wide" with the
+reason, never a number. Chains come through the chart's option feed (below),
+60 seconds fresh, and the tab reads again each minute while it is open; until
+the chart has a price it waits for one.
+
+Overview and News are placeholders for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
-on this device. Only an expanded You or Events tab fetches, once after the
+on this device. Only an expanded You, Events or Forecast tab fetches, once after the
 ticker settles for 300 ms; old requests are cancelled. The panel starts
 collapsed below 1024 px and follows the watchlist's visibility in full-screen
 mode. There are no new tables or migrations for this panel.
@@ -195,6 +208,10 @@ cd backend
 - Level alerts (C5.1): set from the menu on a level, a horizontal ray or an
   automatic level; a bell at each price, gray once fired, and the Alerts list
   in the dock (see [Level alerts](#level-alerts-c51)).
+- Options levels (C4.4), off until shown from Layers: call and put walls and
+  the strikes ranked by open interest, volume or gamma, merged with the
+  automatic levels, and the strike ladder (C4.5) in the dock (see
+  [Options levels](#options-levels-c44) and [Strike ladder](#strike-ladder-c45)).
 - Extended-session shading and regular/extended hours selection. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
@@ -682,7 +699,7 @@ applies; rendering a marker does not revalidate the original execution time.
 ### Option chains (C4.1)
 
 `backend/app/engine/options_chain.py` is the Tradier option chain adapter.
-Nothing on the chart uses it yet; the recorder (C4.3) is its first caller. It
+The recorder (C4.3) and the chart's option feed (C4.4, C4.5, T2.1) call it. It
 turns `/v1/markets/options/expirations` (every root included, so SPXW dates
 appear) and `/v1/markets/options/chains` (one request per expiration, with
 greeks) into the provider-independent `OptionChain` and `OptionContract` of
@@ -756,6 +773,118 @@ first place in that order. Nothing on the chart reads the snapshots yet.
   weekdays by `tradejournal-options-snapshot.timer` or from the Sync Center.
   When anything in scope is still missing, the job fails with that first, so
   the phone alert names it; what was recorded stays.
+
+### Options positioning (C4.2)
+
+`backend/app/engine/options_positioning.py` is pure: it computes on the
+normalized chains it is handed, the underlying's price and a time. For one
+root over a set of expirations it gives each strike's call and put open
+interest and volume, call and put dollar gamma, and in aggregate the put/call
+ratios of open interest and volume and each side's volume over its open
+interest (unavailable over a zero). Run on one expiration it is the
+per-expiration breakdown.
+
+| Number | Kind | Definition |
+|---|---|---|
+| Open interest, volume | *observed* | The provider's fields summed per strike; open interest is OCC's overnight figure for the previous close, volume the session's so far. A side with nothing listed is unavailable; a real zero stays zero. |
+| Call wall, put wall | *calculated* | The strike with the most call (put) open interest across the chosen expirations; in volume mode, the most traded. A tie goes to the strike nearer the price, then the lower. |
+| Rank | *calculated* | A strike's place by the measure; for a card, also its place by each side's open interest and volume. |
+| Dollar gamma | *calculated* | Black-Scholes gamma × open interest × shares per contract × S² × 0.01: the change in the shares' dollar delta for a 1% move. Unsigned. |
+| Signed gamma | *assumed* | Calls' dollar gamma less puts': dealers taken as long calls and short puts. Open interest does not say who holds a contract. Off unless asked for. |
+| Gamma flip | *assumed*, model estimate | Where signed dollar gamma changes sign nearest the price, searched within 5% either way on a 41-point grid and then bisected, each strike's IV and the time held. SPY, QQQ and SPX only. |
+
+Model assumptions, for every contract alike:
+
+- **Rate and dividends** are zero. Over 45 days at most, a 4% rate moves an
+  at-the-money gamma by well under 1%.
+- **Time** runs in calendar years (365 days) to the contract's expiry: 16:00
+  New York, the calendar's close on an early close (13:00), or 09:30 for an
+  AM-settled index root (SPX, NDX, RUT). An expired contract has no gamma;
+  its open interest and volume still count for the session.
+- **Volatility** is the provider's mid IV, else its smoothed-surface IV
+  (ORATS, refreshed hourly, `greeks_updated_at` shown verbatim). The
+  provider's own gamma is never used: gamma is recomputed at the chart's
+  latest price, which does not make the IV fresher.
+- **0DTE.** A same-day contract's gamma grows without bound near its strike
+  as the close nears, and ends at expiry. That is the model's behaviour, not
+  an error; the card shows when the chains and the IV were read.
+- **Missing inputs** (no IV, no open interest, a contract size the provider
+  did not give) leave that contract without gamma, counted in `missing`;
+  nothing is assumed to be 100 shares.
+- **Roots.** One positioning reads one root. SPX's chart reads SPXW (its
+  dailies and weeklies); AM-settled SPX contracts and adjusted roots after a
+  corporate action (`NVDA1`) are counted in `excluded`, never merged.
+
+### Options levels (C4.4)
+
+Off by default. Layers → Options levels (or the chart menu's Layers) shows it
+on every chart, with its filters saved in the shared workspace
+(`optionsLayer`):
+
+- **Measure.** *Open interest*: the call and put walls, then the ten strikes
+  with the most open interest on both sides together. *Volume*: the volume
+  walls ("Call vol wall", "Put vol wall") and the most traded strikes.
+  *Gamma*: the open-interest walls and the strikes with the most dollar gamma;
+  with **Signed gamma and flip (assumed)** the ranks use net signed gamma and
+  SPY, QQQ and SPX add the gamma flip. Each strike appears once; both walls on
+  one strike are two members of one zone.
+- **Expirations.** *0DTE / nearest*: the next to expire, labelled 0DTE when
+  it is today's and "Next expiration … (no 0DTE today)" otherwise. *This
+  week*: the nearest one's Monday-to-Friday week (default). *Within 45
+  days*: every one. Expired ones are gone from 16:00 (09:30 AM-settled).
+- **Strikes each side** (1–5, default 3): the option zones nearest the price
+  on each side. Walls and the flip always draw. Changing it reads nothing.
+
+The workspace request carries the choice (`options=oi.week.0`: measure,
+scope, signed; `auto=0` when the automatic levels are hidden). The backend
+adds the strikes to the automatic levels before confluence (C2.2), so a call
+wall at the prior day's high is one zone, "PDH + Call wall", whose card shows
+both and whose interactions (C2.3) are read like any zone's. Open-interest
+strikes hold still through a session; volume and gamma strikes are
+`developing` and read "moves during the session". A zone with an option member
+is tinted: calls teal, puts rose, other strikes violet, the flip amber.
+Hovering or tapping one shows each strike's call and put open interest and
+volume with their ranks, its dollar gamma (signed ones say *assumed side*),
+its rank by the measure and its distance from the price, then the scope, when
+the chains were read, that open interest is the prior close's, the IV stamp,
+the price gamma was computed at, and anything missing or left out. A panel
+holding its own symbol (C7.1) shows that symbol's nearest expiration only.
+
+Chains come from `backend/app/engine/options_feed.py`, never inside the
+workspace request: the workspace reads memory and starts a background refresh
+of what is stale, and the page asks again after four seconds while a symbol's
+chains are still loading. The scope's expirations must all be in memory
+before anything draws ("Loaded 6 of 14 expirations"); a chain read on an
+earlier New York date is not used. Cadence per symbol: the nearest three
+unexpired expirations at most every 60 seconds, farther ones every 10 minutes,
+the expiration list every 30 minutes, at most six chains per pass, nearest
+first. The feed takes at most 24 of the options budget's 30 reads a minute
+whatever asks (layer, ladder, Forecast), leaving room for the recorder's
+catch-up run; a refused read keeps the older copy with its time, and an
+access refusal or rate limit stops reads for a minute. A simulated hour of
+polling (SPY on 45 days, QQQ and IWM held, ladder and Forecast open) peaks at
+19 reads in a minute and settles near 8.
+
+An alert made from an option zone keeps its price like any alert. When that
+zone is no longer there (a volume wall moved), its row in the Alerts list
+says so and the alert stays where it was.
+
+### Strike ladder (C4.5)
+
+The side dock's third tab (Strike ladder), closed until opened; on a phone
+it opens from the More menu (the top row keeps its height for the chart) as a
+bottom sheet. It reads `GET /charts/options/{symbol}/ladder?scope=&signed=&spot=`
+with the chart's latest price, over the options layer's expirations and gamma
+sign (changing them here changes the layer's too), every minute while the page
+is visible. It shows 25 strikes each side of the price, which sits between the
+strikes around it, and opens scrolled to it inside the panel. Each row: put
+volume and put open interest left of the strike, call open interest and volume
+right, open interest shaded by its size, and dollar gamma as the bar under the
+strike (green and red by sign when signed). The open-interest walls are bold
+and named. A click or tap marks the strike on every chart of the symbol as a
+solid "Strike …" line and brings it onto the main chart's price scale; a
+second click clears it, and charting another symbol drops it. On a phone the
+tap also closes the sheet so the chart shows.
 
 ### Automatic levels (C2.1)
 
@@ -1229,6 +1358,31 @@ Re-arm and Remove call the server. An automatic zone's menu sets a close-beyond
 alert on that chart's interval at the zone's near edge and says when phone
 alerts are not set up. At 390px the list sits in the Watchlist sheet with
 44px buttons. A message reaching a real phone is not covered by any test.
+`backend/tests/test_options_positioning.py` pins the C4.2 formulas to
+hand-worked numbers: at-the-money Black-Scholes gamma, dollar gamma for a 1%
+move, gamma at six hours to the close, expiry at the close, an early close and
+an AM-settled root, and a gamma flip whose crossing has a closed form
+(√(105 × 95) × e^(−σ²T/2)). It also covers sums across expirations with roots
+kept apart, missing values kept missing and counted, ratios over zero, walls
+and ties, chart levels for each measure (each strike once, assumed labels for
+signed gamma and the flip), the merge of a wall with the prior day's high, and
+the three scopes before and after a close. `backend/tests/test_options_feed.py`
+drives the feed with a fake chain client and clock: background loading over
+polls, a held symbol's single expiration, a refused read served from the older
+copy with a cooldown, yesterday's chains not used, the ladder centred on the
+price, the straddle choice and its refusals, the earnings expiration, and an
+hour of polling that never exceeds 30 reads in a minute.
+`backend/tests/test_charts.py` shows strikes merging with the automatic levels
+in `ChartFeed._levels` (and alone when those are hidden) and the routes'
+validation. Browser tests stub the chains: the layer's every filter, the
+request it makes, a merged zone's card, signed gamma's flip, hiding the
+automatic levels, a reload and the chart menu's toggle; the ladder centred on
+the price, a strike marked on all five charts and cleared, its scope and sign
+shared with the layer, and at 390px a bottom sheet with 44px rows whose tap
+marks the strike and shows the chart; the Forecast tab's rows, its refusal and
+the price it sends. A live read on 2026-10-04 (SPY and NVDA, 11 requests)
+returned walls, a flip and straddles; intraday behaviour with a moving price is
+not covered by a test.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's

@@ -11,8 +11,10 @@ const MAX_ACTIVE = 20;
  * made from the chart menu; here they are re-armed or removed. `prices` holds
  * each alert's price on the chart's basis where its symbol is on screen.
  */
-export default function AlertsPanel({ data, prices, narrow, onRearm, onRemove }: {
+export default function AlertsPanel({ data, prices, moved, narrow, onRearm, onRemove }: {
   data: AlertsPayload | null; prices: Map<string, number>; narrow: boolean;
+  /** Alerts made from an option strike that no longer carries its level (C4.4): the wall moved, the alert did not. */
+  moved?: Set<string>;
   onRearm(alert: LevelAlert): void; onRemove(alert: LevelAlert): void;
 }) {
   const alerts = data?.alerts ?? [];
@@ -34,6 +36,7 @@ export default function AlertsPanel({ data, prices, narrow, onRearm, onRemove }:
           <button aria-label={`Remove ${text}`} title="Remove this alert" onClick={() => onRemove(alert)} className={`${icon} hover:text-rose-300`}><Trash2 size={12} /></button>
         </div>
         <p className="ml-[18px] truncate text-[10px] text-slate-500">{[alert.label, alert.session === "extended" ? "extended hours" : "regular hours"].filter(Boolean).join(" · ")}</p>
+        {moved?.has(alert.id) && <p className="ml-[18px] text-[10px] text-amber-300/90">That strike no longer carries the level it was made from; the alert stays at {price(shown)}.</p>}
         {event && <p className="ml-[18px] text-[10px] text-slate-400">
           Fired {etTime(event.event_at, true)} {etTime(event.event_at)} ET at {price(event.price)}{event.source === "minute_bars" ? " (1-minute bar)" : ""} · <span
             className={event.delivery === "sent" ? "text-emerald-400" : "text-amber-300"} title={event.error ?? undefined}>{deliveryText(event, !!data?.phone)}</span></p>}

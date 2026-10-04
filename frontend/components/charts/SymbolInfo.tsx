@@ -1,24 +1,30 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fetchSymbolEvents, fetchSymbolJournal } from "@/lib/symbolInfo";
-import type { SymbolEvents, SymbolJournal } from "@/lib/symbolInfo";
+import { fetchSymbolEvents, fetchSymbolForecast, fetchSymbolJournal } from "@/lib/symbolInfo";
+import type { SymbolEvents, SymbolForecast, SymbolJournal } from "@/lib/symbolInfo";
 import SymbolInfoEvents from "./SymbolInfoEvents";
+import SymbolInfoForecast from "./SymbolInfoForecast";
 import SymbolInfoYou from "./SymbolInfoYou";
 
 const TABS = ["Overview", "News", "Events", "Forecast", "You"] as const;
 type Tab = typeof TABS[number];
 const TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
-/** The tabs built so far: one request each, for the open tab only. */
+/** The tabs built so far: one request each, for the open tab only. The Forecast tab needs the price, and reads again each minute. */
 const BUILT = {
-  You: { load: fetchSymbolJournal, name: "journal" },
-  Events: { load: fetchSymbolEvents, name: "events" },
-} satisfies Partial<Record<Tab, { load(symbol: string, signal: AbortSignal): Promise<unknown>; name: string }>>;
+  You: { load: fetchSymbolJournal, name: "journal", title: "Journal" },
+  Events: { load: fetchSymbolEvents, name: "events", title: "Events" },
+  Forecast: { load: fetchSymbolForecast, name: "forecast", title: "Forecast" },
+} satisfies Partial<Record<Tab, { load(symbol: string, signal: AbortSignal, spot: number | null): Promise<unknown>; name: string; title: string }>>;
 const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
+const FORECAST_MS = 60_000;
 
-export default function SymbolInfo({ symbol }: { symbol: string }) {
+/** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
+export default function SymbolInfo({ symbol, price }: { symbol: string; price?(): number | null }) {
   const id = useId();
+  const priceOf = useRef(price);
+  useEffect(() => { priceOf.current = price; });
   const [view, setView] = useState<{ ready: boolean; expanded: boolean; tab: Tab }>({ ready: false, expanded: false, tab: "You" });
   const [result, setResult] = useState<{ key: string; data?: unknown; error?: string } | null>(null);
   const [retry, setRetry] = useState(0);
@@ -35,16 +41,21 @@ export default function SymbolInfo({ symbol }: { symbol: string }) {
     if (!view.ready || !view.expanded || !built(tab)) return;
     const controller = new AbortController();
     let active = true;
+    let waiting: ReturnType<typeof setTimeout> | undefined;
     const key = `${tab}|${symbol}`;
-    const timer = setTimeout(() => {
-      setResult(null);
-      BUILT[tab].load(symbol, controller.signal).then((data) => {
+    // A refresh keeps what the tab shows if it fails; the first read says so.
+    const run = (quiet: boolean) => {
+      const spot = priceOf.current?.() ?? null;
+      if (tab === "Forecast" && spot === null) { waiting = setTimeout(() => run(quiet), 1000); return; } // the chart's price is still loading
+      BUILT[tab].load(symbol, controller.signal, spot).then((data) => {
         if (active) setResult({ key, data });
       }).catch(() => {
-        if (active) setResult({ key, error: `${tab === "You" ? "Journal" : "Events"} unavailable. Try again.` });
+        if (active && !quiet) setResult({ key, error: `${BUILT[tab].title} unavailable. Try again.` });
       });
-    }, 300);
-    return () => { active = false; clearTimeout(timer); controller.abort(); };
+    };
+    const timer = setTimeout(() => { setResult(null); run(false); }, 300);
+    const again = tab === "Forecast" ? setInterval(() => { if (!document.hidden) run(true); }, FORECAST_MS) : undefined;
+    return () => { active = false; clearTimeout(timer); clearTimeout(waiting); clearInterval(again); controller.abort(); };
   }, [symbol, view.ready, view.expanded, view.tab, retry]);
 
   function select(tab: Tab) {
@@ -67,7 +78,8 @@ export default function SymbolInfo({ symbol }: { symbol: string }) {
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
         {!built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
-          : shown?.data ? (view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : <SymbolInfoEvents data={shown.data as SymbolEvents} />)
+          : shown?.data ? (view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
+            : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
           : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
           : <p role="status" className="text-xs text-slate-500">Loading {BUILT[view.tab].name}…</p>}
       </div>

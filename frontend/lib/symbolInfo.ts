@@ -74,6 +74,34 @@ export async function fetchSymbolEvents(symbol: string, signal: AbortSignal): Pr
   return response.json();
 }
 
+/** One option leg of a straddle, as quoted (observed). */
+export type StraddleLeg = { symbol: string; bid: number | null; ask: number | null; iv: number | null };
+/**
+ * The implied move for one expiration (T2.1): the at-the-money straddle's mid
+ * (calculated), or why there is none. `tags` say which rows it answers:
+ * the nearest expiration, the nearest Friday, the first after the next report.
+ */
+export type ImpliedMove = {
+  tags: ("nearest" | "friday" | "earnings")[]; expiration: string; days: number;
+  state: "ready" | "too_wide" | "none" | "unavailable"; reason?: string;
+  move?: number; percent?: number; iv?: number | null; strike?: number;
+  /** The staler leg's quote time and when the chain was read, in seconds. */
+  quoted_at?: number | null; fetched_at?: number;
+  call?: StraddleLeg; put?: StraddleLeg;
+};
+export type SymbolForecast = {
+  symbol: string; today: string; source: string; spot: number | null; earnings: EarningsNext | null;
+  state: "ready" | "none" | "unavailable"; message: string | null; moves: ImpliedMove[]; earnings_note?: string | null;
+};
+
+/** The Forecast tab (T2.1) at `spot`, the chart's latest price. */
+export async function fetchSymbolForecast(symbol: string, signal: AbortSignal, spot: number | null): Promise<SymbolForecast> {
+  const query = spot && spot > 0 ? `?spot=${spot}` : "";
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/forecast${query}`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Forecast unavailable. Try again.");
+  return response.json();
+}
+
 const newYorkDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" });
 /** Calendar days from New York's today (at `now`, in ms) to `day` (YYYY-MM-DD). */
 export function daysUntil(day: string, now: number): number {
