@@ -202,6 +202,71 @@ def test_closes_beyond_waits_for_a_final_candle_with_no_browser_open(engine):
     assert len(feed.calls) == reads
 
 
+def test_no_minutes_are_read_after_the_session_or_on_a_closed_day(engine):
+    # After the last candle is judged the session is done: no read every 20 seconds until midnight.
+    make(engine, condition="closes_beyond", interval="5m", now=at("15:00"))
+    make(engine, symbol="QQQ", condition="crosses", now=at("15:00"))
+    feed = Feed([(at("15:55") + 60 * i, 99.0, 99.2, 98.9, 99.1) for i in range(5)])
+    clock = [at("16:10")]
+    monitor = LevelAlertMonitor(engine, None, feed=feed, clock=lambda: clock[0])
+    monitor.reload()
+    monitor.sweep()
+    assert sorted(feed.calls) == ["QQQ", "SPY"]
+    with Session(engine) as db:
+        # A regular-hours alert is judged through 16:00, the quiet minutes included.
+        assert {a.checked_through for a in db.exec(select(LevelAlert)).all()} == {int(at("16:00"))}
+    for later in ("16:30", "19:59", "23:00"):
+        clock[0] = at(later)
+        monitor.sweep()
+    assert len(feed.calls) == 2
+    # A Saturday, and a holiday the calendar names, read nothing.
+    saturday = datetime(2026, 10, 10, 11, 0, tzinfo=ET).timestamp()
+    weekend = LevelAlertMonitor(engine, None, feed=feed, clock=lambda: saturday)
+    weekend.reload()
+    assert weekend.sweep() == [] and len(feed.calls) == 2
+    closed = SimpleNamespace(hours=lambda day: {"status": "closed", "open": None, "close": None})
+    holiday = LevelAlertMonitor(engine, None, feed=feed, calendar=closed, clock=lambda: at("11:00"))
+    holiday.reload()
+    assert holiday.sweep() == [] and len(feed.calls) == 2
+    # Before 09:30 a regular-hours alert has nothing to judge, so nothing is read.
+    clock[0] = at("08:00")
+    morning = LevelAlertMonitor(engine, None, feed=feed, clock=lambda: clock[0])
+    with Session(engine) as db:
+        for alert in db.exec(select(LevelAlert)).all():
+            alert.checked_through, alert.armed_at = None, datetime.fromtimestamp(at("07:00"), UTC).replace(tzinfo=None)
+        db.commit()
+    morning.reload()
+    morning.sweep()
+    assert len(feed.calls) == 2
+
+
+def test_a_firing_the_database_could_not_save_is_saved_on_the_next_pass(engine, phone, monkeypatch):
+    sent, _ = phone
+    make(engine)
+    clock = [TEN + 60]
+    monitor = LevelAlertMonitor(engine, None, clock=lambda: clock[0])
+    monitor.reload()
+    alert = next(iter(monitor._watched.values()))
+    record = monitor.record
+    outage = [True]
+
+    def flaky(found):
+        if outage.pop() if outage else False:
+            raise OSError("database unavailable")
+        record(found)
+
+    monkeypatch.setattr(monitor, "record", flaky)
+    monitor.on_tick({"symbol": "SPY", "session": "regular", "at": TEN + 55, "price": 100.4})
+    with pytest.raises(OSError):
+        asyncio.run(monitor.run_once())
+    assert len(monitor._found) == 1 and events(engine) == []
+    monitor.on_tick({"symbol": "SPY", "session": "regular", "at": TEN + 56, "price": 100.6})  # held out until saved
+    asyncio.run(monitor.run_once())
+    saved = events(engine)
+    assert len(saved) == 1 and saved[0].price == 100.4 and monitor._found == []
+    assert len(sent) == 1 and alert["id"] not in monitor._watched
+
+
 def test_extended_hours_trades_count_only_for_an_extended_alert(engine, stream):
     market, clock = stream
     make(engine, symbol="SPY", session="regular", now=at("08:00"))

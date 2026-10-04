@@ -977,12 +977,17 @@ again from the current price.
   and touch or cross alerts over minutes the stream did not carry, such as a
   restart, a reconnect or an outage. A bar's high or low then stands in for
   the trades, and the event says it came from 1-minute bars. A symbol the
-  stream carried throughout costs no read. Each alert stores how far it has
-  been judged, so a restart resumes where it stopped.
+  stream carried throughout costs no read, and nothing is read on a closed
+  day (weekends and the calendar's holidays), before an alert's session or
+  once its last candle has been judged. A minute without trades counts as
+  judged. Each alert stores how far it has been judged, so a restart resumes
+  where it stopped.
 - **Recorded once.** Each firing is one `level_alert_event` row, unique per
   alert and arming. A reconnect, a restart, the sweep and the stream finding
   the same firing, or a second API process can therefore not record a second
   one; an alert removed or re-armed while its firing waited records nothing.
+  A firing the database could not save stays in memory and is saved on the
+  next pass; its alert is not judged again meanwhile.
 - **Delivered at least once.** Delivery is an outbox on that row, separate
   from deduplication. A pass claims a pending event with an update only one
   process can win, sends it through ntfy (the topic in
@@ -1207,7 +1212,10 @@ detector record nothing more, and the database refuses a second row for one
 arming. A reconnect gap is judged on 1-minute bars while covered minutes are
 not, and a covered stream costs no read and saves its progress. A
 closes-beyond alert with no browser or stream waits for its candle to be final,
-skips one that closed before it was armed, and reads once per minute. Extended
+skips one that closed before it was armed, and reads once per minute. Nothing
+is read after the session's last candle, on a Saturday or on a calendar
+holiday, and a firing the database failed to save is saved on the next pass.
+Extended
 trades count only for an extended alert. Delivery tests show that a failed send
 is retried after its backoff and never lost or repeated once sent, that a stale
 claim is put back while a fresh one is left alone, and that without ntfy an

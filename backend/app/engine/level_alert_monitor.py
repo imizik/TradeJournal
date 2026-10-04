@@ -35,7 +35,7 @@ from sqlmodel import Session, select
 
 from app.engine import level_alerts, ntfy
 from app.engine.chart_feed import ChartFeedError
-from app.engine.chart_math import ET, chart_bars, normalize_bars
+from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.models import LevelAlert, LevelAlertEvent
 
 log = logging.getLogger(__name__)
@@ -54,6 +54,13 @@ def _utc(stamp: float) -> datetime:
 
 def _epoch(moment: datetime) -> float:
     return moment.replace(tzinfo=UTC).timestamp()
+
+
+def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple[float, float]:
+    """When an alert's session runs on ``day``: the regular hours, or premarket through postmarket."""
+    parts = [w for w in windows if session == "extended" or w[0] == "regular"]
+    start, end = min(w[1] for w in parts), max(w[2] for w in parts)
+    return tuple(datetime(day.year, day.month, day.day, m // 60, m % 60, tzinfo=ET).timestamp() for m in (start, end))
 
 
 class LevelAlertMonitor:
@@ -110,17 +117,28 @@ class LevelAlertMonitor:
             self._wake.clear()
 
     async def run_once(self) -> None:
-        found, self._found = self._found, []
-        if found:
-            await asyncio.to_thread(self.record, found)
+        await self._record_found()
         await asyncio.to_thread(self.deliver)
         await asyncio.to_thread(self.reload)
         if self.stream is not None and self.symbols():
             self.stream.ensure_running()
         fired = await asyncio.to_thread(self.sweep)
         if fired:
-            await asyncio.to_thread(self.record, fired)
+            self._found.extend(fired)
+            await self._record_found()
             await asyncio.to_thread(self.deliver)
+
+    async def _record_found(self) -> None:
+        """Write the firings waiting in memory. If the database fails, they wait for the next pass:
+        their alerts are held out of judging until then, so dropping them would lose the firing."""
+        found, self._found = self._found, []
+        if not found:
+            return
+        try:
+            await asyncio.to_thread(self.record, found)
+        except Exception:
+            self._found = found + self._found  # recording again is safe: a written firing is skipped
+            raise
 
     # ------------------------------------------------------------ the stream
 
@@ -181,31 +199,38 @@ class LevelAlertMonitor:
     def sweep(self) -> list[dict]:
         """Judge closed candles and uncovered minutes; returns firings and saves each alert's progress.
 
-        A symbol's minutes are read only when a candle may have become final
-        since its alerts were last judged, and touch or cross alerts the stream
-        covered throughout need no read at all.
+        A symbol's minutes are read only when a candle of an alert's session
+        may have become final since the alert was last judged: never on a
+        closed day, before the session or once its last candle was judged, and
+        touch or cross alerts the stream covered throughout need no read at all.
         """
         if self.feed is None or not self._watched:
             return []
         now = self.clock()
         today = datetime.fromtimestamp(now, ET).date()
-        if now < datetime.combine(today, datetime.min.time().replace(hour=4), ET).timestamp():
+        if now < datetime(today.year, today.month, today.day, 4, tzinfo=ET).timestamp():
             return []  # no minutes yet; Tradier refuses a start in the future
+        hours = self.calendar.hours(today) if self.calendar is not None else None
+        windows = session_windows(today, hours)
+        if not windows:
+            return []  # a weekend or a market holiday: nothing trades
         # The newest minute end that can be final: every candle ends on a minute.
         mark = int((now - level_alerts.LATENESS) // 60) * 60
-        fired, progress, hours = [], {}, None
+        fired, progress = [], {}
         for symbol in sorted({alert["symbol"] for alert in self._watched.values()}):
             due = []
             for alert in self._watched.values():
                 if alert["symbol"] != symbol or (alert["id"], alert["generation"]) in self._firing:
                     continue
+                start, end = _span(today, windows, alert["session"])
+                limit = min(mark, end)  # judged no further than the session's last candle
                 after = max(alert["checked_through"] or 0, alert["armed_at"])
-                if mark <= after:
+                if limit <= max(after, start):
                     continue
-                if alert["condition"] != "closes_beyond" and self.stream is not None and self.stream.covered(symbol, after, mark):
-                    progress[alert["id"]] = alert["checked_through"] = mark  # the stream judged every trade
+                if alert["condition"] != "closes_beyond" and self.stream is not None and self.stream.covered(symbol, after, limit):
+                    progress[alert["id"]] = alert["checked_through"] = limit  # the stream judged every trade
                     continue
-                due.append(alert)
+                due.append((alert, limit))
             if not due:
                 continue
             try:
@@ -216,17 +241,18 @@ class LevelAlertMonitor:
             except ChartFeedError as exc:
                 log.info("Level alert sweep skipped %s: %s", symbol, exc)
                 continue
-            if hours is None and self.calendar is not None:
-                hours = self.calendar.hours(today)
             series = (data or {}).get("series") or {}
             rows = series.get("data") if isinstance(series, dict) else None
             minutes = normalize_bars(rows if isinstance(rows, list) else [rows] if isinstance(rows, dict) else [])
-            for alert in due:
+            for alert, limit in due:
                 found, checked = self._judge(alert, minutes, hours, today, now)
                 if found:
                     self._firing.add((alert["id"], alert["generation"]))
                     fired.append(found)
-                elif checked is not None and checked != alert["checked_through"]:
+                    continue
+                # Judged through `limit` even where no candle traded, so a quiet minute is not read again.
+                checked = max(checked or 0, limit)
+                if checked != alert["checked_through"]:
                     progress[alert["id"]] = alert["checked_through"] = checked
         if progress:
             with Session(self.engine) as db:
