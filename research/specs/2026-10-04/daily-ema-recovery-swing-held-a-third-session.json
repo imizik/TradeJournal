@@ -1,0 +1,16 @@
+{
+  "name": "Daily-EMA recovery swing held a third session",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema"
+  },
+  "window": [
+    1000,
+    1600
+  ],
+  "exits": {
+    "target_r": 2.0,
+    "max_sessions": 3
+  },
+  "notes": "The forward evidence for this entry says its edge accrues slowly and keeps growing: against random entries the move after the fill is +0.03R at 30 minutes, +0.05R at an hour, +0.11R at the session close and +0.21R at the next session's close, with no sign of fading. That is a multi-day recovery, not an intraday pop, and the matching failure is the stall exit, which cut trades at one hour and died in confirmation. Exiting at the second session's close therefore closes trades that are still working; giving the same trades a third session should let more of them reach the 2R target and widen the gap over random entries, which are held exactly as long. Builds on re-a9765cdc93 (daily-EMA recovery swing, no trigger on the session's first bar; failed screen at t=1.97): The exit only: max_sessions goes from 2 to 3. Trigger level (daily EMA), the 10:00 start of the window, arming, breakout confirmation, stop and the 2R target are unchanged, and no time or stall stop is added. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}

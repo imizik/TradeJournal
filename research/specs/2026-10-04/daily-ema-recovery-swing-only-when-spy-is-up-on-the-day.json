@@ -1,0 +1,18 @@
+{
+  "name": "Daily-EMA recovery swing, only when SPY is up on the day",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema"
+  },
+  "window": [
+    1000,
+    1600
+  ],
+  "filters": [
+    {
+      "feature": "spy_day",
+      "min": 0
+    }
+  ],
+  "notes": "The daily-EMA reclaim is a long-only dip-buy, and it needs the market behind it: on discovery the worst fifth of recovery-swing trades by SPY's intraday move (SPY well below its open) averages about -0.26R while every other fifth is positive, and the one candidate that reached confirmation was strong in the first half and flat in the second, the signature of a strategy that depends on the market's direction. Refusing the setup whenever SPY is below its own session open should drop roughly the worst 40% of trades and lift the per-trade margin over random entries enough to carry the whole period rather than one regime. Builds on re-a9765cdc93 (daily-EMA recovery swing, no trigger on the session's first bar; failed screen at t=1.97 with avg +0.18R): One filter added: take the signal only when spy_day is at or above 0, i.e. SPY is trading above its own session open at the signal bar's close. Trigger level (daily EMA), the 10:00 start of the window, arming, breakout confirmation, stop, 2R target and two-session hold are all unchanged. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}
