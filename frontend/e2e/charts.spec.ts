@@ -4714,7 +4714,6 @@ async function stubOptions(page: Page, requests: string[]) {
     await route.fulfill({ json: data });
   });
 }
-const optionLevels = (page: Page, panel = "main") => drawn(page, panel).getAttribute("data-option-levels");
 const OI_LEVELS = "250 + Put wall,OI #3 + PDH + 254,OI #6,OI #4,260 + OI #5,OI #7,Call wall";
 
 test("options levels draw the walls and the nearest strikes, follow every filter, merge with automatic levels and explain themselves", async ({ page, context }) => {
