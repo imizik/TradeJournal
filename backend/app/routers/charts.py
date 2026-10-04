@@ -22,6 +22,7 @@ from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
 from app.engine import symbol_info_tradier
+from app.routers.level_alerts import listing as alert_listing
 from app.models import ChartSettingsRecord, Fill
 
 router = APIRouter()
@@ -177,6 +178,8 @@ def workspace(
     data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
     for name, other in data["extras"].items():
         _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values()))
+    # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
+    data["alerts"] = alert_listing(db)
     return data
 
 

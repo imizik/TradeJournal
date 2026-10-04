@@ -390,6 +390,10 @@ carry only a title and the first line of an error, never fills or P&L.
 [Automatic deployment](#automatic-deployment) reports each deploy, hold and
 failure to the same topic.
 
+Level alerts set on the charts (Charts C5.1) go to the same topic: the API
+service reads `alerts.env` too (optional, as above) and sends each firing
+itself, with the symbol, the level, the price and the time.
+
 Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
 owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a
 long random topic such as `tradejournal-` followed by `openssl rand -hex 16`.

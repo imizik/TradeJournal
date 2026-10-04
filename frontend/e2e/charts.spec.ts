@@ -2,6 +2,7 @@ import { expect, test, type BrowserContext, type Locator, type Page } from "@pla
 import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 import type { Earnings } from "../lib/symbolInfo";
+import type { AlertsPayload, LevelAlert } from "../lib/alerts";
 
 // Each test starts from empty server settings of its own; tests tagged
 // @real-settings use the e2e backend's endpoint instead.
@@ -4529,5 +4530,137 @@ test.describe("phone earnings badge", () => {
     expect(shown.x + shown.width).toBeLessThanOrEqual(390);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({ path: test.info().outputPath("earnings-badge-phone.png") });
+  });
+});
+
+// ---- Level alerts (C5.1): made from the chart menu, a bell at each price, listed with what reached the phone ----
+
+type AlertsServer = { payload: AlertsPayload; posts: Record<string, unknown>[]; rearms: Record<string, unknown>[]; deletes: string[] };
+/** The alert routes as the backend answers them; the backend tests judge and deliver. */
+async function stubAlerts(page: Page, phone = true): Promise<AlertsServer> {
+  const server: AlertsServer = { payload: { alerts: [], phone }, posts: [], rearms: [], deletes: [] };
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: {} };
+    data.alerts = server.payload;
+    await route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/alerts**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const replace = (id: string, change: Partial<LevelAlert>) => server.payload.alerts.map((alert) => alert.id === id ? { ...alert, ...change } : alert);
+    if (request.method() === "DELETE") {
+      const id = path.split("/").at(-1)!;
+      server.deletes.push(id);
+      server.payload = { ...server.payload, alerts: server.payload.alerts.filter((alert) => alert.id !== id) };
+    } else if (path.endsWith("/rearm")) {
+      const body = request.postDataJSON();
+      server.rearms.push(body);
+      server.payload = { ...server.payload, alerts: replace(path.split("/").at(-2)!, { state: "active", event: null, price: body.price, direction: body.reference < body.price ? "up" : "down" }) };
+    } else {
+      const body = request.postDataJSON();
+      server.posts.push(body);
+      server.payload = { ...server.payload, alerts: [{ id: `alert-${server.posts.length}`, symbol: body.symbol, price: body.price, created_on: "2026-09-17",
+        condition: body.condition, interval: body.interval, session: body.session, direction: body.reference < body.price ? "up" : "down",
+        source_kind: body.source_kind, source_id: body.source_id, label: body.label, state: "active", armed_at: at("12:00"), event: null }, ...server.payload.alerts] };
+    }
+    await route.fulfill({ json: server.payload });
+  });
+  return server;
+}
+const alertsPanel = (page: Page) => page.getByRole("region", { name: "Price alerts" });
+
+test("a level's menu sets an alert, its bell turns gray once it fires, and the list re-arms and removes it", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  await registerCharts(page);
+  const server = await stubAlerts(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(alertsPanel(page)).toContainText("Right-click (long-press on a phone) a level");
+  await addLevel(page, "Breakout", "256.00");
+  const onLevel = async () => ({ x: 220, y: await levelY(page, "main", 256) });
+
+  await rightClick(page, "main", await onLevel());
+  const menu = itemMenu(page, "Level");
+  await expect(menu.getByRole("menu", { name: "Level alerts" })).toContainText("Alerts at 256.00");
+  await page.screenshot({ path: test.info().outputPath("alert-level-menu.png") });
+  await menu.getByRole("menuitem", { name: "Alert when price crosses" }).click();
+  await expect(menu).toHaveCount(0);
+  // Price is above the level, so the alert waits for a cross below; the server is told which side from the chart's latest price.
+  await expect.poll(() => server.posts.length).toBe(1);
+  expect(server.posts[0]).toMatchObject({ symbol: "MRVL", price: 256, condition: "crosses", interval: null, session: "extended", source_kind: "level", label: "Breakout" });
+  expect(server.posts[0].reference as number).toBeGreaterThan(256);
+  await expect(page.getByRole("status", { name: "Chart notice" })).toHaveText("Alert set: MRVL Crosses below 256.00");
+  // A bell on every chart of the symbol, and the list.
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:active");
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-alerts", "256.00:active");
+  await expect(alertsPanel(page).getByRole("listitem", { name: "MRVL Crosses below 256.00, active" })).toBeVisible();
+  await expect(alertsPanel(page)).toContainText("1/20 active");
+  await expect(alertsPanel(page)).toContainText("Breakout · extended hours");
+  // The level's menu lists the alert on it.
+  await rightClick(page, "main", await onLevel());
+  await expect(itemMenu(page, "Level").getByRole("menuitem", { name: "Remove Crosses below 256.00" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // The server judged a trade through the level and the phone has it.
+  server.payload = { ...server.payload, alerts: server.payload.alerts.map((alert) => ({ ...alert, state: "fired", event: {
+    level: 256, price: 255.98, source: "stream", event_at: at("12:01"), detected_at: at("12:01"), delivery: "sent", attempts: 1, delivered_at: at("12:01"), error: null } })) };
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:fired");
+  const fired = alertsPanel(page).getByRole("listitem", { name: "MRVL Crosses below 256.00, fired" });
+  await expect(fired).toContainText("Fired Sep 14, 2026 12:01 PM ET at 255.98 · Sent to phone 12:01 PM ET");
+  await page.screenshot({ path: test.info().outputPath("alert-fired.png") });
+  await fired.getByRole("button", { name: "Re-arm MRVL Crosses below 256.00" }).click();
+  await expect.poll(() => server.rearms.length).toBe(1);
+  expect(server.rearms[0]).toMatchObject({ price: 256 });
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:active");
+  await alertsPanel(page).getByRole("button", { name: "Remove MRVL Crosses below 256.00" }).click();
+  await expect.poll(() => server.deletes).toEqual(["alert-1"]);
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "");
+  await expect(alertsPanel(page)).toContainText("0/20 active");
+});
+
+test("an automatic level's menu sets a close-beyond alert on that chart's interval, at the zone's edge nearest the price", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  const server = await stubAlerts(page, false);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // PDH 254.30 and the round 254: price is above the zone, so its top edge.
+  const zone = AUTO_ZONES[2];
+  await rightClick(page, "main", { x: 300, y: await autoY(page, "main", zone.id) });
+  const menu = itemMenu(page, "Auto level");
+  await expect(menu).toContainText("PDH + 254");
+  await expect(menu).toContainText("Alerts at 254.30");
+  await expect(menu).toContainText("Phone alerts are not set up on this server");
+  await menu.getByRole("menuitem", { name: "Alert on a 5m close beyond" }).click();
+  await expect.poll(() => server.posts.length).toBe(1);
+  expect(server.posts[0]).toMatchObject({ symbol: "MRVL", price: 254.3, condition: "closes_beyond", interval: "5m", source_kind: "auto", source_id: zone.id, label: "PDH + 254" });
+  await expect(alertsPanel(page)).toContainText("Phone alerts are not set up on this server");
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "254.30:active");
+  // A 15m chart offers its own candle.
+  await rightClick(page, "Panel 2", { x: 120, y: await autoY(page, "Panel 2", zone.id) });
+  await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Alert on a 15m close beyond" })).toBeVisible();
+  await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Remove 5m close below 254.30" })).toBeVisible();
+});
+
+test.describe("phone alerts list", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the list sits in the watchlist sheet with full-size buttons and no sideways scroll", async ({ page }) => {
+    const server = await stubAlerts(page);
+    server.payload = { phone: true, alerts: [{ id: "alert-9", symbol: "SPY", price: 581.2, created_on: "2026-09-17", condition: "touches", interval: null, session: "regular",
+      direction: "up", source_kind: "auto", source_id: "z", label: "PDH + 581", state: "fired", armed_at: at("09:40"), event: {
+        level: 581.2, price: 581.2, source: "minute_bars", event_at: at("10:03"), detected_at: at("10:12"), delivery: "pending", attempts: 2, delivered_at: null, error: "ntfy could not be reached (ConnectError)." } }] };
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+    const item = alertsPanel(page).getByRole("listitem", { name: "SPY Touches 581.20, fired" });
+    await item.scrollIntoViewIfNeeded();
+    await expect(item).toContainText("at 581.20 (1-minute bar) · Retrying phone message (2 tries)");
+    for (const button of await item.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("alerts-phone.png") });
   });
 });

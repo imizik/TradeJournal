@@ -2,15 +2,25 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Layers, Lock, LockOpen, LocateFixed, Plus, Trash2 } from "lucide-react";
+import { Bell, BellOff, BellPlus, Check, ChevronLeft, ChevronRight, Copy, Eye, EyeOff, Layers, Lock, LockOpen, LocateFixed, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { alertText } from "@/lib/alerts";
+import type { AlertCondition, AlertSource, LevelAlert } from "@/lib/alerts";
 import { LEVEL_LABEL_MAX, price } from "@/lib/charts";
+import type { AutoZone, Interval } from "@/lib/charts";
 import { LEVEL_COLOR, NOTE_MAX, PALETTE, TOOL_NAMES } from "@/lib/drawings";
 import type { Drawing } from "@/lib/drawings";
 import { summary } from "./SelectionBar";
 
 /** What a right-click or long press on a chart asks for: the item there (`id`), or the chart at `price` (null off the candle pane). */
-export type MenuRequest = { clientX: number; clientY: number; touch: boolean; price: number | null; id: string | null; reset(): void };
-export type MenuItem = { layer: "levels"; level: { id: string; label: string; price: number; color?: string; hidden?: boolean; locked?: boolean } } | { layer: "drawings"; drawing: Drawing };
+export type MenuRequest = { clientX: number; clientY: number; touch: boolean; price: number | null; id: string | null; auto?: string | null; reset(): void };
+export type MenuItem = { layer: "levels"; level: { id: string; label: string; price: number; color?: string; hidden?: boolean; locked?: boolean } } | { layer: "drawings"; drawing: Drawing } | { layer: "auto"; zone: AutoZone };
+/**
+ * Alerts on the item (C5.1): what a new one would watch (`source`, null for an
+ * item that has no single price), the alerts already on it, the candle a
+ * "closes beyond" alert waits for, and whether the server can reach the phone.
+ */
+export type MenuAlerts = { source: AlertSource | null; existing: (LevelAlert & { shown: number })[]; interval: Interval; phone: boolean;
+  onCreate(condition: AlertCondition): void; onRearm(id: string): void; onRemove(id: string): void };
 /** A change the menu makes to its item: `label` is a level's name or a note's text. */
 export type MenuPatch = { label?: string; color?: string; hidden?: boolean; locked?: boolean };
 export type LayerToggle = { key: string; label: string; on: boolean; toggle(): void };
@@ -30,9 +40,9 @@ const ITEM = "[role=menuitem]:not([disabled]),[role=menuitemcheckbox]:not([disab
  * being edited is saved first unless Esc closed it. It renders on the body,
  * above full-screen charts and clear of the workspace's spacing.
  */
-export default function ChartMenu({ at, symbol, price: value, item, layers, hidden, onAddLevel, onCopyPrice, onReset, onEdit, onDuplicate, onDelete, onClose }: {
+export default function ChartMenu({ at, symbol, price: value, item, layers, hidden, alerts, onAddLevel, onCopyPrice, onReset, onEdit, onDuplicate, onDelete, onClose }: {
   at: { x: number; y: number; touch: boolean }; symbol: string; price: number | null; item: MenuItem | null;
-  layers: LayerToggle[]; hidden: HiddenItem[];
+  layers: LayerToggle[]; hidden: HiddenItem[]; alerts?: MenuAlerts;
   onAddLevel(price: number): void; onCopyPrice(price: number): void; onReset(): void;
   onEdit(patch: MenuPatch): void; onDuplicate(): void; onDelete(): void; onClose(): void;
 }) {
@@ -41,6 +51,7 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const level = item?.layer === "levels" ? item.level : null;
   const drawing = item?.layer === "drawings" ? item.drawing : null;
+  const zone = item?.layer === "auto" ? item.zone : null;
   const labelled = !!level || drawing?.kind === "note";
   const current = level ? level.label : drawing?.text ?? "";
   const [draft, setDraft] = useState(current);
@@ -59,6 +70,18 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
   const close = (keep = true) => { if (keep) commit(); closed.current = true; onClose(); };
   const closer = useRef(close);
   useEffect(() => { closer.current = close; });
+  // A sheet opens under the finger that held for it. That finger's lift is not a tap, or it would press
+  // whichever row (or the backdrop) it lands on: until a new touch starts, a pointer's click is dropped.
+  const touched = useRef(false);
+  useEffect(() => {
+    if (!at.touch) return;
+    const down = () => { touched.current = true; };
+    window.addEventListener("pointerdown", down, true);
+    window.addEventListener("touchstart", down, true);
+    return () => { window.removeEventListener("pointerdown", down, true); window.removeEventListener("touchstart", down, true); };
+  }, [at.touch]);
+  // `detail` is 0 for a click from the keyboard, which is never a lift.
+  const dropLift = (event: React.MouseEvent) => { if (!touched.current && event.detail > 0) { event.preventDefault(); event.stopPropagation(); } };
 
   // A popup stays inside the window: left of the pointer near the right edge, above it near the bottom.
   useLayoutEffect(() => {
@@ -107,12 +130,39 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
   const row = `flex w-full items-center gap-2.5 px-3 text-left text-xs text-slate-200 outline-none hover:bg-slate-700/60 focus-visible:bg-slate-700/60 disabled:opacity-40 ${touch ? "h-11" : "h-8"}`;
   const icon = touch ? 16 : 13;
   const swatch = touch ? "h-11 w-11" : "h-6 w-6";
-  const name = level ? "Level" : drawing ? TOOL_NAMES[drawing.kind] : "Chart";
+  const name = level ? "Level" : drawing ? TOOL_NAMES[drawing.kind] : zone ? "Auto level" : "Chart";
   const color = level ? level.color ?? LEVEL_COLOR : drawing?.color;
   const locked = !!(level ?? drawing)?.locked;
   const hiddenCount = hidden.length;
 
-  const body = item ? <>
+  // Alerts (C5.1): those on this item, then the three ways to make one.
+  const source = alerts?.source;
+  const alertGroup = alerts && (source || alerts.existing.length) ? <div role="menu" aria-label={`${name} alerts`} className="border-t border-slate-700/60 py-1">
+    <div className="px-3 pb-1 pt-1.5 text-[10px] uppercase tracking-wider text-slate-500">Alerts{source ? ` at ${price(source.price)}` : ""}</div>
+    {alerts.existing.map((alert) => <div key={alert.id} className="flex items-center gap-1 px-3 text-[11px]">
+      {alert.state === "active" ? <Bell size={12} className="shrink-0 text-amber-300" aria-hidden /> : <BellOff size={12} className="shrink-0 text-slate-500" aria-hidden />}
+      <span className={`min-w-0 flex-1 truncate ${alert.state === "active" ? "text-slate-200" : "text-slate-500"}`}>{alertText(alert, alert.shown)}{alert.state === "fired" ? " · fired" : ""}</span>
+      {alert.state === "fired" && <button role="menuitem" aria-label={`Re-arm ${alertText(alert, alert.shown)}`} title="Arm it again from the current price" onClick={() => { close(); alerts.onRearm(alert.id); }}
+        className={`inline-flex items-center justify-center rounded text-slate-400 hover:bg-slate-700/60 hover:text-slate-100 ${touch ? "h-11 w-11" : "h-7 w-7"}`}><RotateCcw size={icon} /></button>}
+      <button role="menuitem" aria-label={`Remove ${alertText(alert, alert.shown)}`} title="Remove this alert" onClick={() => { close(); alerts.onRemove(alert.id); }}
+        className={`inline-flex items-center justify-center rounded text-slate-400 hover:bg-slate-700/60 hover:text-rose-300 ${touch ? "h-11 w-11" : "h-7 w-7"}`}><Trash2 size={icon} /></button>
+    </div>)}
+    {source && <>
+      <button role="menuitem" className={row} title="When a trade reaches this price" onClick={() => { close(); alerts.onCreate("touches"); }}><BellPlus size={icon} />Alert when price touches</button>
+      <button role="menuitem" className={row} title="When a trade goes through this price" onClick={() => { close(); alerts.onCreate("crosses"); }}><BellPlus size={icon} />Alert when price crosses</button>
+      <button role="menuitem" className={row} title={`When a ${alerts.interval} candle closes on the other side`} onClick={() => { close(); alerts.onCreate("closes_beyond"); }}><BellPlus size={icon} />Alert on a {alerts.interval} close beyond</button>
+    </>}
+    {!alerts.phone && <p className="px-3 pb-1 pt-1 text-[10px] leading-4 text-amber-300">Phone alerts are not set up on this server, so alerts show here only.</p>}
+  </div> : null;
+
+  const body = zone ? <>
+    <div className="flex items-center gap-2 border-b border-slate-700/60 px-3 py-2 text-[11px]">
+      <span className="h-0.5 w-3 shrink-0 rounded-sm bg-slate-400" />
+      <span className="min-w-0 truncate text-slate-300">{zone.label}</span>
+      <span className="ml-auto shrink-0 font-mono text-slate-400">{zone.low === zone.high ? price(zone.low) : `${price(zone.low)}–${price(zone.high)}`}</span>
+    </div>
+    {alertGroup}
+  </> : item ? <>
     <div className="flex items-center gap-2 border-b border-slate-700/60 px-3 py-2 text-[11px]">
       <span className={`shrink-0 rounded-sm ${level ? "h-0.5 w-3" : "h-2 w-3"}`} style={{ background: color }} />
       <span className="min-w-0 truncate text-slate-300">{level ? level.label : name}</span>
@@ -135,6 +185,7 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
       <button role="menuitem" className={row} onClick={() => { close(); onDuplicate(); }}><Copy size={icon} />Duplicate</button>
       <button role="menuitem" className={`${row} text-rose-300`} onClick={() => { close(false); onDelete(); }}><Trash2 size={icon} />Delete</button>
     </div>
+    {alertGroup}
   </> : view === "main" ? <div role="menu" aria-label="Chart actions" className="py-1">
     <div className="px-3 pb-1.5 pt-1 text-[11px] text-slate-500"><span className="font-semibold text-slate-300">{symbol}</span>{value !== null && <span className="ml-2 font-mono">{price(value)}</span>}</div>
     {value !== null && <>
@@ -155,7 +206,7 @@ export default function ChartMenu({ at, symbol, price: value, item, layers, hidd
   </div>;
 
   const label = `${name} menu`;
-  if (touch) return createPortal(<div className="fixed inset-0 z-[80] flex items-end bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
+  if (touch) return createPortal(<div className="fixed inset-0 z-[80] flex items-end bg-black/50" onClickCapture={dropLift} onClick={(e) => { if (e.target === e.currentTarget) close(); }}>
     <div ref={panel} role="dialog" aria-label={label} tabIndex={-1} onKeyDown={onKeyDown}
       className="max-h-[70vh] outline-none w-full overflow-y-auto overscroll-contain rounded-t-xl border-t border-slate-600 bg-[#121924] pb-[max(0.5rem,env(safe-area-inset-bottom))] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-2xl">
       <div className="mx-auto my-2 h-1 w-10 rounded-full bg-slate-600" aria-hidden />

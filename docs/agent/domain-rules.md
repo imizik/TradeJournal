@@ -364,6 +364,13 @@ is verifiable rather than hopeful.
   split) and indicators are computed over it whole, so pages are slices.
 - Charts pass `feed=sip` explicitly on every Alpaca request and never change
   `ALPACA_DATA_FEED`; IEX bars never reach a chart.
+- Level alerts (`level_alerts.py` pure, `level_alert_monitor.py`) fire once per
+  arming, and the unique (alert, generation) event row is the only
+  deduplication: never add a second detector that records without it. Phone
+  delivery is a separate at-least-once outbox on that row. An alert keeps its
+  own price on the chart's basis as of `created_on`, moved by later splits
+  like a saved level, and never follows a level the user drags. An alert
+  message states what price did, never a signal.
 - Option snapshots (`options_recorder.py`) are taken only for the session in
   progress, between 15 minutes after the regular close and 20:00 New York, and
   never rewritten. Open interest history cannot be fetched later: a missed

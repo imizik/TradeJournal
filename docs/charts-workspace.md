@@ -192,6 +192,9 @@ cd backend
   [Relative volume](#relative-volume-c24)).
 - Earnings (C2.5): an **E** below each report date's candle and an
   "Earnings in 5 d" badge in the header (see [Earnings](#earnings-c25)).
+- Level alerts (C5.1): set from the menu on a level, a horizontal ray or an
+  automatic level; a bell at each price, gray once fired, and the Alerts list
+  in the dock (see [Level alerts](#level-alerts-c51)).
 - Extended-session shading and regular/extended hours selection. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
@@ -257,7 +260,9 @@ cd backend
 - **Context menu (C1.3).** Right-click a chart, or hold a finger still on it
   for half a second, for its menu (`frontend/components/charts/ChartMenu.tsx`).
   A mouse opens it at the pointer; a finger opens it as a bottom sheet with
-  44px rows, closed by its backdrop. On empty chart space it offers **Add level
+  44px rows, closed by its backdrop. The sheet opens under the held finger, and
+  that finger's lift presses nothing: until a new touch starts, a click is
+  dropped. On empty chart space it offers **Add level
   at** and **Copy price** for the price under the pointer (to the cent; the
   magnet applies, as it does to a placed level), **Reset chart scale** for that
   chart alone, and **Layers**: show or hide My levels, Drawings, Auto levels,
@@ -935,6 +940,75 @@ its traps are in the [symbol info roadmap](symbol-info-roadmap.md#data-traps-the
   thread in one batched request per ten symbols, so a chart never waits on
   Tradier's fundamentals; the next 15-second refresh carries them.
 
+### Level alerts (C5.1)
+
+An alert watches one price for one symbol and sends a phone message when it
+fires, whether or not any chart is open. It fires once; **Re-arm** arms it
+again from the current price.
+
+- **Making one.** Right-click (long-press on a phone) a saved level, a
+  horizontal ray or an automatic level: *Alert when price touches*, *Alert
+  when price crosses*, or *Alert on a 5m close beyond*, with the candle of the
+  chart the menu opened on (5m from a daily or weekly chart). The chart's
+  newest streamed trade, else its newest candle, else the quote, says which
+  side the alert waits on; price exactly at the level is refused. An
+  automatic zone's alert watches its edge nearest the price (its middle from
+  inside it). The alert keeps its own price: dragging or deleting the level
+  leaves it, and a split after the day it was made moves it as it moves a
+  saved level. It counts the trades and candles of the chart's session setting
+  when it was made: regular hours only, or extended. At most 20 are active,
+  on 5 symbols, so their reads stay inside the shared Tradier allowance.
+  Trendlines, rectangles and notes take no alert.
+- **When it fires.** *Touches*: a trade at the level or beyond it.
+  *Crosses*: a trade beyond it by any amount. Both are judged on each trade
+  the stream validates, before the browser's one-second coalescing. *Closes
+  beyond*: a candle of the chosen interval, closing after the alert was made,
+  closes beyond the level. A candle is judged 30 seconds after it closes, on
+  the close Tradier's 1-minute bars then hold; a later correction is not
+  judged again.
+- **No chart open, restarts and outages.** The monitor
+  (`backend/app/engine/level_alert_monitor.py`) runs in the API process. While
+  any session could trade (04:00–20:00 New York on weekdays) it adds the
+  alerted symbols to the one upstream stream's subscription, beside the
+  symbols visible charts follow. The stream records when it carried each
+  symbol. At least every 20 seconds a sweep reads today's 1-minute bars
+  through the chart feed's shared, cached and budgeted request (an open chart
+  of the symbol makes the same request) for two cases: closes-beyond alerts,
+  and touch or cross alerts over minutes the stream did not carry, such as a
+  restart, a reconnect or an outage. A bar's high or low then stands in for
+  the trades, and the event says it came from 1-minute bars. A symbol the
+  stream carried throughout costs no read. Each alert stores how far it has
+  been judged, so a restart resumes where it stopped.
+- **Recorded once.** Each firing is one `level_alert_event` row, unique per
+  alert and arming. A reconnect, a restart, the sweep and the stream finding
+  the same firing, or a second API process can therefore not record a second
+  one; an alert removed or re-armed while its firing waited records nothing.
+- **Delivered at least once.** Delivery is an outbox on that row, separate
+  from deduplication. A pass claims a pending event with an update only one
+  process can win, sends it through ntfy (the topic in
+  `/etc/tradejournal/alerts.env`, which the API now reads) and marks it sent.
+  A failure is retried after 30 s, 1, 2, 5 and then every 15 minutes. A claim
+  older than two minutes (a crash mid-send) is put back, so the phone may
+  then get the same message twice; it never gets none while the server runs.
+  An event not delivered within six hours expires rather than arriving that
+  late. Without `NTFY_URL` events wait, retried every five minutes, and the
+  chart says phone alerts are not set up.
+- **The phone message** names the symbol, the level, the price and when:
+  *SPY crossed above 581.20*, *Crossed at 581.24 (trade), 10:42:13 AM ET.
+  Alert on PDH.* A closes-beyond message names the candle; one noticed more
+  than two minutes late says so.
+- **On the chart.** A bell at each alert's price, at the pane's right edge just
+  below the line, on every chart of the symbol: amber while armed, gray once
+  fired. The menu on the level lists its alerts, with *Re-arm* and *Remove*.
+  The **Alerts** list in the dock (in the Watchlist sheet on a phone) shows
+  every alert for any symbol: what it waits for, when it fired and at what
+  price, and whether the phone message was sent, is being retried (the error
+  on hover) or expired.
+- **Delivery to the browser.** `GET /charts/workspace` carries `alerts`
+  (every alert, newest firing first, and `phone`: whether this server can
+  send). `GET`, `POST /charts/alerts`, `POST /charts/alerts/{id}/rearm` and
+  `DELETE /charts/alerts/{id}` return the same list and wake the monitor.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
@@ -1126,6 +1200,27 @@ reads *E 10 d?*, and at 390px the short form stays in the header. The Events
 tab's browser tests stub its route. The live calendar was read on 2026-10-04 for
 twelve watchlist names; what the canvas paints is checked by screenshot review
 only.
+`backend/tests/test_level_alerts.py` feeds Tradier-shaped trades through the
+real stream parser. A touch is not a cross, the crossing trade fires one event
+before coalescing, and later trades add none. A restarted monitor and a second
+detector record nothing more, and the database refuses a second row for one
+arming. A reconnect gap is judged on 1-minute bars while covered minutes are
+not, and a covered stream costs no read and saves its progress. A
+closes-beyond alert with no browser or stream waits for its candle to be final,
+skips one that closed before it was armed, and reads once per minute. Extended
+trades count only for an extended alert. Delivery tests show that a failed send
+is retried after its backoff and never lost or repeated once sent, that a stale
+claim is put back while a fresh one is left alone, and that without ntfy an
+event waits and then expires. The running loop records and sends a streamed
+firing at once. The routes create, refuse (at the level, a duplicate, a sixth
+symbol, a daily close), re-arm as a new generation and remove. Browser tests
+(C5.1) stub the alert routes: a level's menu sets a crossing alert with the
+chart's price as the side, bells appear on both charts of the symbol, a fired
+alert's bell turns gray and the list reads its time, price and sent message,
+Re-arm and Remove call the server. An automatic zone's menu sets a close-beyond
+alert on that chart's interval at the zone's near edge and says when phone
+alerts are not set up. At 390px the list sits in the Watchlist sheet with
+44px buttons. A message reaching a real phone is not covered by any test.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's

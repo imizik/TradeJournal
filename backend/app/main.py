@@ -15,6 +15,7 @@ from app.database import engine
 from app.schema import ensure_current
 from app.models import Account, FILL_LIGHT, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
+from app.routers import level_alerts as level_alerts_router
 from app.routers import symbol_info
 from app.routers.fills import (
     _rebuild_trades,
@@ -203,6 +204,23 @@ def _maybe_start_tradingview_analysis_worker(app: FastAPI):
     return worker
 
 
+async def _maybe_start_level_alerts(app_: FastAPI, stream):
+    """Level alerts (Charts C5.1) are judged here whether or not a chart is open."""
+    app_.state.level_alerts = None
+    if os.environ.get("LEVEL_ALERTS_AUTOSTART", "true").lower() == "false":
+        return None
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    from app.engine.chart_splits import chart_splits
+    from app.engine.level_alert_monitor import LevelAlertMonitor
+
+    monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits)
+    stream.attach(monitor)
+    await monitor.start()
+    app_.state.level_alerts = monitor
+    return monitor
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     # Alembic owns the schema. The app used to call create_all() here, which
@@ -225,9 +243,12 @@ async def lifespan(_app: FastAPI):
     from app.engine.chart_stream import ChartMarketStream
     chart_market_stream = ChartMarketStream(calendar=chart_calendar.cached)
     _app.state.chart_market_stream = chart_market_stream
+    level_alerts = await _maybe_start_level_alerts(_app, chart_market_stream)
     try:
         yield
     finally:
+        if level_alerts is not None:
+            await level_alerts.stop()
         await chart_market_stream.stop()
         from app.engine.job_runtime import execution_mode, shutdown_requested
 
@@ -277,6 +298,7 @@ app.include_router(rebuild.router, prefix="/rebuild", tags=["rebuild"])
 app.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
 app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(symbol_info.router, prefix="/charts", tags=["charts"])
+app.include_router(level_alerts_router.router, prefix="/charts", tags=["charts"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])

@@ -11,6 +11,8 @@ import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
 import { AutoLevelLayer, nearestZones } from "@/lib/autoLevels";
+import { AlertLayer } from "@/lib/alerts";
+import type { AlertMark } from "@/lib/alerts";
 import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
 import SelectionBar from "./SelectionBar";
@@ -26,6 +28,7 @@ const tickFormats = {
 type Overlay = keyof typeof COLORS;
 const MIN_BAR_SPACING = 2;
 const NO_DRAWINGS: Drawing[] = [];
+const NO_ALERTS: AlertMark[] = [];
 const CLOCK_TEXT = { paused: "Paused", delayed: "Delayed data", stale: "Stale data", closed: "Market closed", waiting: "Waiting for bars" };
 // Whitespace alone still joins line segments in Lightweight Charts. Hide the
 // outgoing segment at the session boundary. RTH timestamps always lie within
@@ -102,12 +105,12 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, rvol = null, earnings = null, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -117,6 +120,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   rvol?: RvolBaseline | null;
   /** This symbol's earnings (C2.5): markers on report dates, and the header badge. */
   earnings?: Earnings | null;
+  /** This symbol's level alerts (C5.1), on the chart's basis: a bell at each price. */
+  alerts?: AlertMark[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
@@ -219,7 +224,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     candles.attachPrimitive(layer);
     const autoLayer = new AutoLevelLayer();
     candles.attachPrimitive(autoLayer);
-    bundle.current = { chart, candles, volume, shade, lines, markers, layer, auto: autoLayer, frame: "" };
+    const bells = new AlertLayer();
+    candles.attachPrimitive(bells);
+    bundle.current = { chart, candles, volume, shade, lines, markers, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
@@ -391,8 +398,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const at = local(clientX, clientY);
       const plot = onPlot(at.x, at.y);
       const hit = plot && !now.tool ? layer.hit(at.x, at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
+      // An automatic level under the pointer, when no level or drawing of the user's is (C5.1 alerts on it).
+      const auto = plot && !hit && !now.tool ? autoLayer.hit(at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
       const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
-      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, reset: () => { quiet(); moveView(chart, barsRef.current.length, main, "reset"); } });
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); moveView(chart, barsRef.current.length, main, "reset"); } });
     };
     // A finger held still: its own timer, since browsers differ on whether a
     // long press fires `contextmenu` (Android does, iOS does not; whichever
@@ -585,7 +594,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
-      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); chart.remove(); bundle.current = null; barsRef.current = [];
+      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]);
 
@@ -703,6 +712,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       container.current.dataset.drawings = drawings.map((drawing) => drawing.kind).join(",");
     }
   }, [levels, drawings, pending, main, selected]);
+  useEffect(() => {
+    if (pending) return; // the next symbol's alerts wait for its candles
+    bundle.current?.bells.set(alerts);
+    if (container.current) container.current.dataset.alerts = alerts.map((mark) => `${mark.price.toFixed(2)}:${mark.fired ? "fired" : "active"}`).join(",");
+  }, [alerts, pending]);
   // Automatic levels: the nearest few above and below the latest price, moving with it.
   const lastClose = panel?.bars.at(-1)?.close;
   const zones = useMemo(() => nearestZones(autoLevels?.zones ?? [], lastClose), [autoLevels, lastClose]);

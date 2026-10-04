@@ -417,7 +417,11 @@ Be honest about this when reporting work:
   with no market-data credentials, so quote-dependent UI shows its empty state.
   Phone alerts reach a loopback stand-in for ntfy in the deployment workflow;
   delivery through ntfy.sh and the dead-man's-switch ping are proved only by
-  `deploy/alerts.py test` and a real alert on the server.
+  `deploy/alerts.py test` and a real alert on the server. Level alerts (Charts
+  C5.1) are tested with trades fed through the real stream parser, stub
+  1-minute bars and a stub ntfy sender; a live Tradier stream firing one and
+  the message reaching the phone are proved only by a real alert after the
+  deploy.
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are

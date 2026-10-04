@@ -95,6 +95,7 @@ PURE_MODULES = {
     "app.engine.chart_rvol",  # chart relative volume from supplied bars and profiles
     "app.engine.symbol_info",  # summaries of supplied stored journal results
     "app.engine.symbol_info_events",  # earnings, dividend and split rows from supplied responses
+    "app.engine.level_alerts",  # when a level alert fires, from supplied trades and candles
     # Option chain models. The Tradier adapter (options_chain) fills them; the
     # positioning engine and recorder must be able to read them without it.
     "app.engine.options_models",

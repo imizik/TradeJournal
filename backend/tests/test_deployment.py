@@ -329,6 +329,13 @@ def test_every_managed_unit_ships_with_the_release():
     assert "OnCalendar=*-*-* 17:00:00 America/New_York" in timer
 
 
+def test_the_api_reads_the_phone_alert_topic_for_level_alerts_without_requiring_it():
+    unit = (Path(__file__).resolve().parents[2] / "deploy/systemd/tradejournal-api.service").read_text()
+    # Optional ("-"): a server without phone alerts still starts its API.
+    assert "EnvironmentFile=-/etc/tradejournal/alerts.env" in unit
+    assert unit.index("EnvironmentFile=/etc/tradejournal/backend.env") < unit.index("alerts.env")
+
+
 def test_deployment_stop_leaves_the_alert_check_running(control, monkeypatch):
     stopped = []
     monkeypatch.setattr(control.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout="loaded\n", check_returncode=lambda: None))
