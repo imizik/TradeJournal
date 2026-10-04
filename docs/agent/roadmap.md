@@ -5,6 +5,11 @@ and the decisions worth not relitigating. A planning document, not a
 specification. The principle throughout: **raise agent autonomy only as fast
 as the verification layer earns trust.**
 
+For future trading features and the plan → trade → review → improve workflow,
+see the [product roadmap](../product-roadmap.md). This file covers the
+engineering foundation; the product roadmap preserves the active Charts and
+Symbol info priorities.
+
 ## Where we are
 
 Reproducibility, verification, environment isolation and deployment are all in

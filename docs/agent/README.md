@@ -12,6 +12,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |
 | [background-jobs.md](background-jobs.md) | You are touching queued work: the worker lanes, job ownership, or restart recovery |
+| [../product-roadmap.md](../product-roadmap.md) | You want the future trading-improvement workflow and its usage gates, without changing active feature-roadmap priorities |
 | [../charts-roadmap.md](../charts-roadmap.md) | You are working on `/charts`: execution order, dependencies, acceptance gate, provider evidence and the not-building list |
 | [../charts-deep-history.md](../charts-deep-history.md) | You need C0.0's implemented SIP cache, pagination, warmup, budget and test contract |
 | [roadmap.md](roadmap.md) | You want to know where the foundation stands, what it still lacks, and what is deliberately not being built |
