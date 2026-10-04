@@ -6,6 +6,7 @@ from sqlmodel import Session, SQLModel, create_engine
 
 from app.engine import alpaca
 from app.engine.jobs import _alpaca_fill_ids
+from app.engine.metric_versions import CONTEXT_VERSION
 from app.models import Account, Fill, FillMarketContext
 
 
@@ -92,7 +93,7 @@ def test_alpaca_fill_selection_retries_partial_context_rows():
         session.add(
             FillMarketContext(
                 fill_id=complete_fill.id,
-                calculation_version="entry-context-v2",
+                calculation_version=CONTEXT_VERSION,
                 data_source="alpaca_iex",
                 fetched_at=datetime.utcnow(),
                 entry_underlying_price=150,

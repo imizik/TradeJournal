@@ -50,6 +50,14 @@ def test_reference_applies_documented_financial_rounding():
     assert ref.position_ledger(trade(fills), fills)["values"]["pnl_pct"] == 0.4063
 
 
+@pytest.mark.parametrize("high,expected", [(2.000000001,None), (2.0000001,-100000000)])
+def test_reference_capture_needs_a_positive_peak_at_persisted_precision(high, expected):
+    fills = [fill(price=200), fill("sell_to_close", price=190, minute=10)]
+    result = ref.option_path(trade(fills), fills, [bar(1, high, 1.9)])["values"]
+    assert result["option_exit_efficiency"] == expected
+    assert result["time_to_option_mfe_minutes"] == (None if expected is None else 1)
+
+
 @pytest.mark.parametrize("short", [False, True])
 def test_random_position_paths_and_fifo_match_independent_decimal_reference(short):
     rng = random.Random(731)

@@ -9,6 +9,7 @@ and return results keyed by date string "YYYY-MM-DD" or hour string "YYYY-MM-DD 
 import math
 import logging
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
@@ -197,17 +198,24 @@ def analyze_minute_bars(bars: list[dict], fill_dt: datetime) -> dict:
     vwap: Optional[float] = None
     cum_volume: Optional[int] = None
     if not rth_to_fill.empty and fill_dt_et.hour * 60 + fill_dt_et.minute >= 9 * 60 + 30:
-        vols = rth_to_fill["volume"]
-        typical = (rth_to_fill["high"] + rth_to_fill["low"] + rth_to_fill["close"]) / 3
-        vol_sum = float(vols.sum())
+        # Preserve exact quoted decimals at rounding boundaries. Float
+        # weighted sums can put an exact half a display unit below the tie.
+        vol_sum = Decimal(0)
+        weighted = Decimal(0)
+        for row in rth_to_fill.itertuples():
+            volume = Decimal(str(row.volume))
+            typical = (Decimal(str(row.high)) + Decimal(str(row.low)) + Decimal(str(row.close))) / 3
+            vol_sum += volume
+            weighted += typical * volume
         if vol_sum > 0:
-            vwap = round(float((typical * vols).sum() / vol_sum), 4)
+            vwap = float(round(weighted / vol_sum, 4))
         cum_volume = int(vol_sum)
 
     # Day range used %
     day_range_used: Optional[float] = None
     if day_high and day_low and day_high != day_low:
-        day_range_used = round((entry_price - day_low) / (day_high - day_low) * 100, 2)
+        price, low, high = (Decimal(str(value)) for value in (entry_price, day_low, day_high))
+        day_range_used = float(round((price - low) / (high - low) * 100, 2))
 
     return {
         "entry_context_as_of": (bars_to_fill.index[-1] + pd.Timedelta(minutes=1)).tz_convert(ET).tz_localize(None).to_pydatetime(),

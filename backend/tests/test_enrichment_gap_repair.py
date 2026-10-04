@@ -141,7 +141,7 @@ def _metrics(trade: Trade, **values) -> TradePathMetrics:
     contexts = {str(f.id): session.get(FillMarketContext, f.id) for f in fills}
     complete.setdefault("inputs_fingerprint", trade_path.trade_inputs_fingerprint(trade, fills))
     complete.setdefault("market_inputs_fingerprint", trade_path.market_inputs_fingerprint(fills, contexts))
-    return TradePathMetrics(calculation_version="position-path-v2", trade_id=trade.id, data_source="alpaca_iex", fetched_at=datetime.utcnow(), **complete)
+    return TradePathMetrics(calculation_version=trade_path.PATH_VERSION, trade_id=trade.id, data_source="alpaca_iex", fetched_at=datetime.utcnow(), **complete)
 
 
 def _option_round_trip(session, *, entry_delta=0.5, exit_underlying=101.0):

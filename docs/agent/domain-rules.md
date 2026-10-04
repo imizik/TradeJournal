@@ -194,6 +194,14 @@ is verifiable rather than hopeful.
   use the open cost basis at each sampled minute. Underlying exit efficiency
   and first-order greeks attribution are left null for scale-ins/outs rather
   than applying the maximum position to every move.
+- Option position-path money and exposure arithmetic use Decimal values.
+  Capture ratios and time to a positive peak stay null if the peak rounds to
+  zero at the persisted six-decimal dollar precision. Genuine representable
+  positive peaks are retained. Completed-minute VWAP and day-range position
+  use Decimal arithmetic and half-even rounding (four and two places,
+  respectively), so binary-float residues cannot change rounding ties.
+  These corrections are identified by `position-path-v3` and
+  `entry-context-v3`; older stored rows remain stale until recomputed.
 - The audit is read-only against existing cache files and independent reference
   math. Missing evidence cannot pass; old versions stay stale even if values
   match. Same-cache agreement is not broker/source verification.
