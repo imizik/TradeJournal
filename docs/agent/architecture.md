@@ -237,7 +237,12 @@ kept on disk per completed month. One API-owned Tradier WebSocket
 fans out valid trade prices through private `/charts/stream` SSE to visible tabs,
 each following up to three symbols (the main one and two held by panels).
 The 15-second REST refresh reconciles candles, volume and studies and remains
-the fallback when streaming is unavailable. Every chart is on one
+the fallback when streaming is unavailable. Level alerts (`level_alert`,
+`level_alert_event`) are judged in the same API process by
+`level_alert_monitor.py`, with or without a tab open. It adds alerted symbols
+to that one stream, reads 1-minute bars through the chart feed's budget for
+closed candles and stream gaps, and sends phone messages through the ntfy
+topic in `/etc/tradejournal/alerts.env`. Every chart is on one
 split-adjusted price basis: Alpaca corporate actions (one small cached file per
 symbol, refetched once per New York date) say which splits happened, and
 `chart_adjust.py` adjusts copies of bars at display time, so the raw history

@@ -1,7 +1,10 @@
-"""One Tradier market WebSocket shared by private chart viewers.
+"""One Tradier market WebSocket shared by private chart viewers and level alerts.
 
 Only validated trade prices cross the browser-facing event stream. REST candles
 remain the authority for volume, studies, and recovery after a missed event.
+Level alerts (C5.1) add their symbols to the same subscription and see every
+validated trade before the one-second coalescing; the stream records when it
+covered each symbol, so the alert sweep judges only the minutes it did not.
 """
 
 import asyncio
@@ -63,8 +66,13 @@ def trade_event(row: dict, *, now: float | None = None, calendar: Callable[[date
 class ChartMarketStream:
     """Demand-driven single connection, fan-out and bounded reconnects."""
 
-    def __init__(self, calendar: Callable[[date], dict | None] | None = None):
+    def __init__(self, calendar: Callable[[date], dict | None] | None = None, clock: Callable[[], float] = time.time):
         self._calendar = calendar
+        self._clock = clock
+        # Level alerts (C5.1): symbols() to subscribe, on_tick() for each validated trade.
+        self._alerts = None
+        # Per symbol, when the subscription carried it: [start, end or None while it does].
+        self._coverage: dict[str, list[list]] = {}
         # Each client (one browser tab) follows up to three symbols; the one
         # upstream connection subscribes to the union of every client's set.
         self._clients: dict[int, tuple[frozenset[str], asyncio.Queue]] = {}
@@ -86,6 +94,34 @@ class ChartMarketStream:
 
     def unsubscribe(self, client_id: int) -> None:
         self._clients.pop(client_id, None)
+
+    def attach(self, alerts) -> None:
+        """Carry the level alert monitor's symbols and hand it every validated trade."""
+        self._alerts = alerts
+
+    def ensure_running(self) -> None:
+        """Start the connection when only alerts want it (no viewer has subscribed). Event loop only."""
+        if (self._task is None or self._task.done()) and self._wanted() and not self._stopping:
+            self._task = asyncio.create_task(self._run())
+
+    def covered(self, symbol: str, start: float, end: float) -> bool:
+        """Whether one connected subscription carried ``symbol`` from ``start`` through ``end``."""
+        return any(s <= start and (e is None or e >= end) for s, e in self._coverage.get(symbol, ()))
+
+    def _cover(self, subscribed: set[str]) -> None:
+        now = self._clock()
+        for symbol, spans in self._coverage.items():
+            if spans and spans[-1][1] is None and symbol not in subscribed:
+                spans[-1][1] = now
+        for symbol in subscribed:
+            spans = self._coverage.setdefault(symbol, [])
+            if not spans or spans[-1][1] is not None:
+                spans.append([now, None])
+        for symbol in list(self._coverage):
+            # Two days is longer than any alert sweep looks back.
+            self._coverage[symbol] = [span for span in self._coverage[symbol] if span[1] is None or span[1] > now - 2 * 86400]
+            if not self._coverage[symbol]:
+                del self._coverage[symbol]
 
     async def stop(self) -> None:
         self._stopping = True
@@ -126,6 +162,8 @@ class ChartMarketStream:
             if tick["at"] < self._latest_at.get(symbol, 0):
                 continue
             self._latest_at[symbol] = tick["at"]
+            if self._alerts is not None:
+                self._alerts.on_tick(tick)
             key = (symbol, tick["minute"])
             pending = self._pending.get(key)
             if pending is None:
@@ -137,7 +175,8 @@ class ChartMarketStream:
                 pending["price"] = tick["price"]
 
     def _wanted(self) -> set[str]:
-        return set().union(*(symbols for symbols, _ in self._clients.values()))
+        viewers = set().union(*(symbols for symbols, _ in self._clients.values()))
+        return viewers | self._alerts.symbols() if self._alerts is not None else viewers
 
     def _flush(self) -> None:
         pending = sorted(self._pending.values(), key=lambda tick: tick["at"])
@@ -163,7 +202,7 @@ class ChartMarketStream:
     async def _run(self) -> None:
         delay = 1
         try:
-            while self._clients and not self._stopping:
+            while self._wanted() and not self._stopping:
                 try:
                     url, session_id = await self._session()
                     async with connect(url, compression=None, proxy=None, open_timeout=10, ping_interval=20) as socket:
@@ -171,14 +210,17 @@ class ChartMarketStream:
                         session_started = time.monotonic()
                         last_flush = session_started
                         delay = 1
-                        while self._clients and not self._stopping:
+                        while not self._stopping:
                             wanted = self._wanted()
+                            if not wanted:
+                                break
                             if wanted != subscribed:
                                 if subscribed and time.monotonic() - session_started > 240:
                                     break  # Renew the short-lived session before changing symbols.
                                 await socket.send(json.dumps({"symbols": sorted(wanted), "filter": ["timesale"],
                                                               "sessionid": session_id, "linebreak": True, "validOnly": True}))
                                 subscribed = wanted
+                                self._cover(subscribed)
                                 self._publish({"type": "status", "state": "connected"})
                             try:
                                 message = await asyncio.wait_for(socket.recv(), timeout=1)
@@ -190,19 +232,22 @@ class ChartMarketStream:
                                 self._flush()
                                 last_flush = time.monotonic()
                         self._flush()
+                        self._cover(set())
                 except asyncio.CancelledError:
+                    self._cover(set())
                     raise
                 except Exception as exc:
                     # Provider errors never contain a token or session ID in logs.
                     _log.warning("Tradier chart stream disconnected (%s)", type(exc).__name__)
+                    self._cover(set())
                     self._pending.clear()
                     self._publish({"type": "status", "state": "fallback"})
-                    if self._clients and not self._stopping:
+                    if self._wanted() and not self._stopping:
                         await asyncio.sleep(delay)
                         delay = min(delay * 2, 30)
         finally:
             self._pending.clear()
             self._task = None
             # A new viewer may have subscribed just as the previous viewer left.
-            if self._clients and not self._stopping:
+            if self._wanted() and not self._stopping:
                 self._task = asyncio.create_task(self._run())

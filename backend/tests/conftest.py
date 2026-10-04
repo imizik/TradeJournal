@@ -56,6 +56,7 @@ for _flag in (
     "GMAIL_LISTENER_ENABLED",
     "WEBULL_LISTENER_AUTOSTART",
     "TRADINGVIEW_ANALYSIS_AUTOSTART",
+    "LEVEL_ALERTS_AUTOSTART",
 ):
     os.environ[_flag] = "false"
 

@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import AlertsPanel from "./AlertsPanel";
 import ChartMenu from "./ChartMenu";
-import type { HiddenItem, LayerToggle, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
+import type { HiddenItem, LayerToggle, MenuAlerts, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
 import HotkeySheet from "./HotkeySheet";
 import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
@@ -20,6 +21,8 @@ import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, c
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { useChartSettings } from "@/lib/chartSync";
+import { alertText, createAlert, rearmAlert, removeAlert } from "@/lib/alerts";
+import type { AlertCondition, AlertMark, AlertsPayload, AlertSource, LevelAlert } from "@/lib/alerts";
 import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLOR, MAX_DRAWINGS, MAX_LEVELS, MAX_UNDO, TOOL_NAMES } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, ItemEdit, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
@@ -42,11 +45,12 @@ const frameKey = (frame: Frame) => `${frame.symbol}|${frame.interval}`;
 /** A saved level on the adjusted basis; `was` is its saved price when a split moved it. */
 type ShownLevel = PriceLevel & { was: number | null };
 const NO_LEVELS: ShownLevel[] = [];
+const NO_MARKS: AlertMark[] = [];
 const NO_DRAWINGS: Drawing[] = [];
 /** The selected level or drawing and the panel it was selected on, which carries its bar. */
 type Selection = { symbol: string; id: string; panel: string };
 /** An open chart menu (C1.3): where it was asked for, on which panel's symbol, and the item there (`id`) or the price. */
-type OpenMenu = { at: { x: number; y: number; touch: boolean }; panel: string; symbol: string; price: number | null; id: string | null; reset(): void };
+type OpenMenu = { at: { x: number; y: number; touch: boolean }; panel: string; symbol: string; price: number | null; id: string | null; auto: string | null; reset(): void };
 /** The chart menu's Layers: the user's own groups first, then fills and the studies. */
 const GROUP_NAMES: [keyof HiddenGroups, string][] = [["levels", "My levels"], ["drawings", "Drawings"]];
 /** Only the items a chart draws: none of a hidden group, and no item hidden on its own. */
@@ -162,6 +166,8 @@ export default function ChartWorkspace() {
   const [sheet, setSheet] = useState(false);
   // A short message after a menu action ("Copied 256.12"), cleared after a moment.
   const [notice, setNotice] = useState("");
+  // Level alerts (C5.1) as an alert change returned them, until a workspace refresh newer than that change arrives.
+  const [alertEdit, setAlertEdit] = useState<{ at: number; data: AlertsPayload } | null>(null);
   // Level and drawing edits made in this tab, for undo and redo (C1.1, C1.2).
   const [edits, setEdits] = useState<{ undo: DrawingEdit[]; redo: DrawingEdit[] }>({ undo: [], redo: [] });
   const [immersive, setImmersive] = useState(false);
@@ -269,6 +275,41 @@ export default function ChartWorkspace() {
   }, [splitsBySymbol, wanted, settings.drawings]);
   // Automatic levels (C2.3) as the backend sent them, on the chart's basis already; none while their group is hidden.
   const autoFor = (name: string) => settings.autoLevelsHidden ? null : feedFor(name)?.auto_levels ?? null;
+  // Level alerts (C5.1): every alert, each one's price on the chart's basis where its symbol is on screen, and a bell for each chart.
+  const alertData = alertEdit && (!latest?.alerts || alertEdit.at >= latest.checked_at) ? alertEdit.data : latest?.alerts ?? alertEdit?.data ?? null;
+  const alertPrices = useMemo(() => {
+    const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
+    return new Map((alertData?.alerts ?? []).map((alert) => [alert.id,
+      levelOnBasis({ id: alert.id, price: alert.price, label: "", drawn_on: alert.created_on }, splits.get(alert.symbol) ?? []).price]));
+  }, [alertData, splitsBySymbol]);
+  const alertMarks = useMemo(() => {
+    const marks = new Map<string, AlertMark[]>();
+    for (const alert of alertData?.alerts ?? []) marks.set(alert.symbol, [...marks.get(alert.symbol) ?? [], { id: alert.id, price: alertPrices.get(alert.id) ?? alert.price, fired: alert.state === "fired" }]);
+    return marks;
+  }, [alertData, alertPrices]);
+  // Which side an alert waits on: the newest streamed trade, else the newest candle, else the quote.
+  const referenceFor = (name: string): number | null => {
+    const state = stream.get();
+    const tick = state.key === streamKey ? state.ticks.findLast((row) => row.symbol === name) : undefined;
+    const slot = slots.find((row) => row.symbol === name);
+    return tick?.price ?? (slot && panels.get(frameKey(slot))?.bars.at(-1)?.close) ?? latest?.quotes.find((quote) => quote.symbol === name)?.last ?? null;
+  };
+  const changeAlerts = (work: Promise<AlertsPayload>, done: string) => {
+    work.then((data) => { setAlertEdit({ at: Date.now() / 1000, data }); setNotice(done); }).catch((error: Error) => setNotice(error.message));
+  };
+  const makeAlert = (target: string, source: AlertSource, condition: AlertCondition, interval: Interval) => {
+    const reference = referenceFor(target);
+    if (reference == null) { setNotice(`No ${target} price yet, so the alert cannot tell which side to wait on.`); return; }
+    const direction = reference < source.price ? "up" as const : "down" as const;
+    changeAlerts(createAlert({ symbol: target, price: source.price, reference, condition, interval: condition === "closes_beyond" ? interval : null, session,
+      source_kind: source.kind, source_id: source.id, label: source.label }), `Alert set: ${target} ${alertText({ condition, interval, direction }, source.price)}`);
+  };
+  const rearm = (alert: LevelAlert) => {
+    const reference = referenceFor(alert.symbol);
+    if (reference == null) { setNotice(`Chart ${alert.symbol} to re-arm its alert from the current price.`); return; }
+    changeAlerts(rearmAlert(alert.id, alertPrices.get(alert.id) ?? alert.price, reference), `Alert armed again: ${alert.symbol}`);
+  };
+  const dropAlert = (alert: LevelAlert) => changeAlerts(removeAlert(alert.id), `Alert removed: ${alert.symbol}`);
   // The studies the charts draw: none while the Indicators group is hidden (C1.4).
   const indicators = useMemo(() => shownIndicators(settings.indicators, settings.studiesHidden), [settings.indicators, settings.studiesHidden]);
   // What the charts draw: hidden items and hidden groups (C1.3) are left out, so they neither draw nor select.
@@ -670,7 +711,7 @@ export default function ChartWorkspace() {
     if (tool) { setTool(null); return; }
     setEntry(NO_ENTRY);
     if (request.id) { setSelection({ symbol: target, id: request.id, panel }); setFresh(null); }
-    setMenu({ at: { x: request.clientX, y: request.clientY, touch: request.touch }, panel, symbol: target, price: request.price, id: request.id, reset: request.reset });
+    setMenu({ at: { x: request.clientX, y: request.clientY, touch: request.touch }, panel, symbol: target, price: request.price, id: request.id, auto: request.auto ?? null, reset: request.reset });
   };
   const copyPrice = async (value: number) => {
     const text = value.toFixed(2);
@@ -824,7 +865,26 @@ export default function ChartWorkspace() {
   // The open menu's item, as the charts show it (on the chart's basis); an item deleted or hidden meanwhile closes the menu.
   const menuLevel = menu?.id ? visibleLevels.get(menu.symbol)?.find((level) => level.id === menu.id) : undefined;
   const menuDrawing = menu?.id && !menuLevel ? visibleDrawings.get(menu.symbol)?.find((drawing) => drawing.id === menu.id) : undefined;
-  const menuItem: MenuItem | null = menuLevel ? { layer: "levels", level: menuLevel } : menuDrawing ? { layer: "drawings", drawing: menuDrawing } : null;
+  const menuZone = menu?.auto && !menu.id ? autoFor(menu.symbol)?.zones.find((zone) => zone.id === menu.auto) : undefined;
+  const menuItem: MenuItem | null = menuLevel ? { layer: "levels", level: menuLevel } : menuDrawing ? { layer: "drawings", drawing: menuDrawing } : menuZone ? { layer: "auto", zone: menuZone } : null;
+  // An alert watches one price: a level's, a horizontal ray's, or an automatic zone's edge nearest the price (its middle from inside it).
+  const menuSource = ((): AlertSource | null => {
+    if (!menu) return null;
+    if (menuLevel) return { kind: "level", id: menuLevel.id, label: menuLevel.label || `Level ${price(menuLevel.price)}`, price: menuLevel.price };
+    if (menuDrawing?.kind === "ray") return { kind: "drawing", id: menuDrawing.id, label: menuDrawing.text || "Horizontal ray", price: menuDrawing.points[0].price };
+    if (!menuZone) return null;
+    const last = referenceFor(menu.symbol);
+    const edge = last == null || menuZone.low === menuZone.high ? (menuZone.low + menuZone.high) / 2 : last < menuZone.low ? menuZone.low : last > menuZone.high ? menuZone.high : (menuZone.low + menuZone.high) / 2;
+    return { kind: "auto", id: menuZone.id, label: menuZone.label, price: edge };
+  })();
+  const menuSlot = menu ? slots[menu.panel === "main" ? 0 : Number(menu.panel.replace("Panel ", "")) - 1] : undefined;
+  const menuAlerts: MenuAlerts | undefined = menu && menuItem ? {
+    source: menuSource, interval: menuSlot && intradayInterval(menuSlot.interval) ? menuSlot.interval : "5m", phone: !!alertData?.phone,
+    existing: (alertData?.alerts ?? []).filter((alert) => alert.symbol === menu.symbol && alert.source_id === (menuSource?.id ?? menu.id)).map((alert) => ({ ...alert, shown: alertPrices.get(alert.id) ?? alert.price })),
+    onCreate: (condition) => { if (menuSource) makeAlert(menu.symbol, menuSource, condition, menuSlot && intradayInterval(menuSlot.interval) ? menuSlot.interval : "5m"); },
+    onRearm: (id) => { const alert = alertData?.alerts.find((row) => row.id === id); if (alert) rearm(alert); },
+    onRemove: (id) => { const alert = alertData?.alerts.find((row) => row.id === id); if (alert) dropAlert(alert); },
+  } : undefined;
   const layerToggles: LayerToggle[] = [
     ...GROUP_NAMES.map(([group, label]) => ({ key: group, label, on: !settings.hiddenGroups[group], toggle: () => toggleGroup(group) })),
     { key: "auto", label: "Auto levels", on: !settings.autoLevelsHidden, toggle: toggleAuto },
@@ -1098,6 +1158,7 @@ export default function ChartWorkspace() {
       </form>
       {levelError && <p role="alert" className="mt-2 text-[11px] text-amber-300">{levelError}</p>}
     </section>
+    <AlertsPanel data={alertData} prices={alertPrices} narrow={narrow} onRearm={rearm} onRemove={dropAlert} />
     <section className="border-t border-slate-700/40 p-3" aria-label="Journal executions"><h2 className="mb-3 text-xs font-medium text-slate-200">On your journal</h2>
       {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
     </section>
@@ -1165,7 +1226,7 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -1192,7 +1253,7 @@ export default function ChartWorkspace() {
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -1241,7 +1302,7 @@ export default function ChartWorkspace() {
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
       {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
-        layers={layerToggles} hidden={hiddenItems(menu.symbol)} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
+        layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
         onDelete={() => { if (menu.id) deleteItem(menu.symbol, menu.id); }} onClose={() => setMenu(null)} />}
       {notice && <div role="status" aria-label="Chart notice" className="pointer-events-none fixed bottom-[max(1rem,env(safe-area-inset-bottom))] left-1/2 z-[85] max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-md border border-slate-600 bg-[#121924]/95 px-3 py-1.5 text-xs text-slate-200 shadow-xl">{notice}</div>}

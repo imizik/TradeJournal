@@ -2,6 +2,7 @@ import { apiUrl } from "@/lib/api";
 import { cleanDrawings, cleanToolStyles, DEFAULT_TOOL_STYLES } from "./drawings";
 import type { Drawing, DrawingKind, ToolStyle } from "./drawings";
 import type { Earnings } from "./symbolInfo";
+import type { AlertsPayload } from "./alerts";
 
 export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as const;
 export type Interval = typeof INTERVALS[number];
@@ -106,6 +107,8 @@ export type ChartData = SymbolPanels & {
   market?: MarketDay;
   /** Symbols that panels hold on their own (C7.1), without quotes. */
   extras?: Record<string, SymbolPanels>;
+  /** Every level alert (C5.1); absent from a backend older than C5.1. */
+  alerts?: AlertsPayload;
 };
 export type ChartStreamTick = {
   type: "tick"; symbol: string; at: number; price: number; open: number; high: number; low: number;

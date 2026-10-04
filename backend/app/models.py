@@ -8,11 +8,13 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKey,
     Index,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     text,
 )
 from sqlalchemy.orm import defer
@@ -271,6 +273,66 @@ class OptionSnapshotDay(SQLModel, table=True):
     recorded: int = 0
     note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class LevelAlert(SQLModel, table=True):
+    """A price alert on the chart (Charts C5.1): one level of one symbol, made
+    from a saved level, a horizontal ray or an automatic level, judged by
+    ``engine/level_alert_monitor.py`` whether or not a chart is open.
+    ``price`` is on the chart's split-adjusted basis as of ``created_on`` (New
+    York) and moves with later splits, as a saved level does. ``direction`` is
+    the move that fires it, fixed when it is armed. It fires once per arming;
+    re-arming bumps ``generation``. ``checked_through`` is the end (epoch
+    seconds) of the newest candle the 1-minute sweep has judged."""
+
+    __tablename__ = "level_alert"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    symbol: str = Field(index=True)
+    price: float
+    created_on: date
+    condition: str  # touches | crosses | closes_beyond
+    interval: Optional[str] = None  # closes_beyond only: 1m ... 4h
+    session: str  # regular | extended: which trades and candles count
+    direction: str  # up | down
+    source_kind: str  # level | drawing | auto
+    source_id: Optional[str] = None
+    label: str = ""
+    state: str = Field(default="active", index=True)  # active | fired
+    generation: int = 1
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    armed_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    checked_through: Optional[int] = Field(default=None, sa_column=Column(BigInteger, nullable=True))
+    fired_at: Optional[datetime] = None  # UTC
+
+
+class LevelAlertEvent(SQLModel, table=True):
+    """One firing of a level alert, written once: the unique (alert, generation)
+    pair is what keeps a reconnect, a restart or a second detector from
+    recording it twice. Delivery to the phone is an outbox on the same row,
+    retried until sent, and is at-least-once: a crash between ntfy accepting
+    the message and this row saying so sends it again."""
+
+    __tablename__ = "level_alert_event"
+    __table_args__ = (
+        UniqueConstraint("alert_id", "generation", name="uq_level_alert_event_firing"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    alert_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("level_alert.id", ondelete="CASCADE"), nullable=False, index=True))
+    generation: int
+    level: float  # the alert's price on the basis of the day it fired
+    price: float  # the trade, the bar's extreme, or the candle's close
+    source: str  # stream | minute_bars | closed_bar
+    event_at: datetime  # UTC: the trade, the minute, or the candle's close
+    bar_time: Optional[int] = Field(default=None, sa_column=Column(BigInteger, nullable=True))  # epoch start of the candle or minute, when a bar fired it
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
 class StrategyDefinition(SQLModel, table=True):

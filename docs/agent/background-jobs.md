@@ -141,7 +141,12 @@ It cannot replay a completed or failed row or steal a running job. Its existing
 
 Optional TradingView analysis, and Gmail watch renewal when the Gmail listener
 is disabled (`GMAIL_WATCH_AUTOSTART`, development only), are still API-owned
-background threads. TradingView already has its own database claim/recovery
+background threads. The level alert monitor (Charts C5.1) is an API-owned
+asyncio task beside the chart stream, not a job: its durable state is the
+`level_alert` and `level_alert_event` rows (progress, one row per firing, and
+a delivery outbox claimed by an update), so an API restart resumes it without
+a `job_run`. `LEVEL_ALERTS_AUTOSTART=false` keeps it off, as the test suite
+does. TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
 now provides systemd services for the four lanes and the private API/frontend.

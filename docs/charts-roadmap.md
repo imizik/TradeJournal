@@ -93,8 +93,8 @@ These rows describe future work, not implemented recording or broker controls.
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with symbol info T1.4) |
-| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | next |
-| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
+| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | built ([PR #126](https://github.com/imizik/TradeJournal/pull/126)); done once a live alert is seen on the phone |
+| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | next, after C5.1's live phone check |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
 | C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | todo |
@@ -943,6 +943,20 @@ when it is created. Open-interest walls hold still through a session, but a
 volume wall can move to another strike, and a level moving under an alert
 confuses more than it helps: when the wall moves, the chart says so and the
 alert stays where it was. A wall alert is a level alert and claims no edge.
+As built ([Level alerts](charts-workspace.md#level-alerts-c51)): the menu on a
+saved level, a horizontal ray or an automatic level offers *touches*,
+*crosses* and *closes beyond* on that chart's interval (5m from a daily
+chart). An automatic zone's alert watches its edge nearest the price. An alert
+keeps its own price, so dragging the level does not move it. The monitor runs
+in the API process: touches and crosses are judged on every validated trade
+the one stream carries, and 1-minute bars stand in for minutes the stream did
+not cover. Closes beyond is judged on candles 30 seconds after they close.
+Each firing is one `level_alert_event` row (unique per alert and arming), and
+delivery is an at-least-once outbox on that row. Limits: 20 active alerts on
+5 symbols. Alerts count the chart's session setting when made (regular or
+extended). Trendlines, rectangles and notes take no alert. **Not yet
+observed:** a live message on the phone. After the deploy, set an alert near
+the price and watch it arrive before marking this done and starting C5.2.
 
 **C5.2 Retire the TradingView alert loop** (decided 2026-10-02). Alerts move
 into the app, and Pine stops being a path for anything. Once C5.1 has
