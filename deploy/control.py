@@ -25,7 +25,7 @@ STATE = Path("/var/lib/tradejournal")
 CONFIG = Path("/etc/tradejournal")
 UNITS = Path("/etc/systemd/system")
 SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail")]]
-AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-options-snapshot", "tradejournal-alerts"]
+AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-options-snapshot", "tradejournal-rvol-history", "tradejournal-alerts"]
 # Its timer pauses with the others during an operation. Its service is never
 # stopped from here: that service is what runs the controller unattended.
 AUTODEPLOY = "tradejournal-autodeploy"

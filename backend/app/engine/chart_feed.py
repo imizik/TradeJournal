@@ -14,8 +14,8 @@ import time
 
 import httpx
 
-from app.engine import chart_levels, tradier
-from app.engine.chart_adjust import adjust_minutes, describe, suspect_gaps
+from app.engine import chart_levels, chart_rvol, tradier
+from app.engine.chart_adjust import adjust_minutes, describe, factor_before, suspect_gaps
 from app.engine.chart_math import ET, chart_bars, market_day, normalize_bars
 from app.engine.chart_splits import UNAVAILABLE, ChartSplits, chart_splits
 
@@ -99,13 +99,16 @@ class ChartFeed:
                 raise error from None
 
     def workspace(self, symbol: str, intervals: list[str], watchlist: list[str], session: str, calendar=None, quotes: bool = True,
-                  stored_session: Callable[[str, date], list[dict] | None] | None = None) -> dict:
+                  stored_session: Callable[[str, date], list[dict] | None] | None = None,
+                  volume_profile: Callable[[str, date], chart_rvol.Profile | None] | None = None) -> dict:
         """One symbol's panels, plus batched quotes unless ``quotes`` is off (a
         panel holding its own symbol needs only candles).
 
         With ``stored_session`` (a completed session's raw minutes from disk, or
         None) the response also carries the automatic levels (C2.1–C2.3). They
         cost no provider request beyond the daily bars a daily panel reads anyway.
+        With ``volume_profile`` (a stored session's RVol profile, or None) each
+        intraday candle of today carries its relative volume (C2.4), from disk only.
         """
         now = datetime.now(ET)
         today = now.date()
@@ -172,9 +175,17 @@ class ChartFeed:
                 "trade_time": _number(q.get("trade_date"), divisor=1000),
             })
 
+        rvol, average = self._rvol(symbol, today, hours, info, calendar, volume_profile) if volume_profile else (None, None)
+        # The newest minute's start ends a candle still forming.
+        newest = datetime.fromtimestamp(minutes[-1]["time"], ET) if minutes else None
+        last_minute = newest.hour * 60 + newest.minute if newest else None
         panels = {}
         for interval in intervals:
             bars = chart_bars(minutes, daily, interval, session, {today: hours})
+            if rvol is not None and interval not in ("1D", "1W"):
+                # Before the 1,200-candle cut, so the count starts at the session's first candle.
+                values = chart_rvol.candle_rvol(bars, average, today, last_minute) if average else [None] * len(bars)
+                bars = [{**bar, "rvol": value} for bar, value in zip(bars, values)]
             panels[interval] = {"bars": bars[-1200:], "markers": []}
         if not any(p["bars"] for p in panels.values()) and problems:
             raise ChartFeedError(problems[0])
@@ -192,7 +203,43 @@ class ChartFeed:
         }
         if stored_session:
             data["auto_levels"] = self._levels(symbol, today, minutes, daily, info, calendar, stored_session, panels)
+        if volume_profile:
+            data["rvol"] = rvol
         return data
+
+    @staticmethod
+    def _rvol(symbol, today, hours, info, calendar, volume_profile) -> tuple[dict | None, chart_rvol.Profile | None]:
+        """Today's time-of-day volume baseline (C2.4) from the stored sessions before it, on
+        today's price basis. None on a day with no session; otherwise what the chart says about
+        it, with the baseline only when it is ready."""
+        def state(name: str, message: str | None, days=(), traded=(), missing=()) -> dict:
+            return {"state": name, "day": today.isoformat(), "sessions": [d.isoformat() for d in days],
+                    "traded": len(traded), "missing": [d.isoformat() for d in missing], "message": message}
+
+        if hours is not None and hours["status"] != "open":
+            return None, None
+        days = chart_rvol.window(today, calendar.hours) if hours is not None else None
+        if days is None:
+            return state("unavailable", "The market calendar is unavailable, so the 20 sessions before today cannot be chosen."), None
+        if hours["open"] != chart_rvol.OPEN:
+            return state("unavailable", "Today's regular session does not open at 9:30, so its minutes cannot be compared.", days), None
+        profiles, missing = [], []
+        for day in days:
+            profile = volume_profile(symbol, day)
+            if profile is None:
+                missing.append(day)
+                continue
+            # Raw stored volume, multiplied by every split from that session up to today.
+            factor = factor_before(info["splits"], day)
+            profiles.append((day, profile if factor == 1.0 else tuple(None if v is None else v * factor for v in profile)))
+        if missing:
+            return state("building", f"RVol needs the 20 sessions before today; {len(missing)} not stored yet. Watchlist names are stored each "
+                         "morning before the open, and any symbol's sessions as its older candles load.", days, missing=missing), None
+        found = chart_rvol.baseline(profiles)
+        if len(found.traded) < chart_rvol.MIN_SESSIONS:
+            return state("insufficient", f"Only {len(found.traded)} of the 20 sessions before today traded in regular hours; RVol needs "
+                         f"{chart_rvol.MIN_SESSIONS}.", days, found.traded), None
+        return state("ready", None, days, found.traded), found.average
 
     def _levels(self, symbol, today, minutes, daily, info, calendar, stored_session, panels) -> dict:
         """Automatic levels for the session in progress (or the next one), merged into zones,

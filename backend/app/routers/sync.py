@@ -29,6 +29,7 @@ from app.engine.jobs import (
 from app.engine.job_runtime import execute_job, in_sync_worker, submit_job
 from app.engine.enricher import polygon_calls_per_minute
 from app.engine.options_recorder import record as record_option_snapshots
+from app.engine.rvol_history import store as store_rvol_history
 from app.models import Fill, JobRun, Trade
 from app.environment import require_destructive_confirmation
 from app.routers.fills import (
@@ -49,6 +50,7 @@ JOB_FULL_PIPELINE = "full_pipeline"
 JOB_GMAIL_PUSH = "gmail_push"
 JOB_RESYNC_ALL = "resync_all"
 JOB_OPTIONS_SNAPSHOT = "options_snapshot"
+JOB_RVOL_HISTORY = "rvol_history"
 
 JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_GMAIL_SYNC, "label": "Gmail email sync", "description": "Poll Robinhood execution emails and save new fills.", "advanced": False, "progress_unit": "step"},
@@ -60,6 +62,7 @@ JOB_CONFIG: list[dict[str, Any]] = [
     {"job_type": JOB_DAILY_REVIEW, "label": "Daily review generation", "description": "Generate the latest daily review from current trades and enrichment.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_GMAIL_PUSH, "label": "Gmail push ingest", "description": "React to Gmail Pub/Sub notifications and run import/rebuild/enrichment.", "advanced": False, "progress_unit": "step"},
     {"job_type": JOB_OPTIONS_SNAPSHOT, "label": "Options positioning snapshot", "description": "Keep today's option open interest and volume for SPY, QQQ, SPX, open positions and watchlist names (16:15-20:00 New York).", "advanced": False, "progress_unit": "underlying", "api_provider": "Tradier", "rate_limit_per_minute": 30.0},
+    {"job_type": JOB_RVOL_HISTORY, "label": "Relative volume history", "description": "Store the 20 sessions before today for each chart watchlist name, so the charts' relative volume is ready at the open.", "advanced": False, "progress_unit": "symbol", "api_provider": "Alpaca", "rate_limit_per_minute": 30.0},
 ]
 
 _EXTRA_JOB_CONFIG: dict[str, dict[str, Any]] = {
@@ -221,6 +224,11 @@ def _run_trade_rebuild(session: Session, _job_id: uuid.UUID) -> tuple[int, str]:
 def _run_options_snapshot(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
     # The recorder commits each expiration as it goes, so a restart resumes.
     return record_option_snapshots(session, progress=lambda done, total, text: _set_job(job_id, done=done, total=total, current=text))
+
+
+def _run_rvol_history(session: Session, job_id: uuid.UUID) -> tuple[int, str]:
+    # Each session is published to disk as it arrives, so a restart resumes.
+    return store_rvol_history(session, progress=lambda done, total, text: _set_job(job_id, done=done, total=total, current=text))
 
 
 def _latest_review_day(session: Session) -> tuple[date, list[uuid.UUID]] | None:
@@ -616,6 +624,7 @@ async def run_sync_job(job_type: str, range: str = "week", force: bool = False, 
         JOB_TRADE_REBUILD: _run_trade_rebuild,
         JOB_DAILY_REVIEW: _run_daily_review,
         JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
+        JOB_RVOL_HISTORY: _run_rvol_history,
     }
     runner = runners.get(job_type)
     if not runner:
@@ -690,6 +699,7 @@ def execute_sync_job(job: JobRun) -> None:
             JOB_RESYNC_ALL: _run_resync_all,
             JOB_GMAIL_WATCH_RENEW: _run_gmail_watch_renew,
             JOB_OPTIONS_SNAPSHOT: _run_options_snapshot,
+            JOB_RVOL_HISTORY: _run_rvol_history,
         }
         runner = runners.get(job.job_type)
         if runner is None:

@@ -1,0 +1,12 @@
+[Unit]
+Description=Store the sessions chart relative volume needs before the open (06:00, catch-up 08:40 New York)
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 06:00:00 America/New_York
+OnCalendar=Mon..Fri *-*-* 08:40:00 America/New_York
+RandomizedDelaySec=60
+Persistent=true
+Unit=tradejournal-rvol-history.service
+
+[Install]
+WantedBy=timers.target
