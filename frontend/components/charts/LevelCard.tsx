@@ -24,7 +24,7 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
 }) {
   const several = zone.members.length > 1;
   return <div role="tooltip" aria-label={`${zone.label} level card`} style={style}
-    className={`absolute left-2 z-10 w-72 max-w-[calc(100%-1rem)] overflow-y-auto overscroll-contain rounded-md border border-slate-600/60 bg-[#141b26]/95 p-2.5 text-[11px] text-slate-300 shadow-lg ${pinned ? "" : "pointer-events-none"}`}>
+    className={`absolute left-2 z-10 w-72 max-w-[calc(100%-1rem)] overflow-y-auto overscroll-contain rounded-md border border-slate-600/60 bg-[#141b26] p-2.5 text-[11px] text-slate-300 shadow-lg ${pinned ? "" : "pointer-events-none"}`}>
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
         <div className="font-medium text-slate-100">{zone.label}</div>
