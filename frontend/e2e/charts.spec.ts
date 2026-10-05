@@ -4816,7 +4816,7 @@ const rangeMember = (kind: string, label: string, value: number): AutoLevel => (
 const RANGE_MEMBERS = [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_low", "EM 0DTE low", 255.24),
   rangeMember("expected_move_high", "EM Fri high", 261.94), rangeMember("expected_move_low", "EM Fri low", 252.74)];
 const MAX_PAIN = optionMember("max_pain", "Max pain", 248.5, "inferred");
-async function stubRanges(page: Page, requests: string[]) {
+async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RANGES, members: AutoLevel[] = RANGE_MEMBERS) {
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const url = route.request().url();
     requests.push(url);
@@ -4829,10 +4829,10 @@ async function stubRanges(page: Page, requests: string[]) {
     const auto = query.get("auto") !== "0";
     const options = layer ? [...optionMembers("oi", false), MAX_PAIN] : [];
     data.auto_levels = { day: "2026-10-05", as_of: CAPTURED + 600, atr: 5.5, band: 0.55, missing: {}, auto,
-      zones: mergeZones(auto ? AUTO_ZONES : [], [...options, ...(ranges ? RANGE_MEMBERS : [])]),
+      zones: mergeZones(auto ? AUTO_ZONES : [], [...options, ...(ranges ? members : [])]),
       ...(layer ? { options: { ...optionInfo("oi", "week", false, options), max_pain: { price: 248.5, expiration: "2026-10-09",
         note: "The strike where this expiration's open contracts would pay their holders least at expiry. Arithmetic on open interest; that price drifts to it is folklore, so treat it as a reference, not a target." } } } : {}),
-      ...(ranges ? { ranges: RANGES } : {}) };
+      ...(ranges ? { ranges: bands } : {}) };
     await route.fulfill({ json: data });
   });
 }
@@ -4877,6 +4877,12 @@ test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, 
   await expect(card).toContainText("calculated · Tradier option chains · priced 9:35 AM ET, fixed for the session");
   await expect(card).toContainText("Today's (0DTE) 257.50 straddle cost 2.10 (0.82%) at 9:35 AM ET, added to 257.34, the price then; IV 31.0%.");
   await expect(card).toContainText("a price, not a forecast of where price will stay");
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+  // Friday's high, in the round 262's zone, reads Friday's straddle and not today's.
+  const friday = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@261.94"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", friday));
+  await expect(page.getByRole("tooltip", { name: "262 + EM Fri high level card" })).toContainText("Fri, Oct 9's 257.50 straddle cost 4.60 (1.79%)");
   await page.screenshot({ path: test.info().outputPath("range-bands.png") });
   await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
 
@@ -4896,6 +4902,26 @@ test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, 
   await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
   await expect.poll(() => server.data?.rangeBandsHidden).toBe(true);
   expect(errors).toEqual([]);
+});
+
+test("two expected-move levels on the same cent each show their own expiration's straddle", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context, { revision: 1, data: { rangeBandsHidden: false } });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  // Friday's straddle centred 1.00 lower and 1.00 wider ends on today's high exactly.
+  const friday = { ...RANGES.bands[1], anchor: 256.34, move: 3.1, percent: 3.1 / 256.34, strike: 256 };
+  await stubRanges(page, [], { ...RANGES, bands: [RANGES.bands[0], friday] },
+    [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_high", "EM Fri high", 259.44)]);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM 0DTE high + EM Fri high");
+  const box = (await drawn(page, "main").boundingBox())!;
+  const zone = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@259.44"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", zone));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high + EM Fri high level card" });
+  await expect(card.getByLabel("Straddle Mon, Oct 5")).toContainText("Today's (0DTE) 257.50 straddle cost 2.10");
+  await expect(card.getByLabel("Straddle Fri, Oct 9")).toContainText("Fri, Oct 9's 256.00 straddle cost 3.10");
 });
 
 test("max pain always draws with the options levels, labelled inferred, with its expiration and a caveat", async ({ page, context }) => {

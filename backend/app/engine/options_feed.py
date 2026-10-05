@@ -151,6 +151,10 @@ class OptionsFeed:
             # After the close today's expiration is gone and quotes go stale: keep what the session priced, read nothing.
             return expected_move_levels(captured), {**info, "state": "ready" if captured else "closed", "bands": captured,
                                                     "message": None if captured else "The session has closed; bands are priced on trading days."}
+        if spot is None:
+            # Nothing to centre a new band on (a daily-only layout reads no minutes): show what is captured, read nothing.
+            return expected_move_levels(captured), {**info, "state": "ready" if captured else "unavailable", "bands": captured,
+                                                    "message": f"No live {symbol} price yet; bands are priced from today's minutes."}
         listed = self._list(symbol)
         if listed is None:
             self._background_dates(symbol, None)
@@ -171,9 +175,6 @@ class OptionsFeed:
                     stale.append(expiration)
                     reasons.append(f"{expiration:%a %b} {expiration.day}: loading.")
                     continue
-                if spot is None:
-                    reasons.append(f"No {symbol} price yet.")
-                    continue
                 found = straddle(read.value, spot, root)
                 if found["state"] != "ready":
                     reasons.append(f"{expiration:%a %b} {expiration.day}: {found.get('reason', 'no straddle')}")
@@ -191,7 +192,7 @@ class OptionsFeed:
         state = "loading" if stale else "ready" if bands else "unavailable"
         if not wanted:
             state, reasons = "none", ["No listed expiration."]
-        return levels, {**info, "state": state, "bands": bands, "message": " ".join(reasons) or None}
+        return levels, {**info, "state": state, "bands": bands, "message": " ".join(dict.fromkeys(reasons)) or None}
 
     def ladder(self, symbol: str, scope: str, signed: bool, spot: float | None) -> dict:
         """Every strike near the price for the side panel, reading what is stale first."""

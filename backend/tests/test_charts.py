@@ -571,7 +571,15 @@ def test_range_bands_join_the_zones_and_the_route_asks_for_them_on_every_symbol(
     def bands(symbol, spot):
         return [Level("expected_move_high", "EM 0DTE high", 101.05, "calculated", None, "tradier", formed_at=1)], {"state": "ready"}
 
-    found = ChartFeed()._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, None, True, bands)
+    priced = []
+
+    def spy(symbol, spot):
+        priced.append(spot)
+        return bands(symbol, spot)
+
+    found = ChartFeed()._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, None, True, spy)
+    # No minutes today: the bands get no price (never the last daily close), while other levels still use that close.
+    assert priced == [None]
     zone = next(z for z in found["zones"] if any(m["kind"] == "expected_move_high" for m in z["members"]))
     assert {"expected_move_high", "prior_day_high"} <= {m["kind"] for m in zone["members"]}
     assert found["ranges"] == {"state": "ready"} and "options" not in found

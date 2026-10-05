@@ -358,3 +358,14 @@ def test_range_bands_start_again_each_session_and_say_when_there_is_none():
     clock.advance(4 * 24 * 3600)  # Saturday
     levels, info = options.ranges("SPY", 100.0)
     assert levels == [] and info["state"] == "closed"
+
+
+def test_without_a_live_price_nothing_is_read_or_captured_but_a_captured_band_stays():
+    options, client, clock = feed()
+    levels, info = options.ranges("SPY", None)  # a daily-only layout: no minutes today
+    assert levels == [] and "No live SPY price" in info["message"]
+    assert client.calls == []  # nothing read for a band it cannot centre
+    options.ranges("SPY", 100.0)
+    clock.advance(15)
+    captured, _ = options.ranges("SPY", 100.0)
+    assert options.ranges("SPY", None)[0] == captured

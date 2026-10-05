@@ -267,7 +267,9 @@ class ChartFeed:
         # The latest price: today's newest minute, else the last daily close.
         spot = minutes[-1]["close"] if minutes else daily[-1]["close"] if daily else None
         extra, about = extra_levels(symbol, spot) if extra_levels else ([], None)
-        bands, ranges = range_levels(symbol, spot) if range_levels else ([], None)
+        # The expected move (C2.7) is priced around a live price only: today's newest minute, never a daily close.
+        live = minutes[-1]["close"] if minutes and datetime.fromtimestamp(minutes[-1]["time"], ET).date() == today else None
+        bands, ranges = range_levels(symbol, live) if range_levels else ([], None)
         zones = chart_levels.confluence([*(found.levels if auto else ()), *extra, *bands], band)
         missing = dict(found.missing) if auto else {}
         if band is None:

@@ -47,7 +47,7 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
         </>}
     </div>
     <ul className="mt-2 space-y-1 border-t border-slate-700/50 pt-2">
-      {zone.members.map((member) => <li key={`${member.kind}@${member.price}@${member.bar_time}`}>
+      {zone.members.map((member) => <li key={`${member.kind}@${member.price}@${member.bar_time}@${member.label}`}>
         <div className="flex justify-between gap-2">
           <span className="min-w-0 truncate"><span className="text-slate-200">{member.label}</span> <span className="text-slate-500">{KIND_NAMES[member.kind] ?? member.kind}</span></span>
           <span className="shrink-0 font-mono">{price(member.price)}</span>
@@ -63,12 +63,16 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
   </div>;
 }
 
+/** A band's name as the backend labels it: "0DTE" for today's expiration, else its weekday ("Fri"). */
+const bandName = (band: RangesInfo["bands"][number]) => band.today ? "0DTE"
+  : new Date(`${band.expiration}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short" });
 const day = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
 
 /** An expected-move level's straddle (C2.7): which expiration, its price, and the price it was centred on when captured. */
 function RangeDetail({ member, ranges }: { member: AutoLevel; ranges: RangesInfo }) {
   const high = member.kind === "expected_move_high";
-  const band = ranges.bands.find((row) => Math.abs(row.anchor + (high ? row.move : -row.move) - member.price) < 0.006);
+  // By the label the backend gives each band's levels ("EM 0DTE high", "EM Fri low"): two bands can end on the same cent.
+  const band = ranges.bands.find((row) => `EM ${bandName(row)} ${high ? "high" : "low"}` === member.label);
   if (!band) return null;
   return <p aria-label={`Straddle ${day(band.expiration)}`} className="mt-0.5 text-[10px] leading-4 text-sky-200/80">
     {band.today ? "Today's (0DTE)" : `${day(band.expiration)}'s`} {price(band.strike)} straddle cost {price(band.move)} ({(band.percent * 100).toFixed(2)}%) at {etTime(band.captured_at)} ET,

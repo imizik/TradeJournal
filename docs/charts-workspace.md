@@ -913,7 +913,9 @@ on every chart, saved in the shared workspace (`rangeBandsHidden`):
   what the options market charged for a move either way, not a forecast.
 - **When.** A band is priced once a New York session, on the first workspace
   request at least five minutes after the calendar's open (09:35 on a normal
-  day) with a chain read after that time, and is then fixed for the day:
+  day) with a chain read after that time and a live price (today's newest
+  minute; a layout of daily and weekly charts alone reads no minutes, so it
+  prices nothing and reads no chains), and is then fixed for the day:
   nothing more is read for it. After the close the session's bands stay
   drawn and nothing new is priced (today's 0DTE has expired, and later quotes
   are not the session's). Before 09:35, on a closed day, or with the
