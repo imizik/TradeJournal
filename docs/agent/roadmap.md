@@ -24,8 +24,9 @@ place. What each of them proves is documented where it is enforced, not here.
   the backend for unused and undefined names. Both run ahead of the suite.
 - **Frontend verification.** `backend/scripts/seed_dev_data.py` builds a
   deterministic dataset through the real reconstructor and `frontend/e2e/`
-  asserts its values reach the DOM. Smoke depth on purpose: filtering,
-  sorting, forms, editing and Strategy Lab are not covered, and there is no
+  asserts its values reach the DOM. Smoke depth on purpose: the Analytics
+  explorer's filters and drill-downs are covered (`analytics.spec.ts`), but
+  sorting, forms, editing and Strategy Lab are not, and there is no
   component-level unit coverage. Deepen when a regression justifies it.
 - **Environments.** `GET /health` names the database a process is on,
   `resync-all` refuses a hosted database unless the request names it, Alembic

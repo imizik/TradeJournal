@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RvolBaseline } from "../lib/charts";
+import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 import type { Earnings } from "../lib/symbolInfo";
 import type { AlertsPayload, LevelAlert } from "../lib/alerts";
@@ -4916,6 +4916,148 @@ test("options levels draw the walls and the nearest strikes, follow every filter
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", "");
   await expect.poll(() => (server.data?.optionsLayer as { hidden?: boolean } | undefined)?.hidden).toBe(true);
   expect(errors).toEqual([]);
+});
+
+// ---- Range bands (C2.7) and max pain (C4.7): stubbed bands; the backend tests capture and merge them ----
+
+const CAPTURED = Date.parse("2026-10-05T09:35:00-04:00") / 1000;
+const RANGES: RangesInfo = { state: "ready", message: null, symbol: "MRVL", root: "MRVL", source: "Tradier option chains", day: "2026-10-05", bands: [
+  { expiration: "2026-10-05", tags: ["nearest"], today: true, anchor: 257.34, move: 2.1, percent: 2.1 / 257.34, strike: 257.5, iv: 0.31, quoted_at: CAPTURED - 5, captured_at: CAPTURED },
+  { expiration: "2026-10-09", tags: ["friday"], today: false, anchor: 257.34, move: 4.6, percent: 4.6 / 257.34, strike: 257.5, iv: 0.29, quoted_at: CAPTURED - 5, captured_at: CAPTURED },
+] };
+const rangeMember = (kind: string, label: string, value: number): AutoLevel => ({
+  kind, label, price: value, evidence: "calculated", timeframe: null, source: "tradier", bar_time: null, formed_at: CAPTURED, developing: false });
+const RANGE_MEMBERS = [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_low", "EM 0DTE low", 255.24),
+  rangeMember("expected_move_high", "EM Fri high", 261.94), rangeMember("expected_move_low", "EM Fri low", 252.74)];
+const MAX_PAIN = optionMember("max_pain", "Max pain", 248.5, "inferred");
+async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RANGES, members: AutoLevel[] = RANGE_MEMBERS) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const url = route.request().url();
+    requests.push(url);
+    const query = new URL(url).searchParams;
+    const data = fixture(url);
+    // Intraday candles carry VWAP's standard deviation; daily ones have no VWAP.
+    for (const panel of Object.values(data.panels)) for (const bar of panel?.bars ?? []) bar.vwap_sd = bar.vwap === null ? null : 0.6;
+    const layer = query.get("options");
+    const ranges = query.get("ranges") === "1";
+    const auto = query.get("auto") !== "0";
+    const options = layer ? [...optionMembers("oi", false), MAX_PAIN] : [];
+    data.auto_levels = { day: "2026-10-05", as_of: CAPTURED + 600, atr: 5.5, band: 0.55, missing: {}, auto,
+      zones: mergeZones(auto ? AUTO_ZONES : [], [...options, ...(ranges ? members : [])]),
+      ...(layer ? { options: { ...optionInfo("oi", "week", false, options), max_pain: { price: 248.5, expiration: "2026-10-09",
+        note: "The strike where this expiration's open contracts would pay their holders least at expiry. Arithmetic on open interest; that price drifts to it is folklore, so treat it as a reference, not a target." } } } : {}),
+      ...(ranges ? { ranges: bands } : {}) };
+    await route.fulfill({ json: data });
+  });
+}
+const RANGE_LEVELS = "EM Fri low,EM 0DTE low,EM 0DTE high,262 + EM Fri high";
+
+test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, explain themselves, and hide from the menu", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Off until asked for: no bands drawn and none asked for.
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  expect(requests.every((url) => !new URL(url).searchParams.has("ranges"))).toBe(true);
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const group = layerGroup(page, "Range bands");
+  await group.getByRole("button", { name: "Show Range bands" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("ranges=1");
+  // Every expected-move level draws on every chart, however far; Friday's high shares the round 262's zone.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", RANGE_LEVELS);
+  await expect(group).toContainText("MRVL: 0DTE ±2.10, Fri ±4.60.");
+  // VWAP bands on the intraday charts' every candle; the daily chart has no VWAP to band.
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands", "240");
+  await expect(drawn(page, "Panel 4")).toHaveAttribute("data-vwap-bands", "0");
+  await expect.poll(() => server.data?.rangeBandsHidden).toBe(false);
+
+  const box = (await drawn(page, "main").boundingBox())!;
+  const high = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id === "expected_move_high@259.44")!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", high));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high level card" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("EM 0DTE high Expected move, upper259.44");
+  await expect(card).toContainText("calculated · Tradier option chains · priced 9:35 AM ET, fixed for the session");
+  await expect(card).toContainText("Today's (0DTE) 257.50 straddle cost 2.10 (0.82%) at 9:35 AM ET, added to 257.34, the price then; IV 31.0%.");
+  await expect(card).toContainText("a price, not a forecast of where price will stay");
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+  // Friday's high, in the round 262's zone, reads Friday's straddle and not today's.
+  const friday = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@261.94"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", friday));
+  await expect(page.getByRole("tooltip", { name: "262 + EM Fri high level card" })).toContainText("Fri, Oct 9's 257.50 straddle cost 4.60 (1.79%)");
+  await page.screenshot({ path: test.info().outputPath("range-bands.png") });
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // With the automatic levels hidden, the bands still ask for themselves alone.
+  await layerGroup(page, "Auto levels").getByRole("button", { name: "Hide Auto levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("auto=0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", /^expected_move_low@252.74/);
+
+  // Through a reload, then off again from the chart menu's Layers.
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
+  await rightClick(page, "main", EMPTY);
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Range bands" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", "");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await expect.poll(() => server.data?.rangeBandsHidden).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("two expected-move levels on the same cent each show their own expiration's straddle", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context, { revision: 1, data: { rangeBandsHidden: false } });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  // Friday's straddle centred 1.00 lower and 1.00 wider ends on today's high exactly.
+  const friday = { ...RANGES.bands[1], anchor: 256.34, move: 3.1, percent: 3.1 / 256.34, strike: 256 };
+  await stubRanges(page, [], { ...RANGES, bands: [RANGES.bands[0], friday] },
+    [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_high", "EM Fri high", 259.44)]);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM 0DTE high + EM Fri high");
+  const box = (await drawn(page, "main").boundingBox())!;
+  const zone = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@259.44"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", zone));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high + EM Fri high level card" });
+  await expect(card.getByLabel("Straddle Mon, Oct 5")).toContainText("Today's (0DTE) 257.50 straddle cost 2.10");
+  await expect(card.getByLabel("Straddle Fri, Oct 9")).toContainText("Fri, Oct 9's 256.00 straddle cost 3.10");
+});
+
+test("max pain always draws with the options levels, labelled inferred, with its expiration and a caveat", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await layerGroup(page, "Options levels").getByRole("button", { name: "Show Options levels" }).click();
+  // Far below the nearest strikes, and still drawn: like the walls, max pain is not ranked away.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", `Max pain,${OI_LEVELS}`);
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", "max_pain@248.5"));
+  const card = page.getByRole("tooltip", { name: "Max pain level card" });
+  await expect(card).toContainText("Max pain Max pain: least paid out at expiry248.50");
+  await expect(card).toContainText("inferred · Tradier option chains");
+  await expect(card).toContainText("Fri, Oct 9 expiration. The strike where this expiration's open contracts would pay their holders least at expiry.");
+  await expect(card).toContainText("folklore");
 });
 
 function ladder(url: string): OptionsLadder {

@@ -211,7 +211,12 @@ cd backend
 - Options levels (C4.4), off until shown from Layers: call and put walls and
   the strikes ranked by open interest, volume or gamma, merged with the
   automatic levels, and the strike ladder (C4.5) in the dock (see
-  [Options levels](#options-levels-c44) and [Strike ladder](#strike-ladder-c45)).
+  [Options levels](#options-levels-c44) and [Strike ladder](#strike-ladder-c45)),
+  with max pain (C4.7).
+- Range bands (C2.7), off until shown from Layers: today's and Friday's
+  expected move from the at-the-money straddle, priced five minutes after the
+  open and fixed for the session, and VWAP ±1σ/±2σ (see
+  [Range bands](#range-bands-c27)).
 - Extended-session shading and regular/extended hours selection. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
@@ -794,6 +799,7 @@ per-expiration breakdown.
 | Dollar gamma | *calculated* | Black-Scholes gamma × open interest × shares per contract × S² × 0.01: the change in the shares' dollar delta for a 1% move. Unsigned. |
 | Signed gamma | *assumed* | Calls' dollar gamma less puts': dealers taken as long calls and short puts. Open interest does not say who holds a contract. Off unless asked for. |
 | Gamma flip | *assumed*, model estimate | Where signed dollar gamma changes sign nearest the price, searched within 5% either way on a 41-point grid and then bisected, each strike's IV and the time held. SPY, QQQ and SPX only. |
+| Max pain (C4.7) | *inferred* | For one expiration, the listed strike K minimising what its open contracts would pay at expiry: call open interest × (K − strike) below K plus put open interest × (strike − K) above it, times the contract size. A tie goes to the lower strike; none without open interest. The arithmetic is exact; that price drifts to it is folklore. |
 
 Model assumptions, for every contract alike:
 
@@ -835,7 +841,12 @@ on every chart, with its filters saved in the shared workspace
   week*: the nearest one's Monday-to-Friday week (default). *Within 45
   days*: every one. Expired ones are gone from 16:00 (09:30 AM-settled).
 - **Strikes each side** (1–5, default 3): the option zones nearest the price
-  on each side. Walls and the flip always draw. Changing it reads nothing.
+  on each side. Walls, the flip and max pain always draw. Changing it reads nothing.
+
+**Max pain** (C4.7) is computed for the scope's nearest expiration (today's
+on SPY and QQQ with *0DTE / nearest*) and draws as an *inferred* level, tinted
+orange. Its card names the expiration and says it is a reference, not a
+target; like the walls, it holds still through a session.
 
 The workspace request carries the choice (`options=oi.week.0`: measure,
 scope, signed; `auto=0` when the automatic levels are hidden). The backend
@@ -887,6 +898,45 @@ and named. A click or tap marks the strike on every chart of the symbol as a
 solid "Strike …" line and brings it onto the main chart's price scale; a
 second click clears it, and charting another symbol drops it. On a phone the
 tap also closes the sheet so the chart shows.
+
+### Range bands (C2.7)
+
+Off by default. Layers → Range bands (or the chart menu's Layers) shows them
+on every chart, saved in the shared workspace (`rangeBandsHidden`):
+
+- **Expected move.** For the nearest expiration (0DTE on SPY and QQQ) and the
+  nearest Friday, the at-the-money straddle's mid (T2.1's rule: the strike
+  nearest the price listing both legs; a leg without a bid or ask, crossed,
+  or wider than its own mid gives no number) is drawn as "EM 0DTE high/low"
+  and "EM Fri high/low": the price at that moment plus and minus the
+  straddle. One expiration that is both reads once. It is *calculated* and
+  draws blue; its card gives the strike, the straddle's price and percent,
+  the IV, when it was priced and the price it was centred on, and says it is
+  what the options market charged for a move either way, not a forecast.
+- **When.** A band is priced once a New York session, on the first workspace
+  request at least five minutes after the calendar's open (09:35 on a normal
+  day) with a chain read after that time and a live price (today's newest
+  minute; a layout of daily and weekly charts alone reads no minutes, so it
+  prices nothing and reads no chains), and is then fixed for the day:
+  nothing more is read for it. After the close the session's bands stay
+  drawn and nothing new is priced (today's 0DTE has expired, and later quotes
+  are not the session's). Before 09:35, on a closed day, or with the
+  calendar unavailable, nothing draws and the Layers panel says why. A wide
+  market is not captured and is tried on the next read. A capture lives in
+  the API process's memory, so the first look at a symbol after 09:35, or a
+  restart, prices it later; the card's time says when.
+- **VWAP bands.** On intraday charts, VWAP ±1σ (dashed) and ±2σ (dotted),
+  where σ is the regular session's volume-weighted standard deviation of the
+  same minute HLC3 prices VWAP uses (`vwap_sd` on each candle). None outside
+  the regular session or on daily and weekly charts.
+
+The workspace request carries `ranges=1` (and `auto=0` when the automatic
+levels are hidden). The expected-move levels join the automatic levels before
+confluence, so "262 + EM Fri high" is one zone whose interactions are read
+and from which an alert can be made; every expected-move level draws while the
+switch is on, however far from the price. Chains come through the options feed
+and its budget: the nearest and the Friday chain until both are captured, then
+none. Panels holding their own symbol (SPY, QQQ) get their own bands.
 
 ### Automatic levels (C2.1)
 
@@ -1193,6 +1243,14 @@ text inline. At 390px a swipe and a tap open nothing, a held finger opens
 the chart menu and a level's menu as bottom sheets with 44px rows and swatches,
 a held finger on a selected level opens its menu without moving it, and the
 backdrop closes the sheet.
+Range-band and max-pain tests turn the range bands on from Layers, read the
+expected-move levels on all five charts (one merged with a round number), the
+VWAP bands on intraday charts and none on the daily chart, an expected-move
+card, the request's `ranges=1` and `auto=0`, the saved switch through a reload
+and its menu toggle; and read max pain far below the price among the options
+levels with its *inferred* card. Backend tests pin max pain and the VWAP
+standard deviation by hand and the capture rule with a fake clock; live chains
+at 09:35 are not exercised.
 Workspace-shell tests (C7.3) measure the page and the chart grid at 1440×900
 and 1920×1080 with the dock open and closed (no page scrolling, all five
 charts in view, and with the dock closed a grid at least 80% of the window's

@@ -49,6 +49,13 @@ the board's `next` is unchanged (C5.2, once C5.1 reaches the phone). C4.6,
 open-interest change from the recorded snapshots, was added as a new row
 rather than built.
 
+**Range bands and max pain (2026-10-05):** at the user's request, two new
+rows were added and built ahead of the board's `next`, in one branch: C2.7
+(expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ) and
+C4.7 (max pain in the options layer, labelled *inferred*). They came from the
+user asking which levels traders use to see where price is likely to range.
+The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
+
 ## How to work from this file
 
 1. Take the first item in the [status board](#status-board) whose status is
@@ -118,6 +125,8 @@ rather than built.
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
 | C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
+| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | built ahead of `next` at the user's request (branch `claude/kind-thompson-iecgxd`); done once its PR merges |
+| C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | built ahead of `next` at the user's request (branch `claude/kind-thompson-iecgxd`); done once its PR merges |
 
 Why this order: history, correct sessions and smooth updates come first; then
 shared state and SPY/QQQ/name layouts. Record options snapshots early because
@@ -142,7 +151,8 @@ C3.6 needs C3.4/C3.5 and C3.1's trade-card surface. These are three separate
 implementation slices, in that order, not permission to implement all three
 when asked for one.
 C2.6 needs C2.4; each history page's sessions need their own 20-session baselines.
-C4.6 needs C4.3's snapshots and C4.5's ladder.
+C4.6 needs C4.3's snapshots and C4.5's ladder. C2.7 needs C2.3's zones and
+T2.1's straddle; C4.7 needs C4.4's layer.
 
 ## Ground truth this plan rests on
 
@@ -618,6 +628,28 @@ watchlist's included, refresh on a background thread in one batched call, so a
 chart never waits for them. Upcoming dates were checked against company
 announcements on 2026-10-04 (see Data this plan can rely on).
 
+**C2.7 Range bands.** One Layers switch, off until shown, for "where is price
+likely to range today": the expected move drawn on the chart, and VWAP bands.
+The expected move is the at-the-money straddle's mid (T2.1) for the nearest
+expiration (0DTE on SPY and QQQ) and the nearest Friday, drawn above and below
+the price at the moment it was priced. It is priced once a session, five
+minutes after the regular open so the quotes have settled, and then fixed for
+the day, so the lines do not slide with price; a straddle captured later (the
+first look at a symbol, a restart) says when it was priced. The bands join the
+automatic levels' zones (so an alert can be made from one) and every one draws
+while the switch is on. VWAP ±1σ and ±2σ use the session's volume-weighted
+standard deviation of the same minute prices VWAP uses. A band is what the
+options market charged for a move either way, not a forecast of where price
+will stay; the card says so. *Done when:* the capture rule (not before 09:35,
+not from a chain read before then, once per session, a wide market retried),
+the standard deviation by hand, and the workspace route have backend tests,
+and a browser test toggles the switch, reads the levels, the VWAP bands and a
+card, and hides them again through a reload.
+As built ([Range bands](charts-workspace.md#range-bands-c27)): the capture is
+kept in memory (a deploy waits for the close, so a restart mid-session is
+rare and discloses itself through the priced time). Before 09:35, on a closed
+day, or while a chain loads, the Layers panel says why nothing is drawn.
+
 ### Phase 3 — The journal on the chart
 
 **C3.1 Trade card.** Clicking a fill arrow opens a card for that trade: the
@@ -961,6 +993,17 @@ both sessions' dates; a session marked unavailable leaves the change
 unavailable, never measured against an older one. *Done when:* a fixture with
 a missed session and a new strike proves both, and the change reads from the
 stored rows with no provider request.
+
+**C4.7 Max pain.** The strike of the scope's nearest expiration where its open
+contracts would pay their holders least at expiry, drawn by the options layer
+beside the walls and always shown while it is on. It is arithmetic on open
+interest, but the idea that price drifts to it is folklore, so it is
+*inferred* and its card says it is a reference, not a target. *Done when:* a
+hand-worked fixture pins the strike, roots stay apart, a tie takes the lower
+strike, no open interest gives none, and a browser test reads the line and
+its card.
+As built ([Options levels](charts-workspace.md#options-levels-c44)): orange,
+with the expiration it was computed for on its card.
 
 ### Phase 5 — Alerts on the chart
 

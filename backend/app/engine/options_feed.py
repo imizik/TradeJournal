@@ -1,5 +1,6 @@
-"""Option chains for the chart: the options levels layer (Charts C4.4), the strike
-ladder (C4.5) and the implied move (symbol info T2.1).
+"""Option chains for the chart: the options levels layer (Charts C4.4) with max pain
+(C4.7), the strike ladder (C4.5), the implied move (symbol info T2.1) and the
+expected-move range bands (C2.7).
 
 Every read goes through the C4.1 adapter (`options_chain`) and its budget of 30
 requests a minute, without waiting for a slot: the chart is interactive, so a
@@ -16,6 +17,10 @@ minute, whatever asks: past that a read waits for the next poll.
 The chart asks for its main symbol's scope and only the nearest expiration of
 symbols that panels hold (SPY and QQQ 0DTE), which keeps the steady state near
 ten requests a minute.
+
+The range bands (C2.7) read the nearest and the nearest Friday expiration until
+each one's at-the-money straddle has been captured for the session, and nothing
+after that: a captured band holds for the rest of the day.
 
 Chains live in memory only. One read on an earlier New York date is not used:
 open interest changes overnight. The chart layer never waits: ``chart``
@@ -36,10 +41,10 @@ import time
 from app.engine.chart_levels import Level
 from app.engine.chart_math import ET
 from app.engine.options_chain import OptionsChainError, TradierOptions
-from app.engine.options_implied import days_to, straddle, targets
+from app.engine.options_implied import days_to, expected_move_levels, straddle, targets
 from app.engine.options_models import OptionChain
-from app.engine.options_positioning import (DEALER_SIDE, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, Positioning, StrikeRow,
-                                            chart_levels, gamma_flip, positioning, primary_root, scope_expirations)
+from app.engine.options_positioning import (DEALER_SIDE, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, MaxPain, Positioning, StrikeRow,
+                                            chart_levels, gamma_flip, max_pain, positioning, primary_root, scope_expirations)
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +60,10 @@ KEEP_SYMBOLS = 8
 LADDER_STRIKES = 25  # strikes shown on each side of the price
 FLIP_DRIFT = 0.01  # a flip computed within 1% of the current price, on the same chains, is reused
 SOURCE = "Tradier option chains"
+# Range bands (C2.7): a straddle is captured this many minutes after the regular open, once its quotes have settled.
+CAPTURE_AFTER = 5
+MAX_PAIN_NOTE = ("The strike where this expiration's open contracts would pay their holders least at expiry. "
+                 "Arithmetic on open interest; that price drifts to it is folklore, so treat it as a reference, not a target.")
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +103,8 @@ class OptionsFeed:
         self._calls: deque[float] = deque()
         self._refreshing: set[str] = set()
         self._flips: dict[tuple, tuple[float, GammaFlip]] = {}
+        # Range bands (C2.7): each (symbol, New York date, expiration)'s captured straddle.
+        self._bands: dict[tuple[str, date, date], dict] = {}
 
     # ------------------------------------------------------------------ public
 
@@ -107,10 +118,81 @@ class OptionsFeed:
         if found is None:
             return [], {**info, "mode": layer.measure, "signed": layer.signed, "strikes": [], "flip": None}
         flip = self._flip(layer.scope, found, chains, now) if layer.signed and layer.measure == "gamma" else None
-        levels = chart_levels(found, layer.measure, layer.signed, flip)
+        # Max pain (C4.7) is one expiration's: the scope's nearest.
+        pain = max_pain(chains[0], found.root) if chains else None
+        levels = chart_levels(found, layer.measure, layer.signed, flip, pain)
         shown = {level.price for level in levels}
         rows = self._rows(found, [row for row in found.strikes if row.strike in shown], layer.measure, layer.signed)
-        return levels, {**info, "mode": layer.measure, "signed": layer.signed, "strikes": rows, "flip": _flip_view(flip)}
+        return levels, {**info, "mode": layer.measure, "signed": layer.signed, "strikes": rows, "flip": _flip_view(flip),
+                        "max_pain": _pain_view(pain)}
+
+    def ranges(self, symbol: str, spot: float | None) -> tuple[list[Level], dict]:
+        """The expected-move bands (C2.7): the nearest and the nearest Friday expiration's
+        at-the-money straddle, each captured once a session ``CAPTURE_AFTER`` minutes after the
+        regular open, around the price at that moment. From memory only; until a band is
+        captured its chain is read in the background, and after that nothing is read."""
+        now = self._now()
+        today = now.date()
+        root = primary_root(symbol)
+        info = {"symbol": symbol, "root": root, "source": SOURCE, "day": today.isoformat(), "bands": [], "message": None}
+        hours = self._hours(today)
+        if hours is None:
+            return [], {**info, "state": "unavailable", "message": "The market calendar is unavailable, so the open is unknown."}
+        if hours.get("status") != "open" or hours.get("open") is None:
+            return [], {**info, "state": "closed", "message": "No regular session today; bands are priced on trading days."}
+        at = datetime.combine(today, datetime.min.time(), ET) + timedelta(minutes=hours["open"] + CAPTURE_AFTER)
+        if now < at:
+            return [], {**info, "state": "waiting", "message": f"Priced at {at:%-I:%M} ET, {CAPTURE_AFTER} minutes after the open."}
+        with self._lock:
+            self._bands = {key: band for key, band in self._bands.items() if key[1] == today}
+            captured = sorted((band for key, band in self._bands.items() if key[0] == symbol), key=lambda band: band["expiration"])
+        closed = datetime.combine(today, datetime.min.time(), ET) + timedelta(minutes=hours["close"] or 16 * 60)
+        if now >= closed:
+            # After the close today's expiration is gone and quotes go stale: keep what the session priced, read nothing.
+            return expected_move_levels(captured), {**info, "state": "ready" if captured else "closed", "bands": captured,
+                                                    "message": None if captured else "The session has closed; bands are priced on trading days."}
+        if spot is None:
+            # Nothing to centre a new band on (a daily-only layout reads no minutes): show what is captured, read nothing.
+            return expected_move_levels(captured), {**info, "state": "ready" if captured else "unavailable", "bands": captured,
+                                                    "message": f"No live {symbol} price yet; bands are priced from today's minutes."}
+        listed = self._list(symbol)
+        if listed is None:
+            self._background_dates(symbol, None)
+            return [], {**info, "state": "loading", "message": self._cooling() or "Option expirations are not loaded yet."}
+        chosen = targets(listed, root, now, None, self._closes(listed[:FAST]))
+        wanted = list(dict.fromkeys(d for d in (chosen["nearest"], chosen["friday"]) if d is not None))
+        bands, reasons, stale = [], [], []
+        for expiration in wanted:
+            key = (symbol, today, expiration)
+            with self._lock:
+                band = self._bands.get(key)
+            if band is None:
+                read = self._chain(symbol, expiration, today)
+                # Only quotes read after the capture time (a chain read before the open holds
+                # yesterday's) and within the last minute. A wide market is read again once its
+                # chain is a minute old, never sooner: one read a minute per band at most.
+                if read is None or read.fetched < at.timestamp() or self._clock() - read.fetched >= FAST_TTL:
+                    stale.append(expiration)
+                    reasons.append(f"{expiration:%a %b} {expiration.day}: loading.")
+                    continue
+                found = straddle(read.value, spot, root)
+                if found["state"] != "ready":
+                    reasons.append(f"{expiration:%a %b} {expiration.day}: {found.get('reason', 'no straddle')}")
+                    continue
+                band = {"expiration": expiration.isoformat(), "tags": [name for name in ("nearest", "friday") if chosen[name] == expiration],
+                        "today": expiration == today, "anchor": round(spot, 4), "move": found["move"], "percent": found["percent"],
+                        "strike": found["strike"], "iv": found["iv"], "quoted_at": found["quoted_at"], "captured_at": int(self._clock())}
+                with self._lock:
+                    band = self._bands.setdefault(key, band)  # two requests at once capture one band
+            bands.append(band)
+        if stale:
+            self._background_dates(symbol, stale)
+        levels = expected_move_levels(bands)
+        # Loading only while a chain is being read: the page asks again sooner for that, not for a wide market.
+        state = "loading" if stale else "ready" if bands else "unavailable"
+        if not wanted:
+            state, reasons = "none", ["No listed expiration."]
+        return levels, {**info, "state": state, "bands": bands, "message": " ".join(dict.fromkeys(reasons)) or None}
 
     def ladder(self, symbol: str, scope: str, signed: bool, spot: float | None) -> dict:
         """Every strike near the price for the side panel, reading what is stale first."""
@@ -339,6 +421,43 @@ class OptionsFeed:
             with self._lock:
                 self._refreshing.discard(symbol)
 
+    def _background_dates(self, symbol: str, expirations: list[date] | None) -> None:
+        """Read the expiration list and these chains on a background thread (the range bands);
+        None reads the bands' expirations, the nearest and the nearest Friday, once the list is in."""
+        if self._cooling():
+            return
+        key = f"{symbol}|bands"
+        with self._lock:
+            if key in self._refreshing:
+                return
+            self._refreshing.add(key)
+
+        def work():
+            try:
+                with self._fetching:
+                    self._read_list(symbol)
+                    wanted = expirations
+                    if wanted is None and (listed := self._list(symbol)) is not None:
+                        chosen = targets(listed, primary_root(symbol), self._now(), None, self._closes(listed[:FAST]))
+                        wanted = list(dict.fromkeys(d for d in (chosen["nearest"], chosen["friday"]) if d is not None))
+                    self._read_chains(symbol, (wanted or [])[:PER_PASS])
+            except Exception:  # a background thread has no caller to tell
+                log.exception("Option chain refresh for range bands failed for %s", symbol)
+            finally:
+                with self._lock:
+                    self._refreshing.discard(key)
+        try:
+            self._spawn(work)
+        except RuntimeError:
+            with self._lock:
+                self._refreshing.discard(key)
+
+    def _hours(self, day: date) -> dict | None:
+        calendar = self._calendar
+        if calendar is None:
+            from app.engine.chart_calendar import chart_calendar as calendar
+        return calendar.hours(day)
+
     def _closes(self, dates) -> dict[date, int | None]:
         """Each date's close from the market calendar, for expiry times; None where it has none."""
         calendar = self._calendar
@@ -366,6 +485,12 @@ def _flip_view(flip: GammaFlip | None) -> dict | None:
         return None
     return {"price": flip.price, "low": round(flip.searched[0], 2), "high": round(flip.searched[1], 2), "note": flip.note,
             "assumption": DEALER_SIDE}
+
+
+def _pain_view(pain: MaxPain | None) -> dict | None:
+    if pain is None:
+        return None
+    return {"price": pain.price, "expiration": pain.expiration.isoformat(), "note": MAX_PAIN_NOTE}
 
 
 def _scope_note(scope: str, wanted: list[date], today: date) -> str | None:

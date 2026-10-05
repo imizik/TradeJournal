@@ -387,11 +387,17 @@ is verifiable rather than hopeful.
 - Option positioning (`options_positioning.py`, pure) reads one root at a
   time and labels every number: open interest and volume observed, walls,
   ranks and gamma calculated (Black-Scholes at the chart's price, never the
-  provider's hourly greek), signed gamma and the flip assumed and off unless
+  provider's hourly greek), max pain inferred (the arithmetic is exact; that
+  price drifts to it is not), signed gamma and the flip assumed and off unless
   asked for. A missing input leaves a value unavailable, never zero or a
   contract size of 100. Interactive option reads (`options_feed.py`) never
   wait for a budget slot and take at most 24 of the 30 a minute; only the
   nightly recorder waits.
+- The range bands' expected move (C2.7) is the at-the-money straddle priced
+  once a session, no earlier than five minutes after the open, from a chain
+  read after that time and around a live price (today's newest minute, never a
+  daily close), then fixed for the day. It is a price the options market
+  charged for a move either way, never presented as where price will stay.
 
 ## TradingView live alerts
 

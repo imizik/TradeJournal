@@ -227,8 +227,10 @@ export default function ChartWorkspace() {
   // The options layer (C4.4) asks the workspace for its strikes; with it on, hidden automatic levels are left out of the zones there.
   const optionsKey = optionsQuery(settings.optionsLayer);
   const optionsOn = optionsKey !== null;
-  const autoParam = !optionsOn || !settings.autoLevelsHidden;
-  const requestKey = `${symbol}|${session}|${intervalKey}|${extrasKey}|${watchlistKey}|${optionsKey ?? ""}|${autoParam}`;
+  // The range bands (C2.7) ask the workspace for every shown symbol's expected-move levels; the VWAP bands need nothing new.
+  const rangesOn = !settings.rangeBandsHidden;
+  const autoParam = !(optionsOn || rangesOn) || !settings.autoLevelsHidden;
+  const requestKey = `${symbol}|${session}|${intervalKey}|${extrasKey}|${watchlistKey}|${optionsKey ?? ""}|${rangesOn}|${autoParam}`;
   const streamKey = `${symbolsKey}|${session}`;
   const data = response?.key === requestKey ? response.data : null;
   // Candles depend only on the symbol and session. While a request for a new
@@ -282,7 +284,7 @@ export default function ChartWorkspace() {
     return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
   }, [splitsBySymbol, wanted, settings.drawings]);
   // Automatic levels (C2.3) and option strikes (C4.4) as the backend merged them, on the chart's basis already; only the groups shown.
-  const autoFor = (name: string) => autoLevelsShown(feedFor(name)?.auto_levels, !settings.autoLevelsHidden, optionsOn);
+  const autoFor = (name: string) => autoLevelsShown(feedFor(name)?.auto_levels, !settings.autoLevelsHidden, optionsOn, rangesOn);
   // Level alerts (C5.1): every alert, each one's price on the chart's basis where its symbol is on screen, and a bell for each chart.
   const alertData = alertEdit && (!latest?.alerts || alertEdit.at >= latest.checked_at) ? alertEdit.data : latest?.alerts ?? alertEdit?.data ?? null;
   const alertPrices = useMemo(() => {
@@ -499,7 +501,7 @@ export default function ChartWorkspace() {
       setLoading(true);
       try {
         const result = await fetchChartData({ symbol, session, intervals: intervalKey.split(",") as Interval[],
-          watchlist: watchlistKey ? watchlistKey.split(",") : [], extras, options: optionsKey, auto: autoParam }, controller.signal);
+          watchlist: watchlistKey ? watchlistKey.split(",") : [], extras, options: optionsKey, ranges: rangesOn, auto: autoParam }, controller.signal);
         if (alive) {
           const day = new Date(result.checked_at * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
           if (lastWorkspaceDay.current?.key === session && lastWorkspaceDay.current.day !== day) {
@@ -508,7 +510,7 @@ export default function ChartWorkspace() {
           }
           lastWorkspaceDay.current = { key: session, day };
           setResponse({ key: requestKey, session, data: result }); setError(null);
-          const waiting = [result.auto_levels, ...Object.values(result.extras ?? {}).map((other) => other.auto_levels)].some((levels) => levels?.options?.state === "loading");
+          const waiting = [result.auto_levels, ...Object.values(result.extras ?? {}).map((other) => other.auto_levels)].some((levels) => levels?.options?.state === "loading" || levels?.ranges?.state === "loading");
           if (waiting && soon === undefined) soon = window.setTimeout(() => { soon = undefined; void load(); }, 4000);
         }
       } catch (err) {
@@ -526,7 +528,7 @@ export default function ChartWorkspace() {
     const timer = paused ? undefined : window.setInterval(load, 15_000);
     document.addEventListener("visibilitychange", onVisible);
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); window.clearTimeout(soon); document.removeEventListener("visibilitychange", onVisible); };
-  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, autoParam]);
+  }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, rangesOn, autoParam]);
 
   // One stream for every symbol on screen; each chart applies only its own symbol's trades.
   useEffect(() => {
@@ -704,6 +706,7 @@ export default function ChartWorkspace() {
   const toggleAuto = () => setSettings((s) => ({ ...s, autoLevelsHidden: !s.autoLevelsHidden }));
   const setOptions = (patch: Partial<OptionsLayer>) => setSettings((s) => ({ ...s, optionsLayer: cleanOptionsLayer({ ...s.optionsLayer, ...patch }) }));
   const toggleOptions = () => setOptions({ hidden: !settings.optionsLayer.hidden });
+  const toggleRanges = () => setSettings((s) => ({ ...s, rangeBandsHidden: !s.rangeBandsHidden }));
   /** A strike chosen on the ladder: marked on its symbol's charts and brought onto the main chart's price scale; chosen again, unmarked. */
   const chooseStrike = (value: number) => {
     if (strike?.symbol === symbol && strike.price === value) { setStrike(null); return; }
@@ -916,6 +919,7 @@ export default function ChartWorkspace() {
     ...GROUP_NAMES.map(([group, label]) => ({ key: group, label, on: !settings.hiddenGroups[group], toggle: () => toggleGroup(group) })),
     { key: "auto", label: "Auto levels", on: !settings.autoLevelsHidden, toggle: toggleAuto },
     { key: "options", label: "Options levels", on: optionsOn, toggle: toggleOptions },
+    { key: "ranges", label: "Range bands", on: rangesOn, toggle: toggleRanges },
     ...[...INDICATORS.slice(-1), ...INDICATORS.slice(0, -1)].map(([key, label]) => ({ key, label, on: indicators[key], toggle: () => toggleIndicator(key) })),
   ];
   // The layers panel (C1.4): the items of every symbol on screen, main symbol first.
@@ -934,6 +938,10 @@ export default function ChartWorkspace() {
     { key: "options", name: "Options levels", hidden: settings.optionsLayer.hidden, filters: settings.optionsLayer, note: [
       "The call and put walls (most open interest, or most traded in volume mode) and the strikes ranked by the measure, from Tradier option chains; a strike near another level joins its zone. Hover or tap one for its card. Panels holding their own symbol show its nearest expiration.",
       ...(optionsOn ? [optionsStatus(symbol)] : []),
+    ].filter(Boolean).join(" ") },
+    { key: "ranges", name: "Range bands", hidden: settings.rangeBandsHidden, note: [
+      "Expected move: today's (0DTE) and Friday's at-the-money straddle, priced five minutes after the open and drawn above and below the price then, fixed for the session. VWAP ±1σ (dashed) and ±2σ (dotted) on intraday charts. Hover or tap an expected-move level for its card.",
+      ...(rangesOn ? [rangesStatus(symbol)] : []),
     ].filter(Boolean).join(" ") },
     { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in." },
     { key: "indicators", name: "Indicators", hidden: settings.studiesHidden,
@@ -970,10 +978,17 @@ export default function ChartWorkspace() {
     if (info.state === "loading") return `Loading ${name} option chains… ${info.message ?? ""}`.trim();
     return `Not shown for ${name}: ${info.message ?? "no option chains."}`;
   }
+  /** What the Layers panel says about the main symbol's expected-move bands: what is drawn, or why nothing is yet. */
+  function rangesStatus(name: string): string {
+    const info = feedFor(name)?.auto_levels?.ranges;
+    if (!info) return `Loading ${name} expected move…`;
+    const drawn = info.bands.map((band) => `${band.today ? "0DTE" : new Date(`${band.expiration}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short" })} ±${price(band.move)}`);
+    return [drawn.length ? `${name}: ${drawn.join(", ")}.` : `Not shown for ${name}:`, drawn.length && info.state === "ready" ? null : info.message].filter(Boolean).join(" ");
+  }
   const ladderPanel = (sheet: boolean) => <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
     highlight={strike?.symbol === symbol ? strike.price : null} sheet={sheet} onStrike={chooseStrike} onLayer={setOptions} onClose={() => showDock(null)} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
-    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions}
+    onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
     onJump={jumpTo} onItem={(item, patch) => editItem(item.symbol, item.id, patch)} onDelete={(item) => deleteItem(item.symbol, item.id)}
     onStudy={(key) => toggleIndicator(key as keyof Indicators)} />;
@@ -1272,7 +1287,7 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -1299,7 +1314,7 @@ export default function ChartWorkspace() {
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
