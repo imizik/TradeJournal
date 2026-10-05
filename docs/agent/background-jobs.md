@@ -21,7 +21,7 @@ network filesystems are unsupported. Never delete lock files while executors
 are running; unlinking them defeats mutual exclusion. A job from a different
 host or lock directory is left untouched for operator investigation.
 
-Four execution lanes have separate locks:
+Five execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
@@ -29,6 +29,7 @@ Four execution lanes have separate locks:
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
+| `capture` | Transcribing a voice plan (Charts C3.5, `capture_transcribe`), so a recording never waits behind a broker sync or enrichment |
 
 Pipeline children execute inside the parent's sync lane. Polygon is queued
 independently, so provider pacing cannot block pipeline completion. Additional
@@ -87,6 +88,7 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane polygon --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane webull --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane gmail --recover-unowned --recover-only
+   .venv/bin/python -m app.jobs.worker --lane capture --recover-unowned --recover-only
    ```
 
 5. Run each command as a separate supervised process, from `backend/`, with
@@ -98,7 +100,14 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane polygon
    .venv/bin/python -m app.jobs.worker --lane webull
    .venv/bin/python -m app.jobs.worker --lane gmail
+   .venv/bin/python -m app.jobs.worker --lane capture
    ```
+
+A transcription job is queued when a voice plan is saved and never retried
+by itself: after a failure or an interrupted worker, the plan shows the error
+and only the user's **Retry transcript** queues another, and a second tap
+while one waits reuses it. The capture worker keeps the Whisper model loaded
+between jobs (a few hundred MB of memory).
 
 The Webull worker consumes a listener request made by the existing Start route
 or `WEBULL_LISTENER_AUTOSTART=true` on API startup. It does not invent a
@@ -149,7 +158,7 @@ a `job_run`. `LEVEL_ALERTS_AUTOSTART=false` keeps it off, as the test suite
 does. TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
-now provides systemd services for the four lanes and the private API/frontend.
+now provides systemd services for the five lanes and the private API/frontend.
 It does not alter Webull reconnection policy or move the remaining API threads
 to supervised worker lanes.
 

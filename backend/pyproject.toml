@@ -31,6 +31,10 @@ dependencies = [
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
     "mcp>=1.2.0",
+    # Voice plans (Charts C3.5) are transcribed on this server by Whisper.
+    # faster-whisper 1.2 passes a keyword PyAV 17 removed; 16.1 is verified.
+    "faster-whisper>=1.2,<2",
+    "av>=14,<17",
 ]
 
 [project.optional-dependencies]

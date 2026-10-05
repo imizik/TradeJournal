@@ -53,13 +53,15 @@ def main() -> None:
         if os.environ.get("MIGRATION_DATABASE_URL"):
             raise SystemExit("Migration credentials belong only in migration.env")
         os.chdir(RELEASE / "backend")
+        # The Whisper model for voice plans lives beside the data, not in it, so backups skip it.
         os.environ.update(JOB_EXECUTION_MODE="external", JOB_LOCK_DIR=str(STATE / "job-locks"))
+        os.environ.setdefault("CAPTURE_MODEL_DIR", str(STATE / "models"))
         if service == "api":
             command = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8080"]
-        elif service == "worker" and args in (["sync"], ["polygon"], ["webull"], ["gmail"]):
+        elif service == "worker" and args in (["sync"], ["polygon"], ["webull"], ["gmail"], ["capture"]):
             command = [sys.executable, "-m", "app.jobs.worker", "--lane", args[0]]
         else:
-            raise SystemExit("Expected api, frontend, or worker sync|polygon|webull|gmail")
+            raise SystemExit("Expected api, frontend, or worker sync|polygon|webull|gmail|capture")
     os.execv(command[0], command)
 
 

@@ -1,8 +1,8 @@
 # Ubuntu 24.04 deployment
 
 This package runs one private, single-user TradeJournal installation. It uses
-native systemd services for Next.js, the API, the sync, Polygon, Webull and
-Gmail worker lanes, plus local/offsite backup, Gmail-import, Sync Everything
+native systemd services for Next.js, the API, the sync, Polygon, Webull,
+Gmail and capture (voice-plan transcription) worker lanes, plus local/offsite backup, Gmail-import, Sync Everything
 and phone-alert timers. Production now uses PostgreSQL on the VPS. The original Neon primary is
 retained as a pre-cutover recovery source; it is no longer the live database.
 An optional, separately credentialed service accepts TradingView webhooks.
@@ -162,6 +162,18 @@ Use the HTTPS address reported by Serve. Per the
 [Tailscale Serve documentation](https://tailscale.com/docs/features/tailscale-serve),
 this shares with the tailnet; Funnel would expose it publicly. No public
 database port, frontend port or API port is needed.
+
+## Voice plans
+
+Voice plans on the chart (Charts C3.5) are saved under
+`/var/lib/tradejournal/data/captures`, so the daily backup includes the
+recordings and frozen chart images with the database rows that point to them.
+`tradejournal-worker@capture` transcribes them with Whisper on this server.
+The launcher points `CAPTURE_MODEL_DIR` at `/var/lib/tradejournal/models`,
+outside the backed-up data. The first transcription downloads the model
+(about 150 MB) from Hugging Face; only the model is downloaded, and recordings
+never leave the server. `CAPTURE_TRANSCRIBER=off` in `backend.env` keeps
+recordings and skips transcription.
 
 ## Backups and scheduled Robinhood import
 
@@ -532,7 +544,7 @@ sudo tradejournal-deploy status
 sudo tradejournal-deploy prune --keep 3
 # API-only restart leaves the four worker services running:
 sudo systemctl restart tradejournal-api
-sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -u tradejournal-worker@gmail -f
+sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -u tradejournal-worker@gmail -u tradejournal-worker@capture -f
 # Roll back code only, when its required schema still matches:
 sudo tradejournal-deploy rollback --confirm-database 'HOST/DATABASE'
 ```

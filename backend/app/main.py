@@ -16,6 +16,7 @@ from app.schema import ensure_current
 from app.models import Account, FILL_LIGHT, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
 from app.routers import level_alerts as level_alerts_router
+from app.routers import captures as captures_router
 from app.routers import symbol_info
 from app.routers.fills import (
     _rebuild_trades,
@@ -299,6 +300,7 @@ app.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
 app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(symbol_info.router, prefix="/charts", tags=["charts"])
 app.include_router(level_alerts_router.router, prefix="/charts", tags=["charts"])
+app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])

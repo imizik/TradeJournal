@@ -1143,6 +1143,88 @@ again from the current price.
   send). `GET`, `POST /charts/alerts`, `POST /charts/alerts/{id}/rearm` and
   `DELETE /charts/alerts/{id}` return the same list and wake the monitor.
 
+### Pre-trade capture (C3.4, C3.5)
+
+**Plan trade** records what you are taking and your plan before you enter. It
+never recommends a trade and never sends an order.
+
+- **Opening it.** Use the **Plan trade** button in the toolbar (on a phone,
+  **Plan** in the main chart's own bar) or **Alt+P**. Alt+P matches the key's position, so
+  Option+P works on a Mac. It does nothing while you type in a field, while
+  another dialog is open or on a key repeat. A desktop opens a compact sheet
+  at the right; a phone opens a bottom sheet.
+- **The four actions.** Open; choose **Buy calls**, **Buy puts** or **Buy
+  stock** (**More** adds Short stock, Sell calls and Sell puts); tap a
+  template, whose full wording stays visible; then **Save plan** or Enter. The
+  ticker and account are fixed when the sheet opens and shown at its top.
+  Switching the chart's symbol never moves them. **Change** and the account
+  menu are the only ways to change them. **Discretionary / no explicit plan**
+  is always offered, and so are a short note and optional strike, expiration
+  and quantity. Nothing else is required.
+- **Setup.** The gear in the sheet holds the default account (or *choose each
+  time*) and up to three favorite templates: a setup name and your own
+  invalidation or exit wording. Editing a template raises its revision. A
+  saved plan keeps the wording it was saved with. A save from a sheet showing
+  an older revision is refused instead of being swapped for the new wording.
+- **What is frozen.** At the moment of saving, the sheet records the main
+  chart's interval, session, visible range, last candle, the shown price with
+  its source and staleness, the price basis and splits, and the visible
+  levels, drawings and automatic zones. It reads these from what the page
+  already holds and makes no market-data request. It also makes a JPEG of the
+  main chart's canvas, at most 1600 px wide. Labels drawn over the canvas as
+  page elements are not in the image, and the plan says so. A plan whose
+  symbol the main chart is not showing gets no snapshot and records why. A
+  failed image saves the plan anyway and says *The chart image could not be
+  made*. An image that fails to upload waits in the browser for **Retry
+  image**; the server accepts only that frozen picture, once.
+- **Saved means saved.** Only the server's answer shows *Saved*. Each sheet
+  has its own request ID, so a double tap, a retried request or a lost answer
+  never makes a second plan. A plan the server turns down keeps the sheet open
+  with the reason. A plan that cannot reach the server waits in this browser's
+  IndexedDB, audio included, and the sheet locks to that exact request. After
+  a reload the strip shows *Not saved* with **Retry**. When the browser cannot
+  store it, the sheet says to keep the tab open.
+- **The strip.** It sits between the toolbar and the charts and shows the
+  newest plan from the last day: ticker, side, setup and wording, and when the
+  server received it. Its details show the account, the snapshot, the image,
+  the recording and transcript, and later notes. **Did not take trade** keeps
+  the plan as a record. The ✕ hides the strip on this device only. A plan sent
+  from the outbox shows the device's time as unverified beside the server's.
+- **Voice.** Choose the side, then press and hold **Hold to record**. Release
+  saves the clip. A short press, the keyboard, or a microphone prompt that
+  took the press switches to **Stop & save**. The browser asks for the
+  microphone only then. Clips stop at 30 seconds and offer **Save recording**
+  or **Discard**. A cancelled press, a hidden tab or a lost device does the
+  same. Closing the sheet discards an unsaved clip. A template is optional. A
+  denied or missing microphone leaves the click path working.
+- **Transcription.** The server saves the whole recording before the plan
+  counts. Its receipt time is the plan's time, and a later transcript never
+  moves it. A `capture_transcribe` job in the `capture` lane then runs Whisper
+  (`base.en`, faster-whisper) on the server. The audio never leaves
+  TradeJournal. The strip shows *Recording saved — transcribing*, then the
+  literal text, with *No speech was recognized* for an empty result. It
+  checks every 3 seconds only while a transcript is pending. A failure or an
+  interrupted worker shows the error with **Retry transcript**; nothing
+  retries by itself. With `CAPTURE_TRANSCRIBER=off` or the engine missing,
+  the plan says *Not transcribed* and plays back. **Correct transcript** and
+  **Add a later note** append notes marked *Corrected later* or *Added later*
+  beside the original. The plan itself is never edited.
+- **Storage.** `trade_capture`, `trade_capture_note`, `capture_template` and
+  `capture_profile` are user records, separate from fills and rebuildable
+  trades. Audio (WebM, Ogg, MP4 or WAV, checked by their bytes, 1 KB to 3 MB)
+  and images (PNG, JPEG or WebP, at most 1.5 MB) live under
+  `CAPTURE_STORAGE_DIR`, by default `backend/data/captures`. Each file is
+  written and flushed before its row commits. Only the private API serves
+  them: `GET /charts/captures/{id}/audio` and `/image`.
+- **Routes.** `GET`/`PUT /charts/captures/setup`;
+  `POST /charts/captures/templates`; `PUT` and `DELETE
+  /charts/captures/templates/{id}`; `GET`/`POST /charts/captures`;
+  `POST /charts/captures/voice` (multipart `meta` and `audio`); and
+  `POST /charts/captures/{id}/image`, `/not-taken`, `/notes` and `/transcribe`.
+
+Linking a plan to the trade it became, and counting captures (C3.6), are not
+built.
+
 ## Verification and remaining scope
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted

@@ -830,10 +830,15 @@ export type ChartJump = { panel: string; times: number[]; prices: number[] };
 export function createChartCommands() {
   const listeners = new Set<(command: ChartCommand) => void>();
   const jumps = new Set<(jump: ChartJump) => void>();
+  // Each panel's picture of itself, for a plan's frozen chart image (C3.4).
+  const pictures = new Map<string, () => HTMLCanvasElement | null>();
   return {
     listen(fn: (command: ChartCommand) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     emit(command: ChartCommand) { listeners.forEach((fn) => fn(command)); },
     listenJump(fn: (jump: ChartJump) => void) { jumps.add(fn); return () => { jumps.delete(fn); }; },
     jump(target: ChartJump) { jumps.forEach((fn) => fn(target)); },
+    provideSnapshot(panel: string, fn: () => HTMLCanvasElement | null) { pictures.set(panel, fn); return () => { if (pictures.get(panel) === fn) pictures.delete(panel); }; },
+    /** The panel as drawn now: candles, studies and the lines drawn on its canvas. Null when it is not on screen. */
+    snapshot(panel: string): HTMLCanvasElement | null { try { return pictures.get(panel)?.() ?? null; } catch { return null; } },
   };
 }
