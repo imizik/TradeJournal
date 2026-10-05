@@ -4242,6 +4242,85 @@ type AutoProbe = Map<string, { y(id: string): number | null }>;
 const registerAutoLevels = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjAutoLevels?: Map<string, unknown> }).__tjAutoLevels = new Map(); });
 const autoY = (page: Page, panel: string, id: string) => page.evaluate(([key, zone]) => (window as unknown as { __tjAutoLevels: AutoProbe }).__tjAutoLevels.get(key)!.y(zone)!, [panel, id] as const);
 
+test("level cards stay on the chart under the pointer through linked crosshair redraws and interval changes", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-bars", "240");
+  const main = drawn(page, "main");
+  const region = page.getByRole("region", { name: "MRVL 5m chart", exact: true });
+  const box = (await main.boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  // Range changes recalculate a linked crosshair after the synchronous linking guard has ended.
+  await page.evaluate(() => {
+    type Candles = SeriesProbe & { data(): { time: number }[] };
+    type Chart = { panes(): { getSeries(): Candles[] }[]; setCrosshairPosition(price: number, time: number, series: Candles): void;
+      timeScale(): { getVisibleLogicalRange(): { from: number; to: number } | null; setVisibleLogicalRange(range: { from: number; to: number }): void } };
+    const charts = (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts;
+    const receiver = charts.get("Panel 2")!;
+    const candles = receiver.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    // The link uses this API. Put a receiver's synthetic crosshair on a zone so the bug must exhibit.
+    receiver.setCrosshairPosition(258.5, candles.data().at(-1)!.time, candles);
+    for (const chart of charts.values()) {
+      const range = chart.timeScale().getVisibleLogicalRange()!;
+      chart.timeScale().setVisibleLogicalRange({ from: range.from + 0.25, to: range.to + 0.25 });
+    }
+  });
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  await expect(page.getByRole("tooltip")).toHaveCount(1);
+  // Leaving the plot for its price axis clears the hover even while inside the chart container.
+  await page.mouse.move(box.x + box.width - 20, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+  // An intentional click still pins a card, but a different timeframe starts without it.
+  await page.mouse.click(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip").getByRole("button", { name: "Close level card" })).toBeVisible();
+  await page.getByLabel("Main interval", { exact: true }).selectOption("15m");
+  await expect(page.getByRole("region", { name: "MRVL 15m chart", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("a pinned level card covers the RSI resize handle and chart lines", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // A taller RSI pane puts its separator through the card, as on the reported layout.
+  await page.evaluate(() => {
+    type Chart = { panes(): { setHeight(height: number): void }[] };
+    (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!.panes()[1].setHeight(300);
+  });
+  const canvas = drawn(page, "main");
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.click(box.x + 320, box.y + await autoY(page, "main", AUTO_ZONES[2].id));
+  const card = page.getByRole("region", { name: "MRVL 5m chart", exact: true }).getByRole("tooltip");
+  await expect(card.getByRole("button", { name: "Close level card" })).toBeVisible();
+  // Find the actual library handle; sample the overlap so a z-index regression cannot pass.
+  const overlap = await canvas.evaluate((element) => {
+    const handle = [...element.querySelectorAll<HTMLElement>("*")].find((node) => node.style.zIndex === "50" && getComputedStyle(node).cursor === "row-resize")!;
+    const tooltip = element.parentElement!.querySelector('[role="tooltip"]')!;
+    const [line, card] = [handle.getBoundingClientRect(), tooltip.getBoundingClientRect()];
+    const top = Math.max(line.top, card.top), bottom = Math.min(line.bottom, card.bottom);
+    const x = card.left + 20, y = (top + bottom) / 2;
+    return { height: bottom - top, covered: tooltip.contains(document.elementFromPoint(x, y)), background: getComputedStyle(tooltip).backgroundColor };
+  });
+  expect(overlap.height).toBeGreaterThan(0);
+  expect(overlap.covered).toBe(true);
+  expect(overlap.background).toBe("rgb(20, 27, 38)");
+  await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
+  await card.getByRole("button", { name: "Close level card" }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test("automatic levels draw the nearest three each side, a hover shows each one's card, and the group hides on every chart", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const errors: string[] = [];

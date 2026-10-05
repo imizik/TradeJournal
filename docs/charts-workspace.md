@@ -342,14 +342,16 @@ cd backend
   most, then "+2"). Only the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
-  the pointer: the members, each with its price, what it is, whether it is
-  observed, calculated or inferred, its source and when it formed, the number
+  the pointer in that chart only; linked crosshairs never open cards in other
+  charts. The card shows the members, each with its price, what it is, whether
+  it is observed, calculated or inferred, its source and when it formed, the number
   of independent sources, and how price met it today on that chart's closed
   bars (untested, tested, broken or reclaimed, with times, and whether price is
   at it now). A tap, or a click, keeps the card open until the next tap or its
-  **Close**. A daily or weekly chart draws the same levels; its card says
-  interactions are read on intraday charts. The levels arrive with each
-  15-second workspace refresh; nothing here reads a provider.
+  **Close**, or that chart changes symbol, interval or session. A daily or weekly
+  chart draws the same levels; its card says interactions are read on intraday
+  charts. The levels arrive with each 15-second workspace refresh; nothing here
+  reads a provider.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (toolbar button) saves the current arrangement under a name, such

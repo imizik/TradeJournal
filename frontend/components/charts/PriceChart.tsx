@@ -260,7 +260,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       syncing = false;
     });
     chart.subscribeCrosshairMove((event) => {
-      if (syncing) return;
+      // Redrawing data/ranges also reports synthetic linked crosshairs, after `syncing` has
+      // ended. Only this chart's pointer may open a card, preview a tool or broadcast a hover.
+      // A missing point still clears a departed pointer, including moves onto the axes.
+      if (syncing || (event.point && !event.sourceEvent)) return;
       const time = typeof event.time === "number" ? event.time : null;
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
@@ -630,6 +633,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // While the next candles load, the previous frame stays drawn under the label.
     if (!current || pending) return;
     const bars = panel?.bars ?? [];
+    if (drawnKey.current !== dataKey) setCard(null);
     const frame = `${symbol}|${interval}`;
     if (current.frame !== frame) {
       current.frame = frame;
@@ -728,6 +732,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
     current.auto.set(zones, main);
+    setCard((open) => open && !zones.some((zone) => zone.id === open.id) ? null : open);
     if (container.current) {
       container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
       container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
@@ -737,7 +742,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     bundle.current?.auto.setHighlight(pending ? null : highlight);
     if (container.current) container.current.dataset.highlight = highlight === null || pending ? "" : String(highlight);
   }, [highlight, pending]);
-  const cardZone = card && !pending ? autoLevels?.zones.find((zone) => zone.id === card.id) : undefined;
+  const cardZone = card && !pending ? zones.find((zone) => zone.id === card.id) : undefined;
   useEffect(() => { bundle.current?.auto.setHovered(cardZone?.id ?? null); }, [cardZone]);
   // Arming, switching or dropping a tool forgets a half-placed drawing.
   useEffect(() => {
@@ -801,7 +806,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
       </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
-        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
+        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
         {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
         {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
