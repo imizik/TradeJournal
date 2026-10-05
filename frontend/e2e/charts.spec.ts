@@ -4264,7 +4264,7 @@ test("level cards stay on the chart under the pointer through linked crosshair r
     const candles = receiver.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
     // The link uses this API. Put a receiver's synthetic crosshair on a zone so the bug must exhibit.
     receiver.setCrosshairPosition(258.5, candles.data().at(-1)!.time, candles);
-    for (const chart of charts.values()) {
+    for (const chart of [...charts.values()].reverse()) {
       const range = chart.timeScale().getVisibleLogicalRange()!;
       chart.timeScale().setVisibleLogicalRange({ from: range.from + 0.25, to: range.to + 0.25 });
     }
@@ -4287,6 +4287,40 @@ test("level cards stay on the chart under the pointer through linked crosshair r
   await expect(page.getByRole("tooltip")).toHaveCount(0);
 });
 
+test("redraws under a stationary pointer refresh its candle readout, linked time and level card", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-bars", "240");
+  const region = page.getByRole("region", { name: "MRVL 5m chart", exact: true });
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip", { name: "ONH level card" })).toBeVisible();
+  const before = await page.getByLabel("main candle values").textContent();
+  // Move the candles under a pointer that stays put; use the chart's new coordinate/time mapping.
+  const candle = await page.evaluate(async () => {
+    type Chart = import("lightweight-charts").IChartApi;
+    const chart = (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!;
+    chart.timeScale().setVisibleLogicalRange({ from: 20, to: 70 });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const time = chart.timeScale().coordinateToTime(300);
+    const row = chart.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!.data().find((bar) => bar.time === time)!;
+    if (typeof time !== "number" || !("close" in row)) throw new Error("Expected a candle under the stationary pointer");
+    return { time, close: row.close };
+  });
+  await expect(page.getByLabel("main candle values")).toContainText(`C ${candle.close.toFixed(2)}`);
+  await expect(page.getByLabel("main candle values")).not.toHaveText(before!);
+  const followerBars = fixturePanels(["15m"])["15m"]!.bars;
+  const follower = followerBars.find((bar) => bar.time <= candle.time && candle.time < bar.end_time) ?? followerBars.at(-1)!;
+  await expect(page.getByLabel("Panel 2 candle values")).toContainText(`C ${follower.close.toFixed(2)}`);
+  // The former zone is now off the price scale; no old card may stay at the pointer.
+  expect(await autoY(page, "main", AUTO_ZONES[4].id)).toBeLessThan(0);
+  await expect(region.getByRole("tooltip", { name: "ONH level card" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "MRVL 15m chart", exact: true }).getByRole("tooltip")).toHaveCount(0);
+});
+
 test("a pinned level card covers the RSI resize handle and chart lines", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   await registerCharts(page);
@@ -4295,9 +4329,10 @@ test("a pinned level card covers the RSI resize handle and chart lines", async (
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   // A taller RSI pane puts its separator through the card, as on the reported layout.
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     type Chart = { panes(): { setHeight(height: number): void }[] };
     (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!.panes()[1].setHeight(300);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   });
   const canvas = drawn(page, "main");
   const box = (await canvas.boundingBox())!;

@@ -185,6 +185,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const initial = useRef(true);
   const [hover, setHover] = useState<ChartBar | null>(null);
   const [card, setCard] = useState<Card | null>(null);
+  // A new frame dismisses cards until the next pointer input, while its crosshair readout still updates.
+  const cardHoverEnabled = useRef(false);
   // `rest` is the REST snapshot plus older history; streamed trades are applied
   // here, per panel, so a tick re-renders only the charts whose candles moved.
   const panel = useLivePanel(live, interval, rest);
@@ -250,8 +252,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         : { id: "placing", kind, points, label: kind === "note" ? "Note" : "", color: style?.color ?? "#9cc2ff", width: style?.width ?? 1 });
     };
     let syncing = false;
+    let ownsPointer = false;
+    const releasePointer = () => { ownsPointer = false; };
+    element.addEventListener("pointerleave", releasePointer);
     const stopLink = link.listen((time, source) => {
       if (source === id || syncing) return;
+      ownsPointer = false;
       syncing = true;
       const bar = time === null ? undefined : barAt(barsRef.current, time);
       if (bar) chart.setCrosshairPosition(bar.close, bar.time as UTCTimestamp, candles);
@@ -260,14 +266,21 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       syncing = false;
     });
     chart.subscribeCrosshairMove((event) => {
-      // Redrawing data/ranges also reports synthetic linked crosshairs, after `syncing` has
-      // ended. Only this chart's pointer may open a card, preview a tool or broadcast a hover.
-      // A missing point still clears a departed pointer, including moves onto the axes.
-      if (syncing || (event.point && !event.sourceEvent)) return;
+      // Redraws report source-less positions for both local and linked crosshairs. The chart
+      // owning the pointer must refresh its readout and card; followers must not open cards.
+      if (syncing) return;
+      if (event.sourceEvent) { ownsPointer = !!event.point; cardHoverEnabled.current = ownsPointer; }
+      else if (event.point && !ownsPointer) return;
+      if (!event.point) ownsPointer = false; // leaving the plot for an axis also releases it
+      if (event.point && !event.sourceEvent) {
+        // The redraw event arrives before primitives paint their new coordinates.
+        layer.updateAllViews();
+        autoLayer.updateAllViews();
+      }
       const time = typeof event.time === "number" ? event.time : null;
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
-      const at = event.point && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
+      const at = event.point && cardHoverEnabled.current && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -598,6 +611,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     return () => {
       stopLink(); stopRange(); stopCommands(); stopJumps(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
+      element.removeEventListener("pointerleave", releasePointer);
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
@@ -633,7 +647,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // While the next candles load, the previous frame stays drawn under the label.
     if (!current || pending) return;
     const bars = panel?.bars ?? [];
-    if (drawnKey.current !== dataKey) setCard(null);
+    if (drawnKey.current !== dataKey) { cardHoverEnabled.current = false; setCard(null); }
     const frame = `${symbol}|${interval}`;
     if (current.frame !== frame) {
       current.frame = frame;
