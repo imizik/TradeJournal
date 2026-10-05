@@ -16,7 +16,7 @@ from app.engine import chart_levels
 from app.engine.chart_math import ET
 from app.engine.options_models import OptionChain, OptionContract
 from app.engine.options_positioning import (DEALER_SIDE, StrikeRow, bs_gamma, chart_levels as option_levels, dollar_gamma,
-                                            expires_at, gamma_flip, net_gamma_at, positioning, scope_expirations)
+                                            expires_at, gamma_flip, max_pain, net_gamma_at, positioning, scope_expirations)
 
 NOW = datetime(2026, 10, 5, 10, 0, tzinfo=ET)  # a Monday morning
 TODAY = date(2026, 10, 5)
@@ -235,3 +235,36 @@ def test_after_the_close_todays_expiration_is_gone_and_the_week_rolls_with_the_n
     assert scope_expirations(LISTED, "week", evening, "SPY") == [date(2026, 10, 12), date(2026, 10, 16)]
     with pytest.raises(ValueError):
         scope_expirations(LISTED, "month", NOW, "SPY")
+
+
+# --- max pain (C4.7) ---------------------------------------------------------
+
+
+def test_max_pain_is_the_strike_paying_open_contracts_least_worked_by_hand():
+    # Calls: 100 at 95, 50 at 100. Puts: 80 at 105, 120 at 100. Size 100 shares each.
+    # Settle 95:  calls 0;                         puts 80 x 10 + 120 x 5 = 1,400   -> 140,000
+    # Settle 100: calls 100 x 5 = 500;             puts 80 x 5 = 400                 -> 90,000
+    # Settle 105: calls 100 x 10 + 50 x 5 = 1,250; puts 0                            -> 125,000
+    rows = [contract(95, "call", oi=100), contract(100, "call", oi=50), contract(105, "call", oi=0),
+            contract(95, "put", oi=0), contract(100, "put", oi=120), contract(105, "put", oi=80)]
+    found = max_pain(chain(rows))
+    assert found.price == 100 and found.payout == pytest.approx(90_000) and found.expiration == TODAY
+
+
+def test_max_pain_keeps_roots_apart_takes_the_lower_strike_on_a_tie_and_needs_open_interest():
+    # SPXW only: SPX's AM-settled contracts at the same strikes are left out.
+    rows = [contract(5000, "call", oi=10, root="SPXW"), contract(5010, "put", oi=10, root="SPXW"),
+            contract(5000, "call", oi=99999, root="SPX"), contract(5010, "call", oi=0, root="SPXW")]
+    found = max_pain(chain(rows, underlying="SPX"))
+    # Settle 5000: puts 10 x 10 = 100; settle 5010: calls 10 x 10 = 100. Equal, so the lower strike.
+    assert found.price == 5000 and found.payout == pytest.approx(100 * 100)
+    assert max_pain(chain([contract(100, "call", oi=0), contract(100, "put", oi=None)])) is None
+
+
+def test_max_pain_draws_as_an_inferred_level_beside_the_walls():
+    rows = [contract(95, "call", oi=100), contract(100, "put", oi=120), contract(105, "put", oi=80), contract(100, "call", oi=50)]
+    found = positioning([chain(rows)], "SPY", 100.0, NOW)
+    levels = option_levels(found, "oi", pain=max_pain(chain(rows)))
+    pain = [level for level in levels if level.kind == "max_pain"]
+    assert [(level.label, level.price, level.evidence, level.developing) for level in pain] == [("Max pain", 100.0, "inferred", False)]
+    assert all(level.kind != "max_pain" for level in option_levels(found, "oi"))

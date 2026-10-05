@@ -163,6 +163,7 @@ def test_signed_gamma_on_spy_adds_the_flip_as_an_assumed_level():
 
 def test_an_hour_of_polling_stays_inside_the_options_budget():
     options, client, clock = feed()
+    client.chains[("IWM", date(2026, 10, 9))] = [leg("IWM", date(2026, 10, 9), 240, side, bid=0.1, ask=3.0) for side in ("call", "put")]  # a wide market all hour
     end = clock() + 3600
     fresh_ages = []
     while clock() < end:
@@ -170,6 +171,8 @@ def test_an_hour_of_polling_stays_inside_the_options_budget():
         options.chart("SPY", Layer("gamma", "all", True), 660.0)
         options.chart("QQQ", Layer("gamma", "nearest", True), 600.0)
         options.chart("IWM", Layer("gamma", "nearest", True), 240.0)
+        for symbol, spot in (("SPY", 660.0), ("QQQ", 600.0), ("IWM", 240.0)):
+            options.ranges(symbol, spot)  # the range bands (C2.7) on every symbol, until each is captured
         if int(clock() - START.timestamp()) % 60 == 0:
             options.ladder("SPY", "all", True, 660.0)  # the ladder's own minute
             options.forecast("SPY", 660.0, {"date": "2026-10-28", "status": "confirmed"})
@@ -257,3 +260,101 @@ def test_the_forecast_reads_each_expiration_once_and_tags_shared_ones():
     options.forecast("NVDA", 100.0, None)
     assert len(client.calls) == 3  # cached for a minute
     assert options.forecast("NVDA", None, None)["state"] == "unavailable"
+
+
+# --- max pain on the layer (C4.7) and the range bands (C2.7) ----------------
+
+
+def test_the_layer_adds_max_pain_for_the_scopes_nearest_expiration():
+    options, client, clock = feed()
+    options.chart("QQQ", Layer("oi", "nearest"), 100.0)
+    levels, info = options.chart("QQQ", Layer("oi", "nearest"), 100.0)
+    pain = [level for level in levels if level.kind == "max_pain"]
+    # The fake chain's calls grow with the strike and its puts shrink: 1,000 + 10K calls, 3,000 - 10K puts from 90 to 110.
+    assert len(pain) == 1 and pain[0].evidence == "inferred"
+    assert info["max_pain"]["price"] == pain[0].price and info["max_pain"]["expiration"] == "2026-10-05"
+    assert "folklore" in info["max_pain"]["note"]
+
+
+def test_range_bands_wait_for_five_minutes_after_the_open_and_read_nothing_before():
+    options, client, clock = feed(Clock(datetime(2026, 10, 5, 9, 34, tzinfo=ET)))
+    levels, info = options.ranges("SPY", 100.0)
+    assert levels == [] and info["state"] == "waiting" and info["message"] == "Priced at 9:35 ET, 5 minutes after the open."
+    assert client.calls == []
+
+
+def test_range_bands_capture_todays_and_fridays_straddle_once_and_then_read_nothing():
+    options, client, clock = feed()  # Monday 10:00
+    levels, info = options.ranges("SPY", 100.0)
+    assert levels == [] and info["state"] == "loading"
+    assert [kind for _, kind, _ in client.calls] == ["list", "chain", "chain"]  # today's and Friday's chains
+    clock.advance(15)
+    levels, info = options.ranges("SPY", 100.0)
+    # The fake legs are 1.00 bid, 1.10 ask: the 100 straddle's mid is 1.05 + 1.05 = 2.10 either way.
+    assert info["state"] == "ready"
+    assert [(level.label, level.price, level.evidence) for level in levels] == [
+        ("EM 0DTE high", 102.1, "calculated"), ("EM 0DTE low", 97.9, "calculated"),
+        ("EM Fri high", 102.1, "calculated"), ("EM Fri low", 97.9, "calculated")]
+    assert [band["tags"] for band in info["bands"]] == [["nearest"], ["friday"]]
+    assert all(level.formed_at == int(clock()) for level in levels)
+    # Fixed for the session: the price moves, an hour passes, nothing is read and the band stays where it was captured.
+    reads = len(client.calls)
+    clock.advance(3600)
+    again, info = options.ranges("SPY", 104.0)
+    assert again == levels and len(client.calls) == reads and info["bands"][0]["anchor"] == 100.0
+
+
+def test_a_chain_read_before_the_capture_time_is_not_captured():
+    options, client, clock = feed(Clock(datetime(2026, 10, 5, 9, 20, tzinfo=ET)))
+    options.chart("MRVL", Layer("oi", "nearest"), 100.0)  # the options layer read Friday's chain premarket
+    options.chart("MRVL", Layer("oi", "nearest"), 100.0)
+    clock.advance(16 * 60)  # 09:36, inside the minute that chain would still count as fresh
+    levels, info = options.ranges("MRVL", 100.0)
+    assert levels == [] and info["state"] == "loading"
+    clock.advance(15)
+    levels, info = options.ranges("MRVL", 100.0)
+    # Fridays only for a single name: the nearest expiration is Friday, one band with both tags.
+    assert [level.label for level in levels] == ["EM Fri high", "EM Fri low"]
+    assert info["bands"][0]["tags"] == ["nearest", "friday"] and info["bands"][0]["captured_at"] >= int(datetime(2026, 10, 5, 9, 35, tzinfo=ET).timestamp())
+
+
+def test_a_wide_market_is_not_captured_and_is_tried_again():
+    options, client, clock = feed()
+    today, friday = date(2026, 10, 5), date(2026, 10, 9)
+    for day in (today, friday):
+        client.chains[("SPY", day)] = [leg("SPY", day, 100, "call", bid=0.1, ask=2.0), leg("SPY", day, 100, "put")]
+    options.ranges("SPY", 100.0)
+    clock.advance(15)
+    levels, info = options.ranges("SPY", 100.0)
+    # Not loading, so the page does not ask again sooner than its usual refresh; and no read until the chain is a minute old.
+    assert levels == [] and info["state"] == "unavailable" and "wider than its own price" in info["message"]
+    reads = len(client.calls)
+    clock.advance(15)
+    options.ranges("SPY", 100.0)
+    assert len(client.calls) == reads
+    del client.chains[("SPY", today)], client.chains[("SPY", friday)]
+    clock.advance(FAST_TTL)
+    assert options.ranges("SPY", 100.0)[1]["state"] == "loading" and len(client.calls) == reads + 2
+    clock.advance(15)
+    levels, info = options.ranges("SPY", 101.0)
+    assert info["state"] == "ready" and levels[0].price == 103.1  # captured now, around the price now
+
+
+def test_range_bands_start_again_each_session_and_say_when_there_is_none():
+    options, client, clock = feed()
+    options.ranges("SPY", 100.0)
+    clock.advance(15)
+    assert options.ranges("SPY", 100.0)[1]["state"] == "ready"
+    # After the close: today's 0DTE has expired, yet the session's bands stay and nothing is read for tomorrow's.
+    clock.advance(6 * 3600)
+    reads = len(client.calls)
+    levels, info = options.ranges("SPY", 100.0)
+    assert [level.label for level in levels] == ["EM 0DTE high", "EM 0DTE low", "EM Fri high", "EM Fri low"]
+    assert info["state"] == "ready" and len(client.calls) == reads
+    assert options.ranges("QQQ", 100.0)[1]["state"] == "closed" and len(client.calls) == reads
+    clock.advance(18 * 3600)  # Tuesday 10:00: Monday's bands are gone and Tuesday's are read afresh
+    levels, info = options.ranges("SPY", 100.0)
+    assert levels == [] and info["state"] == "loading" and info["day"] == "2026-10-06"
+    clock.advance(4 * 24 * 3600)  # Saturday
+    levels, info = options.ranges("SPY", 100.0)
+    assert levels == [] and info["state"] == "closed"

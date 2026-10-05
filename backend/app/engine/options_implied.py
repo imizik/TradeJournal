@@ -10,6 +10,10 @@ direction. A strike missing either leg is not at the money for this purpose,
 since a straddle needs both; a one-sided leg (no bid, or no ask) or a leg
 whose spread is wider than its own mid leaves the expiration without a number
 rather than with a guess.
+
+The range bands (Charts C2.7) draw a captured straddle as two levels, the price
+at capture plus and minus the move: what the options market charged then for a
+move either way by that expiration, not a forecast of where price will stay.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Iterable, Mapping
 
+from app.engine.chart_levels import Level
 from app.engine.options_models import OptionChain, OptionContract
 from app.engine.options_positioning import primary_root, unexpired
 
@@ -81,3 +86,20 @@ def _quoted_at(*contracts: OptionContract) -> int | None:
 
 def days_to(expiration: date, today: date) -> int:
     return (expiration - today) // timedelta(days=1)
+
+
+def band_name(band: dict) -> str:
+    """"0DTE" for today's expiration, else its weekday ("Fri")."""
+    return "0DTE" if band["today"] else date.fromisoformat(band["expiration"]).strftime("%a")
+
+
+def expected_move_levels(bands: Iterable[dict]) -> list[Level]:
+    """Each captured band as its upper and lower level: the price at capture plus and minus
+    the straddle, *calculated*, formed when it was captured and fixed for the session."""
+    levels = []
+    for band in bands:
+        name = band_name(band)
+        for kind, side, sign in (("expected_move_high", "high", 1), ("expected_move_low", "low", -1)):
+            levels.append(Level(kind, f"EM {name} {side}", round(band["anchor"] + sign * band["move"], 2), "calculated",
+                                None, "tradier", formed_at=band["captured_at"]))
+    return levels

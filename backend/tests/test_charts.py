@@ -53,6 +53,20 @@ def test_vwap_is_minute_weighted_and_resets_at_regular_open():
     assert one[4]["vwap"] == 200
 
 
+def test_vwap_standard_deviation_is_the_volume_weighted_spread_of_minute_prices():
+    # Typical prices (H + L + C) / 3 equal the close here. 09:30: 100 x 10; 09:31: 110 x 30.
+    # VWAP 107.5; variance (10 x 100^2 + 30 x 110^2) / 40 - 107.5^2 = 11,575 - 11,556.25 = 18.75.
+    raw = [minute("2026-09-28T09:00", 10, 10000), minute("2026-09-28T09:30", 100, 10),
+           minute("2026-09-28T09:31", 110, 30), minute("2026-09-28T16:01", 900, 10000)]
+    one = chart_bars(raw, [], "1m", "extended")
+    five = chart_bars(raw, [], "5m", "extended")
+    assert one[0]["vwap_sd"] is None and one[3]["vwap_sd"] is None  # none outside the regular session
+    assert one[1]["vwap_sd"] == 0
+    assert one[2]["vwap_sd"] == pytest.approx(18.75 ** 0.5)
+    assert five[1]["vwap_sd"] == one[2]["vwap_sd"]  # a resampled candle carries its last minute's
+    assert chart_bars([], [{"time": 0, "end_time": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}], "1D", "regular")[0]["vwap_sd"] is None
+
+
 def test_wilder_rsi_matches_published_reference_sequence_and_warmup_is_null():
     closes = [44.34, 44.09, 44.15, 43.61, 44.33, 44.83, 45.10, 45.42, 45.84, 46.08, 45.89, 46.03, 45.61, 46.28, 46.28, 46.00, 46.03]
     out = indicators([{"close": close} for close in closes])
@@ -546,6 +560,34 @@ def test_workspace_route_asks_options_for_the_main_scope_and_the_held_nearest(ro
     assert seen == [("MRVL", False), ("SPY", False)]
     # Panels holding their own symbol read only its nearest expiration (SPY and QQQ 0DTE).
     assert asked == [("MRVL", "gamma", "all", True, 100.0), ("SPY", "gamma", "nearest", True, 100.0)]
+
+
+def test_range_bands_join_the_zones_and_the_route_asks_for_them_on_every_symbol(route_client, monkeypatch):
+    from app.engine.chart_levels import Level
+    weekdays = [date(2026, 8, 3) + timedelta(days=i) for i in range(56)]
+    daily = normalize_bars([{"date": d.isoformat(), "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}
+                            for d in weekdays if d.weekday() < 5], daily=True)
+
+    def bands(symbol, spot):
+        return [Level("expected_move_high", "EM 0DTE high", 101.05, "calculated", None, "tradier", formed_at=1)], {"state": "ready"}
+
+    found = ChartFeed()._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, None, True, bands)
+    zone = next(z for z in found["zones"] if any(m["kind"] == "expected_move_high" for m in z["members"]))
+    assert {"expected_move_high", "prior_day_high"} <= {m["kind"] for m in zone["members"]}
+    assert found["ranges"] == {"state": "ready"} and "options" not in found
+
+    seen = []
+
+    def fake_workspace(symbol, frames, watchlist, session, **kwargs):
+        seen.append((symbol, kwargs.get("auto"), "extra_levels" in kwargs, kwargs.get("range_levels") is not None))
+        return {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "adjustment": None, "quotes": []}
+
+    monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&extras=SPY:5m&ranges=1&auto=0").status_code == 200
+    assert seen == [("MRVL", False, False, True), ("SPY", False, False, True)]
+    seen.clear()
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&auto=0").status_code == 200
+    assert seen == [("MRVL", None, False, False)]  # without a layer asked for, nothing to leave out
 
 
 @pytest.mark.parametrize("options", ["gamma", "oi.year.0", "delta.week.0", "oi.week.yes"])

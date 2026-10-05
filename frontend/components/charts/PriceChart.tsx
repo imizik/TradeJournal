@@ -10,7 +10,7 @@ import type { Earnings } from "@/lib/symbolInfo";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
-import { AutoLevelLayer, isOption, shownZones } from "@/lib/autoLevels";
+import { AutoLevelLayer, isOption, isRange, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
 import type { AlertMark } from "@/lib/alerts";
 import EarningsBadge from "./EarningsBadge";
@@ -39,6 +39,16 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
   const next = bars[index + 1];
   const gapAfter = name === "vwap" && next && (next.vwap === null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
   return { time: b.time as UTCTimestamp, value: b[name] as number, ...(gapAfter ? { color: "transparent" } : {}) };
+}
+/** The range bands' VWAP bands (C2.7): VWAP plus and minus one and two of the session's standard deviations. */
+const VWAP_BANDS = [2, 1, -1, -2] as const;
+type VwapBand = typeof VWAP_BANDS[number];
+function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
+  const b = bars[index];
+  if (b.vwap === null || b.vwap_sd == null) return { time: b.time as UTCTimestamp };
+  const next = bars[index + 1];
+  const gapAfter = next && (next.vwap === null || next.vwap_sd == null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
+  return { time: b.time as UTCTimestamp, value: b.vwap + k * b.vwap_sd, ...(gapAfter ? { color: "transparent" } : {}) };
 }
 const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close });
 // Up or down by the candle, brighter with its relative volume (C2.4).
@@ -105,12 +115,12 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -118,6 +128,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
   /** With the options layer on (C4.4), how many option zones each side of the price draw besides the walls; null while it is off. */
   optionsNearest?: number | null;
+  /** The range bands (C2.7): every expected-move level of `autoLevels`, and the VWAP ±1σ/±2σ bands. */
+  rangeBands?: boolean;
   /** A strike chosen on the ladder (C4.5), drawn as a solid line. */
   highlight?: number | null;
   /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
@@ -222,6 +234,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
     const lines = {} as Bundle["lines"];
     for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const bands = {} as Bundle["bands"];
+    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: Math.abs(k) === 1 ? "#f5e6a170" : "#f5e6a145", lineWidth: 1,
+      lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     const markers = createSeriesMarkers(candles, []);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
     const layer = new DrawingLayer(timeline);
@@ -230,7 +245,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     candles.attachPrimitive(autoLayer);
     const bells = new AlertLayer();
     candles.attachPrimitive(bells);
-    bundle.current = { chart, candles, volume, shade, lines, markers, layer, auto: autoLayer, bells, frame: "" };
+    bundle.current = { chart, candles, volume, shade, lines, bands, markers, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
@@ -652,11 +667,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // Latest-bar path: series.update keeps zoom, scroll and crosshair, and
       // follows the live edge only when the user is already looking at it.
       const last = bars.length - 1;
-      if (change === "append") for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+      if (change === "append") {
+        for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+        for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last - 1, k));
+      }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
       current.shade.update(shadePoint(bars[last]));
       for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
+      for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
       return;
     }
@@ -674,6 +693,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     current.volume.setData(bars.map(volumePoint));
     current.shade.setData(bars.map(shadePoint));
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
+    for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
+    if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && (initial.current || !prior.length)) {
       current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - (main ? 110 : 65)), to: bars.length + 4 });
@@ -692,6 +713,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     current.volume.applyOptions({ visible: indicators.volume });
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
   }, [indicators]);
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current) return;
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ visible: rangeBands });
+    if (container.current) container.current.dataset.vwapBandsShown = rangeBands ? "true" : "false";
+  }, [rangeBands]);
 
   const markers = panel?.markers;
   // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
@@ -723,7 +750,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   }, [alerts, pending]);
   // Automatic levels: the nearest few above and below the latest price, moving with it, and option strikes with the layer on.
   const lastClose = panel?.bars.at(-1)?.close;
-  const zones = useMemo(() => shownZones(autoLevels?.zones ?? [], lastClose, optionsNearest), [autoLevels, lastClose, optionsNearest]);
+  const zones = useMemo(() => shownZones(autoLevels?.zones ?? [], lastClose, optionsNearest, rangeBands), [autoLevels, lastClose, optionsNearest, rangeBands]);
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
@@ -731,6 +758,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) {
       container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
       container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
+      container.current.dataset.rangeLevels = zones.filter((zone) => zone.members.some(isRange)).map((zone) => zone.label).join(",");
     }
   }, [zones, pending, main]);
   useEffect(() => {

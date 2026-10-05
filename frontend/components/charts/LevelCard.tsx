@@ -3,8 +3,8 @@
 import type { CSSProperties } from "react";
 import { X } from "lucide-react";
 import { etTime, intradayInterval, price } from "@/lib/charts";
-import type { AutoLevel, AutoLevels, AutoZone, Interval, LevelInteraction, OptionsInfo } from "@/lib/charts";
-import { formedName, isOption, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
+import type { AutoLevel, AutoLevels, AutoZone, Interval, LevelInteraction, OptionsInfo, RangesInfo } from "@/lib/charts";
+import { formedName, isOption, isRange, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
 import { contracts, gammaText, optionsAsOf } from "@/lib/optionsView";
 
 const EVENT_NAMES: Record<string, string> = { tested: "Tested", broken: "Broken", reclaimed: "Reclaimed" };
@@ -54,16 +54,33 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
         </div>
         <div className="text-[10px] text-slate-500">{[member.evidence, sourceName(member), formedName(member)].filter(Boolean).join(" · ")}</div>
         {isOption(member) && auto.options && <OptionDetail member={member} options={auto.options} />}
+        {isRange(member) && auto.ranges && <RangeDetail member={member} ranges={auto.ranges} />}
       </li>)}
     </ul>
     {zone.members.some(isOption) && auto.options && <p className="mt-2 border-t border-slate-700/50 pt-1.5 text-[10px] leading-4 text-slate-500">{optionsAsOf(auto.options)}</p>}
+    {zone.members.some(isRange) && <p className="mt-2 border-t border-slate-700/50 pt-1.5 text-[10px] leading-4 text-slate-500">
+      What the options market charged for a move either way by that expiration, from {auto.ranges?.source ?? "Tradier option chains"}: a price, not a forecast of where price will stay.</p>}
   </div>;
+}
+
+const day = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", weekday: "short", month: "short", day: "numeric" });
+
+/** An expected-move level's straddle (C2.7): which expiration, its price, and the price it was centred on when captured. */
+function RangeDetail({ member, ranges }: { member: AutoLevel; ranges: RangesInfo }) {
+  const high = member.kind === "expected_move_high";
+  const band = ranges.bands.find((row) => Math.abs(row.anchor + (high ? row.move : -row.move) - member.price) < 0.006);
+  if (!band) return null;
+  return <p aria-label={`Straddle ${day(band.expiration)}`} className="mt-0.5 text-[10px] leading-4 text-sky-200/80">
+    {band.today ? "Today's (0DTE)" : `${day(band.expiration)}'s`} {price(band.strike)} straddle cost {price(band.move)} ({(band.percent * 100).toFixed(2)}%) at {etTime(band.captured_at)} ET,
+    {" "}{high ? "added to" : "taken from"} {price(band.anchor)}, the price then{band.iv === null ? "" : `; IV ${(band.iv * 100).toFixed(1)}%`}.</p>;
 }
 
 /** An option strike's numbers (C4.4): open interest and volume per side with their ranks, gamma, and how far it is from the price. */
 function OptionDetail({ member, options }: { member: AutoLevel; options: OptionsInfo }) {
   if (member.kind === "gamma_flip") return <p className="mt-0.5 text-[10px] leading-4 text-amber-200/80">
     {options.flip?.note} Searched {price(options.flip?.low)}–{price(options.flip?.high)}, each strike&apos;s IV and the time held.</p>;
+  if (member.kind === "max_pain") return <p className="mt-0.5 text-[10px] leading-4 text-orange-200/80">
+    {options.max_pain ? `${day(options.max_pain.expiration)} expiration. ${options.max_pain.note}` : "Max pain is not available."}</p>;
   const row = options.strikes?.find((strike) => strike.strike === member.price);
   if (!row) return null;
   const away = options.spot ? (row.strike / options.spot - 1) * 100 : null;
