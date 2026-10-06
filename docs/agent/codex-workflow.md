@@ -7,11 +7,11 @@ feature docs, not duplicated here.
 
 ## When to delegate
 
-For a non-trivial, bounded implementation request, Sol leads and assigns one
-Luna worker. The worker owns focused exploration, implementation, ordinary
-debugging, and the task's deterministic checks through completion. This avoids
-paying Sol to rediscover the same code while keeping one owner accountable for
-the result.
+For a non-trivial, bounded implementation request, the selected model owns the
+task. When Sol is selected, Sol leads and assigns one Luna worker. The worker
+owns focused exploration, implementation, ordinary debugging, and the task's
+deterministic checks through completion. This avoids paying Sol to rediscover
+the same code while keeping one owner accountable for the result.
 
 Sol first reads only enough to identify the requested scope, its prerequisite
 and its risk. Do not do a broad code investigation before delegating. The
@@ -38,13 +38,13 @@ monitor by default.
 
 ## Model and configuration
 
-The intended defaults are Sol (`gpt-6.1-sol`, medium) as lead and Luna
-(`gpt-6-luna`, medium) as the single worker. Repo-local configuration enables
-supported subagents and caps spawned threads at two, excluding the lead;
-these values are defaults, not an automatic scheduler. A trusted repository
-and a fresh chat are required for repo configuration to apply, and the
-Desktop model picker can override the selected model. Check the active chat's
-available subagents before promising delegation.
+The project does not pin its lead model: new chats inherit the user's
+`~/.codex/config.toml` default, and the Desktop model picker can choose another
+model. When Sol is selected, spawned agents default to Luna at medium effort;
+the project caps spawned threads at two, excluding the lead. These are
+defaults, not an automatic scheduler. A trusted repository is required for
+project agent settings to apply. Check the active chat's available subagents
+before promising delegation.
 
 Codex discovers supported subagents from the session and delegates through
 its agent tools. See the official [subagents guide](https://learn.chatgpt.com/docs/agent-configuration/subagents)
@@ -54,13 +54,16 @@ default alone forces every task onto Luna.
 
 ## Sol's decision boundary
 
-Sol retains decisions where ambiguity or consequence matters: architecture,
-PnL and FIFO semantics, fill deduplication, account identity, time and price
-provenance, nullable-data correctness, migrations, security, and production
-actions. Applying an established rule is ordinary execution; changing or
-inventing the rule needs Sol. Sol can delegate inspection, evidence collection,
-isolated test fixtures, documentation mechanics, and execution after resolving
-the decision.
+When Sol is the active lead, Sol retains decisions where ambiguity or
+consequence matters: architecture, PnL and FIFO semantics, fill deduplication,
+account identity, time and price provenance, nullable-data correctness,
+migrations, security, and production actions. Applying an established rule is
+ordinary execution; changing or inventing the rule needs Sol. Sol can delegate
+inspection, evidence collection, isolated test fixtures, documentation
+mechanics, and execution after resolving the decision. If Luna is the active
+lead and one of these decisions is unclear, stop and give the user a concise
+escalation to take to Sol; do not imply Codex switches the active model by
+itself.
 The handoff must say which parts are decided and which are delegated; the
 worker must not turn an unresolved semantic choice into an implementation
 assumption.
@@ -95,8 +98,10 @@ The escalation is at most 250 words: state the decision needed, give the
 focused file/section references and observed evidence, list viable options,
 recommend one, and say what work can safely continue. Sol resolves only that
 decision, then resumes the same worker with `followup_task`; do not discard
-useful context or silently change the scope. If the user must decide, present
-the concrete options and keep dependent work paused.
+useful context or silently change the scope. If Luna is the active lead, return
+the concise packet to the user; the user can start a Sol chat with that packet
+and continue the decision there. If the user must decide, present the concrete
+options and keep dependent work paused.
 
 ## Verification and review
 
