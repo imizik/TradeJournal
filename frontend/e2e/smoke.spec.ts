@@ -13,7 +13,7 @@ import { expect, test } from "@playwright/test";
  * reconstructor still produces (backend/tests/test_seed_dev_data.py).
  */
 
-const API = "http://127.0.0.1:8099";
+const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 
 test.describe("fixture", () => {
   test("seeded backend holds exactly the expected dataset", async ({ request }) => {
@@ -86,7 +86,7 @@ test.describe("dashboard", () => {
     await fillCheck.getByRole("button", { name: "Run" }).click();
     await queued;
     await pageRefresh;
-    expect(requests.some((url) => new URL(url).port === "8099" || new URL(url).port === "8080")).toBe(false);
+    expect(requests.some((url) => new URL(url).port === new URL(API).port || new URL(url).port === "8080")).toBe(false);
   });
 });
 

@@ -547,7 +547,7 @@ C2.2 and C2.3 shipped together in one PR at the user's request. The premarket ra
 session's postmarket plus this premarket, from the calendar. Round numbers step
 by 1 or 5 × 10^k near 1% of price; swings are two-session daily pivots over 60
 sessions. For C2.2, each level carries `bar_time`, the bar that set it: the
-independent-source rule counts levels that share a bar once. Its `evidence`
+shared-origin rule counts levels that share a bar once. Its `evidence`
 says observed, calculated or inferred. A level the bars cannot support is
 absent with a reason, never taken from an older session.
 
@@ -555,13 +555,13 @@ absent with a reason, never taken from an older session.
 threshold is a fraction of ATR, not a fixed price, so it scales from SPY to
 CVNA. The zone is labeled by its members ("PDH + 21,500 + OR15 high") and spans
 the members' actual prices, never more precise than they are. The score is the
-count of **independent** sources, so two levels derived from the same bar count
-once. *Done when:* unit tests cover merging, non-merging and the
-independent-source rule.
+count of distinct origins, so two levels derived from the same bar count
+once; the card counts landmarks without claiming statistical independence.
+*Done when:* unit tests cover bounded merging, non-merging and shared origins.
 As built ([Automatic levels](charts-workspace.md#automatic-levels-c21)): the
-threshold is a tenth of the daily ATR(14), the same band C2.3 tests with.
-Merging is single-linkage by price, so a run of close levels merges whole and
-the zone spans exactly its members. Without an ATR only same-price levels merge.
+threshold is a tenth of prior daily ATR(14), capping the **total** zone span.
+Nearest-pair complete-link clustering prevents neighbour chains from expanding
+a zone beyond that cap. Without an ATR only same-price levels merge.
 
 **C2.3 Levels layer.** Auto levels appear as thin labeled lines, and confluence
 zones as shaded bands, behind candles and dimmer than the user's own levels. Only
@@ -569,13 +569,15 @@ the nearest few above and below price show by default. Hovering shows the level
 card: type, source, when it formed, and how price has **interacted** with it
 today:
 
-- *untested*
-- *tested*: price came within the tolerance band and moved away
-- *broken*: a close beyond the band
-- *reclaimed*: broken, then a close back through
+- *untested*: no completed interaction
+- *approached*: visited only the outer proximity buffer
+- *touched/tested*: entered the visible zone, then optionally left above/below
+- *broken*: a close across the visible zone, with direction
+- *reclaimed*: a return to the original side, with direction
 
-Each event is defined on closed bars of the panel's interval with the same
-tolerance band, and the definitions are written in `docs/charts-workspace.md`.
+Each event is defined on closed bars of the panel's interval, confirmed at
+candle end, after the current combination's latest confirmation. Proximity
+does not count as contact; the definitions are in `docs/charts-workspace.md`.
 *Done when:* a browser test hovers a level and reads its card, and unit tests pin
 each interaction event on fixture bars.
 As built ([Implemented behavior](charts-workspace.md#implemented-behavior)): the

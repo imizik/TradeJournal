@@ -324,6 +324,13 @@ class MaxPain:
     payout: float  # what the open contracts would pay at that strike, dollars
 
 
+def max_pain_missing(chain: OptionChain, root: str | None = None) -> int:
+    """Count relevant contracts whose payout weight is unknown, not zero."""
+    root = root or primary_root(chain.underlying)
+    return sum(c.open_interest is None or (c.open_interest > 0 and c.multiplier is None)
+               for c in chain.contracts if c.root == root)
+
+
 def max_pain(chain: OptionChain, root: str | None = None) -> MaxPain | None:
     """The listed strike of one expiration where its open contracts would pay their holders
     least if the underlying settled there: for each candidate strike K, call open interest
@@ -334,6 +341,8 @@ def max_pain(chain: OptionChain, root: str | None = None) -> MaxPain | None:
     established, so it is *inferred* wherever it is shown.
     """
     root = root or primary_root(chain.underlying)
+    if max_pain_missing(chain, root):
+        return None  # A partial chain can put the minimum at a different strike.
     calls: dict[float, float] = {}
     puts: dict[float, float] = {}
     for contract in chain.contracts:

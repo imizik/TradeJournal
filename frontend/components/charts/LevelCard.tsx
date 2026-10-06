@@ -3,14 +3,20 @@
 import type { CSSProperties } from "react";
 import { X } from "lucide-react";
 import { etTime, intradayInterval, price } from "@/lib/charts";
-import type { AutoLevel, AutoLevels, AutoZone, Interval, LevelInteraction, OptionsInfo, RangesInfo } from "@/lib/charts";
+import type { AutoLevel, AutoLevels, AutoZone, Interval, LevelEvent, LevelInteraction, OptionsInfo, RangesInfo } from "@/lib/charts";
 import { formedName, isOption, isRange, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
 import { contracts, gammaText, optionsAsOf } from "@/lib/optionsView";
 
-const EVENT_NAMES: Record<string, string> = { tested: "Tested", broken: "Broken", reclaimed: "Reclaimed" };
+function eventName(event: LevelEvent): string {
+  const side = event.direction ? ` ${event.direction}` : "";
+  if (event.event === "tested") return `Touched; left${side}`;
+  if (event.event === "approached") return `Approached; left${side}`;
+  return `${event.event === "broken" ? "Closed" : "Returned"}${side}`;
+}
 const STATE_STYLE: Record<LevelInteraction["state"], string> = {
   untested: "bg-slate-800 text-slate-300", tested: "bg-sky-400/10 text-sky-300", broken: "bg-rose-400/10 text-rose-300",
   reclaimed: "bg-emerald-400/10 text-emerald-300", developing: "bg-amber-400/10 text-amber-300",
+  touched: "bg-sky-400/10 text-sky-300", approached: "bg-slate-700 text-slate-300",
 };
 
 /**
@@ -28,7 +34,7 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
         <div className="font-medium text-slate-100">{zone.label}</div>
-        <div className="font-mono text-[10px] text-slate-400">{spanName(zone)}{several && ` · ${zone.score} independent source${zone.score === 1 ? "" : "s"}`}</div>
+        <div className="font-mono text-[10px] text-slate-400">{spanName(zone)}{several && ` · ${zone.members.length} landmarks`}</div>
       </div>
       {pinned && <button aria-label="Close level card" onClick={onClose} className="-m-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200"><X size={13} /></button>}
     </div>
@@ -38,12 +44,18 @@ export default function LevelCard({ zone, auto, interaction, interval, pinned, s
         : <>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${STATE_STYLE[interaction.state]}`}>{STATE_NAMES[interaction.state]}</span>
-            {interaction.at_level && <span className="text-[10px] text-amber-300">Price is at it now</span>}
+            {interaction.at_level && <span className="text-[10px] text-amber-300">Last closed candle touched</span>}
+            {!interaction.at_level && interaction.near_level && <span className="text-[10px] text-slate-400">Last closed candle was nearby</span>}
           </div>
           {interaction.events.length > 0 && <ol className="mt-1 flex flex-wrap gap-x-2 font-mono text-[10px] text-slate-400">
-            {interaction.events.map((event) => <li key={`${event.event}${event.time}`}>{EVENT_NAMES[event.event]} {etTime(event.time)}</li>)}
+            {interaction.events.map((event) => <li key={`${event.event}${event.time}`}>{eventName(event)} · confirmed {etTime(event.time)} ET</li>)}
           </ol>}
-          {auto.band !== null && <p className="mt-1 text-[10px] text-slate-500">Today, on closed {interval} bars, within ±{price(auto.band)} (a tenth of the daily ATR).</p>}
+          <p className="mt-1 text-[10px] text-slate-500">Today, on closed {interval} bars{auto.session === "extended" ? ", including extended hours" : auto.session === "regular" ? ", regular hours" : ""}. Touches enter {spanName(zone)}.</p>
+          {auto.band !== null && <p className="mt-1 text-[10px] text-slate-500">Nearby only: {price(zone.low - auto.band)}–{price(zone.high + auto.band)}. Approaches are not touches.</p>}
+          {interaction.since !== undefined && interaction.last_close_at != null && interaction.state !== "developing" && <p className="mt-1 text-[10px] text-slate-500">History since {etTime(interaction.since)} ET for this confirmed combination; earlier bars are excluded.</p>}
+          {interaction.since !== undefined && interaction.last_close_at == null && interaction.state !== "developing" && <p className="mt-1 text-[10px] text-slate-500">No closed candles for this confirmed combination yet.</p>}
+          {interaction.state === "developing" && <p className="mt-1 text-[10px] text-slate-500">A member is still changing, so this combination has no fixed contact history.</p>}
+          {interaction.last_close != null && interaction.last_close_at != null && <p className="mt-1 font-mono text-[10px] text-slate-400">Last closed candle: {price(interaction.last_close)} at {etTime(interaction.last_close_at)} ET.</p>}
         </>}
     </div>
     <ul className="mt-2 space-y-1 border-t border-slate-700/50 pt-2">

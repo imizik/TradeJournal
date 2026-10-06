@@ -27,6 +27,7 @@ from app.engine.options_positioning import primary_root, unexpired
 
 # A leg whose bid-ask spread exceeds this share of its mid is too wide to read a price from.
 MAX_SPREAD = 1.0
+MAX_QUOTE_AGE = 60  # seconds, required only when capturing a new session reference
 FRIDAY = 4
 
 
@@ -43,7 +44,7 @@ def targets(listed: Iterable[date], root: str, now: datetime, earnings: date | N
     }
 
 
-def straddle(chain: OptionChain, spot: float, root: str | None = None) -> dict:
+def straddle(chain: OptionChain, spot: float, root: str | None = None, now: datetime | None = None) -> dict:
     """The at-the-money straddle of one expiration, or why there is none.
 
     ``state`` is ``ready`` (with ``move`` in dollars per share and ``percent`` of
@@ -68,6 +69,12 @@ def straddle(chain: OptionChain, spot: float, root: str | None = None) -> dict:
             return {**base, "state": "too_wide", "reason": f"The {strike:g} {name}'s quote is crossed."}
         if leg.ask - leg.bid > MAX_SPREAD * (leg.bid + leg.ask) / 2:
             return {**base, "state": "too_wide", "reason": f"The {strike:g} {name} is {leg.bid:.2f} bid, {leg.ask:.2f} ask: wider than its own price."}
+    if now is not None:
+        times = [stamp for leg in (call, put) for stamp in (leg.bid_time, leg.ask_time)]
+        if any(stamp is None for stamp in times):
+            return {**base, "state": "stale", "reason": "Option quote timestamps are unavailable; a fresh session band cannot be priced."}
+        if any(not 0 <= (now - stamp).total_seconds() <= MAX_QUOTE_AGE for stamp in times):
+            return {**base, "state": "stale", "reason": "Option bid/ask quotes must all be within the last minute to price a session band."}
     move = (call.bid + call.ask) / 2 + (put.bid + put.ask) / 2
     ivs = [leg.iv for leg in (call, put) if leg.iv is not None]
     return {**base, "state": "ready", "move": round(move, 4), "percent": move / spot,
