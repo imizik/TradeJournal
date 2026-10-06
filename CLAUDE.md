@@ -27,6 +27,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
+| `docs/agent/delegation.md` | Claude Code on Opus: what to hand to the Sonnet `engineer` and `reviewer` subagents, the brief, escalation and review tiers |
 | `docs/product-roadmap.md` | Future trading-improvement workflow: reflections, weekly commitments, playbooks, planned risk and evidence-gated experiments; preserves active feature-roadmap priorities |
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
@@ -81,6 +82,9 @@ person. A PR is ready to merge only when it is ready to go live; see
 - Prefer cheap targeted validation unless the blast radius requires more.
 - Avoid unrelated refactors, formatting churn, and duplicated UI/table logic.
 - Final summaries stay brief: what changed, what was verified, what risk remains.
+- In a Claude Code session on Opus, act as the lead: hand bounded execution to
+  the Sonnet `engineer` subagent and keep judgment, high-risk review and pushes
+  (`docs/agent/delegation.md`). Do small, sequential work directly.
 
 ## Extra care required
 
