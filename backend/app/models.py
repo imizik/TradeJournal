@@ -361,6 +361,9 @@ class CaptureProfile(SQLModel, table=True):
     id: int = Field(default=1, primary_key=True)
     default_account_id: Optional[uuid.UUID] = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+    # Capture adherence (C3.6): counted for trades entered from this moment (UTC), in these accounts (a JSON list of ids).
+    tracking_since: Optional[datetime] = None
+    tracking_accounts: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
 class TradeCapture(SQLModel, table=True):
@@ -415,6 +418,33 @@ class TradeCapture(SQLModel, table=True):
     transcribed_at: Optional[datetime] = None
     transcript_job_id: Optional[uuid.UUID] = None
     not_taken_at: Optional[datetime] = None  # "Did not take trade"
+
+
+class CaptureLink(SQLModel, table=True):
+    """A capture linked to the trade it was for (Charts C3.6), anchored in the
+    source identity of that trade's first entry fill (account plus the fill's
+    dedupe key), never in the trade id alone: trades are rebuilt. The trade is
+    resolved through that fill's link on every read; a fill that disappears
+    leaves the link unresolved, never pointing at another trade. Links are
+    append-only history: unlinking stamps ``unlinked_at`` and a new link is a
+    new row. Linking never changes the capture or its time."""
+
+    __tablename__ = "capture_link"
+    # One active link per plan and per anchor fill, held by the database, so two devices linking at once cannot both win.
+    __table_args__ = (
+        Index("uq_capture_link_active_capture", "capture_id", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+        Index("uq_capture_link_active_source", "account_id", "source_key", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    capture_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=False, index=True))
+    account_id: uuid.UUID
+    source_key: str = Field(index=True)  # Fill.raw_email_id of the trade's first entry when linked
+    method: str  # suggested | manual
+    linked_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    unlinked_at: Optional[datetime] = None  # UTC
 
 
 class TradeCaptureNote(SQLModel, table=True):

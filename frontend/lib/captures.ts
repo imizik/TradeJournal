@@ -32,7 +32,23 @@ export type Capture = {
   audio: { type: string; ms: number | null; bytes: number | null } | null;
   transcript: { status: TranscriptStatus; text: string | null; provider: string | null; error: string | null; transcribed_at: number | null } | null;
   not_taken_at: number | null; notes: CaptureNote[];
+  /** The trade this plan is linked to (C3.6), resolved now; absent from a backend older than C3.6. */
+  link?: CaptureLink | null; link_history?: CaptureLink[];
 };
+/** pre_entry: received before the entry's minute; unverified: inside it, or no time of day; retrospective: after it. */
+export type CaptureTiming = "pre_entry" | "unverified" | "retrospective";
+export type LinkCandidate = { trade_id: string; contract: string; entry_time: number; entry_time_reliable: boolean; status: string; timing: CaptureTiming | null };
+export type CaptureLink = { id: string; method: "suggested" | "manual"; linked_at: number; unlinked_at: number | null } & (
+  (LinkCandidate & { unresolved?: false }) | { unresolved: true; trade_id: null; contract: null; timing: null; note: string });
+export type CaptureSummary = {
+  since: number; accounts: string[]; eligible: number; confirmed: number; confirmed_discretionary: number; unverified: number;
+  retrospective: number; needs_linking: number; no_capture: number; excluded: number;
+};
+export type CaptureReview = {
+  needs_linking: { capture_id: string; suggestions: LinkCandidate[]; others: LinkCandidate[] }[]; unresolved: string[]; count: number;
+  summary: CaptureSummary | null; tracking: { since: number | null; accounts: string[] }; captures: Capture[];
+};
+export const TIMING_LABEL: Record<CaptureTiming, string> = { pre_entry: "Before entry", unverified: "Timing unverified", retrospective: "After entry (retrospective)" };
 /**
  * The chart as it stood when the plan was saved, from what the page already
  * held (no market-data request). `unavailable` says why there is none.
@@ -77,7 +93,12 @@ export const saveDefaultAccount = (id: string | null) => call<CaptureSetup>("/ch
 export const addTemplate = (setup_label: string, wording: string) => call<CaptureSetup>("/charts/captures/templates", json("POST", { setup_label, wording }));
 export const editTemplate = (id: string, setup_label: string, wording: string) => call<CaptureSetup>(`/charts/captures/templates/${id}`, json("PUT", { setup_label, wording }));
 export const removeTemplate = (id: string) => call<CaptureSetup>(`/charts/captures/templates/${id}`, { method: "DELETE" });
-export const fetchCaptures = () => call<{ captures: Capture[] }>("/charts/captures?limit=20");
+export const fetchCaptures = () => call<{ captures: Capture[]; needs_linking?: number }>("/charts/captures?limit=20");
+export const fetchReview = () => call<CaptureReview>("/charts/captures/review");
+export const linkCapture = (id: string, tradeId: string) => call<Capture>(`/charts/captures/${id}/link`, json("POST", { trade_id: tradeId }));
+export const unlinkCapture = (id: string) => call<Capture>(`/charts/captures/${id}/unlink`, { method: "POST" });
+export const saveTracking = (on: boolean, accounts: string[]) => call<{ since: number | null; accounts: string[] }>("/charts/captures/tracking", json("PUT", { on, accounts }));
+export const fetchTradePlans = (tradeId: string) => call<{ captures: Capture[] }>(`/charts/captures/for-trade/${tradeId}`);
 export const markNotTaken = (id: string) => call<Capture>(`/charts/captures/${id}/not-taken`, { method: "POST" });
 export const addCaptureNote = (id: string, kind: CaptureNote["kind"], text: string) => call<Capture>(`/charts/captures/${id}/notes`, json("POST", { kind, text }));
 export const retryTranscript = (id: string) => call<Capture>(`/charts/captures/${id}/transcribe`, { method: "POST" });

@@ -2,6 +2,7 @@
 // positions as lines, and links that open a past trade on its candles.
 import { apiUrl } from "@/lib/api";
 import { intradayInterval, type Interval } from "@/lib/charts";
+import type { Capture } from "@/lib/captures";
 
 /** Where an underlying price at an option fill came from. `single_venue`: one exchange's prints (IEX), not the chart's consolidated tape. */
 export type ObservedUnderlying = { price: number; source: string; as_of?: number | null; single_venue: boolean };
@@ -24,6 +25,8 @@ export type TradeCardData = {
     cost: number; realized_pnl: number | null; pnl_pct: number | null; unit: "share" | "contract"; price_note: string;
   };
   note?: string;
+  /** Pre-trade plans linked to this trade (C3.6). */
+  plans?: Capture[];
   fills?: CardFill[];
   position?: { open: number; avg_cost: number | null; realized: number } | null;
   path?: { state: MetricState; note: string; source?: string; fetched_at?: number | null } & Partial<Record<

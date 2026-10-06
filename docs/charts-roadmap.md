@@ -63,6 +63,13 @@ C4.7 (max pain in the options layer, labelled *inferred*). They came from the
 user asking which levels traders use to see where price is likely to range.
 The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 
+**Journal on the chart (2026-10-05):** at the user's request, the rest of
+Phase 3 was built ahead of G0. C3.1–C3.3 came first, in one PR
+([PR #132](https://github.com/imizik/TradeJournal/pull/132)): the trade card,
+position lines and historical mode share one read-only journal API. C3.6 came
+next, in its own PR, because it adds a migration and needs C3.1's card. The
+board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
+
 ## How to work from this file
 
 1. Take the first item in the [status board](#status-board) whose status is
@@ -127,7 +134,7 @@ The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | G0 | Daily chart replacement acceptance: real market session, desktop and phone | Gate | todo |
 | C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.5, before G0 at the user's request); done once a human walkthrough times the five-second path |
 | C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.4); done once a real desktop and phone recording are checked on the private origin |
-| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | next to build (C3.1's card is in place) |
+| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | done ([PR #133](https://github.com/imizik/TradeJournal/pull/133)) |
 | C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | todo |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
@@ -908,6 +915,13 @@ stable and missing source identities. A browser scenario captures a plan,
 introduces a fixture fill, confirms a suggested link, then reads the preserved
 intent and correctly labeled adherence. A late reflection cannot become a
 pre-entry plan through editing or linking.
+
+As built ([Plans linked to trades](charts-workspace.md#plans-linked-to-trades-c36)):
+links are stored as the first entry fill's account and `raw_email_id`, and
+timing is judged against that entry's New York minute. Trades whose entry has a
+date but no time are the excluded ones. Short stock never matches, because the
+journal reconstructs no short stock trades. The coverage count starts when the
+user starts it, with the accounts they choose.
 
 ### Phase 4 — Options positioning on the chart
 

@@ -174,7 +174,14 @@ def trade_card(db: Session, trade: Trade) -> dict:
         "position": {k: lots[k] for k in ("open", "avg_cost", "realized")} if trade.status == "open" and lots["open"] else None,
         "path": _path(trade, fills, contexts, db.get(TradePathMetrics, trade.id)),
         "context": _context(first, contexts.get(str(first.id)) if first else None),
+        "plans": _plans(db, trade),
     }
+
+
+def _plans(db: Session, trade: Trade) -> list[dict]:
+    """The pre-trade plans linked to this trade (C3.6), as the strip shows them."""
+    from app.engine import capture_links, captures  # captures import this module's helpers
+    return captures.rows(db, capture_links.for_trade(db, trade.id))
 
 
 def fill_card(db: Session, fill: Fill) -> dict:

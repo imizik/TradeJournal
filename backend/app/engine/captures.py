@@ -26,7 +26,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models import Account, CaptureProfile, CaptureTemplate, JobRun, TradeCapture, TradeCaptureNote
+from app.models import Account, CaptureLink, CaptureProfile, CaptureTemplate, JobRun, TradeCapture, TradeCaptureNote
 
 # The explicit opening sides. Buy or sell exposure is never inferred from call/put alone.
 SIDES: dict[str, str] = {
@@ -352,6 +352,9 @@ def attach_image(db: Session, capture: TradeCapture, data: bytes) -> TradeCaptur
 
 
 def mark_not_taken(db: Session, capture: TradeCapture) -> TradeCapture:
+    # C3.6: a plan linked to a trade was taken.
+    if db.exec(select(CaptureLink).where(CaptureLink.capture_id == capture.id, CaptureLink.unlinked_at.is_(None))).first():
+        raise CaptureError("This plan is linked to a trade. Unlink it first if it was not taken.")
     if capture.not_taken_at is None:
         capture.not_taken_at = datetime.utcnow()
         db.add(capture)
@@ -389,7 +392,7 @@ def _transcript(capture: TradeCapture, job: dict | None) -> dict | None:
 
 
 def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
-    """Captures as the browser shows them, with their notes and transcription jobs in two queries."""
+    """Captures as the browser shows them, with their notes, transcription jobs and links (C3.6) in a few queries."""
     ids = [capture.id for capture in captures]
     notes: dict[uuid.UUID, list[dict]] = {}
     if ids:
@@ -400,6 +403,8 @@ def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
     if job_ids:
         for job_id, status, error in db.exec(select(JobRun.id, JobRun.status, JobRun.error).where(JobRun.id.in_(job_ids))).all():
             jobs[job_id] = {"status": status, "error": error}
+    from app.engine.capture_links import link_rows  # it reads captures' helpers
+    links = link_rows(db, captures)
     out = []
     for capture in captures:
         try:
@@ -418,6 +423,7 @@ def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
             "audio": {"type": capture.audio_type, "ms": capture.audio_ms, "bytes": capture.audio_bytes} if capture.audio_type else None,
             "transcript": _transcript(capture, jobs.get(capture.transcript_job_id)),
             "not_taken_at": epoch(capture.not_taken_at), "notes": notes.get(capture.id, []),
+            "link": links[capture.id]["link"], "link_history": links[capture.id]["history"],
         })
     return out
 

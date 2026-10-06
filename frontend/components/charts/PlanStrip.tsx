@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ChevronDown, Loader2, NotebookPen, RotateCcw, X } from "lucide-react";
-import { audioUrl, captureTime, captureTitle, imageUrl, lateBy, SIDE_LABEL } from "@/lib/captures";
+import { audioUrl, captureTime, captureTitle, imageUrl, lateBy, SIDE_LABEL, TIMING_LABEL } from "@/lib/captures";
 import type { Capture, CaptureNote, OutboxItem } from "@/lib/captures";
 import { price } from "@/lib/charts";
 
@@ -16,6 +16,10 @@ type Props = {
   onNotTaken(id: string): void;
   onRetryTranscript(id: string): void;
   onNote(id: string, kind: CaptureNote["kind"], text: string): Promise<void>;
+  /** Plans waiting for a link choice, and links that lost their trade (C3.6). */
+  needsLinking?: number;
+  onReview?(): void;
+  onUnlink?(id: string): void;
 };
 
 const TRANSCRIPT_TEXT = { pending: "Recording saved — transcribing", transcribing: "Transcribing…", ready: "Transcript", failed: "Transcription failed", not_configured: "Not transcribed" } as const;
@@ -26,7 +30,7 @@ const TRANSCRIPT_TEXT = { pending: "Recording saved — transcribing", transcrib
  * one tap away. Saying a plan was not taken keeps it as a record; dismissing
  * only hides the strip on this device.
  */
-export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss, onNotTaken, onRetryTranscript, onNote }: Props) {
+export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss, onNotTaken, onRetryTranscript, onNote, needsLinking = 0, onReview, onUnlink }: Props) {
   const [open, setOpen] = useState(false);
   const [writing, setWriting] = useState<CaptureNote["kind"] | null>(null);
   const [text, setText] = useState("");
@@ -35,7 +39,7 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
   const images = outbox.filter((item) => item.kind === "image");
   // An image whose plan is not the one shown (dismissed, or a newer plan took the strip) keeps its own Retry here.
   const strayImages = images.filter((item) => item.capture_id !== capture?.id);
-  if (!capture && !outbox.length) return null;
+  if (!capture && !outbox.length && !needsLinking) return null;
   const tap = narrow ? "min-h-11 px-2" : "h-6 px-1.5";
   const transcript = capture?.transcript;
   const late = capture ? lateBy(capture) : null;
@@ -52,6 +56,10 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
       <span className="min-w-0 flex-1 truncate">Chart image not uploaded: {item.body.underlying} {SIDE_LABEL[item.body.side]} plan, written {captureTime(item.created_at / 1000)}. {item.error}</span>
       <button type="button" onClick={() => onRetry(item)} className={`inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 ${tap}`}><RotateCcw size={11} />Retry image</button>
     </div>)}
+    {needsLinking > 0 && onReview && <div className="flex items-center gap-2 text-slate-400">
+      <span className="min-w-0 flex-1 truncate">{needsLinking === 1 ? "1 plan needs" : `${needsLinking} plans need`} linking to a trade.</span>
+      <button type="button" onClick={onReview} className={`shrink-0 rounded text-sky-300 hover:bg-slate-800 ${tap}`}>Needs linking</button>
+    </div>}
     {capture && <div className={`flex min-w-0 items-center gap-x-2 ${narrow ? "flex-wrap" : ""}`}>
       <NotebookPen size={12} className="shrink-0 text-sky-300" aria-hidden />
       <span className={`font-medium text-slate-100 ${narrow ? "min-w-0 truncate" : "shrink-0"}`}>{captureTitle(capture)}</span>
@@ -60,7 +68,9 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
       <span role="status" className={`shrink-0 ${capture.not_taken_at ? "text-slate-400" : "text-emerald-300"}`}>
         {capture.not_taken_at ? "Not taken" : transcript && transcript.status !== "ready" ? TRANSCRIPT_TEXT[transcript.status] : "Saved"}</span>
       <button type="button" aria-expanded={open} aria-label={open ? "Hide plan details" : "Show plan details"} onClick={() => setOpen((v) => !v)} className={`inline-flex shrink-0 items-center rounded text-slate-400 hover:bg-slate-800 ${tap}`}><ChevronDown size={13} className={open ? "rotate-180" : ""} /></button>
-      {!narrow && !capture.not_taken_at && <button type="button" onClick={() => onNotTaken(capture.id)} className={`shrink-0 rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200 ${tap}`}>Did not take trade</button>}
+      {capture.link && !capture.link.unresolved && <span className="shrink-0 text-slate-400" title="Linked trade, and when the plan was received against its entry">
+        {capture.link.contract} · <span className={capture.link.timing === "pre_entry" ? "text-emerald-300" : "text-amber-300"}>{capture.link.timing ? TIMING_LABEL[capture.link.timing] : ""}</span></span>}
+      {!narrow && !capture.not_taken_at && !capture.link && <button type="button" onClick={() => onNotTaken(capture.id)} className={`shrink-0 rounded text-slate-400 hover:bg-slate-800 hover:text-slate-200 ${tap}`}>Did not take trade</button>}
       <button type="button" aria-label="Dismiss saved plan" title="Hide this strip (the plan stays saved)" onClick={() => { setOpen(false); onDismiss(capture.id); }} className={`inline-flex shrink-0 items-center rounded text-slate-500 hover:bg-slate-800 ${tap}`}><X size={12} /></button>
     </div>}
     {capture && open && <div className="mt-1 space-y-2 border-t border-slate-800 pb-1 pt-2 text-slate-300">
@@ -93,8 +103,10 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
       </div>}
       {reflections.map((note) => <p key={note.id} className="whitespace-pre-wrap"><span className="text-slate-500">Added later, {captureTime(note.created_at)}: </span>{note.text}</p>)}
       <div className="flex flex-wrap items-center gap-1.5">
-        {narrow && !capture.not_taken_at && <button type="button" onClick={() => onNotTaken(capture.id)} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Did not take trade</button>}
+        {narrow && !capture.not_taken_at && !capture.link && <button type="button" onClick={() => onNotTaken(capture.id)} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Did not take trade</button>}
         {capture.not_taken_at && <span className="text-slate-500">Marked not taken {captureTime(capture.not_taken_at)}.</span>}
+        {capture.link && onUnlink && <button type="button" onClick={() => onUnlink(capture.id)} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Unlink trade</button>}
+        {!capture.link && !capture.not_taken_at && onReview && <button type="button" onClick={onReview} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Link to a trade</button>}
         {!writing && capture.mode === "voice" && transcript?.status === "ready" && <button type="button" onClick={() => setWriting("transcript_correction")} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Correct transcript</button>}
         {!writing && <button type="button" onClick={() => setWriting("note")} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Add a later note</button>}
       </div>

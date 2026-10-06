@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import captures, transcribe
+from app.engine import capture_links, captures, transcribe
 from app.engine.captures import CaptureError
 from app.engine.job_runtime import submit_job
 from app.models import Account, CaptureTemplate, TradeCapture
@@ -30,6 +30,15 @@ class TemplateBody(BaseModel):
 
 class SetupBody(BaseModel):
     default_account_id: uuid.UUID | None = None
+
+
+class LinkBody(BaseModel):
+    trade_id: uuid.UUID
+
+
+class TrackingBody(BaseModel):
+    on: bool
+    accounts: list[str] = Field(default_factory=list, max_length=50)
 
 
 class NoteBody(BaseModel):
@@ -111,7 +120,50 @@ def remove_template(template_id: uuid.UUID, db: Session = Depends(get_session)):
 
 @router.get("/captures")
 def list_captures(limit: int = 20, db: Session = Depends(get_session)):
-    return {"captures": captures.rows(db, captures.recent(db, max(1, min(limit, 100))))}
+    # The Needs linking count rides on the strip's own refresh (C3.6): no polling of its own.
+    return {"captures": captures.rows(db, captures.recent(db, max(1, min(limit, 100)))),
+            "needs_linking": capture_links.needs_linking_count(db)}
+
+
+@router.get("/captures/review")
+def review(db: Session = Depends(get_session)):
+    """Needs linking (C3.6): plans with suggested trades, other candidates, unresolved links, and capture coverage."""
+    data = capture_links.review(db)
+    ids = {uuid.UUID(item["capture_id"]) for item in data["needs_linking"]} | {uuid.UUID(value) for value in data["unresolved"]}
+    rows = captures.rows(db, list(db.exec(select(TradeCapture).where(TradeCapture.id.in_(ids)).order_by(TradeCapture.received_at.desc())).all())) if ids else []
+    return {**data, "captures": rows}
+
+
+@router.put("/captures/tracking")
+def put_tracking(body: TrackingBody, db: Session = Depends(get_session)):
+    try:
+        return capture_links.set_tracking(db, body.on, body.accounts)
+    except CaptureError as exc:
+        _fail(exc)
+
+
+@router.post("/captures/{capture_id}/link")
+def link(capture_id: uuid.UUID, body: LinkBody, db: Session = Depends(get_session)):
+    """Link a plan to a trade, a suggestion or one chosen by hand. The plan and its time never change."""
+    capture = _capture(db, capture_id)
+    try:
+        capture_links.link(db, capture, body.trade_id)
+    except CaptureError as exc:
+        _fail(exc)
+    return _one(db, capture)
+
+
+@router.post("/captures/{capture_id}/unlink")
+def unlink(capture_id: uuid.UUID, db: Session = Depends(get_session)):
+    capture = _capture(db, capture_id)
+    capture_links.unlink(db, capture)
+    return _one(db, capture)
+
+
+@router.get("/captures/for-trade/{trade_id}")
+def for_trade(trade_id: uuid.UUID, db: Session = Depends(get_session)):
+    """The plans linked to one trade, for its card and its page."""
+    return {"captures": captures.rows(db, capture_links.for_trade(db, trade_id))}
 
 
 @router.post("/captures", status_code=201)
@@ -162,7 +214,10 @@ async def add_image(capture_id: uuid.UUID, image: UploadFile = File(...), db: Se
 
 @router.post("/captures/{capture_id}/not-taken")
 def not_taken(capture_id: uuid.UUID, db: Session = Depends(get_session)):
-    return _one(db, captures.mark_not_taken(db, _capture(db, capture_id)))
+    try:
+        return _one(db, captures.mark_not_taken(db, _capture(db, capture_id)))
+    except CaptureError as exc:
+        _fail(exc)
 
 
 @router.post("/captures/{capture_id}/notes")

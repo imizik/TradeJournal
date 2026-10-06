@@ -404,6 +404,18 @@ is verifiable rather than hopeful.
   times known and no older than a minute, then fixed for the day. Missing,
   stale or future option event times cannot become a captured band. It is a price the options market
   charged for a move either way, never presented as where price will stay.
+- On the chart (C3.1–C3.2), an option fill's price is the premium per contract
+  and is never drawn on the price axis or called an underlying price. An
+  option position's line is the underlying observed at its first entry, or
+  nothing. A stock position's line is the first-in-first-out cost of the
+  shares still open.
+- A pre-trade plan's link to a trade (C3.6, `backend/app/engine/capture_links.py`) is anchored
+  in the first entry fill's source identity (account plus `raw_email_id`) and
+  resolved through `tradefill` on every read. A missing fill leaves it
+  unresolved, never pointing at another trade. Links are suggested, never
+  confirmed automatically. Timing compares the server's UTC receipt with the
+  entry's New York minute: only intent received before that minute counts as
+  pre-entry.
 
 ## TradingView live alerts
 

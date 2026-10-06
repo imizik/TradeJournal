@@ -1,15 +1,20 @@
+import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import type { ChartBar, ChartData, Interval } from "../lib/charts";
 import type { ChartPosition, OptionMark, TradeCardData } from "../lib/chartJournal";
+import type { Capture, CaptureReview, CaptureSetup } from "../lib/captures";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 
 // The journal on the chart (C3.1 trade card, C3.2 position lines, C3.3 historical
 // mode). Candles are stubbed; the journal routes are stubbed where a test needs
 // exact states (stale, missing), and read from the seeded backend in the last test.
 
-test.beforeEach(async ({ context }) => {
+test.beforeEach(async ({ context }, testInfo) => {
   await fakeChartSettings(context);
-  await context.route("**/api/backend/charts/captures?**", (route) => route.fulfill({ json: { captures: [] } }));
+  // Saved plans live in the e2e database; tests that are not about them start with none.
+  if (!testInfo.tags.includes("@captures")) await context.route("**/api/backend/charts/captures?**", (route) => route.fulfill({ json: { captures: [] } }));
 });
 
 const STEP: Record<Interval, number> = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 };
@@ -215,4 +220,104 @@ test("a seeded trade's page links to the chart, and the real journal route fills
   await page.route("**/api/backend/charts/history?**", (route) => route.fulfill({ status: 503, json: { detail: { message: "History unavailable" } } }));
   await link.click();
   await expect(page.getByRole("dialog", { name: "Trade card" })).toContainText(card.trade!.contract);
+});
+
+// ---- C3.6: a plan linked to the trade it was for, and capture coverage, on the e2e backend ----
+
+/** A New York wall clock, as the journal stores fill times. */
+const newYorkWall = (at: Date) => new Intl.DateTimeFormat("sv-SE", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(at).replace(" ", "T");
+
+/**
+ * A fill written straight into the scratch e2e database (or removed again), then trades rebuilt, as an import would.
+ * Not `POST /fills`: that also rewrites `backend/data/manual_fills.json`, the checkout's real
+ * manual-fill backup. The `seed:` key is the seeder's own, so the next run clears it.
+ */
+function journalScript(lines: string[], args: Record<string, string>) {
+  const backend = path.resolve(__dirname, "../../backend");
+  const venv = path.join(backend, ".venv", "bin", "python");
+  const url = `sqlite:///${path.join(backend, "data", "e2e_seed.db")}`;
+  const script = [
+    "import json, sys, uuid", "from datetime import datetime", "from sqlalchemy import delete", "from sqlmodel import Session, create_engine",
+    "from app.models import Fill, TradeFill", "from app.routers.fills import _rebuild_trades",
+    "a = json.loads(sys.argv[1])", "engine = create_engine(a['url'])",
+    "with Session(engine) as s:", ...lines.map((line) => `    ${line}`),
+    "    s.commit()", "    _rebuild_trades(s, 'e2e')", "    s.commit()",
+  ].join("\n");
+  execFileSync(existsSync(venv) ? venv : "python3", ["-c", script, JSON.stringify({ url, ...args })], { cwd: backend, env: { ...process.env, DATABASE_URL: url } });
+}
+const addFill = ({ account, ticker, at, key }: { account: string; ticker: string; at: string; key: string }) => journalScript([
+  "s.add(Fill(id=uuid.uuid4(), account_id=uuid.UUID(a['account']), ticker=a['ticker'], instrument_type='stock', side='buy', contracts=10, price=50, executed_at=datetime.fromisoformat(a['at']), raw_email_id=a['key']))",
+], { account, ticker, at, key });
+const removeFill = (key: string) => journalScript([
+  "ids = [f.id for f in s.exec(Fill.__table__.select().where(Fill.raw_email_id == a['key'])).all()]",
+  "s.exec(delete(TradeFill).where(TradeFill.fill_id.in_(ids)))", "s.exec(delete(Fill).where(Fill.id.in_(ids)))",
+], { key });
+
+test("a saved plan, then a fill: the suggested link is confirmed by hand and the trade shows the plan and its coverage", { tag: "@captures" }, async ({ page, request }) => {
+  const CAPTURES = "/api/backend/charts/captures";
+  // A symbol of its own each run: plans from earlier runs stay in this database.
+  const symbol = `LK${Date.now().toString(36).toUpperCase().slice(-5)}`;
+  const setup: CaptureSetup = await (await request.put(`${CAPTURES}/setup`, { data: { default_account_id: (await (await request.get(`${CAPTURES}/setup`)).json()).accounts[0].id } })).json();
+  const account = setup.default_account_id!;
+  const key = `seed:e2e-link-${Date.now()}`;
+  // Counting starts before the plan, so the trade is in it.
+  await request.put(`${CAPTURES}/tracking`, { data: { on: true, accounts: [account] } });
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now) }));
+    await page.goto("/charts");
+    await page.getByLabel("Chart symbol").fill(symbol);
+    await page.getByLabel("Chart symbol").press("Enter");
+    await expect(page.getByRole("region", { name: new RegExp(`${symbol} 5m chart`) })).toHaveCount(1);
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = page.getByRole("dialog", { name: "Plan trade" });
+    await sheet.getByRole("button", { name: "Buy stock" }).click();
+    await sheet.getByRole("button", { name: /Discretionary/ }).click();
+    await sheet.getByLabel("Plan note").fill("Long the reclaim of yesterday's high");
+    await sheet.getByRole("button", { name: "Save plan" }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Saved plan" })).toContainText(`${symbol} · Buy stock`);
+
+    // The fill arrives later: an entry two minutes after the plan.
+    addFill({ account, ticker: symbol, at: newYorkWall(new Date(Date.now() + 120_000)), key });
+    await page.reload();
+    const strip = page.getByRole("region", { name: "Saved plan" });
+    // Plans from earlier runs of this database may wait too; this one is among them.
+    await expect(strip).toContainText(/needs? linking/);
+    await strip.getByRole("button", { name: "Needs linking" }).click();
+    const panel = page.getByRole("dialog", { name: "Needs linking" });
+    await expect(panel.getByRole("region", { name: "Plan coverage" })).toContainText("0 of 1 recorded trades");
+    await expect(panel.getByRole("region", { name: "Plan coverage" })).toContainText("1 needs linking");
+    const plan = panel.getByRole("article", { name: new RegExp(`${symbol} · Buy stock`) });
+    await expect(plan).toContainText(`${symbol} stock`);
+    await expect(plan).toContainText("Before entry");
+    // Nothing is linked until the user says so.
+    let mine = (await (await request.get(`${CAPTURES}?limit=100`)).json()).captures.find((row: Capture) => row.underlying === symbol) as Capture;
+    expect(mine.link).toBeNull();
+    await plan.getByRole("button", { name: "Link" }).first().click();
+    await expect(panel.getByRole("region", { name: "Plan coverage" })).toContainText("1 of 1 recorded trades");
+    await expect(panel.getByRole("region", { name: "Plan coverage" })).toContainText("(1 discretionary)");
+    await expect(plan).toHaveCount(0); // linked, so no longer waiting
+    mine = (await (await request.get(`${CAPTURES}?limit=100`)).json()).captures.find((row: Capture) => row.underlying === symbol) as Capture;
+    expect(mine.link && !mine.link.unresolved && mine.link.timing).toBe("pre_entry");
+    await page.screenshot({ path: test.info().outputPath("needs-linking.png") });
+    await panel.getByRole("button", { name: "Close needs linking" }).click();
+    await expect(strip).toContainText("Before entry");
+
+    // The trade page reads the plan as it was saved, with its timing.
+    await page.goto(`/trades/${mine.link!.trade_id}`);
+    const saved = page.getByRole("region", { name: "Pre-trade plan" });
+    await expect(saved).toContainText("Long the reclaim of yesterday's high");
+    await expect(saved).toContainText("Discretionary: no explicit plan was recorded.");
+    await expect(saved).toContainText("Before entry");
+    const review: CaptureReview = await (await request.get(`${CAPTURES}/review`)).json();
+    expect(review.summary?.confirmed).toBe(1);
+  } finally {
+    // Leave the shared e2e database as the seed made it: no extra trade, and no link left to go unresolved.
+    const rows: Capture[] = (await (await request.get(`${CAPTURES}?limit=100`)).json()).captures;
+    for (const row of rows.filter((other) => other.underlying === symbol && other.link)) await request.post(`${CAPTURES}/${row.id}/unlink`);
+    removeFill(key);
+    await request.put(`${CAPTURES}/tracking`, { data: { on: false } });
+  }
 });
