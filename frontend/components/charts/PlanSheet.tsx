@@ -22,6 +22,8 @@ type Props = {
   onSaved(capture: Capture, imageWaiting: boolean): void;
   /** A plan that could not reach the server, now waiting in this browser's outbox. */
   onQueued(): void;
+  /** The server turned the plan down: setup may have changed on another device, so it is read again. */
+  onRejected(): void;
   onClose(): void;
 };
 
@@ -146,7 +148,7 @@ function useRecorder(onFinished: (recording: Recording) => void) {
  * a template (or Discretionary), Save. Or a voice note in place of the
  * template. Nothing here recommends a trade or sends an order.
  */
-export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupError, narrow, snapshot, onSetup, onSaved, onQueued, onClose }: Props) {
+export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupError, narrow, snapshot, onSetup, onSaved, onQueued, onRejected, onClose }: Props) {
   const [symbol, setSymbol] = useState(opened);
   const [editingSymbol, setEditingSymbol] = useState(false);
   const accounts = setup?.accounts ?? [];
@@ -207,7 +209,7 @@ export default function PlanSheet({ symbol: opened, chartSymbol, setup, setupErr
       onSaved(capture, imageWaiting);
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : "Not saved.";
-      if (failure instanceof CaptureRejected) { setError(`Not saved: ${message}`); setStuck(null); }
+      if (failure instanceof CaptureRejected) { setError(`Not saved: ${message}`); setStuck(null); onRejected(); }
       else {
         const kept = await outboxDurable();
         setStuck(item);

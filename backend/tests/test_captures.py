@@ -349,3 +349,22 @@ def test_the_real_speech_engine_reads_a_spoken_clip_when_installed(tmp_path, mon
     silent.write_bytes(wav(seconds=2.0))
     # A tone has no words: the result is empty, not invented.
     assert transcribe.transcribe(silent) == ""
+
+
+def test_a_queued_transcription_is_already_linked_when_a_worker_can_see_it(client, engine, speech, monkeypatch):
+    """No moment exists where the job is queued but the capture does not point at it."""
+    http, submitted = client
+    seen = []
+    real_commit = Session.commit
+
+    def watch(session):
+        real_commit(session)
+        with Session(engine) as other:
+            for job in other.exec(select(JobRun).where(JobRun.job_type == "capture_transcribe")).all():
+                capture = other.exec(select(TradeCapture).where(TradeCapture.transcript_job_id == job.id)).first()
+                seen.append(capture is not None)
+
+    monkeypatch.setattr(Session, "commit", watch)
+    voice(http)
+    monkeypatch.setattr(Session, "commit", real_commit)
+    assert seen and all(seen)

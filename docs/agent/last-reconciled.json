@@ -1,5 +1,5 @@
 {
-  "commit": "2a0caf9005cbdbd0dbbac95b4610ea9f5bcd5966",
-  "date": "2026-10-01",
-  "note": "Reconciled 32 code commits (Charts C0.0-C0.7: deep history, market calendar, server-saved settings, per-panel symbols, named layouts, hotkeys, the split-adjusted price basis, daily/weekly depth; autodeploy every three minutes; compact verify output; strategy factory exits and families, already documented): added a Charts section to domain-rules.md, the price basis and daily depth to architecture.md and the feature map, the C0.6/C0.7 tests to verification.md, and corrected CLAUDE.md's 'planned' C0.0 contract and the contract's own raw-price note."
+  "commit": "21d3b6f59efb545dea44bd3d8801835eec5c5dee",
+  "date": "2026-10-05",
+  "note": "Reconciled 42 code commits since 2a0caf9 (Charts C1.1-C1.4 drawing layer, tools, context menu and layers panel; C7.3/C7.4 workspace shell and dividers; C2.1-C2.5 automatic levels, confluence, relative volume and earnings; C4.1-C4.5 option chains, snapshots, positioning, options levels and ladder; C5.1 level alerts; C2.7/C4.7 range bands and max pain; symbol info T1.1/T1.4/T2.1; the Analytics explorer; the D0 journal audit and metric rounding; CI screenshots). verification.md's chart browser-test list now covers the shell and dividers, automatic levels, RVol, earnings, level alerts and the options layers, and names test_chart_levels.py and test_level_alerts.py; roadmap.md no longer says Analytics filtering is uncovered; architecture.md says where live option chains and expected-move captures live; domain-rules.md labels max pain inferred and states the expected-move capture rule; feature-map.md gains the D0 audit row."
 }

@@ -1,5 +1,5 @@
 import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RvolBaseline } from "../lib/charts";
+import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 import type { Earnings } from "../lib/symbolInfo";
 import type { AlertsPayload, LevelAlert } from "../lib/alerts";
@@ -4252,6 +4252,120 @@ type AutoProbe = Map<string, { y(id: string): number | null }>;
 const registerAutoLevels = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjAutoLevels?: Map<string, unknown> }).__tjAutoLevels = new Map(); });
 const autoY = (page: Page, panel: string, id: string) => page.evaluate(([key, zone]) => (window as unknown as { __tjAutoLevels: AutoProbe }).__tjAutoLevels.get(key)!.y(zone)!, [panel, id] as const);
 
+test("level cards stay on the chart under the pointer through linked crosshair redraws and interval changes", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-bars", "240");
+  const main = drawn(page, "main");
+  const region = page.getByRole("region", { name: "MRVL 5m chart", exact: true });
+  const box = (await main.boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  // Range changes recalculate a linked crosshair after the synchronous linking guard has ended.
+  await page.evaluate(() => {
+    type Candles = SeriesProbe & { data(): { time: number }[] };
+    type Chart = { panes(): { getSeries(): Candles[] }[]; setCrosshairPosition(price: number, time: number, series: Candles): void;
+      timeScale(): { getVisibleLogicalRange(): { from: number; to: number } | null; setVisibleLogicalRange(range: { from: number; to: number }): void } };
+    const charts = (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts;
+    const receiver = charts.get("Panel 2")!;
+    const candles = receiver.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    // The link uses this API. Put a receiver's synthetic crosshair on a zone so the bug must exhibit.
+    receiver.setCrosshairPosition(258.5, candles.data().at(-1)!.time, candles);
+    for (const chart of [...charts.values()].reverse()) {
+      const range = chart.timeScale().getVisibleLogicalRange()!;
+      chart.timeScale().setVisibleLogicalRange({ from: range.from + 0.25, to: range.to + 0.25 });
+    }
+  });
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  await expect(page.getByRole("tooltip")).toHaveCount(1);
+  // Leaving the plot for its price axis clears the hover even while inside the chart container.
+  await page.mouse.move(box.x + box.width - 20, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+  // An intentional click still pins a card, but a different timeframe starts without it.
+  await page.mouse.click(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip").getByRole("button", { name: "Close level card" })).toBeVisible();
+  await page.getByLabel("Main interval", { exact: true }).selectOption("15m");
+  await expect(page.getByRole("region", { name: "MRVL 15m chart", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("redraws under a stationary pointer refresh its candle readout, linked time and level card", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-bars", "240");
+  const region = page.getByRole("region", { name: "MRVL 5m chart", exact: true });
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip", { name: "ONH level card" })).toBeVisible();
+  const before = await page.getByLabel("main candle values").textContent();
+  // Move the candles under a pointer that stays put; use the chart's new coordinate/time mapping.
+  const candle = await page.evaluate(async () => {
+    type Chart = import("lightweight-charts").IChartApi;
+    const chart = (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!;
+    chart.timeScale().setVisibleLogicalRange({ from: 20, to: 70 });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const time = chart.timeScale().coordinateToTime(300);
+    const row = chart.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!.data().find((bar) => bar.time === time)!;
+    if (typeof time !== "number" || !("close" in row)) throw new Error("Expected a candle under the stationary pointer");
+    return { time, close: row.close };
+  });
+  await expect(page.getByLabel("main candle values")).toContainText(`C ${candle.close.toFixed(2)}`);
+  await expect(page.getByLabel("main candle values")).not.toHaveText(before!);
+  const followerBars = fixturePanels(["15m"])["15m"]!.bars;
+  const follower = followerBars.find((bar) => bar.time <= candle.time && candle.time < bar.end_time) ?? followerBars.at(-1)!;
+  await expect(page.getByLabel("Panel 2 candle values")).toContainText(`C ${follower.close.toFixed(2)}`);
+  // The former zone is now off the price scale; no old card may stay at the pointer.
+  expect(await autoY(page, "main", AUTO_ZONES[4].id)).toBeLessThan(0);
+  await expect(region.getByRole("tooltip", { name: "ONH level card" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "MRVL 15m chart", exact: true }).getByRole("tooltip")).toHaveCount(0);
+});
+
+test("a pinned level card covers the RSI resize handle and chart lines", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // A taller RSI pane puts its separator through the card, as on the reported layout.
+  await page.evaluate(async () => {
+    type Chart = { panes(): { setHeight(height: number): void }[] };
+    (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!.panes()[1].setHeight(300);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  const canvas = drawn(page, "main");
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.click(box.x + 320, box.y + await autoY(page, "main", AUTO_ZONES[2].id));
+  const card = page.getByRole("region", { name: "MRVL 5m chart", exact: true }).getByRole("tooltip");
+  await expect(card.getByRole("button", { name: "Close level card" })).toBeVisible();
+  // Find the actual library handle; sample the overlap so a z-index regression cannot pass.
+  const overlap = await canvas.evaluate((element) => {
+    const handle = [...element.querySelectorAll<HTMLElement>("*")].find((node) => node.style.zIndex === "50" && getComputedStyle(node).cursor === "row-resize")!;
+    const tooltip = element.parentElement!.querySelector('[role="tooltip"]')!;
+    const [line, card] = [handle.getBoundingClientRect(), tooltip.getBoundingClientRect()];
+    const top = Math.max(line.top, card.top), bottom = Math.min(line.bottom, card.bottom);
+    const x = card.left + 20, y = (top + bottom) / 2;
+    return { height: bottom - top, covered: tooltip.contains(document.elementFromPoint(x, y)), background: getComputedStyle(tooltip).backgroundColor };
+  });
+  expect(overlap.height).toBeGreaterThan(0);
+  expect(overlap.covered).toBe(true);
+  expect(overlap.background).toBe("rgb(20, 27, 38)");
+  await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
+  await card.getByRole("button", { name: "Close level card" }).click();
+  await expect(card).toHaveCount(0);
+});
+
 test("automatic levels draw the nearest three each side, a hover shows each one's card, and the group hides on every chart", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const errors: string[] = [];
@@ -4814,6 +4928,148 @@ test("options levels draw the walls and the nearest strikes, follow every filter
   expect(errors).toEqual([]);
 });
 
+// ---- Range bands (C2.7) and max pain (C4.7): stubbed bands; the backend tests capture and merge them ----
+
+const CAPTURED = Date.parse("2026-10-05T09:35:00-04:00") / 1000;
+const RANGES: RangesInfo = { state: "ready", message: null, symbol: "MRVL", root: "MRVL", source: "Tradier option chains", day: "2026-10-05", bands: [
+  { expiration: "2026-10-05", tags: ["nearest"], today: true, anchor: 257.34, move: 2.1, percent: 2.1 / 257.34, strike: 257.5, iv: 0.31, quoted_at: CAPTURED - 5, captured_at: CAPTURED },
+  { expiration: "2026-10-09", tags: ["friday"], today: false, anchor: 257.34, move: 4.6, percent: 4.6 / 257.34, strike: 257.5, iv: 0.29, quoted_at: CAPTURED - 5, captured_at: CAPTURED },
+] };
+const rangeMember = (kind: string, label: string, value: number): AutoLevel => ({
+  kind, label, price: value, evidence: "calculated", timeframe: null, source: "tradier", bar_time: null, formed_at: CAPTURED, developing: false });
+const RANGE_MEMBERS = [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_low", "EM 0DTE low", 255.24),
+  rangeMember("expected_move_high", "EM Fri high", 261.94), rangeMember("expected_move_low", "EM Fri low", 252.74)];
+const MAX_PAIN = optionMember("max_pain", "Max pain", 248.5, "inferred");
+async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RANGES, members: AutoLevel[] = RANGE_MEMBERS) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const url = route.request().url();
+    requests.push(url);
+    const query = new URL(url).searchParams;
+    const data = fixture(url);
+    // Intraday candles carry VWAP's standard deviation; daily ones have no VWAP.
+    for (const panel of Object.values(data.panels)) for (const bar of panel?.bars ?? []) bar.vwap_sd = bar.vwap === null ? null : 0.6;
+    const layer = query.get("options");
+    const ranges = query.get("ranges") === "1";
+    const auto = query.get("auto") !== "0";
+    const options = layer ? [...optionMembers("oi", false), MAX_PAIN] : [];
+    data.auto_levels = { day: "2026-10-05", as_of: CAPTURED + 600, atr: 5.5, band: 0.55, missing: {}, auto,
+      zones: mergeZones(auto ? AUTO_ZONES : [], [...options, ...(ranges ? members : [])]),
+      ...(layer ? { options: { ...optionInfo("oi", "week", false, options), max_pain: { price: 248.5, expiration: "2026-10-09",
+        note: "The strike where this expiration's open contracts would pay their holders least at expiry. Arithmetic on open interest; that price drifts to it is folklore, so treat it as a reference, not a target." } } } : {}),
+      ...(ranges ? { ranges: bands } : {}) };
+    await route.fulfill({ json: data });
+  });
+}
+const RANGE_LEVELS = "EM Fri low,EM 0DTE low,EM 0DTE high,262 + EM Fri high";
+
+test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, explain themselves, and hide from the menu", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Off until asked for: no bands drawn and none asked for.
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  expect(requests.every((url) => !new URL(url).searchParams.has("ranges"))).toBe(true);
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const group = layerGroup(page, "Range bands");
+  await group.getByRole("button", { name: "Show Range bands" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("ranges=1");
+  // Every expected-move level draws on every chart, however far; Friday's high shares the round 262's zone.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", RANGE_LEVELS);
+  await expect(group).toContainText("MRVL: 0DTE ±2.10, Fri ±4.60.");
+  // VWAP bands on the intraday charts' every candle; the daily chart has no VWAP to band.
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands", "240");
+  await expect(drawn(page, "Panel 4")).toHaveAttribute("data-vwap-bands", "0");
+  await expect.poll(() => server.data?.rangeBandsHidden).toBe(false);
+
+  const box = (await drawn(page, "main").boundingBox())!;
+  const high = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id === "expected_move_high@259.44")!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", high));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high level card" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("EM 0DTE high Expected move, upper259.44");
+  await expect(card).toContainText("calculated · Tradier option chains · priced 9:35 AM ET, fixed for the session");
+  await expect(card).toContainText("Today's (0DTE) 257.50 straddle cost 2.10 (0.82%) at 9:35 AM ET, added to 257.34, the price then; IV 31.0%.");
+  await expect(card).toContainText("a price, not a forecast of where price will stay");
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+  // Friday's high, in the round 262's zone, reads Friday's straddle and not today's.
+  const friday = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@261.94"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", friday));
+  await expect(page.getByRole("tooltip", { name: "262 + EM Fri high level card" })).toContainText("Fri, Oct 9's 257.50 straddle cost 4.60 (1.79%)");
+  await page.screenshot({ path: test.info().outputPath("range-bands.png") });
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // With the automatic levels hidden, the bands still ask for themselves alone.
+  await layerGroup(page, "Auto levels").getByRole("button", { name: "Hide Auto levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("auto=0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", /^expected_move_low@252.74/);
+
+  // Through a reload, then off again from the chart menu's Layers.
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
+  await rightClick(page, "main", EMPTY);
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Range bands" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", "");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await expect.poll(() => server.data?.rangeBandsHidden).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("two expected-move levels on the same cent each show their own expiration's straddle", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context, { revision: 1, data: { rangeBandsHidden: false } });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  // Friday's straddle centred 1.00 lower and 1.00 wider ends on today's high exactly.
+  const friday = { ...RANGES.bands[1], anchor: 256.34, move: 3.1, percent: 3.1 / 256.34, strike: 256 };
+  await stubRanges(page, [], { ...RANGES, bands: [RANGES.bands[0], friday] },
+    [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_high", "EM Fri high", 259.44)]);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM 0DTE high + EM Fri high");
+  const box = (await drawn(page, "main").boundingBox())!;
+  const zone = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@259.44"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", zone));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high + EM Fri high level card" });
+  await expect(card.getByLabel("Straddle Mon, Oct 5")).toContainText("Today's (0DTE) 257.50 straddle cost 2.10");
+  await expect(card.getByLabel("Straddle Fri, Oct 9")).toContainText("Fri, Oct 9's 256.00 straddle cost 3.10");
+});
+
+test("max pain always draws with the options levels, labelled inferred, with its expiration and a caveat", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await layerGroup(page, "Options levels").getByRole("button", { name: "Show Options levels" }).click();
+  // Far below the nearest strikes, and still drawn: like the walls, max pain is not ranked away.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", `Max pain,${OI_LEVELS}`);
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", "max_pain@248.5"));
+  const card = page.getByRole("tooltip", { name: "Max pain level card" });
+  await expect(card).toContainText("Max pain Max pain: least paid out at expiry248.50");
+  await expect(card).toContainText("inferred · Tradier option chains");
+  await expect(card).toContainText("Fri, Oct 9 expiration. The strike where this expiration's open contracts would pay their holders least at expiry.");
+  await expect(card).toContainText("folklore");
+});
+
 function ladder(url: string): OptionsLadder {
   const query = new URL(url).searchParams;
   const rows = Array.from({ length: 13 }, (_, i) => 245 + i * 2.5).map((strike) => ({ ...optionRow(strike, null),
@@ -5135,6 +5391,47 @@ test("a double tap on Save plan sends one request and saves one plan", { tag: "@
   await expect(sheet).toHaveCount(0);
   expect(posts).toBe(1);
   expect((await savedCaptures(request)).length).toBe(before + 1);
+});
+
+test("a template edited on another device is refused, then its new wording is shown and saves", { tag: "@captures" }, async ({ page, request }) => {
+  const setup = await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await request.put(`${CAPTURES}/templates/${setup.templates[0].id}`, { data: { setup_label: "Reclaim", wording: "Out under the 9 EMA." } });
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toContainText("edited on another device");
+  await expect(sheet.getByRole("button", { name: /Reclaim/ })).toContainText("Out under the 9 EMA.");
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const row = (await savedCaptures(request))[0];
+  expect([row.wording, row.template_revision]).toEqual(["Out under the 9 EMA.", 2]);
+});
+
+test("a chart image that failed to upload keeps its Retry after its plan is dismissed", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.route(`**${CAPTURES}/*/image`, (route) => route.abort("connectionrefused"));
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy puts" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const id = (await savedCaptures(request))[0].id;
+  await page.getByRole("button", { name: "Dismiss saved plan" }).click();
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("alert")).toContainText("Chart image not uploaded: MRVL Buy puts plan");
+  await page.unroute(`**${CAPTURES}/*/image`);
+  await strip.getByRole("button", { name: "Retry image" }).click();
+  await expect(strip).toHaveCount(0);
+  expect((await savedCaptures(request)).find((row) => row.id === id)?.image.state).toBe("saved");
 });
 
 // The voice tests use Chromium's fake microphone (a tone, see playwright.config.ts): real MediaRecorder, real upload, real storage.

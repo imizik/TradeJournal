@@ -231,7 +231,20 @@ missing-split banner, a history page on a different split set refused, and a
 possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year
 1D chart and a 30-year 1W chart panned page by page to their first bar with a
 stable zoom and the start-of-history label, 1D to 1W to 5m switching, and a
-390px touch pan). Chart
+390px touch pan), the workspace shell and its dividers (C7.3/C7.4: five charts
+filling 1440×900 and 1920×1080 without page scroll, the main chart's minimum
+height at 1280×720, the toolbar at 1024px, dividers dragged, stepped by key,
+clamped and reset with no chart re-render or request, saved proportions shared
+between browsers while the dock's width stays per device, and maximize/restore
+keeping the same chart instances), automatic levels (the nearest three each
+side, a hover or tap card, the group hidden on every chart), relative volume
+(shaded bars, the legend's RVol and its sessions, no baseline said so),
+earnings (markers intraday and daily, the 14-day badge), level alerts (set from
+a level's or an automatic level's menu, the bell grayed once fired, the list
+re-arming and removing), and the options layers (walls and ranked strikes
+through every filter, the strike ladder, max pain, and the range bands'
+expected-move levels, VWAP bands and cards, two bands on one cent each showing
+their own straddle). Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts`, `window.__tjRenders` and `window.__tjDrawings` maps the
@@ -257,7 +270,10 @@ a moving price is not covered. `backend/tests/test_chart_rvol.py` holds every
 chart candle's relative volume equal to fill context's
 `compute_rvol_time_adjusted` on the same bars, and
 `backend/tests/test_rvol_history.py` covers the morning job that stores the
-sessions it needs. Actual Tradier/Webull
+sessions it needs. `backend/tests/test_chart_levels.py` pins each automatic
+level and the confluence rule on fixture bars, including a DST day and a half
+day, and `backend/tests/test_level_alerts.py` the alert monitor (see Level
+alerts under the integration notes below). Actual Tradier/Webull
 access is checked separately by `backend/scripts/check_chart_feed.py`, split
 records and the adjusted prices against both providers by
 `backend/scripts/check_chart_splits.py` (read-only, a real split), live option

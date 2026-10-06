@@ -16,6 +16,9 @@ What each number is:
   Dollar gamma for a 1% move is gamma x open interest x shares per contract x
   S² x 0.01, unsigned: how much hedging a 1% move asks of whoever holds the
   contracts, without saying who that is.
+- *Inferred*: max pain, the strike where the open contracts of one expiration
+  would pay their holders least at expiry. It is arithmetic on open interest,
+  but reading it as where price will settle is folklore, so it says so.
 - *Assumed*: signed gamma and the gamma flip. Open interest does not say who
   holds a contract or which way they hedge, so a sign needs a convention
   (``DEALER_SIDE``). It is off unless asked for, and every result built on it
@@ -310,6 +313,47 @@ def _signed(inputs, price: float) -> float:
 
 
 # ---------------------------------------------------------------------------
+# Max pain (inferred, C4.7)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class MaxPain:
+    price: float  # the strike
+    expiration: date
+    payout: float  # what the open contracts would pay at that strike, dollars
+
+
+def max_pain(chain: OptionChain, root: str | None = None) -> MaxPain | None:
+    """The listed strike of one expiration where its open contracts would pay their holders
+    least if the underlying settled there: for each candidate strike K, call open interest
+    pays (K - strike) below it and put open interest (strike - K) above it, times the
+    contracts' size. A tie goes to the lower strike. None without any open interest.
+
+    Arithmetic on observed open interest; the idea that price drifts to it is not
+    established, so it is *inferred* wherever it is shown.
+    """
+    root = root or primary_root(chain.underlying)
+    calls: dict[float, float] = {}
+    puts: dict[float, float] = {}
+    for contract in chain.contracts:
+        if contract.root != root or not contract.open_interest or contract.multiplier is None:
+            continue
+        side = calls if contract.option_type == "call" else puts
+        side[contract.strike] = side.get(contract.strike, 0) + contract.open_interest * contract.multiplier
+    if not calls and not puts:
+        return None
+    strikes = sorted({c.strike for c in chain.contracts if c.root == root})
+
+    def payout(settle: float) -> float:
+        return (sum(size * (settle - strike) for strike, size in calls.items() if strike < settle)
+                + sum(size * (strike - settle) for strike, size in puts.items() if strike > settle))
+
+    best = min(strikes, key=lambda strike: (payout(strike), strike))
+    return MaxPain(best, chain.expiration, payout(best))
+
+
+# ---------------------------------------------------------------------------
 # Chart levels (C4.4)
 # ---------------------------------------------------------------------------
 
@@ -320,10 +364,12 @@ WALL_KINDS = {
 RANK_NAMES = {"oi": "OI", "volume": "Vol", "gamma": "Gamma"}
 
 
-def chart_levels(found: Positioning, measure: str, signed: bool = False, flip: GammaFlip | None = None) -> list[Level]:
+def chart_levels(found: Positioning, measure: str, signed: bool = False, flip: GammaFlip | None = None,
+                 pain: MaxPain | None = None) -> list[Level]:
     """The strikes the chart draws for ``measure``: the call and put walls (open interest's, or
     volume's in volume mode), then the ``TOP`` strikes by the measure on both sides together,
-    leaving out the walls' strikes, and the gamma flip when there is one.
+    leaving out the walls' strikes, the gamma flip when there is one, and max pain (inferred)
+    when it is given.
 
     Open-interest levels hold still through a session. Volume and gamma ones can
     move (volume trades, gamma follows the price), so they are ``developing``.
@@ -348,6 +394,9 @@ def chart_levels(found: Positioning, measure: str, signed: bool = False, flip: G
         taken.add(row.strike)
     if flip is not None and flip.price is not None:
         levels.append(Level("gamma_flip", "Gamma flip", flip.price, "assumed", None, "tradier", developing=True))
+    if pain is not None:
+        # Open interest holds still through a session, so max pain does too.
+        levels.append(Level("max_pain", "Max pain", pain.price, "inferred", None, "tradier"))
     return levels
 
 

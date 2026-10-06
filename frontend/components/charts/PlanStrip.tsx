@@ -33,6 +33,8 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
   const [problem, setProblem] = useState("");
   const unsent = outbox.filter((item) => item.kind !== "image");
   const images = outbox.filter((item) => item.kind === "image");
+  // An image whose plan is not the one shown (dismissed, or a newer plan took the strip) keeps its own Retry here.
+  const strayImages = images.filter((item) => item.capture_id !== capture?.id);
   if (!capture && !outbox.length) return null;
   const tap = narrow ? "min-h-11 px-2" : "h-6 px-1.5";
   const transcript = capture?.transcript;
@@ -45,6 +47,10 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
     {unsent.map((item) => <div key={item.client_id} role="alert" className="flex items-center gap-2 text-amber-200">
       <span className="min-w-0 flex-1 truncate">Not saved: {item.body.underlying} {SIDE_LABEL[item.body.side]}{item.kind === "voice" ? " (voice)" : ""}, written {captureTime(item.created_at / 1000)} on this device. {item.error}</span>
       <button type="button" onClick={() => onRetry(item)} className={`inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 ${tap}`}><RotateCcw size={11} />Retry</button>
+    </div>)}
+    {strayImages.map((item) => <div key={item.client_id} role="alert" className="flex items-center gap-2 text-amber-200">
+      <span className="min-w-0 flex-1 truncate">Chart image not uploaded: {item.body.underlying} {SIDE_LABEL[item.body.side]} plan, written {captureTime(item.created_at / 1000)}. {item.error}</span>
+      <button type="button" onClick={() => onRetry(item)} className={`inline-flex shrink-0 items-center gap-1 rounded bg-amber-500/20 text-amber-100 hover:bg-amber-500/30 ${tap}`}><RotateCcw size={11} />Retry image</button>
     </div>)}
     {capture && <div className={`flex min-w-0 items-center gap-x-2 ${narrow ? "flex-wrap" : ""}`}>
       <NotebookPen size={12} className="shrink-0 text-sky-300" aria-hidden />

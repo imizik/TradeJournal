@@ -13,6 +13,11 @@ export type ChartBar = {
   extended: boolean; ema9: number | null; ema20: number | null; ema50: number | null; ema200: number | null;
   vwap: number | null; rsi: number | null;
   /**
+   * The regular session's volume-weighted standard deviation of minute prices around VWAP
+   * (C2.7's VWAP bands): null where VWAP is; absent on candles from an older build or a live tick.
+   */
+  vwap_sd?: number | null;
+  /**
    * Relative volume (C2.4): today's regular-session volume through this candle over the
    * baseline's average through the same minute. Present on a workspace response's intraday
    * candles when the symbol trades today; null where there is none (outside regular hours,
@@ -58,7 +63,24 @@ export type AutoLevels = {
   auto?: boolean;
   /** The options levels layer (C4.4) when asked for: what its strikes are and why any are missing. */
   options?: OptionsInfo;
+  /** The expected-move range bands (C2.7) when asked for: each captured straddle, or why there is none yet. */
+  ranges?: RangesInfo;
 };
+/**
+ * One expiration's at-the-money straddle (C2.7), captured once a session five minutes after
+ * the open around the price then (`anchor`), and fixed for the rest of the day. `move` is the
+ * straddle's mid per share; `tags` say whether it is the nearest expiration, the nearest Friday or both.
+ */
+export type RangeBand = {
+  expiration: string; tags: ("nearest" | "friday")[]; today: boolean; anchor: number; move: number; percent: number;
+  strike: number; iv: number | null; quoted_at: number | null; captured_at: number;
+};
+export type RangesInfo = {
+  state: "ready" | "loading" | "waiting" | "closed" | "unavailable" | "none"; message: string | null;
+  symbol: string; root: string; source: string; day: string; bands: RangeBand[];
+};
+/** Max pain (C4.7): one expiration's strike where its open contracts would pay least. Inferred. */
+export type MaxPain = { price: number; expiration: string; note: string };
 /** One strike's open interest and volume (observed) and dollar gamma for a 1% move (calculated), across a scope's expirations (C4.2). */
 export type OptionStrike = {
   strike: number; call_oi: number | null; put_oi: number | null; call_volume: number | null; put_volume: number | null;
@@ -89,6 +111,8 @@ export type OptionsInfo = {
   fetched_at?: number; last_trade_at?: number | null; greeks_updated_at?: string | null;
   excluded?: Record<string, number>; missing?: Record<string, number>; totals?: OptionsTotals;
   strikes?: OptionStrike[]; flip?: GammaFlip | null;
+  /** The scope's nearest expiration's max pain (C4.7); absent before it, null without open interest. */
+  max_pain?: MaxPain | null;
 };
 export type OptionsLadder = OptionsInfo & {
   signed: boolean; rows: OptionStrike[];
@@ -306,6 +330,8 @@ export type ChartSettings = {
   autoLevelsHidden: boolean;
   /** The options levels layer (C4.4): off until asked for, and its filters. */
   optionsLayer: OptionsLayer;
+  /** The range bands (C2.7): expected-move levels and VWAP ±1σ/±2σ, off until shown; a field of its own like `autoLevelsHidden`. */
+  rangeBandsHidden: boolean;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -352,7 +378,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
@@ -402,6 +428,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       studiesHidden: value.studiesHidden === true,
       autoLevelsHidden: value.autoLevelsHidden === true,
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
+      rangeBandsHidden: value.rangeBandsHidden !== false,
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
@@ -531,15 +558,20 @@ export function focusPanel(settings: ChartSettings, index: number): ChartSetting
 }
 
 /** `extras` lists the intervals each symbol held by a panel needs. */
-/** `options` asks for the options levels layer (`optionsQuery`); `auto: false` then leaves the automatic levels out of the zones. */
-export async function fetchChartData({ symbol, intervals, watchlist, session, extras, options = null, auto = true }: {
+/**
+ * `options` asks for the options levels layer (`optionsQuery`) and `ranges` for the range bands (C2.7);
+ * with either, `auto: false` leaves the automatic levels out of the zones.
+ */
+export async function fetchChartData({ symbol, intervals, watchlist, session, extras, options = null, ranges = false, auto = true }: {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: ChartSettings["session"]; extras: Record<string, Interval[]>;
-  options?: string | null; auto?: boolean;
+  options?: string | null; ranges?: boolean; auto?: boolean;
 }, signal: AbortSignal): Promise<ChartData> {
   const query = new URLSearchParams({ symbol, intervals: intervals.join(","), watchlist: watchlist.join(","), session });
   const held = Object.entries(extras).map(([name, frames]) => `${name}:${frames.join(".")}`).join(",");
   if (held) query.set("extras", held);
-  if (options) { query.set("options", options); if (!auto) query.set("auto", "0"); }
+  if (options) query.set("options", options);
+  if (ranges) query.set("ranges", "1");
+  if ((options || ranges) && !auto) query.set("auto", "0");
   const response = await fetch(apiUrl(`/charts/workspace?${query}`), { cache: "no-store", signal });
   const body = await response.json();
   if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Unable to load chart data.");
@@ -788,7 +820,7 @@ export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" |
   if (a.time !== b.time) return "reset";
   return sameBar(a, b) ? "same" : "last";
 }
-const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi", "rvol"] as const;
+const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "vwap_sd", "rsi", "rvol"] as const;
 const sameBar = (a: ChartBar, b: ChartBar) => a === b || BAR_KEYS.every((key) => a[key] === b[key]);
 
 export type TimeRange = { from: number; to: number };

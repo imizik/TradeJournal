@@ -137,6 +137,7 @@ def workspace(
     session: str = Query("extended", pattern="^(regular|extended)$"),
     extras: str = Query("", max_length=120),
     options: str = Query("", max_length=20),
+    ranges: bool = Query(False),
     auto: bool = Query(True),
     db: Session = Depends(get_session),
 ):
@@ -145,8 +146,9 @@ def workspace(
 
     ``options=oi.week.0`` (measure, scope, signed) adds the options levels layer
     (C4.4) to the automatic levels, from the option chain cache only: the main
-    symbol in that scope, a held symbol at its nearest expiration. ``auto=0``
-    then leaves the automatic levels out of the zones."""
+    symbol in that scope, a held symbol at its nearest expiration. ``ranges=1``
+    adds the expected-move range bands (C2.7) for every symbol shown. With either,
+    ``auto=0`` leaves the automatic levels out of the zones."""
     symbol = symbol.upper().strip()
     symbols = list(dict.fromkeys(s.strip().upper() for s in watchlist.split(",") if s.strip()))
     frames = list(dict.fromkeys(s.strip() for s in intervals.split(",") if s.strip()))
@@ -166,10 +168,13 @@ def workspace(
         raise HTTPException(422, "Options levels take a measure (oi, volume or gamma), a scope (nearest, week or all) and 0 or 1.") from None
 
     def levels_for(scope: str | None):
-        if layer is None:
-            return {}
-        held_layer = Layer(layer.measure, scope or layer.scope, layer.signed)
-        return {"extra_levels": lambda name, spot: options_feed.chart(name, held_layer, spot), "auto": auto}
+        found = {}
+        if layer is not None:
+            held_layer = Layer(layer.measure, scope or layer.scope, layer.signed)
+            found["extra_levels"] = lambda name, spot: options_feed.chart(name, held_layer, spot)
+        if ranges:
+            found["range_levels"] = options_feed.ranges
+        return {**found, "auto": auto} if found else {}
 
     try:
         data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,

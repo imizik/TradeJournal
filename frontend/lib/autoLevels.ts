@@ -12,8 +12,10 @@ import { etTime, price } from "./charts";
  *
  * Option strikes (C4.4) join the same zones on the backend, so a call wall at
  * the prior day's high is one zone. A zone with an option member is tinted by
- * it: calls teal, puts rose, other ranked strikes violet, the gamma flip amber.
- * A strike chosen on the ladder (C4.5) draws as a solid highlighted line.
+ * it: calls teal, puts rose, other ranked strikes violet, the gamma flip amber,
+ * max pain (C4.7) orange. The range bands' expected-move levels (C2.7) join the
+ * zones the same way and draw blue. A strike chosen on the ladder (C4.5) draws
+ * as a solid highlighted line.
  */
 
 /** Zones shown on each side of price. */
@@ -27,41 +29,48 @@ function tint(zone: AutoZone): string {
   if (kinds.has("call_wall") || kinds.has("call_volume_wall")) return "#4fd1b5";
   if (kinds.has("put_wall") || kinds.has("put_volume_wall")) return "#f08aa0";
   if (kinds.has("gamma_flip")) return "#f5c76b";
+  if (kinds.has("max_pain")) return "#fb923c";
+  if (zone.members.some(isRange)) return "#7aa7ff";
   return zone.members.some(isOption) ? "#a99af0" : LINE;
 }
 const FONT = "ui-sans-serif, system-ui, sans-serif";
 
-/** Option strike kinds (C4.4); the walls and the flip always draw while the layer is on. */
-const OPTION_KINDS = new Set(["call_wall", "put_wall", "call_volume_wall", "put_volume_wall", "options_oi", "options_volume", "options_gamma", "gamma_flip"]);
-const ALWAYS = new Set(["call_wall", "put_wall", "call_volume_wall", "put_volume_wall", "gamma_flip"]);
+/** Option strike kinds (C4.4, C4.7); the walls, the flip and max pain always draw while the layer is on. */
+const OPTION_KINDS = new Set(["call_wall", "put_wall", "call_volume_wall", "put_volume_wall", "options_oi", "options_volume", "options_gamma", "gamma_flip", "max_pain"]);
+const ALWAYS = new Set(["call_wall", "put_wall", "call_volume_wall", "put_volume_wall", "gamma_flip", "max_pain"]);
+/** The range bands' expected-move levels (C2.7); every one draws while the bands are on. */
+const RANGE_KINDS = new Set(["expected_move_high", "expected_move_low"]);
 export const isOption = (level: AutoLevel) => OPTION_KINDS.has(level.kind);
+export const isRange = (level: AutoLevel) => RANGE_KINDS.has(level.kind);
 const hasOption = (zone: AutoZone) => zone.members.some(isOption);
-const hasAuto = (zone: AutoZone) => zone.members.some((member) => !isOption(member));
+const hasRange = (zone: AutoZone) => zone.members.some(isRange);
+const hasAuto = (zone: AutoZone) => zone.members.some((member) => !isOption(member) && !isRange(member));
 
 /**
  * The zones a chart may show of what the backend sent, by which groups are on.
  * The backend merges only the groups asked for; until a response for a changed
  * choice arrives, a zone without a member of a shown group is left out.
  */
-export function autoLevelsShown(levels: AutoLevels | null | undefined, auto: boolean, options: boolean): AutoLevels | null {
-  if (!levels || (!auto && !options)) return null;
-  if (auto && options) return levels;
-  const zones = levels.zones.filter(auto ? hasAuto : hasOption);
+export function autoLevelsShown(levels: AutoLevels | null | undefined, auto: boolean, options: boolean, ranges = false): AutoLevels | null {
+  if (!levels || (!auto && !options && !ranges)) return null;
+  const zones = levels.zones.filter((zone) => (auto && hasAuto(zone)) || (options && hasOption(zone)) || (ranges && hasRange(zone)));
   return zones.length === levels.zones.length ? levels : { ...levels, zones };
 }
 
 /**
  * The zones to draw: the nearest automatic ones (C2.3) and, with the options
- * layer on, the nearest `options` option zones each side plus every wall and
- * the flip, lowest first. A zone of both kinds counts for each.
+ * layer on, the nearest `options` option zones each side plus every wall, the
+ * flip and max pain; with the range bands on (C2.7), every expected-move level.
+ * Lowest first. A zone of several kinds counts for each.
  */
-export function shownZones(zones: AutoZone[], at: number | undefined, options: number | null): AutoZone[] {
+export function shownZones(zones: AutoZone[], at: number | undefined, options: number | null, ranges = false): AutoZone[] {
   if (at === undefined) return [];
   const chosen = new Map(nearestZones(zones.filter(hasAuto), at).map((zone) => [zone.id, zone]));
   if (options !== null) {
     for (const zone of nearestZones(zones.filter(hasOption), at, options)) chosen.set(zone.id, zone);
     for (const zone of zones) if (zone.members.some((member) => ALWAYS.has(member.kind))) chosen.set(zone.id, zone);
   }
+  if (ranges) for (const zone of zones) if (hasRange(zone)) chosen.set(zone.id, zone);
   return [...chosen.values()].sort((a, b) => a.low - b.low);
 }
 
@@ -90,12 +99,14 @@ export const KIND_NAMES: Record<string, string> = {
   call_volume_wall: "Call volume wall: most calls traded", put_volume_wall: "Put volume wall: most puts traded",
   options_oi: "Open interest, ranked", options_volume: "Option volume, ranked", options_gamma: "Gamma, ranked",
   gamma_flip: "Gamma flip: signed gamma crosses zero",
+  max_pain: "Max pain: least paid out at expiry",
+  expected_move_high: "Expected move, upper", expected_move_low: "Expected move, lower",
 };
 export const STATE_NAMES: Record<LevelInteraction["state"], string> = { untested: "Untested", tested: "Tested", broken: "Broken", reclaimed: "Reclaimed", developing: "Still forming" };
 
 /** Where a level came from, in words: "Tradier daily bar", "SIP minute", or the rule a round number follows. */
 export function sourceName(level: AutoLevel): string {
-  if (isOption(level)) return "Tradier option chains";
+  if (isOption(level) || isRange(level)) return "Tradier option chains";
   if (!level.source) return "price rule";
   const provider = level.source === "alpaca_sip" ? "SIP" : "Tradier";
   return `${provider} ${level.timeframe === "1D" ? "daily bar" : "minute"}`;
@@ -105,6 +116,8 @@ export function sourceName(level: AutoLevel): string {
 export function formedName(level: AutoLevel): string | null {
   // Open interest holds still through a session; volume trades and gamma follows the price.
   if (isOption(level)) return level.developing ? "moves during the session" : null;
+  // An expected-move level is fixed once captured for the session.
+  if (isRange(level)) return level.formed_at === null ? null : `priced ${etTime(level.formed_at)} ET, fixed for the session`;
   if (level.developing) return "still forming";
   return level.formed_at === null ? null : `formed ${etTime(level.formed_at, true)} ${etTime(level.formed_at)}`;
 }

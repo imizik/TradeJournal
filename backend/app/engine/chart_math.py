@@ -8,7 +8,7 @@ supplied, so holidays and early closes resample, stream and count down alike.
 
 from bisect import bisect_left
 from datetime import date, datetime, time as wall_time, timedelta
-from math import isfinite
+from math import isfinite, sqrt
 from typing import Mapping
 from zoneinfo import ZoneInfo
 
@@ -100,7 +100,7 @@ def daily_page(series: list[dict], before: int, limit: int) -> tuple[list[dict],
 def chart_bars(minutes: list[dict], daily: list[dict], interval: str, session: str,
                calendar: Mapping[date, dict | None] | None = None) -> list[dict]:
     if interval == "1D":
-        return indicators([{**b, "source": b.get("source", "tradier"), "extended": False, "vwap": None} for b in daily])
+        return indicators([{**b, "source": b.get("source", "tradier"), "extended": False, "vwap": None, "vwap_sd": None} for b in daily])
     if interval == "1W":
         groups: dict[int, dict] = {}
         for b in daily:
@@ -108,18 +108,18 @@ def chart_bars(minutes: list[dict], daily: list[dict], interval: str, session: s
             monday = dt - timedelta(days=dt.weekday())
             stamp = int(monday.timestamp())
             end = int((monday + timedelta(days=4)).replace(hour=16, minute=0).timestamp())
-            _merge(groups, stamp, end, b, False, None)
+            _merge(groups, stamp, end, b, False, None, None)
         return indicators(list(groups.values()))
 
     width = INTERVALS[interval]
     groups = {}
     current_day = None
     windows: list[tuple[str, int, int]] = []
-    pv = volume = 0.0
+    pv = pv2 = volume = 0.0
     for b in minutes:
         dt = datetime.fromtimestamp(b["time"], ET)
         if dt.date() != current_day:
-            current_day, pv, volume = dt.date(), 0.0, 0.0
+            current_day, pv, pv2, volume = dt.date(), 0.0, 0.0, 0.0
             windows = session_windows(current_day, calendar.get(current_day) if calendar else None)
         minute = dt.hour * 60 + dt.minute
         part = next((w for w in windows if w[1] <= minute < w[2]), None)
@@ -127,26 +127,32 @@ def chart_bars(minutes: list[dict], daily: list[dict], interval: str, session: s
             continue
         # RTH VWAP is always based on minute HLC3, never on resampled candles.
         # It is absent outside RTH, so extended-hours volume cannot dilute it.
-        vwap = None
+        # Its standard deviation (the range bands' VWAP bands, C2.7) is the
+        # volume-weighted spread of the same minute prices around it.
+        vwap = sd = None
         if part[0] == "regular":
-            pv += (b["high"] + b["low"] + b["close"]) / 3 * b["volume"]
+            typical = (b["high"] + b["low"] + b["close"]) / 3
+            pv += typical * b["volume"]
+            pv2 += typical * typical * b["volume"]
             volume += b["volume"]
             vwap = pv / volume if volume else None
+            sd = sqrt(max(pv2 / volume - vwap * vwap, 0.0)) if volume else None
         anchor = part[1] + ((minute - part[1]) // width) * width
         start = dt.replace(hour=anchor // 60, minute=anchor % 60, second=0, microsecond=0)
         finish = min(anchor + width, part[2])
         end = dt.replace(hour=finish // 60, minute=finish % 60, second=0, microsecond=0)
-        _merge(groups, int(start.timestamp()), int(end.timestamp()), b, part[0] != "regular", vwap)
+        _merge(groups, int(start.timestamp()), int(end.timestamp()), b, part[0] != "regular", vwap, sd)
     return indicators(list(groups.values()))
 
 
-def _merge(groups: dict, stamp: int, end: int, bar: dict, extended: bool, vwap: float | None):
+def _merge(groups: dict, stamp: int, end: int, bar: dict, extended: bool, vwap: float | None, sd: float | None):
     if stamp not in groups:
-        groups[stamp] = {**bar, "source": bar.get("source", "tradier"), "time": stamp, "end_time": end, "extended": extended, "vwap": vwap}
+        groups[stamp] = {**bar, "source": bar.get("source", "tradier"), "time": stamp, "end_time": end, "extended": extended, "vwap": vwap,
+                         "vwap_sd": sd}
     else:
         b = groups[stamp]
         b.update(high=max(b["high"], bar["high"]), low=min(b["low"], bar["low"]),
-                 close=bar["close"], volume=b["volume"] + bar["volume"], vwap=vwap)
+                 close=bar["close"], volume=b["volume"] + bar["volume"], vwap=vwap, vwap_sd=sd)
 
 
 def indicators(bars: list[dict]) -> list[dict]:

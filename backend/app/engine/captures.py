@@ -439,7 +439,6 @@ def queue_transcription(db: Session, capture: TradeCapture) -> JobRun | None:
     for over and over.
     """
     from app.engine import transcribe
-    from app.engine.jobs import create_job
 
     if capture.mode != "voice" or capture.transcript_status == "ready":
         return None
@@ -453,12 +452,18 @@ def queue_transcription(db: Session, capture: TradeCapture) -> JobRun | None:
         db.add(capture)
         db.commit()
         return None
-    job = create_job(db, JOB_TRANSCRIBE, {"capture_id": str(capture.id)}, total=1, current=f"Transcribe {capture.underlying} plan")
+    # The job and the capture's link to it commit together: a worker that sees
+    # the queued job always finds the capture pointing at it.
+    now = datetime.utcnow()
+    job = JobRun(id=uuid.uuid4(), job_type=JOB_TRANSCRIBE, status="queued", phase="queued", params_json=json.dumps({"capture_id": str(capture.id)}),
+                 total=1, current=f"Transcribe {capture.underlying} plan", updated_at=now)
     capture.transcript_job_id = job.id
     capture.transcript_status = "pending"
     capture.transcript_error = None
+    db.add(job)
     db.add(capture)
     db.commit()
+    db.refresh(job)
     return job
 
 
