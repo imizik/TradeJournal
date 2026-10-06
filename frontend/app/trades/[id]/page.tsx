@@ -5,6 +5,9 @@ import { api, Fill, FillMarketContext, Trade, TradePathMetrics } from "@/lib/api
 import AlpacaContextSection from "@/components/AlpacaContextSection";
 import TradePathSection from "@/components/TradePathSection";
 import AuditPanel from "@/components/AuditPanel";
+import Link from "next/link";
+import { ChartCandlestick } from "lucide-react";
+import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -110,6 +113,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor}`}>
           {trade.status}
         </span>
+        {newYorkSeconds(trade.opened_at) !== null && <Link href={chartLink({ symbol: trade.ticker, from: newYorkSeconds(trade.opened_at)!, to: newYorkSeconds(trade.closed_at) ?? newYorkSeconds(trade.opened_at), trade: trade.id })}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted"><ChartCandlestick size={13} />Open on chart</Link>}
       </div>
 
       <div className="rounded-lg border bg-card p-5">

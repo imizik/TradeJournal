@@ -1,3 +1,4 @@
+import type { ChartPosition } from "@/lib/chartJournal";
 import { apiUrl } from "@/lib/api";
 import { cleanDrawings, cleanToolStyles, DEFAULT_TOOL_STYLES } from "./drawings";
 import type { Drawing, DrawingKind, ToolStyle } from "./drawings";
@@ -165,6 +166,8 @@ export type SymbolPanels = {
   rvol?: RvolBaseline | null;
   /** The symbol's earnings from the backend's cache (C2.5); absent from a backend older than C2.5. */
   earnings?: Earnings | null;
+  /** Open trades on the symbol (C3.2); absent from a backend older than C3.2. */
+  positions?: ChartPosition[];
 };
 export type ChartData = SymbolPanels & {
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;

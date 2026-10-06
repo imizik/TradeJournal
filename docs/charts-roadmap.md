@@ -121,19 +121,19 @@ The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C4.4 | Options levels layer with filters | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
 | C4.5 | Strike ladder side panel | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | next, after C5.1's live phone check |
-| C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
-| C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
-| C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | todo |
+| C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132), with C3.1 and C3.2) |
+| C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
+| C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
 | G0 | Daily chart replacement acceptance: real market session, desktop and phone | Gate | todo |
 | C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.5, before G0 at the user's request); done once a human walkthrough times the five-second path |
 | C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.4); done once a real desktop and phone recording are checked on the private origin |
-| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | todo |
+| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | next to build (C3.1's card is in place) |
 | C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | todo |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
 | C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
-| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | built ahead of `next` at the user's request (branch `claude/kind-thompson-iecgxd`); done once its PR merges |
-| C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | built ahead of `next` at the user's request (branch `claude/kind-thompson-iecgxd`); done once its PR merges |
+| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
+| C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 
 Why this order: history, correct sessions and smooth updates come first; then
 shared state and SPY/QQQ/name layouts. Record options snapshots early because
@@ -683,6 +683,14 @@ Candles come from the deep-history store (C0.0). A banner shows the date with a
 "Back to live" button.
 *Done when:* a trade from months ago opens with its arrows on the right candles,
 and no Alpaca IEX (single-venue) bars ever mix into consolidated candles.
+
+As built (C3.1–C3.3 in one change; [Journal on the chart](charts-workspace.md#journal-on-the-chart-c31c33)):
+the card opens from a fill arrow, or from the link of a trade or fill page,
+which also loads the trade's history page into every chart of its symbol. An
+option's open P&L needs a mark, which the card reads only when asked. A gap
+between a trade's page and today now fills from the side in view rather than
+always from today's side. Real trades and fills on the private origin have not
+been opened yet; the browser tests use stubbed candles and one seeded trade.
 
 #### Pre-trade capture contract (C3.4–C3.6)
 

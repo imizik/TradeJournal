@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, NotebookPen, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
+import TradeCard from "./TradeCard";
+import { fetchFillCard, fetchTradeCard, openedOn, parsePastView, pastPageEnd, stockOpenPnl, type ChartPosition, type PastView, type TradeCardData } from "@/lib/chartJournal";
 import ChartMenu from "./ChartMenu";
 import type { HiddenItem, LayerToggle, MenuAlerts, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
 import HotkeySheet from "./HotkeySheet";
@@ -54,6 +56,7 @@ type ShownLevel = PriceLevel & { was: number | null };
 const NO_LEVELS: ShownLevel[] = [];
 const NO_MARKS: AlertMark[] = [];
 const NO_DRAWINGS: Drawing[] = [];
+const NO_POSITIONS: (ChartPosition & { pnl: number | null })[] = [];
 /** The selected level or drawing and the panel it was selected on, which carries its bar. */
 type Selection = { symbol: string; id: string; panel: string };
 /** An open chart menu (C1.3): where it was asked for, on which panel's symbol, and the item there (`id`) or the price. */
@@ -200,6 +203,12 @@ export default function ChartWorkspace() {
   const [captures, setCaptures] = useState<Capture[]>([]);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [dismissedPlans, setDismissedPlans] = useState<string[]>([]);
+  // A fill arrow's trade card (C3.1); `key` drops a slower answer to an earlier click.
+  const [tradeCard, setTradeCard] = useState<{ key: string; data: TradeCardData | null; loading: boolean; error: string } | null>(null);
+  // A past trade opened from its trade or fill page (C3.3), until Back to live; `started` once its candles were asked for.
+  const [past, setPast] = useState<(PastView & { started: boolean }) | null>(null);
+  // The frames still to centre on the past trade once its page arrives.
+  const pastJumps = useRef(new Set<string>());
   const link = useMemo(() => createCrosshairLink(), []);
   const rangeLink = useMemo(() => createRangeLink(), []);
   const commands = useMemo(() => createChartCommands(), []);
@@ -297,6 +306,24 @@ export default function ChartWorkspace() {
     const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
     return new Map([...wanted.keys()].map((name) => [name, (settings.drawings[name] ?? NO_DRAWINGS).map((drawing) => drawingOnBasis(drawing, splits.get(name) ?? []))]));
   }, [splitsBySymbol, wanted, settings.drawings]);
+  // Open positions (C3.2) on the same basis, a stock's with its open P&L at the latest quote; the Journal group hides them with the arrows.
+  const quoteKey = JSON.stringify((latest?.quotes ?? []).map((quote) => [quote.symbol, quote.last]));
+  const shownPositions = useMemo(() => {
+    const splits = new Map(JSON.parse(splitsBySymbol) as [string, SplitRecord[]][]);
+    const lasts = new Map(JSON.parse(quoteKey) as [string, number | null][]);
+    return new Map([...wanted.keys()].map((name) => [name, (feedFor(name)?.positions ?? []).map((position) => {
+      const on = position.line === null ? null : levelOnBasis({ id: position.trade_id, price: position.line, label: "", drawn_on: openedOn(position.opened_at) }, splits.get(name) ?? []).price;
+      const basis = position.avg_cost === null || position.line === null || on === null ? position : { ...position, avg_cost: position.instrument === "stock" ? on : position.avg_cost };
+      return { ...basis, line: on, pnl: stockOpenPnl(basis, lasts.get(name)) };
+    })]));
+  }, [splitsBySymbol, quoteKey, wanted, feedFor]);
+  const positionsFor = (name: string) => settings.indicators.fills ? shownPositions.get(name) ?? NO_POSITIONS : NO_POSITIONS;
+  const openCard = useCallback((key: string, load: () => Promise<TradeCardData>) => {
+    setTradeCard({ key, data: null, loading: true, error: "" });
+    load().then((data) => setTradeCard((open) => open?.key === key ? { key, data, loading: false, error: "" } : open),
+      (err) => setTradeCard((open) => open?.key === key ? { key, data: null, loading: false, error: err instanceof Error ? err.message : "The journal could not be read." } : open));
+  }, []);
+  const openFill = useCallback((id: string) => openCard(`fill:${id}`, () => fetchFillCard(id)), [openCard]);
   // Automatic levels (C2.3) and option strikes (C4.4) as the backend merged them, on the chart's basis already; only the groups shown.
   const autoFor = (name: string) => autoLevelsShown(feedFor(name)?.auto_levels, !settings.autoLevelsHidden, optionsOn, rangesOn);
   // Level alerts (C5.1): every alert, each one's price on the chart's basis where its symbol is on screen, and a bell for each chart.
@@ -458,6 +485,62 @@ export default function ChartWorkspace() {
     available.forEach((key) => { const slot = slots.find((s) => frameKey(s) === key); if (slot) void loadOlder(slot, rollover.before); });
     setRollover((current) => current === rollover ? { ...current, pending: current.pending.filter((key) => !available.includes(key)) } : current);
   }, [rollover, session, data, older, slots, loadOlder]);
+
+  // Historical chart mode (C3.3): `/charts?symbol=NVDA&from=…&to=…&trade=…` from a trade or fill page.
+  useEffect(() => {
+    const view = parsePastView(window.location.search);
+    if (view) setPast({ ...view, started: false });
+  }, []);
+  // Once the shared settings are in, chart the trade's symbol (the symbol on screen is this device's own).
+  useEffect(() => {
+    if (ready && past && !past.started && settings.symbol !== past.symbol)
+      setSettings((s) => s.symbol === past.symbol ? s : ({ ...s, symbol: past.symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== past.symbol)].slice(0, 8) }));
+  }, [ready, past, settings.symbol, setSettings]);
+  // With its candles on screen: load the stored history page that holds the trade into every
+  // chart of the symbol, centre each on the trade's arrows, and open the trade's card.
+  useEffect(() => {
+    if (!past || past.started || !ready || current?.symbol !== past.symbol) return;
+    setPast({ ...past, started: true });
+    const targets = slots.filter((s) => s.symbol === past.symbol);
+    pastJumps.current = new Set(targets.map(frameKey));
+    for (const slot of targets) {
+      // Older candles are trimmed around what is in view; until the user pans, that is the trade.
+      visibleTimes.current.set(frameKey(slot), { from: past.from - 3600, to: past.to + 3600 });
+      void loadOlder(slot, pastPageEnd(past, slot.interval));
+    }
+    if (past.fill) openFill(past.fill);
+    else if (past.trade) { const trade = past.trade; openCard(`trade:${trade}`, () => fetchTradeCard(trade)); }
+  }, [past, ready, current, slots, loadOlder, openFill, openCard]);
+  // Each chart centres on the trade once its page is drawn: a jump before that would page back from today instead.
+  useEffect(() => {
+    if (!past?.started || !pastJumps.current.size) return;
+    for (const slot of slots) {
+      const key = frameKey(slot);
+      const loaded = currentOlder[key];
+      if (!pastJumps.current.has(key) || !loaded || loaded.loading) continue;
+      pastJumps.current.delete(key);
+      commands.jump({ panel: slot.index === 0 ? "main" : `Panel ${slot.index + 1}`, times: [past.from, past.to], prices: [] });
+    }
+  }, [past, currentOlder, slots, commands]);
+  // Another symbol leaves the past trade behind.
+  useEffect(() => { if (past?.started && symbol !== past.symbol) setPast(null); }, [past, symbol]);
+  const backToLive = () => {
+    // The trade's pages leave with it: live charts start from today's candles as on any visit.
+    const keys = new Set(slots.filter((slot) => slot.symbol === past?.symbol).map(frameKey));
+    keys.forEach((key) => { historyFlights.current.get(key)?.abort(); historyFlights.current.delete(key); visibleTimes.current.delete(key); });
+    setOlder((state) => ({ ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => !keys.has(key))) }));
+    pastJumps.current.clear();
+    liveAgain.current = true;
+    setPast(null);
+    window.history.replaceState(null, "", "/charts");
+  };
+  // Back to the latest candles once the charts have dropped the trade's pages (their effects run before this one).
+  const liveAgain = useRef(false);
+  useEffect(() => {
+    if (!liveAgain.current) return;
+    liveAgain.current = false;
+    commands.emit("realtime");
+  }, [older, commands]);
   useEffect(() => {
     const measure = () => setWidth(window.innerWidth);
     measure();
@@ -958,7 +1041,7 @@ export default function ChartWorkspace() {
       "Expected move: today's (0DTE) and Friday's at-the-money straddle, priced five minutes after the open and drawn above and below the price then, fixed for the session. VWAP ±1σ (dashed) and ±2σ (dotted) on intraday charts. Hover or tap an expected-move level for its card.",
       ...(rangesOn ? [rangesStatus(symbol)] : []),
     ].filter(Boolean).join(" ") },
-    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in." },
+    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in (click one for its trade), and open positions as lines: a stock at its average cost, an option at the underlying price when it was bought." },
     { key: "indicators", name: "Indicators", hidden: settings.studiesHidden,
       studies: INDICATORS.filter(([key]) => (STUDIES as readonly string[]).includes(key)).map(([key, label]) => ({ key, label, on: indicators[key] })) },
   ];
@@ -1326,6 +1409,9 @@ export default function ChartWorkspace() {
     className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={narrow ? "sr-only" : ""}>Plan trade</span></button>;
 
   const alerts = [
+    past && <div key="past" role="status" aria-label="Past trade view" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-1.5 text-xs text-sky-100">
+      <span>Showing {past.symbol} {etTime(past.from, true)}, {etTime(past.from)}{past.to !== past.from ? `–${etTime(past.to, true) === etTime(past.from, true) ? "" : `${etTime(past.to, true)}, `}${etTime(past.to)}` : ""} ET, on stored consolidated candles.</span>
+      <button onClick={backToLive} className="inline-flex min-h-7 items-center rounded border border-sky-400/40 px-2 text-sky-100 hover:bg-sky-500/15">Back to live</button></div>,
     symbolError && <p key="symbol" className="text-xs text-amber-300" role="alert">{symbolError}</p>,
     drawError && <p key="draw" className="text-xs text-amber-300" role="alert">{drawError}</p>,
     requestFailed && <div key="error" role="alert" aria-label="Chart data error" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">{error.message}{current && <span className="ml-1">Showing the last successful data.</span>}</div>,
@@ -1390,7 +1476,7 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
@@ -1417,7 +1503,7 @@ export default function ChartWorkspace() {
                   className={`${sized ? "flex flex-col" : shown === slot.index && !fill ? "sm:col-span-2 lg:col-span-4" : ""} min-w-0 ${slotHidden(slot.index)}`}>
                 <div className={slotInner(slot.index, sized)}>
                 <PriceChart id={`Panel ${slot.index + 1}`} symbol={slot.symbol} follows={!settings.panelSymbols[slot.index]} onPickSymbol={() => setPalette(slot.index)}
-                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
+                  notice={slot.symbol !== symbol && settings.indicators.fills && feedFor(slot.symbol)?.fills_truncated ? `Most recent 1,000 ${slot.symbol} fills shown.` : null} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} magnet={settings.magnet} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange} clock={clockFor(slot.symbol)}
                   history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)}
                   height={sized || (shown === slot.index && fill) ? undefined : shown === slot.index ? 410 : smallHeight} maximized={shown === slot.index}
                   onMaximize={() => toggleMaximized(slot.index)} onDraw={(value) => addLevel(value, slot.symbol)} onInterval={(i) => setIntervalAt(slot.index, i)}
@@ -1464,6 +1550,14 @@ export default function ChartWorkspace() {
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
+      {tradeCard && (() => {
+        const shownCard = <TradeCard key={tradeCard.key} card={tradeCard.data} loading={tradeCard.loading} error={tradeCard.error}
+          last={tradeCard.data?.trade?.ticker === symbol ? selected?.last ?? null : null} onClose={() => setTradeCard(null)}
+          onShow={(from, to) => { commands.jump({ panel: "main", times: [from, to], prices: [] }); if (narrow) setTradeCard(null); }} />;
+        // A phone: a bottom sheet over the charts. Desktop: a panel over the charts' top right, leaving them live underneath.
+        return narrow ? <Sheet label="Trade card" onClose={() => setTradeCard(null)}>{shownCard}</Sheet>
+          : <div role="dialog" aria-label="Trade card" className="fixed right-3 top-28 z-[70] max-h-[calc(100vh-8.5rem)] w-80 overflow-y-auto overscroll-contain rounded-lg border border-slate-600 bg-[#121924] shadow-2xl">{shownCard}</div>;
+      })()}
       {plan && <PlanSheet key={plan.key} symbol={plan.symbol} chartSymbol={symbol} setup={captureSetup} setupError={setupError} narrow={narrow} snapshot={snapshotFor}
         onSetup={setCaptureSetup} onSaved={planSaved} onQueued={() => void outboxAll().then(setOutbox)} onRejected={() => void loadSetup()} onClose={() => setPlan(null)} />}
       {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}

@@ -440,3 +440,20 @@ def _calc_mid(bid: float | None, ask: float | None) -> float | None:
     if (bid + ask) <= 0:
         return None
     return round((bid + ask) / 2, 4)
+
+
+def option_mark(req: OptionQuoteRequest) -> tuple[OptionQuoteResult, float | None]:
+    """One contract's premium plus the wall-clock time it was quoted (None
+    when nothing came back), for a caller that must say how old a mark is.
+    Reads through the same 60-second cache as the dashboard."""
+    result = get_option_quotes([req])[0]
+    if result.mid is None and result.last_price is None:
+        return result, None
+    if result.provider == PROVIDER_TRADIER:
+        symbol = _occ_for_request(req)
+        cached = _option_contract_cache.get(symbol) if symbol else None
+        fetched = cached[1] if cached else None
+    else:
+        chain = _option_chain_cache.get((req.ticker.strip().upper(), req.expiration))
+        fetched = chain.fetched_at if chain else None
+    return result, None if fetched is None else time.time() - (time.monotonic() - fetched)

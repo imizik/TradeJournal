@@ -221,6 +221,10 @@ cd backend
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
+- The journal on the chart (C3.1–C3.3): hover a fill arrow for a one-line
+  summary and click it for its trade's card; open positions as lines; "Open on
+  chart" from a trade or fill page opens that trade's candles (see
+  [Journal on the chart](#journal-on-the-chart-c31c33)).
 - Levels, drawings, watchlist, intervals, session, indicators, layout and named layouts are saved on the
   server (`GET`/`PUT /charts/settings`, table `chart_settings`), so the phone
   and the desktop share them. The symbol on screen and the recent symbols stay
@@ -1195,6 +1199,55 @@ again from the current price.
   send). `GET`, `POST /charts/alerts`, `POST /charts/alerts/{id}/rearm` and
   `DELETE /charts/alerts/{id}` return the same list and wake the monitor.
 
+### Journal on the chart (C3.1–C3.3)
+
+Read-only views of the journal on the candles. Nothing here calls a provider
+except the option mark, which is asked for from a card.
+
+- **Fill arrows and the trade card (C3.1).** Hovering an arrow shows its
+  one-line summary (side, size, call/put/stock, the candle's time). Clicking it
+  opens its trade's card (`components/charts/TradeCard.tsx`; on a phone, a
+  bottom sheet): the contract, account, direction and status; every entry and
+  exit with its time and price; realized P&L, or for an open trade what is
+  still open, its first-in-first-out average cost and what partial exits
+  realized; MFE, MAE and exit efficiency from the trade path run; and the first
+  entry's market context from enrichment (VWAP distance, relative volume,
+  chase, VWAP reclaim, opening-range breakout, distances from the day's,
+  prior day's and premarket highs and lows). Each section is labeled
+  **Current**, **Stale** (computed on an older version of the trade, its inputs
+  or the calculation) or **Missing**, with what to run. Context read from one
+  exchange (Alpaca IEX) says that its VWAP and volume can differ from the
+  chart's consolidated candles, and every number names its source: none is
+  recomputed from the candles on screen. Option prices are the premium per
+  contract in dollars and the card says they are not underlying prices; an
+  option entry shows the underlying price observed at it, or "underlying not
+  recorded". **Get mark and open P&L** reads one quote through the dashboard's
+  60-second cache (`GET /charts/journal/trades/{id}/mark`) and shows its age,
+  amber past five minutes. Routes: `GET /charts/journal/fills/{id}` and
+  `GET /charts/journal/trades/{id}` (`app/engine/chart_journal.py`).
+- **Position lines (C3.2).** `positions` in `GET /charts/workspace` lists each
+  open trade on every symbol shown (three queries a symbol). A stock draws a
+  solid line at the average cost of the shares still open, first in, first out
+  (after selling the first lot, the rest's cost, not every entry's), titled
+  with the size, account and open P&L at the latest quote. An option draws a
+  dashed line at the underlying price observed at its first entry (enrichment,
+  else the fill's own), titled "underlying at entry", and no line when none was
+  observed: a premium is never drawn on the price axis. Partial exits are the
+  fill arrows. Lines move with later splits like saved levels, and the Journal
+  group in Layers hides them with the arrows.
+- **Historical chart mode (C3.3).** **Open on chart** on a trade page or a fill
+  page links to `/charts?symbol=…&from=…&to=…&trade=…` (or `fill=`). The
+  charts switch to that symbol, load the stored history page that ends at the
+  close of the trade's last day (20:00 New York; daily and weekly charts about
+  three months after it) into every chart of the symbol, centre each on the
+  trade with its arrows, and open the card. Candles come from the same deep
+  history as scrolling back (C0.0): Alpaca SIP minutes for intraday charts,
+  Tradier's daily bars for 1D/1W, never Alpaca IEX. A banner names the dates
+  with **Back to live**, which drops the trade's pages and returns every chart
+  to its latest candles; choosing another symbol also ends the mode. A gap
+  between the trade's page and today fills from the side in view, one page at
+  a time, as the user scrolls toward the present. A malformed link is ignored.
+
 ### Pre-trade capture (C3.4, C3.5)
 
 **Plan trade** records what you are taking and your plan before you enter. It
@@ -1278,6 +1331,18 @@ Linking a plan to the trade it became, and counting captures (C3.6), are not
 built.
 
 ## Verification and remaining scope
+
+`backend/tests/test_chart_journal.py` covers first-in-first-out open lots
+(scale-ins, partial exits, shorts, tied minutes), stock and option position
+lines (the option line is the observed underlying or none, never the premium),
+per-contract units, card states for missing, current and stale path metrics
+and context (including single-venue context), an orphan fill, and the option
+mark's age and open P&L. `frontend/e2e/chart-journal.spec.ts` hovers and clicks
+a fill arrow for its card, reads the labeled states and an old mark, checks the
+lines and the Journal toggle, opens a months-old trade from a link with its
+page request, centring, arrows and card, goes back to live, shows the card as
+a bottom sheet at 390px, and follows a seeded trade's **Open on chart** link to
+a card read from the real journal route. A live option mark is not exercised.
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
 VWAP, a numeric Wilder RSI reference, malformed bars, shared caches, cooldown,
