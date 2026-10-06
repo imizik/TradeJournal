@@ -63,11 +63,14 @@ def attach_open_interest_changes(db: Session, symbol: str, root: str, rows: list
         strike = float(row["strike"])
         deltas = {}
         for name, side in (("calls", "C"), ("puts", "P")):
-            keys = [key for key in current if key[2] == side and key[3] == strike]
-            # An absent current-side contract or any newly listed/missing baseline contract
-            # cannot be treated as a known zero.
-            if not keys or any(key not in previous or current[key] is None or previous[key] is None for key in keys):
+            current_keys = {key for key in current if key[2] == side and key[3] == strike}
+            previous_keys = {key for key in previous if key[2] == side and key[3] == strike}
+            # Both snapshots must contain the same contracts: either an added or a
+            # disappeared contract has an unknown baseline/current OI, not a zero.
+            if not current_keys or current_keys != previous_keys or any(
+                current[key] is None or previous[key] is None for key in current_keys
+            ):
                 deltas[name] = None
             else:
-                deltas[name] = sum(current[key] - previous[key] for key in keys)
+                deltas[name] = sum(current[key] - previous[key] for key in current_keys)
         row["oi_change"] = {**base, "status": "ready" if any(v is not None for v in deltas.values()) else "unavailable", **deltas}

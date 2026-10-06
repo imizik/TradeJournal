@@ -60,3 +60,21 @@ def test_unavailable_session_breaks_the_comparison_chain():
         db.commit()
         attach_open_interest_changes(db, "SPY", "SPY", rows, [expiration.isoformat()])
     assert rows[0]["oi_change"] == {"session": "2026-10-05", "previous_session": "2026-10-02", "status": "unavailable"}
+
+
+def test_a_disappeared_contract_makes_the_aggregated_side_unavailable():
+    engine = _session()
+    first_expiration, second_expiration = date(2026, 10, 9), date(2026, 10, 16)
+    prior, current = date(2026, 10, 1), date(2026, 10, 2)
+    rows = [{"strike": 100.0}]
+    with Session(engine) as db:
+        db.add_all([
+            OptionSnapshotDay(session_date=prior, underlying="SPY", status="recorded"),
+            OptionSnapshotDay(session_date=current, underlying="SPY", status="recorded"),
+            _row(prior, first_expiration, [["SPY", "C", 100, 20, 1]]),
+            _row(prior, second_expiration, [["SPY", "C", 100, 50, 1]]),
+            _row(current, second_expiration, [["SPY", "C", 100, 55, 1]]),
+        ])
+        db.commit()
+        attach_open_interest_changes(db, "SPY", "SPY", rows, [first_expiration.isoformat(), second_expiration.isoformat()])
+    assert rows[0]["oi_change"]["calls"] is None
