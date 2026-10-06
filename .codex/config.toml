@@ -1,7 +1,5 @@
-# Repository defaults; explicit Desktop/CLI selections can override them.
+# Follow the user's model choice in ~/.codex/config.toml or the Desktop picker.
 # Workflow and escalation rules live in docs/agent/codex-workflow.md.
-model = "gpt-6.1-sol"
-model_reasoning_effort = "medium"
 
 [agents]
 enabled = true
