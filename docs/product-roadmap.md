@@ -29,9 +29,9 @@ one slice. Advance status only with implementation and verification evidence.
 Pre-trade capture already belongs to Charts C3.4–C3.6. Reuse its durable
 records and surfaces; do not create a competing plan store. The earlier
 discussion recommended a smaller text/template version with manual linking,
-with voice and adherence added when useful. That is a **proposed scope change**
-to resolve in the Charts contract before implementation; this document does
-not silently replace its existing acceptance criteria.
+with voice and adherence added when useful. The user resolved this on
+2026-10-04 by asking for C3.4 and C3.5 together under the existing Charts
+contract; adherence (C3.6) is still to come.
 
 ## Starting point
 
@@ -212,7 +212,7 @@ target.
 
 | Candidate | Evidence needed before expansion |
 |---|---|
-| Voice capture | Text/templates are a demonstrated capture obstacle, or recordings are a preferred path; address the actual friction rather than a fixed capture-count threshold |
+| Voice capture | Built at the user's request (Charts C3.5, 2026-10-04) before this evidence existed; review its actual use before extending it |
 | Screenshots and richer capture media | Stored candles/context cannot reproduce information needed in review, such as the drawings actually visible at decision time |
 | Capture adherence summaries | Linking and execution timing are trustworthy, and counting captures answers a real review question |
 | Context analytics and smart badges | D0 identifies a supported question worth monitoring; evidence remains visible and uncertain findings stay uncertain |

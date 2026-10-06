@@ -49,6 +49,13 @@ the board's `next` is unchanged (C5.2, once C5.1 reaches the phone). C4.6,
 open-interest change from the recorded snapshots, was added as a new row
 rather than built.
 
+**Out-of-order update (2026-10-04, pre-trade capture):** at the user's
+request, C3.4 and C3.5 were built together in one PR, before G0 and before
+C3.1–C3.3. C3.6 stays `todo`: it needs C3.1's trade card. The board's `next`
+is unchanged. The speech-to-text provider is Whisper run on the server
+(faster-whisper): no new paid plan, and audio never leaves the app. See
+[Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35).
+
 **Range bands and max pain (2026-10-05):** at the user's request, two new
 rows were added and built ahead of the board's `next`, in one branch: C2.7
 (expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ) and
@@ -118,8 +125,8 @@ The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
 | C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | todo |
 | G0 | Daily chart replacement acceptance: real market session, desktop and phone | Gate | todo |
-| C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | todo |
-| C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | todo |
+| C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.5, before G0 at the user's request); done once a human walkthrough times the five-second path |
+| C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.4); done once a real desktop and phone recording are checked on the private origin |
 | C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | todo |
 | C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | todo |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
@@ -781,6 +788,12 @@ Do not treat a saved plan as an actual position until journal evidence exists.
   corrections are tested. Existing chart hotkeys, drawings and settings remain
   intact. No source fills, P&L or enrichment rows are modified.
 
+As built ([Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35)):
+**Plan trade** sits in the toolbar (on a phone, in the main chart's own bar), and
+Alt+P opens it. Setup (the gear in the sheet) holds the default account and up
+to three templates. The strip sits between the toolbar and the charts. The
+human five-second walkthrough has not been run yet.
+
 **C3.5 Voice capture and transcription (planned).** The same sheet offers a
 clearly labeled microphone action alongside templates. Retain explicit account,
 ticker and instrument/side selection; a template is optional for voice.
@@ -826,6 +839,13 @@ restart, retry dedupe and later transcript correction. Audio acknowledged
 before an entry remains pre-entry evidence when its transcript arrives later;
 audio only uploaded after entry remains late/unverified regardless of when
 recording started. Backup/restore preserves playable attachments and metadata.
+
+As built ([Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35)):
+the provider is Whisper `base.en` run on the server through faster-whisper,
+in a fifth worker lane, `capture`. A live transcription of a spoken clip
+through the save route and the real engine was checked on the Mac. A real
+microphone on the desktop and the phone has not been checked yet; the browser
+tests use Chromium's fake microphone.
 
 **C3.6 Execution links and capture adherence (planned).** Surface the saved
 intent beside its linked trade in C3.1 and trade detail, with the original

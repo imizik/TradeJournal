@@ -444,7 +444,12 @@ Be honest about this when reporting work:
   C5.1) are tested with trades fed through the real stream parser, stub
   1-minute bars and a stub ntfy sender; a live Tradier stream firing one and
   the message reaching the phone are proved only by a real alert after the
-  deploy.
+  deploy. Pre-trade capture (Charts C3.4, C3.5) runs its browser tests
+  against the real e2e backend, with Chromium's fake microphone (a tone)
+  and transcription off. Transcript states use stubbed responses, and the
+  backend tests use a stand-in speech engine. A real microphone on the
+  desktop and the phone, the five-second walkthrough, and Whisper on the
+  VPS (model download, speed on two cores) are checked only by hand.
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are

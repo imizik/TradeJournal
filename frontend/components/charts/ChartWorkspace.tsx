@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, NotebookPen, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
 import ChartMenu from "./ChartMenu";
 import type { HiddenItem, LayerToggle, MenuAlerts, MenuItem, MenuPatch, MenuRequest } from "./ChartMenu";
@@ -11,6 +11,9 @@ import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
 import OptionsLadder from "./OptionsLadder";
+import PlanSheet from "./PlanSheet";
+import type { ChartSnapshot } from "./PlanSheet";
+import PlanStrip from "./PlanStrip";
 import PriceChart from "./PriceChart";
 import Sheet from "./Sheet";
 import Splitter from "./Splitter";
@@ -29,6 +32,8 @@ import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLO
 import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, ItemEdit, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
+import { addCaptureNote, captureTitle, fetchCaptures, fetchSetup, markNotTaken, outboxAll, retryTranscript, send as sendCapture } from "@/lib/captures";
+import type { Capture, CaptureNote, CaptureSetup, OutboxItem } from "@/lib/captures";
 import { summary } from "./SelectionBar";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
@@ -88,6 +93,8 @@ const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
 /** The dock's width on this device (C7.4), and whether full screen shows the dock here ("1" or "0"). */
 const DOCK_WIDTH_KEY = "tradejournal.charts.dock.width.v1";
 const FULL_DOCK_KEY = "tradejournal.charts.dock.fullscreen.v1";
+/** Saved plans whose strip was dismissed on this device (C3.4); the plans themselves stay. */
+const DISMISSED_PLANS_KEY = "tradejournal.charts.plans.dismissed.v1";
 /** A share as a flex-grow weight: thousandths, so the weights of a row always add up to at least 1. */
 const grow = (share: number) => Math.round(share * 1000);
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
@@ -186,6 +193,13 @@ export default function ChartWorkspace() {
   const [dockWidth, setDockWidth] = useState<number>(DOCK_WIDTH.default);
   const [fullDock, setFullDock] = useState<boolean | null>(null);
   const [width, setWidth] = useState(1280);
+  // Pre-trade capture (C3.4, C3.5): the open sheet (its symbol frozen when opened), the setup, recent plans and what waits in this browser.
+  const [plan, setPlan] = useState<{ symbol: string; key: number } | null>(null);
+  const [captureSetup, setCaptureSetup] = useState<CaptureSetup | null>(null);
+  const [setupError, setSetupError] = useState("");
+  const [captures, setCaptures] = useState<Capture[]>([]);
+  const [outbox, setOutbox] = useState<OutboxItem[]>([]);
+  const [dismissedPlans, setDismissedPlans] = useState<string[]>([]);
   const link = useMemo(() => createCrosshairLink(), []);
   const rangeLink = useMemo(() => createRangeLink(), []);
   const commands = useMemo(() => createChartCommands(), []);
@@ -757,12 +771,12 @@ export default function ChartWorkspace() {
     if (index < 0 || !shown || !Number.isFinite(value) || value <= 0 || Math.abs(shown.price - value) < 0.005) return;
     editItems({ symbol: target, layer: "levels", before: rows[index], after: cleanLevel({ ...rows[index], price: value, drawn_on: todayNewYork() })!, index });
   };
-  const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem });
+  const actions = useRef({ choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem, plan: () => {} });
   // A maximized chart counts only while five charts show.
   const shown = settings.layout === "multi" ? maximized : null;
   const keys = useRef({ palette: palette !== null, layoutMenu, help, immersive, maximized: shown !== null, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu });
   useEffect(() => {
-    actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem };
+    actions.current = { choose: chooseSymbol, interval: (value: Interval) => setIntervalAt(0, value), replay, deleteItem, plan: openPlan };
     keys.current = { palette: palette !== null, layoutMenu, help, immersive, maximized: shown !== null, watchlist: settings.watchlist, symbol: settings.symbol, typed: entry.typed, selected: picked, tool, menu: !!menu };
   });
   // Hotkeys (lib/hotkeys.ts, listed by the ? sheet). They act on the main
@@ -821,6 +835,7 @@ export default function ChartWorkspace() {
       else if (hotkey.kind === "help") setHelp(true);
       else if (hotkey.kind === "undo" || hotkey.kind === "redo") actions.current.replay(hotkey.kind === "undo" ? "before" : "after");
       else if (hotkey.kind === "delete" && state.selected) actions.current.deleteItem(state.selected.symbol, state.selected.id);
+      else if (hotkey.kind === "plan") actions.current.plan();
     };
     window.addEventListener("pointerdown", onPointer, true);
     window.addEventListener("keydown", onKeyboard, true);
@@ -1224,6 +1239,92 @@ export default function ChartWorkspace() {
       {current?.fills.length ? <div className="space-y-3">{current.fills.slice(-5).reverse().map((fill) => <Link key={fill.id} href={`/fills/${fill.id}`} className="block text-[11px]"><span className="text-slate-300 hover:text-sky-300">{fill.label}</span><span className="mt-0.5 block text-[10px] text-slate-600">{etTime(fill.time, true)} · {etTime(fill.time)} ET</span></Link>)}{current.fills_truncated && <p className="text-[10px] text-amber-300">Most recent 1,000 fills shown.</p>}</div> : <p className="text-[11px] leading-5 text-slate-500">Your executions appear as arrows on the underlying chart when they fall inside a displayed candle.</p>}
     </section>
   </>;
+  // ---- C3.4, C3.5: pre-trade capture ----
+  const refreshCaptures = useCallback(() => {
+    fetchCaptures().then((data) => setCaptures(data.captures)).catch(() => { /* the strip keeps what it had */ });
+    void outboxAll().then(setOutbox);
+  }, []);
+  const loadSetup = useCallback(() => fetchSetup().then((data) => { setCaptureSetup(data); setSetupError(""); })
+    .catch((failure: Error) => setSetupError(`Accounts and templates could not load: ${failure.message}`)), []);
+  useEffect(() => {
+    refreshCaptures();
+    void loadSetup();
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(DISMISSED_PLANS_KEY) ?? "[]");
+      if (Array.isArray(saved)) setDismissedPlans(saved.filter((id): id is string => typeof id === "string").slice(-50));
+    } catch { /* every plan's strip shows */ }
+  }, [refreshCaptures, loadSetup]);
+  // A transcript on its way is checked every few seconds, and only while one is.
+  const transcribing = captures.some((row) => row.transcript?.status === "pending" || row.transcript?.status === "transcribing");
+  useEffect(() => {
+    if (!transcribing) return;
+    const timer = window.setInterval(() => { if (!document.hidden) refreshCaptures(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [transcribing, refreshCaptures]);
+  // The strip shows the newest plan from the last day until it is dismissed here; dismissing never reveals an older one.
+  const newestPlan = captures[0] && captures[0].received_at > Date.now() / 1000 - 86400 ? captures[0] : null;
+  const shownPlan = newestPlan && !dismissedPlans.includes(newestPlan.id) ? newestPlan : null;
+  const keepPlan = (row: Capture) => setCaptures((rows) => [row, ...rows.filter((other) => other.id !== row.id)].sort((a, b) => b.received_at - a.received_at));
+  function openPlan() {
+    if (plan) return;
+    setMenu(null); setEntry(NO_ENTRY);
+    setPlan({ symbol: settings.symbol, key: Date.now() });
+    // Templates may have changed on another device since the last look.
+    void loadSetup();
+  }
+  /**
+   * The main chart as it stands at the moment of saving, from what this page
+   * already holds: no market-data request. A plan for another symbol than
+   * the chart shows gets no snapshot, and says why.
+   */
+  const snapshotFor = (target: string): ChartSnapshot => {
+    const slot = slots[0];
+    const none = (reason: string): ChartSnapshot => ({ context: { state: "unavailable", reason }, canvas: null, imageNote: "" });
+    if (slot.symbol !== target) return none(`The main chart showed ${slot.symbol}, not ${target}, when the plan was saved.`);
+    const bars = panels.get(frameKey(slot))?.bars ?? [];
+    if (!bars.length) return none(`The main chart had no ${target} candles loaded when the plan was saved.`);
+    const state = stream.get();
+    const tick = state.key === streamKey ? latestTrade(state.ticks, target) : undefined;
+    const shown = shownPrice({ tick, quote: selected, candle: latestCandle, scope: live });
+    const now = Date.now() / 1000;
+    const last = bars[bars.length - 1];
+    return {
+      canvas: commands.snapshot("main"),
+      imageNote: "The image is the main chart's canvas as drawn: candles, studies, fill arrows and the lines on it. Labels and cards drawn over the chart as page elements are not in it.",
+      context: {
+        state: "captured", symbol: target, panel: "main", interval: slot.interval, session, visible_range: visibleTimes.current.get(frameKey(slot)) ?? null,
+        last_candle: { time: last.time, close: last.close },
+        price: { value: shown.price ?? null, source: shown.source, at: shown.at ?? null, stale: staleCandles(now, live.fetched) },
+        basis: basis ? { status: basis.status, splits: basis.splits.map((split) => ({ label: split.label, ex_date: split.ex_date })), as_of: basis.as_of } : null,
+        levels: (visibleLevels.get(target) ?? NO_LEVELS).map((level) => ({ label: level.label, price: level.price })),
+        drawings: (visibleDrawings.get(target) ?? NO_DRAWINGS).map((drawing) => ({ kind: drawing.kind, points: drawing.points.map((point) => ({ time: point.time, price: point.price })),
+          ...(drawing.kind === "note" ? { text: drawing.text } : {}) })),
+        auto_levels: (autoFor(target)?.zones ?? []).map((zone) => ({ label: zone.label, low: zone.low, high: zone.high })),
+        captured_at: now,
+      },
+    };
+  };
+  const planSaved = (row: Capture, imageWaiting: boolean) => {
+    setPlan(null);
+    keepPlan(row);
+    void outboxAll().then(setOutbox);
+    const said = row.mode === "voice" ? (row.transcript?.status === "pending" ? "Recording saved — transcribing" : "Recording saved") : `Plan saved: ${captureTitle(row)}`;
+    setNotice(imageWaiting ? `${said}. The chart image did not upload; retry it from the plan strip.` : said);
+  };
+  const retryOutbox = (item: OutboxItem) => {
+    sendCapture(item).then(({ capture: row, imageWaiting }) => { keepPlan(row); setNotice(imageWaiting ? "Plan saved; the chart image is still waiting." : "Saved"); })
+      .catch((failure: Error) => setNotice(`Not saved: ${failure.message}`))
+      .finally(() => void outboxAll().then(setOutbox));
+  };
+  const dismissPlan = (id: string) => {
+    const next = [...dismissedPlans.filter((other) => other !== id), id].slice(-50);
+    setDismissedPlans(next);
+    try { localStorage.setItem(DISMISSED_PLANS_KEY, JSON.stringify(next)); } catch { /* dismissed for this visit only */ }
+  };
+  const changePlan = (work: Promise<Capture>) => work.then(keepPlan).catch((failure: Error) => setNotice(failure.message));
+  const planButton = <button aria-label="Plan trade" aria-haspopup="dialog" aria-expanded={!!plan} title="Plan trade: what you are taking and your plan, before you enter (Alt+P)" onClick={openPlan}
+    className={`${plain(!!plan)} ${control} text-[11px]`}><NotebookPen size={13} /><span className={narrow ? "sr-only" : ""}>Plan trade</span></button>;
+
   const alerts = [
     symbolError && <p key="symbol" className="text-xs text-amber-300" role="alert">{symbolError}</p>,
     drawError && <p key="draw" className="text-xs text-amber-300" role="alert">{drawError}</p>,
@@ -1266,7 +1367,7 @@ export default function ChartWorkspace() {
             ? <ToolbarMenu label="More chart controls" align="right" title="More chart controls" className={`${plain(false)} ${control}`}
               content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{secondary}{ladderButton(close)}{pauseButton}{refreshButton}{keysButton}
                 <div className="mt-1 w-full space-y-2 border-t border-slate-700/60 pt-2 text-[10px] text-slate-500">{about}{attribution}</div></div>}><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More chart controls</span></ToolbarMenu>
-            : <>{pauseButton}{refreshButton}{keysButton}</>}
+            : <>{planButton}{sep}{pauseButton}{refreshButton}{keysButton}</>}
           {immersive
             ? <button className={`${button(narrow ? "h-11 w-11" : "h-7 px-2.5")} !border-sky-500/60 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25`} onClick={() => setImmersive(false)} aria-label="Exit full-screen charts" title="Exit full screen (Esc)"><X size={14} />{!narrow && "Exit"}</button>
             : <button className={`${plain(false)} ${control}`} onClick={() => setImmersive(true)} aria-label="Enter full-screen charts" title="Full screen: hide the app navigation"><Expand size={13} /></button>}
@@ -1276,6 +1377,8 @@ export default function ChartWorkspace() {
       </header>
 
       {!!alerts.length && <div className={fill ? "max-h-28 shrink-0 space-y-1 overflow-y-auto px-2 pt-1" : "space-y-2"}>{alerts}</div>}
+      <PlanStrip capture={shownPlan} outbox={outbox} narrow={narrow} onRetry={retryOutbox} onDismiss={dismissPlan} onNotTaken={(id) => changePlan(markNotTaken(id))}
+        onRetryTranscript={(id) => changePlan(retryTranscript(id))} onNote={(id, kind: CaptureNote["kind"], text) => addCaptureNote(id, kind, text).then(keepPlan)} />
 
       <div className={fill ? "flex min-h-0 flex-1" : ""}>
         {!narrow && <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-slate-700/50 py-1">{tools}</div>}
@@ -1292,7 +1395,7 @@ export default function ChartWorkspace() {
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
                 onMenu={openMenu(slot.symbol, "main")} onUnlock={(id) => editItem(slot.symbol, id, { locked: false })}
-                maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined}
+                maximized={multi ? shown === 0 : undefined} onMaximize={multi ? () => toggleMaximized(0) : undefined} onPlan={narrow ? openPlan : undefined}
                 history={currentOlder[frameKey(slot)]} onNeedHistory={(before) => void loadOlder(slot, before)} onRetryHistory={() => void loadOlder(slot, undefined, true)} onVisibleRange={(range) => visibleTimes.current.set(frameKey(slot), range)} />
               </div>
             </div>)}
@@ -1361,6 +1464,8 @@ export default function ChartWorkspace() {
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
+      {plan && <PlanSheet key={plan.key} symbol={plan.symbol} chartSymbol={symbol} setup={captureSetup} setupError={setupError} narrow={narrow} snapshot={snapshotFor}
+        onSetup={setCaptureSetup} onSaved={planSaved} onQueued={() => void outboxAll().then(setOutbox)} onRejected={() => void loadSetup()} onClose={() => setPlan(null)} />}
       {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}

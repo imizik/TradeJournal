@@ -1,13 +1,18 @@
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
 import type { Earnings } from "../lib/symbolInfo";
 import type { AlertsPayload, LevelAlert } from "../lib/alerts";
+import type { Capture, CaptureSetup } from "../lib/captures";
 
 // Each test starts from empty server settings of its own; tests tagged
 // @real-settings use the e2e backend's endpoint instead.
+/** No saved plans (C3.4) in a context, so no plan strip shifts the layout under test. */
+const noPlans = (context: BrowserContext) => context.route("**/api/backend/charts/captures?**", (route) => route.fulfill({ json: { captures: [] } }));
 test.beforeEach(async ({ context }, testInfo) => {
   if (!testInfo.tags.includes("@real-settings")) await fakeChartSettings(context);
+  // Saved plans (C3.4) live in the e2e database; tests that are not about them start with none, so no strip shifts their layout.
+  if (!testInfo.tags.includes("@captures")) await noPlans(context);
 });
 
 // Provider responses are deliberately stubbed: browser checks prove interaction,
@@ -1094,6 +1099,7 @@ test("a level saved in one browser appears in another, and a stale save is refus
 
   // A second browser (its own storage, like a phone) opens the same workspace.
   const other = await browser.newContext();
+  await noPlans(other);
   const phonePage = await other.newPage();
   await stub(phonePage);
   await phonePage.goto("/charts");
@@ -1563,6 +1569,7 @@ test("a layout saved in one browser is usable in another with its symbol groups"
 
   // A second browser (its own storage, like a phone) sees the saved layout and can switch to it.
   const other = await browser.newContext();
+  await noPlans(other);
   const phonePage = await other.newPage();
   await stub(phonePage);
   await phonePage.goto("/charts");
@@ -2173,6 +2180,8 @@ test("Space and Shift+Space step through the watchlist; a button reached by keyb
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
   await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Plan trade" })).toBeFocused();
+  await page.keyboard.press("Tab");
   const pause = page.getByRole("button", { name: "Pause chart updates" });
   await expect(pause).toBeFocused();
   await page.keyboard.press("Space");
@@ -2228,7 +2237,7 @@ test("? opens a cheat sheet listing exactly the bindings that exist; ? and Escap
   const bindings = ["1 3 5 15 30 then Enter", "Backspace", "Esc", "H", "4", "D", "W",
     "Space", "Shift + Space", "Alt + ↓ or Alt + ↑", "⌘ + K or Ctrl + K",
     "Delete or Backspace", "⌘ + Z or Ctrl + Z", "⌘ + Shift + Z or Ctrl + Shift + Z", "Esc", "Hold ⌘ or Ctrl",
-    "Alt + R", "End", "Esc", "↑ ↓ ← →", "?"];
+    "Alt + P", "Alt + R", "End", "Esc", "↑ ↓ ← →", "?"];
   expect(await sheet.locator("td[aria-label]").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label")))).toEqual(bindings);
   await expect(sheet.getByRole("row")).toHaveCount(bindings.length);
   await page.screenshot({ path: test.info().outputPath("hotkey-sheet-desktop.png") });
@@ -3580,7 +3589,7 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   const toolbar = page.locator("header[aria-label='Chart toolbar']");
   expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
-  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder"]) {
+  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Plan trade", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder"]) {
     const control = name === "Chart symbol" ? page.getByLabel(name) : page.getByRole("button", { name, exact: name !== "Layouts" });
     await expect(control.first(), name).toBeInViewport();
   }
@@ -4072,6 +4081,7 @@ test("two browsers share the chart proportions but not the dock's width, merge a
 
   // A second browser (its own storage, like another computer) opens at the same proportions and its own dock width.
   const other = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await noPlans(other);
   const second = await other.newPage();
   await gmail(second, true);
   await stub(second);
@@ -5135,4 +5145,476 @@ test.describe("phone strike ladder", () => {
     await expect(sheet).toHaveCount(0);
     await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "262.5");
   });
+});
+
+// ---- Pre-trade capture (C3.4, C3.5): Plan trade, templates, Discretionary, voice, saved strip ----
+// Plans go to the real e2e backend, so they persist across browser contexts and reloads.
+const CAPTURES = "/api/backend/charts/captures";
+
+/** One template ("Reclaim") and a default account, set through the real routes; returns the setup. */
+async function captureSetup(request: APIRequestContext, templates: { setup_label: string; wording: string }[] = [{ setup_label: "Reclaim", wording: "Out on a 5m close back below the level." }]): Promise<CaptureSetup> {
+  let setup: CaptureSetup = await (await request.get(`${CAPTURES}/setup`)).json();
+  for (const row of setup.templates) setup = await (await request.delete(`${CAPTURES}/templates/${row.id}`)).json();
+  for (const row of templates) setup = await (await request.post(`${CAPTURES}/templates`, { data: row })).json();
+  return (await request.put(`${CAPTURES}/setup`, { data: { default_account_id: setup.accounts[0].id } })).json();
+}
+const savedCaptures = async (request: APIRequestContext): Promise<Capture[]> => (await (await request.get(`${CAPTURES}?limit=100`)).json()).captures;
+const planSheet = (page: Page) => page.getByRole("dialog", { name: "Plan trade" });
+
+test("Plan trade saves in four actions: open, side, template, save; the strip shows it in every browser", { tag: "@captures" }, async ({ page, browser, request }) => {
+  const setup = await captureSetup(request);
+  const before = (await savedCaptures(request)).length;
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();                       // 1. open
+  const sheet = planSheet(page);
+  await expect(sheet.getByTestId("plan-symbol")).toHaveText("MRVL");
+  await expect(sheet.getByLabel("Plan account")).toHaveValue(setup.accounts[0].id);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();                         // 2. side
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();                           // 3. template, wording visible before saving
+  await expect(sheet.getByRole("button", { name: /Reclaim/ })).toContainText("Out on a 5m close back below the level.");
+  await sheet.getByRole("button", { name: "Save plan" }).click();                         // 4. save
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByLabel("Chart notice")).toContainText("Plan saved: MRVL · Buy calls · Reclaim");
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip).toContainText("MRVL · Buy calls · Reclaim");
+  await expect(strip.getByRole("status")).toHaveText("Saved");
+  const rows = await savedCaptures(request);
+  expect(rows.length).toBe(before + 1);
+  const row = rows[0];
+  expect([row.underlying, row.side, row.mode, row.setup_label, row.wording, row.template_revision]).toEqual(["MRVL", "buy_calls", "template", "Reclaim", "Out on a 5m close back below the level.", 1]);
+  // The chart as it stood: interval, session, basis and price from what the page held; the frozen image uploaded after the save.
+  expect(row.context.state).toBe("captured");
+  if (row.context.state === "captured") {
+    expect([row.context.symbol, row.context.interval, row.context.panel, row.context.basis?.status]).toEqual(["MRVL", "5m", "main", "ok"]);
+    expect(row.context.price.value).toBeGreaterThan(0);
+    expect(row.context.last_candle?.close).toBeGreaterThan(0);
+  }
+  await expect.poll(async () => (await savedCaptures(request))[0].image.state).toBe("saved");
+  const image = await request.get(`${CAPTURES}/${row.id}/image`);
+  expect(image.headers()["content-type"]).toBe("image/jpeg");
+  // Editing the template later never changes the saved plan.
+  await request.put(`${CAPTURES}/templates/${setup.templates[0].id}`, { data: { setup_label: "Reclaim", wording: "Changed later." } });
+  expect((await savedCaptures(request))[0].wording).toBe("Out on a 5m close back below the level.");
+  // Another browser sees the same saved plan.
+  const other = await browser.newContext();
+  await fakeChartSettings(other);
+  const second = await other.newPage();
+  await stub(second);
+  await second.goto("/charts");
+  await expect(second.getByRole("region", { name: "Saved plan" })).toContainText("MRVL · Buy calls · Reclaim");
+  await second.getByRole("button", { name: "Show plan details" }).click();
+  await expect(second.getByRole("img", { name: "MRVL chart when the plan was saved" })).toBeVisible();
+  await expect(second.getByRole("region", { name: "Saved plan" })).toContainText("Reclaim (template rev 1): Out on a 5m close back below the level.");
+  await other.close();
+  // Did not take trade keeps the plan as a record; dismissing only hides the strip here.
+  await page.getByRole("button", { name: "Did not take trade" }).click();
+  await expect(strip.getByRole("status")).toHaveText("Not taken");
+  await page.getByRole("button", { name: "Dismiss saved plan" }).click();
+  await expect(strip).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toHaveCount(0);
+  expect((await savedCaptures(request))[0].not_taken_at).not.toBeNull();
+});
+
+test("Alt+P opens Plan trade only when nothing else has the keys; Enter saves and Esc closes", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  // Typing in a field: Alt+P is the field's.
+  await page.getByLabel("Chart symbol").focus();
+  await page.keyboard.press("Alt+KeyP");
+  await expect(planSheet(page)).toHaveCount(0);
+  // Another dialog open: it keeps the keys.
+  await page.getByLabel("Chart symbol").blur();
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toContainText("Plan trade");
+  await page.keyboard.press("Alt+KeyP");
+  await expect(planSheet(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // The physical key, so Option+P (π on a Mac) works; a held key opens it once.
+  await page.keyboard.down("Alt");
+  await page.keyboard.down("KeyP");
+  await page.keyboard.down("KeyP");
+  await page.keyboard.up("KeyP");
+  await page.keyboard.up("Alt");
+  await expect(planSheet(page)).toHaveCount(1);
+  // Chart hotkeys stay off while it is open.
+  await page.keyboard.press("d");
+  await expect(page.getByRole("button", { name: "1D", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
+  await expect(planSheet(page)).toHaveCount(0);
+  await page.keyboard.press("Alt+KeyP");
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy puts" }).click();
+  await page.keyboard.press("Enter"); // not enabled yet: no plan chosen
+  await expect(sheet).toHaveCount(1);
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await page.keyboard.press("Enter");
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText("MRVL · Buy puts · Discretionary");
+  // Existing chart hotkeys still work afterwards.
+  await page.keyboard.press("d");
+  await expect(page.getByRole("button", { name: "1D", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("on a 390px phone the plan sheet is a bottom sheet; Discretionary with a note saves without templates", { tag: "@captures" }, async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureSetup(request, []);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  // Reachable at 390px with the side panel closed.
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  const box = await sheet.boundingBox();
+  expect(box && Math.round(box.width)).toBe(390);
+  expect(box && Math.round(box.y + box.height)).toBeGreaterThan(800);
+  await expect(sheet).toContainText("No favorite templates yet");
+  for (const name of ["Buy calls", "Buy puts", "Buy stock"]) expect((await sheet.getByRole("button", { name }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await sheet.getByRole("button", { name: "More" }).click();
+  await sheet.getByRole("button", { name: "Short stock" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByLabel("Plan note").fill("Fading the gap into resistance");
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const row = (await savedCaptures(request))[0];
+  expect([row.side, row.instrument, row.mode, row.note, row.setup_label]).toEqual(["short_stock", "stock", "discretionary", "Fading the gap into resistance", null]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole("button", { name: "Show plan details" }).click();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText("Discretionary: no explicit plan.");
+  await page.getByRole("button", { name: "Add a later note" }).click();
+  await page.getByLabel("Later note").fill("Did not fill; price ran.");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText(/Added later, .*Did not fill; price ran\./);
+  expect((await savedCaptures(request))[0].note).toBe("Fading the gap into resistance");
+});
+
+test("a symbol switch while the sheet is open never retargets the plan; a failed chart image still saves the plan", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  // The chart moves on (the sheet leaves the toolbar free on a desktop).
+  await page.getByLabel("Chart symbol").fill("NVDA");
+  await page.getByLabel("Chart symbol").press("Enter");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("189.12");
+  await expect(sheet.getByTestId("plan-symbol")).toHaveText("MRVL");
+  await expect(sheet).toContainText("The chart now shows NVDA. This plan stays on MRVL");
+  await sheet.getByRole("button", { name: "Buy stock" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  let row = (await savedCaptures(request))[0];
+  expect([row.underlying, row.context_state, row.image.state]).toEqual(["MRVL", "unavailable", "unavailable"]);
+  expect(row.context.state === "unavailable" && row.context.reason).toContain("showed NVDA, not MRVL");
+  // An explicit change is allowed before saving.
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  await sheet.getByRole("button", { name: "Change" }).click();
+  await sheet.getByLabel("Plan symbol").fill("NVDA");
+  await sheet.getByLabel("Plan symbol").press("Enter");
+  await expect(sheet.getByTestId("plan-symbol")).toHaveText("NVDA");
+  // The chart's picture cannot be made: the plan saves anyway, saying so, with the rest of the snapshot.
+  await page.evaluate(() => { HTMLCanvasElement.prototype.toBlob = function (callback: BlobCallback) { callback(null); }; });
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  row = (await savedCaptures(request))[0];
+  expect([row.underlying, row.context_state, row.image.state, row.image.note]).toEqual(["NVDA", "captured", "unavailable", "The chart image could not be made."]);
+});
+
+test("a rejected save keeps the sheet open; an unreachable server keeps the plan for Retry across a reload, saved once", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const before = (await savedCaptures(request)).length;
+  await page.route(`**${CAPTURES}`, (route) => route.request().method() === "POST" ? route.fulfill({ status: 422, json: { detail: "Choose the journal account this plan is for." } }) : route.fallback());
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toHaveText("Not saved: Choose the journal account this plan is for.");
+  await expect(sheet).toHaveCount(1);
+  expect((await savedCaptures(request)).length).toBe(before);
+  // Now the server cannot be reached at all.
+  await page.unroute(`**${CAPTURES}`);
+  let posts = 0;
+  await page.route(`**${CAPTURES}`, (route) => { if (route.request().method() !== "POST") return route.fallback(); posts++; return route.abort("connectionrefused"); });
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toContainText("Not saved yet");
+  await expect(sheet.getByRole("alert")).toContainText("kept in this browser");
+  expect(posts).toBe(1);
+  await expect(sheet.getByRole("button", { name: "Buy puts" })).toBeDisabled(); // locked to the request it holds
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("alert")).toContainText("Not saved: MRVL Buy calls");
+  // The first send reached the server after all, but its answer was lost: Retry returns that plan, never a second one.
+  const pending = await page.evaluate(() => new Promise<{ body: unknown }>((resolve) => {
+    const open = indexedDB.open("tradejournal-captures", 1);
+    open.onsuccess = () => { const all = open.result.transaction("outbox").objectStore("outbox").getAll(); all.onsuccess = () => resolve(all.result[0]); };
+  }));
+  expect((await request.post(CAPTURES, { data: pending.body })).status()).toBe(201);
+  await page.unroute(`**${CAPTURES}`);
+  await strip.getByRole("button", { name: "Retry" }).click();
+  await expect(strip.getByRole("alert")).toHaveCount(0);
+  await expect(strip).toContainText("MRVL · Buy calls · Reclaim");
+  expect((await savedCaptures(request)).length).toBe(before + 1);
+});
+
+test("a double tap on Save plan sends one request and saves one plan", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const before = (await savedCaptures(request)).length;
+  let posts = 0;
+  await page.route(`**${CAPTURES}`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    posts++;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return route.continue();
+  });
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).dblclick();
+  await expect(sheet).toHaveCount(0);
+  expect(posts).toBe(1);
+  expect((await savedCaptures(request)).length).toBe(before + 1);
+});
+
+test("a template edited on another device is refused, then its new wording is shown and saves", { tag: "@captures" }, async ({ page, request }) => {
+  const setup = await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await request.put(`${CAPTURES}/templates/${setup.templates[0].id}`, { data: { setup_label: "Reclaim", wording: "Out under the 9 EMA." } });
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toContainText("edited on another device");
+  await expect(sheet.getByRole("button", { name: /Reclaim/ })).toContainText("Out under the 9 EMA.");
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const row = (await savedCaptures(request))[0];
+  expect([row.wording, row.template_revision]).toEqual(["Out under the 9 EMA.", 2]);
+});
+
+test("a chart image that failed to upload keeps its Retry after its plan is dismissed", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.route(`**${CAPTURES}/*/image`, (route) => route.abort("connectionrefused"));
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy puts" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const id = (await savedCaptures(request))[0].id;
+  await page.getByRole("button", { name: "Dismiss saved plan" }).click();
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("alert")).toContainText("Chart image not uploaded: MRVL Buy puts plan");
+  await page.unroute(`**${CAPTURES}/*/image`);
+  await strip.getByRole("button", { name: "Retry image" }).click();
+  await expect(strip).toHaveCount(0);
+  expect((await savedCaptures(request)).find((row) => row.id === id)?.image.state).toBe("saved");
+});
+
+// The voice tests use Chromium's fake microphone (a tone, see playwright.config.ts): real MediaRecorder, real upload, real storage.
+test.describe("voice plans", () => {
+  test.use({ permissions: ["microphone"] });
+
+  test("hold to record and release saves the recording; with no speech engine it says so and plays back", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await expect(sheet).toContainText("What am I taking, why here, and what would change my mind?");
+    // Ticker, account and side stay explicit for voice; no microphone until then.
+    await sheet.getByRole("button", { name: "Record voice plan" }).click();
+    await expect(sheet.getByRole("alert")).toHaveText("Choose what you are taking first.");
+    await sheet.getByRole("button", { name: "Buy calls" }).click();
+    const mic = sheet.getByRole("button", { name: "Record voice plan" });
+    const at = (await mic.boundingBox())!;
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+    await page.mouse.down();
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
+    await page.waitForTimeout(1500);
+    await page.mouse.up();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByLabel("Chart notice")).toHaveText("Recording saved");
+    const row = (await savedCaptures(request))[0];
+    expect([row.mode, row.side, row.setup_label, row.transcript?.status]).toEqual(["voice", "buy_calls", null, "not_configured"]);
+    expect(row.audio?.type).toBe("audio/webm");
+    expect(row.audio!.ms!).toBeGreaterThan(1000);
+    const strip = page.getByRole("region", { name: "Saved plan" });
+    await expect(strip).toContainText("MRVL · Buy calls · Voice plan");
+    await strip.getByRole("button", { name: "Show plan details" }).click();
+    await expect(strip.getByLabel("Plan recording")).toBeVisible();
+    await expect(strip).toContainText("Transcription is turned off on this server. Recordings are saved and can be played back.");
+    const audio = await request.get(`${CAPTURES}/${row.id}/audio`);
+    expect(audio.headers()["content-type"]).toBe("audio/webm");
+    expect((await audio.body()).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  });
+
+  test("tap to start, Stop & save; a cancelled press or a hidden tab stops and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy puts" }).click();
+    // Keyboard: the accessible tap path.
+    await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(sheet.getByRole("button", { name: "Stop & save" })).toBeEnabled();
+    await page.waitForTimeout(600);
+    // The tab is hidden: recording stops, nothing is uploaded, the clip waits for a choice.
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+    await expect(sheet.getByRole("status").filter({ hasText: "page was hidden" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Save recording" })).toBeVisible();
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); });
+    await sheet.getByRole("button", { name: "Discard" }).click();
+    await expect(sheet.getByRole("button", { name: "Record voice plan" })).toBeVisible();
+    // A press the browser cancels (a scroll took it): stopped, not saved.
+    const mic = sheet.getByRole("button", { name: "Record voice plan" });
+    await mic.dispatchEvent("pointerdown", { button: 0, pointerId: 7, isPrimary: true });
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
+    await page.waitForTimeout(600);
+    await sheet.getByRole("button", { name: "Recording: release to save" }).dispatchEvent("pointercancel", { pointerId: 7 });
+    await expect(sheet.getByRole("status").filter({ hasText: "press was interrupted" })).toBeVisible();
+    const before = (await savedCaptures(request)).length;
+    await sheet.getByRole("button", { name: "Save recording" }).click();
+    await expect(sheet).toHaveCount(0);
+    expect((await savedCaptures(request)).length).toBe(before + 1);
+    expect((await savedCaptures(request))[0].side).toBe("buy_puts");
+  });
+
+  test("the 30-second limit stops the clip and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await page.clock.install();
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy stock" }).click();
+    await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(sheet.getByRole("button", { name: "Stop & save" })).toBeEnabled();
+    await page.clock.runFor(31_000);
+    await expect(sheet.getByRole("status").filter({ hasText: "30-second limit" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Save recording" })).toBeVisible();
+    await sheet.getByRole("button", { name: "Discard" }).click();
+    await expect(sheet.getByRole("button", { name: "Save recording" })).toHaveCount(0);
+  });
+
+  test("a voice plan that cannot reach the server waits with its audio and saves on Retry", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.route(`**${CAPTURES}/voice`, (route) => route.abort("connectionrefused"));
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy calls" }).click();
+    await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1200);
+    await sheet.getByRole("button", { name: "Stop & save" }).click();
+    await expect(sheet.getByRole("alert")).toContainText("Not saved yet");
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    const strip = page.getByRole("region", { name: "Saved plan" });
+    await expect(strip.getByRole("alert")).toContainText("Not saved: MRVL Buy calls (voice)");
+    await page.unroute(`**${CAPTURES}/voice`);
+    await strip.getByRole("button", { name: "Retry" }).click();
+    await expect(strip).toContainText("MRVL · Buy calls · Voice plan");
+    const row = (await savedCaptures(request))[0];
+    expect(row.audio?.bytes).toBeGreaterThan(1000);
+    // The server's receipt is what counts; the device's time is kept, unverified.
+    expect(row.client_captured_at).toBeLessThan(row.received_at);
+  });
+});
+
+test("microphone denied or unavailable leaves the click path working", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(sheet.getByRole("status").filter({ hasText: "Microphone access is blocked" })).toBeVisible();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test("transcript states: transcribing, then ready; a failure keeps the recording and offers Retry; a correction sits beside it", { tag: "@captures" }, async ({ page }) => {
+  const base: Capture = { id: "cap-1", client_id: "client-1", received_at: Math.floor(Date.now() / 1000) - 30, client_captured_at: Math.floor(Date.now() / 1000) - 31,
+    account_id: "acct", account_label: "Roth IRA ··8267", underlying: "MRVL", side: "buy_calls", instrument: "option", mode: "voice", template_id: null, template_revision: null,
+    setup_label: null, wording: null, note: null, strike: null, expiration: null, quantity: null, context_state: "unavailable", context: { state: "unavailable", reason: "fixture" },
+    image: { state: "unavailable", note: null, bytes: null }, audio: { type: "audio/webm", ms: 4000, bytes: 30000 },
+    transcript: { status: "pending", text: null, provider: null, error: null, transcribed_at: null }, not_taken_at: null, notes: [] };
+  let current = base;
+  let lists = 0;
+  const posts: string[] = [];
+  await page.route(`**${CAPTURES}?**`, (route) => { lists++; return route.fulfill({ json: { captures: [current] } }); });
+  await page.route(`**${CAPTURES}/cap-1/**`, (route) => {
+    posts.push(new URL(route.request().url()).pathname.split("/").at(-1)!);
+    if (route.request().url().endsWith("/transcribe")) current = { ...current, transcript: { ...current.transcript!, status: "pending", error: null } };
+    if (route.request().url().endsWith("/notes")) current = { ...current, notes: [{ id: "n1", kind: "transcript_correction", text: "Out below 182.", created_at: Date.now() / 1000 }] };
+    return route.fulfill({ json: current });
+  });
+  await stub(page);
+  await page.goto("/charts");
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("status")).toHaveText("Recording saved — transcribing");
+  // While a transcript is on its way the list is checked every few seconds.
+  current = { ...base, transcript: { status: "ready", text: "Taking MRVL calls on the reclaim. Out below one eighty.", provider: "Whisper base.en (on this server)", error: null, transcribed_at: Date.now() / 1000 } };
+  await expect(strip.getByRole("status")).toHaveText("Saved", { timeout: 8000 });
+  const settled = lists;
+  await strip.getByRole("button", { name: "Show plan details" }).click();
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText("Taking MRVL calls on the reclaim. Out below one eighty.");
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText("Whisper base.en (on this server)");
+  await strip.getByRole("button", { name: "Correct transcript" }).click();
+  await strip.getByLabel("Transcript correction").fill("Out below 182.");
+  await strip.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText(/Corrected later, .*Out below 182\./);
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText("Taking MRVL calls on the reclaim. Out below one eighty.");
+  await page.waitForTimeout(3500);
+  expect(lists).toBe(settled); // no polling once nothing is pending
+  // A provider failure: the recording stays, Retry asks once.
+  current = { ...base, transcript: { status: "failed", text: null, provider: null, error: "Transcription took longer than 180 seconds and was stopped.", transcribed_at: null } };
+  await page.reload();
+  await strip.getByRole("button", { name: "Show plan details" }).click();
+  await expect(strip).toContainText("Transcription took longer than 180 seconds and was stopped. The recording is saved.");
+  await expect(strip.getByLabel("Plan recording")).toBeVisible();
+  await strip.getByRole("button", { name: "Retry transcript" }).click();
+  await expect(strip.getByRole("status")).toHaveText("Recording saved — transcribing");
+  expect(posts.filter((post) => post === "transcribe")).toHaveLength(1);
 });

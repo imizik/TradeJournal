@@ -61,9 +61,12 @@ export default defineConfig({
         // typically do). Normally unset: CI and local machines resolve the
         // browser Playwright installed for itself.
         //   PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e
-        ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
-          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
-          : {}),
+        // A fake microphone (a tone) for voice plans (C3.5); it is used only
+        // where a page asks for one and a test grants the permission.
+        launchOptions: {
+          args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+          ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}),
+        },
       },
     },
   ],
@@ -92,6 +95,11 @@ export default defineConfig({
         TRADINGVIEW_ANALYSIS_AUTOSTART: "false",
         // Chart access tests must stay deterministic even with a local .env.
         TRADIER_API_KEY: "",
+        // Voice plans (C3.5): recordings in a scratch folder, and no model
+        // download or speech engine in the browser run. Transcript states are
+        // exercised with fixtures; the engine has its own backend test.
+        CAPTURE_STORAGE_DIR: path.join(BACKEND, "data", "e2e_captures"),
+        CAPTURE_TRANSCRIBER: "off",
       },
     },
     {

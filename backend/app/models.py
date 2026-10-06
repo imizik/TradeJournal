@@ -335,6 +335,101 @@ class LevelAlertEvent(SQLModel, table=True):
     last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
 
+class CaptureTemplate(SQLModel, table=True):
+    """A favorite pre-trade template (Charts C3.4): the user's setup label and
+    their own invalidation/exit wording. Editing bumps ``revision``; a capture
+    keeps its own copy of the wording, so an edit never changes an old plan.
+    Removing one archives it."""
+
+    __tablename__ = "capture_template"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    position: int = 0
+    setup_label: str
+    wording: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = 1
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    archived_at: Optional[datetime] = None
+
+
+class CaptureProfile(SQLModel, table=True):
+    """The one-time capture setup (Charts C3.4): one row, ``id`` 1."""
+
+    __tablename__ = "capture_profile"
+
+    id: int = Field(default=1, primary_key=True)
+    default_account_id: Optional[uuid.UUID] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TradeCapture(SQLModel, table=True):
+    """Intent recorded before a trade (Charts C3.4, C3.5): the user's own
+    record, never a field on a rebuildable trade. What was submitted is never
+    edited afterwards; corrections and reflections are ``TradeCaptureNote``
+    rows. ``received_at`` (UTC) is when the server durably held the complete
+    intent: the template or text, or the whole audio file. ``client_captured_at``
+    is the browser's clock, kept for late uploads and never trusted as proof.
+    Audio and the chart image are files in private storage
+    (``engine/captures.py``); these rows hold their metadata."""
+
+    __tablename__ = "trade_capture"
+    __table_args__ = (
+        UniqueConstraint("client_id", name="uq_trade_capture_client_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    client_id: str  # idempotency key from the browser: a retry never makes a second capture
+    received_at: datetime = Field(index=True)  # UTC
+    client_captured_at: Optional[datetime] = None  # UTC, unverified
+    account_id: uuid.UUID = Field(index=True)
+    account_label: str  # as the account was named when captured
+    underlying: str = Field(index=True)
+    side: str  # buy_calls | buy_puts | buy_stock | short_stock | sell_calls | sell_puts
+    instrument: str  # option | stock
+    mode: str  # template | discretionary | voice
+    template_id: Optional[uuid.UUID] = None
+    template_revision: Optional[int] = None
+    setup_label: Optional[str] = None  # copied from the template when captured
+    wording: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    # Optional exact contract and sizing; absence is never filled in by a guess.
+    strike: Optional[float] = None
+    expiration: Optional[date] = None
+    quantity: Optional[float] = None
+    context_state: str  # captured | unavailable
+    context_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    image_state: str  # pending | saved | unavailable
+    image_type: Optional[str] = None
+    image_bytes: Optional[int] = None
+    image_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    image_received_at: Optional[datetime] = None
+    audio_type: Optional[str] = None
+    audio_bytes: Optional[int] = None
+    audio_ms: Optional[int] = None
+    audio_sha256: Optional[str] = None
+    transcript_status: Optional[str] = None  # pending | transcribing | ready | failed | not_configured
+    transcript_text: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    transcript_provider: Optional[str] = None
+    transcript_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    transcribed_at: Optional[datetime] = None
+    transcript_job_id: Optional[uuid.UUID] = None
+    not_taken_at: Optional[datetime] = None  # "Did not take trade"
+
+
+class TradeCaptureNote(SQLModel, table=True):
+    """Something added to a capture later, never replacing it: a transcript
+    correction or a reflection. Always shown as written after the capture."""
+
+    __tablename__ = "trade_capture_note"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    capture_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=False, index=True))
+    kind: str  # transcript_correction | note
+    text: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class StrategyDefinition(SQLModel, table=True):
     """Named Pine strategy whose code and assumptions evolve through versions."""
 

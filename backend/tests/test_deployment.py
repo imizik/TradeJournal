@@ -315,6 +315,26 @@ def test_launcher_accepts_the_gmail_listener_lane(tmp_path, monkeypatch):
     assert commands[0][-2:] == ["--lane", "gmail"]
 
 
+def test_launcher_runs_the_capture_lane_with_the_model_outside_the_backed_up_data(tmp_path, monkeypatch):
+    launch = load("launch")
+    (tmp_path / "backend").mkdir()
+    (tmp_path / "release.json").write_text('{"release_id":"test"}')
+    monkeypatch.setattr(launch, "RELEASE", tmp_path)
+    monkeypatch.setattr(launch.sys, "argv", ["launch.py", "worker", "capture"])
+    monkeypatch.setenv("DATABASE_URL", "sqlite:///:memory:")
+    monkeypatch.delenv("MIGRATION_DATABASE_URL", raising=False)
+    monkeypatch.delenv("CAPTURE_MODEL_DIR", raising=False)
+    for name in ("JOB_EXECUTION_MODE", "JOB_LOCK_DIR", "TRADEJOURNAL_RELEASE", "PYTHONDONTWRITEBYTECODE"):
+        monkeypatch.setenv(name, os.environ.get(name, ""))
+    monkeypatch.chdir(tmp_path)
+    commands = []
+    monkeypatch.setattr(launch.os, "execv", lambda _, command: commands.append(command))
+    launch.main()
+    assert commands[0][-2:] == ["--lane", "capture"]
+    assert launch.os.environ["CAPTURE_MODEL_DIR"] == "/var/lib/tradejournal/models"
+    assert "tradejournal-worker@capture" in load("control").SERVICES
+
+
 def test_every_managed_unit_ships_with_the_release():
     control = load("control")
     systemd = Path(__file__).resolve().parents[2] / "deploy" / "systemd"

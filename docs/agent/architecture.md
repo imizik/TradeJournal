@@ -70,7 +70,7 @@ when the private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank
 — that split would silently point the two processes at different databases.
 
 The [Ubuntu deployment package](../../deploy/README.md) instead supervises
-six services: frontend, API and the four worker lanes. It keeps the frontend
+seven services: frontend, API and the five worker lanes. It keeps the frontend
 and API on loopback; private Tailscale Serve reaches the frontend, whose
 same-origin `/api/backend` proxy carries browser requests. Server components
 use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
