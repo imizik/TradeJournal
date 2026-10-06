@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { etTime, intradayInterval, price } from "@/lib/charts";
 import type { AutoLevel, AutoLevels, AutoZone, Interval, LevelEvent, LevelInteraction, OptionsInfo, RangesInfo } from "@/lib/charts";
 import { formedName, isOption, isRange, KIND_NAMES, sourceName, spanName, STATE_NAMES } from "@/lib/autoLevels";
-import { contracts, gammaText, optionsAsOf } from "@/lib/optionsView";
+import { contracts, gammaText, openInterestChangeText, optionsAsOf } from "@/lib/optionsView";
 
 function eventName(event: LevelEvent): string {
   const side = event.direction ? ` ${event.direction}` : "";
@@ -104,6 +104,7 @@ function OptionDetail({ member, options }: { member: AutoLevel; options: Options
   return <dl aria-label={`Strike ${price(row.strike)}`} className="mt-1 grid grid-cols-[auto_1fr] gap-x-2 font-mono text-[10px] text-slate-400">
     <dt className="font-sans text-slate-500">Calls</dt><dd>OI {contracts(row.call_oi)}{row.call_oi_rank ? ` (#${row.call_oi_rank})` : ""} · Vol {contracts(row.call_volume)}{row.call_volume_rank ? ` (#${row.call_volume_rank})` : ""}</dd>
     <dt className="font-sans text-slate-500">Puts</dt><dd>OI {contracts(row.put_oi)}{row.put_oi_rank ? ` (#${row.put_oi_rank})` : ""} · Vol {contracts(row.put_volume)}{row.put_volume_rank ? ` (#${row.put_volume_rank})` : ""}</dd>
+    <dt className="font-sans text-slate-500">Δ OI</dt><dd aria-label={openInterestChangeText(row.oi_change)}>{openInterestChangeText(row.oi_change)}</dd>
     <dt className="font-sans text-slate-500">Gamma</dt><dd>{gammaText(row.gamma, !!options.signed && options.mode === "gamma")}</dd>
     <dt className="font-sans text-slate-500">Strike</dt><dd>{row.rank ? `#${row.rank} by ${measure}` : `not ranked by ${measure}`}{away === null ? "" : ` · ${away >= 0 ? "+" : ""}${away.toFixed(2)}% from ${price(options.spot)}`}</dd>
   </dl>;

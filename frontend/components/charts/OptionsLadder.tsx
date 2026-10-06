@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { fetchOptionsLadder, price } from "@/lib/charts";
 import type { OptionsLadder as Ladder, OptionsLayer, OptionStrike, OptionsScope } from "@/lib/charts";
-import { contracts, gammaText, optionsAsOf, SCOPE_NAMES } from "@/lib/optionsView";
+import { contracts, gammaText, openInterestChangeText, openInterestPeriodText, openInterestSideText, optionsAsOf, SCOPE_NAMES } from "@/lib/optionsView";
 import Sheet from "./Sheet";
 
 const REFRESH_MS = 60_000;
@@ -87,6 +87,7 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
         Signed gamma (assumed dealer side)
       </label>
       {data?.totals && <p className="font-mono text-[10px] text-slate-500">P/C OI {data.totals.put_call_oi?.toFixed(2) ?? "—"} · P/C vol {data.totals.put_call_volume?.toFixed(2) ?? "—"} · calls {contracts(data.totals.call_oi)} · puts {contracts(data.totals.put_oi)}</p>}
+      {data?.rows[0]?.oi_change && <p role="note" className="font-mono text-[10px] text-sky-200/70">{openInterestPeriodText(data.rows[0].oi_change)}</p>}
     </div>
     {!shown ? <p role="status" className="px-3 py-3 text-xs text-slate-500">Loading the {symbol} ladder…</p>
       : shown.error ? <div role="alert" className="px-3 py-3 text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className={`mt-2 rounded border border-slate-700 px-3 ${tap}`}>Retry ladder</button></div>
@@ -106,10 +107,10 @@ export default function OptionsLadder({ symbol, layer, spot, highlight, sheet, o
               title={`Gamma ${gammaText(row.gamma, signed)}. Click to mark ${price(row.strike)} on the charts.`}
               className={`grid w-full grid-cols-[1fr_1fr_auto_1fr_1fr] items-center gap-1 px-2 font-mono text-[10px] ${tap} ${chosen ? "bg-sky-400/15" : "hover:bg-slate-800/60"}`}>
               <span className="text-right text-slate-500">{contracts(row.put_volume)}</span>
-              <span className="relative text-right text-rose-200/90"><span aria-hidden className="absolute inset-y-0 right-0 bg-rose-400/15" style={{ width: share(row.put_oi, topOi) }} /><span className="relative">{contracts(row.put_oi)}</span></span>
+              <span className="relative text-right text-rose-200/90"><span aria-hidden className="absolute inset-y-0 right-0 bg-rose-400/15" style={{ width: share(row.put_oi, topOi) }} /><span className="relative">{contracts(row.put_oi)}</span><span className="relative block truncate text-[8px] text-slate-500" title={openInterestChangeText(row.oi_change)} aria-label={`${openInterestChangeText(row.oi_change)} puts`}>{openInterestSideText(row.oi_change, "puts")}</span></span>
               <span className={`relative w-14 text-center ${named ? "font-semibold text-slate-100" : "text-slate-300"}`}>{price(row.strike)}
                 <span aria-hidden className={`absolute -bottom-0.5 left-1/2 h-0.5 -translate-x-1/2 rounded ${signed && (row.gamma ?? 0) < 0 ? "bg-rose-400/80" : signed ? "bg-emerald-400/80" : "bg-violet-400/80"}`} style={{ width: share(row.gamma, topGamma) }} /></span>
-              <span className="relative text-teal-200/90"><span aria-hidden className="absolute inset-y-0 left-0 bg-teal-400/15" style={{ width: share(row.call_oi, topOi) }} /><span className="relative">{contracts(row.call_oi)}</span></span>
+              <span className="relative text-teal-200/90"><span aria-hidden className="absolute inset-y-0 left-0 bg-teal-400/15" style={{ width: share(row.call_oi, topOi) }} /><span className="relative">{contracts(row.call_oi)}</span><span className="relative block truncate text-[8px] text-slate-500" title={openInterestChangeText(row.oi_change)} aria-label={`${openInterestChangeText(row.oi_change)} calls`}>{openInterestSideText(row.oi_change, "calls")}</span></span>
               <span className="text-slate-500">{contracts(row.call_volume)}</span>
             </button>
           </div>;

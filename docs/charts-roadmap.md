@@ -139,7 +139,7 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.5, before G0 at the user's request); done once a human walkthrough times the five-second path |
 | C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.4); done once a real desktop and phone recording are checked on the private origin |
 | C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | done ([PR #133](https://github.com/imizik/TradeJournal/pull/133)) |
-| C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | todo |
+| C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | done ([PR #138](https://github.com/imizik/TradeJournal/pull/138); ahead of C5.2 at the user's request) |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
 | C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
@@ -1056,9 +1056,10 @@ symbol's charts and brings it onto the main chart's price scale.
 open interest by strike since 2026-10-01. Show each strike's change since the
 previous recorded session in the ladder and the strike card, labelled with
 both sessions' dates; a session marked unavailable leaves the change
-unavailable, never measured against an older one. *Done when:* a fixture with
-a missed session and a new strike proves both, and the change reads from the
-stored rows with no provider request.
+unavailable, never measured against an older one. A strike absent from the
+prior snapshot has an unavailable change; absence does not establish zero OI.
+*Done when:* a fixture with a missed session and a new strike proves both, and
+the change reads from the stored rows with no provider request.
 
 **C4.7 Max pain.** The strike of the scope's nearest expiration where its open
 contracts would pay their holders least at expiry, drawn by the options layer

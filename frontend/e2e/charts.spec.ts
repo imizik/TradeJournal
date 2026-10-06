@@ -4860,7 +4860,8 @@ function mergeZones(base: AutoZone[], members: AutoLevel[]): AutoZone[] {
   return zones.map((group) => autoZone([...group].sort((a, b) => b.price - a.price), new Set(group.map((m) => `${m.kind}@${m.price}`)).size)).sort((a, b) => a.low - b.low);
 }
 const optionRow = (strike: number, rank: number | null): OptionStrike => ({ strike, call_oi: 1200 + strike, put_oi: 900 + strike, call_volume: 340, put_volume: 120,
-  call_gamma: 2_400_000, put_gamma: 1_100_000, gamma: 3_500_000, rank, call_oi_rank: rank, put_oi_rank: null, call_volume_rank: null, put_volume_rank: null });
+  call_gamma: 2_400_000, put_gamma: 1_100_000, gamma: 3_500_000, rank, call_oi_rank: rank, put_oi_rank: null, call_volume_rank: null, put_volume_rank: null,
+  oi_change: { session: "2026-10-02", previous_session: "2026-10-01", status: "ready", calls: 125, puts: -45 } });
 function optionInfo(mode: string, scope: string, signed: boolean, members: AutoLevel[]): OptionsInfo {
   return { state: "ready", message: null, symbol: "MRVL", root: "MRVL", scope: scope as OptionsInfo["scope"], source: "Tradier option chains", spot: 257.34,
     expirations: ["2026-10-09"], scope_note: scope === "nearest" ? "Next expiration Fri Oct 9 (no 0DTE today)" : "Week of Oct 5: 1 expiration",
@@ -4930,6 +4931,7 @@ test("options levels draw the walls and the nearest strikes, follow every filter
   const numbers = card.getByLabel("Strike 254.40");
   await expect(numbers).toContainText("OI 1.5K (#3) · Vol 340");
   await expect(numbers).toContainText("#3 by open interest · -1.14% from 257.34");
+  await expect(numbers).toContainText("Δ OI calls +125 · puts −45 · Oct 1, 2026 → Oct 2, 2026");
   await expect(numbers).toContainText("$3.5M per 1% (calculated)");
   await expect(card).toContainText("open interest is OCC's overnight figure for the prior close");
   await expect(card).toContainText("PDH Prior day high254.30");
@@ -5119,6 +5121,7 @@ test("max pain always draws with the options levels, labelled inferred, with its
 function ladder(url: string): OptionsLadder {
   const query = new URL(url).searchParams;
   const rows = Array.from({ length: 13 }, (_, i) => 245 + i * 2.5).map((strike) => ({ ...optionRow(strike, null),
+    ...(strike === 260 ? { oi_change: { session: "2026-10-02", previous_session: "2026-10-01", status: "unavailable" as const, calls: null, puts: null } } : {}),
     gamma: query.get("signed") === "1" ? (strike > 256 ? 1 : -1) * (5_000_000 - Math.abs(strike - 257.5) * 300_000) : 5_000_000 - Math.abs(strike - 257.5) * 300_000 }));
   return { ...optionInfo("gamma", query.get("scope") ?? "week", query.get("signed") === "1", []), spot: Number(query.get("spot")) || null, rows,
     signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 } };
@@ -5147,6 +5150,9 @@ test("the strike ladder centres on the price, marks a strike on the charts and s
   expect([order[at - 1], order[at + 1]]).toEqual(["Strike 255.00", "Strike 257.50"]);
   await expect(panel.getByRole("button", { name: "Strike 265.00, call wall" })).toBeVisible();
   await expect(panel.getByRole("button", { name: "Strike 250.00, put wall" })).toBeVisible();
+  await expect(panel).toContainText("OI change: Oct 1, 2026 → Oct 2, 2026");
+  await expect(panel.getByRole("button", { name: "Strike 255.00" })).toContainText("Δ +125");
+  await expect(panel.getByRole("button", { name: "Strike 260.00" })).toContainText("Δ —");
   await expect(panel).toContainText("P/C OI 1.17 · P/C vol 0.78");
   await page.screenshot({ path: test.info().outputPath("strike-ladder.png") });
 

@@ -13,6 +13,27 @@ const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
 /** A contract count, compact ("12.3K"); a dash where the provider gave nothing. */
 export const contracts = (value: number | null | undefined) => value == null ? "—" : compact.format(value);
 
+const sessionDay = (value: string | null | undefined) => value
+  ? new Date(`${value}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", year: "numeric" })
+  : null;
+export function openInterestChangeText(change: { session: string | null; previous_session: string | null; calls?: number | null; puts?: number | null } | undefined): string {
+  const current = sessionDay(change?.session), previous = sessionDay(change?.previous_session);
+  if (!current || !previous) return "Open-interest change unavailable; two recorded sessions are needed.";
+  const signed = (value: number | null | undefined) => value == null ? "—" : `${value > 0 ? "+" : value < 0 ? "−" : ""}${contracts(Math.abs(value))}`;
+  return `Δ OI calls ${signed(change?.calls)} · puts ${signed(change?.puts)} · ${previous} → ${current}`;
+}
+export function openInterestSideText(change: { session: string | null; previous_session: string | null; calls?: number | null; puts?: number | null } | undefined, side: "calls" | "puts"): string {
+  const current = sessionDay(change?.session), previous = sessionDay(change?.previous_session);
+  if (!current || !previous) return "Δ —";
+  const value = change?.[side];
+  const amount = value == null ? "—" : `${value > 0 ? "+" : value < 0 ? "−" : ""}${contracts(Math.abs(value))}`;
+  return `Δ ${amount}`;
+}
+export function openInterestPeriodText(change: { session: string | null; previous_session: string | null } | undefined): string {
+  const current = sessionDay(change?.session), previous = sessionDay(change?.previous_session);
+  return current && previous ? `OI change: ${previous} → ${current}` : "OI change unavailable; two recorded sessions are needed.";
+}
+
 /** Dollar gamma for a 1% move: "$1.2M per 1%"; signed ones carry their sign and say they are assumed. */
 export function gammaText(value: number | null | undefined, signed: boolean): string {
   if (value == null) return "unavailable";
