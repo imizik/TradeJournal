@@ -121,9 +121,9 @@ The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C4.4 | Options levels layer with filters | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
 | C4.5 | Strike ladder side panel | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
 | C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | next, after C5.1's live phone check |
-| C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | done ([PR #JOURNAL](https://github.com/imizik/TradeJournal/pull/JOURNAL), with C3.1 and C3.2) |
-| C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | done ([PR #JOURNAL](https://github.com/imizik/TradeJournal/pull/JOURNAL)) |
-| C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | done ([PR #JOURNAL](https://github.com/imizik/TradeJournal/pull/JOURNAL)) |
+| C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132), with C3.1 and C3.2) |
+| C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
+| C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
 | G0 | Daily chart replacement acceptance: real market session, desktop and phone | Gate | todo |
 | C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.5, before G0 at the user's request); done once a human walkthrough times the five-second path |
 | C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.4); done once a real desktop and phone recording are checked on the private origin |
