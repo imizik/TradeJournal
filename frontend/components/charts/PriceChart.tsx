@@ -199,7 +199,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted: !!history?.exhausted });
   // The fill arrows drawn, by fill id, for hover summaries and clicks (C3.1).
   const fillMarks = useRef(new Map<string, { label: string; time: number }>());
-  const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number } | null>(null);
+  const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number; width: number } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
@@ -309,7 +309,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const at = event.point && cardHoverEnabled.current && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
       // A fill arrow under the pointer: its one-line summary (C3.1).
       const fill = at && typeof event.hoveredObjectId === "string" ? fillMarks.current.get(event.hoveredObjectId) : undefined;
-      setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y }) : null);
+      setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y, width: element.clientWidth }) : null);
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -899,7 +899,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
             : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
         {fillTip && !pending && <div role="tooltip" aria-label="Fill summary" className="pointer-events-none absolute z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg"
-          style={{ left: Math.max(4, Math.min(fillTip.x + 10, (container.current?.clientWidth ?? 300) - 240)), top: Math.max(4, fillTip.y - 30) }}>
+          style={{ left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - 30) }}>
           {fillTip.label} · {etTime(fillTip.time, true)} {intradayInterval(interval) ? `${etTime(fillTip.time)} ET candle` : ""}{onFill ? " · click for the trade" : ""}</div>}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
