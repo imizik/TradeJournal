@@ -103,7 +103,7 @@ export default function PlanStrip({ capture, outbox, narrow, onRetry, onDismiss,
       </div>}
       {reflections.map((note) => <p key={note.id} className="whitespace-pre-wrap"><span className="text-slate-500">Added later, {captureTime(note.created_at)}: </span>{note.text}</p>)}
       <div className="flex flex-wrap items-center gap-1.5">
-        {narrow && !capture.not_taken_at && <button type="button" onClick={() => onNotTaken(capture.id)} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Did not take trade</button>}
+        {narrow && !capture.not_taken_at && !capture.link && <button type="button" onClick={() => onNotTaken(capture.id)} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Did not take trade</button>}
         {capture.not_taken_at && <span className="text-slate-500">Marked not taken {captureTime(capture.not_taken_at)}.</span>}
         {capture.link && onUnlink && <button type="button" onClick={() => onUnlink(capture.id)} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Unlink trade</button>}
         {!capture.link && !capture.not_taken_at && onReview && <button type="button" onClick={onReview} className={`rounded border border-slate-700 text-slate-300 ${tap}`}>Link to a trade</button>}

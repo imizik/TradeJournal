@@ -164,6 +164,15 @@ def test_links_survive_rebuild_and_go_unresolved_when_the_fill_is_gone(db, clien
     _rebuild_trades(db, "rebuild")
     [row] = client.get("/charts/captures").json()["captures"]
     assert row["link"]["trade_id"] is not None and row["link"]["timing"] == "retrospective"
+    # The trade now has another first fill (and id), but it is still this plan's: no second plan may take it or be offered it.
+    moved = UUID(row["link"]["trade_id"])
+    assert moved != entry
+    other = capture(db, "2026-09-15T13:37:30")
+    assert capture_links.suggestions(db, [other])[other.id] == []
+    refused = client.post(f"/charts/captures/{other.id}/link", json={"trade_id": str(moved)})
+    assert refused.status_code == 422 and "already has a plan" in refused.json()["detail"]
+    db.delete(other)
+    db.commit()
     # A resync that loses the anchored fill: unresolved, never moved to another trade.
     from sqlalchemy import delete
     from app.models import TradeFill
@@ -216,3 +225,24 @@ def test_adherence_counts_from_activation_with_pending_and_excluded_trades(db, c
     assert client.put("/charts/captures/tracking", json={"on": False}).json() == {"since": None, "accounts": []}
     assert client.get("/charts/captures/review").json()["summary"] is None
     assert client.put("/charts/captures/tracking", json={"on": True, "accounts": []}).status_code == 422
+
+
+def test_one_active_link_is_held_by_the_database_and_a_linked_plan_was_taken(db, client):
+    from sqlalchemy.exc import IntegrityError
+    plan = capture(db, "2026-09-15T13:40:00")
+    entry = fill(db, "NVDA", "buy_to_open", 1, 310, "2026-09-15T09:44", **CALL)
+    _rebuild_trades(db, "test")
+    row = capture_links.link(db, plan, trade_of(db, entry).id)
+    # Two devices racing past the checks: the second insert is refused by the partial unique indexes.
+    for duplicate in (CaptureLink(capture_id=plan.id, account_id=ROTH, source_key="links:other", method="manual"),
+                      CaptureLink(capture_id=capture(db, "2026-09-15T13:41:00").id, account_id=ROTH, source_key=row.source_key, method="manual")):
+        db.add(duplicate)
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+    # Unlinked history rows do not count against them.
+    capture_links.unlink(db, plan)
+    capture_links.link(db, plan, trade_of(db, entry).id)
+    assert len(db.exec(select(CaptureLink).where(CaptureLink.capture_id == plan.id)).all()) == 2
+    refused = client.post(f"/charts/captures/{plan.id}/not-taken")
+    assert refused.status_code == 422 and "Unlink" in refused.json()["detail"]

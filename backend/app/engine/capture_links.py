@@ -21,6 +21,7 @@ import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.engine.captures import CaptureError, epoch, profile
@@ -106,10 +107,6 @@ def _trade_row(trade: dict, received_at: datetime | None = None) -> dict:
     }
 
 
-def _key(trade: dict) -> tuple[str, uuid.UUID]:
-    return trade["raw_email_id"], trade["account_id"]
-
-
 def _resolve(db: Session, links: list[CaptureLink]) -> dict[uuid.UUID, dict | None]:
     """Each link's current trade through its anchored fill, or None when that fill is gone or in no trade."""
     keys = {link.source_key for link in links}
@@ -144,8 +141,12 @@ def link_rows(db: Session, captures: list[TradeCapture]) -> dict[uuid.UUID, dict
     return out
 
 
-def _active_keys(db: Session) -> set[tuple[str, uuid.UUID]]:
-    return {(row.source_key, row.account_id) for row in db.exec(select(CaptureLink).where(CaptureLink.unlinked_at.is_(None))).all()}
+def _linked_trades(db: Session) -> dict[uuid.UUID, CaptureLink]:
+    """Active links by the trade they resolve to now. Compared by current trade, never by anchor key:
+    a delayed earlier fill makes another fill the trade's first entry while the link keeps its anchor."""
+    active = list(db.exec(select(CaptureLink).where(CaptureLink.unlinked_at.is_(None))).all())
+    resolved = _resolve(db, active)
+    return {trade["id"]: row for row in active if (trade := resolved.get(row.id))}
 
 
 def suggestions(db: Session, captures: list[TradeCapture]) -> dict[uuid.UUID, list[dict]]:
@@ -153,7 +154,7 @@ def suggestions(db: Session, captures: list[TradeCapture]) -> dict[uuid.UUID, li
     the exact contract where given, first entry within ten minutes of receipt. Never confirmed here."""
     if not captures:
         return {}
-    taken = _active_keys(db)
+    taken = _linked_trades(db)
     # Wall clocks are New York, receipt is UTC: a day of slack, then each candidate is compared exactly.
     earliest = min(capture.received_at for capture in captures) - timedelta(days=1)
     latest = max(capture.received_at for capture in captures) + timedelta(days=1)
@@ -161,16 +162,16 @@ def suggestions(db: Session, captures: list[TradeCapture]) -> dict[uuid.UUID, li
                    Trade.opened_at >= earliest, Trade.opened_at <= latest)
     pool.sort(key=lambda t: t["opened_at"])
     return {capture.id: [_trade_row(trade, capture.received_at) for trade in pool
-                         if _key(trade) not in taken and _compatible(capture, trade) and _in_window(capture, trade)]
+                         if trade["id"] not in taken and _compatible(capture, trade) and _in_window(capture, trade)]
             for capture in captures}
 
 
 def others(db: Session, capture: TradeCapture, limit: int = 10) -> list[dict]:
     """Compatible unlinked trades outside the window within a week, nearest first, for a manual link."""
-    taken = _active_keys(db)
+    taken = _linked_trades(db)
     pool = _trades(db, Trade.account_id == capture.account_id, Trade.ticker == capture.underlying,
                    Trade.opened_at >= capture.received_at - timedelta(days=8), Trade.opened_at <= capture.received_at + timedelta(days=8))
-    rows = [trade for trade in pool if reliable(trade["opened_at"]) and _key(trade) not in taken
+    rows = [trade for trade in pool if reliable(trade["opened_at"]) and trade["id"] not in taken
             and _compatible(capture, trade) and not _in_window(capture, trade)]
     rows.sort(key=lambda t: abs((entry_utc(t["opened_at"]) - capture.received_at).total_seconds()))
     return [_trade_row(trade, capture.received_at) for trade in rows[:limit]]
@@ -186,12 +187,17 @@ def link(db: Session, capture: TradeCapture, trade_id: uuid.UUID) -> CaptureLink
     trade = rows[0]
     if not _compatible(capture, trade):
         raise CaptureError("That trade is a different account, symbol, side or contract from this plan.")
-    if _key(trade) in _active_keys(db):
+    if trade["id"] in _linked_trades(db):
         raise CaptureError("That trade already has a plan linked. A re-entry is a new trade and needs its own plan.")
     row = CaptureLink(capture_id=capture.id, account_id=trade["account_id"], source_key=trade["raw_email_id"],
                       method="suggested" if _in_window(capture, trade) else "manual")
     db.add(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another device linked this plan, or this trade's first fill, a moment earlier.
+        db.rollback()
+        raise CaptureError("This plan or that trade was just linked elsewhere. Refresh and check.") from None
     db.refresh(row)
     return row
 
@@ -248,7 +254,7 @@ def set_tracking(db: Session, on: bool, accounts: list[str]) -> dict:
     return tracking(db)
 
 
-def summary(db: Session, pending: set[tuple[str, uuid.UUID]]) -> dict | None:
+def summary(db: Session, pending: set[uuid.UUID]) -> dict | None:
     """Capture coverage of recorded trades entered since tracking began, in the tracked accounts.
     ``pending``: trades suggested for an unlinked plan, counted as needing linking rather than missed."""
     row = profile(db)
@@ -258,15 +264,14 @@ def summary(db: Session, pending: set[tuple[str, uuid.UUID]]) -> dict | None:
     since = row.tracking_since
     pool = [t for t in _trades(db, Trade.account_id.in_(accounts), Trade.opened_at >= since - timedelta(days=1))
             if not reliable(t["opened_at"]) or entry_utc(t["opened_at"]) >= since]
-    active = list(db.exec(select(CaptureLink).where(CaptureLink.unlinked_at.is_(None))).all())
-    by_key = {(row.source_key, row.account_id): row for row in active}
-    captures = {c.id: c for c in db.exec(select(TradeCapture).where(TradeCapture.id.in_([row.capture_id for row in active])))} if active else {}
+    by_trade = _linked_trades(db)
+    captures = {c.id: c for c in db.exec(select(TradeCapture).where(TradeCapture.id.in_([row.capture_id for row in by_trade.values()])))} if by_trade else {}
     counts = {"confirmed": 0, "confirmed_discretionary": 0, "unverified": 0, "retrospective": 0, "needs_linking": 0, "no_capture": 0, "excluded": 0}
     for trade in pool:
         if not reliable(trade["opened_at"]):
             counts["excluded"] += 1
             continue
-        linked = by_key.get(_key(trade))
+        linked = by_trade.get(trade["id"])
         capture = captures.get(linked.capture_id) if linked else None
         if capture is not None:
             when = timing(capture.received_at, trade["opened_at"])
@@ -275,7 +280,7 @@ def summary(db: Session, pending: set[tuple[str, uuid.UUID]]) -> dict | None:
                 counts["confirmed_discretionary"] += capture.mode == "discretionary"
             else:
                 counts[when] += 1
-        elif _key(trade) in pending:
+        elif trade["id"] in pending:
             counts["needs_linking"] += 1
         else:
             counts["no_capture"] += 1
@@ -294,8 +299,7 @@ def review(db: Session, now: datetime | None = None) -> dict:
     unlinked = [c for c in recent if links[c.id]["link"] is None and c.not_taken_at is None]
     unresolved = [c for c in recent if (links[c.id]["link"] or {}).get("unresolved")]
     suggested = suggestions(db, unlinked)
-    ids = {uuid.UUID(s["trade_id"]) for rows in suggested.values() for s in rows}
-    pending = {_key(row) for row in _trades(db, Trade.id.in_(ids))} if ids else set()
+    pending = {uuid.UUID(s["trade_id"]) for rows in suggested.values() for s in rows}
     return {
         "needs_linking": [{"capture_id": str(c.id), "suggestions": suggested[c.id], "others": others(db, c)} for c in unlinked],
         "unresolved": [str(c.id) for c in unresolved],

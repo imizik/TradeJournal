@@ -430,6 +430,13 @@ class CaptureLink(SQLModel, table=True):
     new row. Linking never changes the capture or its time."""
 
     __tablename__ = "capture_link"
+    # One active link per plan and per anchor fill, held by the database, so two devices linking at once cannot both win.
+    __table_args__ = (
+        Index("uq_capture_link_active_capture", "capture_id", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+        Index("uq_capture_link_active_source", "account_id", "source_key", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     capture_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=False, index=True))

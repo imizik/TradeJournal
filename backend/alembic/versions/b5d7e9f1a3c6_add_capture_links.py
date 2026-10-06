@@ -25,6 +25,12 @@ def upgrade() -> None:
         )
         op.create_index("ix_capture_link_capture_id", "capture_link", ["capture_id"])
         op.create_index("ix_capture_link_source_key", "capture_link", ["source_key"])
+        # One active link per plan and per anchor fill, held by the database (partial unique indexes).
+        active = sa.text("unlinked_at IS NULL")
+        op.create_index("uq_capture_link_active_capture", "capture_link", ["capture_id"], unique=True,
+                        sqlite_where=active, postgresql_where=active)
+        op.create_index("uq_capture_link_active_source", "capture_link", ["account_id", "source_key"], unique=True,
+                        sqlite_where=active, postgresql_where=active)
     columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("capture_profile")}
     with op.batch_alter_table("capture_profile") as batch:
         if "tracking_since" not in columns:

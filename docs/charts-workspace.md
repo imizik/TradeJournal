@@ -1327,8 +1327,8 @@ never recommends a trade and never sends an order.
   `POST /charts/captures/voice` (multipart `meta` and `audio`); and
   `POST /charts/captures/{id}/image`, `/not-taken`, `/notes` and `/transcribe`.
 
-Linking a plan to the trade it became, and counting captures (C3.6), are not
-built.
+Linking a plan to the trade it became, and counting captures, are
+[C3.6](#plans-linked-to-trades-c36).
 
 ### Plans linked to trades (C3.6)
 
@@ -1345,7 +1345,10 @@ A saved plan is tied to the trade it was for by the user; nothing links itself.
   it. **Link another trade…** lists other compatible trades within a week,
   each labeled with its timing. One plan links to one trade, and a trade takes
   one plan: partial opening fills are one trade, and a re-entry is a new trade
-  that needs its own plan. A linked plan unlinks from the strip, and every link
+  that needs its own plan. "Already linked" is judged by the trade each link
+  resolves to now, and partial unique indexes on `capture_link` keep two
+  devices linking at once from both succeeding. A linked plan cannot be marked
+  not taken until it is unlinked. A linked plan unlinks from the strip, and every link
   and unlink is kept as history.
 - **Timing.** Compares when the server received the complete plan (UTC) with
   the trade's first entry, a New York minute. A plan received before that

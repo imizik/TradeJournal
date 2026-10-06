@@ -26,7 +26,7 @@ from typing import Any
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models import Account, CaptureProfile, CaptureTemplate, JobRun, TradeCapture, TradeCaptureNote
+from app.models import Account, CaptureLink, CaptureProfile, CaptureTemplate, JobRun, TradeCapture, TradeCaptureNote
 
 # The explicit opening sides. Buy or sell exposure is never inferred from call/put alone.
 SIDES: dict[str, str] = {
@@ -352,6 +352,9 @@ def attach_image(db: Session, capture: TradeCapture, data: bytes) -> TradeCaptur
 
 
 def mark_not_taken(db: Session, capture: TradeCapture) -> TradeCapture:
+    # C3.6: a plan linked to a trade was taken.
+    if db.exec(select(CaptureLink).where(CaptureLink.capture_id == capture.id, CaptureLink.unlinked_at.is_(None))).first():
+        raise CaptureError("This plan is linked to a trade. Unlink it first if it was not taken.")
     if capture.not_taken_at is None:
         capture.not_taken_at = datetime.utcnow()
         db.add(capture)

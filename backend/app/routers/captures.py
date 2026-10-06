@@ -214,7 +214,10 @@ async def add_image(capture_id: uuid.UUID, image: UploadFile = File(...), db: Se
 
 @router.post("/captures/{capture_id}/not-taken")
 def not_taken(capture_id: uuid.UUID, db: Session = Depends(get_session)):
-    return _one(db, captures.mark_not_taken(db, _capture(db, capture_id)))
+    try:
+        return _one(db, captures.mark_not_taken(db, _capture(db, capture_id)))
+    except CaptureError as exc:
+        _fail(exc)
 
 
 @router.post("/captures/{capture_id}/notes")
