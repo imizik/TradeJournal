@@ -1,0 +1,11 @@
+# Repository defaults; explicit Desktop/CLI selections can override them.
+# Workflow and escalation rules live in docs/agent/codex-workflow.md.
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+
+[agents]
+enabled = true
+default_subagent_model = "gpt-6-luna"
+default_subagent_reasoning_effort = "medium"
+# Normally one owner; leave room for a justified independent investigation.
+max_concurrent_threads_per_session = 2
