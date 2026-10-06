@@ -1056,9 +1056,10 @@ symbol's charts and brings it onto the main chart's price scale.
 open interest by strike since 2026-10-01. Show each strike's change since the
 previous recorded session in the ladder and the strike card, labelled with
 both sessions' dates; a session marked unavailable leaves the change
-unavailable, never measured against an older one. *Done when:* a fixture with
-a missed session and a new strike proves both, and the change reads from the
-stored rows with no provider request.
+unavailable, never measured against an older one. A strike absent from the
+prior snapshot has an unavailable change; absence does not establish zero OI.
+*Done when:* a fixture with a missed session and a new strike proves both, and
+the change reads from the stored rows with no provider request.
 
 **C4.7 Max pain.** The strike of the scope's nearest expiration where its open
 contracts would pay their holders least at expiry, drawn by the options layer

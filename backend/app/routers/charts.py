@@ -26,6 +26,7 @@ from app.engine import symbol_info_tradier
 from app.engine import chart_journal
 from app.engine.quotes import OptionQuoteRequest, option_mark
 from app.engine.options_feed import Layer, options_feed
+from app.engine.options_history import attach_open_interest_changes
 from app.engine.options_positioning import SCOPES
 from app.routers.level_alerts import listing as alert_listing
 from app.models import FILL_LIGHT, ChartSettingsRecord, Fill, Trade
@@ -179,11 +180,18 @@ def workspace(
             found["range_levels"] = options_feed.ranges
         return {**found, "auto": auto} if found else {}
 
+    def add_open_interest_changes(levels: dict | None, name: str) -> None:
+        options_data = levels.get("options") if isinstance(levels, dict) else None
+        if isinstance(options_data, dict):
+            attach_open_interest_changes(db, name, options_data.get("root", ""),
+                                         options_data.get("strikes", []), options_data.get("expirations", []))
+
     try:
         data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
                                     volume_profile=chart_history.volume_profile, **levels_for(None))
     except ChartFeedError as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
+    add_open_interest_changes(data.get("auto_levels"), symbol)
     data["extras"] = {}
     for name, wanted in held.items():
         try:
@@ -191,6 +199,7 @@ def workspace(
                                          volume_profile=chart_history.volume_profile, **levels_for("nearest"))
             data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
                                      "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol")}
+            add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
         except ChartFeedError as exc:
             # A held symbol that cannot load leaves the main charts intact.
             data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
@@ -258,13 +267,15 @@ def journal_mark(trade_id: uuid.UUID, db: Session = Depends(get_session)):
 
 @router.get("/options/{symbol:path}/ladder")
 def options_ladder(symbol: str, scope: str = Query("week", max_length=10), signed: bool = Query(False),
-                   spot: float | None = Query(None, gt=0)):
+                   spot: float | None = Query(None, gt=0), db: Session = Depends(get_session)):
     """The strike ladder (C4.5): open interest, volume and gamma by strike around ``spot``
     (the chart's latest price), over the scope's expirations. Reads stale chains first."""
     symbol = symbol.upper().strip()
     if not SYMBOL.fullmatch(symbol) or scope not in SCOPES:
         raise HTTPException(422, "Use a US stock or ETF ticker and a scope of nearest, week or all.")
-    return options_feed.ladder(symbol, scope, signed, spot)
+    result = options_feed.ladder(symbol, scope, signed, spot)
+    attach_open_interest_changes(db, symbol, result.get("root", ""), result.get("rows", []), result.get("expirations", []))
+    return result
 
 
 class ChartSettingsSave(BaseModel):

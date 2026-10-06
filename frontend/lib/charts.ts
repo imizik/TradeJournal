@@ -87,6 +87,7 @@ export type MaxPain = { price: number; expiration: string; note: string };
 export type OptionStrike = {
   strike: number; call_oi: number | null; put_oi: number | null; call_volume: number | null; put_volume: number | null;
   call_gamma: number | null; put_gamma: number | null;
+  oi_change?: { session: string | null; previous_session: string | null; status: "ready" | "unavailable"; calls?: number | null; puts?: number | null };
   /** Both sides' dollar gamma: summed, or the calls' less the puts' when signed (assumed). */
   gamma: number | null;
   /** Its place by the layer's measure on both sides together, then by each side's open interest and volume. */

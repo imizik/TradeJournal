@@ -906,6 +906,19 @@ solid "Strike …" line and brings it onto the main chart's price scale; a
 second click clears it, and charting another symbol drops it. On a phone the
 tap also closes the sheet so the chart shows.
 
+### Open-interest change (C4.6)
+
+The ladder and each options strike card show call and put open-interest changes
+from the latest stored session to the immediately preceding stored session,
+with both dates. Changes are calculated from `option_chain_snapshot` rows only;
+the chart does not request a provider read for this history. Contracts match by
+root, expiration, option side and strike. An explicit stored zero is valid; a
+contract missing from the earlier snapshot has an unavailable change because
+its earlier open interest is unknown. A latest or prior session marked partial
+or unavailable also leaves the change unavailable, so a missed session never
+falls back to an older snapshot. The ladder's live chain values retain their
+existing refresh behavior.
+
 ### Range bands (C2.7)
 
 Off by default. Layers → Range bands (or the chart menu's Layers) shows them
