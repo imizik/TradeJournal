@@ -32,5 +32,6 @@ export function optionsAsOf(info: OptionsInfo): string {
     info.spot ? `gamma recomputed at ${info.spot.toFixed(2)}` : null,
     info.missing && Object.keys(info.missing).length ? `missing on ${Object.entries(info.missing).map(([what, count]) => `${count} ${what.replace("_", " ")}`).join(", ")} contract${Object.values(info.missing).some((n) => n !== 1) ? "s" : ""}` : null,
     info.excluded && Object.keys(info.excluded).length ? `other roots left out: ${Object.entries(info.excluded).map(([root, count]) => `${root} ${count}`).join(", ")}` : null,
+    info.max_pain_reason,
   ].filter(Boolean).join(" · ") + ".";
 }

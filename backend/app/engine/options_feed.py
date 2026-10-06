@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections import OrderedDict, deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import logging
 import threading
@@ -44,7 +44,7 @@ from app.engine.options_chain import OptionsChainError, TradierOptions
 from app.engine.options_implied import days_to, expected_move_levels, straddle, targets
 from app.engine.options_models import OptionChain
 from app.engine.options_positioning import (DEALER_SIDE, FLIP_SYMBOLS, MEASURES, SCOPES, GammaFlip, MaxPain, Positioning, StrikeRow,
-                                            chart_levels, gamma_flip, max_pain, positioning, primary_root, scope_expirations)
+                                            chart_levels, gamma_flip, max_pain, max_pain_missing, positioning, primary_root, scope_expirations)
 
 log = logging.getLogger(__name__)
 
@@ -105,6 +105,7 @@ class OptionsFeed:
         self._flips: dict[tuple, tuple[float, GammaFlip]] = {}
         # Range bands (C2.7): each (symbol, New York date, expiration)'s captured straddle.
         self._bands: dict[tuple[str, date, date], dict] = {}
+        self._level_seen: OrderedDict[tuple, int] = OrderedDict()
 
     # ------------------------------------------------------------------ public
 
@@ -120,11 +121,25 @@ class OptionsFeed:
         flip = self._flip(layer.scope, found, chains, now) if layer.signed and layer.measure == "gamma" else None
         # Max pain (C4.7) is one expiration's: the scope's nearest.
         pain = max_pain(chains[0], found.root) if chains else None
+        missing_pain = max_pain_missing(chains[0], found.root) if chains else 0
         levels = chart_levels(found, layer.measure, layer.signed, flip, pain)
+        # A fixed reference first observed late must not acquire earlier contacts.
+        # No durable history is promised: a restart starts observation again.
+        with self._lock:
+            self._level_seen = OrderedDict((key, stamp) for key, stamp in self._level_seen.items() if key[0] == now.date())
+            observed = []
+            for level in levels:
+                key = (now.date(), symbol, found.root, layer.scope, found.expirations, level.kind, level.price)
+                stamp = self._level_seen.setdefault(key, int(now.timestamp()))
+                observed.append(replace(level, formed_at=stamp) if not level.developing else level)
+            while len(self._level_seen) > 2048:
+                self._level_seen.popitem(last=False)
+        levels = observed
         shown = {level.price for level in levels}
         rows = self._rows(found, [row for row in found.strikes if row.strike in shown], layer.measure, layer.signed)
         return levels, {**info, "mode": layer.measure, "signed": layer.signed, "strikes": rows, "flip": _flip_view(flip),
-                        "max_pain": _pain_view(pain)}
+                        "max_pain": _pain_view(pain),
+                        "max_pain_reason": f"Max pain unavailable: {missing_pain} contract{'s' if missing_pain != 1 else ''} with unknown open interest or size." if missing_pain else None}
 
     def ranges(self, symbol: str, spot: float | None) -> tuple[list[Level], dict]:
         """The expected-move bands (C2.7): the nearest and the nearest Friday expiration's
@@ -175,7 +190,7 @@ class OptionsFeed:
                     stale.append(expiration)
                     reasons.append(f"{expiration:%a %b} {expiration.day}: loading.")
                     continue
-                found = straddle(read.value, spot, root)
+                found = straddle(read.value, spot, root, now=now)
                 if found["state"] != "ready":
                     reasons.append(f"{expiration:%a %b} {expiration.day}: {found.get('reason', 'no straddle')}")
                     continue

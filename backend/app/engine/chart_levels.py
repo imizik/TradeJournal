@@ -35,8 +35,8 @@ SWING_SIDE = 2  # sessions on each side a swing high must stand above (a low, be
 ROUND_TARGET = 0.01  # round-number spacing aims at about 1% of price
 ROUND_EACH_SIDE = 3  # round numbers at or below the price, and as many above
 DAILY_TAIL = SWING_LOOKBACK + SWING_SIDE + 10  # daily bars any level reads
-# One band, a tenth of the daily ATR(14), scales from SPY to CVNA: levels closer
-# than it merge into one zone (C2.2), and price within it of a level tests it (C2.3).
+# A tenth of the prior daily ATR caps a zone's TOTAL width and defines proximity.
+# Actual contacts/crosses use the visible bounds, never this proximity buffer.
 BAND_ATR = 0.1
 
 Calendar = Mapping[date, dict | None] | None
@@ -75,7 +75,7 @@ class Zone:
     low: float  # the members' lowest and highest prices, as they are: never rounded or padded
     high: float
     label: str  # the members' labels, highest price first: "PDH + 21,500 + OR15 high"
-    score: int  # independent sources: members set by the same bar count once
+    score: int  # distinct origins, not statistical independence or strength
     members: tuple[Level, ...]
 
 
@@ -99,11 +99,14 @@ def compute_levels(day: date, minutes: list[dict], daily: list[dict], as_of: int
     _prior_day(day, completed, stale, calendar, levels, missing)
     _prior_week(day, completed, calendar, levels, missing)
     _intraday(day, minutes, as_of, calendar, levels, missing)
-    _swings(completed, stale, calendar, levels, missing)
+    history_gap = stale or _history_gap(completed, calendar)
+    _swings(completed, history_gap, calendar, levels, missing)
     if reference is None:
         reference = _last_close(minutes, as_of) or (completed[-1]["close"] if completed and not stale else None)
     _round_numbers(reference, levels, missing)
-    atr = compute_daily_indicators([_alpaca(b) for b in completed]).get(_date(completed[-1]).isoformat(), {}).get("atr_14") if len(completed) > 14 else None
+    atr = compute_daily_indicators([_alpaca(b) for b in completed]).get(_date(completed[-1]).isoformat(), {}).get("atr_14") if len(completed) > 14 and not history_gap else None
+    if history_gap:
+        missing["atr"] = history_gap
     return LevelSet(day, as_of, tuple(levels), missing, atr)
 
 
@@ -118,20 +121,20 @@ def previous_session(day: date, calendar: Calendar = None) -> date | None:
 
 
 def confluence(levels: tuple[Level, ...] | list[Level], band: float | None) -> list[Zone]:
-    """Merge levels closer than ``band`` into zones, lowest first.
+    """Nearest-pair complete-link clusters: TOTAL span must be less than ``band``.
 
-    A level joins the zone below it when it is within one band of that zone's
-    highest member, so a zone spans exactly its members' prices. Without a band
-    (no ATR) only levels at the same price merge.
+    Adjacent clusters merge by the smallest maximum pair distance (their span),
+    ties to the lower cluster. Adding a bridge cannot create an unlimited chain.
+    No ATR merges exact-price duplicates only. Member prices are never padded.
     """
-    zones: list[list[Level]] = []
-    for level in sorted(levels, key=lambda item: item.price):
-        gap = level.price - zones[-1][-1].price if zones else None
-        # Prices are floats: 100.1 - 100.0 is a hair under 0.1, which is not closer than a 0.1 band.
-        if gap is not None and (gap + 1e-9 < band if band else gap == 0):
-            zones[-1].append(level)
-        else:
-            zones.append([level])
+    zones = [[level] for level in sorted(levels, key=lambda item: item.price)]
+    while len(zones) > 1:
+        candidates = [(zones[i + 1][-1].price - zones[i][0].price, i) for i in range(len(zones) - 1)]
+        span, index = min(candidates)
+        # An exact threshold stays separate, including floating-point decimal noise.
+        if not (span + 1e-9 < band if band else span == 0):
+            break
+        zones[index:index + 2] = [zones[index] + zones[index + 1]]
     out = []
     for members in zones:
         shown = sorted(members, key=lambda item: -item.price)  # stable: same-price members keep their group order
@@ -144,53 +147,65 @@ def confluence(levels: tuple[Level, ...] | list[Level], band: float | None) -> l
 
 
 def zone_start(zone: Zone) -> int | None:
-    """From when price can interact with a zone: its earliest formed member (round numbers and
-    levels from earlier sessions count from the first bar). None while every member is developing."""
-    formed = [m.formed_at or 0 for m in zone.members if not m.developing]
-    return min(formed) if formed else None
+    """Count only once the whole current combination is confirmed.
+
+    Any moving member makes the combination developing. This is a scan of a
+    fixed current combination, not a durable event log of earlier combinations.
+    A newly confirmed member starts a new history instead of backdating bounds.
+    """
+    return None if any(m.developing for m in zone.members) else max((m.formed_at or 0 for m in zone.members), default=0)
 
 
 def interactions(low: float, high: float, band: float, bars: list[dict], start: int) -> dict:
-    """How price treated the span ``low``..``high`` on closed bars of one interval (C2.3).
+    """Contacts/crosses use visible bounds; the ATR halo is proximity only.
 
-    The tolerance band extends the span by ``band`` on each side. Price's side
-    is set by the last close before ``start`` (or the first bar's open), or, if
-    that sat inside the band, by the first close outside it (price was then at the
-    level, so moving away from it is a test). Then, bar by bar:
-
-    - *broken*: a close beyond the band on the other side from where price started;
-    - *reclaimed*: after a break, a close back beyond the band on the starting side;
-    - *tested*: a bar reached the band, and a later bar lies wholly outside it on
-      the side price came from (it moved away). A retest after a break is a test too.
-
-    The state is the last break or reclaim, else tested, else untested.
-    ``at_level`` says the last bar reached the band.
+    A contact followed by a wholly outside candle is ``tested`` (left above or
+    below, not evidence of support strength). An outer-buffer-only visit can
+    produce ``approached``. Unknown side never implies contact. Event ``time``
+    is when the confirming candle closes; ``bar_time`` is its start.
     """
     top, bottom = high + band, low - band
     earlier = [b for b in bars if b["time"] < start]
     counted = [b for b in bars if b["time"] >= start]
     def where(value):
-        return "above" if value > top else "below" if value < bottom else None
+        return "above" if value > high else "below" if value < low else None
     side = where(earlier[-1]["close"]) if earlier else where(counted[0]["open"]) if counted else None
-    origin, touching, events, crossed = side, False, [], None
+    origin, touching, approaching, events, crossed = side, False, False, [], None
+
+    def event(name, bar, direction):
+        events.append({"event": name, "time": bar.get("end_time", bar["time"]), "bar_time": bar["time"], "direction": direction})
+
     for bar in counted:
         closed = where(bar["close"])
+        contact = bar["low"] <= high and bar["high"] >= low
+        near = bar["low"] <= top and bar["high"] >= bottom
         if side is None:
+            touching = touching or contact
+            approaching = approaching or near
             side = origin = closed
-            touching = closed is not None
             continue
         if closed is not None and closed != side:
             crossed = "broken" if side == origin else "reclaimed"
-            events.append({"event": crossed, "time": bar["time"]})
-            side, touching = closed, False
-        elif bar["low"] <= top and bar["high"] >= bottom:
+            event(crossed, bar, closed)
+            side, touching, approaching = closed, False, False
+        elif contact:
             touching = True
+            approaching = False
         elif touching:
-            events.append({"event": "tested", "time": bar["time"]})
-            touching = False
-    state = crossed or ("tested" if events else "untested")
+            event("tested", bar, side)
+            touching, approaching = False, False
+        elif near:
+            approaching = True
+        elif approaching:
+            event("approached", bar, side)
+            approaching = False
+    state = crossed or ("touched" if touching else "approached" if approaching else events[-1]["event"] if events else "untested")
     last = counted[-1] if counted else None
-    return {"state": state, "events": events, "at_level": bool(last and last["low"] <= top and last["high"] >= bottom)}
+    return {"state": state, "events": events, "at_level": bool(last and last["low"] <= high and last["high"] >= low),
+            "near_level": bool(last and last["low"] <= top and last["high"] >= bottom),
+            "since": max(start, counted[0]["time"]) if counted else start,
+            "last_close": last["close"] if last else None,
+            "last_close_at": last.get("end_time", last["time"]) if last else None}
 
 
 def round_step(price: float) -> float:
@@ -261,6 +276,15 @@ def _daily_gap(completed, day, calendar) -> str | None:
     if not completed:
         return f"No completed daily bars before {day}."
     absent = next((d for d in _days(_date(completed[-1]) + timedelta(days=1), day) if _regular(d, calendar)), None)
+    return f"No daily bar for {absent}." if absent else None
+
+
+def _history_gap(completed, calendar) -> str | None:
+    """Do not compress a missing trading session out of pivot confirmation/ATR."""
+    if not completed:
+        return None
+    dates = {_date(bar) for bar in completed}
+    absent = next((d for d in _days(_date(completed[0]), _date(completed[-1])) if _regular(d, calendar) and d not in dates), None)
     return f"No daily bar for {absent}." if absent else None
 
 

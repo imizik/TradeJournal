@@ -353,9 +353,13 @@ is verifiable rather than hopeful.
   opening ranges and the prior day from the fill-context functions in
   `indicators.py`, so the chart and stored fill context agree on the same
   bars; do not re-derive them in chart code. A level whose bars are missing is
-  absent with a reason, never taken from an older session. Zones and
-  interactions use one band, a tenth of the daily ATR; nothing on the chart
-  calls a level a signal.
+  absent with a reason, never taken from an older session. Missing trading
+  sessions anywhere in the daily tail suppress swings and ATR. A tenth of
+  prior daily ATR caps a zone's total width and defines proximity; contact and
+  closes across use the visible bounds. Current-combination history begins at
+  its latest confirmation; any moving member disables fixed history. Event
+  timestamps are candle closes and labels state direction, not strength.
+  Landmark counts do not claim independent evidence or a signal.
 - Chart relative volume (`chart_rvol.py`, pure) is fill context's
   `compute_rvol_time_adjusted` evaluated at every minute, and a test holds
   them equal on the same bars; change both or neither. The baseline needs all
@@ -387,8 +391,8 @@ is verifiable rather than hopeful.
 - Option positioning (`options_positioning.py`, pure) reads one root at a
   time and labels every number: open interest and volume observed, walls,
   ranks and gamma calculated (Black-Scholes at the chart's price, never the
-  provider's hourly greek), max pain inferred (the arithmetic is exact; that
-  price drifts to it is not), signed gamma and the flip assumed and off unless
+  provider's hourly greek), max pain inferred (payout weights must be complete;
+  price attraction is unvalidated), signed gamma and the flip assumed and off unless
   asked for. A missing input leaves a value unavailable, never zero or a
   contract size of 100. Interactive option reads (`options_feed.py`) never
   wait for a budget slot and take at most 24 of the 30 a minute; only the
@@ -396,7 +400,9 @@ is verifiable rather than hopeful.
 - The range bands' expected move (C2.7) is the at-the-money straddle priced
   once a session, no earlier than five minutes after the open, from a chain
   read after that time and around a live price (today's newest minute, never a
-  daily close), then fixed for the day. It is a price the options market
+  daily close, no older than two minutes), with all four option bid/ask event
+  times known and no older than a minute, then fixed for the day. Missing,
+  stale or future option event times cannot become a captured band. It is a price the options market
   charged for a move either way, never presented as where price will stay.
 - On the chart (C3.1–C3.2), an option fill's price is the premium per contract
   and is never drawn on the price axis or called an underlying price. An

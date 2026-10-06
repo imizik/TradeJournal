@@ -102,7 +102,10 @@ export const KIND_NAMES: Record<string, string> = {
   max_pain: "Max pain: least paid out at expiry",
   expected_move_high: "Expected move, upper", expected_move_low: "Expected move, lower",
 };
-export const STATE_NAMES: Record<LevelInteraction["state"], string> = { untested: "Untested", tested: "Tested", broken: "Broken", reclaimed: "Reclaimed", developing: "Still forming" };
+export const STATE_NAMES: Record<LevelInteraction["state"], string> = {
+  untested: "No completed interaction", touched: "Contact observed", approached: "Approached",
+  tested: "Contact and departure", broken: "Closed across zone", reclaimed: "Returned to approach side", developing: "Combination still changing",
+};
 
 /** Where a level came from, in words: "Tradier daily bar", "SIP minute", or the rule a round number follows. */
 export function sourceName(level: AutoLevel): string {
@@ -115,7 +118,8 @@ export function sourceName(level: AutoLevel): string {
 /** When it formed: "formed Oct 2, 2026 4:00 PM", "still forming", or nothing for a round number. */
 export function formedName(level: AutoLevel): string | null {
   // Open interest holds still through a session; volume trades and gamma follows the price.
-  if (isOption(level)) return level.developing ? "moves during the session" : null;
+  if (isOption(level)) return level.developing ? "moves during the session"
+    : level.formed_at === null ? null : `first observed ${etTime(level.formed_at)} ET`;
   // An expected-move level is fixed once captured for the session.
   if (isRange(level)) return level.formed_at === null ? null : `priced ${etTime(level.formed_at)} ET, fixed for the session`;
   if (level.developing) return "still forming";

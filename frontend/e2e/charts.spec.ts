@@ -195,7 +195,7 @@ test("refreshes once per cycle, stops while hidden or paused, and retains data o
 });
 
 test("missing credentials show setup state and never fake candles", async ({ page, request }) => {
-  const response = await request.get("http://127.0.0.1:8099/charts/workspace");
+  const response = await request.get(`http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}/charts/workspace`);
   expect(response.status()).toBe(503);
   expect((await response.json()).detail.code).toBe("not_configured");
   await page.goto("/charts");
@@ -4238,13 +4238,18 @@ const AUTO_ZONES = [
 const NEAREST_IDS = AUTO_ZONES.slice(1, 7).map((zone) => zone.id).join(",");
 const at = (clock: string) => Date.parse(`2026-09-14T${clock}:00-04:00`) / 1000;
 const AUTO_EVENTS: Record<string, LevelInteraction> = Object.fromEntries(AUTO_ZONES.map((zone) => [zone.id, { state: "untested", events: [], at_level: false }]));
-AUTO_EVENTS[AUTO_ZONES[2].id] = { state: "broken", events: [{ event: "tested", time: at("10:05") }, { event: "broken", time: at("11:40") }], at_level: false };
+AUTO_EVENTS[AUTO_ZONES[2].id] = { state: "broken", events: [
+  { event: "approached", direction: "below", time: at("09:55"), bar_time: at("09:50") },
+  { event: "tested", direction: "below", time: at("10:05"), bar_time: at("10:00") },
+  { event: "broken", direction: "above", time: at("11:40"), bar_time: at("11:35") },
+], at_level: false, since: at("09:35"), last_close: 257.34, last_close_at: at("11:55") };
 
-async function stubAutoLevels(page: Page) {
+async function stubAutoLevels(page: Page, configure?: (data: ChartData) => void) {
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const data = fixture(route.request().url());
-    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: { overnight: "No minute bars for 2026-09-11.", opening_range_15m: "Forms at 09:45." } };
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), session: "extended", atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: { overnight: "No minute bars for 2026-09-11.", opening_range_15m: "Forms at 09:45." } };
     for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D" && interval !== "1W") panel.level_events = AUTO_EVENTS;
+    configure?.(data);
     await route.fulfill({ json: data });
   });
 }
@@ -4383,11 +4388,17 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
   await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[2].id));
   const card = page.getByRole("tooltip", { name: "PDH + 254 level card" });
   await expect(card).toBeVisible();
-  await expect(card).toContainText("254.00–254.30 · 2 independent sources");
-  await expect(card.getByLabel("Interactions today")).toContainText("Broken");
-  await expect(card).toContainText("Tested 10:05 AM");
-  await expect(card).toContainText("Broken 11:40 AM");
-  await expect(card).toContainText("Today, on closed 5m bars, within ±0.55 (a tenth of the daily ATR).");
+  await expect(card).toContainText("254.00–254.30 · 2 landmarks");
+  await expect(card.getByLabel("Interactions today")).toContainText("Closed across zone");
+  await expect(card).toContainText("Approached; left below · confirmed 9:55 AM ET");
+  await expect(card).toContainText("Touched; left below · confirmed 10:05 AM ET");
+  await expect(card).toContainText("Closed above · confirmed 11:40 AM ET");
+  await expect(card).toContainText("Today, on closed 5m bars, including extended hours. Touches enter 254.00–254.30.");
+  await expect(card).toContainText("Nearby only: 253.45–254.85. Approaches are not touches.");
+  await expect(card).toContainText("History since 9:35 AM ET for this confirmed combination; earlier bars are excluded.");
+  await expect(card).toContainText("Last closed candle: 257.34 at 11:55 AM ET.");
+  await expect(card).not.toContainText("independent sources");
+  await expect(card).not.toContainText("Price is at it now");
   await expect(card).toContainText("PDH Prior day high254.30");
   await expect(card).toContainText("observed · Tradier daily bar · formed Sep 11, 2026 4:00 PM");
   await expect(card).toContainText("calculated · price rule");
@@ -4423,12 +4434,43 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
   expect(errors).toEqual([]);
 });
 
+test("a changing combination counts landmarks without inventing a fixed contact history", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  const combined = autoZone([AUTO_ZONES[4].members[0], autoMember("premarket_high", "PMH", 258.5, { developing: true })], 1);
+  await stubAutoLevels(page, (data) => {
+    data.auto_levels!.zones = AUTO_ZONES.map((zone) => zone.id === AUTO_ZONES[4].id ? combined : zone);
+    for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D") {
+      panel.level_events = { ...AUTO_EVENTS, [combined.id]: { state: "developing", events: [], at_level: false } };
+    }
+  });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", new RegExp(combined.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 150, box.y + await autoY(page, "main", combined.id));
+  const card = page.getByRole("tooltip", { name: "ONH + PMH level card" });
+  await expect(card).toContainText("258.50 · 2 landmarks");
+  await expect(card).toContainText("Combination still changing");
+  await expect(card).toContainText("this combination has no fixed contact history");
+  await expect(card).not.toContainText("History since");
+  await expect(card).not.toContainText("independent");
+  await page.screenshot({ path: test.info().outputPath("zone-changing-combination.png") });
+});
+
 test.describe("phone automatic levels", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   test("a tap opens a level's card and it stays until Close", async ({ page }) => {
     await registerCharts(page);
     await registerAutoLevels(page);
-    await stubAutoLevels(page);
+    await stubAutoLevels(page, (data) => {
+      data.auto_levels!.session = "regular";
+      for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D") {
+        panel.level_events = { ...AUTO_EVENTS, [AUTO_ZONES[4].id]: { state: "touched", events: [], at_level: true,
+          near_level: true, since: at("09:35"), last_close: 258.50, last_close_at: at("11:55") } };
+      }
+    });
     await page.goto("/charts");
     await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
     await drawn(page, "main").scrollIntoViewIfNeeded();
@@ -4437,7 +4479,11 @@ test.describe("phone automatic levels", () => {
     await page.touchscreen.tap(Math.round(box.x + 150), Math.round(box.y + await autoY(page, "main", AUTO_ZONES[4].id) + 8));
     const card = page.getByRole("tooltip", { name: "ONH level card" });
     await expect(card).toBeVisible();
-    await expect(card.getByLabel("Interactions today")).toContainText("Untested");
+    await expect(card.getByLabel("Interactions today")).toContainText("Contact observed");
+    await expect(card).toContainText("Last closed candle touched");
+    await expect(card).toContainText("Last closed candle: 258.50 at 11:55 AM ET.");
+    await expect(card).toContainText("regular hours. Touches enter 258.50.");
+    await expect(card).not.toContainText("Price is at it now");
     const close = card.getByRole("button", { name: "Close level card" });
     expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(24);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);

@@ -354,9 +354,10 @@ cd backend
   the pointer in that chart only; linked crosshairs never open cards in other
   charts. The card shows the members, each with its price, what it is, whether
   it is observed, calculated or inferred, its source and when it formed, the number
-  of independent sources, and how price met it today on that chart's closed
-  bars (untested, tested, broken or reclaimed, with times, and whether price is
-  at it now). A tap, or a click, keeps the card open until the next tap or its
+  of landmarks, and how price met the visible zone on closed candles: approaches,
+  contacts/departures and directional closes, confirmed at candle end. It names
+  the session, history start and last closed candle instead of claiming where
+  the live price is now. A tap, or a click, keeps the card open until the next tap or its
   **Close**, or that chart changes symbol, interval or session. A daily or weekly
   chart draws the same levels; its card says interactions are read on intraday
   charts. The levels arrive with each 15-second workspace refresh; nothing here
@@ -850,7 +851,9 @@ on every chart, with its filters saved in the shared workspace
 **Max pain** (C4.7) is computed for the scope's nearest expiration (today's
 on SPY and QQQ with *0DTE / nearest*) and draws as an *inferred* level, tinted
 orange. Its card names the expiration and says it is a reference, not a
-target; like the walls, it holds still through a session.
+target; like the walls, it holds still through a session. Unknown open interest
+or size on a relevant nonzero contract suppresses the calculation rather than
+silently dropping that contract; the options footer says why it is unavailable.
 
 The workspace request carries the choice (`options=oi.week.0`: measure,
 scope, signed; `auto=0` when the automatic levels are hidden). The backend
@@ -919,12 +922,14 @@ on every chart, saved in the shared workspace (`rangeBandsHidden`):
   what the options market charged for a move either way, not a forecast.
 - **When.** A band is priced once a New York session, on the first workspace
   request at least five minutes after the calendar's open (09:35 on a normal
-  day) with a chain read after that time and a live price (today's newest
-  minute; a layout of daily and weekly charts alone reads no minutes, so it
+  day) with a chain read after that time, all four option bid/ask event times
+  known and within the preceding minute, and a live price (today's newest
+  minute, no older than two minutes; a layout of daily and weekly charts alone reads no minutes, so it
   prices nothing and reads no chains), and is then fixed for the day:
   nothing more is read for it. After the close the session's bands stay
   drawn and nothing new is priced (today's 0DTE has expired, and later quotes
-  are not the session's). Before 09:35, on a closed day, or with the
+  are not the session's). Fresh fetches containing stale, missing or future
+  quote times cannot freeze a new band. Before 09:35, on a closed day, or with the
   calendar unavailable, nothing draws and the Layers panel says why. A wide
   market is not captured and is tried on the next read. A capture lives in
   the API process's memory, so the first look at a symbol after 09:35, or a
@@ -982,42 +987,57 @@ group, why any are missing. Only bars complete by `as_of` count.
   absent postmarket cannot be told from a quiet one. A closed day has no
   session levels; its prior-day, prior-week and swing levels remain.
 
-**The band.** One band, a tenth of the daily ATR(14) (Wilder, from the
-completed daily bars, as fill context computes `atr_14`), scales from SPY to
-CVNA. Without an ATR (under 15 daily bars) nothing merges except levels at the
-same price, no interactions are read, and `missing.confluence` says so.
+**The band.** A tenth of prior daily ATR(14) scales the maximum zone width
+and a separate proximity buffer. Neither pads an actual contact or crossing.
+Under 15 daily bars, or with a missing trading session anywhere in the daily
+tail, ATR is unavailable: exact-price levels still merge but no interactions
+are read. Interior gaps also suppress swings, with missing-input reasons.
+The workspace resolves calendar months across the ordinary daily tail so known
+holidays are not mistaken for missing trading sessions. Calendar reads are
+capped at 150 days: sparse/stale symbols do not fetch years of calendars;
+older unresolved dates use the existing clock fallback.
 
-**Confluence zones (C2.2).** Levels are sorted by price; each joins the zone
-below it when it is less than one band above that zone's highest member, so a
-run of close levels merges whole. A zone spans its members' own prices (never
-rounded or padded) and is named by them, highest first, a repeated name
-counted ("PDH + 21,500 + OR15 high", "Swing high ×2"). Its score is the number
-of independent sources: members set by the same bar (`timeframe` and
-`bar_time`) count once, so a premarket high that is also the overnight high, or
-a prior-day high that is also the week's, is one source; a round number is its
-own. A lone level is a zone of one. Its id is the members' kinds and prices.
+**Confluence zones (C2.2).** Nearest-pair complete-link clustering merges
+adjacent clusters by their smallest combined span, ties to the lower cluster.
+The total span must be strictly less than one band: a chain of individually
+close levels cannot create an arbitrarily wide zone. A zone spans its members'
+own prices, never padded or rounded, and names members highest first with
+repeated names counted. The card counts **landmarks**, not independent evidence
+or strength. The retained API `score` counts distinct bar origins (`timeframe`,
+`bar_time`), or kind/price rules; aliases from the same bar count once there.
+A lone level is a zone of one; its id is its members' kinds and prices.
 
-**Interactions (C2.3).** Read for each intraday panel on its closed bars of
-the session's date, from when the zone formed: its earliest formed member, so
-a level from an earlier session or a round number counts from the first bar,
-and a zone whose members are all still developing reads `developing`. The
-tolerance band is the zone widened by one band on each side. Price's side is
-set by the last close before that start (or the first bar's open); if that
-was inside the band, the first close outside sets it, and moving away from
-there counts as a test.
+**Interactions (C2.3).** Closed intraday candles on the session's date count
+only after the **latest** confirmation/observation of the current combination.
+The card shows `since`; earlier bars are excluded rather than attributed to
+bounds that were not yet known. This is a scan of the current confirmed
+combination, not a persistent log of earlier versions. Any developing member
+makes the combination `developing` with no fixed history. Fixed option levels
+start when first observed in this API process; refresh preserves that time,
+while restart/new-session/new-scope observation starts again.
 
-- *tested*: a bar reached the band, and a later bar lies wholly outside it on
-  the side price came from. A retest from the other side after a break is a
-  test too.
-- *broken*: a close beyond the band on the other side from where price started.
-  A close inside the band breaks nothing.
-- *reclaimed*: after a break, a close back beyond the band on the starting side.
-  Another break after that is *broken* again.
+The prior close, or first candle's open, initializes the side relative to the
+visible bounds. Unknown side does not fabricate contact. Actual candle ranges
+must intersect the displayed zone for contact:
 
-The state shown is the latest break or reclaim, else *tested*, else
-*untested*; the card lists every event with its bar's time, and `at_level`
-says the latest closed bar reached the band. A daily or weekly panel reads no
-interactions.
+- *touched*: contact observed, departure not yet completed.
+- *tested*: after contact, a later candle lies wholly outside on the current
+  side. The card says **Touched; left above/below**, without claiming reaction
+  strength. A retest after a crossing counts too.
+- *approached*: an outer-buffer-only visit, pending or followed by departure.
+  Approaches are separate from contacts. The card states the nearby bounds,
+  one band beyond each visible edge.
+- *broken*: a close across the visible zone onto the other side, including a
+  gap. The card says **Closed above/below**. A close inside breaks nothing.
+- *reclaimed*: a later close back onto the original side, shown as **Returned
+  above/below**. It can be downward and implies no bullish diagnosis.
+
+State retains the last crossing/return, else pending contact/proximity, else
+the latest departure or no interaction. Events carry `direction`, candle start
+`bar_time`, and confirmation `time` at candle **end**. Cards mark times as
+confirmed and name regular/extended hours. `at_level` means the last closed
+candle intersected the visible zone, not that the live quote is there; the
+card displays that candle's close/time. Daily/weekly panels read no interactions.
 
 **Delivery.** `GET /charts/workspace` sends `auto_levels` for the main symbol
 and each held symbol (`day`, `as_of`, `atr`, `band`, `zones`, `missing`), and
@@ -1547,16 +1567,15 @@ still-forming bars, missing daily and minute bars, swing confirmation and
 lookback, and round-number spacing. It also feeds the same bars to the
 fill-context functions at four fill times and checks that the chart's
 premarket, opening-range and prior-day levels equal them. Confluence tests
-cover merging, levels a band apart staying apart, a chain merging whole, no
-band, and the independent-source rule; interaction tests pin untested, a test
-that completes only on moving away, a close inside the band, broken, a gap
-through, reclaimed, a retest after a break, starting inside the band, the
-formation start and zone width. A workspace test checks the levels, the
+cover bounded clustering, threshold edges, order invariance and shared origins.
+Interactions pin visible contacts, near misses, unknown-side gaps, one event
+per departure, candle-end confirmation and latest-member formation. Daily-tail
+tests cover interior missing sessions and known holidays. A workspace test checks the levels, the
 stored previous session and each panel's interactions in the response.
 Browser tests (C2.3) stub the response: every chart draws exactly the nearest
 three zones each side, hovering a zone on the 5m chart reads its card (members,
-sources, evidence, formation, two independent sources, a test and a break with
-times), a daily chart's card defers interactions to intraday charts, moving
+sources, evidence, formation, landmark count, approach/contact/cross direction,
+confirmation times, history start and session), a daily chart's card defers interactions to intraday charts, moving
 off closes it, the Layers group lists what is missing, hides the levels on all
 five charts through a reload, and the chart menu shows them again. A card
 kept open by a click gives way to hovering once a symbol switch removes its
