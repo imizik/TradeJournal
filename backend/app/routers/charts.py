@@ -7,6 +7,7 @@ import json
 import re
 import time
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -22,10 +23,12 @@ from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
 from app.engine import symbol_info_tradier
+from app.engine import chart_journal
+from app.engine.quotes import OptionQuoteRequest, option_mark
 from app.engine.options_feed import Layer, options_feed
 from app.engine.options_positioning import SCOPES
 from app.routers.level_alerts import listing as alert_listing
-from app.models import ChartSettingsRecord, Fill
+from app.models import FILL_LIGHT, ChartSettingsRecord, Fill, Trade
 
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
@@ -203,9 +206,54 @@ def workspace(
     data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
     for name, other in data["extras"].items():
         _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values()))
+    # Open positions on each symbol shown (C3.2): three queries a symbol, no provider.
+    data["positions"] = chart_journal.positions(db, symbol)
+    for name, other in data["extras"].items():
+        other["positions"] = chart_journal.positions(db, name)
     # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
     data["alerts"] = alert_listing(db)
     return data
+
+
+@router.get("/journal/fills/{fill_id}")
+def journal_fill(fill_id: uuid.UUID, db: Session = Depends(get_session)):
+    """A fill arrow's card (C3.1): the fill, and the trade it belongs to."""
+    fill = db.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id == fill_id)).first()
+    if fill is None:
+        raise HTTPException(404, "That fill is no longer in the journal.")
+    return chart_journal.fill_card(db, fill)
+
+
+@router.get("/journal/trades/{trade_id}")
+def journal_trade(trade_id: uuid.UUID, db: Session = Depends(get_session)):
+    """One trade's card, for a link that names the trade rather than a fill."""
+    trade = db.get(Trade, trade_id)
+    if trade is None:
+        raise HTTPException(404, "That trade is no longer in the journal. Trades are rebuilt from fills; open it from its fill instead.")
+    return {"fill": None, **chart_journal.trade_card(db, trade)}
+
+
+@router.get("/journal/trades/{trade_id}/mark")
+def journal_mark(trade_id: uuid.UUID, db: Session = Depends(get_session)):
+    """An open option trade's current premium and open P&L, asked for from its
+    card. One quote through the dashboard's 60-second cache; the answer says
+    when it was quoted, so an old mark is shown as old."""
+    trade = db.get(Trade, trade_id)
+    if trade is None or trade.instrument_type != "option" or trade.status != "open" or trade.expiration is None:
+        raise HTTPException(422, "Only an open option trade has a mark to read.")
+    card = chart_journal.trade_card(db, trade)
+    position = card["position"]
+    db.close()  # the quote is a network call; no journal transaction stays open across it
+    quote, quoted_at = option_mark(OptionQuoteRequest(trade.ticker, trade.expiration.isoformat(), float(trade.strike), trade.option_type or ""))
+    # Quotes are per share; journal option prices are per contract (x100).
+    mark, basis = (quote.mid, "mid") if quote.mid is not None else (quote.last_price, "last") if quote.last_price is not None else (None, None)
+    open_pnl = None
+    if mark is not None and position and position["avg_cost"] is not None:
+        sign = -1 if card["trade"]["direction"] == "short" else 1
+        open_pnl = round((mark * 100 - position["avg_cost"]) * position["open"] * sign, 2)
+    return {"mark": mark, "mark_per_contract": None if mark is None else round(mark * 100, 2), "basis": basis,
+            "bid": quote.bid, "ask": quote.ask, "last": quote.last_price,
+            "provider": quote.provider, "quoted_at": int(quoted_at) if quoted_at else None, "open_pnl": open_pnl}
 
 
 @router.get("/options/{symbol:path}/ladder")

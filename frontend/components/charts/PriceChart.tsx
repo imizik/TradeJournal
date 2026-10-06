@@ -15,6 +15,7 @@ import { AlertLayer } from "@/lib/alerts";
 import type { AlertMark } from "@/lib/alerts";
 import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
+import { positionLineTitle, type ChartPosition } from "@/lib/chartJournal";
 import SelectionBar from "./SelectionBar";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
@@ -29,6 +30,7 @@ type Overlay = keyof typeof COLORS;
 const MIN_BAR_SPACING = 2;
 const NO_DRAWINGS: Drawing[] = [];
 const NO_ALERTS: AlertMark[] = [];
+const NO_POSITIONS: (ChartPosition & { pnl?: number | null })[] = [];
 const CLOCK_TEXT = { paused: "Paused", delayed: "Delayed data", stale: "Stale data", closed: "Market closed", waiting: "Waiting for bars" };
 // Whitespace alone still joins line segments in Lightweight Charts. Hide the
 // outgoing segment at the session boundary. RTH timestamps always lie within
@@ -120,7 +122,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -179,6 +181,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onInterval(interval: Interval): void; onFocus?(): void; onMaximize?(): void;
   /** Plan trade (C3.4) in the main chart's own bar, where a phone's toolbar has no room left. */
   onPlan?(): void;
+  /** Open trades on this symbol (C3.2), on the chart's basis: a line where `line` is set. */
+  positions?: (ChartPosition & { pnl?: number | null })[];
+  /** A click on a fill arrow (C3.1): its fill id. */
+  onFill?(id: string): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const bundle = useRef<Bundle | null>(null);
@@ -190,7 +196,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted: !!history?.exhausted });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted: !!history?.exhausted });
+  // The fill arrows drawn, by fill id, for hover summaries and clicks (C3.1).
+  const fillMarks = useRef(new Map<string, { label: string; time: number }>());
+  const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
@@ -209,7 +218,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
   const exhausted = !!history?.exhausted;
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted]);
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -298,6 +307,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
       const at = event.point && cardHoverEnabled.current && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
+      // A fill arrow under the pointer: its one-line summary (C3.1).
+      const fill = at && typeof event.hoveredObjectId === "string" ? fillMarks.current.get(event.hoveredObjectId) : undefined;
+      setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y }) : null);
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -521,6 +533,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const touch = performance.now() - lastTouch < 1000;
       const slop = touch ? TOUCH_SLOP : MOUSE_SLOP;
       const hit = layer.hit(event.point.x, event.point.y, slop)?.id ?? null;
+      // A fill arrow opens its trade's card (C3.1); the user's own levels and drawings win where they overlap.
+      if (!hit && typeof event.hoveredObjectId === "string" && fillMarks.current.has(event.hoveredObjectId) && now.onFill) {
+        now.onSelect?.(null); tapCard(null, 0); setFillTip(null);
+        now.onFill(event.hoveredObjectId);
+        return;
+      }
       now.onSelect?.(hit);
       tapCard(hit ? null : autoLayer.hit(event.point.y, slop), event.point.y);
     });
@@ -560,9 +578,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         if (range.from < 100) actions.current.onNeedHistory?.();
         const bars = barsRef.current;
         for (let i = Math.max(0, Math.floor(range.from) - 100); i < Math.min(bars.length - 1, Math.ceil(range.to) + 100); i++) {
-          if (bars[i + 1].time - bars[i].time > gapSeconds(actions.current.interval) && !requestedGaps.current.has(bars[i + 1].time)) {
-            requestedGaps.current.add(bars[i + 1].time);
-            actions.current.onNeedHistory?.(bars[i + 1].time);
+          if (bars[i + 1].time - bars[i].time <= gapSeconds(actions.current.interval)) continue;
+          // A gap whose older side is in view (a past trade's day, C3.3) fills from that side, one
+          // page's span at a time, toward the present; otherwise from its newer side, as before.
+          const step = INTERVAL_SECONDS[actions.current.interval];
+          const before = i >= Math.floor(range.from) - 1
+            ? Math.min(bars[i + 1].time, bars[i].end_time + Math.max(gapSeconds(actions.current.interval), 1200 * step)) : bars[i + 1].time;
+          if (!requestedGaps.current.has(before)) {
+            requestedGaps.current.add(before);
+            actions.current.onNeedHistory?.(before);
             break;
           }
         }
@@ -752,6 +776,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
       color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : [];
     bundle.current?.markers.setMarkers([...fills, ...reports].sort((a, b) => a.time - b.time));
+    fillMarks.current = new Map(indicators.fills ? (markers ?? []).map((m) => [m.id, { label: m.label, time: m.time }]) : []);
+    setFillTip(null);
     if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
   }, [markers, earningsKey, pending, indicators.fills, main]);
 
@@ -769,6 +795,17 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     bundle.current?.bells.set(alerts);
     if (container.current) container.current.dataset.alerts = alerts.map((mark) => `${mark.price.toFixed(2)}:${mark.fired ? "fired" : "active"}`).join(",");
   }, [alerts, pending]);
+  // Open positions (C3.2): a stock's average cost, solid; an option's underlying at entry, dashed. Never a premium.
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current || pending) return;
+    const drawn = positions.filter((position) => position.line !== null && Number.isFinite(position.line));
+    const lines = drawn.map((position) => current.candles.createPriceLine({ id: `position:${position.trade_id}`, price: position.line!,
+      color: position.instrument === "stock" ? "#a3e635" : "#c4b5fd", lineWidth: 1, lineStyle: position.instrument === "stock" ? LineStyle.Solid : LineStyle.Dashed,
+      axisLabelVisible: true, title: main ? positionLineTitle(position) : "" }));
+    if (container.current) container.current.dataset.positions = drawn.map((position) => `${position.instrument}:${position.line!.toFixed(2)}`).join(",");
+    return () => { for (const line of lines) current.candles.removePriceLine(line); };
+  }, [positions, pending, main]);
   // Automatic levels: the nearest few above and below the latest price, moving with it, and option strikes with the layer on.
   const lastClose = panel?.bars.at(-1)?.close;
   const zones = useMemo(() => shownZones(autoLevels?.zones ?? [], lastClose, optionsNearest, rangeBands), [autoLevels, lastClose, optionsNearest, rangeBands]);
@@ -861,6 +898,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
             : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
+        {fillTip && !pending && <div role="tooltip" aria-label="Fill summary" className="pointer-events-none absolute z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg"
+          style={{ left: Math.max(4, Math.min(fillTip.x + 10, (container.current?.clientWidth ?? 300) - 240)), top: Math.max(4, fillTip.y - 30) }}>
+          {fillTip.label} · {etTime(fillTip.time, true)} {intradayInterval(interval) ? `${etTime(fillTip.time)} ET candle` : ""}{onFill ? " · click for the trade" : ""}</div>}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>

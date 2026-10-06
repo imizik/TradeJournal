@@ -394,7 +394,7 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
     assert data["extras"].pop("BAD") | {"earnings": None} == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
                                                          "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "rvol": None,
-                                                         "fills_truncated": False, "earnings": None}
+                                                         "fills_truncated": False, "earnings": None, "positions": []}
     # Every symbol on screen carries its earnings (C2.5), even one whose candles failed.
     assert data["earnings"]["state"] == "unavailable" and data["extras"]["SPY"]["earnings"]["source"] == "Tradier corporate calendar"
 
