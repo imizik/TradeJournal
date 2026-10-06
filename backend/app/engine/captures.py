@@ -389,7 +389,7 @@ def _transcript(capture: TradeCapture, job: dict | None) -> dict | None:
 
 
 def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
-    """Captures as the browser shows them, with their notes and transcription jobs in two queries."""
+    """Captures as the browser shows them, with their notes, transcription jobs and links (C3.6) in a few queries."""
     ids = [capture.id for capture in captures]
     notes: dict[uuid.UUID, list[dict]] = {}
     if ids:
@@ -400,6 +400,8 @@ def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
     if job_ids:
         for job_id, status, error in db.exec(select(JobRun.id, JobRun.status, JobRun.error).where(JobRun.id.in_(job_ids))).all():
             jobs[job_id] = {"status": status, "error": error}
+    from app.engine.capture_links import link_rows  # it reads captures' helpers
+    links = link_rows(db, captures)
     out = []
     for capture in captures:
         try:
@@ -418,6 +420,7 @@ def rows(db: Session, captures: list[TradeCapture]) -> list[dict]:
             "audio": {"type": capture.audio_type, "ms": capture.audio_ms, "bytes": capture.audio_bytes} if capture.audio_type else None,
             "transcript": _transcript(capture, jobs.get(capture.transcript_job_id)),
             "not_taken_at": epoch(capture.not_taken_at), "notes": notes.get(capture.id, []),
+            "link": links[capture.id]["link"], "link_history": links[capture.id]["history"],
         })
     return out
 

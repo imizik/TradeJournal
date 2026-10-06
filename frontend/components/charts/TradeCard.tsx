@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { Loader2, X } from "lucide-react";
 import { etTime, price } from "@/lib/charts";
+import PlanSummary from "./PlanSummary";
 import { fetchOptionMark, MARK_STALE_SECONDS, type MetricState, type ObservedUnderlying, type OptionMark, type TradeCardData } from "@/lib/chartJournal";
 
 const STATE: Record<MetricState, { text: string; style: string }> = {
@@ -104,6 +105,10 @@ export default function TradeCard({ card, loading, error, last, onClose, onShow 
               {mark.state === "loading" && <Loader2 size={11} className="animate-spin" />}{mark.data ? "Refresh mark" : "Get mark and open P&L"}</button>
             {mark.state === "error" && <p role="alert" className="text-[10px] text-rose-300">{mark.error}</p>}
           </div>}
+      </Section>}
+      {card.plans !== undefined && <Section title="Plan">
+        {card.plans.length ? card.plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)
+          : <p className="text-slate-500">No plan linked. Plans saved with Plan trade are linked from Needs linking.</p>}
       </Section>}
       <Section title="Entries and exits">
         <ol className="space-y-1">{(card.fills ?? []).map((fill) => <li key={fill.id} className={card.fill?.id === fill.id ? "rounded bg-sky-400/10 px-1 -mx-1" : ""}>

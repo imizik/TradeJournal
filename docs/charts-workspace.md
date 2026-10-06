@@ -1330,6 +1330,64 @@ never recommends a trade and never sends an order.
 Linking a plan to the trade it became, and counting captures (C3.6), are not
 built.
 
+### Plans linked to trades (C3.6)
+
+A saved plan is tied to the trade it was for by the user; nothing links itself.
+
+- **Needs linking.** The strip says how many plans need linking and opens the
+  view (`components/charts/LinkReview.tsx`, a bottom sheet on a phone). For each
+  plan from the last 30 days (or since counting began) that is neither linked
+  nor marked not taken, it suggests trades with the same account, underlying
+  and opening side (Buy calls is `buy_to_open` calls, Buy stock is `buy`; Short
+  stock has no journal trade to match), the exact strike and expiration where
+  the plan gave them, and a first entry within ten minutes after the server
+  received the plan. Several matches are all offered; **Link** on one confirms
+  it. **Link another trade…** lists other compatible trades within a week,
+  each labeled with its timing. One plan links to one trade, and a trade takes
+  one plan: partial opening fills are one trade, and a re-entry is a new trade
+  that needs its own plan. A linked plan unlinks from the strip, and every link
+  and unlink is kept as history.
+- **Timing.** Compares when the server received the complete plan (UTC) with
+  the trade's first entry, a New York minute. A plan received before that
+  minute began is **Before entry**. One received inside the minute, or for an
+  entry with no time of day, is **Timing unverified**. One received after it,
+  such as a late upload, a plan linked to an earlier trade, or a reflection, is
+  **After entry (retrospective)**. Notes and links never change a plan's time.
+- **Rebuilds and resyncs.** A link is stored as the first entry fill's account
+  and `raw_email_id`, and is resolved through that fill on every read. After a
+  rebuild it follows the fill's trade, and timing is judged again (an earlier
+  fill imported later can make a plan retrospective). If the fill is gone, the
+  link is unresolved and listed for relinking, never moved to another trade.
+- **Coverage.** **Start counting from now** (with the accounts to count) shows
+  "X of Y recorded trades since the start date have a confirmed pre-entry
+  plan" (with how many were discretionary), plus needs linking (a suggestion
+  is waiting), no plan, after entry and timing unverified. Trades whose entry
+  has a date but no time are excluded and counted separately. It covers only
+  trades in the journal, measures capture rather than discipline or results,
+  and never nags. The count refreshes with the strip when a new journal fill
+  reaches the chart, not on a timer of its own.
+- **Where a linked plan shows.** In the strip, the trade card (C3.1) and the
+  trade page: wording, note, recording and transcript, the chart image, later
+  notes labeled as later, and the timing.
+- Routes: `GET /charts/captures/review`, `POST /charts/captures/{id}/link` and
+  `/unlink`, `PUT /charts/captures/tracking`,
+  `GET /charts/captures/for-trade/{trade_id}`; `needs_linking` in
+  `GET /charts/captures`, and `link` and `link_history` on each plan.
+  Migration `b5d7e9f1a3c6` adds `capture_link` and two tracking columns on
+  `capture_profile`.
+
+`backend/tests/test_capture_links.py` covers minute timing across daylight
+saving, tied and date-only entries; suggestions by account, side, contract and
+window, with same-ticker ambiguity left to the user; one plan per trade and
+re-entries; manual, late and reflected links staying retrospective; history on
+unlink; a delayed import turning a waiting plan into a suggestion; plans not
+taken; links surviving a rebuild, being judged again after an earlier fill
+arrives, and going unresolved when the fill is gone; and the coverage count's
+activation, accounts, pending and excluded trades. The browser scenario in
+`frontend/e2e/chart-journal.spec.ts` saves a plan, adds a fill to the e2e
+database, confirms the suggested link, and reads the plan and its coverage on
+the strip and the trade page.
+
 ## Verification and remaining scope
 
 `backend/tests/test_chart_journal.py` covers first-in-first-out open lots

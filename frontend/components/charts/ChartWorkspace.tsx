@@ -34,8 +34,9 @@ import { applyEdit, cleanDrawing, drawingOnBasis, editName, editVerb, LEVEL_COLO
 import type { Anchor, Drawing, DrawingEdit, DrawingKind, DrawingPatch, ItemEdit, Tool } from "@/lib/drawings";
 import type { LiveFeed } from "@/lib/chartStore";
 import { readHotkey, stepWatchlist, TYPED_INTERVALS } from "@/lib/hotkeys";
-import { addCaptureNote, captureTitle, fetchCaptures, fetchSetup, markNotTaken, outboxAll, retryTranscript, send as sendCapture } from "@/lib/captures";
-import type { Capture, CaptureNote, CaptureSetup, OutboxItem } from "@/lib/captures";
+import { addCaptureNote, captureTitle, fetchCaptures, fetchReview, fetchSetup, linkCapture, markNotTaken, outboxAll, retryTranscript, saveTracking, send as sendCapture, unlinkCapture } from "@/lib/captures";
+import LinkReview from "./LinkReview";
+import type { Capture, CaptureNote, CaptureReview, CaptureSetup, OutboxItem } from "@/lib/captures";
 import { summary } from "./SelectionBar";
 
 const INDICATORS: [keyof Indicators, string][] = [["ema9", "EMA 9"], ["ema20", "EMA 20"], ["ema50", "EMA 50"], ["ema200", "EMA 200"], ["vwap", "RTH VWAP"], ["volume", "Volume"], ["rsi", "RSI 14"], ["fills", "My fills"]];
@@ -201,6 +202,9 @@ export default function ChartWorkspace() {
   const [captureSetup, setCaptureSetup] = useState<CaptureSetup | null>(null);
   const [setupError, setSetupError] = useState("");
   const [captures, setCaptures] = useState<Capture[]>([]);
+  // Needs linking (C3.6): the count rides on the captures refresh; the view loads when opened.
+  const [needsLinking, setNeedsLinking] = useState(0);
+  const [linkView, setLinkView] = useState<{ data: CaptureReview | null; loading: boolean; error: string } | null>(null);
   const [outbox, setOutbox] = useState<OutboxItem[]>([]);
   const [dismissedPlans, setDismissedPlans] = useState<string[]>([]);
   // A fill arrow's trade card (C3.1); `key` drops a slower answer to an earlier click.
@@ -1324,7 +1328,7 @@ export default function ChartWorkspace() {
   </>;
   // ---- C3.4, C3.5: pre-trade capture ----
   const refreshCaptures = useCallback(() => {
-    fetchCaptures().then((data) => setCaptures(data.captures)).catch(() => { /* the strip keeps what it had */ });
+    fetchCaptures().then((data) => { setCaptures(data.captures); setNeedsLinking(data.needs_linking ?? 0); }).catch(() => { /* the strip keeps what it had */ });
     void outboxAll().then(setOutbox);
   }, []);
   const loadSetup = useCallback(() => fetchSetup().then((data) => { setCaptureSetup(data); setSetupError(""); })
@@ -1344,6 +1348,23 @@ export default function ChartWorkspace() {
     const timer = window.setInterval(() => { if (!document.hidden) refreshCaptures(); }, 3000);
     return () => window.clearInterval(timer);
   }, [transcribing, refreshCaptures]);
+  // A new journal fill on the chart (an import or a rebuild) may be the trade a plan was for (C3.6): re-read the plans then, not on a timer.
+  const newestFill = current?.fills.at(-1)?.id ?? "";
+  useEffect(() => { if (newestFill) refreshCaptures(); }, [newestFill, refreshCaptures]);
+  const openLinks = () => {
+    setLinkView({ data: null, loading: true, error: "" });
+    void loadSetup();
+    fetchReview().then((data) => { setLinkView({ data, loading: false, error: "" }); setNeedsLinking(data.count); },
+      (err: Error) => setLinkView({ data: null, loading: false, error: err.message }));
+  };
+  // A link or tracking change: read the view and the strip again.
+  const relink = async (work: Promise<unknown>) => {
+    await work;
+    const data = await fetchReview();
+    setLinkView((open) => open && { data, loading: false, error: "" });
+    setNeedsLinking(data.count);
+    refreshCaptures();
+  };
   // The strip shows the newest plan from the last day until it is dismissed here; dismissing never reveals an older one.
   const newestPlan = captures[0] && captures[0].received_at > Date.now() / 1000 - 86400 ? captures[0] : null;
   const shownPlan = newestPlan && !dismissedPlans.includes(newestPlan.id) ? newestPlan : null;
@@ -1464,7 +1485,8 @@ export default function ChartWorkspace() {
 
       {!!alerts.length && <div className={fill ? "max-h-28 shrink-0 space-y-1 overflow-y-auto px-2 pt-1" : "space-y-2"}>{alerts}</div>}
       <PlanStrip capture={shownPlan} outbox={outbox} narrow={narrow} onRetry={retryOutbox} onDismiss={dismissPlan} onNotTaken={(id) => changePlan(markNotTaken(id))}
-        onRetryTranscript={(id) => changePlan(retryTranscript(id))} onNote={(id, kind: CaptureNote["kind"], text) => addCaptureNote(id, kind, text).then(keepPlan)} />
+        onRetryTranscript={(id) => changePlan(retryTranscript(id))} onNote={(id, kind: CaptureNote["kind"], text) => addCaptureNote(id, kind, text).then(keepPlan)}
+        needsLinking={needsLinking} onReview={openLinks} onUnlink={(id) => relink(unlinkCapture(id)).catch((failure: Error) => setNotice(failure.message))} />
 
       <div className={fill ? "flex min-h-0 flex-1" : ""}>
         {!narrow && <div className="flex w-10 shrink-0 flex-col items-center gap-0.5 overflow-y-auto border-r border-slate-700/50 py-1">{tools}</div>}
@@ -1550,6 +1572,13 @@ export default function ChartWorkspace() {
         panel={palette ? { name: `Panel ${palette + 1}`, follow: symbol, held: settings.panelSymbols[palette] } : undefined}
         onChoose={(choice) => palette ? choosePanelSymbol(palette, choice) : chooseSymbol(choice)} onFollow={() => { if (palette) choosePanelSymbol(palette, null); }} onClose={() => setPalette(null)} />}
       {help && <HotkeySheet onClose={() => setHelp(false)} />}
+      {linkView && (() => {
+        const view = <LinkReview review={linkView.data} loading={linkView.loading} error={linkView.error} setup={captureSetup}
+          onLink={(id, trade) => relink(linkCapture(id, trade))} onUnlink={(id) => relink(unlinkCapture(id))}
+          onTracking={(on, accounts) => relink(saveTracking(on, accounts))} onClose={() => setLinkView(null)} />;
+        return narrow ? <Sheet label="Needs linking" onClose={() => setLinkView(null)}>{view}</Sheet>
+          : <div role="dialog" aria-label="Needs linking" className="fixed right-3 top-28 z-[70] max-h-[calc(100vh-8.5rem)] w-96 overflow-y-auto overscroll-contain rounded-lg border border-slate-600 bg-[#121924] shadow-2xl">{view}</div>;
+      })()}
       {tradeCard && (() => {
         const shownCard = <TradeCard key={tradeCard.key} card={tradeCard.data} loading={tradeCard.loading} error={tradeCard.error}
           last={tradeCard.data?.trade?.ticker === symbol ? selected?.last ?? null : null} onClose={() => setTradeCard(null)}
