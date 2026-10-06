@@ -47,6 +47,10 @@ place. What each of them proves is documented where it is enforced, not here.
   branches. Generated artifacts are gitignored so branches do not fight over
   them, and `test_schema_migrations.py` fails on two Alembic heads, which is
   the main way parallel branches collide here.
+- **Bounded Codex ownership.** [The delegation workflow](codex-workflow.md)
+  assigns one Luna worker to ordinary execution and keeps Sol on decisions
+  and review where consequence warrants it. Shared surfaces have one writer;
+  separate branches alone do not prevent conflicting changes.
 
 ## Still open
 
@@ -57,8 +61,6 @@ place. What each of them proves is documented where it is enforced, not here.
   exists — the Codex GitHub App reviews pull requests — but `main` has no
   branch protection, so a pull request can still merge with no review at all
   (`verification.md`).
-- **A convention for splitting work** so two agents do not both land in
-  `reconstructor.py` in the same afternoon.
 
 ## Decided, with the reasoning worth keeping
 

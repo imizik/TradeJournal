@@ -9,6 +9,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
+| [codex-workflow.md](codex-workflow.md) | How Codex assigns bounded implementation work to Luna and handles escalation |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |
 | [background-jobs.md](background-jobs.md) | You are touching queued work: the worker lanes, job ownership, or restart recovery |
