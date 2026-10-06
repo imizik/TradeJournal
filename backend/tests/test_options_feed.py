@@ -66,7 +66,8 @@ class FakeClient:
     def chain(self, symbol, expiration, wait=False):
         self._call("chain", symbol)
         rows = self.chains.get((symbol, expiration)) or [
-            leg(symbol, expiration, strike, side, oi=1000 + 10 * strike if side == "call" else 3000 - 10 * strike)
+            leg(symbol, expiration, strike, side, oi=1000 + 10 * strike if side == "call" else 3000 - 10 * strike,
+                quoted=datetime.fromtimestamp(self.clock(), timezone.utc))
             for strike in range(90, 111) for side in ("call", "put")]
         return OptionChain(symbol, expiration, "tradier", datetime.fromtimestamp(self.clock(), timezone.utc), tuple(rows))
 
@@ -369,3 +370,42 @@ def test_without_a_live_price_nothing_is_read_or_captured_but_a_captured_band_st
     clock.advance(15)
     captured, _ = options.ranges("SPY", 100.0)
     assert options.ranges("SPY", None)[0] == captured
+
+
+@pytest.mark.parametrize("quote", [None, datetime(2026, 10, 2, 16, tzinfo=ET), START - timedelta(seconds=61), START + timedelta(seconds=20)])
+def test_a_fresh_fetch_cannot_capture_missing_old_or_future_bid_ask_quotes(quote):
+    options, client, clock = feed()
+    expiry = date(2026, 10, 9)
+    client.chains[("XYZ", expiry)] = [leg("XYZ", expiry, 100, side, quoted=quote) for side in ("call", "put")]
+    options.ranges("XYZ", 100)
+    levels, info = options.ranges("XYZ", 100)
+    assert levels == [] and info["state"] == "unavailable" and "quote" in info["message"].lower()
+    # A later valid provider update recovers without having frozen the bad input.
+    clock.advance(61)
+    client.chains[("XYZ", expiry)] = [leg("XYZ", expiry, 100, side, quoted=datetime.fromtimestamp(clock(), timezone.utc)) for side in ("call", "put")]
+    options.ranges("XYZ", 100)
+    assert options.ranges("XYZ", 100)[1]["state"] == "ready"
+
+
+def test_session_capture_requires_every_leg_timestamp_not_just_one_recent_stamp():
+    from dataclasses import replace
+    now = datetime.fromtimestamp(Clock()(), timezone.utc)
+    call = leg("XYZ", date(2026, 10, 9), 100, "call", quoted=now)
+    put = replace(leg("XYZ", date(2026, 10, 9), 100, "put", quoted=now), ask_time=None)
+    found = straddle(OptionChain("XYZ", date(2026, 10, 9), "tradier", now, (call, put)), 100, now=now)
+    assert found["state"] == "stale" and "unavailable" in found["reason"]
+
+
+def test_fixed_option_references_keep_first_observation_time_and_explain_missing_max_pain():
+    options, client, clock = feed()
+    expiry = date(2026, 10, 9)
+    client.chains[("XYZ", expiry)] = [leg("XYZ", expiry, 100, "call", oi=1000), leg("XYZ", expiry, 110, "put", oi=None)]
+    options.chart("XYZ", Layer("oi", "nearest"), 100)
+    levels, info = options.chart("XYZ", Layer("oi", "nearest"), 100)
+    assert all(item.kind != "max_pain" for item in levels)
+    assert info["max_pain"] is None and "1 contract" in info["max_pain_reason"]
+    assert all(item.formed_at == int(clock()) for item in levels)
+    stamps = {item.kind: item.formed_at for item in levels}
+    clock.advance(61)
+    again, _ = options.chart("XYZ", Layer("oi", "nearest"), 100)
+    assert {item.kind: item.formed_at for item in again} == stamps

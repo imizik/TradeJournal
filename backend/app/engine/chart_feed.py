@@ -210,7 +210,7 @@ class ChartFeed:
         }
         if stored_session:
             data["auto_levels"] = self._levels(symbol, today, minutes, daily, info, calendar, stored_session, panels, extra_levels, auto,
-                                             range_levels)
+                                             range_levels, session=session)
         if volume_profile:
             data["rvol"] = rvol
         return data
@@ -250,25 +250,32 @@ class ChartFeed:
         return state("ready", None, days, found.traded), found.average
 
     def _levels(self, symbol, today, minutes, daily, info, calendar, stored_session, panels, extra_levels=None, auto=True,
-                range_levels=None) -> dict:
+                range_levels=None, session="extended") -> dict:
         """Automatic levels for the session in progress (or the next one), with any extra
         ones, merged into zones, and each intraday panel's interactions with them on its
         closed bars today."""
         now = int(time.time())
-        # The dates any level reads: three weeks back and the next ten days (unpublished months read as clock hours).
-        known = {d: calendar.hours(d) if calendar is not None else None for d in (today + timedelta(days=i) for i in range(-21, 11))}
+        # Validate the full daily lookback, including holidays inside pivot/ATR windows.
+        oldest = datetime.fromtimestamp(daily[-(chart_levels.DAILY_TAIL + 1)]["time"], ET).date() if len(daily) > chart_levels.DAILY_TAIL else \
+            datetime.fromtimestamp(daily[0]["time"], ET).date() if daily else today
+        # Sparse/delisted history must not turn one chart read into years of
+        # calendar requests. 150 days covers the ordinary 72-session tail.
+        first = max(min(oldest, today - timedelta(days=21)), today - timedelta(days=150))
+        known = {d: calendar.hours(d) if calendar is not None else None
+                 for d in (first + timedelta(days=i) for i in range((today - first).days + 11))}
         day = chart_levels.session_day(today, known)
         previous = chart_levels.previous_session(day, known)
         stored = stored_session(symbol, previous) if previous else None
         # The previous session from the history cache, on the same basis as today's Tradier minutes.
         before = adjust_minutes(stored, previous, info["splits"]) if stored else []
         found = chart_levels.compute_levels(day, before + (minutes if day == today else []), daily, now, known)
-        band = chart_levels.BAND_ATR * found.atr if found.atr else None
+        band = chart_levels.BAND_ATR * found.atr if found.atr is not None else None
         # The latest price: today's newest minute, else the last daily close.
         spot = minutes[-1]["close"] if minutes else daily[-1]["close"] if daily else None
         extra, about = extra_levels(symbol, spot) if extra_levels else ([], None)
         # The expected move (C2.7) is priced around a live price only: today's newest minute, never a daily close.
-        live = minutes[-1]["close"] if minutes and datetime.fromtimestamp(minutes[-1]["time"], ET).date() == today else None
+        live = minutes[-1]["close"] if minutes and datetime.fromtimestamp(minutes[-1]["time"], ET).date() == today \
+            and 0 <= now - minutes[-1]["time"] <= 120 else None
         bands, ranges = range_levels(symbol, live) if range_levels else ([], None)
         zones = chart_levels.confluence([*(found.levels if auto else ()), *extra, *bands], band)
         missing = dict(found.missing) if auto else {}
@@ -284,7 +291,7 @@ class ChartFeed:
                 events[zone.id] = {"state": "developing", "events": [], "at_level": False} if start is None \
                     else chart_levels.interactions(zone.low, zone.high, band, bars, start)
             panel["level_events"] = events
-        return {"day": day.isoformat(), "as_of": now, "atr": found.atr, "band": band, "missing": missing, "auto": auto,
+        return {"day": day.isoformat(), "as_of": now, "atr": found.atr, "band": band, "session": session, "missing": missing, "auto": auto,
                 **({"options": about} if extra_levels else {}), **({"ranges": ranges} if range_levels else {}),
                 "zones": [{"id": z.id, "low": z.low, "high": z.high, "label": z.label, "score": z.score,
                            "members": [asdict(m) for m in z.members]} for z in zones]}

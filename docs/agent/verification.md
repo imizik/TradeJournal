@@ -73,6 +73,12 @@ see its quota or tell you when it stops posting. It is advisory, it is not a
 required check, and `main` has no branch protection — a PR can merge with no
 review at all.
 
+If another checkout owns the default browser-test ports, set
+`E2E_BACKEND_PORT=8199 E2E_FRONTEND_PORT=3199 bash scripts/verify.sh --e2e`.
+Both the servers and direct API test requests use those ports; the seeded
+database remains in this worktree. Do not reuse or stop another checkout's
+test servers.
+
 ## Credentials and data: none required
 
 Tests need no API keys and touch no real data.

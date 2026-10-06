@@ -50,7 +50,7 @@ export type AutoLevel = {
   timeframe: "1m" | "1D" | null; source: "tradier" | "alpaca_sip" | null;
   bar_time: number | null; formed_at: number | null; developing: boolean;
 };
-/** Levels within one band of each other (C2.2); a lone level is a zone of one. `score` counts independent sources. */
+/** Total span is less than one band (C2.2). `score` counts distinct origins, not independent evidence. */
 export type AutoZone = { id: string; low: number; high: number; label: string; score: number; members: AutoLevel[] };
 /**
  * A symbol's automatic levels for `day` (the session in progress, or the next
@@ -59,6 +59,7 @@ export type AutoZone = { id: string; low: number; high: number; label: string; s
  */
 export type AutoLevels = {
   day: string; as_of: number; atr: number | null; band: number | null; zones: AutoZone[]; missing: Record<string, string>;
+  session?: "regular" | "extended";
   /** False when the zones leave the automatic levels out (only options levels asked for); absent before C4.4. */
   auto?: boolean;
   /** The options levels layer (C4.4) when asked for: what its strikes are and why any are missing. */
@@ -113,14 +114,19 @@ export type OptionsInfo = {
   strikes?: OptionStrike[]; flip?: GammaFlip | null;
   /** The scope's nearest expiration's max pain (C4.7); absent before it, null without open interest. */
   max_pain?: MaxPain | null;
+  max_pain_reason?: string | null;
 };
 export type OptionsLadder = OptionsInfo & {
   signed: boolean; rows: OptionStrike[];
   walls: Partial<Record<"call_oi" | "put_oi" | "call_volume" | "put_volume", number | null>>;
 };
-export type LevelEvent = { event: "tested" | "broken" | "reclaimed"; time: number };
+export type LevelEvent = { event: "tested" | "approached" | "broken" | "reclaimed"; time: number; bar_time?: number; direction?: "above" | "below" };
 /** How price treated a zone today on one intraday panel's closed bars (C2.3). */
-export type LevelInteraction = { state: "untested" | "tested" | "broken" | "reclaimed" | "developing"; events: LevelEvent[]; at_level: boolean };
+export type LevelInteraction = {
+  state: "untested" | "touched" | "approached" | "tested" | "broken" | "reclaimed" | "developing";
+  events: LevelEvent[]; at_level: boolean; near_level?: boolean; since?: number;
+  last_close?: number | null; last_close_at?: number | null;
+};
 /**
  * What today's relative volume is measured against (C2.4): the market calendar's 20
  * sessions before `day`, of which `traded` had regular-session volume. Only `ready`

@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-const API = "http://127.0.0.1:8099";
+const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 
 test("analytics drills into groups and winning outliers", async ({ page }, testInfo) => {
   await page.goto("/analytics");

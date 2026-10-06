@@ -268,3 +268,17 @@ def test_max_pain_draws_as_an_inferred_level_beside_the_walls():
     pain = [level for level in levels if level.kind == "max_pain"]
     assert [(level.label, level.price, level.evidence, level.developing) for level in pain] == [("Max pain", 100.0, "inferred", False)]
     assert all(level.kind != "max_pain" for level in option_levels(found, "oi"))
+
+
+def test_max_pain_needs_complete_relevant_payout_weights_but_preserves_real_zero():
+    from dataclasses import replace
+    from app.engine.options_positioning import max_pain_missing
+    rows = [contract(100, "call", oi=1000), contract(110, "put", oi=2000)]
+    assert max_pain(chain(rows)).price == 110
+    for broken in (replace(rows[1], open_interest=None), replace(rows[1], multiplier=None)):
+        partial = chain([rows[0], broken])
+        assert max_pain(partial) is None and max_pain_missing(partial) == 1
+    zero = replace(rows[1], open_interest=0, multiplier=None)
+    assert max_pain(chain([rows[0], zero])).price == 100
+    # Unknown weights in another root do not contaminate the selected root.
+    assert max_pain(chain(rows + [replace(rows[1], root="SPY1", open_interest=None)])).price == 110

@@ -17,8 +17,11 @@ const ROOT = path.resolve(__dirname, "..");
 const BACKEND = path.join(ROOT, "backend");
 const E2E_DB = path.join(BACKEND, "data", "e2e_seed.db");
 
-const BACKEND_PORT = 8099;
-const FRONTEND_PORT = 3099;
+const BACKEND_PORT = Number(process.env.E2E_BACKEND_PORT || 8099);
+const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT || 3099);
+if (![BACKEND_PORT, FRONTEND_PORT].every((port) => Number.isInteger(port) && port > 0 && port <= 65535) || BACKEND_PORT === FRONTEND_PORT) {
+  throw new Error("E2E_BACKEND_PORT and E2E_FRONTEND_PORT must be different valid TCP ports.");
+}
 const API_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 // Prefer the project venv so the servers match what scripts/setup.sh built.
