@@ -51,9 +51,12 @@ backend/pubsub-subscriber.json
 
 # Claude Code internal. Skills are shared project tooling -- a skill that only
 # exists on one machine cannot help the cold agent that clones this repo -- so
-# .claude/skills/ is tracked and everything else under .claude/ is not.
+# .claude/skills/, .claude/agents/ and the shared .claude/settings.json are
+# tracked; everything else under .claude/ (settings.local.json, caches) is not.
 .claude/*
 !.claude/skills/
+!.claude/agents/
+!.claude/settings.json
 
 # Installers
 *.exe

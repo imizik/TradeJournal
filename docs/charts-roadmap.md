@@ -88,6 +88,10 @@ The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 7. Use the same requirements with any implementing model. Scope, fixtures and
    acceptance evidence carry the handoff; a model change is not a reason to
    redesign the epic. Stop after the selected item, not after the whole board.
+8. Before starting, check the item in [Delegation readiness](#delegation-readiness).
+   A `worker` item goes to a Sonnet worker with the item ID as its contract;
+   a `lead` item needs the named decision made first
+   ([delegation](agent/delegation.md)).
 
 ## Status board
 
@@ -160,6 +164,24 @@ when asked for one.
 C2.6 needs C2.4; each history page's sessions need their own 20-session baselines.
 C4.6 needs C4.3's snapshots and C4.5's ladder. C2.7 needs C2.3's zones and
 T2.1's straddle; C4.7 needs C4.4's layer.
+
+## Delegation readiness
+
+Open items only. **worker**: the item's Done-when, the rules below and
+[the feature map](agent/feature-map.md) are a complete contract, so a worker can
+build it from the item ID. **lead**: a named decision has to be made first,
+by the lead or the user; after it, execution can still go to a worker. Escalate
+if is on top of the worker's default escalation conditions.
+
+| ID | Readiness | Escalate if / decision first |
+|---|---|---|
+| C4.6 | worker | the stored snapshots cannot tell "not recorded" from "unavailable" for a session; anything needs a migration |
+| C2.6 | worker | older sessions' baselines need provider requests or storage beyond what the `rvol_history` job keeps |
+| C3.6 | lead | the link's data model and migration: anchoring on account plus source dedupe key, and how links survive rebuild and `resync-all`. UI, tests and the adherence counts are worker work once that is settled. Tier 2 review |
+| C5.2 | lead | removes the only internet-reachable process and its deploy units; the lead approves the removal list and reviews `deploy/` hunks. Waits on C5.1's live phone check |
+| C6.1 | lead | where the replay time cutoff is enforced (server, client, or both) so levels, earnings and options snapshots cannot leak the future |
+| C6.2 | lead | product behavior the user decides: what Wait records, what is compared, how drills are stored |
+| G0 | user | human acceptance in a real session; no code to delegate |
 
 ## Ground truth this plan rests on
 

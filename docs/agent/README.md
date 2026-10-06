@@ -10,6 +10,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
+| [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |
 | [background-jobs.md](background-jobs.md) | You are touching queued work: the worker lanes, job ownership, or restart recovery |
 | [../product-roadmap.md](../product-roadmap.md) | You want the future trading-improvement workflow and its usage gates, without changing active feature-roadmap priorities |
