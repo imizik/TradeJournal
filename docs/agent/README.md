@@ -10,6 +10,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
 | [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
+| [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [dots-integration.md](dots-integration.md) | Future Dots handoff: current local A1 tools, restricted-profile and authentication gates, and the private API boundary |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |

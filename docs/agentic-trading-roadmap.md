@@ -52,8 +52,8 @@ If this track is selected, start with A1, then A2, then A3. Assign and review
 
 | ID | Deliverable | Depends on | Status / exit evidence |
 |---|---|---|---|
-| P0 | Set the first practice policy, universe and schedule | Selection of this track | proposed setup; exit: one example plan and outcome with unambiguous time, price and cost rules |
-| A1 | Freeze and retrieve a human or agent decision | P0 | [draft PR #143](https://github.com/imizik/TradeJournal/pull/143); local backend, build and browser suites pass; not done: A1 phone/provider walkthrough and PostgreSQL CI; records remain practice drafts and unarmed |
+| P0 | Set the first practice policy, universe and schedule | Selection of this track | selected in [P0 v1](agent/practice-policy.md); synthetic plan/outcome and real read-only source-time check recorded; forward use awaits A1/A2 operational gates |
+| A1 | Freeze and retrieve a human or agent decision | P0 | [PR #143](https://github.com/imizik/TradeJournal/pull/143) merged; merged CI including Postgres parity passed; read-only provider time/unit check and 390px automated WAIT save/reopen observed; human timing and provider-backed TAKE remain unobserved; records remain practice drafts and unarmed |
 | A2 | Watch, alert and paper-track a fixed-rule plan | A1 | proposed second build; exit: one observed phone alert and restart-safe paper lifecycle, with any operational probe labeled and excluded from strategy results |
 | A3 | Run the short daily routine and compare independent choices | A2 | proposed third build; exit: three observed sessions with honest run status, paired choices and review timing |
 | B | Use the same policy for forward observation | A3, or manual preparation using A1/A2 | proposed observation; exit: at least ten eligible sessions with coverage and attention results |
@@ -1059,17 +1059,7 @@ example as the first end-to-end acceptance artifact.
 and creates the one contract all later automation needs. Another analytical
 tab cannot answer what was actually decided before the outcome.
 
-**Implementation status (2026-10-07, [draft PR #143](https://github.com/imizik/TradeJournal/pull/143)):** A1 storage/API, durable server-owned
-market contexts, idempotency, Today decision entry/detail and local MCP adapter
-are present in the working tree. TAKE validation binds prices to completed raw
-Alpaca minute-bar facts in the saved context, requires a declared freshness
-limit (capped at one day), explicit entry guard and versioned nonnegative cost
-parameters. The minute source requests `adjustment=raw`; timestamp and basis
-remain in each frozen fact. P0 remains proposed: there is no selected universe
-or operational example plan/cost schedule. Accepted records are drafts with
-`practice_draft_unarmed` status; this code does not arm or create positions.
-No live provider or A1 phone walkthrough has been observed, and PostgreSQL CI
-remains pending, so A1 is proposed in the draft PR but not done.
+**Acceptance status (2026-10-07, [merged PR #143](https://github.com/imizik/TradeJournal/pull/143)):** A1 storage/API, durable server-owned market contexts, idempotency, Today decision entry/detail and local MCP adapter are on main. PR #143 reported successful Backend, Frontend, Browser, Postgres parity, Ubuntu package/systemd and Screenshots checks. TAKE validation binds prices to completed raw Alpaca minute-bar facts in the saved context, requires a declared freshness limit (capped at one day), explicit entry guard and versioned nonnegative cost parameters. The selected [P0 practice policy](agent/practice-policy.md) fixes the universe, manual schedule, cost assumptions and one synthetic plan/outcome; its real read-only Alpaca check found a completed SPY IEX minute bar with UTC source time before request time. A1 still does not enforce all P0 operating limits or arm a plan. A disposable local 390px browser walkthrough saved and reopened one WAIT with explicit unavailable-provider context and no horizontal overflow; this did not validate TAKE or measure human comprehension time. Full local verification passed (1,406 backend tests, 177 browser tests); the human comprehension timing and provider-backed TAKE save remain unobserved.
 
 ### A2 — Watch that plan, alert once, and paper-track its outcome
 
@@ -1124,6 +1114,8 @@ underlying price/fill assumptions; do not describe a fixture or probe as alpha.
 **Dependencies:** A1; private always-on API, fresh provider data and working
 phone delivery. C5.1's phone observation already occurred; A2 needs its own
 observed plan-to-paper lifecycle and does not change C5.2 deployment status.
+
+**Smallest proposed A2 cut after A1 acceptance:** One explicit arm action accepts only a P0-valid frozen TAKE and atomically stores a plan-owned watch or a visible retryable arm failure. One deterministic worker consumes completed regular-session 15-minute observations, commits a single trigger/missed-trigger event and the next eligible one-minute order intent, then advances one paper position through fixed stop/target/two-session expiry. `DecisionEvent` rows and unique operation keys are the authority; projections rebuild from them after restart. A recovery cursor records the last evaluated provider interval. On restart, a recoverable pending order may be replayed against source bars with reconstruction marked; a detection gap past the allowable entry window records `missed_trigger` or unresolved coverage without backdating an entry. Persist the economic event before enqueueing one plan-event phone notification through the existing ntfy outbox. Delivery can retry, but the phone message deep-links to the frozen card/event and never mutates an event. Keep paper rows and R separate from journal fills, FIFO, actual P&L and factory ledger. One controlled live phone receipt and restart drill are acceptance gates, with any operational probe excluded from strategy outcomes. No scheduled agent, Dots connection or second rule family is part of A2.
 
 **Why this second:** it is the shortest route to the user's actual objective:
 the system watches while he works and retains an outcome worth reviewing.
