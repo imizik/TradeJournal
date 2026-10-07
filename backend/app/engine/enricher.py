@@ -196,6 +196,24 @@ class _AdaptiveRateLimiter:
             self._next_slot = max(now, self._next_slot) + 60.0 / self.rate
             return delay
 
+    def reserve_within(self, max_wait: float) -> float | None:
+        """Like ``reserve`` but only claims a slot at most ``max_wait`` seconds out.
+
+        Past that it returns None and leaves the schedule alone, so a caller that
+        will not wait does not push other callers back.
+        """
+        with self._lock:
+            now = self._clock()
+            self._recover(now)
+            if self.rate is None:
+                self._next_slot = now
+                return 0.0
+            delay = max(0.0, self._next_slot - now)
+            if delay > max_wait:
+                return None
+            self._next_slot = max(now, self._next_slot) + 60.0 / self.rate
+            return delay
+
     def wait(self) -> None:
         delay = self.reserve()
         if delay > 0:

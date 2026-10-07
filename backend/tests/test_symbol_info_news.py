@@ -170,7 +170,7 @@ def test_polygon_not_configured_or_busy_never_calls_out(tmp_path, polygon, monke
     monkeypatch.setattr(module.enricher, "POLYGON_API_KEY", "")
     assert feed(tmp_path, [1.0]).view("NVDA")["sources"][1]["state"] == "not_configured"
     monkeypatch.setattr(module.enricher, "POLYGON_API_KEY", "k")
-    monkeypatch.setattr(module.enricher._limiter, "reserve", lambda: 30.0)
+    monkeypatch.setattr(module.enricher._limiter, "reserve_within", lambda _max: None)
     busy = feed(tmp_path, [1.0]).view("NVDA")
     assert busy["sources"][1]["state"] == "failed" and "busy" in busy["sources"][1]["message"] and not calls
 
@@ -255,3 +255,38 @@ def test_alpaca_failure_without_cache_is_failed_and_quiet(tmp_path, polygon):
     assert store.view("AMD")["sources"][0]["state"] == "failed"
     clock[0] += 60
     assert store.view("AMD")["sources"][0]["state"] == "failed" and len(calls) == 1
+
+
+# ------------------------------------------- the news read honors the limiter's slot
+
+class _Tick:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+def test_reserve_within_over_budget_returns_none_and_does_not_push_enrichment_back():
+    clock = _Tick()
+    limiter = module.enricher._AdaptiveRateLimiter(ceiling=6.0, clock=clock)
+    limiter.reserve()  # slot now, next slot 10 s out
+    before = limiter._next_slot
+    assert limiter.reserve_within(2.0) is None
+    assert limiter._next_slot == before
+    clock.now += 9
+    assert limiter.reserve_within(2.0) == pytest.approx(1.0) and limiter._next_slot == before + 10
+
+
+def test_reserve_within_unpaced_is_instant():
+    limiter = module.enricher._AdaptiveRateLimiter(ceiling=None, clock=_Tick())
+    assert limiter.reserve_within(2.0) == 0.0
+
+
+def test_polygon_news_sleeps_the_granted_delay_then_calls(tmp_path, polygon, monkeypatch):
+    calls, _ = polygon
+    slept = []
+    monkeypatch.setattr(module, "observed_sleep", lambda provider, reason, seconds: slept.append((provider, reason, seconds)))
+    monkeypatch.setattr(module.enricher._limiter, "reserve_within", lambda _max: 1.5)
+    assert feed(tmp_path, [1_000_000.0]).view("NVDA")["sources"][1]["state"] == "ok"
+    assert slept == [("Polygon", "rate_limit", 1.5)] and len(calls) == 1

@@ -36,11 +36,12 @@ function Article({ article, symbol, minute }: { article: NewsArticle; symbol: st
 /** The News tab (T1.2). The parent re-reads each minute while it is open; new headlines wait behind "N new" instead of shifting the list. */
 export default function SymbolInfoNews({ data }: { data: SymbolNews }) {
   const [focused, setFocused] = useState(true);
-  const [seen, setSeen] = useState(() => new Set(data.articles.map((a) => a.id)));
+  const [shown, setShown] = useState(data.articles); // what the list displays; replaced only on "N new" (the parent keys this by symbol)
   const minute = useClock((now) => Math.floor(now / 60));
   const current = listedNews(data.articles, focused);
-  const fresh = current.filter((a) => !seen.has(a.id)).length;
-  const rows = listedNews(data.articles.filter((a) => seen.has(a.id)), focused);
+  const shownIds = new Set(shown.map((a) => a.id));
+  const fresh = current.filter((a) => !shownIds.has(a.id)).length;
+  const rows = listedNews(shown, focused);
   const hidden = data.articles.filter((a) => a.roundup).length;
   const reading = data.sources.filter((s) => s.state !== "ok");
   const bothDown = data.sources.every((s) => s.state === "failed" || s.state === "not_configured");
@@ -49,7 +50,7 @@ export default function SymbolInfoNews({ data }: { data: SymbolNews }) {
       <label className="flex min-h-11 items-center gap-2 text-slate-300 lg:min-h-0" title="Hides articles that tag more than three symbols">
         <input type="checkbox" checked={focused} onChange={(event) => setFocused(event.target.checked)} /> Focused
       </label>
-      {fresh > 0 && <button onClick={() => setSeen(new Set(data.articles.map((a) => a.id)))} className="min-h-11 rounded border border-sky-400/50 px-3 py-2 text-sky-300 lg:min-h-0">{fresh} new</button>}
+      {fresh > 0 && <button onClick={() => setShown(data.articles)} className="min-h-11 rounded border border-sky-400/50 px-3 py-2 text-sky-300 lg:min-h-0">{fresh} new</button>}
     </div>
     {rows.length > 0 ? <ul className="divide-y divide-slate-700/40">{rows.map((a) => <Article key={a.id} article={a} symbol={data.symbol} minute={minute} />)}</ul>
       : data.articles.length > 0 ? <p className="text-slate-500">No focused headlines. {hidden} roundup {hidden === 1 ? "article is" : "articles are"} hidden; turn Focused off to read {hidden === 1 ? "it" : "them"}.</p>

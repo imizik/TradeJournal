@@ -29,6 +29,7 @@ from uuid import uuid4
 import httpx
 
 from app.engine import enricher, news
+from app.engine.api_wait import observed_sleep
 from app.engine.alpaca import ALPACA_API_KEY, ALPACA_API_SECRET
 from app.engine.symbol_info_news import ALPACA, POLYGON, SENTIMENT_NOTE, merge, normalize_alpaca, normalize_polygon
 
@@ -158,8 +159,11 @@ class SymbolNews:
     def _call(self, symbol: str, now: float) -> dict:
         """One Polygon read, never retried. Raises ``SourceError`` with the reason."""
         limiter = enricher._limiter
-        if limiter.reserve() > MAX_WAIT_SECONDS:
+        delay = limiter.reserve_within(MAX_WAIT_SECONDS)
+        if delay is None:
             raise SourceError("Polygon is busy with fill enrichment; its budget is shared.")
+        if delay > 0:
+            observed_sleep("Polygon", "rate_limit", delay)
         since = (datetime.fromtimestamp(now, timezone.utc) - timedelta(days=DAYS)).strftime("%Y-%m-%d")
         params = {"ticker": symbol, "limit": 50, "order": "desc", "sort": "published_utc",
                   "published_utc.gte": since, "apiKey": enricher.POLYGON_API_KEY}

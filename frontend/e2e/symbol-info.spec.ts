@@ -370,3 +370,26 @@ test("News polls each minute only while the tab is open and the page is visible,
   await page.clock.runFor(180_000);
   expect(reads).toHaveLength(3);
 });
+
+test("News keeps the same 20 rows behind the banner when a poll adds one and the backend drops the oldest", async ({ page }) => {
+  const stories = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => article(`s${from + i}`, `Story ${from + i}`, 100 - (from + i), ["NVDA"]));
+  let feed = stories(1, 20).reverse(); // newest first
+  await page.route("**/api/backend/charts/symbol/NVDA/news", (route) => route.fulfill({ json: newsBody(feed) }));
+  await page.clock.install({ time: new Date(NEWS_NOW) });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "News", exact: true }).click();
+  await page.clock.runFor(400);
+  const rows = info.locator("ul > li");
+  await expect(rows).toHaveCount(20);
+  feed = stories(2, 21).reverse(); // one new, the oldest evicted from the capped feed
+  await page.clock.runFor(60_000);
+  await expect(info.getByRole("button", { name: "1 new" })).toBeVisible();
+  await expect(rows).toHaveCount(20);
+  await expect(info.getByRole("link", { name: "Story 1", exact: true })).toBeVisible();
+  await expect(info.getByRole("link", { name: "Story 21", exact: true })).toHaveCount(0);
+  await info.getByRole("button", { name: "1 new" }).click();
+  await expect(rows).toHaveCount(20);
+  await expect(info.getByRole("link", { name: "Story 21", exact: true })).toBeVisible();
+  await expect(info.getByRole("link", { name: "Story 1", exact: true })).toHaveCount(0);
+});
