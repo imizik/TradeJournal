@@ -67,7 +67,8 @@ opinion. New headlines wait behind an "N new" button. The tab reads again each
 minute only while it is open and the page is visible. Polygon shares the free
 plan's 5 calls a minute with fill enrichment, so it is read only for this tab,
 through the enricher's limiter, never retried, and a 429 or failure serves the
-cached copy with its age and mutes Polygon for five minutes; each source's state
+cached copy with its age and mutes Polygon for five minutes (Alpaca news likewise
+reads once on a 2.5 s budget with no retry and mutes itself for five minutes); each source's state
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
 

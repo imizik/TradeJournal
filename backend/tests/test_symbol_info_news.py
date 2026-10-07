@@ -183,3 +183,75 @@ def test_route_returns_the_view_and_rejects_bad_tickers(tmp_path, polygon, monke
     body = client.get("/charts/symbol/NVDA/news").json()
     assert body["symbol"] == "NVDA" and body["articles"] and "apiKey" not in json.dumps(body)
     assert client.get("/charts/symbol/bad%20one/news").status_code == 422
+
+
+# ------------------------------------------------- alpaca never blocks the route
+
+def _alpaca_http(monkeypatch, status_code=429, raises=None):
+    from app.engine import alpaca as alp, news as news_mod
+    calls, sleeps = [], []
+    monkeypatch.setattr(alp, "ALPACA_API_KEY", "k")
+    monkeypatch.setattr(alp, "ALPACA_API_SECRET", "s")
+    monkeypatch.setattr(alp, "observed_sleep", lambda *a: sleeps.append(a))
+    monkeypatch.setattr(alp.time, "sleep", lambda s: sleeps.append(("time.sleep", s)))
+
+    def get(url, params=None, headers=None, timeout=None):
+        calls.append(timeout)
+        if raises:
+            raise raises
+        return httpx.Response(status_code, json={"news": []}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(alp.httpx, "get", get)
+    return alp, news_mod, calls, sleeps
+
+
+def test_fast_news_read_429_returns_at_once_without_sleeping_or_retrying(monkeypatch):
+    alp, news_mod, calls, sleeps = _alpaca_http(monkeypatch, 429)
+    with pytest.raises(alp.AlpacaFastFailure):
+        news_mod.fetch_news(symbols=["NVDA"], fast=True)
+    assert len(calls) == 1 and sleeps == [] and calls[0] <= 3
+
+
+@pytest.mark.parametrize("raises", [httpx.ReadTimeout("slow"), httpx.ConnectError("down")])
+def test_fast_news_read_timeout_or_network_error_is_not_retried(monkeypatch, raises):
+    alp, news_mod, calls, sleeps = _alpaca_http(monkeypatch, raises=raises)
+    with pytest.raises(alp.AlpacaFastFailure):
+        news_mod.fetch_news(symbols=["NVDA"], fast=True)
+    assert len(calls) == 1 and sleeps == []
+
+
+def test_other_callers_still_retry_on_429(monkeypatch):
+    alp, news_mod, calls, sleeps = _alpaca_http(monkeypatch, 429)
+    monkeypatch.setattr(alp._limiter, "wait", lambda: None)
+    with pytest.raises(RuntimeError):
+        news_mod.fetch_news(symbols=["NVDA"])
+    assert len(calls) == 5 and [s[2] for s in sleeps] == [30, 60, 90, 120, 150]
+
+
+def test_route_default_reader_uses_the_fast_path(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(module.news, "fetch_news", lambda **kw: seen.update(kw) or [])
+    SymbolNews._read_alpaca("NVDA", None)
+    assert seen["fast"] is True
+
+
+def test_alpaca_failure_serves_stale_with_age_then_stays_quiet_for_five_minutes(tmp_path, polygon):
+    clock, fail, calls = [1_000_000.0], [False], []
+    store = feed(tmp_path, clock, alpaca_calls=calls, fail=fail)
+    store.view("NVDA")
+    fail[0], clock[0] = True, clock[0] + 120
+    first = store.view("NVDA")["sources"][0]
+    assert first["state"] == "stale" and first["age_seconds"] == 120 and len(calls) == 2
+    clock[0] += 200  # inside the quiet period: no new call, still stale with a growing age
+    quiet = store.view("NVDA")["sources"][0]
+    assert quiet["state"] == "stale" and quiet["age_seconds"] == 320 and len(calls) == 2
+    fail[0], clock[0] = False, clock[0] + 101  # quiet period over: reads again and recovers
+    assert store.view("NVDA")["sources"][0]["state"] == "ok" and len(calls) == 3
+
+
+def test_alpaca_failure_without_cache_is_failed_and_quiet(tmp_path, polygon):
+    clock, calls = [1_000_000.0], []
+    store = feed(tmp_path, clock, alpaca_calls=calls, fail=[True])
+    assert store.view("AMD")["sources"][0]["state"] == "failed"
+    clock[0] += 60
+    assert store.view("AMD")["sources"][0]["state"] == "failed" and len(calls) == 1

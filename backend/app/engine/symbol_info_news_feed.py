@@ -2,8 +2,10 @@
 
 Two sources, each degrading on its own:
 
-* Alpaca (Benzinga) through ``news.fetch_news``, cached 60 s per symbol in memory.
-  A failed read serves the older copy with its age.
+* Alpaca (Benzinga) through ``news.fetch_news(fast=True)``, cached 60 s per symbol in
+  memory. One request on a ~2.5 s budget, no retry and no limiter wait; a 429,
+  timeout or failure serves the older copy with its age (or ``failed``) and stays
+  quiet for ``BACKOFF_SECONDS``, so the request path never blocks.
 * Polygon ``/v2/reference/news`` (headlines with per-ticker sentiment), cached 15
   minutes per symbol on disk under ``backend/data/symbol_info/v1/polygon/``. The
   free plan is 5 calls a minute shared with fill enrichment, so this is read only
@@ -56,6 +58,7 @@ class SymbolNews:
         self._alpaca = alpaca or self._read_alpaca
         self._lock = threading.Lock()
         self._alpaca_cache: dict[str, tuple[float, list[dict]]] = {}
+        self._alpaca_quiet_until: dict[str, float] = {}
         self._polygon_memory: dict[str, tuple[float, list[dict]]] = {}
         self._polygon_quiet_until: dict[str, tuple[float, str]] = {}
         self._fetching = threading.Lock()  # one read at a time; a waiter reuses the fresh copy
@@ -75,7 +78,7 @@ class SymbolNews:
 
     @staticmethod
     def _read_alpaca(symbol: str, start: datetime) -> list[dict]:
-        return news.fetch_news(symbols=[symbol], start=start, limit=50)
+        return news.fetch_news(symbols=[symbol], start=start, limit=50, fast=True)
 
     def _alpaca_rows(self, symbol: str, now: float) -> tuple[list[dict] | None, dict]:
         cached = self._alpaca_cache.get(symbol)
@@ -83,15 +86,23 @@ class SymbolNews:
             return cached[1], status(ALPACA, "ok", cached[0], now)
         if self._alpaca is self._read_alpaca and not (ALPACA_API_KEY and ALPACA_API_SECRET):
             return None, status(ALPACA, "not_configured", None, now, "Set ALPACA_API_KEY and ALPACA_API_SECRET on the private backend to read Alpaca news.")
+        if now < self._alpaca_quiet_until.get(symbol, 0.0):
+            return self._alpaca_degraded(cached, now)
         try:
             rows = normalize_alpaca(self._alpaca(symbol, datetime.fromtimestamp(now, timezone.utc) - timedelta(days=DAYS)))
         except Exception as exc:  # the provider's own errors vary; none may take down the tab
             log.warning("Alpaca news for %s failed: %s", symbol, exc)
-            if cached:
-                return cached[1], status(ALPACA, "stale", cached[0], now, "Alpaca news could not be read; showing the older copy.")
-            return None, status(ALPACA, "failed", None, now, "Alpaca news could not be read.")
+            self._alpaca_quiet_until[symbol] = now + BACKOFF_SECONDS
+            return self._alpaca_degraded(cached, now)
+        self._alpaca_quiet_until.pop(symbol, None)
         self._alpaca_cache[symbol] = (now, rows)
         return rows, status(ALPACA, "ok", now, now)
+
+    @staticmethod
+    def _alpaca_degraded(cached, now: float) -> tuple[list[dict] | None, dict]:
+        if cached:
+            return cached[1], status(ALPACA, "stale", cached[0], now, "Alpaca news could not be read; showing the older copy.")
+        return None, status(ALPACA, "failed", None, now, "Alpaca news could not be read.")
 
     # ----------------------------------------------------------------- polygon
 

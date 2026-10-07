@@ -190,7 +190,9 @@ symbol with no trades shows "No trades on this symbol"; the 390 px layout
 test passes.
 
 **T1.2 News.** The newest 20 headlines for the symbol from two feeds,
-merged, newest first: Alpaca's Benzinga feed (`fetch_news`, cached 60 s per
+merged, newest first: Alpaca's Benzinga feed (`fetch_news(fast=True)`: one request on a
+2.5 s budget, no retry or limiter wait; a 429, timeout or failure serves the
+cached copy with its age or `failed` and goes quiet for five minutes; cached 60 s per
 symbol in memory) and Polygon's `/v2/reference/news` (cached 15 minutes per
 symbol under `backend/data/symbol_info/v1/polygon/`). Each feed has a pure
 normalizer into one shape (`provider` is `alpaca_benzinga` or `polygon`, plus
