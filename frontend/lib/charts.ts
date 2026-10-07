@@ -158,7 +158,9 @@ export type MarketDay = {
 };
 export type ChartQuote = {
   symbol: string; name: string; last: number | null; change: number | null;
-  change_percentage: number | null; volume: number | null; previous_close: number | null; trade_time: number | null;
+  change_percentage: number | null; volume: number | null; previous_close: number | null;
+  /** Tradier's explicit current regular-session close; null until it is known. */
+  regular_close?: number | null; trade_time: number | null;
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {
@@ -633,6 +635,21 @@ export function retainHistory(bars: ChartBar[], live: ChartBar[], visible: { fro
 }
 
 export const chartStreamUrl = (symbols: string[]) => apiUrl(`/charts/stream?symbols=${encodeURIComponent(symbols.join(","))}`);
+
+/** Resolve a validated timestamp against the same New York session windows supplied by the backend. */
+export function marketSessionAt(stamp: number | null | undefined, market?: MarketDay): "pre" | "regular" | "post" | null {
+  if (stamp == null || !Number.isFinite(stamp) || !market) return null;
+  return market.sessions.find((part) => stamp >= part.start && stamp < part.end)?.part ?? null;
+}
+
+/** Extended-hours percent only uses a timestamped trade and its session's explicit close reference. */
+export function sessionChange(priceValue: number | null | undefined, session: "pre" | "regular" | "post" | null,
+  quote: ChartQuote | undefined): number | null {
+  if (!session) return null;
+  const reference = session === "post" ? quote?.regular_close : quote?.previous_close;
+  return priceValue != null && priceValue > 0 && reference != null && reference > 0
+    ? (priceValue / reference - 1) * 100 : null;
+}
 
 export function parseChartTick(value: unknown): ChartStreamTick | null {
   if (!value || typeof value !== "object") return null;

@@ -179,6 +179,9 @@ class ChartFeed:
                 "last": _number(q.get("last")), "change": _number(q.get("change")),
                 "change_percentage": _number(q.get("change_percentage")),
                 "volume": _number(q.get("volume")), "previous_close": _number(q.get("prevclose")),
+                # Tradier's `close` is the current regular-session close. It is
+                # often null before/while RTH is open; never infer it from last.
+                "regular_close": _number(q.get("close")),
                 "trade_time": _number(q.get("trade_date"), divisor=1000),
             })
 
