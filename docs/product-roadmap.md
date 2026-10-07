@@ -21,6 +21,7 @@ plans retain their implementation scope and execution order:
 | [Engineering roadmap](agent/roadmap.md) | Verification, environment isolation and operational foundations |
 | [Swing strategy roadmap](swing-strategy-roadmap.md) | Swing research in the strategy factory, the after-close practice loop, the setups board and confluence scan |
 | [Strategy Workbench roadmap](strategy-workbench-roadmap.md) | A later interactive page over the factory's discovery data |
+| [Agentic practice proposal](agentic-trading-roadmap.md) | Alternative morning human/agent decision loop, immutable plans and intraday paper review; select against the swing practice loop before implementation |
 | This document | Structured reflection, weekly improvement, personal playbooks, planned risk and prospective experiments |
 
 This plan does not interrupt the active `next` rows in those boards. The

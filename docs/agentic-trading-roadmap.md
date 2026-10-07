@@ -2,14 +2,14 @@
 
 **Proposed product track, 2026-10-07. Documentation only; no implementation is authorized by this document.**
 
-The next product should prove one small loop: **freeze a decision, watch its
+This proposed track would prove one small loop: **freeze a decision, watch its
 objective trigger, send a useful alert, paper-track the outcome, and review the
 original decision.** Start with underlying shares, at most three candidate
 plans a day and five watched symbols. Use an agent for bounded preparation and
 critique; let deterministic code monitor conditions and account for outcomes.
 
-Do this before building an interactive strategy optimizer, acquiring a large
-news archive, or adding more chart features. The first month should produce
+Within this track, do this before building an interactive strategy optimizer
+or acquiring a large news archive. The first month should produce
 forward records and reveal whether this fits a working day. It cannot establish
 a trading edge or justify real-money automation.
 
@@ -21,10 +21,17 @@ the reuse decisions, evidence limits and contracts those slices depend on.
 ## How to work from this roadmap
 
 This is the proposed **Agentic Practice** track, alongside the existing
-[Charts](charts-roadmap.md) and [journal learning](product-roadmap.md) plans.
-It does not silently change either plan's `next` item. When this track is
-selected, start with A1, then A2, then A3. Assign and review **one slice at a
-time**; finishing a slice does not authorize starting the next one.
+[Charts](charts-roadmap.md), [journal learning](product-roadmap.md),
+[swing strategy and practice](swing-strategy-roadmap.md), and
+[Strategy Workbench](strategy-workbench-roadmap.md) plans. The swing plan's
+S1–S2 is a separate, after-close factory-signal proposal; this track tests
+morning human/agent decisions and intraday paper plans. They share the same
+phone, practice and decision concepts. Choose which loop to run first before
+implementation, and reuse one decision record and paper outcome service if
+both are eventually built. Do not create competing Take/Skip stores or two
+practice pages. This document does not change the other plans' priorities.
+If this track is selected, start with A1, then A2, then A3. Assign and review
+**one slice at a time**; finishing a slice does not authorize starting the next.
 
 1. Read the selected slice's scope, exclusions, acceptance criteria and
    verification. Use the domain, data and permission contracts above it for
@@ -66,7 +73,7 @@ The proposed long chain mixes three different questions:
 | Question | Evidence that answers it | Product home |
 |---|---|---|
 | Is my account of the world predictive? | Frozen thesis predictions and their later measurements | Theses, within Research |
-| Does an objective setup generalize? | Factory specs, discovery, confirmation, exam, subsequent forward evidence | Factory Workbench, within Strategy Lab |
+| Does an objective setup generalize? | Factory specs, discovery, confirmation, exam, subsequent forward evidence | The separately planned Strategy Workbench |
 | Can I make and follow useful decisions while working? | Timestamped opportunities, plans, alerts, paper events and review | Today and Daily Review |
 
 Connect them with explicit references, but allow each to work independently.
@@ -86,12 +93,13 @@ and one 20-minute weekly review. Stops and paper management run without an
 open browser. Measure whether this contract is realistic rather than assuming
 that a strategy with an attractive backtest fits the user's life.
 
-This proposal recommends selecting slices A1–A3 below as the next product
-experiment. It does not mark other roadmaps done, reorder their boards, retire
-TradingView, or grant deployment permission. Charts C5.2 still requires the
-existing live-phone acceptance check. The factory's validated-strategy paper
-path remains gated; the proposed **Practice** path is a separate, explicitly
-unvalidated experiment.
+If the morning agent workflow is selected over the after-close S1–S2 path,
+this proposal recommends A1–A3 as its first experiment. It does not mark other
+roadmaps done, reorder their boards, or grant deployment permission. A live
+phone alert satisfied Charts C5.1 on 2026-10-06; C5.2 is merged, with the
+Charts board still recording fresh-deployment verification as pending. The
+factory's validated-strategy paper path remains gated; the proposed
+**Practice** path is a separate, explicitly unvalidated experiment.
 
 ## 2. Excavation: what exists and what it proves
 
@@ -103,6 +111,14 @@ were left alone. The local `origin/main` ref was three commits ahead, including
 `8b1088f` (C4.6 stored OI changes); it was not fetched or pulled. Thus C4.6 is
 absent from the inspected checkout, but is already present in that local remote
 ref and should not be proposed as new work.
+
+Before opening this documentation PR, `origin/main` was fetched at `ff4a9f2`.
+It has since added C4.6, the News tab, C5.1's observed phone check, C5.2's
+merged code, and the two linked swing/Workbench proposals. The detailed
+implementation inventory below remains labeled as the earlier inspection;
+recheck current code before implementing any slice. This document adds the
+morning agent, immutable decision and review proposal; it is not a replacement
+for the newer swing or Workbench contracts.
 
 The active research checkout is `/Users/user/TradeJournal-factory`, branch
 `factory/ledger`, at `47f58aa2f80a69e1f78c7edf937b0c986e8dbc36`, dated
@@ -223,13 +239,13 @@ future evidence for claims beyond the factory's historical tests.
 | **Today**, a section on the existing dashboard | 0–3 frozen plans, paper status, data/watch health and a link to the original evidence | Morning brief and independent choice controls |
 | **Charts** | Deep-link to a plan's symbol and time; reuse PlanSummary styling and current levels | “Watch as paper plan” from a human capture, using the same plan service |
 | **Daily Review** | A separate Paper/Decisions section alongside actual journal review | Weekly process and thesis outcomes |
-| **Strategy Lab** | Keep existing imported runs accessible | A Factory tab: catalog, Explore, frozen candidates, results and signals |
+| **Strategy Workbench** | Follow its separate roadmap and factory access gates | Cross-link any later frozen candidates and signals from Today |
 | **Research** | Keep AI Buildout intact | A Theses tab with versions and due predictions |
 
 Do not add separate top-level pages for a Morning Agent, Shadow Isaac,
 Referee, Macro Terminal, Catalyst Lab and Paper Broker. These are roles and
-views of the same small record set. Keep `/signals` as the existing TradingView
-surface until its retirement contract is completed; do not silently repurpose it.
+views of the same small record set. Do not silently repurpose `/signals`;
+check its current ownership after C5.2 deployment verification.
 
 A phone alert should open one card showing: **PAPER / PRACTICE**, decision time,
 ticker, why it was considered, exact trigger and whether it fired, price and
@@ -242,7 +258,7 @@ insufficient because current facts differ from the original decision.
 
 Keep FastAPI, SQLModel/Alembic, the existing providers, the single-host runtime
 and private file storage. Preserve journal fills/FIFO, imported Strategy Lab
-runs, TradingView alerts and paper practice as separate accounting domains.
+runs, historical signal records and paper practice as separate accounting domains.
 Do not create a fake brokerage account to hold simulated trades.
 
 ### First-loop records
@@ -367,6 +383,12 @@ existing plans continues and new plans remain absent.
 
 ## 7. Strategy Workbench and slower swing research
 
+The newer [Workbench roadmap](strategy-workbench-roadmap.md) owns its
+implementation order and UI, and the [swing roadmap](swing-strategy-roadmap.md)
+owns S1–S2. The analysis here records constraints for a later shared design;
+it is not a second Workbench or swing implementation queue. Reconcile any
+different protocol choices with those owning roadmaps before coding them.
+
 ### Workbench: extend the existing catalog
 
 `factory_brief.catalog()` already derives families, parameter defaults and
@@ -433,7 +455,7 @@ erased. Testing a learned parent and child remains two evaluated hypotheses.
 New post-hoc cohort views are exploratory looks, not additional confirmatory
 successes. A renamed copy or unchanged cached replay adds no new hypothesis.
 
-Before the Workbench can validate, implement one shared serialization lock
+Before any Workbench-triggered validation is allowed, implement one shared serialization lock
 around reserve-count/evaluate/append for CLI, weekly and future UI requests;
 durable attempts must count confirmation access even if the process fails
 after opening data but before completing a report. Disable unrestricted
@@ -961,10 +983,10 @@ It also inspects factory specs/ledger, the October 4 and preceding September
 29c/29d reports, generated latest run artifacts, and local archived packets.
 
 Important planning reconciliations: C3.6 exists despite older product text;
-News/Overview are still placeholders in this checkout despite upstream news
-fetching; the AI Buildout workspace is editable context, not an immutable
+News/Overview were placeholders in the inspected checkout, but the News tab
+has since landed on main; the AI Buildout workspace is editable context, not an immutable
 thesis system; the factory catalog exists; paper execution does not. Built
-capture/alert code still has human/device acceptance gates. The older
+capture still has its documented human acceptance gates. The older
 factory “paper only after confirmation” rule applies to validated-family
 forward testing; adding Practice requires its own explicit label and permission
 state and does not silently relax that rule.
@@ -1088,8 +1110,8 @@ write assertion and a live Tradier→monitor→ntfy→phone observation. Validat
 underlying price/fill assumptions; do not describe a fixture or probe as alpha.
 
 **Dependencies:** A1; private always-on API, fresh provider data and working
-phone delivery. This slice can satisfy the relevant C5.1 phone observation if
-the evidence meets its contract, but does not retire TradingView automatically.
+phone delivery. C5.1's phone observation already occurred; A2 needs its own
+observed plan-to-paper lifecycle and does not change C5.2 deployment status.
 
 **Why this second:** it is the shortest route to the user's actual objective:
 the system watches while he works and retains an outcome worth reviewing.
