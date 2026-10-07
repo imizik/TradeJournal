@@ -10,6 +10,20 @@ patterns that can create N+1 calls.
 
 ## Fills and trades
 
+### Practice decision records (A1)
+
+- `decision_record` is separate from account fills, FIFO trades, Strategy Lab
+  runs and factory ledgers. Creating a decision never creates journal activity.
+- A record is immutable. Retrying its operation ID with identical content
+  returns the original; changed content conflicts. Corrections require a new
+  operation and record.
+- `decision_context` is an immutable server-generated market packet. A
+  `DecisionRecord` references one context and copies its exact evidence hash;
+  later packets cannot rewrite it. The packet has a source completeness limit:
+  only completed minute-bar price facts are eligible for a TAKE reference.
+- A1 TAKE records are always `practice_draft_unarmed`; no code in this slice
+  arms alerts or creates paper positions. Never infer an execution from one.
+
 - `fill` is the source layer. `trade` and `tradefill` are derived and are safe
   to wipe and rebuild.
 - `contracts` is the quantity field for **both** stocks and options.

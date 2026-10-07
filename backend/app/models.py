@@ -220,6 +220,44 @@ class ResearchWorkspace(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class DecisionRecord(SQLModel, table=True):
+    """Immutable Practice decision and the exact evidence saved with it."""
+
+    __tablename__ = "decision_record"
+    __table_args__ = (UniqueConstraint("operation_id", name="uq_decision_record_operation_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: str = Field(index=True)
+    opportunity_id: str = Field(index=True)
+    actor: str = Field(index=True)  # human | agent:<stable identity>
+    decision: str  # take | wait | skip
+    symbol: str = Field(index=True)
+    context_id: uuid.UUID = Field(foreign_key="decision_context.id", index=True)
+    received_at: datetime = Field(index=True)  # UTC, set by the server
+    input_cutoff: datetime  # UTC
+    policy_version: str
+    policy_hash: str
+    evidence_json: str = Field(sa_column=Column(Text, nullable=False))
+    evidence_sha256: str
+    decision_json: str = Field(sa_column=Column(Text, nullable=False))
+    record_sha256: str
+
+
+class DecisionContext(SQLModel, table=True):
+    """Durable, server-generated market packet frozen before a choice."""
+
+    __tablename__ = "decision_context"
+    __table_args__ = (UniqueConstraint("operation_id", name="uq_decision_context_operation_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: str = Field(index=True)
+    symbol: str = Field(index=True)
+    captured_at: datetime = Field(index=True)
+    provider: str
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    context_sha256: str
+
+
 class ChartSettingsRecord(SQLModel, table=True):
     """The Charts workspace every browser shares: levels, watchlist, intervals,
     indicators and layout, as one JSON document the frontend validates. The
