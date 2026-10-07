@@ -66,6 +66,9 @@ export type DecisionRecord = {
   evidence: Record<string, unknown>;
   evidence_sha256: string;
   plan: Record<string, unknown>;
+  rationale: string;
+  wait_condition: string | null;
+  wait_expiry: string | null;
   record_sha256: string;
   status: "practice_draft_unarmed";
 };

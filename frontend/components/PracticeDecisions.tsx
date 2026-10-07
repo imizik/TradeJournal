@@ -26,6 +26,9 @@ export default function PracticeDecisions({ records }: { records: DecisionRecord
             <div className="mt-4 border-t pt-3 text-xs">
               <dl className="grid gap-2 sm:grid-cols-2">
                 <div><dt className="text-muted-foreground">Opportunity</dt><dd>{record.opportunity_id}</dd></div>
+                {record.rationale && <div><dt className="text-muted-foreground">Rationale</dt><dd className="whitespace-pre-wrap">{record.rationale}</dd></div>}
+                {record.wait_condition && <div><dt className="text-muted-foreground">Wait condition</dt><dd>{record.wait_condition}</dd></div>}
+                {record.wait_expiry && <div><dt className="text-muted-foreground">Wait ends</dt><dd>{new Date(record.wait_expiry).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</dd></div>}
                 <div><dt className="text-muted-foreground">Input cutoff</dt><dd>{new Date(record.input_cutoff).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</dd></div>
                 <div><dt className="text-muted-foreground">Evidence SHA-256</dt><dd className="break-all">{record.evidence_sha256}</dd></div>
                 <div><dt className="text-muted-foreground">Record SHA-256</dt><dd className="break-all">{record.record_sha256}</dd></div>

@@ -19,7 +19,9 @@ export default function PracticeDecisionForm() {
   const [saving, setSaving] = useState(false);
   const operationId = useRef("");
   const contextOperationId = useRef("");
-  const contextSymbol = useRef("");
+  const contextOperationSymbol = useRef("");
+  const currentSymbol = useRef("");
+  const contextRequest = useRef(0);
   const sessionCalendar = context?.packet.session_calendar as { status?: string; close?: number | null; description?: string } | undefined;
 
   function edited() {
@@ -27,21 +29,25 @@ export default function PracticeDecisionForm() {
   }
 
   async function freeze() {
+    const requestId = ++contextRequest.current;
+    const normalizedSymbol = symbol.trim().toUpperCase();
     setError("");
     setSavedId("");
     setContext(null);
+    if (!normalizedSymbol) return;
+    if (!contextOperationId.current || contextOperationSymbol.current !== normalizedSymbol) {
+      contextOperationId.current = crypto.randomUUID();
+      contextOperationSymbol.current = normalizedSymbol;
+    }
     try {
-      const normalizedSymbol = symbol.trim().toUpperCase();
-      if (!contextOperationId.current || contextSymbol.current !== normalizedSymbol) {
-        contextOperationId.current = crypto.randomUUID();
-        contextSymbol.current = normalizedSymbol;
-      }
       const value = await api.freezeDecisionContext(normalizedSymbol, contextOperationId.current);
+      if (requestId !== contextRequest.current || currentSymbol.current !== normalizedSymbol || value.symbol !== normalizedSymbol) return;
       setContext(value);
       contextOperationId.current = "";
-      contextSymbol.current = "";
+      contextOperationSymbol.current = "";
       operationId.current = "";
     } catch (err) {
+      if (requestId !== contextRequest.current || currentSymbol.current !== normalizedSymbol) return;
       setError(err instanceof Error ? err.message : "Could not freeze market context.");
     }
   }
@@ -49,7 +55,7 @@ export default function PracticeDecisionForm() {
   async function save() {
     setError("");
     setSavedId("");
-    if (!context) return setError("Freeze market context before saving a decision.");
+    if (!context || context.symbol !== symbol.trim().toUpperCase()) return setError("Freeze market context for the current symbol before saving a decision.");
     let plan: Record<string, unknown> | undefined;
     if (choice === "take") {
       try { plan = JSON.parse(planText) as Record<string, unknown>; }
@@ -85,7 +91,7 @@ export default function PracticeDecisionForm() {
       <summary className="cursor-pointer font-medium">Save a human decision</summary>
       <div className="mt-4 grid gap-3 text-sm">
         <label className="grid gap-1">Symbol
-          <input value={symbol} onChange={(e) => { setSymbol(e.target.value.toUpperCase()); setContext(null); edited(); }} maxLength={15} className="rounded border bg-background px-3 py-2" placeholder="SPY" />
+          <input value={symbol} onChange={(e) => { const next = e.target.value.toUpperCase(); currentSymbol.current = next.trim(); contextRequest.current++; contextOperationId.current = ""; contextOperationSymbol.current = ""; setSymbol(next); setContext(null); edited(); }} maxLength={15} className="rounded border bg-background px-3 py-2" placeholder="SPY" />
         </label>
         <button onClick={freeze} disabled={!symbol.trim()} className="w-fit rounded border px-3 py-2 disabled:opacity-50">Freeze market context</button>
         {context && <div className="rounded border bg-muted/30 p-3 text-xs">

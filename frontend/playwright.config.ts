@@ -97,6 +97,8 @@ export default defineConfig({
         WEBULL_LISTENER_AUTOSTART: "false",
         // Chart access tests must stay deterministic even with a local .env.
         TRADIER_API_KEY: "",
+        ALPACA_API_KEY: "",
+        ALPACA_API_SECRET: "",
         // Voice plans (C3.5): recordings in a scratch folder, and no model
         // download or speech engine in the browser run. Transcript states are
         // exercised with fixtures; the engine has its own backend test.
