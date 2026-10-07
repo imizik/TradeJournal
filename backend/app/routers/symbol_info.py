@@ -8,7 +8,7 @@ from sqlmodel import Session
 
 from app.database import get_session
 from app.engine.chart_math import ET
-from app.engine import symbol_info_tradier
+from app.engine import symbol_info_news_feed, symbol_info_tradier
 from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 
@@ -25,6 +25,14 @@ def _ticker(symbol: str) -> str:
 @router.get("/symbol/{symbol:path}/you")
 def you(symbol: str, db: Session = Depends(get_session)):
     return read_journal(db, _ticker(symbol))
+
+
+@router.get("/symbol/{symbol:path}/news")
+def news(symbol: str):
+    """Headlines from Alpaca (Benzinga) and Polygon, merged (T1.2): the newest 20, plus the newest 20 that
+    tag at most three symbols so the browser's Focused filter can fill a list. Cached 60 s (Alpaca) and
+    15 min (Polygon); each source degrades on its own and the response says how each one went."""
+    return symbol_info_news_feed.symbol_news.view(_ticker(symbol))
 
 
 @router.get("/symbol/{symbol:path}/events")
