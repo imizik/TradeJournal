@@ -33,7 +33,9 @@ records and surfaces; do not create a competing plan store. The earlier
 discussion recommended a smaller text/template version with manual linking,
 with voice and adherence added when useful. The user resolved this on
 2026-10-04 by asking for C3.4 and C3.5 together under the existing Charts
-contract; adherence (C3.6) is still to come.
+contract. C3.6 is now implemented: source-fill links, timing and capture coverage
+are described in [the workspace](charts-workspace.md#plans-linked-to-trades-c36).
+Those counts measure capture coverage, not adherence to the substance of a plan.
 
 ## Starting point
 
@@ -44,7 +46,8 @@ enrichment, trade-path metrics, and charts with fill markers. See the
 
 Those are foundations to extend. AI reviews are not the user's own recorded
 intent or reflection. Analytics groups are not proof of a repeatable setup.
-The following connected workflow remains future work:
+The connected workflow below combines built capture/linking with future
+structured reflection and prospective experiments:
 
 1. Before entry, save a short plan and, optionally, a playbook template.
 2. After execution, connect the plan to the recorded trade.
@@ -56,7 +59,11 @@ The following connected workflow remains future work:
 
 Order is a recommendation for when this track is activated, not a deadline.
 D0 is preparatory research and can be selected independently; it is not a
-prerequisite for basic reflection. Capture can join the loop when C3.4 ships.
+prerequisite for basic reflection. C3.4/C3.5 capture is built, with its human
+walkthrough gates still recorded on the Charts board. The
+[agentic trading proposal](agentic-trading-roadmap.md) recommends a separate
+bounded paper-practice experiment using these foundations; it does not change
+the milestone statuses here.
 
 | ID | Deliverable | Depends on | Status |
 |---|---|---|---|
