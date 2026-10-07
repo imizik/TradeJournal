@@ -19,6 +19,8 @@ plans retain their implementation scope and execution order:
 | [Charts roadmap](charts-roadmap.md) | Chart replacement, alerts, historical trade navigation, pre-trade capture, options layers and replay |
 | [Symbol info roadmap](symbol-info-roadmap.md) | News, events, company information and options-implied context beside the chart |
 | [Engineering roadmap](agent/roadmap.md) | Verification, environment isolation and operational foundations |
+| [Swing strategy roadmap](swing-strategy-roadmap.md) | Swing research in the strategy factory, the after-close practice loop, the setups board and confluence scan |
+| [Strategy Workbench roadmap](strategy-workbench-roadmap.md) | A later interactive page over the factory's discovery data |
 | This document | Structured reflection, weekly improvement, personal playbooks, planned risk and prospective experiments |
 
 This plan does not interrupt the active `next` rows in those boards. The
