@@ -504,6 +504,72 @@ One screen, built for a minute on a phone:
 - **Open shadow trades:** each one's state, today's stop and exit date. On
   exit days a morning message: "rules exit at today's close".
 
+### During the day: the setups board
+
+For glancing at between work, not for alerts. Columns on the existing
+watchlist, phone-friendly, refreshed with the chart's own data:
+
+| Name | State | Shows |
+|---|---|---|
+| NVDA | **Armed** (trend up, pulled back to the EMA 20) | "fires tonight if it closes above $182.40", the higher of the EMA 20 and yesterday's high |
+| MU | **Fired** yesterday | entered at today's open, stop, the rules' exit date |
+| AMD | **Not in setup** | the condition that is missing (below the EMA 50) |
+
+- **It is the rule, not a score.** Each close-decision family gets one small
+  `would_fire_above(series)` (or below, for shorts) beside its `on_bar`:
+  the price at which today's close would trigger, given the completed bars.
+  `trend_pullback`'s is max(EMA 20, prior high); `range_breakout`'s is the
+  20-session closing high. A test proves that a synthetic close at that price
+  fires `on_bar` and a close a tick short does not, so the board cannot
+  disagree with the factory.
+- **Facts beside it, no weighting:** distance to the nearest level zone in
+  daily ATR (`chart_levels.py`), relative strength against SPY today,
+  relative volume, earnings or a macro event within the hold.
+- **A level-type count, labelled as such.** The colour is the number of
+  distinct level origins near the price (the zone's existing `score`),
+  labelled "levels nearby", never "strength". VWAP, EMAs, the prior day's
+  high and a swing often restate one fact, so a dark colour is attention,
+  not evidence.
+- No phone message comes from the board. The nightly signal is the only
+  thing that buzzes.
+
+### The confluence scan
+
+A discretionary sibling of the practice loop: after the close, score every
+watchlist name on how many conditions line up, and send a message when the
+score reaches a threshold. You decide with wider context; the system
+records what it saw and what followed.
+
+- **Daily close only**, in the nightly job. An intraday confluence message
+  would ask for exactly the chart-watching this plan avoids.
+- **Components fixed before any result, equal weights**, each as-of from
+  completed bars: close within 0.25 daily ATR of the daily EMA 20 or 50, of
+  a prior swing high or low (`chart_levels.py` swings), or of a round
+  number; 20-session relative strength in the top third of the universe;
+  full-day relative volume above 1.5; SPY above its daily EMA 20 (or below,
+  for shorts); no earnings inside the next 5 sessions. The list is a
+  decision ([decision 11](#13-decisions-for-the-user)) and changes only as a
+  new, dated version.
+- **No hand-tuned weights.** Which conditions matter is the factory's learned
+  filter's job (logistic, trained on discovery, frozen), not a slider.
+- **Labelled SCAN, not validated**, like practice. It uses the same page,
+  Take/Skip and reasons, and its alerts count toward the two-candidate limit
+  only as one stream.
+- **Recorded in full:** every component's value, the score, the decision,
+  and the forward path against random entries on the same names (session
+  closes 1, 2, 3, 5, 10). After a couple of months that answers two
+  questions: do high-score names move differently from low-score ones, and
+  do the ones you took beat the ones you skipped.
+- **Tested in the factory too.** `confluence_score` becomes a feature built
+  from the same component code, read at the signal bar. Whether high scores
+  beat random entries is checked on discovery data, as for any feature.
+  Option walls cannot be components: their history starts 2026-10-02, so
+  they are recorded beside the score, prospectively, and never summed into
+  it.
+- **The history this has to beat:** the Isaac Market Map was multi-setup
+  confluence and scored PF 0.89 to 1.05 out of sample. A count of
+  unvalidated conditions is not a validated signal, and the page says so.
+
 ### Recorded and reviewed
 
 Per signal: delivery delay, decision and its time, reason. Per taken
@@ -562,6 +628,9 @@ the underlying's R survives as the expression, after spread and theta?
 9. **Start the news and context recorder now** (recommended; cheap), or wait.
 10. **Priority:** this plan ahead of the remaining Charts items and the
     Workbench.
+11. **The confluence scan's components and threshold** (§11), fixed before
+    its first message, and whether it is wanted at all before S2 has run
+    for a few weeks.
 
 ## 14. Milestones
 
@@ -572,6 +641,8 @@ rest are conditional on use or on a verdict.
 |---|---|---|
 | **S1** | `trend_pullback` at fixed defaults; session-scale forward evidence (closes 1–16); `signals_on`; the replay parity test; the month-cluster rule if decided | synthetic-bar tests for the family's arming, trigger, stop and exits; for every discovery session, `signals_on(day)` equals the full run's signals that day; every committed spec's id and trades unchanged; the user runs it through the factory on the Mac and the ledger has its line |
 | **S2** | Practice loop: `research/candidates.json`, the `strategy_signal` table (a migration), the nightly job in the research lane, ntfy delivery, `/practice` with Take/Skip, shadow trades advanced nightly | a fixture day produces exactly the replayed signals; delivery is deduplicated across restarts; a shadow trade matches `run_candidate`'s trade; the page is checked on the phone on the private origin. Then real days |
+| S2a | Setups board: `would_fire_above` per close-decision family; watchlist columns for state, trigger price, nearest zone, RS, relative volume, events, and the labelled level count | a synthetic close at the trigger price fires `on_bar` and one a tick short does not; the board's states match `signals_on` at the close; checked on the phone |
+| S2b | Confluence scan: the fixed component list, the nightly score, a SCAN message above the threshold, components and forward path recorded; `confluence_score` as a factory feature | the score is as-of (the feature test); every message's components are stored; the factory reads the feature like any other |
 | S3 | `range_breakout`; swing features (`ret_20`, `rs_20`, `spy_ret_20`, `dist_high_20`); ETF fetch and the control universe | new features pass the as-of test; earlier ids and trades unchanged |
 | S4 | Earnings: frozen historical snapshot, daily prospective snapshot, `sessions_to/since_earnings`, the `earnings` exit setting | synthetic calendars prove each setting; a refetch cannot change a past run |
 | S5 | Prospective recorder: daily news (raw, revisions), Cboe VIX and FRED yields snapshots | appends only; reruns are idempotent; coverage stored per day |
@@ -597,6 +668,9 @@ rest are conditional on use or on a verdict.
 - A candidate admin UI, the Workbench UI, dashboards of practice results.
 - Automatic promotion between stages.
 - New intraday variants of the recovery swing.
+- Intraday confluence or setups-board phone messages. The board is for
+  looking; only the nightly signal and scan send messages.
+- Weighted or tuned confluence scores.
 
 ## First slice, and why it beats more Charts
 

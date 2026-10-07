@@ -7,7 +7,9 @@ for the factory to judge. The factory stays the only engine and the only
 judge. The Workbench adds a faster way to explore discovery data and a
 record of every look. It adds no backtester, no gate and no second ledger.
 
-**Status:** proposal, 2026-10-07. Nothing here is built. Milestones are
+**Status:** proposal, 2026-10-07. Nothing here is built. Sequenced after
+the [swing strategy roadmap](swing-strategy-roadmap.md)'s S1–S2, which take
+priority. Milestones are
 listed in order with what proves each; the [first slice](#first-slice) is at
 the end.
 
