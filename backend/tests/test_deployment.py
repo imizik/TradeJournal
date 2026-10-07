@@ -609,7 +609,8 @@ def test_retired_ingress_unit_is_stopped_and_removed_during_upgrade(control, tmp
     assert ["systemctl", "disable", "--now", "tradejournal-ingress.service"] in calls
     assert not (units / "tradejournal-ingress.service").exists()
     assert not (release / "deploy/systemd/tradejournal-ingress.service").exists()
-    assert "tradejournal-ingress.service" in control.OPTIONAL_UNITS
+    assert "tradejournal-ingress.service" not in control.OPTIONAL_UNITS
+    assert "tradejournal-ingress" in control.RETIRED_SERVICES
 
 
 def test_backups_preserve_legacy_ingress_configuration(tmp_path, monkeypatch):

@@ -33,7 +33,6 @@ TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.tim
 OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
 # Retired units stay listed until upgrades have removed their installed copies.
 RETIRED_SERVICES = ["tradejournal-ingress"]
-OPTIONAL_UNITS.extend(f"{name}.service" for name in RETIRED_SERVICES)
 # The alert check keeps running through a deployment, so a release that fails
 # to come back up still reaches the phone.
 ALERT_UNITS = {"tradejournal-alerts.timer", "tradejournal-alerts.service"}
@@ -165,7 +164,7 @@ def install_units(release: Path) -> None:
         for pattern in ("*.service", "*.timer")
         for unit in (release / "deploy/systemd").glob(pattern)
     }
-    for name in OPTIONAL_UNITS:
+    for name in OPTIONAL_UNITS + [f"{service}.service" for service in RETIRED_SERVICES]:
         target = UNITS / name
         if name not in bundled and target.exists():
             subprocess.run(["systemctl", "disable", "--now", name], check=False)
