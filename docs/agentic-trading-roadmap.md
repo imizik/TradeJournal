@@ -53,7 +53,7 @@ If this track is selected, start with A1, then A2, then A3. Assign and review
 | ID | Deliverable | Depends on | Status / exit evidence |
 |---|---|---|---|
 | P0 | Set the first practice policy, universe and schedule | Selection of this track | proposed setup; exit: one example plan and outcome with unambiguous time, price and cost rules |
-| A1 | Freeze and retrieve a human or agent decision | P0 | proposed first build; exit: accepted TAKE/WAIT/SKIP records, immutable evidence and reviewed phone card |
+| A1 | Freeze and retrieve a human or agent decision | P0 | built locally; focused backend/API/migration checks pass; not done: human phone walkthrough and clean full verification; records remain practice drafts and unarmed |
 | A2 | Watch, alert and paper-track a fixed-rule plan | A1 | proposed second build; exit: one observed phone alert and restart-safe paper lifecycle, with any operational probe labeled and excluded from strategy results |
 | A3 | Run the short daily routine and compare independent choices | A2 | proposed third build; exit: three observed sessions with honest run status, paired choices and review timing |
 | B | Use the same policy for forward observation | A3, or manual preparation using A1/A2 | proposed observation; exit: at least ten eligible sessions with coverage and attention results |
@@ -1058,6 +1058,18 @@ example as the first end-to-end acceptance artifact.
 **Why this first:** it starts collecting anti-hindsight evidence immediately
 and creates the one contract all later automation needs. Another analytical
 tab cannot answer what was actually decided before the outcome.
+
+**Implementation status (2026-10-07):** A1 storage/API, durable server-owned
+market contexts, idempotency, Today decision entry/detail and local MCP adapter
+are present in the working tree. TAKE validation binds prices to completed raw
+Alpaca minute-bar facts in the saved context, requires a declared freshness
+limit (capped at one day), explicit entry guard and versioned nonnegative cost
+parameters. The minute source requests `adjustment=raw`; timestamp and basis
+remain in each frozen fact. P0 remains proposed: there is no selected universe
+or operational example plan/cost schedule. Accepted records are drafts with
+`practice_draft_unarmed` status; this code does not arm or create positions.
+No live provider or phone walkthrough has been observed, so A1 is built but
+not done.
 
 ### A2 — Watch that plan, alert once, and paper-track its outcome
 

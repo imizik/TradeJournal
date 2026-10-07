@@ -61,6 +61,26 @@ def _get(path: str, params: dict | None = None, timeout: float = 120.0,
         _log_call(path, params, error, time.monotonic() - started, response_bytes)
 
 
+def _post(path: str, payload: dict, timeout: float = 60.0):
+    started = time.monotonic()
+    error = None
+    response_bytes = None
+    try:
+        resp = httpx.post(f"{API_BASE}{path}", json=payload, timeout=timeout)
+        resp.raise_for_status()
+        response_bytes = len(resp.content)
+        return resp.json()
+    except httpx.ConnectError as exc:
+        error = str(exc)
+        raise RuntimeError(f"Cannot reach the trade journal backend at {API_BASE}.") from exc
+    except httpx.HTTPStatusError as exc:
+        error = f"{exc.response.status_code}: {exc.response.text[:300]}"
+        raise RuntimeError(f"Backend error on {path} — {error}") from exc
+    finally:
+        _log_call(path, {"operation_id": payload.get("operation_id")}, error,
+                  time.monotonic() - started, response_bytes)
+
+
 def _log_call(path: str, params: dict | None, error: str | None,
               duration_s: float, response_bytes: int | None = None) -> None:
     """Append one JSONL line per tool-backed request for auditability."""
@@ -95,6 +115,38 @@ def get_market_report(report_type: str) -> dict:
     Takes ~10-30 seconds to build.
     """
     return _get("/packets/report", {"type": report_type})
+
+
+@mcp.tool()
+def get_decision_context(symbol: str, operation_id: str) -> dict:
+    """Fetch and durably freeze a ticker packet for a Practice decision."""
+    return _post(f"/decisions/context/{symbol.strip().upper()}", {"operation_id": operation_id})
+
+
+@mcp.tool()
+def record_decision(operation_id: str, opportunity_id: str, actor: str,
+                    decision: str, symbol: str, context_id: str,
+                    rationale: str = "", wait_condition: str | None = None,
+                    wait_expiry: str | None = None, plan: dict | None = None) -> dict:
+    """Save an immutable TAKE/WAIT/SKIP Practice draft; records never arm a plan."""
+    return _post("/decisions", {
+        "operation_id": operation_id, "opportunity_id": opportunity_id,
+        "actor": actor, "decision": decision, "symbol": symbol,
+        "context_id": context_id, "rationale": rationale,
+        "wait_condition": wait_condition, "wait_expiry": wait_expiry, "plan": plan,
+    })
+
+
+@mcp.tool()
+def get_decision(record_id: str) -> dict:
+    """Retrieve one immutable Practice decision by its saved record ID."""
+    return _get(f"/decisions/{record_id}")
+
+
+@mcp.tool()
+def list_decisions(limit: int = 30) -> dict:
+    """List recent Practice decisions, including explicit unarmed draft status."""
+    return _get("/decisions", {"limit": max(1, min(limit, 100))})
 
 
 @mcp.tool()

@@ -2,6 +2,7 @@ import { api, Account, Fill, PositionQuote } from "@/lib/api";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 import PerformanceOverview from "@/components/PerformanceOverview";
+import PracticeDecisions from "@/components/PracticeDecisions";
 import {
   buildOpenPositionMeta,
   computeUnrealizedPnl,
@@ -37,10 +38,11 @@ export default async function DashboardPage({
 
   const statsQuery = statsParams.toString();
 
-  const [stats, allTrades, accounts, params] = await Promise.all([
+  const [stats, allTrades, accounts, decisions, params] = await Promise.all([
     api.stats(statsQuery),
     api.trades(),
     api.accounts(),
+    api.decisions(),
     Promise.resolve(resolvedParams),
   ]);
 
@@ -192,6 +194,8 @@ export default async function DashboardPage({
       </div>
 
       <PerformanceOverview trades={trades} />
+
+      <PracticeDecisions records={decisions.decisions} />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Today's Closed P&L" value={fmt$(stats.today_pnl)} valueClass={pnlColor(stats.today_pnl)} />

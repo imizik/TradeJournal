@@ -52,6 +52,34 @@ export type Health = {
   };
 };
 
+export type DecisionRecord = {
+  id: string;
+  operation_id: string;
+  opportunity_id: string;
+  actor: string;
+  decision: "take" | "wait" | "skip";
+  symbol: string;
+  received_at: string;
+  input_cutoff: string;
+  policy_version: string;
+  policy_hash: string;
+  evidence: Record<string, unknown>;
+  evidence_sha256: string;
+  plan: Record<string, unknown>;
+  record_sha256: string;
+  status: "practice_draft_unarmed";
+};
+
+export type DecisionContext = {
+  context_id: string;
+  symbol: string;
+  captured_at: string;
+  provider: string;
+  context_sha256: string;
+  price_facts: { name: string; value: number; source: string; formed_at: string; observed_at: string; unit: string; split_basis: string }[];
+  packet: Record<string, unknown>;
+};
+
 export type Account = {
   id: string;
   name: string;
@@ -616,6 +644,10 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
 }
 
 export const api = {
+  decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
+  freezeDecisionContext: (symbol: string, operationId: string) => post<DecisionContext>(`/decisions/context/${encodeURIComponent(symbol)}`, { operation_id: operationId }),
+  createDecision: (body: { operation_id: string; opportunity_id: string; actor: string; decision: string; symbol: string; context_id: string; rationale?: string; wait_condition?: string; wait_expiry?: string; plan?: Record<string, unknown> }) =>
+    post<DecisionRecord>("/decisions", body),
   accounts: () => get<Account[]>("/accounts"),
   trades: (params?: string) => get<Trade[]>(`/trades${params ? `?${params}` : ""}`),
   trade: (id: string) => get<Trade>(`/trades/${id}`),
