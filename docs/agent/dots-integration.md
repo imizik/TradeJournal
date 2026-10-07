@@ -23,8 +23,10 @@ completed raw Alpaca minute facts by their saved fact names. Source, formation
 and observation times, USD/share unit, and raw split basis are retained. The
 validator rejects missing, stale, future, mismatched or non-finite facts, and
 requires an explicit freshness limit, entry guard and versioned nonnegative
-slippage parameters. P0 still needs a selected universe and a frozen operating
-example before any plan can be considered prospectively eligible.
+slippage parameters. The [selected P0 operating policy](practice-policy.md) now
+fixes the universe and worked example. Its complete `shadow-isaac-p0-v1`
+version/hash and eligibility checks must be stored at a future A2 arm; the
+current A1 schema hash alone does not make a draft prospectively eligible.
 
 ## Requirements before connecting another agent
 
