@@ -417,33 +417,17 @@ is verifiable rather than hopeful.
   entry's New York minute: only intent received before that minute counts as
   pre-entry.
 
-## TradingView live alerts
+## Retired TradingView alert records
 
-- Wire `v` is the immutable wire-schema version and is distinct from Pine
-  `indicator_version`.
-- `parse_alert_v1()` and its golden fixtures are **frozen** while v1 data
-  exists. Changed fields, meaning, canonical identity, timestamp semantics or
-  acceptance rules require a new wire version. Never reparse stored v1 payloads
-  with a future "current" parser.
-- `alert_id` is the sole idempotency key. Equal semantic hashes are retries even
-  when raw bytes differ; the same id with a different semantic hash is a
-  collision and must never overwrite first evidence.
-- `persist_alert()` commits or rolls back the session it is given — pass a clean
-  request-scoped session with no unrelated pending writes.
-- Analysis claims commit **before** market-data calls, and `analysis_attempts`
-  is a fencing token: a stale worker must never overwrite a newer attempt.
-  Generic scorer/code failures are terminal, not retried.
-- Keep analysis network calls outside database transactions.
-- Query-token auth is required by TradingView but leaks through access logs.
-  Keep ingress/proxy/tunnel request-target logging disabled or redacted, and
-  rotate the token if exposed.
-- The ingress process may import only `app.tradingview_ingress`,
-  `app.tradingview_database`, `app.routers.tradingview_webhook`,
-  `app.engine.tradingview`, `app.engine.tradingview_alerts` and `app.models`,
-  through any chain. `backend/tests/test_import_boundaries.py` enforces this;
-  a new import on that path is an architecture change, not a convenience.
-- Future schema work uses expand → version-pinned idempotent backfill →
-  constraint migration.
+- The `v=1` webhook contract and parser are historical. C5.2 removed the public
+  receiver and Pine alert source; do not restore a write route as part of chart
+  alert work.
+- Existing `tradingview_alert` rows and the Signals list/detail pages remain.
+  The API exposes GET routes only, and the old analysis autostart worker is no
+  longer started, so stored rows do not change during ordinary app operation.
+- Preserve the table, Alembic revision, payloads and analysis fields. Deleting
+  rows, dropping the table, removing the legacy `tj_ingress` role, or deleting
+  saved credentials requires a separate user decision.
 
 ## Database access patterns
 

@@ -5,7 +5,6 @@ native systemd services for Next.js, the API, the sync, Polygon, Webull,
 Gmail and capture (voice-plan transcription) worker lanes, plus local/offsite backup, Gmail-import, Sync Everything
 and phone-alert timers. Production now uses PostgreSQL on the VPS. The original Neon primary is
 retained as a pre-cutover recovery source; it is no longer the live database.
-An optional, separately credentialed service accepts TradingView webhooks.
 
 ## Access and layout
 
@@ -20,8 +19,7 @@ An optional, separately credentialed service accepts TradingView webhooks.
 | Runtime state | `/var/lib/tradejournal/data`, `oauth`, `job-locks`, `frontend-cache` |
 | Private application config | `/etc/tradejournal/backend.env`; root owned, mode 0600 |
 | Migration credentials | `/etc/tradejournal/migration.env`; root owned, mode 0600 |
-| TradingView ingress | `127.0.0.1:8090`; dedicated `tradejournal-ingress` OS user |
-| Ingress configuration | `/etc/tradejournal/tradingview.env`; root owned, mode 0600 |
+| Legacy TradingView configuration | Existing `/etc/tradejournal/tradingview.env` is preserved but unused |
 | Offsite backup credentials | `/etc/tradejournal/offsite.env` and `restic-password`; root owned, mode 0600 |
 | Phone alert settings | `/etc/tradejournal/alerts.env`; root owned, mode 0600 |
 
@@ -29,9 +27,9 @@ The frontend proxy has the same authority as the unauthenticated private API.
 Keep **both** services behind private access. Restrict the Tailscale access
 policy to the journal owner's devices/identity. Do not use Funnel, a public
 reverse proxy, public port forwarding, or expose 3000/8080 in the firewall.
-The only application designed for public webhooks is the separate TradingView
-ingress on 8090. Its opt-in service is included; the dedicated public HTTPS
-proxy is configured separately under [TradingView webhooks](#tradingview-webhooks).
+C5.2 retires the public TradingView webhook receiver. The frontend and API
+remain private; the release controller removes the old ingress unit during an
+upgrade and does not bind port 8090.
 
 All API/worker processes share the same hostname, database URL and local lock
 directory. This is not a multi-host worker deployment. Stop the old laptop's
@@ -118,8 +116,7 @@ Set `FRONTEND_PUBLIC_URL` to the private HTTPS Tailscale origin and
 `BACKEND_PUBLIC_URL` to that origin plus `/api/backend`. Configure only the
 integration keys needed. Autostarts default to false; turn on Webull listening
 only after installing its credentials and stopping the old executor.
-TradingView analysis, when enabled, remains API-owned. Real-time Gmail import
-is opt-in and needs no public endpoint; see
+Real-time Gmail import is opt-in and needs no public endpoint; see
 [Real-time Gmail import](#real-time-gmail-import).
 
 Copy needed state from the old host **before activation**, with all writers
@@ -244,8 +241,9 @@ database, since a successful upload alone does not prove recoverability.
 ### Production database cutover (2026-09-23)
 
 The Ubuntu 24.04 VPS runs PostgreSQL 18 on `127.0.0.1:5432/tradejournal`.
-The app uses `tj_app`; Alembic uses `tj_owner`; the optional TradingView ingress
-role is `tj_ingress`. PostgreSQL, the API and the frontend listen on loopback;
+The app uses `tj_app`; Alembic uses `tj_owner`; a legacy `tj_ingress` role may
+remain in existing databases and is not used by current releases. Removing that
+role is a separate operator decision. PostgreSQL, the API and the frontend listen on loopback;
 private Tailscale Serve reaches only the frontend. No database port is public.
 
 For the cutover, all application writers and timers were stopped. A final Neon
@@ -423,105 +421,19 @@ five-minute period and ten-minute grace that notifies the same ntfy topic.
 Every check pings it, or pings `/fail` when a notification could not be
 delivered, and the outside service alerts when the pings stop.
 
-## TradingView webhooks
+## Retired TradingView webhook ingress
 
-The deployment includes `tradejournal-ingress.service`, disabled by default.
-It runs on loopback port 8090 as a separate `tradejournal-ingress` OS user,
-with only `/etc/tradejournal/tradingview.env` injected by systemd. The unit
-cannot read the journal's runtime data, OAuth files, backups or private
-configuration. The launcher removes inherited private credentials, forces
-the PostgreSQL URL to be explicit, and disables Uvicorn access logging.
-Analysis remains in the private API, using its existing durable claim/retry
-worker and private Alpaca credentials.
+C5.2 removes the public webhook application, its 8090 listener, deployment
+unit and Pine alert source. Existing `tradingview_alert` rows remain available
+through the private read-only Signals API and pages. The release controller
+stops and removes an old `tradejournal-ingress.service` during activation.
 
-### Enable the receiver and analysis
-
-1. Install a release containing the ingress service. The installer creates
-   its OS user and a root-only `tradingview.env` with ingress disabled.
-2. In `/etc/tradejournal/backend.env`, configure `ALPACA_API_KEY` and
-   `ALPACA_API_SECRET`, then set `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
-3. In `/etc/tradejournal/tradingview.env`, set:
-
-   ```dotenv
-   TRADINGVIEW_INGRESS_ENABLED=true
-   TRADINGVIEW_DATABASE_URL=postgresql+psycopg://tj_ingress:URL_ENCODED_PASSWORD@127.0.0.1:5432/tradejournal
-   TRADINGVIEW_WEBHOOK_TOKEN=DEDICATED_RANDOM_TOKEN_AT_LEAST_32_BYTES
-   ```
-
-   Generate the token with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
-   Use the existing restricted ingress role, never `tj_app` or `tj_owner`.
-   It needs SELECT/INSERT/UPDATE on `tradingview_alert`, USAGE on `public`,
-   no other table privileges, no CREATE on `public`, and no role memberships
-   or administrative flags. See [database roles](../docs/agent/environments.md#database-roles).
-   Match the private URL's host, port, database and routing parameters exactly.
-4. Run the read-only check before activation:
-
-   ```bash
-   sudo /opt/tradejournal/releases/RELEASE_ID/backend/.venv/bin/python /opt/tradejournal/releases/RELEASE_ID/deploy/ingress.py
-   sudo tradejournal-deploy activate RELEASE_ID --confirm-database '127.0.0.1:5432/tradejournal'
-   curl --fail http://127.0.0.1:8090/health
-   ```
-
-   Preflight checks the configured worker, matching database endpoint, real
-   schema access and effective role privileges before stopping a healthy
-   release. It prints only whether ingress is enabled. Activation starts and
-   checks ingress after the private API is healthy; a failed ingress startup
-   follows the same rollback path as an API/frontend failure. The health check
-   proves DB/token readiness, not Alpaca connectivity or a live verdict.
-
-### Public HTTPS with a free hostname
-
-[DuckDNS](https://www.duckdns.org/about.jsp) provides a free hostname such as
-`your-alerts.duckdns.org`. Point its IPv4 record at the VPS public IPv4 address.
-[Caddy](https://caddyserver.com/docs/automatic-https) obtains and renews HTTPS
-certificates automatically. This uses the existing VPS; no additional hosted
-relay or purchased domain is required.
-
-Install Caddy following its [official package instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian).
-Use `deploy/Caddyfile.tradingview.example` as the dedicated `/etc/caddy/Caddyfile`,
-replacing both `alerts.example.com` and `203.0.113.10` with the actual hostname
-and the public IPv4 address assigned to the VPS interface. Review existing
-Caddy configuration before replacing it if the host already uses Caddy.
-The explicit bind keeps Caddy off the private Tailscale Serve address.
-If the VPS uses NAT, choose its assigned interface address for the bind and
-its public address for DNS. Allow inbound TCP 80/443 to that interface in
-both the VPS and provider firewalls; keep 3000/8080/8090/5432 closed publicly.
-
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl enable caddy
-sudo systemctl restart caddy
-```
-
-The template disables the Caddy admin API, so use a service restart rather
-than `caddy reload`. Only HTTPS POST `/tradingview/webhook` is forwarded to
-8090; other application paths return 404. HTTP is used only for certificate
-validation and otherwise returns 404. No journal/frontend route is proxied.
-Access logs are disabled, and request fields are removed from Caddy runtime
-error logs, since upstream failures would otherwise record the query token.
-Do not enable debug/request logging at another proxy hop.
-
-TradingView's URL is:
-
-```text
-https://YOUR_HOSTNAME/tradingview/webhook?token=YOUR_DEDICATED_TOKEN
-```
-
-The public endpoint uses 443; 8090 remains internal. TradingView accepts ports
-80/443, requires 2FA for webhooks, and cancels a request taking more than three
-seconds ([official webhook requirements](https://www.tradingview.com/support/solutions/43000529348-how-to-configure-webhook-alerts/)).
-The receiver acknowledges persistence without waiting for market analysis.
-Check readiness locally, then use a current contract-valid alert to confirm
-the public response and the private `/signals` record. Resending it must
-return `dup:true`; unauthenticated requests must return 401. A synthetic old
-alert proves receipt/deduplication but will be skipped by analysis.
-
-The controller preserves the ingress config across releases, includes it in
-local/encrypted offsite backups when present, and stops ingress during
-migration or release switching. Rolling back to a release without ingress
-support removes/disables its unit; the public proxy then returns an upstream
-error until a supporting release is activated. Set ingress to `false` and
-activate the current release to disable it deliberately.
+The deployment does not delete `/etc/tradejournal/tradingview.env`, remove the
+`tradejournal-ingress` OS account, drop the `tj_ingress` database role, or
+delete stored alert rows. Those are preserved for recovery and require a
+separate operator decision. Existing Caddy or firewall configuration is outside
+the release artifact; remove the old webhook route and public 80/443 allowance
+when retiring that endpoint.
 
 ## Updates, restarts and rollback
 
@@ -529,8 +441,8 @@ Install the next verified archive using its checksum. The installer creates
 an offline venv and preserves state/config. Release IDs cannot be overwritten.
 When the controller changes, update `/usr/local/sbin/tradejournal-deploy` from
 that verified artifact too. Before switching, wait for long-running jobs to
-finish; deployment stops the six private services, optional ingress, and every
-timer except the phone-alert check, which keeps watching so a release that
+finish; deployment stops the six private services, any installed retired ingress unit,
+and every timer except the phone-alert check, which keeps watching so a release that
 fails to start is still reported. Workers get 90 seconds to finish, after
 which systemd can kill them. Queued jobs survive. Interrupted jobs fail
 visibly and need an explicit new run; destructive or paid work is never
@@ -591,8 +503,7 @@ goes live about 10 minutes after it lands.
 A newer build waits, and is installed later or by a person, while:
 
 - it is 09:25–16:15 New York time on a weekday. An activation restarts
-  everything for about a minute, and a TradingView alert arriving then is
-  lost. Adding the `deploy-now` label to the pull request, before or after
+  the private app for about a minute. Adding the `deploy-now` label to the pull request, before or after
   merging, releases it on the next check;
 - a sync or enrichment job is running, or the API is not answering;
 - it adds or removes an Alembic revision. The release is installed but not
@@ -637,9 +548,8 @@ release switch. Its decisions are kept in
 ## Verification boundaries
 
 `backend/tests/test_deployment.py` covers rollback ordering, incompatible
-schemas, checksums, unsafe extraction, ingress configuration isolation,
-preflight failure, opt-in service lifecycle and forced runtime bindings. Browser
-smoke tests exercise the same-origin proxy with seeded data. The Ubuntu
+schemas, checksums, unsafe extraction, and removal of an installed retired
+ingress unit. Browser smoke tests exercise the same-origin proxy with seeded data. The Ubuntu
 workflow additionally installs the built artifact, migrates fresh Postgres,
 executes queued work, restarts the API without restarting its worker, checks
 crash recovery, upgrades through the real autodeploy unit, rolls back, checks
@@ -648,10 +558,7 @@ stops and starts the entire service set. The upgrade polls a local stand-in
 for GitHub's releases API; the live Release workflow and the VPS polling
 GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
 covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
-schema holds, checksums, and notifications sent once per build. It also runs a restricted PostgreSQL ingress
-role, real webhook duplicate/auth checks, stale-alert analysis, a separate OS
-user, and the shipped Caddy routing/error-log filter over local HTTP fixtures.
-It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
+schema holds, checksums, and notifications sent once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by
 `backend/tests/test_gmail_listener.py` with a fake subscriber. The workflow

@@ -19,8 +19,8 @@ place. What each of them proves is documented where it is enforced, not here.
   verified and run, and CI runs the same checks on every pull request. What
   that covers and what it does not is in [verification.md](verification.md).
 - **Rules CI enforces**, rather than documentation an agent can miss.
-  `test_import_boundaries.py` holds the public ingress to a module allowlist
-  and keeps the pure engine free of network and database imports; `ruff` covers
+  `test_import_boundaries.py` keeps pure engine modules free of network and
+  database imports; `ruff` covers
   the backend for unused and undefined names. Both run ahead of the suite.
 - **Frontend verification.** `backend/scripts/seed_dev_data.py` builds a
   deterministic dataset through the real reconstructor and `frontend/e2e/`
@@ -31,7 +31,7 @@ place. What each of them proves is documented where it is enforced, not here.
 - **Environments.** `GET /health` names the database a process is on,
   `resync-all` refuses a hosted database unless the request names it, Alembic
   is the only schema authority, and three database roles separate migration,
-  application and TradingView-ingress access. See
+  application access; the legacy TradingView ingress role remains unused pending operator cleanup. See
   [environments.md](environments.md).
 - **Postgres in CI.** `test_postgres_parity.py` and
   `test_postgres_migration_paths.py` run against a `postgres:16` service
@@ -87,13 +87,11 @@ paragraph. See
 [domain-rules.md](domain-rules.md#known-same-timestamp-ordering-is-arbitrary).
 
 **The app is not stateless**, and any future hosting decision inherits that.
-Startup normalizes the Roth account and restores manual fills; background
-jobs, the Gmail watch renewer and the TradingView analysis worker all expect a
-long-lived process, and the database is a durable queue rather than a task
-dispatcher (`architecture.md`). A scale-to-zero platform breaks that model.
-The public TradingView ingress is the only process that may be
-internet-reachable; the private API has no auth at all, and any host has to
-preserve that split. Cost matters more than elasticity for a single-user app.
+Startup normalizes the Roth account and restores manual fills; background jobs
+and the Gmail watch renewer expect a long-lived process, and the database is a
+durable queue rather than a task dispatcher (`architecture.md`). A
+scale-to-zero platform breaks that model. The API has no authentication and
+must remain private. Cost matters more than elasticity for a single-user app.
 
 ## Deliberately not doing
 

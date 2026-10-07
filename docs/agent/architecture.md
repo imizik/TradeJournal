@@ -6,38 +6,22 @@ The shape of the system. For where a specific feature lives, see
 
 ## Processes
 
-Three processes run locally, and they are deliberately not one:
+Two processes run locally, and they are deliberately not one:
 
 | Process | Port | Entry point | Exposure |
 |---|---|---|---|
 | Private API | 8080 from `startdev.sh`; 8000 from a bare `uvicorn` command and `mcp_server.py`'s default | `backend/app/main.py` | localhost only, **no auth** |
-| TradingView ingress | 8090 | `backend/app/tradingview_ingress.py` | the only tunnelable port; **opt-in** |
 | Frontend | 3000 | `frontend/` (Next 16 App Router) | localhost |
 
-The ingress is a separate FastAPI application with its own route allowlist and
-its own environment file (`backend/.env.tradingview`). It exists so a public
-webhook can reach the database without exposing the private API. Private API
-keys and unrestricted database credentials must never appear in its
-environment.
+C5.2 retired the public TradingView webhook receiver and Pine alert source.
+Stored TradingView alert records remain readable through private GET routes and
+the Signals pages. The optional analysis worker is no longer started, so these
+records are read-only. Existing ingress systemd units are stopped and removed
+by the release controller; legacy credentials and the `tj_ingress` database
+role are preserved pending an explicit operator decision.
 
-On Ubuntu, `tradejournal-ingress.service` is opt-in and runs as its own OS
-user, with `/etc/tradejournal/tradingview.env` instead of the local dotenv.
-Deployment checks its database target and effective role privileges before
-activation. The dedicated Caddy template forwards only the webhook path to
-8090; the private Tailscale/frontend/API routes stay private. See
-[production setup](../../deploy/README.md#tradingview-webhooks).
-
-That separation is enforced on the import graph, not only described here.
-`backend/tests/test_import_boundaries.py` fails if anything the ingress
-imports, through any chain, lies outside a six-module allowlist
-(`app.tradingview_ingress`, `app.tradingview_database`,
-`app.routers.tradingview_webhook`, `app.engine.tradingview`,
-`app.engine.tradingview_alerts`, `app.models`); if a private module imports
-the ingress side; or if a pure engine module — the reconstructor, the parsers,
-Strategy Lab metrics — starts reaching the network or the database engine.
-The allowlists at the top of that file are the policy. Changing them is an
-architecture change: make it deliberately, in the same commit as the import
-that needs it, and say why.
+The import-boundary tests now protect pure engine modules from reaching the
+network or database engine.
 
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.
@@ -58,16 +42,8 @@ the strategy factory's `app.engine.factory_*` modules: `factory_gates.evaluate`
 reaches bars only through the loader `scripts/strategy_factory.py` passes it,
 which is also what keeps each stage from loading data it may not see.
 
-`startdev.sh` / `startdev.ps1` launch the private backend and frontend by
-default. The ingress is opt-in:
-
-```bash
-TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh
-```
-
-When it is enabled, the launchers require a webhook token and refuse to start
-when the private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank
-— that split would silently point the two processes at different databases.
+`startdev.sh` / `startdev.ps1` launch the private backend and frontend only.
+Both bind to loopback.
 
 The [Ubuntu deployment package](../../deploy/README.md) instead supervises
 seven services: frontend, API and the five worker lanes. It keeps the frontend
@@ -138,7 +114,7 @@ They share a database and nothing else. Do not route data between them.
    `strategy_run` → `strategy_run_trade`, plus `strategy_run_metrics` and
    `strategy_experiment`. Simulated trades never enter `fill`/`trade`/
    `tradefill`.
-3. **TradingView live alerts** — `tradingview_alert` only. Wire contract `v=1`
+3. **Retired TradingView alert records** — `tradingview_alert` only. Historical wire contract `v=1`
    is frozen in `docs/tradingview-webhook-contract-v1.md`.
 
 ## Persistence

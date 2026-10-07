@@ -171,40 +171,6 @@ def _maybe_autostart_gmail_listener() -> None:
         submit_job(job_id)
 
 
-def _tradingview_analysis_autostart_enabled() -> bool:
-    configured = os.environ.get(
-        "TRADINGVIEW_ANALYSIS_AUTOSTART",
-        "false",
-    ).strip().lower()
-    if configured in {"1", "true", "yes"}:
-        return True
-    if configured in {"0", "false", "no"}:
-        return False
-    _log.warning(
-        "Invalid TRADINGVIEW_ANALYSIS_AUTOSTART=%r; disabling worker",
-        configured,
-    )
-    return False
-
-
-def _maybe_start_tradingview_analysis_worker(app: FastAPI):
-    """Start one cooperative DB-backed worker in the private API process."""
-
-    if not _tradingview_analysis_autostart_enabled():
-        _log.info(
-            "TradingView analysis worker skipped: autostart disabled"
-        )
-        return None
-
-    from app.engine.tradingview_analysis import TradingViewAnalysisWorker
-
-    worker = TradingViewAnalysisWorker(engine)
-    worker.start()
-    app.state.tradingview_analysis_worker = worker
-    _log.info("TradingView analysis worker started")
-    return worker
-
-
 async def _maybe_start_level_alerts(app_: FastAPI, stream):
     """Level alerts (Charts C5.1) are judged here whether or not a chart is open."""
     app_.state.level_alerts = None
@@ -239,7 +205,6 @@ async def lifespan(_app: FastAPI):
     _maybe_autostart_webull_listener()
     _maybe_autostart_gmail_watch()
     _maybe_autostart_gmail_listener()
-    tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_stream import ChartMarketStream
     chart_market_stream = ChartMarketStream(calendar=chart_calendar.cached)
@@ -255,9 +220,6 @@ async def lifespan(_app: FastAPI):
 
         if execution_mode() == "embedded":
             shutdown_requested.set()  # let an embedded Gmail listener end cleanly
-        if tradingview_worker is not None:
-            tradingview_worker.stop()
-            _log.info("TradingView analysis worker stopped")
 
 
 app = FastAPI(title="Trade Journal API", lifespan=lifespan)

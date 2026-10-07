@@ -1,17 +1,15 @@
-"""The Python port of Isaac Market Map, on synthetic bars.
+"""The Python Market Map implementation, exercised on synthetic bars.
 
 Every scenario is written once as a long and run again reflected through 100
 as a short (`market_map_bars.mirror`), so both sides are checked by the same
-numbers. Inputs are checked against the Pine source itself, not a copy.
+numbers. Historical exports provide a separate parity reference.
 """
 
 from __future__ import annotations
 
 import math
-import re
 from datetime import date
-from dataclasses import fields, replace
-from pathlib import Path
+from dataclasses import replace
 
 import pytest
 
@@ -42,8 +40,6 @@ from tests.market_map_bars import (
 
 THREE_BACK = date(2026, 2, 26)
 TWO_BACK = date(2026, 2, 27)
-PINE = (Path(__file__).resolve().parents[2] / "docs" / "pine" / "isaac_market_map.pine").read_text()
-
 ONLY = {
     "enable_orb": False,
     "enable_level_breaks": False,
@@ -75,72 +71,6 @@ def hhmm(moment) -> str:
 def price(value: float, side: int) -> float:
     """A long scenario's price, reflected for the short run."""
     return round(value if side == 1 else 200 - value, 6)
-
-
-# --- the inputs are the Pine's ---------------------------------------------------
-
-
-def _pine_constants() -> dict[str, str]:
-    return dict(re.findall(r'^const string (\w+) = "([^"]*)"', PINE, re.M))
-
-
-def _pine_inputs() -> dict[str, object]:
-    constants = _pine_constants()
-    found: dict[str, object] = {}
-    for name, kind, default in re.findall(r'^(\w+) = input\.(\w+)\(("[^"]*"|[^,]+),', PINE, re.M):
-        default = default.strip()
-        if kind in ("string", "symbol"):
-            found[name] = default.strip('"') if default.startswith('"') else constants[default]
-        elif kind == "bool":
-            found[name] = default == "true"
-        elif kind == "int":
-            found[name] = int(default)
-        else:
-            found[name] = float(default)
-    return found
-
-
-def _snake(name: str) -> str:
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
-
-
-# Inputs that only change what the chart draws or logs.
-DISPLAY_INPUTS = {"showLevels", "showTable", "logPayloads"}
-
-
-def test_every_pine_input_is_a_config_field_with_the_pine_default() -> None:
-    inputs = _pine_inputs()
-    assert len(inputs) > 40, "input parsing broke"
-    config = MarketMapConfig()
-    names = {field.name for field in fields(MarketMapConfig)}
-    missing, wrong = [], []
-    for pine_name, default in inputs.items():
-        if pine_name in DISPLAY_INPUTS:
-            continue
-        name = _snake(pine_name)
-        if name not in names:
-            missing.append(pine_name)
-        elif getattr(config, name) != default:
-            wrong.append(f"{name}: python {getattr(config, name)!r}, pine {default!r}")
-    assert not missing, f"Pine inputs with no MarketMapConfig field: {missing}"
-    assert not wrong, wrong
-
-
-def test_strategy_properties_match_the_pine_header() -> None:
-    header = re.search(r"^strategy\((.+)\)$", PINE, re.M).group(1)
-    assert "process_orders_on_close = true" in header
-    assert "pyramiding = 0" in header
-    config = MarketMapConfig()
-    assert f"slippage = {config.slippage}," in header
-    assert f"initial_capital = {config.initial_capital:g}," in header
-    assert "commission_value = 0" in header
-
-
-def test_the_port_knows_every_setup_the_pine_can_emit() -> None:
-    pine_setups = set(re.findall(r'(?:longSetup|shortSetup|retestLongName|retestShortName) := "([^"]+)"', PINE))
-    source = (Path(__file__).resolve().parents[1] / "app" / "engine" / "market_map.py").read_text()
-    port_setups = set(re.findall(r'"(\w+_(?:break|retest|reclaim|loss|fail))"', source))
-    assert pine_setups == port_setups
 
 
 # --- setups -----------------------------------------------------------------------

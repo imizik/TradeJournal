@@ -103,11 +103,8 @@ and `test_schema_migrations.py` fails on that deliberately.
 
 ## Hard constraints
 
-- Never expose or tunnel the private API (8080/8000). It has no auth. Only
-  port 8090, the TradingView ingress, is safe to tunnel — and it only runs when
-  `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
-- Never put private API keys or unrestricted database credentials in
-  `backend/.env.tradingview` or the VPS `/etc/tradejournal/tradingview.env`.
+- Never expose or tunnel the private API (8080/8000). It has no auth. There is
+  no public application ingress in the current deployment.
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the
   test suite writes to whatever `DATABASE_URL` resolves to, including the
   production VPS database.

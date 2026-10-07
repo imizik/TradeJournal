@@ -1,8 +1,7 @@
 """
 Backtest Isaac Market Map over many tickers from Alpaca bars.
 
-Runs the Python port of `docs/pine/isaac_market_map.pine`
-(`app/engine/market_map.py`) on each ticker, prints a cohort report in R, and
+Runs `app/engine/market_map.py` on each ticker, prints a cohort report in R, and
 writes a TradingView-shaped "List of trades" CSV per ticker that imports into
 Strategy Lab (source timezone America/New_York).
 
@@ -14,7 +13,7 @@ grade and size; use `--feed sip` when the key allows it.
 Usage:
     python scripts/backtest_market_map.py MU META AAPL NBIS SPY --days 365
     python scripts/backtest_market_map.py AMD LLY --days 180 --set allow_shorts=true
-    # parity with the committed v1.0.0 Strategy Tester exports (see docs/pine/README.md)
+     # parity with the archived Strategy Tester exports (see docs/pine/README.md)
     python scripts/backtest_market_map.py --profile v1.0.0 --feed sip --extended-hours \\
         --start 2025-10-14 --end 2026-09-24 --parity "TradingView/IMM_v1.0.0_*.csv"
 """
