@@ -311,8 +311,6 @@ def main() -> None:
         elif args.action == "status":
             print(f"Current: {current()}\nPrevious: {current('previous')}")
             run("systemctl", "--no-pager", "status", *SERVICES)
-            if (UNITS / f"{INGRESS_SERVICE}.service").is_file():
-                subprocess.run(["systemctl", "--no-pager", "status", INGRESS_SERVICE], check=False)
         else:
             release = release_path(args.release_id)
             if args.action == "identity":

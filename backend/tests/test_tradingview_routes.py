@@ -8,12 +8,11 @@ from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy import event
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine, select
+from sqlmodel import Session, SQLModel, create_engine
 
 from app.database import get_session
 from app.engine.tradingview import parse_alert_bytes
 from app.engine.tradingview_alerts import persist_alert, serialize_snapshot
-from app.models import TradingViewAlert
 from app.routers import tradingview_alerts
 
 
