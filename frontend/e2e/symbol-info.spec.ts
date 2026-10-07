@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
-import type { Earnings, SymbolEvents, SymbolForecast } from "../lib/symbolInfo";
+import type { Earnings, NewsArticle, NewsSource, SymbolEvents, SymbolForecast, SymbolNews } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
@@ -63,12 +63,10 @@ test("placeholder tabs persist per device and rapid symbol steps fetch only the 
   await page.goto("/charts");
   const info = panel(page);
   await expect(info.locator("dl")).toContainText("$1,300.00");
-  for (const tab of ["Overview", "News"]) {
-    await info.getByRole("tab", { name: tab, exact: true }).click();
-    await expect(info).toContainText(`${tab} is coming soon.`);
-  }
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  await expect(info).toContainText("Overview is coming soon.");
   await page.reload();
-  await expect(info.getByRole("tab", { name: "News", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(info.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
   expect(reads).toHaveLength(1);
   // Anchor both operations to one fixed time. Pausing at wall-clock "now"
   // races the browser advancing while the command travels to it on CI.
@@ -285,4 +283,113 @@ test("Forecast shows the implied move at the chart's price for the nearest expir
   await page.screenshot({ path: test.info().outputPath("symbol-info-forecast.png"), fullPage: true });
   await choose(page, "AAPL");
   await expect.poll(() => reads.at(-1)).toMatch(/\/AAPL\/forecast\?spot=101$/);
+});
+
+// ---- News (T1.2): stubbed feed; the backend tests prove the merge, dedupe and caches ----
+
+const NEWS_NOW = Date.parse("2026-10-06T15:00:00Z");
+const article = (id: string, headline: string, minutesAgo: number, tickers: string[], extra: Partial<NewsArticle> = {}): NewsArticle => ({
+  id, provider: "alpaca_benzinga", publisher: "Benzinga", headline, url: `https://example.com/${id}`,
+  published_at: new Date(NEWS_NOW - minutesAgo * 60_000).toISOString(), summary: `Summary of ${headline}`, tickers,
+  roundup: tickers.length > 3, sentiment: [], also_in: [], ...extra,
+});
+const sources = (polygon: NewsSource["state"] = "ok"): NewsSource[] => [
+  { provider: "alpaca_benzinga", label: "Alpaca (Benzinga)", state: "ok", fetched_at: NEWS_NOW / 1000, age_seconds: 0, message: null },
+  { provider: "polygon", label: "Polygon", state: polygon, fetched_at: NEWS_NOW / 1000 - 900, age_seconds: 900, message: polygon === "ok" ? null : "Polygon refused the read (429)." }];
+const newsBody = (articles: NewsArticle[], polygon: NewsSource["state"] = "ok"): SymbolNews => ({
+  symbol: "NVDA", as_of: new Date(NEWS_NOW).toISOString(), time_zone: "America/New_York", days: 7, sentiment_note: "Sentiment is supplied by Polygon, not calculated here.",
+  sources: sources(polygon), articles });
+
+test("News lists headlines with Focused on, expands summaries, shows provider sentiment and a degraded source", async ({ page }) => {
+  const mixed = [
+    article("a1", "Nvidia ships a chip", 5, ["NVDA"], { sentiment: [{ ticker: "NVDA", sentiment: "positive", reasoning: "Strong demand." }], provider: "polygon", publisher: "Reuters" }),
+    article("a2", "Five stocks moving today", 30, ["NVDA", "AAPL", "MSFT", "AMZN", "GOOGL"]),
+    article("a3", "Three tickers stay", 90, ["NVDA", "AMD", "AVGO"]),
+  ];
+  await page.route("**/api/backend/charts/symbol/NVDA/news", (route) => route.fulfill({ json: newsBody(mixed, "stale") }));
+  await page.clock.install({ time: new Date(NEWS_NOW) });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "News", exact: true }).click();
+  await expect(info.getByRole("link", { name: "Nvidia ships a chip" })).toHaveAttribute("href", "https://example.com/a1");
+  await expect(info.getByRole("link", { name: "Nvidia ships a chip" })).toHaveAttribute("target", "_blank");
+  await expect(info.getByRole("link", { name: "Five stocks moving today" })).toHaveCount(0); // Focused hides the roundup
+  await expect(info.getByText("Three tickers stay")).toBeVisible();
+  await expect(info.getByText("+2 tickers")).toBeVisible();
+  await expect(info.getByText("5 min ago")).toHaveAttribute("title", "Oct 6, 10:55 AM ET");
+  await expect(info.getByText("Polygon: positive")).toHaveAttribute("title", /not ours: Strong demand\./);
+  await expect(info).toContainText("Polygon refused the read (429).");
+  await expect(info).not.toContainText("Summary of Nvidia ships a chip");
+  await info.getByRole("button", { name: /Show summary: Nvidia ships a chip/ }).click();
+  await expect(info).toContainText("Summary of Nvidia ships a chip");
+  await info.getByLabel("Focused").uncheck();
+  await expect(info.getByRole("link", { name: "Five stocks moving today" })).toBeVisible();
+  await expect(info.getByText("+4 tickers")).toBeVisible();
+});
+
+test("News says so when the feed is empty", async ({ page }) => {
+  await page.route("**/api/backend/charts/symbol/NVDA/news", (route) => route.fulfill({ json: newsBody([]) }));
+  await page.goto("/charts");
+  await panel(page).getByRole("tab", { name: "News", exact: true }).click();
+  await expect(panel(page)).toContainText("No news in the last 7 days");
+});
+
+test("News polls each minute only while the tab is open and the page is visible, and new headlines wait behind a banner", async ({ page }) => {
+  const reads: number[] = [];
+  const feed = [article("a1", "First story", 10, ["NVDA"])];
+  await page.route("**/api/backend/charts/symbol/NVDA/news", (route) => {
+    reads.push(reads.length);
+    return route.fulfill({ json: newsBody(feed) });
+  });
+  await page.clock.install({ time: new Date(NEWS_NOW) });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "News", exact: true }).click();
+  await page.clock.runFor(400);
+  await expect(info.getByRole("link", { name: "First story" })).toBeVisible();
+  expect(reads).toHaveLength(1);
+  feed.unshift(article("a2", "Breaking story", 0, ["NVDA"]));
+  await page.clock.runFor(60_000);
+  await expect(info.getByRole("button", { name: "1 new" })).toBeVisible();
+  await expect(info.getByRole("link", { name: "Breaking story" })).toHaveCount(0); // the list did not shift
+  expect(reads).toHaveLength(2);
+  await info.getByRole("button", { name: "1 new" }).click();
+  await expect(info.getByRole("link", { name: "Breaking story" })).toBeVisible();
+  // A hidden page does not poll.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => true });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.clock.runFor(180_000);
+  expect(reads).toHaveLength(2);
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); });
+  await page.clock.runFor(60_000);
+  expect(reads).toHaveLength(3);
+  // Leaving the tab stops it too.
+  await info.getByRole("tab", { name: "You", exact: true }).click();
+  await page.clock.runFor(180_000);
+  expect(reads).toHaveLength(3);
+});
+
+test("News keeps the same 20 rows behind the banner when a poll adds one and the backend drops the oldest", async ({ page }) => {
+  const stories = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => article(`s${from + i}`, `Story ${from + i}`, 100 - (from + i), ["NVDA"]));
+  let feed = stories(1, 20).reverse(); // newest first
+  await page.route("**/api/backend/charts/symbol/NVDA/news", (route) => route.fulfill({ json: newsBody(feed) }));
+  await page.clock.install({ time: new Date(NEWS_NOW) });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "News", exact: true }).click();
+  await page.clock.runFor(400);
+  const rows = info.locator("ul > li");
+  await expect(rows).toHaveCount(20);
+  feed = stories(2, 21).reverse(); // one new, the oldest evicted from the capped feed
+  await page.clock.runFor(60_000);
+  await expect(info.getByRole("button", { name: "1 new" })).toBeVisible();
+  await expect(rows).toHaveCount(20);
+  await expect(info.getByRole("link", { name: "Story 1", exact: true })).toBeVisible();
+  await expect(info.getByRole("link", { name: "Story 21", exact: true })).toHaveCount(0);
+  await info.getByRole("button", { name: "1 new" }).click();
+  await expect(rows).toHaveCount(20);
+  await expect(info.getByRole("link", { name: "Story 21", exact: true })).toBeVisible();
+  await expect(info.getByRole("link", { name: "Story 1", exact: true })).toHaveCount(0);
 });

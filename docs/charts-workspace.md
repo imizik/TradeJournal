@@ -56,9 +56,25 @@ reason, never a number. Chains come through the chart's option feed (below),
 60 seconds fresh, and the tab reads again each minute while it is open; until
 the chart has a price it waits for one.
 
-Overview and News are placeholders for the
+Its **News** tab (T1.2) reads `GET /charts/symbol/{symbol}/news`: the newest
+20 headlines from Alpaca (Benzinga, cached 60 s) and Polygon (cached 15 minutes
+on disk under `backend/data/symbol_info/v1/polygon/`), merged and deduplicated by
+canonical link and normalized headline. Rows show relative time (New York time
+on hover), headline, publisher, a "+N tickers" chip, the summary on expand and
+the link out. **Focused** (default on) hides articles that tag more than three
+symbols. Polygon's per-ticker sentiment, when present, is labelled as Polygon's
+opinion. New headlines wait behind an "N new" button. The tab reads again each
+minute only while it is open and the page is visible. Polygon shares the free
+plan's 5 calls a minute with fill enrichment, so it is read only for this tab,
+through the enricher's limiter, never retried, and a 429 or failure serves the
+cached copy with its age and mutes Polygon for five minutes (Alpaca news likewise
+reads once on a 2.5 s budget with no retry and mutes itself for five minutes); each source's state
+(`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
+Polygon failure.
+
+Overview is a placeholder for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
-on this device. Only an expanded You, Events or Forecast tab fetches, once after the
+on this device. Only an expanded You, News, Events or Forecast tab fetches, once after the
 ticker settles for 300 ms; old requests are cancelled. The panel starts
 collapsed below 1024 px and follows the watchlist's visibility in full-screen
 mode. There are no new tables or migrations for this panel.

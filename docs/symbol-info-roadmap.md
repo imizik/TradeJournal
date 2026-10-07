@@ -43,7 +43,7 @@ after them, clearly labelled.
 | ID | Item | Phase | Status |
 |---|---|---|---|
 | T1.1 | Panel shell and the **You** tab: your own trades on this underlying | 1 Core | done ([PR #115](https://github.com/imizik/TradeJournal/pull/115)) |
-| T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga) | 1 Core | next |
+| T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga, plus Polygon with provider-supplied sentiment) | 1 Core | done (branch `claude/roadmap-features-7kd6u6`) |
 | T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | todo |
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
@@ -54,6 +54,8 @@ after them, clearly labelled.
 | T3.3 | Ownership and insider activity | 3 Depth | todo |
 | T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | todo |
 | T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
+| T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
+| T3.7 | Economic calendar from FRED release dates | 3 Depth | todo, not built (needs a free FRED key) |
 
 Why this order: **You** costs zero external calls, is the one tab TradingView
 cannot have, and proves the shell. News is the most-asked-for tab and the
@@ -70,7 +72,7 @@ Probed 2026-10-02 with NVDA, CVNA, AMD, LLY and SPY.
 |---|---|---|---|
 | Overview: key stats | Tradier `/v1/markets/quotes` + `/beta/markets/fundamentals/company`, `/ratios`, `/statistics` (Morningstar) | Last, change, day range, 52-week high/low; market cap, enterprise value, shares outstanding, employees, sector code, IPO date, long description; P/E, P/S, P/B, EV/EBITDA, dividend yield, payout, 36/48/60-month beta; 30/60/90-day average volume; 13F holders and % institutional. One call each, 0.3-1.3 s, comma-separated symbols batch | **Feasible now** |
 | News | Alpaca `/v1beta1/news` (Benzinga), already in `backend/app/engine/news.py` | Headline, summary, tagged symbols, source, URL, images; full text on request. Last 7 days: NVDA 115, SPY 240, LLY 28, CVNA 4 articles | **Feasible now** |
-| News, with sentiment | Polygon `/v2/reference/news` | Publisher, description, keywords, and per-ticker `insights` (positive/negative/neutral plus a reasoning sentence) | Feasible but costs the Polygon budget (below); later |
+| News, with sentiment | Polygon `/v2/reference/news` | Publisher, description, keywords, and per-ticker `insights` (positive/negative/neutral plus a reasoning sentence) | **Built in T1.2** as the News tab's second source, on its own 15-minute cache (budget below) |
 | Events / earnings | Tradier `/beta/markets/fundamentals/calendars` | Earnings results and calls by quarter, AGM, conferences, annual report, each `Confirmed` or `Estimated`. History back to 2010 (AMD) / 2017 (CVNA). NVDA next: 2026-11-19 *Estimated*; CVNA next: 2026-10-28 *Confirmed* | **Feasible now**, with the caveats below |
 | Dividends, splits | Tradier `/dividends`, `/corporate_actions`; Alpaca `/v1/corporate-actions`; Polygon `/v3/reference/dividends` | Ex, record and pay dates, amounts; split history with ratios | **Feasible now** (Tradier; Alpaca as fallback) |
 | Forecast: analyst targets, ratings, estimates | Polygon/Massive Benzinga endpoints (`/benzinga/v1/ratings`, `/consensus-ratings`, `/earnings`) | **HTTP 403**, "not entitled", needs a paid plan | Not available on current plans |
@@ -135,7 +137,7 @@ these keys.
 |---|---|---|---|
 | Tradier (120/min per token) | Chart feed (60/min cap), options positioning (30/min), position quotes (under 10/min) | **At most 10/min** | Fundamentals cached 24 h per symbol, calendar 12 h, batched by `symbols=`. A cold symbol costs three calls (company, ratios, calendar); a warm one costs none |
 | Alpaca (free data plan) | Enrichment, reports, scalp packets | At most 2/min | News cached 60 s per symbol on the server; the browser polls once a minute only while the News tab is open and the page is visible |
-| Polygon Basic (5/min) | Fill enrichment, which paces itself from Polygon's first 429 | **At most one call per symbol per dataset per day**, never on the hot path | Disk cache; on a 429, serve the cached copy with its age and do not retry. No Polygon call in Phase 1 |
+| Polygon Basic (5/min) | Fill enrichment, which paces itself from Polygon's first 429 | **At most one call per symbol per dataset per day**, never on the hot path. **News is the one exception: one call per symbol per 15 minutes**, and only while the News tab is requested | Disk cache; on a 429 or any failure, serve the cached copy with its age and do not retry (and stay quiet for five minutes). News goes through the enricher's adaptive limiter and never waits for a slot: a slot more than two seconds out counts as busy, serves the cache and claims nothing (`reserve_within`), so enrichment is not pushed back; a nearer slot is slept before the call. No other Polygon call in Phase 1 |
 | Yahoo (`yfinance`) | Quote fallback, report gauges | One fetch per symbol per day | Disk cache; any failure shows "Yahoo unavailable" and the cached copy if one exists |
 | Anthropic | AI reviews | Zero by default | Nothing in this plan calls a model automatically |
 
@@ -187,16 +189,34 @@ the reconstructor's realized P&L as stored, and does not recompute P&L.
 symbol with no trades shows "No trades on this symbol"; the 390 px layout
 test passes.
 
-**T1.2 News.** The latest 20 Benzinga headlines for the symbol, newest first:
-time (relative, with New York time on hover), headline, source, a "+N
-tickers" chip when the article tags several symbols, summary on expand, and
-the link out. A **Focused** toggle (default on) hides articles tagging more
-than three symbols, which removes most mega-cap roundups (NVDA appears in
-many). New articles since the tab was opened show as "N new" at the top
-instead of shifting the list. Reuse `fetch_news`; add the server-side 60 s
-cache. *Done when:* a fixture with mixed tagging proves the Focused filter;
-an empty feed says "No news in the last 7 days"; polling stops when the tab
-or page is hidden (browser test with a stubbed route).
+**T1.2 News.** The newest 20 headlines for the symbol from two feeds,
+merged, newest first: Alpaca's Benzinga feed (`fetch_news(fast=True)`: one request on a
+2.5 s budget, no retry or limiter wait; a 429, timeout or failure serves the
+cached copy with its age or `failed` and goes quiet for five minutes; cached 60 s per
+symbol in memory) and Polygon's `/v2/reference/news` (cached 15 minutes per
+symbol under `backend/data/symbol_info/v1/polygon/`). Each feed has a pure
+normalizer into one shape (`provider` is `alpaca_benzinga` or `polygon`, plus
+publisher, URL, UTC time, summary, tagged symbols and optional per-ticker
+sentiment from Polygon's `insights`); the browser never sees a provider's
+shape. Two rows are one story when their canonical links (no scheme, `www.`,
+tracking query or trailing slash) or normalized headlines match; the Alpaca row
+stays and takes Polygon's sentiment. Each row shows time (relative, with New York
+time on hover), headline, publisher, a "+N tickers" chip when the article tags
+several symbols, the summary on expand, and the link out. Sentiment is
+labelled as Polygon's, never ours. A **Focused** toggle (default on) hides
+articles tagging more than three symbols, which removes most mega-cap
+roundups; the response carries the newest 20 plus the newest 20 non-roundups,
+so Focused still fills a list. New articles since the tab was opened show as
+"N new" at the top instead of shifting the list; the tab reads again each
+minute while it is open and the page is visible. Polygon is read only when the
+tab is requested, never retried, and a failure or 429 degrades only itself:
+the response lists each source as `ok`, `stale` (older copy, with its age),
+`failed` or `not_configured`, and Alpaca news still shows. An empty feed
+says "No news in the last 7 days". *Done when:* a fixture with mixed tagging
+proves the Focused flag and the merge, the caches and the Polygon 429 fallback
+are tested, and the browser tests cover the empty state, Focused and polling
+stopping when the tab or page is hidden (stubbed routes; live Alpaca and
+Polygon are not exercised).
 
 **T1.3 Overview.** Price and change, day range, a 52-week range bar, average
 volume (30-day, from fundamentals; [trap](#data-traps-the-probes-found)),
@@ -325,11 +345,15 @@ right candle on 1m and 1D in a browser test, and a layer toggle hides them.
   last 24 h of headlines and the price move with the Anthropic API, on demand
   only, cached per symbol per hour. Belongs with the charts roadmap's "Why did
   this move?", which owns the evidence-labelling rules.
-- **Headline sentiment** from Polygon's per-ticker `insights`. It is a model's
-  opinion and costs the scarce Polygon budget; add only if headlines prove
-  hard to triage.
 - **Seasonals**: average return by month and weekday from Tradier daily
   history. Cheap to calculate, of little use for 0-7 DTE options.
+- **EDGAR news source** (T3.6): 8-K and Form 4 filings as headlines in the
+  News tab, normalized into the same shape with `provider: "edgar"`. EDGAR
+  needs a descriptive `User-Agent` and a 10-requests-a-second courtesy limit,
+  and this sandbox cannot reach it, so probe it from the VPS first. Not built.
+- **Economic calendar** (T3.7): FRED `/fred/releases/dates` for CPI, jobs and
+  FOMC-adjacent releases on the Events tab or as chart markers. Needs a free
+  FRED API key. Not built.
 - **SEC filings list** (10-K, 10-Q, 8-K links) from EDGAR, after the VPS
   probe.
 - **IV rank**: needs about a year of the C4.3 daily option snapshots before it

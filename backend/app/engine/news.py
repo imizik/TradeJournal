@@ -13,7 +13,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from app.engine.alpaca import _alpaca_get
+from app.engine.alpaca import _alpaca_get, _alpaca_get_fast
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ def fetch_news(
     end: Optional[datetime] = None,
     limit: int = 50,
     include_content: bool = False,
+    fast: bool = False,
 ) -> list[dict]:
     """
     Fetch news articles, newest first. `symbols=None` returns the broad tape.
@@ -35,6 +36,9 @@ def fetch_news(
     `include_content=True` adds full article text (HTML stripped, capped at
     MAX_CONTENT_CHARS). Meant for targeted drill-down on a few articles, not
     bulk packet assembly — keep `limit` small when using it.
+
+    `fast=True` is for request paths: one page on a ~2.5 s budget, no retry, no
+    rate-limit wait; failures raise `AlpacaFastFailure`.
     """
     params: dict = {
         "sort": "desc",
@@ -57,7 +61,7 @@ def fetch_news(
         page_params = dict(params)
         if page_token:
             page_params["page_token"] = page_token
-        data = _alpaca_get("/v1beta1/news", page_params)
+        data = (_alpaca_get_fast if fast else _alpaca_get)("/v1beta1/news", page_params)
         for item in data.get("news", []):
             article_id = item.get("id")
             if article_id in seen_ids:
@@ -78,7 +82,7 @@ def fetch_news(
             if len(articles) >= limit:
                 break
         page_token = data.get("next_page_token")
-        if not page_token:
+        if not page_token or fast:
             break
 
     return articles

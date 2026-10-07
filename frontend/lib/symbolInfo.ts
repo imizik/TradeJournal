@@ -120,3 +120,37 @@ const longDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "sh
 export const eventDay = (day: string) => longDay.format(new Date(`${day}T00:00:00Z`));
 export const readAt = (seconds: number | null) => seconds == null ? "not read yet"
   : `read ${new Date(seconds * 1000).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`;
+
+/** One headline (T1.2), already normalized by the backend from Alpaca (Benzinga) or Polygon. */
+export type NewsArticle = {
+  id: string; provider: "alpaca_benzinga" | "polygon"; publisher: string | null; headline: string; url: string;
+  /** UTC ISO time. */
+  published_at: string; summary: string | null; tickers: string[];
+  /** Tags more than three symbols; Focused hides these. */
+  roundup: boolean;
+  /** Polygon's per-ticker opinion; never ours. */
+  sentiment: { ticker: string; sentiment: "positive" | "negative" | "neutral"; reasoning: string | null }[];
+  also_in: string[];
+};
+/** How one source went: `stale` serves an older copy (`age_seconds` old); `failed` and `not_configured` show nothing from it. */
+export type NewsSource = { provider: string; label: string; state: "ok" | "stale" | "failed" | "not_configured"; fetched_at: number | null; age_seconds: number | null; message: string | null };
+export type SymbolNews = {
+  symbol: string; as_of: string; time_zone: string; days: number; sentiment_note: string;
+  sources: NewsSource[]; articles: NewsArticle[];
+};
+export const NEWS_SHOWN = 20;
+/** What the News tab lists: the newest 20, with Focused hiding articles that tag more than three symbols. */
+export const listedNews = (articles: NewsArticle[], focused: boolean) => articles.filter((a) => !(focused && a.roundup)).slice(0, NEWS_SHOWN);
+
+export async function fetchSymbolNews(symbol: string, signal: AbortSignal): Promise<SymbolNews> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/news`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("News unavailable. Try again.");
+  return response.json();
+}
+
+/** "5 min ago", from the article's time to `now` (ms). */
+export function ago(publishedAt: string, now: number): string {
+  const minutes = Math.max(0, Math.floor((now - Date.parse(publishedAt)) / 60_000));
+  return minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1440)} d ago`;
+}
+export const newYorkTime = (publishedAt: string) => `${new Date(publishedAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`;

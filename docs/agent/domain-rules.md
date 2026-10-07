@@ -236,6 +236,11 @@ is verifiable rather than hopeful.
   `POLYGON_CALLS_PER_MINUTE` is a **ceiling**, not a target; leave it unset
   unless you mean to stay below what the plan allows. Never pin it to a
   free-tier number in `.env.example` — that silently caps every paid key.
+- The symbol info News tab also reads Polygon (`/v2/reference/news`), through
+  this same limiter but off the enrichment path: it only reserves a slot
+  (never waits more than two seconds, never retries), caches 15 minutes under
+  `backend/data/symbol_info/v1/polygon/`, and a 429 there calls `note_refusal`
+  like any other, so it also slows enrichment. Keep it behind the News tab.
 - Cache markers: empty Polygon responses are cached as
   `{"_empty_cached_at": ts}` (1 year for finalized history); an empty bar
   window is retried weekly. Delete the file to force a retry.
