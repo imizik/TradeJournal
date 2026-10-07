@@ -115,13 +115,12 @@ you change it (`verification.md`, "What is NOT covered yet").
 | AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py`, `app/routers/daily_review.py` | `POST /trades/{id}/review`; `GET /daily-review`, `/daily-review/{day}`, `POST /daily-review`; job `daily_review` | — (Anthropic) |
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab (kept readable, not extended since 2026-10-02: [what comes next](../strategy-factory.md#what-comes-next)) | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
-| Isaac Market Map backtester | `app/engine/market_map.py` (the Pine's rules, pure), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
+| Isaac Market Map backtester | `app/engine/market_map.py` (pure historical strategy research rules), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
 | Strategy factory | `app/engine/factory_data.py` (bars, splits, features), `factory_rules.py` (entry families, the shared execution model, specs), `factory_model.py` (learned filter), `factory_gates.py` (gates, ledger records), `factory_brief.py` (the weekly brief, proposal review, weekly report) — all pure; `scripts/strategy_factory.py` (bar cache, ledger file, CLI, the Claude call, ntfy); `../scripts/factory_week.sh` (the weekly run, from launchd, or by hand with a Claude Code session as the idea model: `.claude/skills/factory-week/SKILL.md`); specs in `research/specs/`, results in `research/ledger.jsonl`; the live ledger and the weekly reports are on branch `factory/ledger`, never merged | — (`python scripts/strategy_factory.py run ../research/specs/<spec>.json`, then `ledger`; weekly: phone summary) | `test_factory.py` (synthetic bars: execution model, families, gates, forward evidence, the data lock end to end), `test_factory_brief.py` (catalog, digest, evidence, review, report), `test_strategy_factory.py` (the script with a stub minute source and a stub idea model); see `docs/strategy-factory.md` |
 | Research workspace | `app/engine/research.py`, `app/routers/research.py` | `GET`/`PUT /research/workspaces/{slug}` | — |
 | TradingView Signals page | `frontend/app/signals/page.tsx`, `frontend/app/signals/[alertId]/page.tsx`, `frontend/components/SignalsRefresh.tsx`, `frontend/lib/tradingview.ts` | `/signals` in the nav, then any row's **Detail**; both refresh every 30s while visible and on tab return | `frontend/e2e/signals.spec.ts`: new alerts, verdicts/details, hidden-tab pause, navigation cleanup, slow refresh and skip/error reasons against disposable SQLite |
 | Automatic deployment | `deploy/autodeploy.py`, `.github/workflows/release.yml`, `deploy/control.py` (`prune`, lock exit 75), `deploy/systemd/tradejournal-autodeploy.*`, `deploy/autodeploy.env.example` | merge to `main`; on the VPS `sudo … autodeploy.py status` ([automatic deployment](../../deploy/README.md#automatic-deployment)) | `test_autodeploy.py`, `test_deployment.py`; the Ubuntu smoke upgrades through the real unit against a local stand-in for GitHub. The live Release workflow runs only on `main` |
-| Production TradingView ingress | `deploy/ingress.py`, `deploy/launch.py`, `deploy/control.py`, `deploy/systemd/tradejournal-ingress.service`, `deploy/Caddyfile.tradingview.example` | [VPS webhook setup](../../deploy/README.md#tradingview-webhooks) | `test_deployment.py`; Ubuntu deployment smoke covers real role/service/proxy behavior, public DNS/TLS remains an operator check |
-| TradingView alerts (retiring after in-house alerts: [C5.2](../charts-roadmap.md#phase-5--alerts-on-the-chart)) | `app/engine/tradingview.py`, `tradingview_alerts.py`, `tradingview_analysis.py`; `app/routers/tradingview_*.py`; `app/tradingview_ingress.py`, `app/tradingview_database.py` | private `GET /tradingview/alerts`, `/tradingview/alerts/{alert_id}`; public ingress on `:8090` `POST /tradingview/webhook`, `GET /health` | `test_tradingview.py`, `_routes`, `_alert_model`, `_alert_persistence`, `_alert_migration`, `_analysis`; `test_import_boundaries.py` (what the ingress may import) |
+| Retired TradingView alert records | `app/models.py`, `app/engine/tradingview_alerts.py`, `app/routers/tradingview_alerts.py`; migration and legacy parsers retained for historical data | private read-only `GET /tradingview/alerts`, `/tradingview/alerts/{alert_id}`; Signals list/detail pages | `test_tradingview_routes.py` (GET-only API and DTO reads), `test_tradingview_alert_migration.py`; C5.2 deployment smoke proves no ingress service or 8090 listener |
 | Schema | `app/models.py`, `alembic/versions/`, `app/schema.py` | — | `test_schema_migrations.py`, `test_schema_authority.py`, `test_postgres_parity.py`, `test_postgres_migration_paths.py` |
 | Which database am I on | `app/environment.py`, `app/database.py`, `app/routers/health.py` | `GET /health` | `test_environment_guard.py`, `test_check_database.py` |
 | Database roles | `scripts/setup_roles.py` | — | `test_setup_roles.py` (Postgres job only) |
@@ -159,8 +158,8 @@ you change it (`verification.md`, "What is NOT covered yet").
   (`domain-rules.md`, fills and trades)
 - `repair_expired_trade_times.py` — the guarded repair of expiration closes
   saved as UTC clocks instead of 16:00 New York wall time
-- `setup_roles.py` — create the app and ingress roles, then prove they are
-  limited by connecting as each one (`environments.md`)
+- `setup_roles.py` — provision and verify database roles, including the
+  retained legacy ingress role by connecting as each one (`environments.md`)
 - `backtest_market_map.py` — Isaac Market Map over many tickers from Alpaca
   bars: cohort report in R, Strategy Lab CSVs, `--parity` against exports
 - `imm_export_cohorts.py`, `playbook_cohorts.py` — the cohort evidence
@@ -202,8 +201,8 @@ reason, and ruff lints them without importing them.
 - `docs/tradingview-signal-loop-plan.md` — staged plan for the signal loop
 - `docs/strategy-lab-metrics.md` — metric definitions
 - `docs/strategy-lab-pine-metadata.md` — the `sl1|key=value|...` convention
-- `docs/pine/README.md` — the Isaac Market Map strategy/alert script, the
-  journal evidence behind each rule, and TradingView setup
+- `docs/pine/README.md` — archived Isaac Market Map research and historical
+  TradingView export comparisons
 - `docs/strategy-factory.md` — how the strategy factory judges an idea (the
   periods, random-entry baseline, rising bar and holdout lock), how to write a
   spec, and its results so far
@@ -216,13 +215,7 @@ reason, and ruff lints them without importing them.
   decision support and never places orders.
 - No component-level frontend tests; the Playwright smoke tests are the only
   frontend coverage, and they are smoke depth.
-- The Pine script (`docs/pine/isaac_market_map.pine`) is contract-tested by
-  `backend/tests/test_pine_market_map.py` but never compiled in CI;
-  TradingView is the only place it runs. Its Python port
-  (`app/engine/market_map.py`) is tested on synthetic bars and against the
-  exports' execution fingerprints; entry-by-entry parity on real bars is a
-  manual `--parity` run (88% of the single-stock round 1 entries on SIP bars,
-  `docs/pine/README.md`), not a test.
+- The Pine alert source was retired with C5.2; the Python research implementation remains tested on synthetic bars and historical exports.
 - `/accounts` is a placeholder page (above).
 
 ## Subsystem notes worth knowing before you dig

@@ -1,15 +1,14 @@
-"""Isaac Market Map, ported bar for bar from `docs/pine/isaac_market_map.pine`.
+"""Isaac Market Map rules evaluated on supplied bars.
 
-The Pine is the specification. Every input is a `MarketMapConfig` field with
-the Pine default, named as the Pine input in snake_case, and the per-bar
-logic keeps the Pine's order of evaluation, because several rules depend on
+The archived Pine strategy is the historical reference. Every input is a
+`MarketMapConfig` field with the archived defaults, named after the former
+Pine inputs in snake_case, and the per-bar logic keeps their order of evaluation, because several rules depend on
 it (a retest level set on this bar cannot fire until the next one; an exit
 is counted and its cooldown started on the bar the script notices it, which
 for a fill at a bar's close is the next bar and can be the next session).
 
 Pine's `na` is represented as `math.nan`. Comparisons with NaN are false in
-Python exactly as comparisons with `na` are false in Pine, so the conditions
-read the same as the source.
+Python as they are in Pine, preserving the behavior of the historical port.
 
 Execution follows the Pine `strategy()` settings:
 

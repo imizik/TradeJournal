@@ -3,22 +3,9 @@
 These are the rules a change cannot be allowed to break by accident, so they
 are checked on the static import graph rather than left to review:
 
-1. **The public ingress reaches only its own modules.** ``app.tradingview_ingress``
-   is the one process that may be exposed to the internet. Whatever it imports,
-   directly or through any chain, runs in that process with that process's
-   credentials. It must never pull in the private database engine
-   (``app.database``), the private app or its routers, the migration runner, or
-   any module that holds a private API key.
-
-2. **The private app never imports the ingress side.** ``app.tradingview_database``
-   reads ``TRADINGVIEW_DATABASE_URL``; the private app must not grow a dependency
-   on it.
-
-3. **Pure engine modules stay pure.** The FIFO reconstructor, the parsers and
-   the Strategy Lab metrics are testable with no credentials, no stubs and no
-   network. That property is only as durable as the imports: a pure module may
-   import other pure modules, ``app.models`` and a short list of third-party
-   packages, and nothing else.
+1. **Pure engine modules stay pure.** The FIFO reconstructor, parsers and
+   Strategy Lab metrics are testable with no credentials, stubs or network.
+   Their imports must stay inside the explicit pure-module policy below.
 
 Each rule is an allowlist, not a denylist, so a new module is caught the first
 time it is reached: the universe checked is the graph grimp builds from the
@@ -40,21 +27,6 @@ import pytest
 
 
 # --- policy ------------------------------------------------------------------
-
-# Everything the public ingress process may import, directly or indirectly.
-INGRESS_ENTRYPOINT = "app.tradingview_ingress"
-INGRESS_MAY_REACH = {
-    "app.tradingview_ingress",
-    "app.tradingview_database",
-    "app.routers.tradingview_webhook",
-    "app.engine.tradingview",
-    "app.engine.tradingview_alerts",
-    "app.models",
-}
-
-# Modules that belong to the ingress side only. Nothing outside this set may
-# import them.
-INGRESS_ONLY = {"app.tradingview_ingress", "app.tradingview_database"}
 
 # Modules with no network, no database engine and no credentials. Ordered
 # roughly by how much depends on them.
@@ -133,23 +105,6 @@ def _chain(graph: grimp.ImportGraph, importer: str, imported: str) -> str:
     return " -> ".join(chain) if chain else f"{importer} -> ... -> {imported}"
 
 
-def ingress_strays(graph: grimp.ImportGraph) -> dict[str, str]:
-    """Internal modules the ingress reaches that the policy does not allow, with the chain."""
-    reached = graph.find_upstream_modules(INGRESS_ENTRYPOINT) | {INGRESS_ENTRYPOINT}
-    strays = {m for m in reached if _is_internal(m)} - INGRESS_MAY_REACH
-    return {m: _chain(graph, INGRESS_ENTRYPOINT, m) for m in sorted(strays)}
-
-
-def ingress_only_leaks(graph: grimp.ImportGraph) -> dict[str, str]:
-    """Modules outside the ingress side that import an ingress-only module."""
-    leaks: dict[str, str] = {}
-    for module in sorted(INGRESS_ONLY):
-        for importer in sorted(graph.find_downstream_modules(module)):
-            if importer not in INGRESS_MAY_REACH:
-                leaks[importer] = _chain(graph, importer, module)
-    return leaks
-
-
 def impurities(graph: grimp.ImportGraph) -> dict[str, str]:
     """For each pure module, the first thing it reaches that a pure module may not."""
     found: dict[str, str] = {}
@@ -184,27 +139,9 @@ def graph() -> grimp.ImportGraph:
 
 
 def test_the_policy_names_modules_that_exist(graph: grimp.ImportGraph) -> None:
-    named = INGRESS_MAY_REACH | INGRESS_ONLY | PURE_MODULES
+    named = PURE_MODULES
     missing = sorted(named - set(graph.modules))
     assert not missing, f"policy names modules that do not exist: {missing}"
-
-
-def test_the_public_ingress_reaches_only_its_own_modules(graph: grimp.ImportGraph) -> None:
-    strays = ingress_strays(graph)
-    assert not strays, _report(
-        "The public ingress imports private modules. Whatever it imports runs "
-        "in the exposed process with that process's credentials:",
-        strays,
-    )
-
-
-def test_the_private_app_does_not_import_the_ingress_side(graph: grimp.ImportGraph) -> None:
-    leaks = ingress_only_leaks(graph)
-    assert not leaks, _report(
-        "A private module imports the ingress side, which reads "
-        "TRADINGVIEW_DATABASE_URL:",
-        leaks,
-    )
 
 
 def test_pure_engine_modules_stay_pure(graph: grimp.ImportGraph) -> None:
@@ -225,30 +162,11 @@ def test_pure_engine_modules_stay_pure(graph: grimp.ImportGraph) -> None:
 
 def _graph(*edges: tuple[str, str]) -> grimp.ImportGraph:
     graph = grimp.ImportGraph()
-    for module in INGRESS_MAY_REACH | PURE_MODULES | {"app.database", "httpx", "app.main"}:
+    for module in PURE_MODULES | {"app.database", "httpx", "app.main"}:
         graph.add_module(module, is_squashed=not _is_internal(module))
     for importer, imported in edges:
         graph.add_import(importer=importer, imported=imported)
     return graph
-
-
-def test_a_private_import_two_hops_from_the_ingress_is_named() -> None:
-    graph = _graph(
-        ("app.tradingview_ingress", "app.routers.tradingview_webhook"),
-        ("app.routers.tradingview_webhook", "app.engine.tradingview_alerts"),
-        ("app.engine.tradingview_alerts", "app.database"),
-    )
-    assert ingress_strays(graph) == {
-        "app.database": (
-            "app.tradingview_ingress -> app.routers.tradingview_webhook -> "
-            "app.engine.tradingview_alerts -> app.database"
-        )
-    }
-
-
-def test_the_private_app_importing_the_ingress_database_is_named() -> None:
-    graph = _graph(("app.main", "app.tradingview_database"))
-    assert ingress_only_leaks(graph) == {"app.main": "app.main -> app.tradingview_database"}
 
 
 def test_a_pure_module_reaching_httpx_through_another_module_is_named() -> None:
@@ -270,11 +188,5 @@ def test_a_pure_module_importing_the_database_engine_is_named() -> None:
 
 
 def test_a_clean_graph_reports_nothing() -> None:
-    graph = _graph(
-        ("app.tradingview_ingress", "app.routers.tradingview_webhook"),
-        ("app.engine.strategy_lab", "app.engine.strategy_metrics"),
-        ("app.engine.tradingview_alerts", "app.models"),
-    )
-    assert ingress_strays(graph) == {}
-    assert ingress_only_leaks(graph) == {}
+    graph = _graph(("app.engine.strategy_lab", "app.engine.strategy_metrics"))
     assert impurities(graph) == {}

@@ -9,7 +9,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
-| [codex-workflow.md](codex-workflow.md) | How Codex assigns bounded implementation work to Luna and handles escalation |
+| [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |

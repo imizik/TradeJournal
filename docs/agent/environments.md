@@ -136,12 +136,10 @@ that cannot create or drop anything. Three roles:
 |---|---|---|
 | **owner** (`tj_owner`) | `alembic` | everything; owns the schema |
 | **app** (`tj_app`) | the private API and workers | SELECT/INSERT/UPDATE/DELETE, no DDL |
-| **ingress** (`tj_ingress`) | the TradingView ingress (port 8090) | `tradingview_alert` only |
+| **legacy ingress** (`tj_ingress`) | retired TradingView receiver; no current process uses it | `tradingview_alert` only |
 
-The ingress is the one that matters: port 8090 is the only tunnelable port and
-is meant to be internet-facing, while 8080 is localhost-only by hard
-constraint. The other two bound what an application-level bug can reach — the
-difference between a bad `SELECT` and a `DROP TABLE`.
+The retired ingress role may remain in an existing database. C5.2 does not
+drop it or delete stored alert rows; role removal is a separate operator task.
 
 ### Configuration
 
@@ -151,13 +149,8 @@ MIGRATION_DATABASE_URL=postgresql+psycopg://tj_owner:...@host/db
 ```
 
 `alembic` uses `MIGRATION_DATABASE_URL` when set and `DATABASE_URL` otherwise,
-so a single-role setup keeps working untouched. `backend/.env.tradingview` gets
-`TRADINGVIEW_DATABASE_URL` with the ingress role, and nothing else — no keys,
-no owner credentials (`architecture.md`).
-On Ubuntu the equivalent file is `/etc/tradejournal/tradingview.env`;
-deployment preflight checks the matching endpoint and effective ingress
-privileges before activation. It is injected only into the separate ingress
-service. See [production webhooks](../../deploy/README.md#tradingview-webhooks).
+so a single-role setup keeps working untouched. Legacy TradingView ingress
+configuration is no longer read by current releases.
 
 Anything that migrates a *named* database out of process must set both
 variables. `MIGRATION_DATABASE_URL` takes precedence inside Alembic, so one
@@ -199,7 +192,7 @@ anything that moves which database is in play.
 
 **On Neon, create roles in SQL, never in the console.** A console-created role
 is a member of `neon_superuser` and inherits everything the owner can do —
-verified on a real branch, where the ingress role read every fill with no
+verified on a real branch, where the legacy ingress role read every fill with no
 direct privilege on it — and the owner holds no admin option, so it cannot be
 narrowed, re-passworded or dropped from SQL afterwards. Only the console can
 delete it, and only after the owner revokes its grants. `setup_roles.py`

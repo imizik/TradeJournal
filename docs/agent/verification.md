@@ -35,8 +35,8 @@ native PowerShell launcher for the app itself.
 | Deployment lint | `cd backend && ruff check --config pyproject.toml ../deploy` | Defects in release building and server-operation scripts |
 | Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Docs | `cd backend && pytest tests/test_docs_freshness.py -q` | That the drift pass above is overdue: it counts code commits since `docs/agent/last-reconciled.json` and fails past 30. It cannot check that the pass happened, only that someone was asked. CI runs it on pull requests only, so it never blocks a release from `main` |
-| Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
-| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port, the strategy factory on synthetic bars, the Charts routes, session calendar, history cache, stream and split-adjusted price basis on fixtures, and the import boundaries again |
+| Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | A pure engine module reaching the network or database engine |
+| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, historical TradingView parser/persistence/analysis and read-only route coverage, Webull, schema drift, independent metric validation, the Market Map port, the strategy factory on synthetic bars, the Charts routes, session calendar, history cache, stream and split-adjusted price basis on fixtures, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
@@ -50,9 +50,9 @@ Postgres parity, migration-path and role checks are additional to the local
 script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
-Postgres. It also exercises the optional ingress, its restricted DB/OS roles,
-duplicate delivery, stale-alert analysis and Caddy routing/token-log filtering
-over local HTTP. Public DNS and certificate issuance are not covered.
+Postgres. The updated package confirms the retired ingress unit is removed during an
+upgrade and that no service listens on port 8090. Signals row rendering remains
+covered by the browser fixture suite.
 See [deployment verification](../../deploy/README.md#verification-boundaries).
 It checks boot enablement but does not reboot a real VPS or test Tailscale/live
 integrations. Agent verification is not the only signal.
@@ -86,8 +86,9 @@ Tests need no API keys and touch no real data.
 - `backend/tests/conftest.py` pins the whole session to a throwaway SQLite
   database **before** anything imports `app.database`. An exported
   `DATABASE_URL` — including a hosted Neon one — is ignored.
-- Every external integration (Gmail, Polygon, Alpaca, Anthropic, Webull,
-  TradingView) is opt-in and dormant when its variables are unset.
+- External provider interactions are stubbed or excluded from local tests. The
+  historical TradingView row reads use seeded fixtures; live level-alert delivery
+  needs a phone check.
 
 This matters more than it looks. Several tests drive the real `app.main:app`
 through `TestClient`, and that app's lifespan runs `_seed_and_normalize_roth_account()` (which can
@@ -488,11 +489,11 @@ showing the response, or running the app and exercising the page.
 
 ```bash
 bash startdev.sh                                  # backend 8080, frontend 3000
-TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh # also ingress on 8090
+
 ```
 
-The TradingView ingress is opt-in; ordinary work does not need it. Everything
-binds to `127.0.0.1`. Only ever tunnel `8090`; the private API has no auth.
+The private API and frontend bind to `127.0.0.1`. The API has no auth and
+must only be reached through private access.
 
 ## Historical metric evidence
 

@@ -95,7 +95,6 @@ export default defineConfig({
         // credentials that are deliberately absent here.
         GMAIL_WATCH_AUTOSTART: "false",
         WEBULL_LISTENER_AUTOSTART: "false",
-        TRADINGVIEW_ANALYSIS_AUTOSTART: "false",
         // Chart access tests must stay deterministic even with a local .env.
         TRADIER_API_KEY: "",
         // Voice plans (C3.5): recordings in a scratch folder, and no model

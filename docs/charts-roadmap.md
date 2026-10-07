@@ -127,11 +127,11 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
 | C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with symbol info T1.4) |
-| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | built ([PR #126](https://github.com/imizik/TradeJournal/pull/126)); done once a live alert is seen on the phone |
+| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | done ([PR #126](https://github.com/imizik/TradeJournal/pull/126); user observed live alert on phone 2026-10-06) |
 | C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request, with symbol info T2.1) |
 | C4.4 | Options levels layer with filters | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
 | C4.5 | Strike ladder side panel | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
-| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | next, after C5.1's live phone check |
+| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | built locally; fresh-deployment verification pending |
 | C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132), with C3.1 and C3.2) |
 | C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
 | C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
@@ -777,7 +777,7 @@ scoring, inferred rationale or experiment tracker is part of these items.
   Repeated taps, requests and retries must not duplicate a capture or job.
 - Audio and images live in private durable storage outside release directories,
   with database metadata and inclusion in backup/restore. Access uses the
-  existing private application boundary, never the public TradingView ingress
+  existing private application boundary
   or public artifact URLs. Bound file sizes and validate uploads. Archiving a
   capture does not erase the historical adherence record.
 
@@ -1107,18 +1107,20 @@ not cover. Closes beyond is judged on candles 30 seconds after they close.
 Each firing is one `level_alert_event` row (unique per alert and arming), and
 delivery is an at-least-once outbox on that row. Limits: 20 active alerts on
 5 symbols. Alerts count the chart's session setting when made (regular or
-extended). Trendlines, rectangles and notes take no alert. **Not yet
-observed:** a live message on the phone. After the deploy, set an alert near
-the price and watch it arrive before marking this done and starting C5.2.
+extended). Trendlines, rectangles and notes take no alert. **Live check observed:** the user saw an in-house level alert arrive on the phone
+on 2026-10-06. C5.1 is complete; fixture coverage remains separate from this
+manual delivery evidence.
 
 **C5.2 Retire the TradingView alert loop** (decided 2026-10-02). Alerts move
 into the app, and Pine stops being a path for anything. Once C5.1 has
-delivered a live alert to the phone, remove the TradingView webhook ingress
-(port 8090, the only internet-reachable process): its service and deploy unit,
-the webhook-only router and the Pine file. Mark the `v=1` contract retired and
-bring `docs/agent/` up to date in the same PR. Stored `tradingview_alert` rows
-and the Signals pages that read them stay, read-only; deleting the rows and
-dropping the ingress database role wait for the user. *Done when:* a fresh
+delivered a live alert to the phone, remove the former TradingView webhook ingress
+(port 8090): its service and deploy unit,
+the webhook-only router and Pine alert source. Disable the old analysis worker
+so stored `tradingview_alert` rows
+and the Signals pages that read them stay read-only; preserve rows, table and
+legacy credentials. Deleting rows or dropping the ingress database role waits
+for the user. Mark the `v=1` contract retired and update agent documentation.
+*Done when:* a fresh
 deployment starts no ingress service, nothing listens on 8090, the Signals
 pages still render stored rows, and the import-boundary and deploy checks pass
 without the ingress.
@@ -1323,8 +1325,7 @@ follow-up item and leave the gate open.
   remains an explicit coverage question unless its separate data paths were
   verified. Advanced options estimates and replay are not prerequisites.
 - State the remaining TradingView dependency: this epic does not port the Pine
-  scripts or replace the existing TradingView-to-Signals alert loop. Passing G0
-  does not by itself justify canceling a subscription used for that separate loop.
+  alert loop; G0 remains a separate chart-workflow gate.
 
 ## Later (not this epic)
 

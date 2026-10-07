@@ -1,4 +1,10 @@
-# TradingView Live Alert Contract v1
+# TradingView Live Alert Contract v1 (retired)
+
+> Retired by Charts C5.2 on 2026-10-06 after the user observed an in-house
+> level alert arrive on the phone. This document is retained as historical
+> provenance for stored rows. Current releases accept no TradingView webhook
+> writes; the Signals API is read-only.
+
 
 Status: frozen on 2026-07-23 and implemented by
 `backend/app/engine/tradingview.py`. The golden contract tests live in

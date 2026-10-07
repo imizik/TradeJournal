@@ -15,7 +15,7 @@ Local-first trade journal and reconciliation system for Robinhood/Webull trade h
 ```bash
 bash scripts/setup.sh    # clean clone -> runnable (venv, deps, migrations)
 bash scripts/verify.sh   # backend lint + tests, import boundaries, frontend typecheck/lint/build, browser tests
-bash startdev.sh         # backend 8080, TradingView ingress 8090, frontend 3000
+bash startdev.sh         # backend 8080, frontend 3000
 ```
 
 No credentials are needed to install, test, or run against local SQLite. Every
@@ -30,14 +30,6 @@ cd backend
 pip install -e .
 alembic upgrade head
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
-```
-
-Restricted TradingView ingress (only when using live alerts):
-
-```bash
-cd backend
-uvicorn app.tradingview_ingress:app --reload --no-access-log \
-  --host 127.0.0.1 --port 8090
 ```
 
 Frontend:
@@ -55,16 +47,11 @@ Repo helper note:
 
 - Private backend config loads `.env` before DB init from `backend/.env` first,
   then repo-root `.env`; exported env vars still win.
-- The public TradingView process loads only `backend/.env.tradingview`, never
-  the private app's shared `.env`.
 - `startdev.ps1` and `startdev.sh` start the private backend on `8080` and
-  frontend on `3000` by default. TradingView ingress is disabled unless
-  `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
-- When enabled, ingress binds to `127.0.0.1:8090`; tunnel only `8090`, never
-  the private API. The launchers then require a webhook token and refuse a
-  hosted/private `DATABASE_URL` setup without a matching
-  `TRADINGVIEW_DATABASE_URL`.
-- `backend/mcp_server.py` defaults to `http://localhost:8000`; set `TRADE_JOURNAL_API=http://localhost:8080` if you want the MCP tools to talk to a backend started by `startdev.ps1`.
+  frontend on `3000` by default.
+- `backend/mcp_server.py` defaults to `http://localhost:8000`; set
+  `TRADE_JOURNAL_API=http://localhost:8080` if you want the MCP tools to talk
+  to a backend started by `startdev.ps1`.
 
 ## Core Model
 
@@ -96,8 +83,8 @@ Current SQLite tables include `account`, `fill`, `trade`, `tradefill`, `tag`, `t
 - Strategy Lab: `GET/POST /strategy-lab/strategies`, `GET/PATCH /strategy-lab/strategies/{id}`, `POST /strategy-lab/strategies/{id}/versions`, `GET/PATCH /strategy-lab/versions/{id}`, `POST /strategy-lab/versions/{id}/fork`, `POST /strategy-lab/imports/preview`, `POST /strategy-lab/runs/import`, `GET /strategy-lab/runs`, `GET /strategy-lab/runs/{run_id}`, `GET /strategy-lab/runs/{run_id}/trades`, `POST /strategy-lab/runs/{run_id}/metrics/recalculate`, `GET /strategy-lab/runs/{run_id}/metrics`
 - TradingView private reads: `GET /tradingview/alerts`, `GET /tradingview/alerts/{alert_id}`
 
-The separate port `8090` ingress exposes only `POST /tradingview/webhook` and
-`GET /health`; it does not expose any of the private API surfaces above.
+C5.2 retired the TradingView webhook ingress. The retained TradingView alert
+API routes are private GET-only reads of historical rows.
 
 ## Strategy Lab TradingView Import
 
@@ -117,78 +104,14 @@ After commit, the run page shows source/run assumptions, coverage-aware determin
 
 Stage 4 reused the existing normalized `strategy_*` schema and Alembic revision `f1a2b3c4d5e6`; it added no schema migration. Two-run comparison, deterministic findings, experiment workflows, and Pine source diffs remain Stage 5 work.
 
-## TradingView Live Signal Loop
+## Retired TradingView alert records
 
-Steps 1–4 and 6 are implemented. The frozen v1 parser validates TradingView JSON,
-the isolated table preserves immutable first-delivery evidence, and a
-token-protected webhook-only process accepts alerts without exposing the
-journal API. The private backend runs one database-backed worker that claims
-alerts atomically, calls the existing read-only scalp analyzer outside any
-transaction, and stores a fenced verdict/confidence/assessment result.
-
-Local setup:
-
-1. Run `alembic upgrade head`.
-2. Generate a token:
-
-   ```bash
-   python -c "import secrets; print(secrets.token_urlsafe(32))"
-   ```
-
-3. Copy `backend/.env.tradingview.example` to
-   `backend/.env.tradingview` and put the token there as
-   `TRADINGVIEW_WEBHOOK_TOKEN=...`. If the private app uses `DATABASE_URL`,
-   set `TRADINGVIEW_DATABASE_URL` to the same database (preferably through a
-   restricted ingress role); leave it blank only for default local SQLite.
-4. In the private `backend/.env`, set
-   `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
-5. Run `TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh`, or start
-   `app.main:app` and `app.tradingview_ingress:app` separately using the
-   commands above. Without that launcher flag, normal development starts only
-   the private backend and frontend.
-6. Test with the sample payload from
-   [TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md):
-
-   ```bash
-   curl -X POST http://localhost:8090/tradingview/webhook \
-     -H "Authorization: Bearer <TOKEN>" \
-     -H "Content-Type: application/json" \
-     --data-binary @sample-alert.json
-   ```
-
-The TradingView UI cannot attach a Bearer header, so its webhook URL uses
-`https://<tunnel-host>/tradingview/webhook?token=<TOKEN>`. Query tokens can
-appear in proxy/access logs: the local ingress command disables Uvicorn access
-logs, and every tunnel/proxy/cloud hop must also disable or redact the request
-target. The token should be dedicated and rotated if exposed. Tunnel only port
-`8090`; `/health` returns `200` only when the token and isolated table are
-ready.
-
-The private reads are `GET /tradingview/alerts` and
-`GET /tradingview/alerts/{alert_id}`. The list omits raw payload, snapshots,
-assessment JSON, and full error text; detail returns them explicitly.
-Snapshot scalars in detail are tagged (`number`, `string`, `boolean`, `null`)
-so exact decimal text and original scalar types remain distinguishable.
-
-`backend/.env.example` documents private worker retry/lease/freshness settings.
-`backend/.env.tradingview.example` documents the public token and optional
-`TRADINGVIEW_DATABASE_URL`; production must use a service-specific environment
-and an ingress database role restricted to `tradingview_alert`. The ingress
-never runs migrations. Cloud scale-to-zero still needs an always-on worker or
-durable task dispatcher.
-The Ubuntu deployment includes an opt-in ingress service with a separate OS
-user, restricted database-role preflight and a dedicated HTTPS proxy template;
-see [production webhook setup](deploy/README.md#tradingview-webhooks).
-
-The exact payload, bounds, identity format, and future migration policy are in
-[TradingView Live Alert Contract v1](docs/tradingview-webhook-contract-v1.md).
-The Signals page at `/signals` lists every alert with its verdict, confidence
-and analysis status, and links to a per-alert view of the indicator levels,
-the indicator context, and the stored assessment. Both views refresh every
-30 seconds while visible, immediately when returning to the tab, and through
-**Refresh now**. Pending/running alerts are counted separately from skipped
-and failed analysis; details show the recorded skip/error reason. The Pine
-source is `docs/pine/isaac_market_map.pine`; see [its README](docs/pine/README.md).
+C5.2 retired the public webhook, its Pine alert source and the analysis worker
+after an in-house chart alert was observed on the phone. Existing `tradingview_alert`
+rows and the `/signals` pages remain read-only. The old `v=1` contract and
+implementation plan are retained as historical documentation; the legacy ingress
+configuration and database role are preserved, but current releases do not use
+them. See [the retired contract](docs/charts-roadmap.md#phase-5--alerts-on-the-chart).
 
 ## Durable Jobs
 
@@ -229,17 +152,15 @@ today.** Two things stand in the way, both worth knowing before you wire it up:
 
 - Pub/Sub push needs a public HTTPS endpoint, and `/gmail/push` lives on the
   private API, which has no authentication and must never be internet-reachable
-  (see the hard constraints in `CLAUDE.md`). Port 8090, the TradingView ingress,
-  is the only port that may be exposed.
+  (see the hard constraints in `CLAUDE.md`). No application ingress is
+  currently available.
 - `_verify_push_token` returns early when `GMAIL_PUBSUB_VERIFICATION_TOKEN` is
-  unset, so an unconfigured token accepts **any** caller — the opposite of the
-  ingress, which refuses to start without one. Exposing the route with the
-  token blank would hand anyone the ability to trigger the ingest pipeline.
+  unset, so an unconfigured token accepts **any** caller. Exposing the route
+  with the token blank would let anyone trigger the ingest pipeline.
 
 Use the OAuth pull path instead — `POST /sync/pipeline/run`, or the Sync
-Center in the UI — which needs no public endpoint. If push is wanted later, it belongs behind the ingress pattern — its
-own process, its own restricted database role, its own environment file — and
-that is a Phase 4 design question, not a configuration change.
+Center in the UI — which needs no public endpoint. Reintroducing push requires
+a separately reviewed authenticated service design.
 
 If you keep the backend running continuously, `GMAIL_WATCH_AUTOSTART=true` lets it renew the watch in-process. On startup the backend can also auto-start Webull listeners when `WEBULL_LISTENER_AUTOSTART=true` or `WEBULL_LISTENER_ACCOUNTS` is set. The `gmail_push` pipeline does not wait for slow Polygon enrichment to finish, so check `GET /fills/enrich/status` separately if coverage still looks incomplete right after a successful push or full pipeline run.
 

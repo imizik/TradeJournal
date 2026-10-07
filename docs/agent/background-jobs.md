@@ -148,9 +148,10 @@ It cannot replay a completed or failed row or steal a running job. Its existing
 
 ## Remaining work and evidence
 
-Optional TradingView analysis, and Gmail watch renewal when the Gmail listener
-is disabled (`GMAIL_WATCH_AUTOSTART`, development only), are still API-owned
-background threads. The level alert monitor (Charts C5.1) is an API-owned
+Gmail watch renewal when the Gmail listener is disabled
+(`GMAIL_WATCH_AUTOSTART`, development only), is still an API-owned background
+thread. The TradingView analysis worker was retired with C5.2; stored alert rows
+are now read-only. The level alert monitor (Charts C5.1) is an API-owned
 asyncio task beside the chart stream, not a job: its durable state is the
 `level_alert` and `level_alert_event` rows (progress, one row per firing, and
 a delivery outbox claimed by an update), so an API restart resumes it without
