@@ -22,7 +22,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
 | `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory, chart price basis |
 | `docs/agent/verification.md` | How to prove a change works |
-| `docs/agent/codex-workflow.md` | Bounded Codex delegation to Luna, escalation, and completion reports |
+| `docs/agent/codex-workflow.md` | Sol-led substantial work, bounded Luna assignments, escalation, and completion reports |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
@@ -37,10 +37,13 @@ Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
 fixed in the same change.
 
-In Codex, for a bounded implementation task, use the delegation workflow in
-[`docs/agent/codex-workflow.md`](docs/agent/codex-workflow.md): Sol leads and
-assigns one Luna owner when delegation is useful; the worker owns ordinary
-exploration, implementation and tests through completion.
+In Codex, prefer Sol as the main agent for substantial features, refactors,
+difficult debugging, and deployment changes. Sol owns scope, consequential
+decisions, integration, and final verification; delegate clear, bounded work to
+Luna when it helps. Use Luna directly for small tasks with clear requirements.
+Delegation is optional: Sol can complete a feature itself. Follow
+[`docs/agent/codex-workflow.md`](docs/agent/codex-workflow.md), including its
+fallback when a substantial task has already started on Luna.
 
 ## Verification is not optional
 
