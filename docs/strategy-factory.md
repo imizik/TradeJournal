@@ -83,6 +83,15 @@ was allowed to see (`trades_discovery.csv`, `trades_confirm.csv`,
 `trades_holdout.csv`, every trade with its entry features) to
 `backend/data/factory/runs/<time>-<id>/`, and a line to the ledger.
 
+The “exam once” rule above is a workflow restriction: `--rerun` currently
+re-evaluates the same ID and can reopen its exam unless `--no-exam` is set.
+`--no-exam` still allows confirmation; it is not discovery-only exploration.
+The weekly shell wrapper has a lock, but direct CLI runs do not share that
+lock around ledger read/evaluation/append. Do not run competing writers or use
+reruns to select a favorable result. The proposed
+[Workbench access gates](agentic-trading-roadmap.md#7-strategy-workbench-and-slower-swing-research)
+describe the stricter accounting needed before adding an interactive writer.
+
 ## The weekly loop
 
 Every Sunday at 10:00 (New York time on this Mac) launchd runs
