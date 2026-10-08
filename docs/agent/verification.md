@@ -45,8 +45,10 @@ native PowerShell launcher for the app itself.
 
 CI (`.github/workflows/ci.yml`) runs backend, frontend and Postgres jobs on
 every pull request. It runs the two browser shards unless the diff contains only
-Markdown under `docs/`, root README/agent guides or the PR template.
-Documentation-only pull requests skip that disposable application environment. Pushes to `main` and
+Markdown under `docs/`, root README/agent guides or the PR template
+(`scripts/ci_scope.sh`, shared with the deployment workflow and covered by
+`test_ci_scope_script.py`). Documentation-only pull requests skip that
+disposable application environment. Pushes to `main` and
 manual runs always run the complete suite. Browser pictures are posted on
 pull requests that change the frontend (see [browser tests](#browser-tests)).
 Postgres parity, migration-path and role checks are additional to the local
