@@ -13,7 +13,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app.database import get_session
 from app.engine import decisions, ntfy, paper
 from app.engine import paper_execution as px
-from app.models import DecisionEvent, DecisionRecord, Fill, Trade
+from app.models import DecisionContext, DecisionEvent, DecisionRecord, Fill, Trade
 from app.routers import decisions as routes
 from zoneinfo import ZoneInfo
 
@@ -88,6 +88,9 @@ def record(engine, symbol="SPY", decision="take", received=at(DAY, 8, 55), **pla
                           decision_json=json.dumps({"plan": plan(**plan_over) if decision == "take" else {}, "rationale": "",
                                                     "wait_condition": None, "wait_expiry": None}))
     with Session(engine) as db:
+        db.add(DecisionContext(id=item.context_id, operation_id=f"ctx-{uuid.uuid4()}", symbol=symbol,
+                               captured_at=item.input_cutoff, provider="fixture", data_json="{}", context_sha256="e"))
+        db.commit()
         db.add(item)
         db.commit()
         db.refresh(item)
@@ -178,15 +181,15 @@ def lifecycle(engine):
 def test_a_plan_triggers_enters_and_exits_with_no_browser(engine):
     rid, feed, clock, w = lifecycle(engine)
     w.run()
-    assert types(engine, rid) == ["armed", "trigger"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent"]
     feed.minutes.append((at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5))
     clock.now = at(DAY, 10, 17, 31)
     w.run()
-    assert types(engine, rid) == ["armed", "trigger", "entry"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry"]
     feed.minutes.append((at(DAY, 10, 17), 100.5, 104.1, 100.5, 104.0))
     clock.now = at(DAY, 10, 18, 31)
     w.run()
-    assert types(engine, rid) == ["armed", "trigger", "entry", "exit"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry", "exit"]
     with Session(engine) as db:
         row = paper.paper_row(db, rid)
         assert db.exec(select(Fill)).all() == [] and db.exec(select(Trade)).all() == []
@@ -203,7 +206,7 @@ def test_passes_repeated_and_a_restart_record_nothing_twice(engine):
     for _ in range(3):
         w.run()
         watcher(engine, feed, clock).run()  # a fresh process: state comes from the database only
-    assert types(engine, rid) == ["armed", "trigger", "entry"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry"]
 
 
 def test_a_restart_past_the_detection_delay_is_a_missed_trigger(engine):
@@ -230,7 +233,7 @@ def test_a_split_after_entry_leaves_the_outcome_unresolved(engine):
     feed.minutes.append((at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5))
     clock.now = at(DAY, 10, 17, 31)
     w.run()
-    w.splits = type("S", (), {"get": lambda self, s, d: {"splits": [{"ex_date": NEXT.isoformat(), "ratio": 2}]}})()
+    w.splits = type("S", (), {"get": lambda self, s, d: {"status": "ok", "splits": [{"ex_date": NEXT.isoformat(), "ratio": 2}]}})()
     clock.now = at(NEXT, 9, 31)
     w.run()
     assert types(engine, rid)[-1] == "unresolved"
@@ -284,7 +287,7 @@ def test_a_stale_feed_answer_is_never_judged(engine):
     assert types(engine, rid) == ["armed"]
     feed.issue = None
     w.run()
-    assert types(engine, rid) == ["armed", "trigger"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent"]
 
 
 def test_a_restart_past_expiry_still_records_the_missed_trigger(engine):
@@ -314,10 +317,10 @@ def test_an_unavailable_split_source_pauses_judging_instead_of_assuming_no_split
     feed.minutes.append((at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5))
     clock.now = at(DAY, 10, 17, 31)
     w.run()
-    assert types(engine, rid) == ["armed", "trigger"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent"]
     w.splits = None
     w.run()
-    assert types(engine, rid) == ["armed", "trigger", "entry"]
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry"]
 
 
 def test_the_entry_minute_starts_after_the_trigger_was_stored(engine):
@@ -361,7 +364,7 @@ def test_one_plans_failure_does_not_stop_the_others(engine):
     feed.minutes.append((at(DAY, 10, 14), 99.9, 100.3, 99.9, 100.2))
     feed.fail = {"SPY"}
     watcher(engine, feed, clock).run()
-    assert types(engine, spy) == ["armed"] and types(engine, qqq) == ["armed", "trigger"]
+    assert types(engine, spy) == ["armed"] and types(engine, qqq) == ["armed", "trigger", "order_intent"]
 
 
 def test_paper_plans_are_judged_even_when_the_level_alert_stage_fails(engine):
@@ -425,3 +428,149 @@ def test_arm_and_paper_routes(engine, monkeypatch):
 def test_the_policy_hash_covers_the_execution_rules():
     assert paper.POLICY_SPEC["execution"]["version"] == px.EXEC_VERSION
     assert paper.POLICY_SPEC["plan_schema"]["hash"] == decisions.POLICY_HASH
+
+
+@pytest.mark.parametrize("status", ["unknown", "stale"])
+def test_split_metadata_failure_status_does_not_allow_entry(engine, status):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+    feed.minutes.append((at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5))
+    clock.now = at(DAY, 10, 17, 31)
+    w.splits = type("S", (), {"get": lambda self, s, d: {"status": status, "splits": []}})()
+    w.run()
+    assert types(engine, rid) == ["armed", "trigger", "order_intent"]
+    w.splits = type("S", (), {"get": lambda self, s, d: {"status": "ok", "splits": []}})()
+    w.run()
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry"]
+
+
+def test_missing_closing_minute_cannot_supply_a_false_fifteen_minute_close(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    feed.minutes[-1] = (at(DAY, 10, 13), 100.2, 100.3, 100.1, 100.2)
+    w.run()
+    assert types(engine, rid) == ["armed"]
+    feed.minutes.append((at(DAY, 10, 14), 99.8, 99.9, 99.7, 99.8))
+    w.run()
+    assert types(engine, rid) == ["armed"]
+
+
+def test_replay_pauses_when_saved_policy_hash_does_not_match(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    with Session(engine) as db:
+        row = paper.events_for(db, rid)[0]
+        data = json.loads(row.data_json)
+        data["policy_hash"] = "a-different-policy"
+        row.data_json = json.dumps(data)
+        db.add(row)
+        db.commit()
+    w.run()
+    assert types(engine, rid) == ["armed"]
+
+
+def test_after_close_restart_recovers_second_session_time_exit(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+    feed.flat(at(DAY, 10, 16), at(DAY, 16, 0))
+    feed.flat(at(NEXT, 9, 30), at(NEXT, 16, 0))
+    clock.now = at(NEXT, 17, 0)
+    watcher(engine, feed, clock).run()
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry", "exit"]
+    with Session(engine) as db:
+        row = paper.paper_row(db, rid)
+    assert row["outcome"]["exit_kind"] == "time"
+    assert row["events"][-1]["reconstructed"] is True
+    watcher(engine, feed, clock).run()
+    assert types(engine, rid) == ["armed", "trigger", "order_intent", "entry", "exit"]
+
+
+def test_concurrent_arms_cannot_bypass_the_symbol_cap(tmp_path, monkeypatch):
+    db_engine = create_engine(f"sqlite:///{tmp_path / 'arms.db'}", connect_args={"check_same_thread": False})
+    SQLModel.metadata.create_all(db_engine)
+    try:
+        check_concurrent_symbol_cap(db_engine, monkeypatch)
+    finally:
+        db_engine.dispose()
+
+
+def check_concurrent_symbol_cap(db_engine, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, BrokenBarrierError
+
+    ids = [record(db_engine), record(db_engine)]
+    start, eligibility = Barrier(2), Barrier(2)
+    original = paper._armed_rows
+
+    def competing_read(db):
+        rows = original(db)
+        # Without transaction serialization, both callers see an empty list
+        # here. With it, the first times out while the second waits for the lock.
+        try:
+            eligibility.wait(timeout=0.3)
+        except BrokenBarrierError:
+            pass
+        return rows
+
+    monkeypatch.setattr(paper, "_armed_rows", competing_read)
+
+    def attempt(rid):
+        start.wait(timeout=5)
+        try:
+            arm(db_engine, rid, op=str(rid))
+            return "armed"
+        except paper.PaperError:
+            return "refused"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, ids))
+    assert sorted(results) == ["armed", "refused"]
+    with Session(db_engine) as db:
+        assert len([row for row in original(db) if row.record_id in ids]) == 1
+
+
+@pytest.mark.parametrize("missing", ["whole_interval", "empty_response"])
+def test_missing_trigger_coverage_never_expires_a_plan_as_if_nothing_happened(engine, missing):
+    rid = record(engine)
+    arm(engine, rid)
+    feed = Feed()
+    if missing == "whole_interval":
+        feed.flat(at(DAY, 9, 30), at(DAY, 15, 15), 99.0)
+        feed.minutes = [m for m in feed.minutes if not at(DAY, 10, 0) <= m[0] < at(DAY, 10, 15)]
+    w = watcher(engine, feed, Clock(at(DAY, 15, 30)))
+    w.run()
+    assert types(engine, rid) == ["armed"]
+
+
+def test_entry_intent_is_sampled_after_trigger_commit_across_minute_boundary(engine, monkeypatch):
+    rid, feed, clock, w = lifecycle(engine)
+    clock.now = at(DAY, 10, 15, 58)
+    store = w._store
+
+    def slow_trigger_commit(record, events, **kwargs):
+        store(record, events, **kwargs)
+        if any(e["type"] == "trigger" for e in events):
+            clock.now = at(DAY, 10, 16, 3)
+
+    monkeypatch.setattr(w, "_store", slow_trigger_commit)
+    w.run()
+    feed.minutes += [(at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5), (at(DAY, 10, 17), 100.7, 100.8, 100.6, 100.7)]
+    clock.now = at(DAY, 10, 18, 31)
+    watcher(engine, feed, clock).run()
+    with Session(engine) as db:
+        events = [json.loads(r.data_json) for r in paper.events_for(db, rid)]
+    intent = next(e for e in events if e["type"] == "order_intent")
+    entry = next(e for e in events if e["type"] == "entry")
+    assert intent["at"] == at(DAY, 10, 16, 3)
+    assert intent["eligible_at"] == entry["bar_start"] == at(DAY, 10, 17)
+    assert len([e for e in events if e["type"] == "order_intent"]) == 1
+
+
+def test_crash_between_trigger_and_intent_cannot_backdate_or_delay_entry_indefinitely(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    with Session(engine) as db:
+        state = paper.state_of(db, rid)
+    events = px.watch(state, px.terms_from_plan(plan()), [{"start": at(DAY, 10, 0), "end": at(DAY, 10, 15), "close": 100.2}], clock.now)
+    with Session(engine) as db:
+        paper.append(db, rid, events, now=clock.now)
+    clock.now = at(DAY, 10, 25)
+    watcher(engine, feed, clock).run()
+    assert types(engine, rid) == ["armed", "trigger", "unresolved"]

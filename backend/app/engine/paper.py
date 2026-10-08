@@ -20,7 +20,7 @@ import logging
 import uuid
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import func, update
+from sqlalchemy import func, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
@@ -162,6 +162,12 @@ def arm(db: Session, record_id: uuid.UUID, operation_id: str, *, now: datetime, 
     The same ``operation_id`` again returns the original arming; another one is refused. Every refusal
     names the policy rule; nothing is stored unless every rule passes.
     """
+    # Caps cover different records, so per-record uniqueness cannot enforce
+    # them. Serialize the eligibility read and armed-event commit together.
+    if db.get_bind().dialect.name == "postgresql":
+        db.exec(text("SELECT pg_advisory_xact_lock(72431002)"))
+    elif db.get_bind().dialect.name == "sqlite":
+        db.exec(text("BEGIN IMMEDIATE"))
     now = _naive(now)
     record = db.get(DecisionRecord, record_id)
     if record is None:
@@ -229,6 +235,10 @@ class PaperWatcher:
         with Session(self.engine) as db:
             result = []
             for row in _armed_rows(db):
+                policy = json.loads(row.data_json)
+                if (policy.get("policy_version"), policy.get("policy_hash"), row.exec_version) != (POLICY_VERSION, POLICY_HASH, px.EXEC_VERSION):
+                    log.error("Paper plan %s paused: saved policy/execution differs from this watcher", row.record_id)
+                    continue
                 state = state_of(db, row.record_id)
                 if state.status in px.TERMINAL:
                     continue
@@ -258,7 +268,7 @@ class PaperWatcher:
             # The trigger is judged before expiry, so a restart past the expiry still finds a missed trigger.
             minutes = self._minutes(record.symbol, first, today)
             detected = self.clock()  # after the read: the bars cannot be newer than this
-            events = px.watch(state, terms, self._bars15(minutes, detected), detected)
+            events = px.watch(state, terms, self._bars15(minutes, detected, state.armed_at, terms), detected)
             if not events:
                 events = px.check_expiry(state, terms, detected)
             if not events:
@@ -269,36 +279,68 @@ class PaperWatcher:
                 return
         if state.status not in ("triggered", "open"):
             return
+        if state.status == "triggered" and state.order_intent is None:
+            # This clock sample happens after the trigger commit returned.
+            # recorded_at on that trigger was sampled before commit and cannot
+            # prove that the next minute began after durable detection.
+            intent_at = self.clock()
+            if intent_at - state.trigger["detected_at"] > px.MAX_DETECTION_DELAY:
+                return self._store(record, px.end_unresolved(state, intent_at, "monitoring gap before durable entry intent"))
+            self._store(record, [{"type": "order_intent", "key": "order_intent", "at": intent_at,
+                                  "eligible_at": (int(intent_at) // 60 + 1) * 60}])
+            state = px.fold(self._history(record.id))
+            if state.status != "triggered" or state.order_intent is None:
+                return
         split = self._split_since(record.symbol, first, today)
         if split is None:
             return  # the split source is unavailable: wait rather than judge across a possible split
         if split:
             return self._store(record, px.end_unresolved(state, now, "split"))
         session = regular_session(today, self.calendar.hours(today))
-        if session is None or not session.open_at < now <= session.close_at + LATENESS + 120:
+        if session is None:
             return
+        # Completed bars remain recoverable after the close. Restrict the bars,
+        # not the wall clock: a restart must recover a final-minute time exit.
         minutes = self._minutes(record.symbol, first, today)
         seen = self.clock()
         bars = [{"start": b["time"], "o": b["open"], "h": b["high"], "l": b["low"], "c": b["close"]}
                 for b in minutes if b["end_time"] + LATENESS <= seen]
-        events = px.advance(state, terms, bars, sessions_from(self.calendar, first, today),
-                            durable_at=self._trigger_stored_at(record.id))
+        events = px.advance(state, terms, bars, sessions_from(self.calendar, first, today))
         self._store(record, events, reconstructed_before=seen - px.MAX_DETECTION_DELAY - 60)
 
-    def _bars15(self, minutes: list[dict], now: float) -> list[dict]:
-        days = {datetime.fromtimestamp(b["time"], ET).date() for b in minutes}
-        candles = chart_bars(minutes, [], "15m", "regular", {d: self.calendar.hours(d) for d in days})
-        return [{"start": b["time"], "end": b["end_time"], "close": b["close"]} for b in candles if b["end_time"] + LATENESS <= now]
+    def _bars15(self, minutes: list[dict], now: float, armed_at: float, terms: px.Terms) -> list[dict]:
+        day = datetime.fromtimestamp(armed_at, ET).date()
+        last = datetime.fromtimestamp(min(now, terms.expiry), ET).date()
+        hours, sessions = {}, []
+        while day <= last:
+            hours[day] = self.calendar.hours(day)
+            if hours[day] is None:
+                raise ChartFeedError("market calendar unavailable; trigger coverage cannot be verified")
+            session = regular_session(day, hours[day])
+            if session is not None:
+                sessions.append(session)
+            day += timedelta(days=1)
+        relevant = [b for b in minutes if datetime.fromtimestamp(b["time"], ET).date() in hours]
+        candles = {b["end_time"]: b for b in chart_bars(relevant, [], "15m", "regular", hours)}
+        starts = {b["time"] for b in minutes}
+        completed = []
+        for session in sessions:
+            for start in range(session.open_at, session.close_at, 15 * 60):
+                end = min(start + 15 * 60, session.close_at)
+                if end <= armed_at or end > terms.expiry or end + LATENESS > now:
+                    continue
+                if end not in candles or any(t not in starts for t in range(start, end, 60)):
+                    raise ChartFeedError("one-minute trigger coverage is incomplete; plan evaluation paused")
+                completed.append({"start": start, "end": end, "close": candles[end]["close"]})
+                # The first crossing decides the plan. Later gaps must not
+                # suppress an already observable trigger or missed trigger.
+                if candles[end]["close"] > terms.trigger:
+                    return completed
+        return completed
 
     def _history(self, record_id: uuid.UUID) -> list[dict]:
         with Session(self.engine) as db:
             return _data(events_for(db, record_id))
-
-    def _trigger_stored_at(self, record_id: uuid.UUID) -> float | None:
-        with Session(self.engine) as db:
-            row = db.exec(select(DecisionEvent).where(DecisionEvent.record_id == record_id,
-                                                      DecisionEvent.event_type == "trigger")).first()
-            return _epoch(row.recorded_at) if row else None
 
     def _store(self, record: DecisionRecord, events: list[dict], **kwargs) -> None:
         with Session(self.engine) as db:
@@ -322,7 +364,10 @@ class PaperWatcher:
         if self.splits is None:
             return False
         try:
-            found = self.splits.get(symbol, today).get("splits") or []
+            info = self.splits.get(symbol, today)
+            if info.get("status") != "ok":
+                return None
+            found = info.get("splits") or []
             return any(first < date.fromisoformat(s["ex_date"]) <= today for s in found)
         except Exception:
             return None

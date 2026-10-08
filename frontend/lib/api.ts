@@ -668,6 +668,7 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
 
 export const api = {
   decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
+  decision: (id: string) => get<DecisionRecord>(`/decisions/${encodeURIComponent(id)}`),
   paperState: (id: string) => get<PaperState>(`/decisions/${encodeURIComponent(id)}/paper`),
   armPaperPlan: (id: string, operationId: string) => post<PaperState>(`/decisions/${encodeURIComponent(id)}/arm`, { operation_id: operationId }),
   freezeDecisionContext: (symbol: string, operationId: string) => post<DecisionContext>(`/decisions/context/${encodeURIComponent(symbol)}`, { operation_id: operationId }),

@@ -227,3 +227,43 @@ test("a closed paper plan shows base and 3x outcomes, and ?decision= opens the c
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(0);
 });
+
+test("a phone deep link retrieves a decision outside the recent window", async ({ page, request }) => {
+  const id = await takeRecord(request);
+  const python = existsSync(path.join(BACKEND_DIR, ".venv", "bin", "python")) ? path.join(BACKEND_DIR, ".venv", "bin", "python") : "python3";
+  execFileSync(python, ["-c", `import sqlite3,sys
+from datetime import datetime, timedelta
+import uuid
+db=sqlite3.connect(sys.argv[1])
+row=db.execute("select * from decision_record where id=?", (sys.argv[2],)).fetchone()
+columns=[r[1] for r in db.execute("pragma table_info(decision_record)")]
+for i in range(31):
+    data=dict(zip(columns,row))
+    data.update(id=uuid.uuid4().hex, operation_id="e2e-take-"+uuid.uuid4().hex, received_at=(datetime(2026,10,8)+timedelta(seconds=i)).isoformat(" "))
+    db.execute("insert into decision_record ("+",".join(columns)+") values ("+",".join("?" for _ in columns)+")", list(data.values()))
+db.commit()
+`, E2E_DB, id.replace(/-/g, "")]);
+  await mockPaper(page, id, { record_id: id, status: "armed", policy_version: "shadow-isaac-p0-v1",
+    events: [ev("armed", 1, 1791378000)], outcome: null, outcome_x3: null });
+  await page.goto(`/?decision=${id}`);
+  const card = page.locator(`#decision-${id}`);
+  await expect(card).toHaveJSProperty("open", true);
+  await expect(card.getByText("PRACTICE · PAPER · ARMED").first()).toBeVisible();
+});
+
+test("refresh retrieves paper events committed while the card stays open", async ({ page, request }) => {
+  const id = await takeRecord(request);
+  let closed = false;
+  const base = { record_id: id, policy_version: "shadow-isaac-p0-v1" };
+  await page.route(`**/api/backend/decisions/${id}/paper`, (route) => route.fulfill({ json: closed ? {
+    ...base, status: "closed", events: [ev("armed", 1, 1791378000), ev("exit", 2, 1791385200, { kind: "target", fill: 603.89 })],
+    outcome: outcome("p0-cost-v1", 3.78, 1.791), outcome_x3: outcome("p0-cost-v1-x3", 3.7, 1.753),
+  } : { ...base, status: "armed", events: [ev("armed", 1, 1791378000)], outcome: null, outcome_x3: null } }));
+  await page.goto(`/?decision=${id}`);
+  const card = page.locator(`#decision-${id}`);
+  await expect(card.getByText("PRACTICE · PAPER · ARMED").first()).toBeVisible();
+  closed = true;
+  await card.getByRole("button", { name: "Refresh paper timeline" }).click();
+  await expect(card.getByText("PRACTICE · PAPER · CLOSED").first()).toBeVisible();
+  await expect(card.getByText("Simulated entry-to-stop exposure 2.11/share").first()).toBeVisible();
+});

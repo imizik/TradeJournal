@@ -78,6 +78,7 @@ class Paper:
     status: str = "unarmed"
     armed_at: float | None = None
     trigger: dict | None = None
+    order_intent: dict | None = None
     entry: dict | None = None
     exit: dict | None = None
     ended: dict | None = None  # the event that ended a plan with no exit: expired, missed, rejected or unresolved
@@ -148,6 +149,8 @@ def apply(state: Paper, event: dict) -> Paper:
         return replace(state, status="armed", armed_at=event["at"])
     if kind == "trigger":
         return replace(state, status="triggered", trigger=event)
+    if kind == "order_intent":
+        return replace(state, order_intent=event)
     if kind == "entry":
         return replace(state, status="open", entry=event)
     if kind == "exit":
@@ -244,7 +247,8 @@ def advance(state: Paper, terms: Terms, bars: list[dict], sessions: list[Session
         return []
     run = _Run(state, reconstructed)
     if state.status == "triggered":
-        expected = _next_minute(max(state.trigger["detected_at"], durable_at or 0))
+        expected = _next_minute(max(state.trigger["detected_at"], durable_at or 0,
+                                    state.order_intent["at"] if state.order_intent else 0))
     else:
         expected = state.entry["bar_start"]
     hold_end = None

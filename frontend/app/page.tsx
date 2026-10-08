@@ -46,6 +46,13 @@ export default async function DashboardPage({
     Promise.resolve(resolvedParams),
   ]);
 
+  // A phone alert may reference a plan older than the recent-decision window.
+  if (resolvedParams.decision && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedParams.decision)
+      && !decisions.decisions.some((record) => record.id === resolvedParams.decision)) {
+    const focused = await api.decision(resolvedParams.decision).catch(() => null);
+    if (focused) decisions.decisions.unshift(focused);
+  }
+
   const accountMap = Object.fromEntries(accounts.map((a: Account) => [a.id, a]));
   const accountOptions = Array.from(new Map(accounts.map((a) => [a.type, a])).values());
 
