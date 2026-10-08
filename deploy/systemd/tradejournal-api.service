@@ -4,6 +4,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+EnvironmentFile=-/etc/tradejournal/access-backend.env
 Type=simple
 User=tradejournal
 Group=tradejournal

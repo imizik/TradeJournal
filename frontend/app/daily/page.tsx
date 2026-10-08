@@ -1,4 +1,7 @@
-import { api, DailyReviewIndexItem } from "@/lib/api";
+import PracticeRoutine from "@/components/PracticeRoutine";
+import { requireAccess } from "@/lib/accessServer";
+import { api } from "@/lib/serverApi";
+import type { DailyReviewIndexItem } from "@/lib/api";
 
 function formatDate(value: string) {
   return new Date(`${value}T12:00:00`).toLocaleDateString(undefined, {
@@ -17,6 +20,8 @@ function monthLabel(value: string) {
 }
 
 export default async function DailyReviewPage() {
+  const access = await requireAccess();
+  if (!access.owner && !access.grants.journal_read) return <PracticeRoutine />;
   const days = await api.dailyReviews();
   const savedCount = days.filter((day) => day.saved && !day.source_data_stale).length;
   const groups = groupByMonth(days);

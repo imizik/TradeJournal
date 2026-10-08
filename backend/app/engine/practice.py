@@ -92,8 +92,9 @@ def recover_view(db, run):
         db.commit()
 
 
-def view(db: Session, run: PracticeRun, *, details=True):
-    recover_view(db, run)
+def view(db: Session, run: PracticeRun, *, details=True, recover=True):
+    if recover:
+        recover_view(db, run)
     call = db.exec(select(PracticeAgentCall).where(PracticeAgentCall.run_id == run.id)).first()
     opps = opportunities(db, run.id) if details else []
     contexts = {c.id: c for c in db.exec(select(DecisionContext).where(DecisionContext.id.in_([o.context_id for o in opps if o.context_id]))).all()} if opps else {}

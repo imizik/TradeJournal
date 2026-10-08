@@ -10,7 +10,7 @@ Two processes run locally, and they are deliberately not one:
 
 | Process | Port | Entry point | Exposure |
 |---|---|---|---|
-| Private API | 8080 from `startdev.sh`; 8000 from a bare `uvicorn` command and `mcp_server.py`'s default | `backend/app/main.py` | localhost only, **no auth** |
+| Private API (legacy default; optional authenticated mode below) | 8080 from `startdev.sh`; 8000 from a bare `uvicorn` command and `mcp_server.py`'s default | `backend/app/main.py` | localhost only, **no auth** |
 | Frontend | 3000 | `frontend/` (Next 16 App Router) | localhost |
 
 C5.2 retired the public TradingView webhook receiver and Pine alert source.
@@ -48,7 +48,7 @@ Both bind to loopback.
 The [Ubuntu deployment package](../../deploy/README.md) instead supervises
 eight services: frontend, API and the six worker lanes. It keeps the frontend
 and API on loopback; private Tailscale Serve reaches the frontend, whose
-same-origin `/api/backend` proxy carries browser requests. Server components
+same-origin `/api/backend` request handler carries browser requests. Server components
 use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
 Because that frontend grants access to the private API, it must never be made
 public. Local development retains the existing direct API URL default.
@@ -250,3 +250,23 @@ API client and defaults to `http://localhost:8080` when
 `NEXT_PUBLIC_API_URL` is unset. Table logic is shared through
 `components/DashboardTables.tsx` and `components/TradesTable.tsx` — reuse them
 rather than writing a fourth table.
+
+
+## Optional authenticated browser access
+
+The default installation remains private and unauthenticated. The
+[cloud-browser contract](cloud-browser-auth-contract.md) adds an opt-in
+backend session/capability boundary and two frontend profiles: private owner
+access through Tailscale, and a disabled restricted assistant frontend.
+The same-origin handler strips caller identity/service headers; authenticated
+server reads carry the current session, never a shared owner fallback. A
+public-profile credential can only transport assistant sessions. In secure
+mode, unknown routes/identities are denied, market-only chart responses omit
+journal data, and selected-run/record reads enforce resource grants.
+
+New authentication metadata belongs to the existing database and Alembic;
+financial records/hashes are preserved. In-process workers do not depend on
+browser sessions. The separate assistant process binds loopback port 3001,
+is not auto-enabled, and ships with no public TLS ingress. The actual Dot
+browser/HTTPS trial and live exposure approval remain separate gates. The
+legacy owner frontend and raw private API must never be published.

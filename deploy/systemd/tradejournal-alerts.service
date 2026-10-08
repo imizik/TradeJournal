@@ -5,6 +5,7 @@ After=network-online.target
 ConditionPathExists=/etc/tradejournal/alerts.env
 
 [Service]
+EnvironmentFile=-/etc/tradejournal/access-monitor.env
 Type=oneshot
 User=tradejournal
 Group=tradejournal

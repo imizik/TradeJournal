@@ -3,6 +3,7 @@ Description=TradeJournal private frontend
 After=network-online.target
 
 [Service]
+EnvironmentFile=-/etc/tradejournal/access-owner.env
 Type=simple
 User=tradejournal
 Group=tradejournal

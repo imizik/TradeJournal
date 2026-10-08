@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppAccess } from "@/components/AccessProvider";
 import { useState } from "react";
 import { api, DailyReview } from "@/lib/api";
 
@@ -20,6 +21,7 @@ export default function DailyAiPanel({
   initialReview?: DailyReview | null;
   initialGeneratedAt?: string | null;
 }) {
+  const { owner } = useAppAccess();
   const [status, setStatus] = useState<Status>(initialReview ? "done" : "idle");
   const [review, setReview] = useState<DailyReview | null>(initialReview);
   const [generatedAt, setGeneratedAt] = useState<string | null>(initialGeneratedAt);
@@ -55,7 +57,7 @@ export default function DailyAiPanel({
         <button
           type="button"
           onClick={handleRunAnalysis}
-          disabled={!day || tradeIds.length === 0 || status === "loading"}
+          disabled={!owner || !day || tradeIds.length === 0 || status === "loading"}
           className="rounded bg-foreground px-3 py-2 text-sm font-medium text-background transition-colors hover:bg-foreground/90 disabled:opacity-50"
         >
           {status === "loading" ? "Generating..." : review ? "Regenerate Analysis" : "Run Daily Analysis"}

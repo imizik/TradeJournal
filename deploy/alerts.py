@@ -86,7 +86,7 @@ def load_config() -> dict[str, str]:
 
 
 def get(path: str):
-    with urlopen(f"{API}{path}", timeout=15) as response:
+    with urlopen(Request(f"{API}{path}", headers={"x-tj-service": os.environ["TJ_SERVICE_KEY"]} if os.environ.get("TJ_SERVICE_KEY") else {}), timeout=15) as response:
         return json.load(response)
 
 

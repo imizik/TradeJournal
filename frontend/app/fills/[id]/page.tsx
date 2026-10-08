@@ -1,4 +1,5 @@
-import { api, Fill } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { Fill } from "@/lib/api";
 import ManualFillForm from "@/components/ManualFillForm";
 import { notFound } from "next/navigation";
 import Link from "next/link";

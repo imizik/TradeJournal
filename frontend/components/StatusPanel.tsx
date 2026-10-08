@@ -338,10 +338,11 @@ export default function StatusPanel({ open, onClose }: Props) {
 // Hook — tells the nav button whether any job is running (for pulse dot)
 // ---------------------------------------------------------------------------
 
-export function useAnyJobRunning(): boolean {
+export function useAnyJobRunning(enabled = true): boolean {
   const [running, setRunning] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let mounted = true;
     async function check() {
       const results = await Promise.allSettled([
@@ -359,7 +360,7 @@ export function useAnyJobRunning(): boolean {
       if (!document.hidden) check();
     }, 30000);
     return () => { mounted = false; clearInterval(id); };
-  }, []);
+  }, [enabled]);
 
   return running;
 }

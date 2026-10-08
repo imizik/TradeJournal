@@ -1,6 +1,7 @@
 import Link from "next/link";
 import SignalsRefresh from "@/components/SignalsRefresh";
-import { api, TradingViewAlert } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { TradingViewAlert } from "@/lib/api";
 import {
   fmtAlertTime,
   fmtDecimal,

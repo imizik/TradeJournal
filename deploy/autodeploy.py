@@ -263,7 +263,7 @@ def backup(current: Path) -> None:
 
 def api_healthy() -> bool:
     try:
-        with urlopen(f"{API}/health", timeout=10) as response:
+        with urlopen(Request(f"{API}/health", headers={"x-tj-service": os.environ["TJ_SERVICE_KEY"]} if os.environ.get("TJ_SERVICE_KEY") else {}), timeout=10) as response:
             return json.load(response).get("status") == "ok"
     except (URLError, TimeoutError, ValueError):
         return False

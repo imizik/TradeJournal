@@ -32,7 +32,7 @@ CONFIG_ROOT = Path("/etc/tradejournal")
 RETENTION = 7
 BACKUP_NAME = re.compile(r"^\d{8}T\d{6}Z$")
 CONFIG_FILES = ("backend.env", "migration.env")
-OPTIONAL_CONFIG_FILES = ("tradingview.env",)
+OPTIONAL_CONFIG_FILES = ("tradingview.env", "access-backend.env", "access-owner.env", "access-assistant.env", "access-monitor.env", "access-automation.env", "access-mcp.env")
 
 
 def sha256(path: Path) -> str:

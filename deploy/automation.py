@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import re
 import time
 from urllib.error import HTTPError
@@ -12,7 +13,7 @@ API = "http://127.0.0.1:8080"
 
 
 def request(path: str, method: str = "GET"):
-    request = Request(f"{API}{path}", method=method)
+    request = Request(f"{API}{path}", method=method, headers={"x-tj-service": os.environ["TJ_SERVICE_KEY"]} if os.environ.get("TJ_SERVICE_KEY") else {})
     try:
         with urlopen(request, timeout=15) as response:
             return response.status, json.load(response)

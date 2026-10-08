@@ -390,3 +390,34 @@ def test_a3_cohort_and_agent_reservation_uniqueness_on_postgres(migrated):
         with pytest.raises(IntegrityError):
             db.commit()
         db.rollback()
+
+
+def test_app_access_session_and_revocation_on_postgres(migrated, monkeypatch):
+    from datetime import timedelta
+    from starlette.requests import Request
+    from app.engine import access
+    from app.models import AccessPrincipal
+    monkeypatch.setattr(access, "engine", migrated)
+    principal_id = "pg-auth-inspector"
+    with Session(migrated) as db:
+        principal = AccessPrincipal(id=principal_id, grants_json='{"symbols":["SPY"],"run_ids":[],"journal_read":false}', credential_expires_at=access.now() + timedelta(days=30))
+        db.add(principal)
+        db.flush()
+        token, _ = access.issue_session(db, principal, "assistant")
+        db.commit()
+    monkeypatch.setenv("TJ_OWNER_GATEWAY_KEY", "o" * 43)
+    monkeypatch.setenv("TJ_ASSISTANT_GATEWAY_KEY", "p" * 43)
+    monkeypatch.setenv("TJ_ASSISTANT_ORIGIN", "https://assistant.example")
+    monkeypatch.delenv("TJ_ACCESS_ALLOW_LOCAL_HTTP", raising=False)
+    request = Request({"type": "http", "method": "GET", "path": "/access/me", "headers": [(b"x-tj-gateway", b"p" * 43), (b"cookie", f"{access.cookie_name()}={token}".encode())], "query_string": b"", "server": ("localhost", 8080), "scheme": "http"})
+    assert access.identify(request).identifier == principal_id
+    with Session(migrated) as db:
+        principal = db.get(AccessPrincipal, principal_id)
+        principal.enabled = False
+        principal.version += 1
+        db.add(principal)
+        db.commit()
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException) as denied:
+        access.identify(request)
+    assert denied.value.status_code == 401

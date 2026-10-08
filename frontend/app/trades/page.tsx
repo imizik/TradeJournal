@@ -1,4 +1,5 @@
-import { api, Account } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { Account } from "@/lib/api";
 import TradesTable from "@/components/TradesTable";
 
 export default async function TradesPage({

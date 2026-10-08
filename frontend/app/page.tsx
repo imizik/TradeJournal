@@ -1,4 +1,6 @@
-import { api, Account, Fill, PositionQuote } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { Account, Fill, PositionQuote } from "@/lib/api";
+import { requireAccess } from "@/lib/accessServer";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 import PerformanceOverview from "@/components/PerformanceOverview";
@@ -27,6 +29,8 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ account?: string; type?: string; decision?: string }>;
 }) {
+  const access = await requireAccess();
+  if (!access.owner && !access.grants.journal_read) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /><PracticeDecisions records={(await api.decisions()).decisions} /></div>;
   const resolvedParams = await searchParams;
   const statsParams = new URLSearchParams();
 
@@ -173,7 +177,7 @@ export default async function DashboardPage({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
-        <DashboardActions />
+        {access.owner && <DashboardActions />}
       </div>
 
       <div className="flex flex-wrap gap-4 text-sm">

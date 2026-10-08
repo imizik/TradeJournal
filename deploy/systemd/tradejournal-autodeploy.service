@@ -6,6 +6,7 @@ After=network-online.target
 ConditionPathExists=/etc/tradejournal/autodeploy.env
 
 [Service]
+EnvironmentFile=-/etc/tradejournal/access-monitor.env
 Type=oneshot
 # Root, like an operator's sudo session: it installs releases and switches
 # services through /usr/local/sbin/tradejournal-deploy.

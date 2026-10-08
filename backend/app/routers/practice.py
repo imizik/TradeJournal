@@ -4,12 +4,12 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, practice
+from app.engine import decisions, practice, access
 from app.engine.job_runtime import submit_job
 from app.models import PracticeOpportunity, PracticeRun
 
@@ -74,17 +74,33 @@ def prepare(body: Preparation, db: Session = Depends(get_session)):
     return practice.view(db, run)
 
 
+def inspector_view(request, db, run, *, details=True):
+    restricted = access.permitted_runs(request) is not None
+    result = practice.view(db, run, details=details, recover=not restricted)
+    if restricted:
+        result["error"] = "Preparation unavailable" if result["error"] else None
+        result["agent"]["error"] = "Agent output unavailable" if result["agent"]["error"] else None
+        result["agent"]["limits"] = None
+    return result
+
+
 @router.get("/runs")
-def runs(day: date | None = None, db: Session = Depends(get_session)):
+def runs(request: Request, day: date | None = None, db: Session = Depends(get_session)):
     query = select(PracticeRun).order_by(PracticeRun.created_at.desc()).limit(30)
+    allowed = access.permitted_runs(request)
+    if allowed is not None:
+        query = query.where(PracticeRun.id.in_([uuid.UUID(value) for value in allowed]))
     if day:
         query = query.where(PracticeRun.day == day)
-    return {"runs": [practice.view(db, r, details=False) for r in db.exec(query).all()]}
+    return {"runs": [inspector_view(request, db, r, details=False) for r in db.exec(query).all()]}
 
 
 @router.get("/runs/{run_id}")
-def get_run(run_id: uuid.UUID, db: Session = Depends(get_session)):
-    return practice.view(db, run_or_404(db, run_id))
+def get_run(run_id: uuid.UUID, request: Request, db: Session = Depends(get_session)):
+    allowed = access.permitted_runs(request)
+    if allowed is not None and str(run_id) not in allowed:
+        raise HTTPException(404, "Daily run not found")
+    return inspector_view(request, db, run_or_404(db, run_id))
 
 
 @router.post("/opportunities/{opp_id}/choice")

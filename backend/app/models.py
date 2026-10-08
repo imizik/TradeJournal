@@ -1201,6 +1201,48 @@ class TradingViewAlert(SQLModel, table=True):
     )
 
 
+class AccessPrincipal(SQLModel, table=True):
+    __tablename__ = "access_principal"
+    id: str = Field(primary_key=True)
+    key_hash: Optional[str] = None
+    enabled: bool = True
+    version: int = 1
+    grants_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    credential_expires_at: Optional[datetime] = None
+
+
+class AccessSession(SQLModel, table=True):
+    __tablename__ = "access_session"
+    digest: str = Field(primary_key=True)
+    principal_id: Optional[str] = Field(default=None, foreign_key="access_principal.id")
+    version: int = 0
+    audience: str
+    csrf: str
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    last_seen_at: datetime = Field(default_factory=utc_now_naive)
+    expires_at: datetime
+
+
+class AccessLoginLimit(SQLModel, table=True):
+    __tablename__ = "access_login_limit"
+    id: str = Field(primary_key=True)
+    attempts: int = 0
+    window_at: datetime = Field(default_factory=utc_now_naive)
+    blocked_until: Optional[datetime] = None
+
+
+class AccessAudit(SQLModel, table=True):
+    __tablename__ = "access_audit"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    principal_id: Optional[str] = None
+    operation: str
+    resource: Optional[str] = None
+    outcome: str
+    request_id: str
+    created_at: datetime = Field(default_factory=utc_now_naive, index=True)
+
+
 # Loader options for bulk Fill queries: skip the legacy raw-email payload
 # columns (write-only history; nothing reads them back). Keeps multi-KB email
 # bodies per row off the wire — metered egress on hosted Postgres. Every

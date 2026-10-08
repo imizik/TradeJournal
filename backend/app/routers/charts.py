@@ -23,7 +23,7 @@ from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
 from app.engine import symbol_info_tradier
-from app.engine import chart_journal
+from app.engine import chart_journal, access
 from app.engine.quotes import OptionQuoteRequest, option_mark
 from app.engine.options_feed import Layer, options_feed
 from app.engine.options_history import attach_open_interest_changes
@@ -40,6 +40,11 @@ MAX_SYMBOLS = 3
 MAX_STREAM_SYMBOLS = 33
 # Thirty levels on each of hundreds of symbols fit; a runaway client does not.
 SETTINGS_BYTES = 512_000
+STREAM_AUTH_INTERVAL = 15
+
+
+def stream_clock():
+    return time.monotonic()
 
 
 def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], bool]:
@@ -71,6 +76,7 @@ def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], 
 
 @router.get("/history")
 def history(
+    request: Request,
     symbol: str = Query(..., max_length=15),
     interval: str = Query(...),
     session: str = Query(..., pattern="^(regular|extended)$"),
@@ -91,7 +97,7 @@ def history(
             raise HTTPException(503, {"code": exc.code, "message": str(exc), "retry_at": retry}) from None
         data["session"] = session
         data["markers"] = []
-        data["fills_truncated"] = _markers(db, symbol, [data])[1]
+        data["fills_truncated"] = _markers(db, symbol, [data])[1] if access.is_journal(request) else False
         return data
     try:
         data = chart_history.page(symbol, interval, session, before, limit, continuation)
@@ -99,7 +105,7 @@ def history(
         status = 422 if exc.code == "invalid_request" else 503
         raise HTTPException(status, {"code": exc.code, "message": str(exc), "retry_at": exc.retry_at}) from None
     data["markers"] = []
-    fills, truncated = _markers(db, symbol, [data])
+    fills, truncated = _markers(db, symbol, [data]) if access.is_journal(request) else ([], False)
     data["fills_truncated"] = truncated
     return data
 
@@ -118,7 +124,13 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
     async def events():
         client_id, queue = market.subscribe(wanted)
         try:
+            next_check = stream_clock()
             while True:
+                if access.enabled() and stream_clock() >= next_check:
+                    from starlette.concurrency import run_in_threadpool
+                    if not await run_in_threadpool(access.still_authorized, request):
+                        break
+                    next_check = stream_clock() + STREAM_AUTH_INTERVAL
                 if await request.is_disconnected():
                     break
                 try:
@@ -137,6 +149,7 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
 
 @router.get("/workspace")
 def workspace(
+    request: Request,
     symbol: str = Query("SPY", max_length=15),
     intervals: str = Query("5m,15m,1h,1D,1m", max_length=80),
     watchlist: str = Query("SPY,QQQ,MRVL,NVDA,AMD,META", max_length=500),
@@ -211,6 +224,13 @@ def workspace(
     data["earnings"] = earnings[symbol]
     for name, other in data["extras"].items():
         other["earnings"] = earnings[name]
+
+    if not access.is_journal(request):
+        data["fills"], data["fills_truncated"], data["positions"], data["alerts"] = [], False, [], []
+        data["journal_access"] = "restricted"
+        for other in data["extras"].values():
+            other["fills_truncated"], other["positions"] = False, []
+        return data
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.

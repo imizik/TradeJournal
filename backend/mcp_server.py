@@ -35,13 +35,18 @@ log = logging.getLogger("trade-journal-mcp")
 mcp = FastMCP("trade-journal")
 
 
+def _access_headers():
+    key = os.environ.get("TRADE_JOURNAL_SERVICE_KEY")
+    return {"x-tj-service": key} if key else {}
+
+
 def _get(path: str, params: dict | None = None, timeout: float = 120.0,
          allow_404: bool = False):
     started = time.monotonic()
     error = None
     response_bytes = None
     try:
-        resp = httpx.get(f"{API_BASE}{path}", params=params, timeout=timeout)
+        resp = httpx.get(f"{API_BASE}{path}", params=params, timeout=timeout, headers=_access_headers())
         if allow_404 and resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -66,7 +71,7 @@ def _post(path: str, payload: dict, timeout: float = 60.0):
     error = None
     response_bytes = None
     try:
-        resp = httpx.post(f"{API_BASE}{path}", json=payload, timeout=timeout)
+        resp = httpx.post(f"{API_BASE}{path}", json=payload, timeout=timeout, headers=_access_headers())
         resp.raise_for_status()
         response_bytes = len(resp.content)
         return resp.json()
