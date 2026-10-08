@@ -279,6 +279,18 @@ class PaperWatcher:
                 return
         if state.status not in ("triggered", "open"):
             return
+        if state.status == "triggered" and state.order_intent is None:
+            # This clock sample happens after the trigger commit returned.
+            # recorded_at on that trigger was sampled before commit and cannot
+            # prove that the next minute began after durable detection.
+            intent_at = self.clock()
+            if intent_at - state.trigger["detected_at"] > px.MAX_DETECTION_DELAY:
+                return self._store(record, px.end_unresolved(state, intent_at, "monitoring gap before durable entry intent"))
+            self._store(record, [{"type": "order_intent", "key": "order_intent", "at": intent_at,
+                                  "eligible_at": (int(intent_at) // 60 + 1) * 60}])
+            state = px.fold(self._history(record.id))
+            if state.status != "triggered" or state.order_intent is None:
+                return
         split = self._split_since(record.symbol, first, today)
         if split is None:
             return  # the split source is unavailable: wait rather than judge across a possible split
@@ -293,8 +305,7 @@ class PaperWatcher:
         seen = self.clock()
         bars = [{"start": b["time"], "o": b["open"], "h": b["high"], "l": b["low"], "c": b["close"]}
                 for b in minutes if b["end_time"] + LATENESS <= seen]
-        events = px.advance(state, terms, bars, sessions_from(self.calendar, first, today),
-                            durable_at=self._trigger_stored_at(record.id))
+        events = px.advance(state, terms, bars, sessions_from(self.calendar, first, today))
         self._store(record, events, reconstructed_before=seen - px.MAX_DETECTION_DELAY - 60)
 
     def _bars15(self, minutes: list[dict], now: float, armed_at: float, terms: px.Terms) -> list[dict]:
@@ -330,12 +341,6 @@ class PaperWatcher:
     def _history(self, record_id: uuid.UUID) -> list[dict]:
         with Session(self.engine) as db:
             return _data(events_for(db, record_id))
-
-    def _trigger_stored_at(self, record_id: uuid.UUID) -> float | None:
-        with Session(self.engine) as db:
-            row = db.exec(select(DecisionEvent).where(DecisionEvent.record_id == record_id,
-                                                      DecisionEvent.event_type == "trigger")).first()
-            return _epoch(row.recorded_at) if row else None
 
     def _store(self, record: DecisionRecord, events: list[dict], **kwargs) -> None:
         with Session(self.engine) as db:
