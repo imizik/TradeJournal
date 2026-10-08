@@ -2,8 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fetchSymbolEvents, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolNews } from "@/lib/symbolInfo";
-import type { SymbolEvents, SymbolForecast, SymbolJournal, SymbolNews } from "@/lib/symbolInfo";
+import { fetchSymbolEvents, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolNews, fetchSymbolOverview } from "@/lib/symbolInfo";
+import type { SymbolEvents, SymbolForecast, SymbolJournal, SymbolNews, SymbolOverview } from "@/lib/symbolInfo";
+import type { ChartQuote } from "@/lib/charts";
+import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoForecast from "./SymbolInfoForecast";
 import SymbolInfoNews from "./SymbolInfoNews";
@@ -14,6 +16,7 @@ type Tab = typeof TABS[number];
 const TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
 /** The tabs built so far: one request each, for the open tab only. The Forecast tab needs the price. Forecast and News read again each minute while open and visible. */
 const BUILT = {
+  Overview: { load: fetchSymbolOverview, name: "overview", title: "Overview" },
   You: { load: fetchSymbolJournal, name: "journal", title: "Journal" },
   News: { load: fetchSymbolNews, name: "news", title: "News" },
   Events: { load: fetchSymbolEvents, name: "events", title: "Events" },
@@ -23,7 +26,7 @@ const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
 const REFRESH_MS = 60_000;
 
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
-export default function SymbolInfo({ symbol, price }: { symbol: string; price?(): number | null }) {
+export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null }) {
   const id = useId();
   const priceOf = useRef(price);
   useEffect(() => { priceOf.current = price; });
@@ -80,7 +83,8 @@ export default function SymbolInfo({ symbol, price }: { symbol: string; price?()
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
         {!built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
-          : shown?.data ? (view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
+          : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
+            : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
             : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} />
             : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
           : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>

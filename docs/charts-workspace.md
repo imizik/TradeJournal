@@ -74,8 +74,15 @@ Polygon failure.
 
 Overview is a placeholder for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
-on this device. Only an expanded You, News, Events or Forecast tab fetches, once after the
-ticker settles for 300 ms; old requests are cancelled. The panel starts
+on this device. Only an expanded Overview, You, News, Events or Forecast tab
+fetches, once after the ticker settles for 300 ms; old requests are cancelled.
+Overview shows price, change, day range and a 52-week range from the chart's
+existing quote, so it does not make a second quote request. Its company
+profile, valuation ratios and statistics come from three independent Tradier
+fundamentals reads, each cached for 24 hours under
+`backend/data/symbol_info/v1/tradier/`. Every value has its source and read
+time on hover; ETF/fund fundamentals and individual provider failures are
+shown as unavailable without hiding other blocks. The panel starts
 collapsed below 1024 px and follows the watchlist's visibility in full-screen
 mode. There are no new tables or migrations for this panel.
 

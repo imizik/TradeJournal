@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
-import type { Earnings, NewsArticle, NewsSource, SymbolEvents, SymbolForecast, SymbolNews } from "../lib/symbolInfo";
+import type { Earnings, NewsArticle, NewsSource, SymbolEvents, SymbolForecast, SymbolNews, SymbolOverview } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
@@ -16,10 +16,47 @@ test.beforeEach(async ({ context, page }) => {
     const now = Math.floor(Date.now() / 1000);
     const bars = Array.from({ length: 10 }, (_, i) => ({ time: 1789392600 + i * 300, end_time: 1789392900 + i * 300, open: 100, high: 102, low: 99, close: 101, volume: 1000, extended: false }));
     await route.fulfill({ json: { symbol, session: "extended", provider: "Fixture", delayed: false, refresh_seconds: 15,
-      checked_at: now, fetched_at: { intraday: now }, intraday_as_of: now, issues: [], quotes: [], fills: [], fills_truncated: false,
+      checked_at: now, fetched_at: { intraday: now, quotes: now }, intraday_as_of: now, issues: [], quotes: [{ symbol, name: `${symbol} company`, instrument_type: symbol === "SPY" ? "etf" : "stock", last: 189.12, change: 2.2,
+        change_percentage: 1.18, volume: 112700000, previous_close: 186.92, trade_time: now, day_low: 185, day_high: 191, week_52_low: 86, week_52_high: 195 }], fills: [], fills_truncated: false,
       panels: Object.fromEntries((query.get("intervals") ?? "5m").split(",").map((interval) => [interval, { bars, markers: [] }])), extras: {} } });
   });
   await page.route("**/api/backend/charts/stream?**", (route) => route.fulfill({ status: 503, body: "Fixture has no stream" }));
+});
+
+const OVERVIEW_READ = Date.parse("2026-10-05T13:40:00Z") / 1000;
+function overview(symbol: string): SymbolOverview {
+  const block = { state: (symbol === "SPY" ? "none" : "ready") as "none" | "ready", source: "Tradier company fundamentals", fetched_at: OVERVIEW_READ, message: null };
+  return { symbol, state: symbol === "SPY" ? "none" : "ready", datasets: {
+    company: { ...block, name: symbol === "SPY" ? null : "NVIDIA Corporation", sector: symbol === "SPY" ? null : "Technology", employees: symbol === "SPY" ? null : 36000,
+      ipo_date: symbol === "SPY" ? null : "1999-01-22", description: symbol === "SPY" ? null : "GPU designer" },
+    ratios: { ...block, pe: symbol === "SPY" ? null : 52.5, price_to_sales: symbol === "SPY" ? null : 25, price_to_book: symbol === "SPY" ? null : 40,
+      ev_to_ebitda: symbol === "SPY" ? null : 48, dividend_yield: symbol === "SPY" ? null : 0.0003, beta_60_month: symbol === "SPY" ? null : 1.8 },
+    statistics: { ...block, market_cap: symbol === "SPY" ? null : 4500000000000, enterprise_value: symbol === "SPY" ? null : 4490000000000,
+      shares_outstanding: symbol === "SPY" ? null : 24500000000, institutional_ownership: symbol === "SPY" ? null : 0.68,
+      average_volume_30_day: symbol === "SPY" ? null : 112700000 },
+  } };
+}
+
+test("Overview combines the chart's existing quote with cached company fundamentals", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/overview", async (route) => {
+    const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
+    reads.push(symbol);
+    await route.fulfill({ json: overview(symbol) });
+  });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$189.12");
+  await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$185.00 – $191.00");
+  await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
+  await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("$4.5T");
+  await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
+  await expect(info.getByText("52.5", { exact: true })).toHaveAttribute("title", /Tradier company fundamentals · read/);
+  expect(reads).toEqual(["NVDA"]);
+  await choose(page, "SPY");
+  await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Not available for ETFs or funds.");
+  expect(reads).toEqual(["NVDA", "SPY"]);
 });
 
 const panel = (page: Page) => page.getByRole("region", { name: "Symbol info", exact: true });

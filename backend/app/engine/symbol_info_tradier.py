@@ -29,6 +29,7 @@ import httpx
 from app.engine import tradier
 from app.engine.symbol_info_events import (REPORTS_SHOWN, dividends_view, earnings_view, parse_dividends, parse_earnings,
                                            parse_splits, splits_view)
+from app.engine import symbol_info_overview
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +46,12 @@ DATASETS: dict[str, tuple[str, Callable, int, str]] = {
     "calendars": ("/beta/markets/fundamentals/calendars", parse_earnings, 12 * 3600, "Tradier corporate calendar"),
     "dividends": ("/beta/markets/fundamentals/dividends", parse_dividends, 24 * 3600, "Tradier dividends"),
     "corporate_actions": ("/beta/markets/fundamentals/corporate_actions", parse_splits, 24 * 3600, "Tradier corporate actions"),
+    "company": ("/beta/markets/fundamentals/company", symbol_info_overview.normalize_company, 24 * 3600, "Tradier company fundamentals"),
+    "ratios": ("/beta/markets/fundamentals/ratios", symbol_info_overview.normalize_ratios, 24 * 3600, "Tradier company fundamentals"),
+    "statistics": ("/beta/markets/fundamentals/statistics", symbol_info_overview.normalize_statistics, 24 * 3600, "Tradier company fundamentals"),
 }
+EVENT_DATASETS = ("calendars", "dividends", "corporate_actions")
+OVERVIEW_DATASETS = ("company", "ratios", "statistics")
 
 
 class SymbolEventsError(Exception):
@@ -91,7 +97,7 @@ class SymbolEvents:
 
     def events(self, symbol: str, today: date) -> dict:
         """Everything the Events tab shows for one symbol. Each block degrades on its own."""
-        issues = {dataset: self.refresh(dataset, [symbol]) for dataset in DATASETS}
+        issues = {dataset: self.refresh(dataset, [symbol]) for dataset in EVENT_DATASETS}
         dividends, dividend_meta = self._block("dividends", symbol, issues["dividends"])
         splits, split_meta = self._block("corporate_actions", symbol, issues["corporate_actions"])
         return {
@@ -100,6 +106,18 @@ class SymbolEvents:
             "dividends": {**dividend_meta, **dividends_view(dividends.rows if dividends else [], today)},
             "splits": {**split_meta, "rows": splits_view(splits.rows if splits else [], today)},
         }
+
+    def overview(self, symbol: str) -> dict:
+        """Tradier company facts, with independent 24-hour caches per dataset."""
+        datasets = {}
+        for dataset in OVERVIEW_DATASETS:
+            issue = self.refresh(dataset, [symbol])
+            entry, meta = self._block(dataset, symbol, issue)
+            values = entry.rows[0] if entry and entry.rows else {}
+            datasets[dataset] = {**meta, **values}
+        has_data = any(block["state"] == "ready" for block in datasets.values())
+        return {"symbol": symbol, "state": "ready" if has_data else "none" if all(block["state"] == "none" for block in datasets.values()) else "unavailable",
+                "datasets": datasets}
 
     def refresh(self, dataset: str, symbols: list[str]) -> str | None:
         """Read the stale ones among ``symbols``. Returns why it could not, or None."""
@@ -136,7 +154,7 @@ class SymbolEvents:
             issue = issue or self._cooling(dataset) or (None if tradier.tradier_configured() else NOT_CONFIGURED)
         else:
             issue = None
-        state = ("unavailable" if issue else "loading") if entry is None else "ready" if entry.rows else "none"
+        state = ("unavailable" if issue else "loading") if entry is None else "ready" if entry.rows else "unavailable" if issue else "none"
         return entry, {"state": state, "source": DATASETS[dataset][3], "fetched_at": int(entry.fetched_at) if entry else None,
                        "message": issue}
 
