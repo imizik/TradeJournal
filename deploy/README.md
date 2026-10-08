@@ -506,9 +506,12 @@ A newer build waits, and is installed later or by a person, while:
   the private app for about a minute. Adding the `deploy-now` label to the pull request, before or after
   merging, releases it on the next check;
 - a sync or enrichment job is running, or the API is not answering;
-- it adds or removes an Alembic revision. The release is installed but not
-  activated, and the phone is told. `run --allow-migration` (below) takes and
-  verifies a backup, migrates and activates;
+- it adds or removes an Alembic revision and `AUTODEPLOY_AUTO_MIGRATE` is not
+  `true`. With that setting enabled, the deployer creates and verifies a fresh
+  backup for the confirmed database and running commit, migrates, and activates.
+  A backup or migration failure stops the release and alerts the phone. After
+  a migration failure, the controller attempts to restart the prior release
+  only when the database is still compatible;
 - it is not ahead of the running commit on `main`. The deployer never moves
   the server backwards, and never replaces a build deployed by hand from a
   branch;
@@ -525,6 +528,13 @@ an `NTFY_URL` in `autodeploy.env` sends them to a different topic instead. The
 timer is enabled by every activation; without that file its service is
 skipped.
 
+Set `AUTODEPLOY_AUTO_MIGRATE=true` in the root-only configuration to let green
+`main` builds with schema changes deploy after the market-hours hold. This does
+not make an old release schema-compatible: a failed migration may require a
+forward fix or a deliberate database restore. Keep the offsite backup and
+restore drill healthy; the deployer's immediate pre-migration check verifies
+the new local restore point, not an offsite restore.
+
 ```bash
 sudo install -m 0600 /opt/tradejournal/current/deploy/autodeploy.env.example /etc/tradejournal/autodeploy.env
 sudoedit /etc/tradejournal/autodeploy.env
@@ -533,7 +543,7 @@ PY=/opt/tradejournal/current/backend/.venv/bin/python
 sudo $PY $AUTODEPLOY status
 # Skip the market-hours wait for the newest build:
 sudo $PY $AUTODEPLOY run --now
-# Apply a held schema change: verified backup, migrate, activate:
+# Apply a held schema change once when automatic migrations are disabled:
 sudo $PY $AUTODEPLOY run --now --allow-migration
 sudo journalctl -u tradejournal-autodeploy --since today
 ```
@@ -558,7 +568,8 @@ stops and starts the entire service set. The upgrade polls a local stand-in
 for GitHub's releases API; the live Release workflow and the VPS polling
 GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
 covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
-schema holds, checksums, and notifications sent once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
+optional schema migrations, fresh backups, checksums, and notifications sent
+once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by
 `backend/tests/test_gmail_listener.py` with a fake subscriber. The workflow
