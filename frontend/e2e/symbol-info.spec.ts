@@ -94,17 +94,22 @@ test("You renders seeded completed results, account-separated open trades and an
   expect(reads).toHaveLength(4);
 });
 
-test("placeholder tabs persist per device and rapid symbol steps fetch only the settled symbol", async ({ page }) => {
+test("Overview persists per device and rapid symbol steps fetch only the settled symbol", async ({ page }) => {
   const reads: string[] = [];
   page.on("request", (request) => { if (/\/charts\/symbol\//.test(request.url())) reads.push(request.url()); });
+  await page.route("**/api/backend/charts/symbol/*/overview", async (route) => {
+    const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
+    await route.fulfill({ json: overview(symbol) });
+  });
   await page.goto("/charts");
   const info = panel(page);
   await expect(info.locator("dl")).toContainText("$1,300.00");
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
-  await expect(info).toContainText("Overview is coming soon.");
+  await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
   await page.reload();
   await expect(info.getByRole("tab", { name: "Overview", exact: true })).toHaveAttribute("aria-selected", "true");
-  expect(reads).toHaveLength(1);
+  await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
+  expect(reads).toHaveLength(3);
   // Anchor both operations to one fixed time. Pausing at wall-clock "now"
   // races the browser advancing while the command travels to it on CI.
   const clockStart = new Date("2026-10-02T16:00:00Z");
@@ -116,8 +121,8 @@ test("placeholder tabs persist per device and rapid symbol steps fetch only the 
   await choose(page, "AMD");
   await page.clock.runFor(301);
   await expect(info).toContainText("No trades on this symbol");
-  expect(reads).toHaveLength(2);
-  expect(reads[1]).toContain("/AMD/you");
+  expect(reads).toHaveLength(4);
+  expect(reads[3]).toContain("/AMD/you");
 });
 
 test("a failed journal request retries without replacing charts", async ({ page }) => {
