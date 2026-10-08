@@ -17,9 +17,10 @@ python3 scripts/pr_review.py begin --owner codex --session SESSION_ID --contract
 
 For Claude ownership use `--owner claude`. SessionStart hook feedback supplies
 the actual session id; Codex CLI also supplies `CODEX_THREAD_ID`. Use the exact
-id, never `--last` or a guessed id. The contract points to agreed requirements,
-not an author's narrative. Record requirements in existing task documentation
-when they are not already in the repository.
+id, never `--last` or a guessed id. The contract supplies agreed requirements,
+not an author's narrative. It may be a repository document or a quoted task
+brief. Review refuses an empty contract; supply it through `begin` or the first
+`review --contract` invocation. It cannot be changed after review starts.
 
 After verification, commit the finished changes, then:
 
@@ -70,7 +71,8 @@ For a local review before push, leave the PR unbound until publication.
 
 [Codex hooks](../../.codex/hooks.json) and
 [Claude settings](../../.claude/settings.json) install SessionStart and Stop
-handlers. SessionStart saves a baseline. Stop enrolls work changed during that
+handlers. SessionStart saves a baseline, including for detached managed
+worktrees before the owner creates its feature branch. Stop enrolls work changed during that
 session and returns pending work to its owner, using provider-native hook
 feedback. Read-only sessions with no changed work are left alone. Explicit
 `begin` also enrolls an existing unfinished branch.

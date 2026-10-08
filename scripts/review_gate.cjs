@@ -22,16 +22,17 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
     // The local owner publishes with the user's gh login. A contributor's
     // status, arbitrary prose, or an older-base receipt cannot certify a PR.
     const trusted = receipt?.creator?.login === repo.owner;
+    const previous = statuses.find(s => s.context === GATE);
     let state = 'pending', description = 'Independent local review has not completed for this head and base';
     if (receipt?.state === 'success' && trusted && identity?.[1] === pr.base.sha) {
       state = 'success'; description = receipt.description;
     } else if (receipt?.state === 'error' || receipt?.state === 'failure') {
       state = 'error'; description = 'Review stopped; resume the owning session and inspect its findings';
-    } else if (receipt && now - Date.parse(receipt.created_at) > 45 * 60 * 1000) {
+    } else if ((!receipt && previous?.state === 'error') ||
+      now - Date.parse((receipt || previous)?.created_at) > 45 * 60 * 1000) {
       state = 'error'; description = 'Review is overdue or its base changed; owning session needs attention';
     }
     // Avoid spamming identical statuses on every watchdog tick.
-    const previous = statuses.find(s => s.context === GATE);
     if (previous?.state !== state || previous?.description !== description) {
       await github.rest.repos.createCommitStatus({ ...repo, sha: pr.head.sha,
         context: GATE, state, description, target_url: pr.html_url });

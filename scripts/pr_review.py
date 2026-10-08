@@ -79,7 +79,12 @@ def atomic_json(path, value):
 
 def load_json(path):
     try:
-        return json.loads(path.read_text()) if path.exists() else None
+        if not path.exists():
+            return None
+        value = json.loads(path.read_text())
+        if value is None:
+            raise ReviewError(f"Null review state is invalid: {path}")
+        return value
     except (OSError, ValueError) as exc:
         raise ReviewError(f"Cannot read review state: {path}") from exc
 
@@ -120,9 +125,23 @@ def owner_state(root, owner, session, base_ref="origin/main", contract=""):
         raise ReviewError("An explicit owning session id is required")
     path = state_path(root)
     state = load_json(path)
-    if state:
+    if state is not None:
+        required = {"version", "owner", "session", "branch", "base_ref", "contract", "phase", "passes"}
+        phases = {"needs_review", "reviewing", "findings", "clean", "ready"} | TERMINAL
+        if (not isinstance(state, dict) or not required.issubset(state) or state["version"] != 1
+                or state["owner"] not in {"codex", "claude"} or state["phase"] not in phases
+                or not isinstance(state["passes"], list) or len(state["passes"]) > MAX_PASSES
+                or not all(isinstance(state[k], str) and state[k] for k in ("session", "branch", "base_ref"))
+                or not isinstance(state["contract"], str)
+                or state["branch"] != git(root, "symbolic-ref", "--short", "HEAD")):
+            raise ReviewError("Review state is corrupt or belongs to an unsupported version/branch; report the blocker")
         if (state["owner"], state["session"]) != (owner, session):
             raise ReviewError("This branch has another owning session. Resume that session or use takeover after human authorization")
+        if contract and contract != state["contract"]:
+            if state["passes"]:
+                raise ReviewError("Do not change the agreed review contract after review starts")
+            state["contract"] = contract
+            save(path, state)
         return path, state
     state = {"version": 1, "owner": owner, "session": session,
              "branch": git(root, "symbolic-ref", "--short", "HEAD"),
@@ -317,6 +336,8 @@ def review(root, args):
     path = state_path(root)
     with locked(path):
         path, state = owner_state(root, args.owner, args.session, args.base, args.contract)
+        if not state["contract"].strip():
+            raise ReviewError("Supply the agreed task requirements with --contract (a repository document or quoted brief) before review")
         ident = identity(root, state["base_ref"])
         if ident["dirty"]:
             raise ReviewError("Commit the finished changes before review; ignored logs/dependencies are excluded")
@@ -461,11 +482,6 @@ def hook(root, args, payload):
     session = payload.get("session_id")
     if not session:
         raise ReviewError("Hook omitted session_id; cannot assign review ownership")
-    try:
-        path = state_path(root)
-    except ReviewError:
-        # No work is enrolled automatically on main or detached checkouts.
-        return {}
     baseline = root / ".review-loop" / "sessions" / (hashlib.sha256(session.encode()).hexdigest() + ".json")
     current = {"head": git(root, "rev-parse", "HEAD"), "dirty": git(root, "status", "--porcelain", "--untracked-files=normal")}
     if event == "SessionStart":
@@ -477,10 +493,17 @@ def hook(root, args, payload):
         return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": message}}
     if event != "Stop":
         return {}
+    try:
+        path = state_path(root)
+    except ReviewError:
+        before = load_json(baseline)
+        if before and before != current:
+            return {"decision": "block", "reason": "Work changed on main or a detached checkout. Move it to a feature branch without losing changes, then register ownership and run independent review before finishing."}
+        return {}
     with locked(path):
         state = load_json(path)
         before = load_json(baseline)
-        owns_state = state and (state["owner"], state["session"]) == (args.owner, session)
+        owns_state = isinstance(state, dict) and (state.get("owner"), state.get("session")) == (args.owner, session)
         if not owns_state and (before is None or before == current):
             return {}
         path, state = owner_state(root, args.owner, session)
@@ -505,6 +528,8 @@ def hook(root, args, payload):
             state.update(phase="attention", error="Owner stopped repeatedly without advancing the review")
         save(path, state)
         command = f"python3 scripts/pr_review.py review --owner {args.owner} --session {shlex.quote(session)}"
+        if not state["contract"]:
+            command += " --contract 'AGREED TASK REQUIREMENTS OR REPOSITORY CONTRACT PATH'"
         if current["dirty"]:
             reason = f"Finish required checks and commit your changes, then run {command}. Preserve unrelated changes. Review must complete before publishing ready work."
         elif state["phase"] == "clean" and matches(state, ident):
@@ -556,7 +581,7 @@ def main():
                 else:
                     path, state = owner_state(root, args.owner, args.session, args.base, args.contract)
                 print(f"Owner registered. State: {path}")
-    except (ReviewError, ValueError, OSError, subprocess.SubprocessError) as exc:
+    except (ReviewError, ValueError, TypeError, KeyError, OSError, subprocess.SubprocessError) as exc:
         if args.command == "hook":
             reason = f"Review hook failed: {exc}. Report the blocker; do not claim ready. Human intervention is required."
             print(json.dumps({"systemMessage": reason} if payload and payload.get("stop_hook_active") else {"decision": "block", "reason": reason}))

@@ -169,6 +169,12 @@ def test_another_session_cannot_take_ownership(repo):
         reviewer.owner_state(repo, "codex", "second")
 
 
+def test_corrupted_state_cannot_certify_readiness(repo):
+    reviewer.atomic_json(reviewer.state_path(repo), {"phase": "ready", "version": 1})
+    with pytest.raises(reviewer.ReviewError, match="corrupt"):
+        reviewer.owner_state(repo, "codex", "owner-session")
+
+
 def test_another_read_only_session_is_not_forced_to_take_over(repo):
     reviewer.owner_state(repo, "codex", "first")
     payload = {"session_id": "second", "hook_event_name": "SessionStart"}
@@ -204,6 +210,30 @@ def test_hook_returns_work_to_owner_but_leaves_read_only_sessions_alone(repo):
     assert feedback["decision"] == "block"
     assert "Commit" in feedback["reason"] or "commit" in feedback["reason"]
     assert state(repo)["session"] == "owner-session"
+
+
+def test_detached_start_still_enrolls_changes_after_branch_creation(repo):
+    git(repo, "checkout", "-q", "--detach")
+    payload = {"session_id": "owner-session", "hook_event_name": "SessionStart"}
+    reviewer.hook(repo, args(), payload)
+    git(repo, "switch", "-qc", "codex/from-detached")
+    (repo / "a.py").write_text("value = 3\n")
+    payload["hook_event_name"] = "Stop"
+    assert reviewer.hook(repo, args(), payload)["decision"] == "block"
+    assert state(repo)["session"] == "owner-session"
+
+
+def test_contract_is_required_and_can_be_supplied_after_auto_enrollment(repo, cli):
+    reviewer.owner_state(repo, "codex", "owner-session")
+    a = args()
+    a.contract = ""
+    with pytest.raises(reviewer.ReviewError, match="agreed task requirements"):
+        reviewer.review(repo, a)
+    assert state(repo)["passes"] == []
+    reviewer.review(repo, args())
+    assert state(repo)["contract"] == "CLAUDE.md"
+    with pytest.raises(reviewer.ReviewError, match="Do not change"):
+        reviewer.owner_state(repo, "codex", "owner-session", contract="Different requirements")
 
 
 def test_hook_terminal_failure_reports_once_then_stops(repo):

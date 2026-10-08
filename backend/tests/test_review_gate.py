@@ -14,11 +14,11 @@ BASE = "a" * 40
 HEAD = "b" * 40
 
 
-def gate(receipt=None, *, comments=None, base=BASE, event="schedule"):
+def gate(receipt=None, *, comments=None, base=BASE, event="schedule", previous=None):
     fixture = {
         "pr": {"number": 1, "state": "open", "head": {"sha": HEAD}, "base": {"sha": base},
                "labels": [{"name": "review-loop"}], "html_url": "https://github.com/owner/repo/pull/1"},
-        "statuses": [receipt] if receipt else [], "comments": comments or [], "event": event,
+        "statuses": ([receipt] if receipt else []) + ([previous] if previous else []), "comments": comments or [], "event": event,
     }
     program = """
 const gate = require(process.argv[1]);
@@ -67,6 +67,13 @@ def test_explicit_review_error_notifies_without_waiting():
     result = gate(receipt(state="error"))
     assert result["updates"][0]["state"] == "error"
     assert result["notifications"]
+
+
+def test_managed_pr_with_no_receipt_expires_and_remains_failed():
+    previous = {"context": "tradejournal/independent-review", "state": "pending", "created_at": "1970-01-01T00:00:00Z"}
+    assert gate(previous=previous)["updates"][0]["state"] == "error"
+    previous.update(state="error", created_at="1970-01-01T00:59:00Z")
+    assert gate(previous=previous)["updates"][0]["state"] == "error"
 
 
 def test_success_does_not_expire_while_head_and_base_stay_same():
