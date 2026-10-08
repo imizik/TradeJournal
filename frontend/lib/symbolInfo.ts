@@ -214,3 +214,22 @@ export async function fetchSymbolAnalysts(symbol: string, signal: AbortSignal): 
   if (!response.ok) throw new Error("Analyst data unavailable. Try again.");
   return response.json();
 }
+
+/** One fiscal quarter from SEC EDGAR (T3.2). `gap` rows are Q4, reported only in the annual 10-K: every value null. */
+export type FinancialQuarter = {
+  start: string | null; end: string; gap: boolean; fiscal_year: number | null; fiscal_period: string | null; filed: string | null;
+  revenue: number | null; gross_profit: number | null; operating_income: number | null; net_income: number | null; eps_diluted: number | null;
+  gross_margin: number | null; operating_margin: number | null;
+  revenue_yoy: number | null; net_income_yoy: number | null; eps_diluted_yoy: number | null;
+};
+export type SymbolFinancials = {
+  symbol: string; state: "ready" | "none" | "unavailable"; message: string | null; source: string; entity: string | null;
+  fetched_at: number | null; stale: boolean; latest_end: string | null; quarters: FinancialQuarter[];
+};
+
+/** The Financials tab (T3.2), cached on the server until the next 10-Q is due. */
+export async function fetchSymbolFinancials(symbol: string, signal: AbortSignal): Promise<SymbolFinancials> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/financials`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Financials unavailable. Try again.");
+  return response.json();
+}

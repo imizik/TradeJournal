@@ -81,9 +81,31 @@ reads once on a 2.5 s budget with no retry and mutes itself for five minutes); e
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
 
+Its **Financials** tab (T3.2) reads `GET /charts/symbol/{symbol}/financials`:
+the last eight fiscal quarters of revenue, gross margin, operating margin, net
+income and diluted EPS as small bars, with growth against the same fiscal
+quarter a year earlier under revenue, net income and EPS. The source is SEC
+EDGAR's XBRL companyfacts (`data.sec.gov`, ticker to CIK from
+`www.sec.gov/files/company_tickers.json`), not Polygon. A quarter is a 10-Q
+fact spanning 80-105 days, never picked by `fp` (6- and 9-month year-to-date
+facts share it); the value comes from the latest filing that repeats the
+quarter and the fiscal label from the earliest. Margins are calculated from
+revenue, gross profit and operating income, never read. Q4 is filed only in
+the annual 10-K, so it shows as an empty column (—), never a derived number;
+a missing field is null, never zero. A foreign issuer that files only 20-Fs
+(NBIS) reads "No quarterly SEC financials for this issuer."; an ETF or unknown
+ticker reads "Not available for ETFs or funds." The server cache keeps only the
+normalized quarters under `backend/data/symbol_info/v1/sec/` (never the 4 MB
+payload; the ticker map is cached seven days), stays fresh until the next 10-Q
+is due (latest quarter end + 105 days, at least a day) and then re-checks
+daily; a failed read serves the cached copy with its age and is not retried for
+five minutes. Requests are paced to five a second at most. SEC returns 403
+without a contact in the `User-Agent`, so set `SEC_USER_AGENT` (a name and
+email) in the server's `backend.env`; the tab says so when SEC refuses.
+
 Overview is a placeholder for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
-on this device. Only an expanded Overview, You, News, Events or Forecast tab
+on this device. Only an expanded Overview, You, News, Events, Forecast or Financials tab
 fetches, once after the ticker settles for 300 ms; old requests are cancelled.
 Overview shows price, change, day range and a 52-week range from the chart's
 existing quote, so it does not make a second quote request; the company name
