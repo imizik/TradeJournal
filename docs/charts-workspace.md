@@ -56,6 +56,15 @@ reason, never a number. Chains come through the chart's option feed (below),
 60 seconds fresh, and the tab reads again each minute while it is open; until
 the chart has a price it waits for one.
 
+Below it, **Past earnings reactions** (T2.2) read `GET /charts/symbol/{symbol}/reactions`
+once per symbol, apart from the forecast so the implied move is never held up
+by the daily-history read. For each of the latest eight confirmed reports the
+report session and the next session are measured from completed, split-adjusted
+Tradier daily bars (dividends not adjusted) and the larger absolute full-day
+move is shown with its gap, so the average leans high; the report's time of day
+is unknown. A row refuses a number when a bar, calendar day or split check is
+missing, conflicting or unverified. The average needs four usable reports.
+
 Its **News** tab (T1.2) reads `GET /charts/symbol/{symbol}/news`: the newest
 20 headlines from Alpaca (Benzinga, cached 60 s) and Polygon (cached 15 minutes
 on disk under `backend/data/symbol_info/v1/polygon/`), merged and deduplicated by

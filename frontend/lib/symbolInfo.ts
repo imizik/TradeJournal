@@ -107,10 +107,31 @@ export type ImpliedMove = {
   quoted_at?: number | null; fetched_at?: number;
   call?: StraddleLeg; put?: StraddleLeg;
 };
+export type ReactionSession = {
+  date: string; previous_date: string | null; state: "ready" | "unavailable"; reason: string | null;
+  gap_pct: number | null; day_pct: number | null;
+};
+export type EarningsReaction = {
+  report_date: string; label: string | null; state: "ready" | "unavailable"; reason: string | null;
+  sessions: ReactionSession[]; reaction_date: string | null; gap_pct: number | null; reaction_pct: number | null;
+};
+export type ReactionSummary = {
+  state: "ready" | "none" | "loading" | "unavailable"; message: string | null; source: string; fetched_at: number | null;
+  earnings_fetched_at: number | null; earnings_stale: boolean; earnings_message: string | null;
+  stale: boolean; price_basis: string; adjustment: Record<string, unknown>; rows: EarningsReaction[];
+  usable_count: number; average_abs_pct: number | null; report_range: { from: string; to: string } | null;
+};
 export type SymbolForecast = {
   symbol: string; today: string; source: string; spot: number | null; earnings: EarningsNext | null;
   state: "ready" | "none" | "unavailable"; message: string | null; moves: ImpliedMove[]; earnings_note?: string | null;
 };
+
+/** Inferred earnings reactions (T2.2): read once per symbol, apart from the forecast so the implied move is never held up. */
+export async function fetchSymbolReactions(symbol: string, signal: AbortSignal): Promise<ReactionSummary> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/reactions`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Earnings reactions unavailable.");
+  return response.json();
+}
 
 /** The Forecast tab (T2.1) at `spot`, the chart's latest price. */
 export async function fetchSymbolForecast(symbol: string, signal: AbortSignal, spot: number | null): Promise<SymbolForecast> {

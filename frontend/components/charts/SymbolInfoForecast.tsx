@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { eventDay, fetchSymbolAnalysts } from "@/lib/symbolInfo";
-import type { AnalystBlock, ImpliedMove, SymbolAnalysts, SymbolForecast } from "@/lib/symbolInfo";
+import { eventDay, fetchSymbolAnalysts, fetchSymbolReactions, readAt } from "@/lib/symbolInfo";
+import type { AnalystBlock, ImpliedMove, ReactionSummary, SymbolAnalysts, SymbolForecast } from "@/lib/symbolInfo";
 
 const clock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const quote = (bid: number | null | undefined, ask: number | null | undefined) => `${bid?.toFixed(2) ?? "—"} × ${ask?.toFixed(2) ?? "—"}`;
@@ -75,6 +75,21 @@ function Analysts({ symbol, spot }: { symbol: string; spot: number | null }) {
  * or very wide market shows why there is no number instead of one.
  */
 export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
+  const [loaded, setLoaded] = useState<{ symbol: string; value: ReactionSummary | null } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchSymbolReactions(data.symbol, controller.signal).then((value) => setLoaded({ symbol: data.symbol, value }))
+      .catch(() => { if (!controller.signal.aborted) setLoaded({ symbol: data.symbol, value: null }); });
+    return () => controller.abort();
+  }, [data.symbol]);
+  const current = loaded?.symbol === data.symbol ? loaded : null;
+  const reactions = current?.value ?? null;
+  const reactionError = current != null && current.value == null;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(id); }, []);
+  const earningsMove = data.moves.find((move) => move.tags.includes("earnings"));
+  const comparisonReady = reactions?.average_abs_pct != null && earningsMove?.state === "ready" && earningsMove.percent != null
+    && earningsMove.fetched_at != null && now / 1000 - earningsMove.fetched_at <= 60;
   return <div className="space-y-3 text-[11px]">
     <section aria-label="Implied move" className="space-y-2">
       <h3 className="flex items-center gap-2 text-slate-400">Implied move
@@ -97,6 +112,36 @@ export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
       {data.message && data.state !== "unavailable" && <p className="text-[10px] text-amber-300">{data.message}</p>}
       <p className="text-[10px] leading-4 text-slate-500">What the options market prices for a move either way by expiry, at {data.spot?.toFixed(2) ?? "—"}: not a direction or a forecast of one. {data.source}.</p>
     </section>
+    {(reactions || reactionError) && <section aria-label="Past earnings reactions" className="space-y-2 border-t border-slate-800 pt-3">
+      <h3 className="text-slate-300">Past earnings reactions <span className="ml-1 rounded bg-slate-800 px-1 text-[9px] uppercase tracking-wider text-slate-400">inferred</span></h3>
+      <p className="text-[10px] leading-4 text-slate-500">Report timing is unknown. For each report, the larger absolute full-day move across the report session and next session is shown, so the average leans high. This is descriptive, not a forecast. {reactions?.source ?? "Tradier daily history"} ({readAt(reactions?.fetched_at ?? null)}); split-adjusted, dividends not adjusted.{reactions?.stale ? " Split data is stale." : ""}{reactions?.earnings_stale ? " Earnings dates use an older cached calendar because refresh failed." : ""}</p>
+      {!reactions ? <p role="status" className="text-amber-300">Earnings reactions unavailable. Reopen the tab to retry.</p>
+        : reactions.state === "loading" || reactions.state === "unavailable" ? <p role="status" className="text-amber-300">{reactions.message ?? "Earnings reactions unavailable."}</p>
+        : reactions.state === "none" ? <p className="text-slate-500">{reactions.message ?? "No past earnings history."}</p>
+        : <>
+          <ul className="divide-y divide-slate-800">{reactions.rows.map((row) => <li key={row.report_date} className="py-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-slate-300">{row.label ?? eventDay(row.report_date)} · report {eventDay(row.report_date).replace(/, \d{4}$/, "")}</span>
+              {row.state === "ready" && row.reaction_date && row.gap_pct != null && row.reaction_pct != null
+                ? <span className="shrink-0 font-mono text-slate-100">{row.reaction_pct > 0 ? "+" : ""}{row.reaction_pct.toFixed(1)}%</span>
+                : <span className="shrink-0 text-amber-300">No number</span>}
+            </div>
+            <p className="mt-0.5 text-[10px] text-slate-500">{row.state === "ready" && row.reaction_date && row.gap_pct != null
+              ? `${eventDay(row.reaction_date)} gap ${row.gap_pct > 0 ? "+" : ""}${row.gap_pct.toFixed(1)}% · inferred full-day reaction`
+              : row.reason}</p>
+            <details className="mt-1 text-[10px] text-slate-500"><summary className="min-h-6 cursor-pointer py-1">Show both candidate sessions</summary>
+              <ul>{row.sessions.map((session) => <li key={session.date}>{eventDay(session.date)}: {session.state === "ready" && session.day_pct != null && session.gap_pct != null
+                ? `gap ${session.gap_pct > 0 ? "+" : ""}${session.gap_pct.toFixed(1)}%, full-day ${session.day_pct > 0 ? "+" : ""}${session.day_pct.toFixed(1)}%`
+                : session.reason}</li>)}</ul>
+            </details>
+          </li>)}</ul>
+          {reactions.average_abs_pct != null
+            ? <p className="text-slate-300">{comparisonReady && earningsMove ? `Priced ±${(earningsMove.percent! * 100).toFixed(1)}% through ${eventDay(earningsMove.expiration).replace(/, \d{4}$/, "")}; past inferred average ±${reactions.average_abs_pct.toFixed(1)}% (${reactions.usable_count} reports).` : `Past inferred average ±${reactions.average_abs_pct.toFixed(1)}% (${reactions.usable_count} reports).`}{reactions.report_range ? ` Reports ${eventDay(reactions.report_range.from).replace(/, \d{4}$/, "")}–${eventDay(reactions.report_range.to).replace(/, \d{4}$/, "")}.` : ""}</p>
+            : <p className="text-slate-500">At least four usable reports are required for an average; {reactions.usable_count} available.</p>}
+          {reactions.average_abs_pct != null && !comparisonReady && <p className="text-[10px] text-slate-500">Earnings implied move is unavailable or stale, so the comparison is omitted.</p>}
+          {reactions.message && <p className="text-[10px] text-amber-300">{reactions.message}</p>}
+        </>}
+    </section>}
     <Analysts key={data.symbol} symbol={data.symbol} spot={data.spot} />
   </div>;
 }
