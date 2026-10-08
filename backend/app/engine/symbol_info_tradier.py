@@ -95,6 +95,12 @@ class SymbolEvents:
                         self._refreshing = False
         return {symbol: self._earnings(symbol, today, None, None) for symbol in wanted}
 
+    def forecast_earnings(self, symbol: str, today: date) -> dict:
+        """The active symbol's earnings history for Forecast, with an independent calendar status."""
+        issue = self.refresh("calendars", [symbol])
+        entry, meta = self._block("calendars", symbol, issue)
+        return {**meta, **earnings_view(entry.rows if entry else [], today, None)}
+
     def events(self, symbol: str, today: date) -> dict:
         """Everything the Events tab shows for one symbol. Each block degrades on its own."""
         issues = {dataset: self.refresh(dataset, [symbol]) for dataset in EVENT_DATASETS}
