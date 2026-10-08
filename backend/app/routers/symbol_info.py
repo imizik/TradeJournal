@@ -8,9 +8,12 @@ from sqlmodel import Session
 
 from app.database import get_session
 from app.engine.chart_math import ET
+from app.engine.chart_calendar import chart_calendar
+from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine import symbol_info_news_feed, symbol_info_tradier
 from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
+from app.engine.symbol_info_reactions import SOURCE as REACTIONS_SOURCE, calculate as calculate_reactions, summary as reaction_summary
 
 router = APIRouter()
 
@@ -53,6 +56,43 @@ def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
     for the nearest expiration, the nearest Friday and the first expiration after the next report."""
     symbol = _ticker(symbol)
     today = datetime.now(ET).date()
-    # The next report from the Events cache only; a stale one refreshes in the background.
-    earnings = symbol_info_tradier.symbol_events.chart_earnings([symbol], [], today)[symbol].get("next")
-    return options_feed.forecast(symbol, spot, earnings)
+    # Refresh the active symbol's earnings calendar independently of option and daily history reads.
+    events = symbol_info_tradier.symbol_events.forecast_earnings(symbol, today)
+    earnings = events.get("next")
+    result = options_feed.forecast(symbol, spot, earnings)
+    reactions = {"state": "unavailable", "message": None, "source": REACTIONS_SOURCE, "fetched_at": None,
+                 "stale": False, "price_basis": "split_adjusted", "adjustment": {}, "rows": [],
+                 "usable_count": 0, "average_abs_pct": None, "report_range": None,
+                 "earnings_fetched_at": events.get("fetched_at"), "earnings_stale": bool(events.get("message")),
+                 "earnings_message": events.get("message")}
+    if events["state"] in ("loading", "unavailable"):
+        reactions.update(state=events["state"], message=events.get("message") or "Earnings history is loading.")
+    elif not events["reports"]:
+        reactions.update(state="none", message="No confirmed past earnings reports are listed.", fetched_at=events.get("fetched_at"))
+    else:
+        info = chart_feed.splits.get(symbol) if chart_feed.splits else None
+        if not info or info.get("status") == "unknown":
+            reactions["message"] = (info or {}).get("issue") or "Split adjustment data is unavailable."
+        else:
+            try:
+                entry = chart_feed.daily.entry(symbol, today, info)
+                rows = calculate_reactions(events["reports"], entry.bars, chart_calendar, datetime.now(ET), entry.conflicts)
+                summary = reaction_summary(rows)
+                warnings = []
+                if info.get("status") == "stale":
+                    warnings.append("Split adjustment data is stale.")
+                if events.get("message"):
+                    warnings.append(f"Earnings calendar refresh failed: {events['message']}")
+                if "unverified" in entry.states.values():
+                    for row in rows:
+                        row.update(state="unavailable", reason="A stock split could not be verified for this history.",
+                                   reaction_date=None, gap_pct=None, reaction_pct=None)
+                    summary = reaction_summary(rows)
+                    warnings.append("A stock split could not be verified for this history.")
+                reactions.update(state="ready", message=" ".join(warnings) or None, fetched_at=entry.fetched_at,
+                                 stale=bool(info.get("status") == "stale"), adjustment={"status": info.get("status"), "as_of": info.get("as_of"),
+                                 "issue": info.get("issue"), "daily": entry.states}, rows=rows, **summary)
+            except ChartFeedError as exc:
+                reactions["message"] = str(exc)
+    result["reactions"] = reactions
+    return result

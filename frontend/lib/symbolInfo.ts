@@ -107,9 +107,24 @@ export type ImpliedMove = {
   quoted_at?: number | null; fetched_at?: number;
   call?: StraddleLeg; put?: StraddleLeg;
 };
+export type ReactionSession = {
+  date: string; previous_date: string | null; state: "ready" | "unavailable"; reason: string | null;
+  gap_pct: number | null; day_pct: number | null;
+};
+export type EarningsReaction = {
+  report_date: string; label: string | null; state: "ready" | "unavailable"; reason: string | null;
+  sessions: ReactionSession[]; reaction_date: string | null; gap_pct: number | null; reaction_pct: number | null;
+};
+export type ReactionSummary = {
+  state: "ready" | "none" | "loading" | "unavailable"; message: string | null; source: string; fetched_at: number | null;
+  earnings_fetched_at: number | null; earnings_stale: boolean; earnings_message: string | null;
+  stale: boolean; price_basis: string; adjustment: Record<string, unknown>; rows: EarningsReaction[];
+  usable_count: number; average_abs_pct: number | null; report_range: { from: string; to: string } | null;
+};
 export type SymbolForecast = {
   symbol: string; today: string; source: string; spot: number | null; earnings: EarningsNext | null;
   state: "ready" | "none" | "unavailable"; message: string | null; moves: ImpliedMove[]; earnings_note?: string | null;
+  reactions?: ReactionSummary;
 };
 
 /** The Forecast tab (T2.1) at `spot`, the chart's latest price. */

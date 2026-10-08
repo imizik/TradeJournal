@@ -291,6 +291,12 @@ const QUOTED = Date.parse("2026-10-05T14:28:00Z") / 1000;
 function forecast(symbol: string, spot: number): SymbolForecast {
   return { symbol, today: "2026-10-05", source: "Tradier option chains", spot, state: "ready", message: null,
     earnings: { date: "2026-11-19", status: "estimated", label: "Q3 FY2027" }, earnings_note: null,
+    reactions: { state: "ready", message: null, source: "Tradier daily history", fetched_at: QUOTED, earnings_fetched_at: QUOTED,
+      earnings_stale: false, earnings_message: null, stale: false, price_basis: "split_adjusted", adjustment: {},
+      usable_count: 4, average_abs_pct: 6.4, report_range: { from: "2025-10-01", to: "2026-07-30" },
+      rows: [{ report_date: "2026-07-30", label: "Q2 FY2026", state: "ready", reason: null, reaction_date: "2026-07-30", gap_pct: 2.3, reaction_pct: -4.1,
+        sessions: [{ date: "2026-07-30", previous_date: "2026-07-29", state: "ready", reason: null, gap_pct: 2.3, day_pct: -4.1 },
+          { date: "2026-07-31", previous_date: "2026-07-30", state: "ready", reason: null, gap_pct: 1.2, day_pct: 2.5 }] }] },
     moves: [
       { tags: ["nearest", "friday"], expiration: "2026-10-09", days: 4, state: "ready", strike: 100, move: 4.4, percent: 4.4 / spot, iv: 0.512,
         quoted_at: QUOTED, fetched_at: QUOTED + 60, call: { symbol: "NVDA261009C00100000", bid: 2.2, ask: 2.3, iv: 0.5 }, put: { symbol: "NVDA261009P00100000", bid: 2.1, ask: 2.2, iv: 0.524 } },
@@ -322,9 +328,35 @@ test("Forecast shows the implied move at the chart's price for the nearest expir
   await expect(earnings).toContainText("The 100 put has no bid.");
   await expect(moves.getByText("calculated", { exact: true })).toBeVisible();
   await expect(moves).toContainText("What the options market prices for a move either way by expiry, at 101.00: not a direction or a forecast of one.");
+  const reactions = info.getByRole("region", { name: "Past earnings reactions" });
+  await expect(reactions).toContainText("inferred");
+  await expect(reactions).toContainText("-4.1%");
+  await expect(reactions).toContainText("Past inferred average ±6.4% (4 reports).");
+  await expect(reactions).toContainText("Reports Wed, Oct 1–Thu, Jul 30.");
+  await reactions.getByText("Show both candidate sessions").click();
+  await expect(reactions).toContainText("full-day -4.1%");
   await page.screenshot({ path: test.info().outputPath("symbol-info-forecast.png"), fullPage: true });
   await choose(page, "AAPL");
   await expect.poll(() => reads.at(-1)).toMatch(/\/AAPL\/forecast\?spot=101$/);
+});
+
+test("phone Forecast keeps inferred reaction details inside the watchlist sheet", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/backend/charts/symbol/*/forecast**", async (route) => {
+    const url = new URL(route.request().url());
+    await route.fulfill({ json: forecast(decodeURIComponent(url.pathname.split("/").at(-2)!), Number(url.searchParams.get("spot"))) });
+  });
+  await page.goto("/charts");
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Watchlist", exact: true });
+  const info = panel(page);
+  await info.getByRole("button", { name: "NVDA symbol info" }).click();
+  await info.getByRole("tab", { name: "Forecast", exact: true }).click();
+  const reactions = info.getByRole("region", { name: "Past earnings reactions" });
+  await expect(reactions).toContainText("Past inferred average ±6.4% (4 reports).");
+  await expect(info.getByText("Show both candidate sessions")).toBeVisible();
+  expect(await sheet.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
 // ---- News (T1.2): stubbed feed; the backend tests prove the merge, dedupe and caches ----
