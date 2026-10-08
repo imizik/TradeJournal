@@ -3627,8 +3627,22 @@ test("dock, navigation and window resizes keep every chart, the selection, the s
   await expect(page.getByLabel("Selected symbol quote")).toContainText("281.50");
   await page.keyboard.press("Alt+r");
   await expect.poll(async () => (await roundedRange(page, "main"))?.to).toBeGreaterThanOrEqual(244); // the trade opened a newer candle
+  // Following the new live candle animates the price scale. A coordinate read
+  // during that transition can miss the level, or turn a $2 move into <3px.
+  await expect.poll(async () => {
+    const before = await levelY(page, "main", 250);
+    await page.waitForTimeout(100);
+    return Math.abs((await levelY(page, "main", 250)) - before);
+  }).toBeLessThan(0.5);
   await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
-  await mouseDrag(page, "main", await levelY(page, "main", 250), await levelY(page, "main", 252));
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+  const [fromY, toY] = await page.evaluate(() => {
+    const candles = (window as unknown as { __tjCharts: PaneRegistry }).__tjCharts.get("main")!
+      .panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    return [candles.priceToCoordinate(250)!, candles.priceToCoordinate(252)!];
+  });
+  expect(fromY - toY).toBeGreaterThan(3); // the chart's minimum drag distance
+  await mouseDrag(page, "main", fromY, toY);
   await expect.poll(() => savedLevels(server)[0].price).toBeGreaterThan(251);
 });
 
