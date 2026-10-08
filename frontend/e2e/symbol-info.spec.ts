@@ -306,9 +306,26 @@ test("Forecast shows the implied move at the chart's price for the nearest expir
     reads.push(url.pathname + url.search);
     await route.fulfill({ json: forecast(decodeURIComponent(url.pathname.split("/").at(-2)!), Number(url.searchParams.get("spot"))) });
   });
+  await page.route("**/api/backend/charts/symbol/*/analysts", async (route) => {
+    const ready = (source: string, value: unknown) => ({ state: "ready", source, fetched_at: 1, value });
+    await route.fulfill({ json: { symbol: "NVDA", state: "ready", providers: {}, blocks: {
+      targets: ready("Webull", { mean: 121, median: 120, high: 150, low: 90 }),
+      ratings: ready("Yahoo, unofficial", { strong_buy: 10, buy: 48, hold: 2, sell: 1, strong_sell: 0 }),
+      estimates: ready("Yahoo, unofficial", [{ period: "current quarter", eps: { avg: 2.47, low: 2.3, high: 2.7, analysts: 44, growth: 0.9 } }]),
+      history: ready("Yahoo, unofficial", [{ quarter: "2026-04-30", actual: 1.87, estimate: 1.77, surprise: 0.055, result: "beat" }]),
+      actions: { state: "unavailable", source: "Yahoo, unofficial", message: "Yahoo could not be read." },
+    } } });
+  });
   await page.goto("/charts");
   const info = panel(page);
   await info.getByRole("tab", { name: "Forecast", exact: true }).click();
+  const analysts = info.getByRole("region", { name: "Analyst consensus" });
+  await expect(analysts).toContainText("Median $120.00 · mean $121.00 · +18.8% vs 101.00");
+  await expect(analysts).toContainText("Low $90.00 · High $150.00");
+  await expect(analysts).toContainText("Strong Buy 10 · Buy 48 · Hold 2 · Sell 1 · Strong Sell 0");
+  await expect(analysts).toContainText("EPS $2.47 (2.30–2.70, 44 analysts)");
+  await expect(analysts).toContainText("Last 1 reports: beat 5.5%");
+  await expect(analysts).toContainText("Yahoo could not be read.");
   const moves = info.getByRole("region", { name: "Implied move" });
   // The chart's latest price (the fixture's candles close at 101) goes with the request.
   await expect(moves).toContainText("Nearest · This Friday");

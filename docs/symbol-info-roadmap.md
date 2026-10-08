@@ -48,7 +48,7 @@ after them, clearly labelled.
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |
-| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Yahoo, unofficial) | 2 Forecast | todo (needs [decision 1](#open-decisions)) |
+| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built locally; Webull blocked until the VPS IP is on the key's allowlist (Yahoo path verified from the VPS) |
 | T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS | 3 Depth | todo |
 | T3.3 | Ownership and insider activity | 3 Depth | todo |
@@ -287,17 +287,24 @@ current implied move from T2.1 ("Priced ±8.1 %, moved ±6.4 % on average").
 *Done when:* a fixture test covers a before-open and an after-close report,
 and the summary refuses to render with fewer than four past reports.
 
-**T2.3 Analyst consensus (Yahoo, unofficial).** Price target mean, median,
-high and low against the current price; rating distribution; the last ten
-upgrades and downgrades with target changes; next-quarter EPS and revenue
-estimates with the analyst count; the last four quarters' beat or miss;
-EPS-estimate trend over 90 days. Fetched once per symbol per day through
-`yfinance`, cached on disk, and tagged "Yahoo, unofficial" on every block.
-**Blocked on [decision 1](#open-decisions).** Before shipping, probe from the
-VPS itself (Yahoo rate-limits datacenter addresses and this sandbox could not
-reach `earnings_dates`). *Done when:* a recorded fixture renders, a Yahoo
-failure leaves the rest of the Forecast tab intact, and the probe result is
-in the PR.
+**T2.3 Analyst consensus (Webull, Yahoo).** Price target mean, median,
+high and low against the chart's price; rating distribution; next-quarter
+and current-quarter EPS and revenue estimates with the analyst count; the
+last four reports' beat or miss; the last ten upgrades and downgrades with
+target changes. `symbol_info_analysts.py` reads two providers, each cached a
+day per symbol on disk: **Webull OpenAPI** (official) is primary for targets
+and ratings (`/market-data/fundamentals/analysis/target-prices/get` and
+`.../ratings/get`), and **Yahoo via `yfinance`** (unofficial) fills those when
+Webull has none and is the only source of estimates, beat or miss and actions.
+Every block names its source and a failing provider blanks only what it alone
+supplies. Webull's docs list no request parameters or response fields, so its
+parser accepts several spellings and the query (`WEBULL_QUERY`) is a guess:
+**confirm both with a live call.** That call returned `IP_NOT_ALLOWED` from the
+VPS on 2026-10-08: the app key is restricted to listed IP addresses, and the
+VPS (15.204.255.2) must be added in Webull's developer portal first. Webull's
+forecast-EPS endpoint (`/market-data/fundamentals/forecast-eps/get`) is not
+used yet. *Done when:* a live Webull call from the VPS returns targets and
+ratings that the parser reads, and its response is recorded as a fixture.
 
 ### Phase 3 — Depth
 
@@ -376,12 +383,10 @@ right candle on 1m and 1D in a browser test, and a layer toggle hides them.
 
 Only the user can settle these.
 
-1. **Use Yahoo (`yfinance`) for analyst data?** It is free, it already
-   powers the default quote provider, and the probe returned everything the
-   Forecast tab needs. It is unofficial and unlicensed, Yahoo rate-limits
-   datacenter IPs, and it can break without notice. The alternative is a paid
-   analyst feed. **Recommendation: yes**, as T2.3, labelled "unofficial",
-   cached daily, after T2.1 and T2.2 so the tab is useful without it.
+1. **Use Yahoo (`yfinance`) for analyst data?** Settled 2026-10-08: yes, as
+   the fallback and the only source of estimates and analyst actions,
+   labelled "unofficial" and cached daily, with Webull primary for targets
+   and ratings. A probe from the VPS read all six Yahoo tables. No paid feed.
 2. **When does Phase 1 start relative to the Charts board?** This track
    touches the side column and new files only, so it can run beside the
    Charts items. **Recommendation:** run T1.1-T1.4 now, alongside C1.2; hold
