@@ -160,6 +160,9 @@ def main():
         assert subprocess.run(["systemctl", "is-active", "--quiet", "tradejournal-ingress"], check=False).returncode != 0
         assert not (control.UNITS / "tradejournal-ingress.service").exists()
         control.run("systemctl", "is-enabled", *control.SERVICES, *control.TIMERS)
+        assert subprocess.run(["systemctl", "is-enabled", "--quiet", "tradejournal-practice.timer"], check=False).returncode != 0
+        control.run("systemctl", "start", "tradejournal-practice.service")
+        assert request("/practice/runs")["runs"] == []  # disabled service creates no cohort or paid call
         # A real 08:00/17:00 New York run would make the sync POSTs below
         # return 409. Enablement is what this smoke asserts.
         control.run("systemctl", "stop", "tradejournal-sync-pipeline.timer")

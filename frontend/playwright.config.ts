@@ -106,6 +106,8 @@ export default defineConfig({
         // exercised with fixtures; the engine has its own backend test.
         CAPTURE_STORAGE_DIR: path.join(BACKEND, "data", "e2e_captures"),
         CAPTURE_TRANSCRIBER: "off",
+        PRACTICE_AGENT_ENABLED: "false",
+        PRACTICE_SCHEDULE_ENABLED: "false",
       },
     },
     {

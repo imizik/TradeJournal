@@ -371,3 +371,22 @@ def test_guard_accepts_an_empty_database():
         _refuse_if_not_disposable(empty)  # must not raise
     finally:
         empty.dispose()
+
+
+def test_a3_cohort_and_agent_reservation_uniqueness_on_postgres(migrated):
+    from app.engine import practice
+    from app.models import PracticeAgentCall, PracticeOpportunity
+    with Session(migrated) as db:
+        run = practice.start(db)
+        assert practice.start(db, mode="scheduled").id == run.id
+        db.add(PracticeAgentCall(day=run.day, run_id=run.id, model="fixture", prompt_version="fixture", payload_json="{}", config_json="{}"))
+        db.commit()
+        db.add(PracticeAgentCall(day=run.day, run_id=run.id, model="fixture", prompt_version="fixture", payload_json="{}", config_json="{}"))
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()
+        first = practice.opportunities(db, run.id)[0]
+        db.add(PracticeOpportunity(run_id=run.id, symbol=first.symbol))
+        with pytest.raises(IntegrityError):
+            db.commit()
+        db.rollback()

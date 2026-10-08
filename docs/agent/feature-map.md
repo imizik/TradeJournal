@@ -25,7 +25,7 @@ one of these by a row link or a button.
 | Plans linked to trades | `/charts`: **Needs linking** on the saved-plan strip; the trade card and trade page show a linked plan | `components/charts/LinkReview.tsx`, `components/charts/PlanSummary.tsx`, `components/charts/PlanStrip.tsx`, `lib/captures.ts` | — | `/charts/captures/review`, `/link`, `/unlink`, `/tracking`, `/for-trade/{id}`; `tests/test_capture_links.py`, `e2e/chart-journal.spec.ts` |
 | Pre-trade capture | `/charts`: **Plan trade** in the toolbar or Alt+P; the saved-plan strip above the charts; the gear in the sheet for templates and the default account | `components/charts/PlanSheet.tsx` (sheet, recorder, setup), `components/charts/PlanStrip.tsx`, `lib/captures.ts` (routes, outbox, image) | — | `/charts/captures` routes; template, Discretionary and voice plans with a frozen chart snapshot; `tests/test_captures.py`, `e2e/charts.spec.ts` |
 | Practice decisions (A1) | `/`: Practice decisions section on Today | `app/engine/decisions.py`, `app/routers/decisions.py`, `components/PracticeDecisions.tsx`, `components/PracticeDecisionForm.tsx`, `lib/api.ts`; `DecisionRecord` and `DecisionContext` in `app/models.py` | `POST /decisions/context/{symbol}`, `/decisions` (create/list), `/decisions/{id}` | `tests/test_decisions.py`; immutable server-owned context, typed choices, and practice drafts/unarmed |
-| Practice paper plans (A2) | Today page (`/`): a TAKE card under Practice decisions has an Arm paper plan button, the Practice paper timeline and base plus 3× costs outcome; `/?decision=<id>` opens that card | `app/engine/paper.py` (arming, watcher, phone outbox), `app/engine/paper_execution.py` (pure rules), `app/engine/level_alert_monitor.py` (runs the watcher); `DecisionEvent` in `app/models.py` | `POST /decisions/{id}/arm`, `GET /decisions/{id}/paper`; UI `frontend/components/PracticeDecisions.tsx`, `frontend/components/PracticePaperPlan.tsx`, `frontend/app/page.tsx`, `frontend/lib/api.ts` | `tests/test_paper_execution.py`, `tests/test_paper_plans.py`, `frontend/e2e/practice-decisions.spec.ts`; no live phone or restart drill yet |
+| Practice paper plans (A2) | Today page (`/`): a TAKE card under Practice decisions has an Arm paper plan button, the Practice paper timeline and base plus 3× costs outcome; `/?decision=<id>` opens that card | `app/engine/paper.py` (arming, watcher, phone outbox), `app/engine/paper_execution.py` (pure rules), `app/engine/level_alert_monitor.py` (runs the watcher); `DecisionEvent` in `app/models.py` | `POST /decisions/{id}/arm`, `GET /decisions/{id}/paper`; UI `frontend/components/PracticeDecisions.tsx`, `frontend/components/PracticePaperPlan.tsx`, `frontend/app/page.tsx`, `frontend/lib/api.ts` | `tests/test_paper_execution.py`, `tests/test_paper_plans.py`, `frontend/e2e/practice-decisions.spec.ts`; [live SPY phone, open-position restart and exit observation](practice-policy.md#a2-live-operational-observation-2026-10-08) recorded 2026-10-08; operational probe outside the on-time strategy cohort |
 | Level alerts | `/charts`: right-click (long-press) a level, horizontal ray or automatic level; the Alerts list in the dock | `components/charts/AlertsPanel.tsx`, `components/charts/ChartMenu.tsx`, `lib/alerts.ts` (bells: `AlertLayer`) | — | `GET`/`POST /charts/alerts`, `POST /charts/alerts/{id}/rearm`, `DELETE /charts/alerts/{id}`, and `alerts` in `GET /charts/workspace`; touches, crosses, closes beyond; judged and sent to the phone by the API with no tab open; `tests/test_level_alerts.py`, `e2e/charts.spec.ts` |
 | Daily Review | `/daily` → `/daily/{YYYY-MM-DD}` | `app/daily/page.tsx`, `app/daily/[day]/page.tsx` | `GET /daily-review`; per day `/daily-review/{day}`, `/trades`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/accounts`, quotes | `DailyAiPanel`: `POST /daily-review` |
 | Trades | `/trades` → `/trades/{id}` | `app/trades/page.tsx`, `app/trades/[id]/page.tsx`, `components/TradesTable.tsx` | list: `GET /trades?status=&ticker=&account=&type=`, `/accounts`. Detail (client page): `/trades/{id}`, `/trades/{id}/fills`, `/market-context/fills/bulk`, `/market-context/trade/{id}` | `AuditPanel`: `GET /market-context/audit/{id}`; review button: `POST /trades/{id}/review` |
@@ -252,3 +252,19 @@ reason, and ruff lints them without importing them.
   reads existing files without fetching and separates missing/stale evidence from matches.
   The golden snapshot reads the Alpaca cache; `test_seed_snapshot.py` points
   it at an empty directory so a developer's cache cannot leak into the result.
+
+## A3 daily Practice routine
+
+Today and Daily Review mount `frontend/components/PracticeRoutine.tsx`: manual
+preparation, frozen contexts, validated immutable choices, explicit reveal,
+A2 arming, outcome/coverage review, feedback and actual attention timers.
+`backend/app/routers/practice.py` owns the private owner API;
+`backend/app/engine/practice.py` owns run/revision identity and deterministic
+review/benchmark. `backend/app/engine/practice_agent.py` is the bounded tool-free
+adapter, disabled by default. `backend/app/jobs/practice_schedule.py` and the
+optional `deploy/systemd/tradejournal-practice.timer` provide disabled 08:50 ET
+scheduling in a separate lane. Tests live in
+`backend/tests/test_practice_routine.py` and
+`frontend/e2e/practice-routine.spec.ts`. See the
+[A3 acceptance contract](a3-implementation-contract.md); live acceptance is
+unobserved until three real sessions and their actual routine timings exist.
