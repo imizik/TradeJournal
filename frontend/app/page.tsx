@@ -24,7 +24,7 @@ function fmt$(val: number | null | undefined) {
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ account?: string; type?: string }>;
+  searchParams: Promise<{ account?: string; type?: string; decision?: string }>;
 }) {
   const resolvedParams = await searchParams;
   const statsParams = new URLSearchParams();
@@ -195,7 +195,7 @@ export default async function DashboardPage({
 
       <PerformanceOverview trades={trades} />
 
-      <PracticeDecisions records={decisions.decisions} />
+      <PracticeDecisions records={decisions.decisions} focusId={resolvedParams.decision} />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Today's Closed P&L" value={fmt$(stats.today_pnl)} valueClass={pnlColor(stats.today_pnl)} />

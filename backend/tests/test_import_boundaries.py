@@ -70,6 +70,7 @@ PURE_MODULES = {
     "app.engine.symbol_info_overview",  # company fundamentals from supplied Tradier responses
     "app.engine.symbol_info_news",  # headlines from supplied Alpaca and Polygon responses
     "app.engine.level_alerts",  # when a level alert fires, from supplied trades and candles
+    "app.engine.paper_execution",  # Practice paper fills and exits, from supplied bars and events
     # Option chain models. The Tradier adapter (options_chain) fills them; the
     # positioning engine and recorder must be able to read them without it.
     "app.engine.options_models",

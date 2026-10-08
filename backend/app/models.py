@@ -258,6 +258,40 @@ class DecisionContext(SQLModel, table=True):
     context_sha256: str
 
 
+class DecisionEvent(SQLModel, table=True):
+    """One append-only Practice paper event for a decision record (A2).
+
+    ``data_json`` is the economic fact the reducer (``engine/paper_execution.py``)
+    returned and is never rewritten; the unique (record, key) pair keeps a retry,
+    a restart or a second pass from recording it twice. The delivery columns are
+    the phone outbox, operational metadata only: sending or failing to send never
+    changes the event."""
+
+    __tablename__ = "decision_event"
+    __table_args__ = (
+        UniqueConstraint("record_id", "key", name="uq_decision_event_key"),
+        UniqueConstraint("record_id", "seq", name="uq_decision_event_seq"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    record_id: uuid.UUID = Field(foreign_key="decision_record.id", index=True)
+    seq: int
+    key: str
+    event_type: str
+    effective_at: datetime  # UTC: when the market condition or bar happened
+    recorded_at: datetime  # UTC: when this server stored it
+    exec_version: str
+    source: str  # where the bars came from, e.g. tradier_timesales_1min
+    reconstructed: bool = False  # judged well after it happened, e.g. after a restart
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    delivery: str = Field(default="none", index=True)  # none | pending | sending | sent | expired
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class ChartSettingsRecord(SQLModel, table=True):
     """The Charts workspace every browser shares: levels, watchlist, intervals,
     indicators and layout, as one JSON document the frontend validates. The

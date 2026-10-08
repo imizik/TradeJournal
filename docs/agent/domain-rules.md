@@ -21,8 +21,25 @@ patterns that can create N+1 calls.
   `DecisionRecord` references one context and copies its exact evidence hash;
   later packets cannot rewrite it. The packet has a source completeness limit:
   only completed minute-bar price facts are eligible for a TAKE reference.
-- A1 TAKE records are always `practice_draft_unarmed`; no code in this slice
-  arms alerts or creates paper positions. Never infer an execution from one.
+- A decision record itself stays `practice_draft_unarmed`. Paper state lives
+  only in `decision_event` (A2): `POST /decisions/{id}/arm` checks a TAKE
+  against the complete `shadow-isaac-p0-v1` policy in `app/engine/paper.py`
+  and stores its hash on the `armed` event. Never infer an execution from a
+  record without events.
+
+### Practice paper events (A2)
+
+- `decision_event` is append-only; the unique (record, key) and (record, seq)
+  pairs keep retries and restarts from recording an economic event twice. A
+  position is always `paper_execution.fold` of its events, never a stored row.
+- The rules (trigger, next-minute fill, guard, stop-first, two-session time
+  exit, `p0-cost-v1`) are the pure `app/engine/paper_execution.py`; the level
+  alert monitor's loop runs `PaperWatcher` on Tradier's consolidated minutes.
+- A trigger detected more than `MAX_DETECTION_DELAY` (300 s) after its bar
+  closed is `missed_trigger`, never a backdated entry. A missing minute or a
+  split during the hold makes the outcome `unresolved`, never filled forward.
+- Paper events never write fills, trades, accounts or the factory ledger.
+  Delivery columns are an outbox; sending never changes the event.
 
 - `fill` is the source layer. `trade` and `tradefill` are derived and are safe
   to wipe and rebuild.
