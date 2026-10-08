@@ -52,7 +52,7 @@ test("Overview combines the chart's existing quote with cached company fundament
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("$4.5T");
   await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
-  await expect(info.getByText("52.5", { exact: true })).toHaveAttribute("title", /Tradier company fundamentals · read/);
+  await expect(info.getByText("52.5", { exact: true }).locator("..")).toHaveAttribute("title", /Tradier company fundamentals · read/);
   expect(reads).toEqual(["NVDA"]);
   await choose(page, "SPY");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Not available for ETFs or funds.");
