@@ -60,7 +60,7 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
     </section>
 
     <Dataset title="Company" block={company} unavailable={noFundamentals}>
-      {name && <h4 title={blockLabel(company)} className="font-medium text-slate-200">{name}</h4>}
+      {name && <h4 title={company.name ? blockLabel(company) : qTitle} className="font-medium text-slate-200">{name}</h4>}
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Value label="Sector" value={company.sector ?? "—"} title={blockLabel(company)} />
         <Value label="Employees" value={number(company.employees, 0)} title={blockLabel(company)} />

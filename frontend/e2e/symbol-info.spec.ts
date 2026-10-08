@@ -51,6 +51,7 @@ test("Overview combines the chart's existing quote with cached company fundament
   await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$185.00 – $191.00");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("NVDA company"); // Tradier fundamentals have no name; the quote's is used
+  await expect(info.getByRole("heading", { name: "NVDA company" })).toHaveAttribute("title", /^Tradier chart quote/);
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("$4.5T");
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("68.00%"); // 13F share arrives as a fraction
   await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
