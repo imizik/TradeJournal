@@ -73,6 +73,26 @@ export type DecisionRecord = {
   status: "practice_draft_unarmed";
 };
 
+export type PaperEvent = {
+  type: string; key: string; at: number; seq: number; recorded_at: number; source: string;
+  reconstructed: boolean; delivery: string | null; delivery_error: string | null;
+  [field: string]: unknown;
+};
+
+export type PaperOutcome = {
+  cost_version: string; entry_fill: number; exit_fill: number; net_per_share: number; planned_r: number;
+  entry_to_stop_exposure: number; exit_kind: string; ambiguous: boolean; gap: boolean;
+};
+
+export type PaperState = {
+  record_id: string;
+  status: "unarmed" | "armed" | "triggered" | "open" | "closed" | "expired" | "missed" | "rejected" | "unresolved";
+  policy_version: string | null;
+  events: PaperEvent[];
+  outcome: PaperOutcome | null;
+  outcome_x3: PaperOutcome | null;
+};
+
 export type DecisionContext = {
   context_id: string;
   symbol: string;
@@ -648,6 +668,8 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
 
 export const api = {
   decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
+  paperState: (id: string) => get<PaperState>(`/decisions/${encodeURIComponent(id)}/paper`),
+  armPaperPlan: (id: string, operationId: string) => post<PaperState>(`/decisions/${encodeURIComponent(id)}/arm`, { operation_id: operationId }),
   freezeDecisionContext: (symbol: string, operationId: string) => post<DecisionContext>(`/decisions/context/${encodeURIComponent(symbol)}`, { operation_id: operationId }),
   createDecision: (body: { operation_id: string; opportunity_id: string; actor: string; decision: string; symbol: string; context_id: string; rationale?: string; wait_condition?: string; wait_expiry?: string; plan?: Record<string, unknown> }) =>
     post<DecisionRecord>("/decisions", body),

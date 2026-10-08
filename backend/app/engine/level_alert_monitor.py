@@ -65,8 +65,9 @@ def _span(day: date, windows: list[tuple[str, int, int]], session: str) -> tuple
 
 class LevelAlertMonitor:
     def __init__(self, engine, stream=None, *, feed=None, calendar=None, splits=None,
-                 clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS):
+                 clock: Callable[[], float] = time.time, sweep_seconds: float = SWEEP_SECONDS, paper=None):
         self.engine = engine
+        self.paper = paper  # Practice paper plans (A2), judged on the same pass and the same feed
         self.stream = stream
         self.feed = feed
         self.calendar = calendar
@@ -127,6 +128,11 @@ class LevelAlertMonitor:
             self._found.extend(fired)
             await self._record_found()
             await asyncio.to_thread(self.deliver)
+        if self.paper is not None:
+            try:
+                await asyncio.to_thread(self.paper.run)
+            finally:
+                await asyncio.to_thread(self.paper.deliver)
 
     async def _record_found(self) -> None:
         """Write the firings waiting in memory. If the database fails, they wait for the next pass:

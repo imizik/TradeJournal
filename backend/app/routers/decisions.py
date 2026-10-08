@@ -2,12 +2,12 @@
 import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from app.database import get_session
-from app.engine import decisions
+from app.engine import decisions, paper
 from app.engine.analyzer import build_ticker_analysis
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET
@@ -27,6 +27,11 @@ class DecisionCreate(BaseModel):
     rationale: str = Field(default="", max_length=2000)
     wait_condition: str | None = Field(default=None, max_length=500)
     wait_expiry: str | None = None
+
+
+class ArmCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation_id: str = Field(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9._:-]+$")
 
 
 class ContextCreate(BaseModel):
@@ -87,3 +92,29 @@ def get_decision(record_id: uuid.UUID, db: Session = Depends(get_session)):
     if item is None:
         raise HTTPException(status_code=404, detail="Decision record not found")
     return decisions.row(item)
+
+
+@router.post("/{record_id}/arm", status_code=201)
+def arm(record_id: uuid.UUID, body: ArmCreate, request: Request, response: Response, db: Session = Depends(get_session)):
+    """Arm a frozen TAKE as a Practice paper plan under the complete P0 policy (A2)."""
+    try:
+        _, created = paper.arm(db, record_id, body.operation_id, now=datetime.now(ET), calendar=chart_calendar)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except paper.PaperError as exc:
+        raise HTTPException(status_code=409 if "operation_id" in str(exc) else 422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    monitor = getattr(request.app.state, "level_alerts", None)
+    if monitor is not None:
+        monitor.changed()
+    response.status_code = 201 if created else 200
+    return paper.paper_row(db, record_id)
+
+
+@router.get("/{record_id}/paper")
+def get_paper(record_id: uuid.UUID, db: Session = Depends(get_session)):
+    try:
+        return paper.paper_row(db, record_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc

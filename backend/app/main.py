@@ -181,8 +181,10 @@ async def _maybe_start_level_alerts(app_: FastAPI, stream):
     from app.engine.chart_feed import chart_feed
     from app.engine.chart_splits import chart_splits
     from app.engine.level_alert_monitor import LevelAlertMonitor
+    from app.engine.paper import PaperWatcher
 
-    monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits)
+    paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
+    monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper)
     stream.attach(monitor)
     await monitor.start()
     app_.state.level_alerts = monitor
