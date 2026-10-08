@@ -11,7 +11,7 @@ from app.database import get_session
 from app.engine.chart_math import ET
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
-from app.engine import symbol_info_analysts, symbol_info_financials_feed, symbol_info_news_feed, symbol_info_peers_feed, symbol_info_short_feed, symbol_info_tradier
+from app.engine import symbol_info_analysts, symbol_info_financials_feed, symbol_info_insiders, symbol_info_news_feed, symbol_info_peers_feed, symbol_info_short_feed, symbol_info_tradier
 from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 from app.engine.symbol_info_reactions import SOURCE as REACTIONS_SOURCE, calculate as calculate_reactions, summary as reaction_summary
@@ -89,6 +89,13 @@ def financials(symbol: str):
     """The last eight quarters of revenue, margins, net income and diluted EPS (T3.2) from SEC EDGAR
     companyfacts. Margins are calculated; Q4 shows as a gap. Cached until the next 10-Q is due."""
     return symbol_info_financials_feed.symbol_financials.view(_ticker(symbol))
+
+
+@router.get("/symbol/{symbol:path}/insiders")
+def insiders(symbol: str):
+    """Net insider buying and selling over 90 days (T3.3) from Yahoo, unofficial, cached a day.
+    Separate from the overview so a slow Yahoo read never delays the Tradier fundamentals."""
+    return symbol_info_insiders.symbol_insiders.view(_ticker(symbol))
 
 
 @router.get("/symbol/{symbol:path}/reactions")

@@ -12,8 +12,8 @@ A newer build waits instead of deploying while:
 - it is 09:25-16:15 New York time on a weekday, unless its pull request carries
   the deploy-now label;
 - a sync or enrichment job is running, or the API is not answering;
-- it changes the database schema. It is installed, and a person runs
-  `run --allow-migration`, which takes a verified backup first;
+- it changes the database schema and automatic migrations are disabled. When
+  enabled, a fresh verified backup precedes the migration;
 - it is not ahead of the running commit on main. This never moves the server
   backwards, and never replaces a build someone deployed by hand from a branch;
 - it is the build an operator rolled back from, or one whose activation failed.
@@ -75,6 +75,7 @@ class Settings:
     enabled: bool
     repository: str
     confirm_database: str
+    auto_migrate: bool
     hold: tuple[time, time] | None
     keep: int
     api_url: str
@@ -126,6 +127,7 @@ def load_settings(path: Path = CONFIG) -> Settings | None:
         enabled=values.get("AUTODEPLOY_ENABLED") == "true",
         repository=repository,
         confirm_database=confirm,
+        auto_migrate=values.get("AUTODEPLOY_AUTO_MIGRATE") == "true",
         hold=parse_hold(values.get("AUTODEPLOY_HOLD_WINDOW")),
         keep=int(values.get("AUTODEPLOY_KEEP_RELEASES") or 3),
         api_url=(values.get("AUTODEPLOY_API_URL") or GITHUB).rstrip("/"),
@@ -253,11 +255,19 @@ def schema_changes(current: Path, candidate: Path) -> bool:
     return revisions(current) != revisions(candidate)
 
 
-def backup(current: Path) -> None:
+def backup(current: Path, confirm_database: str) -> None:
+    previous = (BACKUPS / "latest").resolve() if (BACKUPS / "latest").exists() else None
     try:
         subprocess.run(["systemctl", "start", "tradejournal-backup.service"], check=True)
-        subprocess.run([current / "backend/.venv/bin/python", current / "deploy/backup.py", "verify", (BACKUPS / "latest").resolve()], check=True)
-    except subprocess.CalledProcessError as exc:
+        latest = (BACKUPS / "latest").resolve(strict=True)
+        if latest == previous:
+            raise Failed("The backup service did not create a fresh restore point; nothing was changed")
+        manifest = json.loads((latest / "manifest.json").read_text())
+        running = json.loads((current / "release.json").read_text())
+        if manifest.get("database_identity") != confirm_database or manifest.get("commit") != running["commit"]:
+            raise Failed("The fresh backup does not match the running release and confirmed database; nothing was changed")
+        subprocess.run([current / "backend/.venv/bin/python", current / "deploy/backup.py", "verify", latest], check=True)
+    except (subprocess.CalledProcessError, OSError, ValueError, KeyError) as exc:
         raise Failed("The backup before the migration did not verify; nothing was changed") from exc
 
 
@@ -351,18 +361,33 @@ def deploy(settings: Settings, *, now: datetime, ignore_hold: bool = False, allo
             record(settings, state, build, "failed", f"{short} ({build.title}) could not be installed; the server is unchanged.\n{exc}", title="TradeJournal update failed")
             raise
     if schema_changes(ROOT / "current", release):
-        if not allow_migration:
-            record(settings, state, build, "needs-migration", f"{short} ({build.title}) changes the database, so it is installed but not live. Ask Claude to apply it; that takes a backup first.", title="TradeJournal update waiting")
+        if not (allow_migration or settings.auto_migrate):
+            record(settings, state, build, "needs-migration", f"{short} ({build.title}) changes the database, so it is installed but not live. Enable automatic migrations or apply it manually after a verified backup.", title="TradeJournal update waiting")
             return f"Holding {short}: it changes the database schema"
-        backup(ROOT / "current")
+        try:
+            backup(ROOT / "current", settings.confirm_database)
+        except Failed as exc:
+            record(settings, state, build, "backup-failed", f"{short} ({build.title}) was not migrated because its fresh backup failed. The server is unchanged.\n{exc}", title="TradeJournal backup failed")
+            raise
         try:
             controller("migrate", build.release_id, "--confirm-database", settings.confirm_database)
         except Failed as exc:
-            # migrate checks the owner connection before it stops anything.
+            # A refused preflight leaves the old API up. A failed migration
+            # leaves services stopped; restart the old release only if its
+            # schema still passes the controller's compatibility check.
+            recovery_error = None
+            if not api_healthy():
+                try:
+                    controller("activate", running["release_id"], "--confirm-database", settings.confirm_database)
+                except Failed as recovery_exc:
+                    recovery_error = recovery_exc
             if api_healthy():
-                record(settings, state, build, "failed", f"The database migration for {short} was refused before anything stopped.\n{exc}", title="TradeJournal update failed")
+                record(settings, state, build, "failed", f"The database migration for {short} failed; the prior release is running.\n{exc}", title="TradeJournal update failed")
             else:
-                record(settings, state, build, "failed", f"The database migration for {short} failed and the app is stopped.\n{exc}", title="TradeJournal is DOWN")
+                detail = f"The database migration for {short} failed and the app is stopped.\n{exc}"
+                if recovery_error:
+                    detail += f"\nPrior release restart failed: {recovery_error}"
+                record(settings, state, build, "failed", detail, title="TradeJournal is DOWN")
             raise
     try:
         controller("activate", build.release_id, "--confirm-database", settings.confirm_database)
@@ -383,7 +408,7 @@ def deploy(settings: Settings, *, now: datetime, ignore_hold: bool = False, allo
 def status(settings: Settings) -> None:
     running = json.loads((ROOT / "current/release.json").read_text())
     hold = "off" if settings.hold is None else f"{settings.hold[0]:%H:%M}-{settings.hold[1]:%H:%M} New York, weekdays"
-    print(f"Automatic deployment: {'on' if settings.enabled else 'off'} (market-hours hold {hold})")
+    print(f"Automatic deployment: {'on' if settings.enabled else 'off'} (market-hours hold {hold}; automatic migrations {'on' if settings.auto_migrate else 'off'})")
     print(f"Running: {running['release_id']} (commit {running['commit'][:12]})")
     try:
         build = newest_build(github(settings, "/releases?per_page=20"))
