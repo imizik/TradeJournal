@@ -206,6 +206,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const placing = useRef<{ kind: DrawingKind; first: Anchor } | null>(null);
   const [second, setSecond] = useState(false);
   const initial = useRef(true);
+  // After Reset or Latest, candles that arrive keep the latest in view until the user moves the chart:
+  // the range asked for applies on the chart's next frame, so a read before then is the old one.
+  const pinnedLive = useRef(false);
   const [hover, setHover] = useState<ChartBar | null>(null);
   const [card, setCard] = useState<Card | null>(null);
   // A new frame dismisses cards until the next pointer input, while its crosshair readout still updates.
@@ -450,7 +453,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // An automatic level under the pointer, when no level or drawing of the user's is (C5.1 alerts on it).
       const auto = plot && !hit && !now.tool ? autoLayer.hit(at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
       const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
-      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); moveView(chart, barsRef.current.length, main, "reset"); } });
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, main, "reset"); } });
     };
     // A finger held still: its own timer, since browsers differ on whether a
     // long press fires `contextmenu` (Android does, iOS does not; whichever
@@ -525,6 +528,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("touchend", onTouchEnd, true);
     element.addEventListener("touchcancel", onTouchEnd, true);
     element.addEventListener("contextmenu", onContextMenu, true);
+    const unpin = () => { pinnedLive.current = false; };
+    for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
     chart.subscribeClick((event) => {
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
@@ -544,6 +549,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     });
     const stopRange = rangeLink.listen(id, (range) => {
       if (!linking.current || !barsRef.current.length) return;
+      pinnedLive.current = false;
       const step = INTERVAL_SECONDS[actions.current.interval];
       // Sync by time. A coarser chart keeps a readable minimum of candles
       // around the same moment instead of collapsing to one bar.
@@ -597,6 +603,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const stopCommands = commands.listen((command) => {
       if (!barsRef.current.length) return;
       quiet();
+      pinnedLive.current = true;
       moveView(chart, barsRef.current.length, main, command);
     });
     // A jump from the layers panel (C1.4): centre the item's moments at the
@@ -644,6 +651,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     retryJump.current = tryJump;
     const stopJumps = commands.listenJump((target) => {
       if (target.panel !== id) return;
+      pinnedLive.current = false;
       jump = { target, pages: 0, until: performance.now() + JUMP_MS, frame: bundle.current?.frame ?? "" };
       tryJump();
     });
@@ -657,6 +665,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
+      for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
       markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]);
@@ -728,7 +737,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) container.current.dataset.resets = String(resets.current);
     const range = current.chart.timeScale().getVisibleRange();
     const logical = current.chart.timeScale().getVisibleLogicalRange();
-    const following = !logical || logical.to >= (current.candles.data().length - 3);
+    const following = pinnedLive.current || !logical || logical.to >= (current.candles.data().length - 3);
     const anchorIndex = logical ? Math.max(0, Math.min(prior.length - 1, Math.ceil(logical.from))) : 0;
     const anchorTime = prior[anchorIndex]?.time;
     const movedTo = anchorTime === undefined ? -1 : bars.findIndex((b) => b.time === anchorTime);
@@ -871,7 +880,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
             className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
-          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) moveView(bundle.current.chart, barsRef.current.length, main, "reset"); }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, main, "reset"); } }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
           {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded p-1.5 hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
         </div>
