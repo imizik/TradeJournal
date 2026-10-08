@@ -43,16 +43,23 @@ native PowerShell launcher for the app itself.
 | Browser smoke | `cd frontend && npm run e2e` | Whether pages actually render real data |
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
-CI (`.github/workflows/ci.yml`) runs backend, frontend, browser and Postgres
-jobs on every pull request, and posts the browser tests' pictures on pull
-requests that change the frontend (see [browser tests](#browser-tests)).
+CI (`.github/workflows/ci.yml`) runs backend, frontend and Postgres jobs on
+every pull request. It runs the two browser shards unless the diff contains only
+Markdown under `docs/`, root README/agent guides or the PR template
+(`scripts/ci_scope.sh`, shared with the deployment workflow and covered by
+`test_ci_scope_script.py`). Documentation-only pull requests skip that
+disposable application environment. Pushes to `main` and
+manual runs always run the complete suite. Browser pictures are posted on
+pull requests that change the frontend (see [browser tests](#browser-tests)).
 Postgres parity, migration-path and role checks are additional to the local
 script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
-Postgres. The updated package confirms the retired ingress unit is removed during an
-upgrade and that no service listens on port 8090. Signals row rendering remains
-covered by the browser fixture suite.
+Postgres for every pull request outside the same documentation allowlist.
+Documentation-only pull requests skip the disposable installation. Pushes to `main` and manual
+runs always build it. The updated package confirms the retired ingress unit is
+removed during an upgrade and that no service listens on port 8090. Signals row
+rendering remains covered by the browser fixture suite.
 See [deployment verification](../../deploy/README.md#verification-boundaries).
 It checks boot enablement but does not reboot a real VPS or test Tailscale/live
 integrations. Agent verification is not the only signal.
