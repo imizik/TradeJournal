@@ -174,7 +174,8 @@ def provider(monkeypatch):
         elif "history" in url:
             payload = {"history": {"day": {"date": today, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 100}}}
         else:
-            payload = {"quotes": {"quote": {"symbol": "SPY", "last": 100, "trade_date": 1000000}}}
+            payload = {"quotes": {"quote": {"symbol": "SPY", "last": 100, "trade_date": 1000000,
+                                                "prevclose": 98, "close": 99}}}
         return httpx.Response(status[0], json=payload, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(feed_module.httpx, "get", get)
@@ -186,6 +187,7 @@ def test_five_panels_share_history_and_poll_only_recent_data(provider):
     frames = ["1m", "5m", "15m", "1h", "1D"]
     feed.workspace("SPY", frames, ["QQQ", "SPY"], "extended")
     assert len(calls) == 4  # today, the whole daily series (once per date), the daily tail and quotes
+    assert feed.workspace("SPY", frames, ["QQQ", "SPY"], "extended")["quotes"][0]["regular_close"] == 99
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
     assert len(calls) == 4  # completed minutes use SIP history
     clock[0] += 16

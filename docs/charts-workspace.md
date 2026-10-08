@@ -415,8 +415,16 @@ cd backend
 - One private API-owned Tradier WebSocket market stream serves all visible chart
   tabs. Valid trade prices are batched to at most one event per second and sent
   to each tab through private server-sent events. Symbol changes update that
-  single upstream subscription. Hidden or paused tabs disconnect; the stream
-  reconnects after provider or network failures.
+  single upstream subscription. It carries up to three chart symbols plus the
+  30-symbol watchlist, so watchlist prices update without per-symbol streams or
+  extra REST polling. A watchlist tick is shown as live for at most 45 seconds;
+  its source and age appear on hover, and pausing keeps the last trade marked
+  as paused with its age rather than reverting silently to an older quote.
+  Premarket percent compares its timestamped trade with `prevclose`, and
+  postmarket percent compares it with Tradier's explicit regular-session
+  `close`. If that close is absent, the postmarket percent is unavailable.
+  Hidden or paused tabs disconnect; the stream reconnects after provider or
+  network failures.
 - The 15-second visible-tab REST refresh remains the source of truth for volume,
   indicators, fill markers, and recovery after missed stream events. Live prices
   move the selected intraday candles between refreshes; volume and studies may
@@ -451,8 +459,8 @@ cd backend
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
 - The selected price says whether it is a streamed trade, an extended-hours
-  candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
-  which can show regular-session closes after hours.
+  candle, or a Tradier quote. Watchlist rows use streamed trades when available;
+  their batched quote fallback can show regular-session closes after hours.
 - Intraday charts load older SIP/raw pages when the visible range nears the
   loaded left edge. A 5m chart can navigate six months through pages. The
   candle hover legend says **SIP** or **Tradier**. Today's forming bars and
@@ -532,12 +540,14 @@ fills in the requested history are returned, with truncation disclosed.
 Private `GET /charts/stream` holds an SSE response. Only the backend uses the
 Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
-demand-driven and bounded to the symbols each tab is viewing (three at most).
+demand-driven; each tab may request up to three chart symbols and 30 watchlist
+symbols over that connection.
 
 `backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), a
 ten-day daily tail (60-second TTL) joined to the whole daily series that
 `chart_daily.py` reads once per symbol per New York date, and a single batch of
-watchlist quotes (15-second TTL).
+watchlist quotes (15-second TTL). That quote batch is the initial and recovery
+snapshot; live updates come from the shared stream.
 All five panels share these reads. A lock coalesces concurrent misses; a bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable

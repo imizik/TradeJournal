@@ -36,6 +36,8 @@ SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 SETTINGS = "default"
 # The main symbol plus two held by panels: each costs its own chart-feed reads.
 MAX_SYMBOLS = 3
+# The chart symbols plus the saved watchlist share the same market stream.
+MAX_STREAM_SYMBOLS = 33
 # Thirty levels on each of hundreds of symbols fit; a runaway client does not.
 SETTINGS_BYTES = 512_000
 
@@ -103,12 +105,12 @@ def history(
 
 
 @router.get("/stream")
-async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=60)):
+async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=600)):
     """Relay one private market stream to each visible chart tab as SSE, for
-    the tab's main symbol plus any symbols its panels hold (three at most)."""
+    up to three chart symbols and its 30-symbol watchlist."""
     wanted = list(dict.fromkeys(s.strip().upper() for s in f"{symbol},{symbols}".split(",") if s.strip()))
-    if not wanted or len(wanted) > MAX_SYMBOLS or any(not SYMBOL.fullmatch(s) for s in wanted):
-        raise HTTPException(422, f"Stream one to {MAX_SYMBOLS} US stock or ETF tickers.")
+    if not wanted or len(wanted) > MAX_STREAM_SYMBOLS or any(not SYMBOL.fullmatch(s) for s in wanted):
+        raise HTTPException(422, f"Stream one to {MAX_STREAM_SYMBOLS} US stock or ETF tickers.")
     if not tradier.tradier_configured():
         raise HTTPException(503, "Tradier market streaming is not configured.")
     market = request.app.state.chart_market_stream

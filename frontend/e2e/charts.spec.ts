@@ -56,7 +56,7 @@ function fixture(url: string): ChartData {
   return { symbol, session: query.get("session") === "regular" ? "regular" : "extended", provider: "Tradier", delayed: false,
     refresh_seconds: 15, checked_at: now, fetched_at: { intraday: now }, panels,
     quotes: symbols.map((s) => ({ symbol: s, name: `${s} test company`, last: s === "NVDA" ? 189.12 : 262.66,
-      change: 2, change_percentage: 1.5, volume: 1200000, previous_close: 260.66, trade_time: now - 2 })),
+      change: 2, change_percentage: 1.5, volume: 1200000, previous_close: 260.66, regular_close: 270, trade_time: now - 2 })),
     issues: [], adjustment: ADJUSTED, intraday_as_of: now - 60, history_note: "Synthetic chart data for browser verification.", fills: [], fills_truncated: false, extras };
 }
 
@@ -139,6 +139,44 @@ test("streamed trades move the selected price and candle, then pause freezes the
   await page.evaluate((tick) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick(tick),
     { type: "tick", symbol: "MRVL", at: at + 1, minute: Math.floor(at / 60) * 60, session: "post", price: 290, open: 290, high: 290, low: 290, buckets });
   await expect(page.getByLabel("Selected symbol quote")).not.toContainText("290.00");
+});
+
+test("watchlist rows use shared stream trades and the regular close for postmarket change", async ({ page }) => {
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      constructor() { MockEventSource.current = this; queueMicrotask(() => this.emit("status", { state: "connected" })); }
+      addEventListener(type: string, listener: EventListener | EventListenerObject) { this.listeners.set(type, listener as Listener); }
+      emit(type: string, value: unknown) { this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+      close() { /* no-op */ }
+    }
+    const testWindow = window as typeof window & {
+      __chartTick?: (value: unknown) => void;
+      __chartStreamReady?: () => boolean;
+    };
+    testWindow.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    testWindow.__chartStreamReady = () => !!MockEventSource.current?.listeners.has("tick");
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+  await stub(page);
+  await page.goto("/charts");
+  const row = page.locator("[data-watch-row]").filter({ hasText: "NVDA" });
+  await expect(row).toBeVisible();
+  // The row can render before the effect opens the shared stream. Wait until
+  // its tick listener is attached so this synthetic event cannot be dropped.
+  await page.waitForFunction(() =>
+    (window as typeof window & { __chartStreamReady?: () => boolean }).__chartStreamReady?.() === true);
+  const at = Math.floor(Date.now() / 1000) - 1;
+  await page.evaluate((tick) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick(tick),
+    { type: "tick", symbol: "NVDA", at, minute: Math.floor(at / 60) * 60, session: "post", price: 275, open: 275, high: 275, low: 275, buckets: {} });
+  await expect(row).toContainText("275.00");
+  await expect(row).toContainText("+1.85");
+  await expect(row.locator("span[title]").first()).toHaveAttribute("title", /Live trade/);
+  await page.getByRole("button", { name: "Pause chart updates" }).click();
+  await expect(row).toContainText("275.00");
+  await expect(row.locator("span[title]").first()).toHaveAttribute("title", /Paused trade/);
 });
 
 test("newer extended-hours candle is labeled instead of showing an older quote", async ({ page }) => {
@@ -290,6 +328,15 @@ function currentFixture(url: string, now: number, lastEnd = now + 30): ChartData
   data.checked_at = now;
   return data;
 }
+/** Keep tests about live updates and layout independent of the local historical-data cache. */
+async function stubExhaustedHistory(page: Page) {
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"),
+      before: Number(query.get("before")), limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
+}
 // 10:32:15 New York time on a Tuesday (EDT).
 const TUESDAY_1032 = Date.parse("2026-09-29T14:32:15Z") / 1000;
 
@@ -428,6 +475,7 @@ test("with no intraday bars today (weekend, holiday, overnight) charts open on t
 });
 
 test("streamed ticks update the latest candle in place and keep zoom; history changes reset", async ({ page }) => {
+  await stubExhaustedHistory(page);
   await registerCharts(page);
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
@@ -1242,6 +1290,8 @@ test("without the server, settings stay in this browser and save when it returns
 // ---- Per-panel symbols (C7.1): SPY, QQQ and the traded name side by side ----
 
 type StreamWindow = typeof window & { __streams: string[]; __emit: (type: string, value: unknown) => void };
+const expectStreamSymbols = async (page: Page, symbols: string[]) =>
+  expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1)?.split(",").sort())).toEqual([...symbols].sort());
 async function mockStreams(page: Page) {
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
@@ -1303,7 +1353,7 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(page.getByRole("region", { name: "SPY 1h chart" })).not.toContainText("fills shown");
   expect(requests.at(-1)!.get("intervals")).toBe("5m,15m,1D");
   expect(requests.at(-1)!.get("extras")).toBe("QQQ:1m,SPY:1h");
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("MRVL,QQQ,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 
   await page.screenshot({ path: test.info().outputPath("panel-symbols.png") });
   // A fourth symbol is refused; the panel keeps following MRVL.
@@ -1321,7 +1371,7 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(page.getByLabel("Selected symbol quote")).toContainText("189.12");
   expect(await resets(page, "Panel 3")).toBe(heldResets); // SPY was never redrawn
   expect(await page.evaluate(() => { const w = window as unknown as { __tjCharts: Map<string, unknown>; __spy: unknown }; return w.__tjCharts.get("Panel 3") === w.__spy; })).toBe(true);
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 
   // One stream carries all three; each chart applies only its own symbol's trades.
   await trade(page, "SPY", 701.25);
@@ -1338,13 +1388,13 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(page.getByLabel("Selected symbol quote")).toContainText("Live trade");
   await expect(page.getByText(/^Live trade \d+s ago$/)).toBeVisible();
 
-  // Pause freezes every symbol; resume reconnects the same three.
+  // Pause freezes every symbol; resume reconnects the chart symbols plus watchlist.
   await page.getByRole("button", { name: "Pause chart updates" }).click();
   await trade(page, "SPY", 705);
   await expect(values(page, "Panel 3")).toContainText("C 702.50");
   await page.getByRole("button", { name: "Resume chart updates" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(3);
-  expect(await page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
   await trade(page, "SPY", 706.5);
   await expect(values(page, "Panel 3")).toContainText("C 706.50");
 
@@ -1359,12 +1409,12 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   expect(held.from).toBeLessThanOrEqual(middle);
   expect(held.to).toBeGreaterThanOrEqual(middle);
 
-  // Following again drops the symbol from requests and the stream.
+  // Following again drops the held chart symbol from extras; QQQ remains streamed as a watchlist name.
   await page.getByRole("button", { name: "Panel 5 symbol" }).click();
   await page.getByRole("dialog", { name: "Symbol for Panel 5" }).getByRole("option", { name: /Follow the main chart \(NVDA\)/ }).click();
   await expect(page.getByRole("region", { name: "NVDA 1m chart" })).toBeVisible();
   await expect.poll(() => requests.at(-1)!.get("extras")).toBe("SPY:1h");
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 });
 
 test("a held panel scrolls back its own symbol, and focusing it swaps it with the main chart", async ({ page, context }) => {
@@ -3506,6 +3556,7 @@ test("on the charts page the journal navigation is a rail that expands and is re
 });
 
 test("dock, navigation and window resizes keep every chart, the selection, the scrolled-back view and the live stream, with no new requests", async ({ page, context }) => {
+  await stubExhaustedHistory(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   const server = await fakeChartSettings(context);
   await registerCharts(page);
