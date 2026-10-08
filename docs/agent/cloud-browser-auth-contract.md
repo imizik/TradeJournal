@@ -329,8 +329,12 @@ Backend authority is [access.py](../../backend/app/engine/access.py), the
 adds principals, sessions, persisted rate budgets and bounded security audits.
 The inspector has a 240-request/minute budget including session checks;
 registered operations and symbol/run/record restrictions are enforced before
-provider or protected domain reads. Actor attribution on authenticated owner
-A1 writes is server-derived; assistant writes remain denied.
+provider or protected domain reads, including the chart's Insiders endpoint.
+Actor attribution on authenticated A1 writes is server-derived: owner browser
+writes are `human`, and the scoped manual MCP service writes are
+`agent:manual_mcp` regardless of the caller's actor field. Existing immutable
+records and hashes are not rewritten; legacy private mode retains its previous
+actor behavior. Assistant browser writes remain denied.
 
 Frontend enforcement is [proxy.ts](../../frontend/proxy.ts),
 [request forwarding](../../frontend/lib/backendProxy.ts),

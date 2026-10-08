@@ -25,6 +25,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /charts/symbol/{symbol:path}/events',
     'GET /charts/symbol/{symbol:path}/financials',
     'GET /charts/symbol/{symbol:path}/forecast',
+    'GET /charts/symbol/{symbol:path}/insiders',
     'GET /charts/symbol/{symbol:path}/news',
     'GET /charts/symbol/{symbol:path}/overview',
     'GET /charts/symbol/{symbol:path}/peers',

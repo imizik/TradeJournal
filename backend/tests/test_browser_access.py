@@ -13,10 +13,10 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from app import access_middleware
 from app.access_manifest import DOMAIN_ROUTES
 from app.database import get_session
-from app.engine import access
+from app.engine import access, decisions
 from app.main import app
-from app.models import AccessPrincipal, AccessSession, AccessAudit, PracticeRun, PracticeOpportunity, JobRun
-from app.routers import charts, quotes
+from app.models import AccessPrincipal, AccessSession, AccessAudit, PracticeRun, PracticeOpportunity, JobRun, DecisionRecord
+from app.routers import charts, quotes, symbol_info
 
 OWNER_KEY, PUBLIC_KEY = "o" * 43, "p" * 43
 OWNER_ORIGIN, PUBLIC_ORIGIN = "http://127.0.0.1:3100", "http://127.0.0.1:3101"
@@ -129,6 +129,46 @@ def test_symbols_checked_before_provider(boundary):
     for query in ("tickers=SPY,NVDA", "tickers=MU&tickers=NVDA"):
         assert boundary.public.get(f"/quotes?{query}").status_code == 403
     assert called == [["MU", "NBIS"]]
+
+
+def test_insiders_obeys_symbol_grant_before_provider(boundary):
+    assert signin(boundary).status_code == 200
+    called = []
+    boundary.patch.setattr(symbol_info.symbol_info_insiders.symbol_insiders, "view",
+        lambda symbol: called.append(symbol) or {"symbol": symbol, "state": "ready"})
+    assert boundary.public.get("/charts/symbol/NVDA/insiders").status_code == 403
+    assert called == []
+    assert boundary.public.get("/charts/symbol/MU/insiders").json()["symbol"] == "MU"
+    assert boundary.owner.get("/charts/symbol/NVDA/insiders").json()["symbol"] == "NVDA"
+    assert called == ["MU", "NVDA"]
+
+
+@pytest.mark.parametrize("service", [False, True])
+def test_authenticated_decision_actor_is_durable_and_server_owned(boundary, service):
+    with Session(boundary.engine) as db:
+        context, _ = decisions.freeze_context(db, "actor-context", "SPY", {"symbol": "SPY"})
+        context_id = str(context.id)
+    boundary.patch.setenv("TJ_ACCESS_SERVICES", json.dumps({"manual_mcp": "m" * 43}))
+    with TestClient(app) as mcp:
+        mcp.headers["x-tj-service"] = "m" * 43
+        client = mcp if service else boundary.owner
+        payload = {"operation_id": "actor-choice", "opportunity_id": "actor-opportunity",
+            "actor": "human" if service else "agent:spoofed", "decision": "skip",
+            "symbol": "SPY", "context_id": context_id, "rationale": "No clear setup"}
+        response = client.post("/decisions", json=payload)
+        assert response.status_code == 201, response.text
+        saved = response.json()
+        expected = "agent:manual_mcp" if service else "human"
+        assert saved["actor"] == expected
+        retry = client.post("/decisions", json={**payload, "actor": "agent:another-spoof"})
+        assert retry.status_code == 200, retry.text
+        assert retry.json()["record_sha256"] == saved["record_sha256"]
+        assert client.get(f"/decisions/{saved['id']}").json()["actor"] == expected
+    with Session(boundary.engine) as db:
+        records = db.exec(select(DecisionRecord)).all()
+        assert len(records) == 1
+        assert records[0].actor == expected
+        assert records[0].record_sha256 == saved["record_sha256"]
 
 
 def test_market_history_does_not_query_journal(boundary):

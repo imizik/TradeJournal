@@ -33,6 +33,7 @@ MARKET_PATHS = frozenset({"GET /charts/workspace", "GET /charts/history", "GET /
     "GET /charts/symbol/{symbol:path}/forecast", "GET /charts/symbol/{symbol:path}/analysts",
     "GET /charts/symbol/{symbol:path}/short", "GET /charts/symbol/{symbol:path}/peers",
     "GET /charts/symbol/{symbol:path}/financials", "GET /charts/symbol/{symbol:path}/reactions",
+    "GET /charts/symbol/{symbol:path}/insiders",
     "GET /packets/analyze", "GET /packets/news", "GET /quotes"})
 JOURNAL_PATHS = frozenset({"GET /accounts", "GET /fills", "GET /fills/{fill_id}", "GET /trades",
     "GET /trades/{trade_id}", "GET /trades/fills/bulk", "GET /trades/{trade_id}/fills",

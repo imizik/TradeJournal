@@ -134,6 +134,8 @@ def record_decision(operation_id: str, opportunity_id: str, actor: str,
                     rationale: str = "", wait_condition: str | None = None,
                     wait_expiry: str | None = None, plan: dict | None = None) -> dict:
     """Save an immutable TAKE/WAIT/SKIP Practice draft; records never arm a plan."""
+    # In authenticated mode the API assigns agent:manual_mcp from the service
+    # identity. The actor argument remains for private legacy installations.
     return _post("/decisions", {
         "operation_id": operation_id, "opportunity_id": opportunity_id,
         "actor": actor, "decision": decision, "symbol": symbol,

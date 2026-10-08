@@ -79,7 +79,13 @@ def create(body: DecisionCreate, response: Response, request: Request, db: Sessi
     try:
         payload = body.model_dump()
         if access.enabled():
-            payload["actor"] = "human"
+            who = request.state.access
+            if who.owner:
+                payload["actor"] = "human"
+            elif who.service and who.identifier == "service:manual_mcp":
+                payload["actor"] = "agent:manual_mcp"
+            else:
+                raise HTTPException(403, "Decision writer not permitted")
         item, created = decisions.create(db, payload)
     except decisions.DecisionError as exc:
         raise HTTPException(status_code=409 if "operation_id" in str(exc) else 422, detail=str(exc)) from exc
