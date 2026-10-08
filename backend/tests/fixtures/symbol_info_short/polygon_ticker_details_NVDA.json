@@ -1,0 +1,26 @@
+{
+ "results": {
+  "ticker": "NVDA",
+  "name": "Nvidia Corp",
+  "market": "stocks",
+  "locale": "us",
+  "primary_exchange": "XNAS",
+  "type": "CS",
+  "active": true,
+  "currency_name": "usd",
+  "cik": "0001045810",
+  "composite_figi": "BBG000BBJQV0",
+  "share_class_figi": "BBG001S5TZJ6",
+  "market_cap": 5734188090000.0,
+  "sic_code": "3674",
+  "sic_description": "SEMICONDUCTORS & RELATED DEVICES",
+  "ticker_root": "NVDA",
+  "homepage_url": "https://www.nvidia.com",
+  "total_employees": 42000,
+  "list_date": "1999-01-22",
+  "share_class_shares_outstanding": 24100000000,
+  "weighted_shares_outstanding": 24147000000,
+  "round_lot": 100
+ },
+ "status": "OK"
+}

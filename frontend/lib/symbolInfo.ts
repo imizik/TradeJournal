@@ -214,3 +214,33 @@ export async function fetchSymbolAnalysts(symbol: string, signal: AbortSignal): 
   if (!response.ok) throw new Error("Analyst data unavailable. Try again.");
   return response.json();
 }
+
+/** The Short tab (T3.1): FINRA short interest, daily short volume and the borrow flag, normalized by the backend. */
+export type ShortBlockMeta = {
+  state: "ready" | "none" | "unavailable"; source: string; fetched_at: number | null; age_seconds: number | null;
+  /** True when the read failed and the rows are an older copy; `message` says why. */
+  stale: boolean; message: string | null; none_message?: string | null;
+};
+export type ShortInterest = ShortBlockMeta & {
+  settlement_date?: string; short_interest?: number; avg_daily_volume?: number | null; days_to_cover?: number | null;
+  settlement_note?: string; pct_note?: string; shares_outstanding?: number | null; shares_basis?: string | null;
+  pct_of_shares_outstanding?: number | null; pct_message?: string | null;
+  previous?: { settlement_date: string; short_interest: number; change_pct: number } | null;
+};
+export type ShortVolumeRow = { date: string; short_volume: number; total_volume: number; ratio_pct: number };
+export type ShortVolume = ShortBlockMeta & { rows?: ShortVolumeRow[]; average_pct?: number; note?: string };
+export type ShortBorrow = {
+  state: "ready" | "unavailable"; source: string; fetched_at: number | null; age_seconds: number | null; stale: boolean;
+  message: string | null; hard_to_borrow: boolean | null; note?: string;
+};
+export type SymbolShort = { symbol: string; as_of: string; time_zone: string; state: "ready" | "none" | "unavailable"; interest: ShortInterest; volume: ShortVolume; borrow: ShortBorrow };
+
+export async function fetchSymbolShort(symbol: string, signal: AbortSignal): Promise<SymbolShort> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/short`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Short data unavailable. Try again.");
+  return response.json();
+}
+
+/** "2 d old", "5 h old": the age of a cached copy, from the backend's `age_seconds`. */
+export const copyAge = (seconds: number | null) => seconds == null ? "age unknown"
+  : seconds < 3600 ? `${Math.max(1, Math.floor(seconds / 60))} min old` : seconds < 86_400 ? `${Math.floor(seconds / 3600)} h old` : `${Math.floor(seconds / 86_400)} d old`;

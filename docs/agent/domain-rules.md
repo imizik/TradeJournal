@@ -272,6 +272,9 @@ is verifiable rather than hopeful.
   (never waits more than two seconds, never retries), caches 15 minutes under
   `backend/data/symbol_info/v1/polygon/`, and a 429 there calls `note_refusal`
   like any other, so it also slows enrichment. Keep it behind the News tab.
+- The Short tab (T3.1) reads three more Polygon endpoints (`/stocks/v1/short-interest`,
+  `/stocks/v1/short-volume`, `/v3/reference/tickers/{t}`) the same way, cached one
+  day per symbol, only when that tab asks.
 - Cache markers: empty Polygon responses are cached as
   `{"_empty_cached_at": ts}` (1 year for finalized history); an empty bar
   window is retried weekly. Delete the file to force a retry.

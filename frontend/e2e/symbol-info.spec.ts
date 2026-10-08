@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
-import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, SymbolForecast, SymbolNews, SymbolOverview } from "../lib/symbolInfo";
+import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, SymbolForecast, SymbolNews, SymbolOverview, SymbolShort } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
@@ -486,4 +486,69 @@ test("News keeps the same 20 rows behind the banner when a poll adds one and the
   await expect(rows).toHaveCount(20);
   await expect(info.getByRole("link", { name: "Story 21", exact: true })).toBeVisible();
   await expect(info.getByRole("link", { name: "Story 1", exact: true })).toHaveCount(0);
+});
+
+// T3.1: values are the recorded NVDA responses (Polygon FINRA short interest and short volume, 2026-10-08).
+const SHORT_READ = Date.parse("2026-10-08T14:00:00Z") / 1000;
+const SHORT_DAYS = ["2026-10-07", "2026-10-06", "2026-10-05", "2026-10-02", "2026-10-01", "2026-09-30", "2026-09-29", "2026-09-28", "2026-09-25", "2026-09-24"];
+const SHORT_RATIOS = [51.5, 56.6, 57.4, 46.5, 54.1, 42.6, 47.8, 32.8, 35.0, 34.8];
+const shortBody = (symbol: string, patch: Partial<SymbolShort> = {}): SymbolShort => {
+  const meta = { fetched_at: SHORT_READ, age_seconds: 0, stale: false, message: null };
+  return { symbol, as_of: "2026-10-08T14:00:00Z", time_zone: "America/New_York", state: "ready",
+    interest: { ...meta, state: "ready", source: "Polygon (FINRA short interest)", settlement_date: "2026-09-15", short_interest: 294225803, avg_daily_volume: 115324892,
+      days_to_cover: 2.55, shares_outstanding: 24100000000, shares_basis: "share_class_shares_outstanding", pct_of_shares_outstanding: 1.22, pct_message: null,
+      pct_note: "Shown against shares outstanding. A float figure is not available, so this is not a percent of float.",
+      settlement_note: "FINRA publishes short interest twice a month and the figure lags its settlement date by about two weeks.",
+      previous: { settlement_date: "2026-08-31", short_interest: 298301619, change_pct: -1.4 } },
+    volume: { ...meta, state: "ready", source: "Polygon (FINRA daily short volume)", average_pct: 46.1,
+      note: "Share of the volume FINRA's facilities report, not of all trading, so the share of the full day is lower.",
+      rows: SHORT_RATIOS.map((ratio_pct, i) => ({ date: SHORT_DAYS[i], short_volume: Math.round(ratio_pct * 1e6 / 100 * 40), total_volume: 40_000_000, ratio_pct })) },
+    borrow: { state: "ready", source: "Tradier easy-to-borrow list", fetched_at: SHORT_READ, age_seconds: 0, stale: false, message: null, hard_to_borrow: false },
+    ...patch };
+};
+
+test("Short shows interest, days to cover, % of shares outstanding, ten sessions of short volume and the borrow flag", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/short", async (route) => {
+    const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
+    reads.push(symbol);
+    await route.fulfill({ json: symbol === "SPY" ? shortBody(symbol, { state: "none",
+      interest: { state: "none", source: "Polygon (FINRA short interest)", fetched_at: SHORT_READ, age_seconds: 0, stale: false, message: null, none_message: "No FINRA short interest is published for SPY." },
+      volume: { state: "none", source: "Polygon (FINRA daily short volume)", fetched_at: SHORT_READ, age_seconds: 0, stale: false, message: null, none_message: "No FINRA short-volume rows are published for SPY." } })
+      : symbol === "AMD" ? shortBody(symbol, {
+        interest: { ...shortBody(symbol).interest, stale: true, age_seconds: 2 * 86_400 + 3600, message: "Polygon refused the read (429, the free plan allows 5 a minute).", shares_outstanding: null, pct_of_shares_outstanding: null, shares_basis: null, pct_message: "Shares outstanding unavailable, so the percentage is omitted." },
+        borrow: { ...shortBody(symbol).borrow, hard_to_borrow: true, note: "Missing from Tradier's easy-to-borrow list, which brokers use to decide where shares can be borrowed to short. Expect higher borrow fees or no shares to short." } })
+      : shortBody(symbol) });
+  });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Short", exact: true }).click();
+  const interest = info.getByRole("region", { name: "Short interest" });
+  await expect(interest).toContainText("294.23M shares");
+  await expect(interest).toContainText("Sep 15, 2026");
+  await expect(interest.getByText("2.55", { exact: true })).toBeVisible();
+  await expect(interest.getByText("1.22%", { exact: true })).toBeVisible();
+  await expect(interest).toContainText("% of shares outstanding");
+  await expect(interest).toContainText("not a percent of float");
+  await expect(interest).not.toContainText("% of float");
+  await expect(interest).toContainText("-1.4%");
+  await expect(info.getByRole("region", { name: "Borrow" })).toContainText("Easy to borrow");
+  const volume = info.getByRole("region", { name: /Short volume/ });
+  await expect(volume.getByRole("list", { name: "Daily short volume ratio" }).getByRole("listitem")).toHaveCount(10);
+  await expect(volume).toContainText("of FINRA-reported volume");
+  await expect(volume).toContainText("not of all trading");
+  await expect(volume.getByText("51.5%", { exact: true })).toBeVisible();
+  expect(reads).toEqual(["NVDA"]);
+  // A stale Polygon copy names its age; a symbol off the easy-to-borrow list is flagged; a missing share count omits only the percentage.
+  await choose(page, "AMD");
+  await expect(info.getByRole("region", { name: "Borrow" })).toContainText("Hard to borrow");
+  await expect(info.getByRole("region", { name: "Short interest" })).toContainText("429");
+  await expect(info.getByRole("region", { name: "Short interest" })).toContainText("Copy is 2 d old");
+  await expect(info.getByRole("region", { name: "Short interest" })).toContainText("percentage is omitted");
+  await expect(info.getByRole("region", { name: "Short interest" })).toContainText("294.23M shares");
+  // An ETF with no FINRA rows says so in each block.
+  await choose(page, "SPY");
+  await expect(info.getByRole("region", { name: "Short interest" })).toContainText("No FINRA short interest is published for SPY.");
+  await expect(info.getByRole("region", { name: /Short volume/ })).toContainText("No FINRA short-volume rows are published for SPY.");
+  expect(reads).toEqual(["NVDA", "AMD", "SPY"]);
 });
