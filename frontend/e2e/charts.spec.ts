@@ -116,12 +116,7 @@ test("streamed trades move the selected price and candle, then pause freezes the
       }
       close() { this.closed = true; }
     }
-    const testWindow = window as typeof window & {
-      __chartTick?: (value: unknown) => void;
-      __chartStreamReady?: () => boolean;
-    };
-    testWindow.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
-    testWindow.__chartStreamReady = () => !!MockEventSource.current?.listeners.has("tick");
+    (window as typeof window & { __chartTick?: (value: unknown) => void }).__chartTick = (value) => MockEventSource.current?.emit("tick", value);
     window.EventSource = MockEventSource as unknown as typeof EventSource;
   });
   await stub(page);
@@ -157,7 +152,12 @@ test("watchlist rows use shared stream trades and the regular close for postmark
       emit(type: string, value: unknown) { this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
       close() { /* no-op */ }
     }
-    (window as typeof window & { __chartTick?: (value: unknown) => void }).__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    const testWindow = window as typeof window & {
+      __chartTick?: (value: unknown) => void;
+      __chartStreamReady?: () => boolean;
+    };
+    testWindow.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    testWindow.__chartStreamReady = () => !!MockEventSource.current?.listeners.has("tick");
     window.EventSource = MockEventSource as unknown as typeof EventSource;
   });
   await stub(page);
