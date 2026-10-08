@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
@@ -65,7 +66,7 @@ def context(symbol: str, body: ContextCreate, db: Session = Depends(get_session)
         "close": None, "description": "Market calendar unavailable", "source": None,
     }
     try:
-        item, evidence = decisions.freeze_context(db, body.operation_id, symbol, packet)
+        item, evidence = decisions.freeze_context(db, body.operation_id, symbol, jsonable_encoder(packet))
     except decisions.DecisionError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return decisions.context_row(item, evidence)

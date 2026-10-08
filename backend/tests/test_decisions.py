@@ -106,6 +106,20 @@ def test_context_is_durable_and_later_packet_does_not_rewrite_decision(client, m
     assert reopened["context_id"] == first_context["context_id"]
 
 
+def test_context_serializes_live_analysis_datetime_and_retries_same_evidence(client, monkeypatch):
+    live_packet = packet()
+    as_of = datetime(2026, 10, 8, 10, 15)
+    live_packet["short_term"] = {"entry_context_as_of": as_of}
+    monkeypatch.setattr(routes, "build_ticker_analysis", lambda symbol: live_packet)
+    context = freeze(client, "ctx-live-datetime")
+    assert context["packet"]["short_term"]["entry_context_as_of"] == as_of.isoformat()
+    retry = freeze(client, "ctx-live-datetime")
+    assert retry == context
+    saved = client.post("/decisions", json=base(context)).json()
+    reopened = client.get(f"/decisions/{saved['id']}").json()
+    assert reopened["evidence"]["packet"]["short_term"] == context["packet"]["short_term"]
+
+
 def test_unavailable_context_still_records_wait_or_skip_but_cannot_support_take(client, monkeypatch):
     def unavailable(_symbol):
         raise RuntimeError("provider offline")
