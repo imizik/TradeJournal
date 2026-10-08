@@ -44,7 +44,7 @@ after them, clearly labelled.
 |---|---|---|---|
 | T1.1 | Panel shell and the **You** tab: your own trades on this underlying | 1 Core | done ([PR #115](https://github.com/imizik/TradeJournal/pull/115)) |
 | T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga, plus Polygon with provider-supplied sentiment) | 1 Core | done (branch `claude/roadmap-features-7kd6u6`) |
-| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | built locally; browser verification pending |
+| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | built ([PR #146](https://github.com/imizik/TradeJournal/pull/146)); the fundamentals parser was rewritten against recorded responses on 2026-10-08 after it showed nothing for every symbol |
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | in PR ([PR #150](https://github.com/imizik/TradeJournal/pull/150)) |
@@ -103,6 +103,17 @@ and the item that consumes the data owns the test.
   second class (`0PDXF29G25`, IPO 1970, nearly empty) that carries its own
   beta and averages. Pick the share class matching the request's primary
   listing and ignore the rest. Do not merge fields across classes. (T1.3)
+  On 2026-10-08 the 30/60/90-day volume averages arrived only on that second
+  class (NVDA 107.9M), so the statistics read takes the class that has them.
+- **The tables are not named after the endpoints.** The company call holds
+  `share_class`, `share_class_profile` (market cap, enterprise value, shares
+  outstanding), `ownership_summary` (13F), `company_profile`,
+  `historical_asset_classification` (a numeric Morningstar sector code) and
+  `long_descriptions`; ratios are `valuation_ratios` (`p_e_ratio`,
+  `e_v_to_e_b_i_t_d_a`, `forward_dividend_yield`) and `alpha_beta`. There is
+  no company name, percentages are fractions, and an ETF's market cap reads 0.
+  The first parser guessed other names and showed nothing; parse only against
+  the recorded fixture `backend/tests/fixtures/tradier/overview_2026-10-08.json`. (T1.3)
 - **Calendars can hold two "next earnings" rows.** CVNA had Q3 results on
   2026-10-28 *Confirmed* and 2026-10-29 *Estimated*. A confirmed row wins for
   the same fiscal quarter. (T1.4) By 2026-10-04 the estimated row was gone;
