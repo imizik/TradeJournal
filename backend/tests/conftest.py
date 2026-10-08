@@ -62,6 +62,8 @@ for _flag in (
     "GMAIL_LISTENER_ENABLED",
     "WEBULL_LISTENER_AUTOSTART",
     "LEVEL_ALERTS_AUTOSTART",
+    "PRACTICE_AGENT_ENABLED",
+    "PRACTICE_SCHEDULE_ENABLED",
 ):
     os.environ[_flag] = "false"
 

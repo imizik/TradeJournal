@@ -683,3 +683,18 @@ def test_deployment_pauses_the_autodeploy_timer_but_never_its_running_service(co
     assert "tradejournal-autodeploy.service" not in stopped
     assert "tradejournal-autodeploy.timer" in control.TIMERS
     assert "tradejournal-autodeploy.service" in control.OPTIONAL_UNITS
+
+
+def test_practice_timer_is_packaged_but_never_enabled_by_install():
+    systemd = Path(__file__).resolve().parents[2] / "deploy/systemd"
+    control = load("control")
+    assert "tradejournal-practice.timer" not in control.TIMERS
+    assert "tradejournal-practice.timer" in control.OPTIONAL_UNITS
+    assert "tradejournal-worker@practice" in control.SERVICES
+    timer = (systemd / "tradejournal-practice.timer").read_text()
+    assert "08:50:00 America/New_York" in timer
+    assert "Persistent=true" in timer
+    service = (systemd / "tradejournal-practice.service").read_text()
+    assert "app.jobs.practice_schedule" in service
+    assert "TimeoutStartSec=5min" in service
+    assert "EnvironmentFile=/etc/tradejournal/backend.env" in service

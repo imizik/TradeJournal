@@ -1,0 +1,21 @@
+[Unit]
+Description=Opt-in TradeJournal finite daily practice preparation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tradejournal
+Group=tradejournal
+WorkingDirectory=/opt/tradejournal/current/backend
+EnvironmentFile=/etc/tradejournal/backend.env
+Environment=JOB_EXECUTION_MODE=external
+Environment=JOB_LOCK_DIR=/var/lib/tradejournal/job-locks
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m app.jobs.practice_schedule
+TimeoutStartSec=5min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/tradejournal

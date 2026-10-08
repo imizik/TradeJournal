@@ -1236,3 +1236,59 @@ TRADINGVIEW_ALERT_LIGHT = (
     defer(TradingViewAlert.assessment_json),
     defer(TradingViewAlert.analysis_error),
 )
+
+
+class PracticeRun(SQLModel, table=True):
+    """A3 session identity; revisions never replace the canonical cohort."""
+    __tablename__ = "practice_run"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_key: str = Field(unique=True)
+    day: date = Field(index=True)
+    revision: int = 0
+    parent_id: Optional[uuid.UUID] = Field(default=None, foreign_key="practice_run.id")
+    job_id: uuid.UUID = Field(foreign_key="job_run.id")
+    mode: str
+    comparison: str
+    status: str = "queued"
+    result: Optional[str] = None
+    late: bool = False
+    deadline: datetime
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+    policy_version: str
+    policy_hash: str
+    calendar_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    brief_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    timings_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    error: Optional[str] = None
+
+
+class PracticeOpportunity(SQLModel, table=True):
+    __tablename__ = "practice_opportunity"
+    __table_args__ = (UniqueConstraint("run_id", "symbol", name="uq_practice_opportunity_symbol"),)
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="practice_run.id", index=True)
+    symbol: str
+    context_id: Optional[uuid.UUID] = Field(default=None, foreign_key="decision_context.id")
+    revealed_at: Optional[datetime] = None
+    benchmark_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    feedback_json: str = Field(default='{"rating":"unrated","phone_received":null}', sa_column=Column(Text, nullable=False))
+
+
+class PracticeAgentCall(SQLModel, table=True):
+    """One reserved paid attempt per ET day, including uncertain completions."""
+    __tablename__ = "practice_agent_call"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    day: date = Field(unique=True)
+    run_id: uuid.UUID = Field(foreign_key="practice_run.id", unique=True)
+    status: str = "reserved"
+    model: str
+    prompt_version: str
+    payload_json: str = Field(sa_column=Column(Text, nullable=False))
+    output_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    config_json: str = Field(sa_column=Column(Text, nullable=False))
+    usage_json: Optional[str] = None
+    cost_usd: Optional[float] = None
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+    error: Optional[str] = None

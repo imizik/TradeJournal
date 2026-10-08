@@ -29,10 +29,10 @@ def main() -> None:
         os.environ.setdefault("CAPTURE_MODEL_DIR", str(STATE / "models"))
         if service == "api":
             command = [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8080"]
-        elif service == "worker" and args in (["sync"], ["polygon"], ["webull"], ["gmail"], ["capture"]):
+        elif service == "worker" and args in (["sync"], ["polygon"], ["webull"], ["gmail"], ["capture"], ["practice"]):
             command = [sys.executable, "-m", "app.jobs.worker", "--lane", args[0]]
         else:
-            raise SystemExit("Expected api, frontend, or worker sync|polygon|webull|gmail|capture")
+            raise SystemExit("Expected api, frontend, or worker sync|polygon|webull|gmail|capture|practice")
     os.execv(command[0], command)
 
 

@@ -29,7 +29,7 @@ from app.engine import paper_execution as px
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.engine.level_alerts import LATENESS
-from app.models import DecisionEvent, DecisionRecord
+from app.models import DecisionEvent, DecisionRecord, PracticeOpportunity, PracticeRun
 
 log = logging.getLogger(__name__)
 
@@ -178,6 +178,12 @@ def arm(db: Session, record_id: uuid.UUID, operation_id: str, *, now: datetime, 
         if armed.get("operation_id") == operation_id:
             return existing, False
         raise PaperError("this plan is already armed under another operation_id")
+    if record.opportunity_id.startswith("a3:"):
+        paired_arm = db.exec(select(DecisionEvent.id).join(DecisionRecord, DecisionEvent.record_id == DecisionRecord.id).where(
+            DecisionRecord.opportunity_id == record.opportunity_id, DecisionRecord.id != record.id,
+            DecisionEvent.event_type == "armed")).first()
+        if paired_arm is not None:
+            raise PaperError("this shared opportunity was already armed through another actor; paired choices cannot create another paper plan")
     plan = json.loads(record.decision_json)["plan"]
     if record.decision != "take":
         raise PaperError("only a TAKE plan can be armed")
@@ -194,6 +200,14 @@ def arm(db: Session, record_id: uuid.UUID, operation_id: str, *, now: datetime, 
     session = regular_session(today, calendar.hours(today))
     if session is None:
         raise PaperError("the market calendar does not show an open session today, so nothing can be armed")
+    if record.opportunity_id.startswith("a3:"):
+        try:
+            opportunity = db.get(PracticeOpportunity, uuid.UUID(record.opportunity_id[3:]))
+        except ValueError:
+            opportunity = None
+        routine = db.get(PracticeRun, opportunity.run_id) if opportunity else None
+        if routine is None or routine.day != today:
+            raise PaperError("A3 plan must be armed on its run's market session date")
     if record.received_at.replace(tzinfo=UTC).astimezone(ET).date() != today:
         raise PaperError("only a plan decided today can be armed today")
     cutoff = watch_cutoff(session)
@@ -433,12 +447,12 @@ def message(record: DecisionRecord, event: dict, now: float) -> tuple[str, str]:
     return f"PRACTICE · {record.symbol} {event['type'].replace('_', ' ')}", what + ". Not a real trade."
 
 
-def paper_row(db: Session, record_id: uuid.UUID) -> dict:
+def paper_row(db: Session, record_id: uuid.UUID, *, record: DecisionRecord | None = None, event_rows: list[DecisionEvent] | None = None) -> dict:
     """The plan's paper state, event timeline and outcome at base and triple costs."""
-    record = db.get(DecisionRecord, record_id)
+    record = record if record is not None else db.get(DecisionRecord, record_id)
     if record is None:
         raise LookupError("Decision record not found")
-    rows = events_for(db, record_id)
+    rows = event_rows if event_rows is not None else events_for(db, record_id)
     state = px.fold(_data(rows))
     terms = px.terms_from_plan(json.loads(record.decision_json)["plan"]) if record.decision == "take" else None
     return {

@@ -21,7 +21,7 @@ network filesystems are unsupported. Never delete lock files while executors
 are running; unlinking them defeats mutual exclusion. A job from a different
 host or lock directory is left untouched for operator investigation.
 
-Five execution lanes have separate locks:
+Six execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
@@ -30,6 +30,7 @@ Five execution lanes have separate locks:
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
 | `capture` | Transcribing a voice plan (Charts C3.5, `capture_transcribe`), so a recording never waits behind a broker sync or enrichment |
+| `practice` | Finite A3 daily preparation (`practice_prepare`), separate from import and transcription deadlines |
 
 Pipeline children execute inside the parent's sync lane. Polygon is queued
 independently, so provider pacing cannot block pipeline completion. Additional
@@ -89,6 +90,7 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane webull --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane gmail --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane capture --recover-unowned --recover-only
+   .venv/bin/python -m app.jobs.worker --lane practice --recover-unowned --recover-only
    ```
 
 5. Run each command as a separate supervised process, from `backend/`, with
@@ -101,6 +103,7 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane webull
    .venv/bin/python -m app.jobs.worker --lane gmail
    .venv/bin/python -m app.jobs.worker --lane capture
+   .venv/bin/python -m app.jobs.worker --lane practice
    ```
 
 A transcription job is queued when a voice plan is saved and never retried
@@ -159,7 +162,7 @@ a `job_run`. `LEVEL_ALERTS_AUTOSTART=false` keeps it off, as the test suite
 does. TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
-now provides systemd services for the five lanes and the private API/frontend.
+now provides systemd services for the six lanes and the private API/frontend.
 It does not alter Webull reconnection policy or move the remaining API threads
 to supervised worker lanes.
 
@@ -171,3 +174,19 @@ Alpaca, or Polygon. The separate Ubuntu deployment workflow exercises systemd
 with a packaged application and disposable Postgres; real-VPS reboot and live
 provider checks remain operator work. Those checks and Postgres-specific tests
 are separate from the local verification script.
+
+## A3 finite daily preparation
+
+`practice_prepare` uses its own `practice` lane, separate from sync and capture.
+The packaged worker handles manual requests through the normal ownership locks;
+`app.jobs.practice_schedule` is the finite optional systemd entrypoint. Its
+08:50 America/New_York timer is installed but never enabled by the release
+controller. `PRACTICE_SCHEDULE_ENABLED` defaults off. Before 08:50 a persistent
+catch-up is skipped; after the 09:00 deadline a durable late/missed record is
+created without market/model calls. The calendar determines closed sessions.
+
+Agent execution separately defaults off via `PRACTICE_AGENT_ENABLED`. One daily
+reservation survives model timeout/process death; uncertain completion is not
+retried. Interrupted jobs retain contexts and require an explicit linked
+assisted revision. Neither job failure nor disabled preparation changes the
+API-owned A2 watcher. See [the A3 contract](a3-implementation-contract.md).

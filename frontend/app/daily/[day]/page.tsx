@@ -1,4 +1,5 @@
 import DailyAiPanel from "@/components/DailyAiPanel";
+import PracticeRoutine from "@/components/PracticeRoutine";
 import { api, Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
 
 type TradeWithFills = {
@@ -322,6 +323,8 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         initialReview={savedDailyReview?.review ?? null}
         initialGeneratedAt={savedDailyReview?.generated_at ?? null}
       />
+
+      <PracticeRoutine day={selectedDay} />
 
       {selectedTrades.length === 0 ? (
         <section className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">

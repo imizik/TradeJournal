@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session
 
 from app.database import get_session
-from app.engine import decisions, paper
+from app.engine import decisions, paper, practice
 from app.engine.analyzer import build_ticker_analysis
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET
@@ -85,13 +85,13 @@ def create(body: DecisionCreate, response: Response, db: Session = Depends(get_s
 
 @router.get("")
 def list_decisions(limit: int = Query(30, ge=1, le=100), db: Session = Depends(get_session)):
-    return {"decisions": [decisions.row(item) for item in decisions.recent(db, limit)]}
+    return {"decisions": [decisions.row(item) for item in decisions.recent(db, limit) if practice.visible_record(db, item)]}
 
 
 @router.get("/{record_id}")
 def get_decision(record_id: uuid.UUID, db: Session = Depends(get_session)):
     item = decisions.get(db, record_id)
-    if item is None:
+    if item is None or not practice.visible_record(db, item):
         raise HTTPException(status_code=404, detail="Decision record not found")
     return decisions.row(item)
 
@@ -99,6 +99,9 @@ def get_decision(record_id: uuid.UUID, db: Session = Depends(get_session)):
 @router.post("/{record_id}/arm", status_code=201)
 def arm(record_id: uuid.UUID, body: ArmCreate, request: Request, response: Response, db: Session = Depends(get_session)):
     """Arm a frozen TAKE as a Practice paper plan under the complete P0 policy (A2)."""
+    item = decisions.get(db, record_id)
+    if item is not None and not practice.visible_record(db, item):
+        raise HTTPException(status_code=404, detail="Decision record not found")
     monitor = getattr(request.app.state, "level_alerts", None)
     if monitor is None or getattr(monitor, "paper", None) is None:
         # Arming without a running watcher would use a session slot for a plan nobody judges.
@@ -118,6 +121,9 @@ def arm(record_id: uuid.UUID, body: ArmCreate, request: Request, response: Respo
 
 @router.get("/{record_id}/paper")
 def get_paper(record_id: uuid.UUID, db: Session = Depends(get_session)):
+    item = decisions.get(db, record_id)
+    if item is None or not practice.visible_record(db, item):
+        raise HTTPException(status_code=404, detail="Decision record not found")
     try:
         return paper.paper_row(db, record_id)
     except LookupError as exc:

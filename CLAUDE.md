@@ -32,6 +32,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/product-roadmap.md` | Future trading-improvement workflow: reflections, weekly commitments, playbooks, planned risk and evidence-gated experiments; preserves active feature-roadmap priorities |
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 | `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
+| `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
 | `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |

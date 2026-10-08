@@ -46,7 +46,7 @@ which is also what keeps each stage from loading data it may not see.
 Both bind to loopback.
 
 The [Ubuntu deployment package](../../deploy/README.md) instead supervises
-seven services: frontend, API and the five worker lanes. It keeps the frontend
+eight services: frontend, API and the six worker lanes. It keeps the frontend
 and API on loopback; private Tailscale Serve reaches the frontend, whose
 same-origin `/api/backend` proxy carries browser requests. Server components
 use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
@@ -104,9 +104,9 @@ safe to wipe and rebuild — rebuilding is normal, not a repair of last resort.
 Corrections happen by editing bad fills and rebuilding, not by appending
 compensating rows.
 
-## Three isolated domains
+## Isolated domains
 
-They share a database and nothing else. Do not route data between them.
+These domains share persistence infrastructure, with explicit boundaries. Do not route data between them.
 
 1. **Journal** — `account`, `fill`, `trade`, `tradefill`, `fill_market_context`,
    `trade_path_metrics`, `job_run`, `dailyreview`.
@@ -116,6 +116,11 @@ They share a database and nothing else. Do not route data between them.
    `tradefill`.
 3. **Retired TradingView alert records** — `tradingview_alert` only. Historical wire contract `v=1`
    is frozen in `docs/tradingview-webhook-contract-v1.md`.
+4. **Practice** — `decision_context`, `decision_record`, `decision_event`,
+   `practice_run`, `practice_opportunity`, `practice_agent_call`. Paper events
+   and shared benchmarks never enter journal fills/FIFO or factory ledgers.
+   A3 preparation uses `JobRun` infrastructure in its own lane; its timer and
+   paid adapter are disabled by default.
 
 ## Persistence
 
@@ -146,8 +151,8 @@ work. API status endpoints read `job_run`, never process-local state.
 
 `JOB_EXECUTION_MODE=embedded` (default) dispatches API-owned threads through
 the shared ownership runtime. `external` leaves committed requests for
-`python -m app.jobs.worker --lane sync`, plus separate `polygon`, `webull` and
-`gmail` workers. This is a single-host design with shared local process locks, not a
+`python -m app.jobs.worker --lane sync`, plus separate `polygon`, `webull`,
+`gmail`, `capture` and `practice` workers. This is a single-host design with shared local process locks, not a
 distributed or Cloud Run queue. API restarts do not invalidate live owners;
 dead owners become failed and require an explicit new run. See
 [background-jobs.md](background-jobs.md) for configuration, recovery and the
