@@ -1,6 +1,7 @@
 """The chart side panel, separate from chart feed and canvas routes."""
 
 from datetime import datetime
+import logging
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -15,6 +16,7 @@ from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 from app.engine.symbol_info_reactions import SOURCE as REACTIONS_SOURCE, calculate as calculate_reactions, summary as reaction_summary
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -94,5 +96,8 @@ def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
                                  "issue": info.get("issue"), "daily": entry.states}, rows=rows, **summary)
             except ChartFeedError as exc:
                 reactions["message"] = str(exc)
+            except Exception:  # reactions are an add-on; the implied move must still be returned
+                log.exception("Earnings reactions failed for %s", symbol)
+                reactions["message"] = "Earnings reactions could not be calculated."
     result["reactions"] = reactions
     return result

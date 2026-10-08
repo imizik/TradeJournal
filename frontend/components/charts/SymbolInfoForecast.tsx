@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { eventDay, readAt } from "@/lib/symbolInfo";
 import type { ImpliedMove, SymbolForecast } from "@/lib/symbolInfo";
 
@@ -19,9 +20,11 @@ function names(move: ImpliedMove, data: SymbolForecast): string {
  */
 export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
   const reactions = data.reactions;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(id); }, []);
   const earningsMove = data.moves.find((move) => move.tags.includes("earnings"));
   const comparisonReady = reactions?.average_abs_pct != null && earningsMove?.state === "ready" && earningsMove.percent != null
-    && earningsMove.fetched_at != null && Date.now() / 1000 - earningsMove.fetched_at <= 60;
+    && earningsMove.fetched_at != null && now / 1000 - earningsMove.fetched_at <= 60;
   return <div className="space-y-3 text-[11px]">
     <section aria-label="Implied move" className="space-y-2">
       <h3 className="flex items-center gap-2 text-slate-400">Implied move

@@ -82,8 +82,9 @@ def test_missing_prior_invalid_prices_and_conflicting_duplicate_refuse_number():
     assert no_prior["state"] == "unavailable"
     invalid = [bar(date(2026, 1, 2), 100, 100), bar(first, 0, 101), bar(second, 100, 101)]
     assert calculate([{"date": report.isoformat()}], invalid, Calendar(), datetime(2026, 1, 7, 17, tzinfo=ET))[0]["state"] == "unavailable"
-    duplicate = [bar(date(2026, 1, 2), 100, 100), bar(first, 100, 101), bar(first, 100, 103), bar(second, 100, 101)]
-    assert calculate([{"date": report.isoformat()}], duplicate, Calendar(), datetime(2026, 1, 7, 17, tzinfo=ET))[0]["state"] == "unavailable"
+    duplicate = [bar(date(2026, 1, 2), 100, 100), bar(first, 100, 101), bar(second, 100, 101)]
+    assert calculate([{"date": report.isoformat()}], duplicate, Calendar(), datetime(2026, 1, 7, 17, tzinfo=ET),
+                     conflicts={first})[0]["state"] == "unavailable"
 
 
 def test_select_eight_before_validity_filter_and_mean_absolute_requires_four():
@@ -96,3 +97,13 @@ def test_select_eight_before_validity_filter_and_mean_absolute_requires_four():
               for i, value in enumerate((8, -4, 0, -12), 1)]
     assert summary(values)["average_abs_pct"] == 6
     assert summary(values[:3])["average_abs_pct"] is None
+
+
+def test_conflicting_days_ignores_rows_normalize_bars_rejects():
+    from app.engine.chart_daily import conflicting_days
+
+    good = {"date": "2026-01-05", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1}
+    bad = {**good, "high": 90}  # high below low: rejected by normalize_bars
+    other = {**good, "close": 100.5}
+    assert conflicting_days([good, bad]) == set()
+    assert conflicting_days([good, other]) == {date(2026, 1, 5)}

@@ -32,13 +32,7 @@ def calculate(reports: list[dict], bars: list[dict], calendar, now: datetime, co
     """Calculate the latest eight selected confirmed reports, newest first."""
     report_rows = [r for r in reports if r.get("date") and r["date"] < now.date().isoformat()]
     selected = sorted(report_rows, key=lambda r: r["date"], reverse=True)[:8]
-    by_day: dict[date, dict] = {}
-    for bar in bars:
-        day = datetime.fromtimestamp(bar["time"], ET).date()
-        if day in by_day:  # conflicting duplicate dates cannot be resolved safely
-            by_day[day] = None
-        else:
-            by_day[day] = bar
+    by_day: dict[date, dict | None] = {datetime.fromtimestamp(bar["time"], ET).date(): bar for bar in bars}
     for day in conflicts:
         by_day[day] = None
 

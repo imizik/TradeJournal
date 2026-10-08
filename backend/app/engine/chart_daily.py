@@ -73,8 +73,9 @@ def conflicting_days(rows: list[dict]) -> set[date]:
         try:
             day = date.fromisoformat(str(row["date"]))
             values = tuple(float(row[key]) for key in ("open", "high", "low", "close", "volume"))
-            if not all(isfinite(value) for value in values):
-                continue
+            o, h, l, c, v = values
+            if not all(isfinite(value) for value in values) or min(o, h, l, c) <= 0 or v < 0 or h < max(o, c, l) or l > min(o, c):
+                continue  # normalize_bars rejects these rows, so they cannot conflict with a valid one
         except (KeyError, TypeError, ValueError, OverflowError):
             continue
         if day in seen and seen[day] != values:
