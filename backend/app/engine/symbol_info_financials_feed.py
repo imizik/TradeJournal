@@ -8,7 +8,7 @@ Two reads, both free and keyless but requiring a descriptive ``User-Agent``
   large filer. Only the normalized quarters are cached, never this payload,
   under ``backend/data/symbol_info/v1/sec/``.
 
-A symbol stays fresh until the next 10-Q is due (latest quarter end + 116 days,
+A symbol stays fresh until the next 10-Q is due (latest quarter end + 105 days,
 at least a day), then is checked daily. A failed read serves the cached copy
 with its age and is not retried for five minutes.
 """
@@ -37,7 +37,7 @@ FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 DEFAULT_USER_AGENT = "TradeJournal personal-research app"
 TICKER_TTL = 7 * 24 * 3600
 DAY = 24 * 3600
-FILING_DUE_DAYS = 116
+FILING_DUE_DAYS = 105  # next quarter end + two weeks, before the earliest 10-Q; then daily
 RETRY_SECONDS = 300
 MIN_INTERVAL = 0.2  # five requests a second at most, half of SEC's 10
 TICKERS_KEY = "_tickers"

@@ -7,7 +7,7 @@ import pytest
 
 from app.engine import symbol_info_financials as module
 from app.engine.symbol_info_financials import normalize
-from app.engine.symbol_info_financials_feed import NotFound, ProviderError, SymbolFinancials, expires_at
+from app.engine.symbol_info_financials_feed import FILING_DUE_DAYS, NotFound, ProviderError, SymbolFinancials, expires_at
 
 FIXTURES = Path(__file__).parent / "fixtures" / "sec"
 
@@ -166,7 +166,7 @@ def test_freshness_waits_for_the_next_filing_then_checks_daily(tmp_path):
     f = feed(tmp_path, sec, clock)
     f.view("NVDA")
     latest = 1_785_024_000.0  # 2026-07-26T00:00Z
-    due = latest + 116 * 86400
+    due = latest + FILING_DUE_DAYS * 86400
     entry = {"latest_end": "2026-07-26"}
     assert expires_at(entry, clock.now) == due
     clock.now += 86400 * 20  # before the next filing is due: no new request

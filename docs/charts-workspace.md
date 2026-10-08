@@ -97,7 +97,7 @@ a missing field is null, never zero. A foreign issuer that files only 20-Fs
 ticker reads "Not available for ETFs or funds." The server cache keeps only the
 normalized quarters under `backend/data/symbol_info/v1/sec/` (never the 4 MB
 payload; the ticker map is cached seven days), stays fresh until the next 10-Q
-is due (latest quarter end + 116 days, at least a day) and then re-checks
+is due (latest quarter end + 105 days, at least a day) and then re-checks
 daily; a failed read serves the cached copy with its age and is not retried for
 five minutes. Requests are paced to five a second at most. SEC returns 403
 without a contact in the `User-Agent`, so set `SEC_USER_AGENT` (a name and
