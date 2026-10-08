@@ -72,7 +72,12 @@ export type OverviewBlock = {
   state: "ready" | "none" | "loading" | "unavailable"; source: string;
   fetched_at: number | null; message: string | null;
 };
-export type OverviewCompany = OverviewBlock & { name: string | null; sector: string | null; employees: number | null; ipo_date: string | null; description: string | null };
+/** The 13F summary from Tradier's company call (T3.3); `percent_held` is a fraction. Null when Tradier lists no 13F filers. */
+export type OverviewOwnership = {
+  as_of: string | null; holders: number | null; percent_held: number | null; buyers: number | null; sellers: number | null;
+  new_holders: number | null; sold_out_holders: number | null; shares_bought: number | null; shares_sold: number | null;
+};
+export type OverviewCompany = OverviewBlock & { name: string | null; sector: string | null; employees: number | null; ipo_date: string | null; description: string | null; ownership: OverviewOwnership | null };
 export type OverviewRatios = OverviewBlock & { pe: number | null; price_to_sales: number | null; price_to_book: number | null; ev_to_ebitda: number | null; dividend_yield: number | null; beta_60_month: number | null };
 export type OverviewStatistics = OverviewBlock & { market_cap: number | null; enterprise_value: number | null; shares_outstanding: number | null; institutional_ownership: number | null; average_volume_30_day: number | null; average_volume_90_day?: number | null };
 export type SymbolOverview = {
@@ -83,6 +88,21 @@ export type SymbolOverview = {
 export async function fetchSymbolOverview(symbol: string, signal: AbortSignal): Promise<SymbolOverview> {
   const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/overview`), { signal, cache: "no-store" });
   if (!response.ok) throw new Error("Overview unavailable. Try again.");
+  return response.json();
+}
+
+/** One open-market insider purchase or sale (Yahoo, unofficial). */
+export type InsiderTransaction = { date: string; insider: string | null; position: string | null; kind: "buy" | "sell"; shares: number; value: number | null };
+export type SymbolInsiders = {
+  symbol: string; state: "ready" | "none" | "unavailable"; source: string; fetched_at: number | null; message: string | null;
+  since?: string; until?: string; window_days?: number; buys?: { count: number; shares: number }; sells?: { count: number; shares: number };
+  net_shares?: number; net_value?: number | null; excluded?: number; note?: string; latest?: InsiderTransaction[];
+};
+
+/** Net insider buying and selling over 90 days (T3.3), cached a day on the server. */
+export async function fetchSymbolInsiders(symbol: string, signal: AbortSignal): Promise<SymbolInsiders> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/insiders`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Insider activity unavailable. Try again.");
   return response.json();
 }
 

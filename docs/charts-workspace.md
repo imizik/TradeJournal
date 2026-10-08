@@ -95,7 +95,18 @@ cap, enterprise value, shares outstanding and the 13F share held by
 institutions; the ratios call gives the valuation ratios and 60-month beta;
 the statistics call gives only the volume averages. Key statistics joins the
 company and statistics reads and shows the older read time. Each read uses one
-share class, never mixing fields across them. Every value has its source and read
+share class, never mixing fields across them. The Ownership section (T3.3)
+shows the 13F summary from that same company call with no extra request (holders,
+share held, existing holders buying and selling, new and sold-out holders, shares
+bought and sold, as-of date), and net insider activity over 90 days by transaction
+date from one more read, `GET /charts/symbol/{symbol}/insiders`, made after the
+Overview has loaded so stepping the watchlist never fires it. That read is Yahoo
+(`yfinance` `insider_transactions`, labelled "Yahoo, unofficial"), cached a day under
+`backend/data/symbol_info/v1/insiders/`, and a failed read serves the older copy with its age.
+Only Yahoo rows whose text starts "Purchase" or "Sale" count as buying and
+selling; awards, gifts, option exercises and blank rows are excluded and
+counted as left out. Net value is blank when any counted row has no value.
+Funds skip the request. Every value has its source and read
 time on hover; ETF/fund fundamentals and individual provider failures are
 shown as unavailable without hiding other blocks. The panel starts
 collapsed below 1024 px and follows the watchlist's visibility in full-screen

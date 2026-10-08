@@ -70,6 +70,8 @@ def test_overview_route_reads_three_datasets_once_and_serves_cached_values(tmp_p
     assert first["state"] == "ready"
     assert first["datasets"]["company"]["sector"] == "Communication Services"
     assert "market_cap" not in first["datasets"]["company"]
+    # The 13F block comes with the company call (T3.3): no extra request.
+    assert first["datasets"]["company"]["ownership"]["holders"] == 1153 and first["datasets"]["company"]["ownership"]["as_of"] == "2026-09-30"
     assert first["datasets"]["ratios"]["price_to_sales"] == 48.451218
     # Key statistics joins the company call's share-class figures with the statistics call's volume.
     statistics = first["datasets"]["statistics"]
