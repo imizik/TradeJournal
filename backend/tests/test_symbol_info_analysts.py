@@ -66,7 +66,7 @@ def test_webull_is_primary_and_yahoo_fills_the_rest(tmp_path):
     analysts, _ = make(tmp_path, lambda s: {"targets": {"mean": 1.0, "median": 1.0, "high": 2.0, "low": 0.5}}, lambda s: YAHOO)
     view = analysts.view("NVDA")
     assert view["blocks"]["targets"]["source"] == "Webull" and view["blocks"]["targets"]["value"]["high"] == 2.0
-    assert view["blocks"]["ratings"]["source"] == "Yahoo, unofficial"  # Yahoo's labels lead for ratings
+    assert view["blocks"]["ratings"]["source"] == "Yahoo, unofficial"  # Webull gave none, so Yahoo
     assert view["blocks"]["estimates"]["source"] == "Yahoo, unofficial"
     assert view["state"] == "ready"
 

@@ -3,8 +3,8 @@
 Two providers, each cached a day per symbol in memory and on disk under
 ``backend/data/symbol_info/v1/analysts/``:
 
-- Webull OpenAPI (official): price targets and reported-EPS beat or miss lead; rating counts follow Yahoo's.
-- Yahoo via ``yfinance`` (unofficial): a fallback for those, the lead for rating counts, and the only
+- Webull OpenAPI (official): price targets, rating counts and reported-EPS beat or miss lead.
+- Yahoo via ``yfinance`` (unofficial): a fallback for those, and the only
   source of EPS and revenue estimates and recent analyst actions.
 
 Every block carries its own source label, and a provider that fails blanks only
@@ -234,11 +234,10 @@ class SymbolAnalysts:
         with self._fetching:  # one symbol at a time keeps both providers' rates low; daily caches make it brief
             reads = {provider: self._read(provider, symbol) for provider in self._fetchers}
         blocks = {}
-        for name in ("targets", "history"):  # Webull first, Yahoo when Webull has none
+        # Webull first, Yahoo when Webull has none. Their rating counts differ for the same analysts (NVDA: Webull
+        # strong_buy 48, buy 10; Yahoo the reverse); Webull's matches what its own app shows, so it leads.
+        for name in ("targets", "ratings", "history"):
             blocks[name] = self._block(name, reads, (WEBULL, YAHOO))
-        # Webull's rating counts disagree with Yahoo's labels (NVDA: Webull strong_buy 48, buy 10; Yahoo the reverse,
-        # same total), so Yahoo's known labels lead until Webull's meaning is settled.
-        blocks["ratings"] = self._block("ratings", reads, (YAHOO, WEBULL))
         for name in ("estimates", "actions"):  # Yahoo alone
             blocks[name] = self._block(name, reads, (YAHOO,))
         ready = [block for block in blocks.values() if block["state"] == "ready"]
