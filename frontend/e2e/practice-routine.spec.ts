@@ -172,3 +172,14 @@ test("attention timing stays with its original run and a failed save preserves t
   const recorded = await request.get(`${API}/practice/runs/${original.runId}`);
   expect((await recorded.json()).timings.morning.seconds).toBeGreaterThan(0);
 });
+
+test("historical runs do not offer current-facts assisted revisions", async ({ page }) => {
+  const today = new Date();
+  today.setDate(today.getDate() - 1);
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(today);
+  const old = seedNoProviderRun(day);
+  await page.goto(`/daily/${day}?practice_run=${old.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect(routine.getByTestId("practice-run")).toBeVisible();
+  await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
+});

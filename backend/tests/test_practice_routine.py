@@ -381,3 +381,16 @@ def test_take_checks_actual_receipt_day_when_midnight_passes_after_preflight(db,
     response = http.post(f"/practice/opportunities/{opp.id}/choice", json={"decision": "take", "plan": {}})
     assert response.status_code == 409 and "market session date" in response.text
     assert practice.records(db, opp) == {}
+
+
+def test_revision_api_validates_selected_parent_even_when_today_revision_exists(db, http):
+    run = prepared(db)
+    revised = practice.start(db, revision=1)
+    old = practice.start(db, day=run.day-timedelta(days=1))
+    before = len(db.exec(select(JobRun)).all())
+    assert http.post("/practice/prepare", json={"revision": 1}).status_code == 422
+    assert http.post("/practice/prepare", json={"revision": 1, "parent_id": str(old.id)}).status_code == 409
+    assert http.post("/practice/prepare", json={"revision": 1, "parent_id": str(uuid.uuid4())}).status_code == 409
+    assert len(db.exec(select(JobRun)).all()) == before
+    result = http.post("/practice/prepare", json={"revision": 1, "parent_id": str(run.id)}).json()
+    assert result["id"] == str(revised.id) and result["parent_id"] == str(run.id)

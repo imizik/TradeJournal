@@ -336,3 +336,31 @@ job_runtime.execute_job(uuid.UUID({str(job_id)!r}),runner=hold)
         assert practice.view(db, run)["agent"]["status"] == "uncertain"
         assert practice.start(db).id == run_id
         assert db.exec(select(PracticeAgentCall)).one().output_json is None
+
+
+@pytest.mark.parametrize("result", ["completed", "no_session", "failed", "scheduled_disabled"])
+def test_a3_real_dispatch_finishes_after_expiring_session(database, monkeypatch, result):
+    from datetime import timedelta, timezone
+    from app import database as db_module
+    from app.engine import analyzer, chart_calendar, practice
+    from app.models import PracticeRun
+    monkeypatch.setattr(db_module, "engine", database)
+    monkeypatch.setenv("PRACTICE_AGENT_ENABLED", "false")
+    monkeypatch.setenv("PRACTICE_SCHEDULE_ENABLED", "false")
+    hours = None if result == "failed" else {"status": "closed"} if result == "no_session" else {"status": "open", "open": 570, "close": 960}
+    monkeypatch.setattr(chart_calendar.chart_calendar, "hours", lambda _: hours)
+    calls = []
+    def packet(symbol):
+        calls.append(symbol)
+        return {"symbol": symbol, "data_source": "alpaca_sip", "recent_minute_bars": [{"t": (datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat(), "o": 100, "h": 102, "l": 99, "c": 101}]}
+    monkeypatch.setattr(analyzer, "build_ticker_analysis", packet)
+    with Session(database) as db:
+        run = practice.start(db, mode="scheduled" if result == "scheduled_disabled" else "manual")
+        run_id, job_id = run.id, run.job_id
+    runtime.execute_job(job_id)  # actual handler, default expire_on_commit=True
+    assert read_job(database, job_id).status == ("failed" if result in {"failed", "scheduled_disabled"} else "succeeded")
+    with Session(database) as db:
+        saved = db.get(PracticeRun, run_id)
+        assert saved.result == ("failed" if result == "scheduled_disabled" else result)
+    runtime.execute_job(job_id)
+    assert len(calls) == (5 if result == "completed" else 0)

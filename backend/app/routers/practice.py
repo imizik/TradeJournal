@@ -24,6 +24,7 @@ class Preparation(Strict):
     mode: str = "manual"
     comparison: str = "independent"
     revision: int = Field(default=0, ge=0, le=10)
+    parent_id: uuid.UUID | None = None
 
 
 class Choice(Strict):
@@ -63,8 +64,10 @@ def opp_or_404(db, opp_id):
 def prepare(body: Preparation, db: Session = Depends(get_session)):
     if body.mode == "scheduled" and os.environ.get("PRACTICE_SCHEDULE_ENABLED") != "true":
         raise HTTPException(403, "Scheduling disabled pending explicit approval")
+    if body.revision and body.parent_id is None:
+        raise HTTPException(422, "An explicit revision requires its selected original run")
     try:
-        run = practice.start(db, mode=body.mode, comparison=body.comparison, revision=body.revision)
+        run = practice.start(db, mode=body.mode, comparison=body.comparison, revision=body.revision, parent_id=body.parent_id)
     except decisions.DecisionError as exc:
         raise HTTPException(409, str(exc)) from exc
     submit_job(run.job_id)

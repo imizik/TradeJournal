@@ -35,11 +35,15 @@ def records(db, opp):
     return {r.actor: r for r in db.exec(select(DecisionRecord).where(DecisionRecord.opportunity_id == f"a3:{opp.id}")).all()}
 
 
-def start(db: Session, *, mode="manual", comparison="independent", day=None, revision=0, now=None):
+def start(db: Session, *, mode="manual", comparison="independent", day=None, revision=0, now=None, parent_id=None):
     now = now or now_utc()
     day = day or now.replace(tzinfo=UTC).astimezone(ET).date()
     if mode not in {"manual", "scheduled"} or comparison not in {"independent", "assisted"}:
         raise decisions.DecisionError("Invalid preparation mode")
+    if parent_id is not None:
+        selected = db.get(PracticeRun, parent_id)
+        if not revision or selected is None or selected.revision != 0 or selected.day != day or selected.policy_hash != paper.POLICY_HASH:
+            raise decisions.DecisionError("Revision parent must be the selected original run for today's ET session")
     key = f"{day}:{paper.POLICY_HASH}:{revision}"
     existing = db.exec(select(PracticeRun).where(PracticeRun.session_key == key)).first()
     if existing:
@@ -372,9 +376,10 @@ def run_preparation_job(job_id):
             db.commit()
         else:
             prepare(db, run, calendar=chart_calendar, packet_loader=build_ticker_analysis)
-    if run.result == "failed":
+        terminal_result, terminal_error = run.result, run.error
+    if terminal_result == "failed":
         from app.engine.jobs import _fail_job
-        _fail_job(job_id, RuntimeError(run.error or "Practice preparation failed; inspect durable run"))
+        _fail_job(job_id, RuntimeError(terminal_error or "Practice preparation failed; inspect durable run"))
     else:
         _finish_job(job_id, 5, 5)
     return 5

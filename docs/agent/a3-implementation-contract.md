@@ -254,3 +254,13 @@ actual-receipt midnight case, and all three real-backend A3 browser scenarios.
 All required CI checks on original head `7581d7f` passed, including Postgres
 parity/roles and native Ubuntu package/systemd. The correction head needs its
 own CI and hosted re-review; no merge or deployment is authorized.
+
+The second hosted review found an expired/detached run read in the job handler
+and a historical revision action that lacked selected-parent identity. The
+handler now captures terminal scalars before closing its session, with four
+actual-dispatch terminal-path tests. Revision requests supply and validate the
+original parent before same-key lookup, and historical pages do not offer
+current-facts preparation revisions. The focused follow-up passed 100 backend
+checks and all four A3 browser scenarios, plus lint/typecheck. Latest-head CI
+and hosted review remain required before merge; paid/scheduled runtime and
+three live sessions retain their separate approvals/evidence gates.
