@@ -269,6 +269,18 @@ def model_process(command, snapshot, env, prompt, log_dir, timeout):
             for sig, handler in previous.items():
                 signal.signal(sig, handler)
     if p.returncode:
+        # Claude can exit 1 with subtype=success AND is_error=true on quota.
+        # Report the operational cause rather than making the owner decipher
+        # hundreds of source-reading events or wait for a nonexistent review.
+        try:
+            events = [json.loads(line) for line in (log_dir / "stdout.jsonl").read_text().splitlines() if line.strip()]
+            for event in events:
+                if event.get("type") == "result" and event.get("is_error"):
+                    message = str(event.get("result", "")).lower()
+                    if "hit your session limit" in message or "hit your weekly limit" in message or "usage limit" in message:
+                        raise ReviewError("Claude subscription allowance is exhausted. Check /usage for its reset time; no API fallback was used")
+        except ValueError:
+            pass
         raise ReviewError(f"Reviewer failed (exit {p.returncode}); diagnostic logs: {log_dir}")
     return (log_dir / "stdout.jsonl").read_text()
 

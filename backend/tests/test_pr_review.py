@@ -56,6 +56,9 @@ elif name == 'codex' and args[:2] == ['login', 'status']:
     print('Logged in using ' + ('API key' if os.getenv('FAKE_AUTH') == 'api' else 'ChatGPT'))
 else:
     prompt = sys.stdin.read()
+    if os.getenv('FAKE_LIMIT'):
+        print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': True, 'result': "You've hit your session limit · resets 8:40pm (America/New_York)"}))
+        sys.exit(1)
     if os.getenv('FAKE_SLEEP'): time.sleep(20)
     assert os.getenv('TJ_REVIEW_ROLE') == 'reviewer'
     assert not os.getenv('ANTHROPIC_API_KEY') and not os.getenv('OPENAI_API_KEY') and not os.getenv('GH_TOKEN')
@@ -137,6 +140,14 @@ def test_budget_exhaustion_is_terminal_and_preserves_findings(repo, cli, monkeyp
         reviewer.review(repo, args())
     assert len(state(repo)["passes"]) == 3
     assert state(repo)["passes"][-1]["result"]["findings"]
+
+
+def test_real_claude_quota_envelope_is_an_explicit_failure(repo, cli, monkeypatch):
+    monkeypatch.setenv("FAKE_LIMIT", "1")
+    with pytest.raises(reviewer.ReviewError, match="subscription allowance is exhausted"):
+        reviewer.review(repo, args())
+    assert state(repo)["phase"] == "error"
+    assert "no API fallback" in state(repo)["error"]
 
 
 def test_new_commit_dirty_files_and_updated_base_invalidate_receipt(repo, cli):
