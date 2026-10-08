@@ -86,6 +86,7 @@ if want_backend; then
   # names, import placement. Rule set and version pin: backend/pyproject.toml.
   run "backend lint" backend "$VENV_PY" -m ruff check .
   run "deployment lint" backend "$VENV_PY" -m ruff check --config pyproject.toml ../deploy
+  run "workflow lint" backend "$VENV_PY" -m ruff check --config pyproject.toml ../scripts
   # What the public ingress may import, and which engine modules stay free of
   # network and database imports. Run on its own first so a boundary violation
   # is one named failure, not a line inside the suite (which runs it again).

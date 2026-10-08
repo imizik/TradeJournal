@@ -1,4 +1,5 @@
 # Dependencies
+.review-loop/
 node_modules/
 __pycache__/
 *.py[cod]
