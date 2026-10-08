@@ -230,4 +230,5 @@ def test_route_returns_the_view_and_rejects_bad_tickers(tmp_path, net, monkeypat
 def test_class_share_tickers_use_polygons_dot_spelling(tmp_path, net):
     feed(tmp_path, [1_000_000.0]).view("BRK/B")
     tickers = {params.get("ticker") for path, params in net.polygon_calls() if "ticker" in params}
-    assert tickers == {"BRK.B"} and all("/" not in path.removeprefix("/v3/reference/tickers/") for path, _ in net.polygon_calls())
+    details = [path for path, _ in net.polygon_calls() if path.startswith("/v3/reference/tickers/")]
+    assert tickers == {"BRK.B"} and all(path == "/v3/reference/tickers/BRK.B" for path in details)
