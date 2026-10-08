@@ -77,7 +77,7 @@ class SymbolPeers:
 
     @staticmethod
     def _read_quotes(tickers: list[str]) -> tuple[dict, float, str | None]:
-        return chart_feed.read("quotes", "/v1/markets/quotes", {"symbols": ",".join(sorted(tickers))}, 15)
+        return chart_feed.read("/v1/markets/quotes", {"symbols": ",".join(sorted(tickers))}, 15)
 
     # ----------------------------------------------------------------- polygon
 

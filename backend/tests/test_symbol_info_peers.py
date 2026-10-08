@@ -146,3 +146,18 @@ def test_route_returns_the_view_and_rejects_bad_tickers(tmp_path, polygon, monke
     body = client.get("/charts/symbol/NVDA/peers").json()
     assert body["symbol"] == "NVDA" and len(body["peers"]) == 10 and "apiKey" not in json.dumps(body)
     assert client.get("/charts/symbol/bad%20one/peers").status_code == 422
+
+
+def test_the_default_quote_reader_makes_one_budgeted_tradier_call(monkeypatch):
+    from app.engine import chart_feed as feed_module
+    calls = []
+
+    def get(url, params=None, **_):
+        calls.append((url, params))
+        return httpx.Response(200, json=QUOTES, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(feed_module.tradier, "TRADIER_API_KEY", "test-secret")
+    monkeypatch.setattr(feed_module.httpx, "get", get)
+    data, _, issue = SymbolPeers._read_quotes(["AMD", "AVGO"])
+    assert issue is None and "quotes" in data
+    assert len(calls) == 1 and calls[0][0].endswith("/v1/markets/quotes") and calls[0][1] == {"symbols": "AMD,AVGO"}
