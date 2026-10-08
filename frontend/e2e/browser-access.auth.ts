@@ -104,5 +104,11 @@ test("assistant login fits phone width", async ({ page }) => {
   await expect(page.getByLabel("Assistant ID")).toBeVisible();
   await expect(page.getByLabel("Access key")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
-  await page.screenshot({ path: test.info().outputPath("assistant-login-phone.png"), fullPage: true });
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeInViewport();
+  // Keep the phone viewport fixed. Headless Chromium can briefly reject a
+  // capture while its compositor initializes; retry only the evidence capture,
+  // never the layout assertions, and still fail if capture remains unavailable.
+  await expect(async () => {
+    await page.screenshot({ path: test.info().outputPath("assistant-login-phone.png"), animations: "disabled" });
+  }).toPass({ timeout: 5_000, intervals: [100, 250, 500] });
 });
