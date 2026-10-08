@@ -168,6 +168,31 @@ def test_another_session_cannot_take_ownership(repo):
         reviewer.owner_state(repo, "codex", "second")
 
 
+def test_another_read_only_session_is_not_forced_to_take_over(repo):
+    reviewer.owner_state(repo, "codex", "first")
+    payload = {"session_id": "second", "hook_event_name": "SessionStart"}
+    reviewer.hook(repo, args(), payload)
+    payload["hook_event_name"] = "Stop"
+    assert reviewer.hook(repo, args(), payload) == {}
+    (repo / "a.py").write_text("changed by second session\n")
+    with pytest.raises(reviewer.ReviewError, match="another owning session"):
+        reviewer.hook(repo, args(), payload)
+
+
+def test_outdated_branch_must_integrate_base_before_spending_a_pass(repo, cli):
+    original_head = git(repo, "rev-parse", "HEAD")
+    git(repo, "switch", "-q", "main")
+    (repo / "new.py").write_text("new base contract\n")
+    git(repo, "add", ".")
+    git(repo, "commit", "-qm", "base advanced")
+    git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    git(repo, "switch", "-q", "codex/task")
+    assert git(repo, "rev-parse", "HEAD") == original_head
+    with pytest.raises(reviewer.ReviewError, match="latest base"):
+        reviewer.review(repo, args())
+    assert state(repo)["passes"] == []
+
+
 def test_hook_returns_work_to_owner_but_leaves_read_only_sessions_alone(repo):
     payload = {"session_id": "owner-session", "hook_event_name": "SessionStart"}
     reviewer.hook(repo, args(), payload)

@@ -302,6 +302,8 @@ def review(root, args):
         ident = identity(root, state["base_ref"])
         if ident["dirty"]:
             raise ReviewError("Commit the finished changes before review; ignored logs/dependencies are excluded")
+        if ident["merge_base"] != ident["base"]:
+            raise ReviewError("Bring the latest base into this feature branch before review; resolve conflicts and rerun checks")
         if state["phase"] in {"clean", "ready"} and matches(state, ident):
             print("Already clean for this exact head and base")
             return
@@ -425,7 +427,7 @@ def publish(root, args, finish=False):
                 raise ReviewError("PR cannot become ready without a clean current review")
             wait_checks(root, pr["number"], time.time() + 1200)
             # Recheck the remote after reading checks; never ready a newer push.
-            if pr_info(root, pr["number"]) != pr:
+            if pr_info(root, pr["number"]) != pr or identity(root, state["base_ref"]) != ident:
                 raise ReviewError("PR changed while checking CI")
             if pr["isDraft"]:
                 run(["gh", "pr", "ready", str(pr["number"])], cwd=root)
@@ -460,7 +462,8 @@ def hook(root, args, payload):
     with locked(path):
         state = load_json(path)
         before = load_json(baseline)
-        if not state and (before is None or before == current):
+        owns_state = state and (state["owner"], state["session"]) == (args.owner, session)
+        if not owns_state and (before is None or before == current):
             return {}
         path, state = owner_state(root, args.owner, session)
         ident = identity(root, state["base_ref"])
