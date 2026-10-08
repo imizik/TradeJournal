@@ -32,7 +32,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 | `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
-| `docs/agent/dots-integration.md` | Future Dots handoff: current local A1 tools, restricted-profile and authentication gates, and the private API boundary |
+| `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 | `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
 | `docs/swing-strategy-roadmap.md` | Swing families (1–16 sessions) in the factory, the after-close practice loop (signal, phone, Take/Skip, shadow trade), the setups board and confluence scan, macro/news/earnings as-of rules, stages from research to live |

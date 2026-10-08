@@ -758,6 +758,16 @@ different recorded states.
 
 ### Independent comparison design
 
+The personal Dot may already know Isaac's choices through conversation or
+memory. Asking it to ignore that knowledge is not an independence control.
+Use a separate restricted runner with a recorded, allowlisted input packet and
+no personal Dot memory, human-choice context or journal tools. A fresh task
+alone does not prove isolation: inspect the delegated payload and enforce
+service permissions. If independence cannot be demonstrated, label the choice
+assisted or independence-unverified. Dot can coordinate and review the paired
+results after reveal; it must not leak either verdict before both commitments.
+See the [role boundaries](agent/dots-integration.md#roles-and-independent-decisions).
+
 On a small set of **preselected opportunities**, present Isaac the same factual
 card without the agent verdict. He can tap TAKE/WAIT/SKIP or ignore it. Record
 his first choice, then reveal the agent's committed choice. Never require a
@@ -1230,3 +1240,71 @@ objective pattern deserves testing, choose the guarded swing/Workbench slice.
 If the whole routine is ignored or interrupts work too often, reduce cadence
 or stop. **The intended deliverable is a usable body of forward evidence and
 one justified next decision, not a finished trading platform.**
+
+## 17. Dots follow-through expansion (proposed)
+
+Added 2026-10-08 as future direction. Preserve the selected P0 policy and
+A1 → A2 → A3 sequence. These ideas do not authorize another slice, add a Dot
+dependency to monitoring, or change current acceptance criteria. The
+[product roadmap](product-roadmap.md#dots-assisted-learning-extensions-proposed)
+owns reflection, commitments, attention preferences and later drills; the
+[integration handoff](agent/dots-integration.md#proposed-follow-through-capabilities)
+owns the proposed connection contract. Reuse existing records and surfaces.
+
+### Open questions and changing thesis evidence
+
+Extend the existing thesis/referee direction only after a recurring research
+need is observed. Save one unresolved question with its thesis/version or
+opportunity link, evidence cutoff, supporting and contradictory predicates,
+review date or supported event, research budget and expiry. Examples include
+checking whether an earnings disclosure supports an assumption or revisiting
+an existing WAIT condition. TradeJournal evaluates objective price/calendar
+conditions; Dot researches and explains changes in evidence. A thesis update
+does not amend a frozen trade plan or arm a paper position.
+
+Acceptance requires source publication and observation times, preserved thesis
+versions, explicit unknown/contradicted/supported states, and a demonstrated
+resolve/expire/cancel path. An unchanged story should not generate repetitive
+notifications. Event-triggered work requires a verified supported connection;
+bounded polling is a possible initial design, not a promise of real-time Dot
+delivery. A saved question is not proof that monitoring is active.
+
+### Attention fit and service usefulness
+
+Attach explicit availability and notification preferences to the daily routine
+without changing the complete opportunity denominator. Keep unavailable,
+missed, late and deliberately skipped distinct. Preferences affect presentation
+and user participation; they cannot silently alter P0 eligibility, paper
+execution, or ongoing stop/target monitoring. Policy changes require a new
+version and cohort. Do not suppress position exits or monitoring failures under
+the setup-alert cap.
+
+Link feedback to each brief, alert and review. Report delivery, acknowledgment
+when available, user-rated usefulness, missing ratings, comprehension/review
+time and commitments attempted separately. Use weekly review to choose one
+output to keep, shorten, change or stop. A later assisted-versus-unassisted
+experiment needs predeclared allocation, measures, timing and coverage under
+J5; convenience comparisons or a handful of profitable trades do not establish
+causal benefit. No new experiment is required to start collecting feedback.
+
+### Operational diagnosis before behavioral conclusions
+
+Give an authorized review role a bounded read-only report of source freshness,
+coverage, condition/detection/delivery times and affected record IDs. A missing
+notification is not evidence of user inattention. Delivery-provider acceptance
+is not phone receipt, and phone receipt is not reading. Missing evidence stays
+unknown rather than being attributed to the user or the strategy.
+
+When records show a reproducible software defect, Dot may prepare a sanitized
+issue brief with expected/observed behavior and evidence. Delegation to Codex
+requires explicit or standing authorization for that task; pushes, PR creation,
+production changes and data repairs retain their separate approval boundaries.
+Do not forward credentials, private service URLs or broad journal exports.
+Prove the diagnosis with a fixture and, where relevant, an observed live path;
+a completed agent task is not proof that the defect is fixed.
+
+The recommended first extensions are conversational reasons, durable follow-ups
+and attention feedback. Select one bounded contract when useful; defer thesis
+monitoring and personalized drills until recorded needs justify them. At the
+end of the observation period, evaluate whether Dot saved attention and helped
+close a useful question, alongside the existing evidence-integrity scorecard.

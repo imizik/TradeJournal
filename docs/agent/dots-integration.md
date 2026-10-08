@@ -5,6 +5,19 @@ not establish that Dots supports MCP, that a connection exists, or that a cloud
 agent can reach this installation. Keep TradeJournal as the owner of decision
 records, frozen market context and any later paper outcomes.
 
+**Direction updated 2026-10-08; design only.** Dot owns bounded preparation,
+explanation and follow-through. TradeJournal owns durable evidence, objective
+monitoring, validation and calculations. Codex implements selected changes;
+Isaac owns priorities and consequential approvals. No integration, schedule,
+new permission or implementation is activated by this document.
+
+OpenAI documents ongoing responsibilities, selective memory, delegation and
+event monitoring where a connected service supports it in
+[Tasks and memory](https://learn.chatgpt.com/docs/dots/tasks-and-memory).
+These product capabilities do not establish this installation's transport,
+authentication, event support or availability. Verify those at connection time.
+Agent memory is not a complete transcript or the authority for saved state.
+
 ## Current A1 interface
 
 The current adapter is [`backend/mcp_server.py`](../../backend/mcp_server.py),
@@ -66,3 +79,60 @@ translate tool inputs and outputs. Do not add Dots-specific columns, callback
 formats, schedulers, credentials or a public tunnel to the decision schema.
 The implementation sequence and A1/A2/A3 boundaries are in the
 [agentic trading roadmap](../agentic-trading-roadmap.md).
+
+## Roles and independent decisions
+
+The personal Dot may know Isaac's decisions from prior conversation or memory.
+A prompt asking it to disregard them cannot make its choice independent. Use
+a separate restricted runner for Shadow Isaac, with an explicit recorded input
+packet containing only permitted market/context/policy facts. Do not pass Dot
+memory, human choices, journal activity or a summary that leaks those choices.
+Verify the actual delegated payload and service authorization; a new thread
+alone is not proof of isolation. Reveal paired decisions only after both are
+committed, or label late/assisted/independence-unverified cases explicitly.
+
+| Proposed role | Allowed scope | Boundary |
+|---|---|---|
+| Independent practice runner | Approved context and its own frozen decisions; later own paper events if separately granted | No human choices, coaching memory, accounts or journal tools before commitment |
+| Personal review/coach | Explicitly granted reflections, commitments, opportunity outcomes and journal summaries | Human context is allowed; its decisions are not represented as blind comparisons |
+| Research | Approved questions, sourced evidence and thesis-update proposals | No automatic policy changes, paper arming or journal mutation |
+| Operational diagnosis | Sanitized freshness, coverage and delivery evidence | No credentials, raw database access, production repair or automatic deployment |
+
+These roles are permission scopes, not a requirement to create four agents.
+Enforce each at the service boundary; do not broaden the shadow catalog to
+support coaching. Scope changes need explicit selection and authorization.
+
+## Proposed follow-through capabilities
+
+Build only the capability needed for a selected slice. The following are
+design requirements, not existing tools, routes, tables or verified Dot APIs.
+
+| Capability | Contract |
+|---|---|
+| Durable questions and commitments | Store owner, linked evidence/decision, original wording, version, due time or explicit condition, budget/expiry and open/resolved/expired/canceled state. Reference existing WAIT conditions; do not duplicate executable plans. |
+| Changes since a saved cursor | Return authorized bounded events with stable IDs, source/observation times, versions, pagination and a resumable cursor. Surface retention gaps and stale sources; consumers deduplicate and recover after restart. No human-choice metadata may leak into the shadow scope. |
+| Evidence-linked proposals | Separate suggested reflections, structured reasons and thesis amendments from accepted records. Retain original words and before/after-outcome timing; unresolved identity stays unresolved. Saving authority is explicit and corrections append history. |
+| Action receipts | Return operation ID, accepted/rejected/pending status and resulting record/version. Same-key retries are idempotent; changed content conflicts. After an uncertain timeout, retrieve status before retrying. A conversational claim is not a persistence receipt. |
+| Availability and interruption preferences | Version user-selected availability, timezone, quiet windows, channel and budget. Optional calendar access requires its own permission. Preferences cannot rewrite cohorts, execution policy or required exit/failure notices. |
+| Usefulness and operational evidence | Link feedback and source/detection/delivery status to exact artifacts/events. Preserve unrated/unobserved states; expose bounded sanitized reports for diagnosis and weekly service review. |
+
+A connection does not establish an active responsibility. For each selected
+follow-up, retain its confirmed schedule or supported event subscription,
+timezone, destination, next due/check state, last success/failure and cancellation
+status. Verify one actual run and a stop/cancel path. Bound calls, cost, retries
+and notification volume. Polling may be an initial fallback only after the
+transport is verified. Deterministic monitoring of existing positions must
+continue if Dot, its model, a schedule or the connected computer is unavailable.
+
+Before claiming a capability works, test ownership denial and identity spoofing,
+proposal/acceptance separation, duplicate and out-of-order events, cursor gaps,
+restart recovery, uncertain writes, cancellation and revocation. Observe a real
+connection and resulting persisted record; test fixtures do not establish live
+delivery. Existing A1 tools do not satisfy these proposed contracts by name.
+
+Prioritize conversational reasons, follow-ups and feedback through their
+[product owners](../product-roadmap.md#dots-assisted-learning-extensions-proposed).
+Thesis evidence monitoring and operational diagnosis follow the
+[agentic expansion](../agentic-trading-roadmap.md#17-dots-follow-through-expansion-proposed).
+Preserve A1–A3 scope; do not build a general workflow engine or publish the
+private API to make the integration convenient.
