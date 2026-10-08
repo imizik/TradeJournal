@@ -116,7 +116,12 @@ test("streamed trades move the selected price and candle, then pause freezes the
       }
       close() { this.closed = true; }
     }
-    (window as typeof window & { __chartTick?: (value: unknown) => void }).__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    const testWindow = window as typeof window & {
+      __chartTick?: (value: unknown) => void;
+      __chartStreamReady?: () => boolean;
+    };
+    testWindow.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    testWindow.__chartStreamReady = () => !!MockEventSource.current?.listeners.has("tick");
     window.EventSource = MockEventSource as unknown as typeof EventSource;
   });
   await stub(page);
@@ -159,6 +164,10 @@ test("watchlist rows use shared stream trades and the regular close for postmark
   await page.goto("/charts");
   const row = page.locator("[data-watch-row]").filter({ hasText: "NVDA" });
   await expect(row).toBeVisible();
+  // The row can render before the effect opens the shared stream. Wait until
+  // its tick listener is attached so this synthetic event cannot be dropped.
+  await page.waitForFunction(() =>
+    (window as typeof window & { __chartStreamReady?: () => boolean }).__chartStreamReady?.() === true);
   const at = Math.floor(Date.now() / 1000) - 1;
   await page.evaluate((tick) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick(tick),
     { type: "tick", symbol: "NVDA", at, minute: Math.floor(at / 60) * 60, session: "post", price: 275, open: 275, high: 275, low: 275, buckets: {} });
