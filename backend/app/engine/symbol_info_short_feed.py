@@ -55,6 +55,11 @@ POLYGON_DATASETS: dict[str, tuple[str, dict, Callable]] = {
 }
 
 
+def polygon_ticker(symbol: str) -> str:
+    """Polygon writes class shares with a dot (BRK.B); the chart accepts BRK/B."""
+    return symbol.replace("/", ".")
+
+
 class SourceError(Exception):
     def __init__(self, message: str, shared: bool = False):
         super().__init__(message)
@@ -181,7 +186,7 @@ class ShortFeed:
         path, params, parse = POLYGON_DATASETS[dataset]
         block = self._block("polygon", dataset, symbol, now, ["polygon", f"{dataset}:{symbol}"], bool(enricher.POLYGON_API_KEY),
                             "Set POLYGON_API_KEY on the private backend to read short interest.",
-                            lambda: parse(self._call(path.format(symbol=symbol), {**params, **({"ticker": symbol} if "{symbol}" not in path else {})})))
+                            lambda: parse(self._call(path.format(symbol=polygon_ticker(symbol)), {**params, **({"ticker": polygon_ticker(symbol)} if "{symbol}" not in path else {})})))
         if block["state"] == "ready" and not block["rows"]:
             block["state"] = "none"
         return block

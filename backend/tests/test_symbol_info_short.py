@@ -225,3 +225,9 @@ def test_route_returns_the_view_and_rejects_bad_tickers(tmp_path, net, monkeypat
     ok = client.get("/charts/symbol/nvda/short")
     assert ok.status_code == 200 and ok.json()["symbol"] == "NVDA" and ok.json()["interest"]["settlement_date"] == "2026-09-15"
     assert client.get("/charts/symbol/%24bad/short").status_code == 422
+
+
+def test_class_share_tickers_use_polygons_dot_spelling(tmp_path, net):
+    feed(tmp_path, [1_000_000.0]).view("BRK/B")
+    tickers = {params.get("ticker") for path, params in net.polygon_calls() if "ticker" in params}
+    assert tickers == {"BRK.B"} and all("/" not in path.removeprefix("/v3/reference/tickers/") for path, _ in net.polygon_calls())
