@@ -161,3 +161,17 @@ def test_the_default_quote_reader_makes_one_budgeted_tradier_call(monkeypatch):
     data, _, issue = SymbolPeers._read_quotes(["AMD", "AVGO"])
     assert issue is None and "quotes" in data
     assert len(calls) == 1 and calls[0][0].endswith("/v1/markets/quotes") and calls[0][1] == {"symbols": "AMD,AVGO"}
+
+
+def test_class_share_tickers_use_polygons_dot_spelling_in_one_path_segment(tmp_path, monkeypatch):
+    urls = []
+
+    def get(url, params=None, **_):
+        urls.append(url)
+        return httpx.Response(200, json={"results": []}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(module.enricher, "POLYGON_API_KEY", "test-secret")
+    monkeypatch.setattr(module.httpx, "get", get)
+    monkeypatch.setattr(module.enricher._limiter, "reserve_within", lambda _: 0)
+    SymbolPeers(root=tmp_path, clock=lambda: 1_000_000, quotes=lambda _: ({}, 0, None)).view("BRK/B")
+    assert urls == ["https://api.polygon.io/v1/related-companies/BRK.B"]

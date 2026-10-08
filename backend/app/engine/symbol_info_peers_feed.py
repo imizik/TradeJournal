@@ -140,7 +140,7 @@ class SymbolPeers:
         if delay > 0:
             observed_sleep("Polygon", "rate_limit", delay)
         try:
-            response = httpx.get(URL.format(symbol=symbol), params={"apiKey": enricher.POLYGON_API_KEY}, timeout=TIMEOUT_SECONDS)
+            response = httpx.get(URL.format(symbol=polygon_ticker(symbol)), params={"apiKey": enricher.POLYGON_API_KEY}, timeout=TIMEOUT_SECONDS)
         except httpx.HTTPError as exc:
             raise SourceError(f"Polygon peers could not be read ({type(exc).__name__}).") from None
         if response.status_code == 429:
@@ -156,6 +156,11 @@ class SymbolPeers:
         if not isinstance(body, dict):
             raise SourceError("Polygon peers came back unreadable.")
         return body
+
+
+def polygon_ticker(symbol: str) -> str:
+    """Polygon writes class shares with a dot (BRK.B); the chart accepts BRK/B."""
+    return symbol.replace("/", ".")
 
 
 def status(state: str, fetched_at: float | None, now: float, message: str | None = None) -> dict:
