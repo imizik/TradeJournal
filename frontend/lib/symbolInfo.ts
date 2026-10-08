@@ -74,7 +74,7 @@ export type OverviewBlock = {
 };
 export type OverviewCompany = OverviewBlock & { name: string | null; sector: string | null; employees: number | null; ipo_date: string | null; description: string | null };
 export type OverviewRatios = OverviewBlock & { pe: number | null; price_to_sales: number | null; price_to_book: number | null; ev_to_ebitda: number | null; dividend_yield: number | null; beta_60_month: number | null };
-export type OverviewStatistics = OverviewBlock & { market_cap: number | null; enterprise_value: number | null; shares_outstanding: number | null; institutional_ownership: number | null; average_volume_30_day: number | null };
+export type OverviewStatistics = OverviewBlock & { market_cap: number | null; enterprise_value: number | null; shares_outstanding: number | null; institutional_ownership: number | null; average_volume_30_day: number | null; average_volume_90_day?: number | null };
 export type SymbolOverview = {
   symbol: string; state: "ready" | "none" | "unavailable";
   datasets: { company: OverviewCompany; ratios: OverviewRatios; statistics: OverviewStatistics };
@@ -244,3 +244,38 @@ export async function fetchSymbolShort(symbol: string, signal: AbortSignal): Pro
 /** "2 d old", "5 h old": the age of a cached copy, from the backend's `age_seconds`. */
 export const copyAge = (seconds: number | null) => seconds == null ? "age unknown"
   : seconds < 3600 ? `${Math.max(1, Math.floor(seconds / 60))} min old` : seconds < 86_400 ? `${Math.floor(seconds / 3600)} h old` : `${Math.floor(seconds / 86_400)} d old`;
+
+/** The Peers strip (T3.4): Polygon's related companies with today's move from one Tradier quote call. */
+export type PeerSource = { provider: string; label: string; state: "ok" | "stale" | "failed" | "not_configured"; fetched_at: number | null; age_seconds: number | null; message: string | null };
+export type Peer = { symbol: string; name: string | null; last: number | null; change_percentage: number | null };
+export type SymbolPeers = {
+  symbol: string; as_of: string;
+  /** `none`: Polygon lists no related companies (an ETF); `unavailable`: no list could be read. */
+  state: "ready" | "none" | "unavailable";
+  source: PeerSource; quotes: PeerSource; peers: Peer[];
+};
+
+export async function fetchSymbolPeers(symbol: string, signal: AbortSignal): Promise<SymbolPeers> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/peers`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Peers unavailable.");
+  return response.json();
+}
+
+/** One fiscal quarter from SEC EDGAR (T3.2). `gap` rows are Q4, reported only in the annual 10-K: every value null. */
+export type FinancialQuarter = {
+  start: string | null; end: string; gap: boolean; fiscal_year: number | null; fiscal_period: string | null; filed: string | null;
+  revenue: number | null; gross_profit: number | null; operating_income: number | null; net_income: number | null; eps_diluted: number | null;
+  gross_margin: number | null; operating_margin: number | null;
+  revenue_yoy: number | null; net_income_yoy: number | null; eps_diluted_yoy: number | null;
+};
+export type SymbolFinancials = {
+  symbol: string; state: "ready" | "none" | "unavailable"; message: string | null; source: string; entity: string | null;
+  fetched_at: number | null; stale: boolean; latest_end: string | null; quarters: FinancialQuarter[];
+};
+
+/** The Financials tab (T3.2), cached on the server until the next 10-Q is due. */
+export async function fetchSymbolFinancials(symbol: string, signal: AbortSignal): Promise<SymbolFinancials> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/financials`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Financials unavailable. Try again.");
+  return response.json();
+}

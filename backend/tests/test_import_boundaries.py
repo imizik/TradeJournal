@@ -69,6 +69,7 @@ PURE_MODULES = {
     "app.engine.symbol_info_events",  # earnings, dividend and split rows from supplied responses
     "app.engine.symbol_info_overview",  # company fundamentals from supplied Tradier responses
     "app.engine.symbol_info_news",  # headlines from supplied Alpaca and Polygon responses
+    "app.engine.symbol_info_peers",  # peer tickers and chips from supplied Polygon and Tradier responses
     "app.engine.symbol_info_short",  # short interest, short volume and borrow flag from supplied responses
     "app.engine.level_alerts",  # when a level alert fires, from supplied trades and candles
     "app.engine.paper_execution",  # Practice paper fills and exits, from supplied bars and events
