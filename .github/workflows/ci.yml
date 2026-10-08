@@ -139,6 +139,14 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund
 
+      # Reuse Playwright's Chromium download across runs. The lockfile fixes
+      # the Playwright version and therefore the matching browser revision.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install browser
         working-directory: frontend
         run: npx playwright install --with-deps chromium
