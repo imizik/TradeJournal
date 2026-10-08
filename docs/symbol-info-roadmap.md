@@ -52,7 +52,7 @@ after them, clearly labelled.
 | T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | built (branch `worktree-agent-ad98a3a9a83fc8ff7`) |
 | T3.3 | Ownership and insider activity | 3 Depth | todo |
-| T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | todo |
+| T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | built (branch `worktree-agent-aac8457f5447293c2`) |
 | T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
 | T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
 | T3.7 | Economic calendar from FRED release dates | 3 Depth | todo, not built (needs a free FRED key) |

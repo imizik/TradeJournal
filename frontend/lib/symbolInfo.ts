@@ -215,6 +215,22 @@ export async function fetchSymbolAnalysts(symbol: string, signal: AbortSignal): 
   return response.json();
 }
 
+/** The Peers strip (T3.4): Polygon's related companies with today's move from one Tradier quote call. */
+export type PeerSource = { provider: string; label: string; state: "ok" | "stale" | "failed" | "not_configured"; fetched_at: number | null; age_seconds: number | null; message: string | null };
+export type Peer = { symbol: string; name: string | null; last: number | null; change_percentage: number | null };
+export type SymbolPeers = {
+  symbol: string; as_of: string;
+  /** `none`: Polygon lists no related companies (an ETF); `unavailable`: no list could be read. */
+  state: "ready" | "none" | "unavailable";
+  source: PeerSource; quotes: PeerSource; peers: Peer[];
+};
+
+export async function fetchSymbolPeers(symbol: string, signal: AbortSignal): Promise<SymbolPeers> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/peers`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Peers unavailable.");
+  return response.json();
+}
+
 /** One fiscal quarter from SEC EDGAR (T3.2). `gap` rows are Q4, reported only in the annual 10-K: every value null. */
 export type FinancialQuarter = {
   start: string | null; end: string; gap: boolean; fiscal_year: number | null; fiscal_period: string | null; filed: string | null;

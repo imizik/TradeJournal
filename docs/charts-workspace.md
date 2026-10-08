@@ -81,6 +81,20 @@ reads once on a 2.5 s budget with no retry and mutes itself for five minutes); e
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
 
+A **Peers** strip (T3.4) sits above the tabs whenever the panel is expanded:
+Polygon's related companies for the active symbol as chips, each with today's
+percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
+seven days on disk, read through the enricher's limiter the way the News feed
+is (never waits more than 2 s, never retried, a 429 or failure serves the
+cached copy with its age and mutes Polygon for five minutes). The changes come
+from one batched Tradier quote call for all peers through the chart feed's
+budgeted read (15 s cache); the quote's `average_volume` is not used. A peer
+without a quote keeps its chip with "—". Funds and ETFs (SPY) have no related
+companies: the strip says so. Clicking a chip runs the watchlist row's handler
+(chart switches, and the phone sheet closes), so it does not add the peer to
+the watchlist. The strip fetches once after the ticker settles for 300 ms and
+again each minute while the page is visible, independent of the open tab.
+
 Its **Financials** tab (T3.2) reads `GET /charts/symbol/{symbol}/financials`:
 the last eight fiscal quarters of revenue, gross margin, operating margin, net
 income and diluted EPS as small bars, with growth against the same fiscal
