@@ -4,7 +4,8 @@ from datetime import datetime
 
 import pandas as pd
 
-from app.engine.symbol_info_analysts import (ProviderError, SymbolAnalysts, normalize_webull_ratings, normalize_webull_targets,
+from app.engine.symbol_info_analysts import (ProviderError, SymbolAnalysts, normalize_webull_eps, normalize_webull_ratings,
+                                             normalize_webull_targets,
                                              normalize_yahoo)
 
 YAHOO = {
@@ -19,6 +20,20 @@ def test_webull_shapes_with_different_spellings_and_wrapping():
         == {"mean": 327.7, "median": 315.0, "high": 515.0, "low": 180.0}
     assert normalize_webull_ratings([{"strong_buy": 10, "buy": 48, "hold": 2, "sell": 1, "strong_sell": 0}]) \
         == {"strong_buy": 10, "buy": 48, "hold": 2, "sell": 1, "strong_sell": 0}
+
+
+def test_webull_live_responses_from_2026_10_08():
+    """Recorded from the VPS: values are strings, ratings use under_perform, EPS is a bare list."""
+    assert normalize_webull_targets({"symbol": "NVDA", "category": "US_STOCK", "mean": "328.71695", "low": "180", "high": "515", "median": "315", "currency": "USD"}) \
+        == {"mean": 328.71695, "median": 315.0, "high": 515.0, "low": 180.0}
+    assert normalize_webull_ratings({"number": "61", "under_perform": "0", "buy": "10", "sell": "1", "strong_buy": "48", "hold": "2"}) \
+        == {"strong_buy": 48, "buy": 10, "hold": 2, "sell": 1, "strong_sell": 0}
+    eps = normalize_webull_eps([
+        {"fiscal_year": 2027, "fiscal_period": 1, "actual": "2.391087", "est": "1.74134", "reported": True},
+        {"fiscal_year": 2027, "fiscal_period": 2, "actual": "2.457813", "est": "2.06024", "reported": True},
+        {"fiscal_year": 2027, "fiscal_period": 3, "est": "2.49676", "reported": False}])
+    assert [row["quarter"] for row in eps] == ["FY2027 Q2", "FY2027 Q1"] and eps[0]["result"] == "beat"
+    assert round(eps[0]["surprise"], 3) == 0.193  # (actual - est) / est, not Yahoo's rounded figure
 
 
 def test_webull_empty_or_garbage_is_missing_not_zero():
@@ -51,7 +66,7 @@ def test_webull_is_primary_and_yahoo_fills_the_rest(tmp_path):
     analysts, _ = make(tmp_path, lambda s: {"targets": {"mean": 1.0, "median": 1.0, "high": 2.0, "low": 0.5}}, lambda s: YAHOO)
     view = analysts.view("NVDA")
     assert view["blocks"]["targets"]["source"] == "Webull" and view["blocks"]["targets"]["value"]["high"] == 2.0
-    assert view["blocks"]["ratings"]["source"] == "Yahoo, unofficial"  # Webull gave none, so Yahoo
+    assert view["blocks"]["ratings"]["source"] == "Yahoo, unofficial"  # Yahoo's labels lead for ratings
     assert view["blocks"]["estimates"]["source"] == "Yahoo, unofficial"
     assert view["state"] == "ready"
 

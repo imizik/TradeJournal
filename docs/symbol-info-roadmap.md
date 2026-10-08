@@ -48,7 +48,7 @@ after them, clearly labelled.
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |
-| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built locally; Webull blocked until the VPS IP is on the key's allowlist (Yahoo path verified from the VPS) |
+| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS, ratings labels disagree with Yahoo's |
 | T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS | 3 Depth | todo |
 | T3.3 | Ownership and insider activity | 3 Depth | todo |
@@ -297,14 +297,16 @@ and ratings (`/market-data/fundamentals/analysis/target-prices/get` and
 `.../ratings/get`), and **Yahoo via `yfinance`** (unofficial) fills those when
 Webull has none and is the only source of estimates, beat or miss and actions.
 Every block names its source and a failing provider blanks only what it alone
-supplies. Webull's docs list no request parameters or response fields, so its
-parser accepts several spellings and the query (`WEBULL_QUERY`) is a guess:
-**confirm both with a live call.** That call returned `IP_NOT_ALLOWED` from the
-VPS on 2026-10-08: the app key is restricted to listed IP addresses, and the
-VPS (15.204.255.2) must be added in Webull's developer portal first. Webull's
-forecast-EPS endpoint (`/market-data/fundamentals/forecast-eps/get`) is not
-used yet. *Done when:* a live Webull call from the VPS returns targets and
-ratings that the parser reads, and its response is recorded as a fixture.
+supplies. Webull's docs list no request parameters or response fields; a live
+call from the VPS on 2026-10-08 (after the VPS, 15.204.255.2, was added to the
+key's IP allowlist) showed `symbol` and `category=US_STOCK` work, values come
+back as strings, ratings use `under_perform`, and `/forecast-eps/get` is a bare
+list of fiscal quarters with `actual`, `est` and `reported`. Webull leads for
+targets and for beat or miss. **Rating counts follow Yahoo's labels**: for NVDA
+Webull reports `strong_buy` 48 and `buy` 10 where Yahoo reports 10 and 48 (the
+same total, and the same target figures, so the same vendor); until Webull's
+meaning is settled, Webull's counts are only the fallback. *Done when:* the
+tab renders these on the VPS and the ratings mapping is settled.
 
 ### Phase 3 — Depth
 

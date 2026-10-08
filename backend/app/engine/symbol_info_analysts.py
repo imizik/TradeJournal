@@ -3,9 +3,9 @@
 Two providers, each cached a day per symbol in memory and on disk under
 ``backend/data/symbol_info/v1/analysts/``:
 
-- Webull OpenAPI (official): price targets and rating counts. Primary for those.
-- Yahoo via ``yfinance`` (unofficial): a fallback for the same two, and the only
-  source of EPS and revenue estimates, beat or miss, and recent analyst actions.
+- Webull OpenAPI (official): price targets and reported-EPS beat or miss lead; rating counts follow Yahoo's.
+- Yahoo via ``yfinance`` (unofficial): a fallback for those, the lead for rating counts, and the only
+  source of EPS and revenue estimates and recent analyst actions.
 
 Every block carries its own source label, and a provider that fails blanks only
 the blocks it alone supplies. A failed read keeps serving the older copy with
@@ -31,9 +31,10 @@ ACTIONS_SHOWN = 10
 WEBULL = "webull"
 YAHOO = "yahoo"
 LABELS = {WEBULL: "Webull", YAHOO: "Yahoo, unofficial"}
-# Webull documents no request parameters; adjust these once a probe shows the real ones.
+# Webull documents no request parameters; a live call on 2026-10-08 showed these work.
 WEBULL_TARGET_PATH = "/market-data/fundamentals/analysis/target-prices/get"
 WEBULL_RATING_PATH = "/market-data/fundamentals/analysis/ratings/get"
+WEBULL_EPS_PATH = "/market-data/fundamentals/forecast-eps/get"
 WEBULL_QUERY = {"category": "US_STOCK"}
 RATING_KEYS = ("strong_buy", "buy", "hold", "sell", "strong_sell")
 TARGET_KEYS = ("mean", "median", "high", "low")
@@ -96,9 +97,28 @@ def normalize_webull_ratings(payload) -> dict | None:
         "buy": _count(_pick(row, "buy")),
         "hold": _count(_pick(row, "hold")),
         "sell": _count(_pick(row, "sell")),
-        "strong_sell": _count(_pick(row, "strongSell", "strong_sell")),
+        "strong_sell": _count(_pick(row, "strongSell", "strong_sell", "underPerform", "under_perform")),
     }
     return values if any(value is not None for value in values.values()) else None
+
+
+def normalize_webull_eps(payload) -> list[dict] | None:
+    """Reported quarters of /forecast-eps (fiscal year, period, actual, est, reported) as beat or miss rows."""
+    rows = []
+    for row in payload if isinstance(payload, list) else []:
+        if not isinstance(row, dict) or row.get("reported") is not True:
+            continue
+        actual, expected = _number(row.get("actual")), _number(row.get("est"))
+        if actual is None or expected is None or row.get("fiscal_year") is None or row.get("fiscal_period") is None:
+            continue
+        rows.append({"quarter": f"FY{row['fiscal_year']} Q{row['fiscal_period']}", "actual": actual, "estimate": expected,
+                     "surprise": (actual - expected) / abs(expected) if expected else None,
+                     "result": "beat" if actual > expected else "miss" if actual < expected else "met",
+                     "_order": (int(row["fiscal_year"]), int(row["fiscal_period"]))})
+    rows.sort(key=lambda r: r["_order"], reverse=True)
+    for row in rows:
+        row.pop("_order")
+    return rows[:4] or None
 
 
 def _records(frame) -> list[dict]:
@@ -185,7 +205,8 @@ def fetch_webull(symbol: str) -> dict:
     failures = []
     try:
         client = WebullHttpClient()
-        for key, path, parse in (("targets", WEBULL_TARGET_PATH, normalize_webull_targets), ("ratings", WEBULL_RATING_PATH, normalize_webull_ratings)):
+        for key, path, parse in (("targets", WEBULL_TARGET_PATH, normalize_webull_targets), ("ratings", WEBULL_RATING_PATH, normalize_webull_ratings),
+                                  ("history", WEBULL_EPS_PATH, normalize_webull_eps)):
             try:
                 if value := parse(client.get(path, query={"symbol": symbol, **WEBULL_QUERY})):
                     out[key] = value
@@ -213,9 +234,12 @@ class SymbolAnalysts:
         with self._fetching:  # one symbol at a time keeps both providers' rates low; daily caches make it brief
             reads = {provider: self._read(provider, symbol) for provider in self._fetchers}
         blocks = {}
-        for name in ("targets", "ratings"):  # Webull first, Yahoo when Webull has none
+        for name in ("targets", "history"):  # Webull first, Yahoo when Webull has none
             blocks[name] = self._block(name, reads, (WEBULL, YAHOO))
-        for name in ("estimates", "history", "actions"):  # Yahoo alone
+        # Webull's rating counts disagree with Yahoo's labels (NVDA: Webull strong_buy 48, buy 10; Yahoo the reverse,
+        # same total), so Yahoo's known labels lead until Webull's meaning is settled.
+        blocks["ratings"] = self._block("ratings", reads, (YAHOO, WEBULL))
+        for name in ("estimates", "actions"):  # Yahoo alone
             blocks[name] = self._block(name, reads, (YAHOO,))
         ready = [block for block in blocks.values() if block["state"] == "ready"]
         return {"symbol": symbol, "state": "ready" if ready else "unavailable" if any(r[2] for r in reads.values()) else "none",
