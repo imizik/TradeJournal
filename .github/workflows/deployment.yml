@@ -14,8 +14,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # See CI's matching scope job. A docs-only pull request needs link and
+  # freshness coverage, not a disposable Ubuntu installation. Every main
+  # commit and manual run still builds and smoke-tests the release package.
+  changes:
+    name: Changed deployment scope
+    runs-on: ubuntu-latest
+    outputs:
+      ubuntu: ${{ steps.scope.outputs.ubuntu }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify pull-request scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "ubuntu=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Check the diff status before reading it; include both sides of
+          # renames so moving runtime code into docs never skips verification.
+          files=$(git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" --)
+          ubuntu=false
+          while IFS= read -r file; do
+            case "$file" in
+              ""|docs/*.md|docs/**/*.md|README.md|AGENTS.md|CLAUDE.md|.github/pull_request_template.md)
+                ;;
+              *)
+                ubuntu=true
+                ;;
+            esac
+          done <<< "$files"
+          echo "ubuntu=$ubuntu" >> "$GITHUB_OUTPUT"
+
   ubuntu:
-    name: Ubuntu package and systemd
+    name: Ubuntu package and systemd build
+    needs: changes
+    if: >-
+      needs.changes.result == 'success' &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.ubuntu == 'true')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
@@ -55,3 +100,26 @@ jobs:
           name: tradejournal-ubuntu-24.04-x86_64
           path: dist/
           retention-days: 14
+
+  # Preserve the established required-check name and fail closed if the scope
+  # classifier cannot decide whether the package test is needed. A docs-only
+  # pull request reaches this tiny gate without provisioning Ubuntu services.
+  deployment_gate:
+    name: Ubuntu package and systemd
+    needs: [changes, ubuntu]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the package smoke test when in scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          UBUNTU_ENABLED: ${{ needs.changes.outputs.ubuntu }}
+          UBUNTU_RESULT: ${{ needs.ubuntu.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$UBUNTU_ENABLED" != true ]; then
+            echo "Documentation-only pull request; Ubuntu package test is not needed."
+            exit 0
+          fi
+          test "$UBUNTU_RESULT" = success

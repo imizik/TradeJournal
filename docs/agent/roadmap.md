@@ -16,7 +16,8 @@ Reproducibility, verification, environment isolation and deployment are all in
 place. What each of them proves is documented where it is enforced, not here.
 
 - **Setup and verification.** A fresh clone with no credentials can be set up,
-  verified and run, and CI runs the same checks on every pull request. What
+  verified and run. CI runs its complete release gate on runtime changes and
+  keeps the backend/docs checks for documentation-only pull requests. What
   that covers and what it does not is in [verification.md](verification.md).
 - **Rules CI enforces**, rather than documentation an agent can miss.
   `test_import_boundaries.py` keeps pure engine modules free of network and

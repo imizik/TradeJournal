@@ -39,9 +39,11 @@ const backendCommand = [
 export default defineConfig({
   testDir: "./e2e",
   // Pages read from one shared backend, so parallel workers would race on
-  // any test that mutates. Serial keeps failures interpretable.
+  // mutations. Each CI shard starts a separate backend, however, and
+  // fullyParallel lets Playwright distribute individual tests between those
+  // isolated runners. One worker still keeps each shard deterministic.
   workers: 1,
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],

@@ -16,6 +16,48 @@ permissions:
   contents: read
 
 jobs:
+  # Documentation and contributor-guide edits cannot affect the built app.
+  # Keep the cheap backend gate for docs links/freshness, but avoid starting
+  # two disposable application environments for a non-runtime diff. Pushes to
+  # main and manual runs always retain the entire release gate.
+  changes:
+    name: Changed runtime scope
+    runs-on: ubuntu-latest
+    outputs:
+      browser: ${{ steps.scope.outputs.browser }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify pull-request scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "browser=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A failed diff must fail the job. Disabling rename detection keeps
+          # both sides of a runtime-to-documentation move in the scope check.
+          files=$(git diff --no-renames --name-only "$BASE_SHA" "$HEAD_SHA" --)
+          browser=false
+          while IFS= read -r file; do
+            case "$file" in
+              ""|docs/*.md|docs/**/*.md|README.md|AGENTS.md|CLAUDE.md|.github/pull_request_template.md)
+                ;;
+              *)
+                browser=true
+                ;;
+            esac
+          done <<< "$files"
+          echo "browser=$browser" >> "$GITHUB_OUTPUT"
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
@@ -109,9 +151,21 @@ jobs:
         run: npm run build
 
   e2e:
-    name: Browser
+    name: Browser shard (${{ matrix.shard }})
+    needs: changes
+    if: >-
+      needs.changes.result == 'success' &&
+      (github.event_name != 'pull_request' || needs.changes.outputs.browser == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: "1/2"
+            artifact: one
+          - shard: "2/2"
+            artifact: two
     steps:
       - uses: actions/checkout@v4
 
@@ -157,13 +211,13 @@ jobs:
       # pass on a component that is broken at runtime.
       - name: Browser smoke tests
         working-directory: frontend
-        run: npm run e2e
+        run: npm run e2e -- --shard=${{ matrix.shard }}
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.artifact }}
           path: frontend/test-results/
           retention-days: 7
 
@@ -174,10 +228,33 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
+          name: screenshots-${{ matrix.artifact }}
           path: frontend/test-results/**/*.png
           if-no-files-found: ignore
           retention-days: 7
+
+  # Keep one stable required-check name even though the expensive work is
+  # divided across runners. Docs-only changes complete this no-op gate; a
+  # failed classifier, failed shard or cancelled shard fails it closed.
+  browser:
+    name: Browser
+    needs: [changes, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every browser shard
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BROWSER_ENABLED: ${{ needs.changes.outputs.browser }}
+          SHARDS_RESULT: ${{ needs.e2e.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$BROWSER_ENABLED" != true ]; then
+            echo "Documentation-only pull request; browser shards are not needed."
+            exit 0
+          fi
+          test "$SHARDS_RESULT" = success
 
   screenshots:
     name: Screenshots
@@ -227,8 +304,9 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: screenshots
+          pattern: screenshots-*
           path: ${{ runner.temp }}/pictures
+          merge-multiple: true
 
       # A failure here leaves no comment.md, and the next step says so on the
       # pull request instead of failing it.
