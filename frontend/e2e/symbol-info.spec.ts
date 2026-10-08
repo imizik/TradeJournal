@@ -64,7 +64,7 @@ const choose = (page: Page, symbol: string) => page.getByRole("button", { name: 
 
 test("You renders seeded completed results, account-separated open trades and an empty symbol", async ({ page }) => {
   const reads: string[] = [];
-  page.on("request", (request) => { if (/\/charts\/symbol\//.test(request.url())) reads.push(request.url()); });
+  page.on("request", (request) => { if (/\/charts\/symbol\/[^/]+\/(?!peers)/.test(request.url())) reads.push(request.url()); });
   await page.goto("/charts");
   const info = panel(page);
   await expect(info.getByRole("tab", { name: "You", exact: true })).toHaveAttribute("aria-selected", "true");
@@ -96,7 +96,7 @@ test("You renders seeded completed results, account-separated open trades and an
 
 test("Overview persists per device and rapid symbol steps fetch only the settled symbol", async ({ page }) => {
   const reads: string[] = [];
-  page.on("request", (request) => { if (/\/charts\/symbol\//.test(request.url())) reads.push(request.url()); });
+  page.on("request", (request) => { if (/\/charts\/symbol\/[^/]+\/(?!peers)/.test(request.url())) reads.push(request.url()); });
   await page.route("**/api/backend/charts/symbol/*/overview", async (route) => {
     const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
     await route.fulfill({ json: overview(symbol) });
@@ -161,7 +161,7 @@ test("a late result from the previous symbol cannot overwrite the current journa
 test("390px opens collapsed inside the watchlist sheet and follows its visibility in immersive mode", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const reads: string[] = [];
-  page.on("request", (request) => { if (/\/charts\/symbol\//.test(request.url())) reads.push(request.url()); });
+  page.on("request", (request) => { if (/\/charts\/symbol\/[^/]+\/(?!peers)/.test(request.url())) reads.push(request.url()); });
   await page.goto("/charts");
   const info = panel(page);
   await expect(info).toHaveCount(0);

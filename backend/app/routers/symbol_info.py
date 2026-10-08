@@ -11,7 +11,7 @@ from app.database import get_session
 from app.engine.chart_math import ET
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
-from app.engine import symbol_info_analysts, symbol_info_news_feed, symbol_info_tradier
+from app.engine import symbol_info_analysts, symbol_info_news_feed, symbol_info_peers_feed, symbol_info_tradier
 from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 from app.engine.symbol_info_reactions import SOURCE as REACTIONS_SOURCE, calculate as calculate_reactions, summary as reaction_summary
@@ -38,6 +38,12 @@ def news(symbol: str):
     tag at most three symbols so the browser's Focused filter can fill a list. Cached 60 s (Alpaca) and
     15 min (Polygon); each source degrades on its own and the response says how each one went."""
     return symbol_info_news_feed.symbol_news.view(_ticker(symbol))
+
+
+@router.get("/symbol/{symbol:path}/peers")
+def peers(symbol: str):
+    """Related companies with today's move (T3.4): Polygon's list (cached 7 days) and one batched Tradier quote call."""
+    return symbol_info_peers_feed.symbol_peers.view(_ticker(symbol))
 
 
 @router.get("/symbol/{symbol:path}/events")

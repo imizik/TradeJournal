@@ -9,6 +9,7 @@ import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoForecast from "./SymbolInfoForecast";
 import SymbolInfoNews from "./SymbolInfoNews";
+import SymbolInfoPeers from "./SymbolInfoPeers";
 import SymbolInfoYou from "./SymbolInfoYou";
 
 const TABS = ["Overview", "News", "Events", "Forecast", "You"] as const;
@@ -26,7 +27,7 @@ const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
 const REFRESH_MS = 60_000;
 
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
-export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null }) {
+export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void }) {
   const id = useId();
   const priceOf = useRef(price);
   useEffect(() => { priceOf.current = price; });
@@ -74,6 +75,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt }: { s
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
     {view.expanded && <div id={`${id}-content`}>
+      {onSelectSymbol && <SymbolInfoPeers symbol={symbol} onSelect={onSelectSymbol} />}
       <div role="tablist" aria-label="Symbol info tabs" className="flex border-y border-slate-700/40">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {

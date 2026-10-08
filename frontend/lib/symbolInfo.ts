@@ -214,3 +214,19 @@ export async function fetchSymbolAnalysts(symbol: string, signal: AbortSignal): 
   if (!response.ok) throw new Error("Analyst data unavailable. Try again.");
   return response.json();
 }
+
+/** The Peers strip (T3.4): Polygon's related companies with today's move from one Tradier quote call. */
+export type PeerSource = { provider: string; label: string; state: "ok" | "stale" | "failed" | "not_configured"; fetched_at: number | null; age_seconds: number | null; message: string | null };
+export type Peer = { symbol: string; name: string | null; last: number | null; change_percentage: number | null };
+export type SymbolPeers = {
+  symbol: string; as_of: string;
+  /** `none`: Polygon lists no related companies (an ETF); `unavailable`: no list could be read. */
+  state: "ready" | "none" | "unavailable";
+  source: PeerSource; quotes: PeerSource; peers: Peer[];
+};
+
+export async function fetchSymbolPeers(symbol: string, signal: AbortSignal): Promise<SymbolPeers> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/peers`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Peers unavailable.");
+  return response.json();
+}
