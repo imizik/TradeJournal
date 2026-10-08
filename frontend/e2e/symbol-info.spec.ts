@@ -29,7 +29,9 @@ function overview(symbol: string): SymbolOverview {
   const block = { state: (symbol === "SPY" ? "none" : "ready") as "none" | "ready", source: "Tradier company fundamentals", fetched_at: OVERVIEW_READ, message: null };
   return { symbol, state: symbol === "SPY" ? "none" : "ready", datasets: {
     company: { ...block, name: null, sector: symbol === "SPY" ? null : "Technology", employees: symbol === "SPY" ? null : 36000,
-      ipo_date: symbol === "SPY" ? null : "1999-01-22", description: symbol === "SPY" ? null : "GPU designer" },
+      ipo_date: symbol === "SPY" ? null : "1999-01-22", description: symbol === "SPY" ? null : "GPU designer",
+      ownership: symbol === "SPY" ? null : { as_of: "2026-09-30", holders: 6120, percent_held: 0.68, buyers: 2100, sellers: 1950, new_holders: 310, sold_out_holders: 120,
+        shares_bought: 1_250_000_000, shares_sold: 900_000_000 } },
     ratios: { ...block, pe: symbol === "SPY" ? null : 52.5, price_to_sales: symbol === "SPY" ? null : 25, price_to_book: symbol === "SPY" ? null : 40,
       ev_to_ebitda: symbol === "SPY" ? null : 48, dividend_yield: symbol === "SPY" ? null : 0.0003, beta_60_month: symbol === "SPY" ? null : 1.8 },
     statistics: { ...block, market_cap: symbol === "SPY" ? null : 4500000000000, enterprise_value: symbol === "SPY" ? null : 4490000000000,
@@ -45,6 +47,14 @@ test("Overview combines the chart's existing quote with cached company fundament
     reads.push(symbol);
     await route.fulfill({ json: overview(symbol) });
   });
+  const insiderReads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/insiders", async (route) => {
+    insiderReads.push(decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!));
+    await route.fulfill({ json: { symbol: "NVDA", state: "ready", source: "Yahoo, unofficial", fetched_at: OVERVIEW_READ, message: null, since: "2026-07-10", until: "2026-10-08", window_days: 90,
+      buys: { count: 0, shares: 0 }, sells: { count: 2, shares: 1_396_460 }, net_shares: -1_396_460, net_value: -306_933_628, excluded: 4, note: "Counts open-market purchases and sales only. Awards, gifts and option exercises are excluded.",
+      latest: [{ date: "2026-09-21", insider: "TETER TIMOTHY S", position: "General Counsel", kind: "sell", shares: 30460, value: 6786533 },
+        { date: "2026-09-18", insider: "STEVENS MARK A", position: "Director", kind: "sell", shares: 1366000, value: 300147095 }] } });
+  });
   await page.goto("/charts");
   const info = panel(page);
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
@@ -57,10 +67,28 @@ test("Overview combines the chart's existing quote with cached company fundament
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("68.00%"); // 13F share arrives as a fraction
   await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
   await expect(info.getByText("52.5", { exact: true }).locator("..")).toHaveAttribute("title", /Tradier company fundamentals · read/);
+  // Ownership: the 13F block comes from the overview payload; insiders are one separate Yahoo-backed read.
+  const ownership = info.getByRole("region", { name: "Ownership" });
+  await expect(ownership).toContainText("as of 2026-09-30");
+  await expect(ownership).toContainText("6,120");
+  await expect(ownership).toContainText("68.0%");
+  await expect(ownership).toContainText("Existing holders buying");
+  await expect(ownership).toContainText("2,100");
+  await expect(ownership).toContainText("1.25B");
+  await expect(ownership).toContainText("Open-market sells");
+  await expect(ownership).toContainText("2 · 1.4M sh");
+  await expect(ownership).toContainText("−1.4M sh");
+  await expect(ownership).toContainText("−$306.93M");
+  await expect(ownership.getByRole("list", { name: "Latest insider transactions" })).toContainText("TETER TIMOTHY S");
+  await expect(ownership).toContainText("Awards, gifts and option exercises are excluded.");
+  await expect(ownership).toContainText("Yahoo, unofficial");
   expect(reads).toEqual(["NVDA"]);
+  expect(insiderReads).toEqual(["NVDA"]);
   await choose(page, "SPY");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Not available for ETFs or funds.");
+  await expect(info.getByRole("region", { name: "Ownership" })).toContainText("Not available for ETFs or funds.");
   expect(reads).toEqual(["NVDA", "SPY"]);
+  expect(insiderReads).toEqual(["NVDA"]); // no insider request for an ETF
 });
 
 const panel = (page: Page) => page.getByRole("region", { name: "Symbol info", exact: true });
@@ -100,7 +128,7 @@ test("You renders seeded completed results, account-separated open trades and an
 
 test("Overview persists per device and rapid symbol steps fetch only the settled symbol", async ({ page }) => {
   const reads: string[] = [];
-  page.on("request", (request) => { if (/\/charts\/symbol\/[^/]+\/(?!peers)/.test(request.url())) reads.push(request.url()); });
+  page.on("request", (request) => { if (/\/charts\/symbol\/[^/]+\/(?!peers|insiders)/.test(request.url())) reads.push(request.url()); }); // insiders are counted in the Overview test
   await page.route("**/api/backend/charts/symbol/*/overview", async (route) => {
     const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
     await route.fulfill({ json: overview(symbol) });

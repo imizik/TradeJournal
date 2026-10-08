@@ -49,9 +49,9 @@ after them, clearly labelled.
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | in PR ([PR #150](https://github.com/imizik/TradeJournal/pull/150)) |
 | T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS |
-| T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | built ([PR #157](https://github.com/imizik/TradeJournal/pull/157)) |
+| T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | done ([PR #157](https://github.com/imizik/TradeJournal/pull/157)) |
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | done ([PR #155](https://github.com/imizik/TradeJournal/pull/155)) |
-| T3.3 | Ownership and insider activity | 3 Depth | todo |
+| T3.3 | Ownership and insider activity | 3 Depth | built ([PR #158](https://github.com/imizik/TradeJournal/pull/158)); insiders from Yahoo, unofficial |
 | T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | done ([PR #154](https://github.com/imizik/TradeJournal/pull/154)) |
 | T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
 | T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
@@ -126,6 +126,13 @@ and the item that consumes the data owns the test.
   *Estimated*, Yahoo 2026-11-17. Show the source and status, prefer a
   confirmed date from either, and never present an estimate as a date. (T1.4,
   T2.3)
+- **Yahoo insider rows name the kind only in `Text`.** `insider_transactions`
+  leaves `Transaction` empty; `Text` starts "Sale", "Purchase", "Stock
+  Award(Grant)", "Stock Gift", "Conversion of Exercise of derivative
+  security", or is blank (recorded 2026-10-08 on 11 symbols:
+  `tests/fixtures/yahoo/insider_transactions_2026-10-08.json`). Only Sale and
+  Purchase count as selling and buying; NVDA's 500,000-share gifts are not
+  sales. (T3.3)
 - **No time of day for earnings.** Tradier's calendar has dates only (its
   `time_zone` field holds a placeholder date), so before-open versus
   after-close is unknown. Yahoo's `earnings_dates` carries a time but could not

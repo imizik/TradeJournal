@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ChartQuote } from "@/lib/charts";
 import { readAt } from "@/lib/symbolInfo";
 import type { OverviewBlock, SymbolOverview } from "@/lib/symbolInfo";
+import SymbolInfoOwnership from "./SymbolInfoOwnership";
 
 const number = (value: number | null, digits = 2) => value == null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 const dollars = (value: number | null) => value == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(value);
@@ -89,5 +90,7 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
         <Value label="Beta · 60 months" value={number(ratios.beta_60_month)} title={blockLabel(ratios)} />
       </dl>
     </Dataset>
+
+    <SymbolInfoOwnership symbol={data.symbol} company={company} fund={isFund} unavailable={noFundamentals} />
   </div>;
 }
