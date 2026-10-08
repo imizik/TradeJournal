@@ -5,7 +5,7 @@ happened, review the decision, and choose one concrete improvement to practice.
 Success means a useful routine with trustworthy evidence and little manual
 work. Shipping a feature does not establish a trading edge or improved returns.
 
-**Planning date:** 2026-10-04. This document records future direction from the
+**Planning date:** 2026-10-04; Dots capability direction added 2026-10-08. This document records future direction from the
 product discussion. No new feature is implemented by this document, and no
 production data was audited to write it.
 
@@ -186,6 +186,42 @@ hypothesis, not validation on future trades.
 
 Build only after weekly review is useful and there is a question worth
 tracking repeatedly. One prospective experiment is enough for the first slice.
+
+## Dots-assisted learning extensions (proposed)
+
+The 2026-10-08 direction is to give Dot durable questions, commitments and
+outcomes to follow through on. These are candidates extending the owning
+milestones, not shipped functionality or a second implementation queue. Keep
+the selected A1–A3 practice sequence intact; select a bounded extension
+explicitly rather than adding these requirements to its current acceptance
+gates. Integration and authorization belong to the
+[Dots handoff](agent/dots-integration.md#proposed-follow-through-capabilities).
+
+| Candidate | Owner and dependency | Smallest useful result and acceptance evidence |
+|---|---|---|
+| Conversational reason capture | J1; existing capture/decision links | Attach the user's own words to a confirmed trade or opportunity, with original text, capture time and before/after-outcome status. Suggested structured reasons remain distinct from confirmed reasons. Ambiguous links ask one question or remain unresolved; corrections preserve history and links survive reconstruction. |
+| Durable questions and commitments | J2; J1 for journal-linked commitments | Save “revisit after earnings” or a weekly commitment with an owner, evidence links, a due date or explicit condition, and open/resolved/expired/canceled status. Demonstrate retrieval, one follow-up, resolution and cancellation without duplicate reminders. A WAIT decision references its existing condition; do not create a competing plan store. |
+| Availability and interruption preferences | J4; A3 for practice presentation | Start with explicit daily availability and attention budget; calendar access is optional. Version the preference and record actual missed windows. Presentation may mark a setup unsuitable for the user's day but cannot remove it from the frozen practice cohort or suppress open-position/operational notices. |
+| Personalized practice exercises | Conditional J3 extension; repeated review difficulty and usable replay | Select a few examples of one observed difficulty, hide later information, record a choice, then reveal and explain. Known examples are labeled; training records remain separate from evaluation/holdout data. Measure completion and usefulness before building a curriculum engine. |
+| Dot usefulness review | J2; J5 only for a later prospective comparison | Link brief/alert feedback to the exact artifact: useful, too late, unclear, too long, already known, or not rated. Show rating coverage, attention time and commitments attempted; recommend one output to shorten, change or stop. Unread is not useless, delivery is not reading, and a few favorable outcomes do not establish financial benefit. |
+
+Conversational reason capture should distinguish deliberate rule-based skip,
+missed alert, unavailable user, unclear setup and entry beyond the plan. Do
+not infer these reasons from silence, fills or price paths. Dot may propose a
+reflection from conversation; whether it may save it directly must be explicit
+in its granted authority. Original pre-entry intent remains immutable.
+
+Useful follow-up means checking the evidence and closing or revising the
+question, not repeatedly producing a report. Record why a commitment remains
+unresolved and when its next review is warranted. Basic capture, retrieval and
+resolution must remain usable without Dot or a paid model call.
+
+Recommended first extensions, after explicit selection, are reason capture,
+durable follow-ups and attention feedback. Thesis evidence monitoring belongs
+to the [agentic roadmap](agentic-trading-roadmap.md#17-dots-follow-through-expansion-proposed).
+Personalized drills wait for a demonstrated learning need. The action →
+feedback → next exercise pattern may inform AbleTutor separately; this does
+not authorize cross-product data sharing or create an AbleTutor dependency.
 
 ## Evidence and persistence rules
 
