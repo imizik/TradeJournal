@@ -4,7 +4,10 @@ from datetime import datetime
 
 import pandas as pd
 
-from app.engine.symbol_info_analysts import (ProviderError, SymbolAnalysts, normalize_webull_eps, normalize_webull_ratings,
+import pytest
+
+from app.engine import symbol_info_analysts as module
+from app.engine.symbol_info_analysts import (PartialRead, ProviderError, SymbolAnalysts, normalize_webull_eps, normalize_webull_ratings,
                                              normalize_webull_targets,
                                              normalize_yahoo)
 
@@ -13,13 +16,6 @@ YAHOO = {
     "ratings": {"strong_buy": 10, "buy": 48, "hold": 2, "sell": 1, "strong_sell": 0},
     "estimates": [{"period": "current quarter", "eps": {"avg": 2.47, "low": 2.3, "high": 2.7, "analysts": 44, "growth": 0.9}}],
 }
-
-
-def test_webull_shapes_with_different_spellings_and_wrapping():
-    assert normalize_webull_targets({"data": {"highTargetPrice": "515", "lowTargetPrice": 180, "meanTargetPrice": 327.7, "medianTargetPrice": 315}}) \
-        == {"mean": 327.7, "median": 315.0, "high": 515.0, "low": 180.0}
-    assert normalize_webull_ratings([{"strong_buy": 10, "buy": 48, "hold": 2, "sell": 1, "strong_sell": 0}]) \
-        == {"strong_buy": 10, "buy": 48, "hold": 2, "sell": 1, "strong_sell": 0}
 
 
 def test_webull_live_responses_from_2026_10_08():
@@ -38,7 +34,7 @@ def test_webull_live_responses_from_2026_10_08():
 
 def test_webull_empty_or_garbage_is_missing_not_zero():
     assert normalize_webull_targets({}) is None
-    assert normalize_webull_ratings({"data": {"buy": "n/a"}}) is None
+    assert normalize_webull_ratings({"buy": "n/a"}) is None
 
 
 def test_yahoo_frames_normalize():
@@ -58,7 +54,8 @@ def test_yahoo_frames_normalize():
     assert out["history"][0]["result"] == "beat"
 
 
-def make(tmp_path, webull, yahoo, now=[1000.0]):
+def make(tmp_path, webull, yahoo):
+    now = [1000.0]
     return SymbolAnalysts(tmp_path, clock=lambda: now[0], fetchers={"webull": webull, "yahoo": yahoo}), now
 
 
@@ -109,3 +106,123 @@ def test_cache_serves_a_day_then_retries_and_keeps_old_copy_on_failure(tmp_path)
     reborn = SymbolAnalysts(tmp_path, clock=lambda: now[0] - 100, fetchers={"webull": lambda s: {}, "yahoo": yahoo})
     reborn.view("NVDA")
     assert calls["yahoo"] == 2
+
+
+def test_yahoo_ratings_carry_a_label_note_and_webull_ones_do_not(tmp_path):
+    view = make(tmp_path, lambda s: {}, lambda s: YAHOO)[0].view("NVDA")
+    assert "labels differ" in view["blocks"]["ratings"]["note"]
+    view = make(tmp_path / "w", lambda s: {"ratings": YAHOO["ratings"]}, lambda s: YAHOO)[0].view("NVDA")
+    assert "note" not in view["blocks"]["ratings"]
+
+
+def test_partial_read_is_shown_with_why_kept_in_memory_only_and_retried_after_five_minutes(tmp_path):
+    calls = []
+
+    def yahoo(symbol):
+        calls.append(symbol)
+        if len(calls) == 1:
+            raise PartialRead({"targets": YAHOO["targets"]}, "Yahoo answered only in part.")
+        return YAHOO
+    analysts, now = make(tmp_path, lambda s: {}, yahoo)
+    view = analysts.view("NVDA")
+    assert view["blocks"]["targets"]["message"] == "Yahoo answered only in part." and view["blocks"]["estimates"]["state"] == "unavailable"  # missing because the read was partial
+    assert not list((tmp_path / "yahoo").rglob("*.json"))  # the partial read is not written to disk
+    analysts.view("NVDA")
+    assert len(calls) == 1
+    now[0] += 301
+    assert analysts.view("NVDA")["blocks"]["estimates"]["state"] == "ready" and len(calls) == 2
+    assert len(list((tmp_path / "yahoo").rglob("*.json"))) == 1  # the complete read is cached a day
+
+
+def test_stale_copy_after_failed_refresh_says_why_on_the_block(tmp_path):
+    state = {"fail": False}
+
+    def yahoo(symbol):
+        if state["fail"]:
+            raise ProviderError("rate limited")
+        return YAHOO
+    analysts, now = make(tmp_path, lambda s: {}, yahoo)
+    analysts.view("NVDA")
+    state["fail"] = True
+    now[0] += 24 * 3600 + 1
+    block = analysts.view("NVDA")["blocks"]["targets"]
+    assert block["state"] == "ready" and block["message"] == "rate limited" and block["fetched_at"] == 1000
+
+
+class FakeWebull:
+    queries = []
+    failing = ()
+
+    def get(self, path, *, query=None):
+        FakeWebull.queries.append((path, query))
+        if path in FakeWebull.failing:
+            raise module_error("boom")
+        return {module.WEBULL_TARGET_PATH: {"mean": "1", "median": "1", "high": "2", "low": "0.5"},
+                module.WEBULL_RATING_PATH: {"strong_buy": "3", "buy": "1", "hold": "0", "sell": "0", "under_perform": "0"},
+                module.WEBULL_EPS_PATH: [{"fiscal_year": 2027, "fiscal_period": 2, "actual": "2", "est": "1", "reported": True}]}[path]
+
+
+def module_error(message):
+    from app.engine.webull_client import WebullClientError
+    return WebullClientError(message)
+
+
+@pytest.fixture
+def webull(monkeypatch):
+    from app.engine import webull_client
+    FakeWebull.queries, FakeWebull.failing = [], ()
+    monkeypatch.setattr(webull_client, "webull_configured", lambda: True)
+    monkeypatch.setattr(webull_client, "WebullHttpClient", FakeWebull)
+    return FakeWebull
+
+
+def test_fetch_webull_asks_each_endpoint_for_the_us_stock(webull):
+    out = module.fetch_webull("NVDA")
+    assert set(out) == {"targets", "ratings", "history"}
+    assert {query["symbol"] for _, query in webull.queries} == {"NVDA"} and all(query["category"] == "US_STOCK" for _, query in webull.queries)
+
+
+def test_fetch_webull_partial_and_total_failure(webull):
+    webull.failing = (module.WEBULL_RATING_PATH,)
+    with pytest.raises(PartialRead) as partial:
+        module.fetch_webull("NVDA")
+    assert set(partial.value.data) == {"targets", "history"}
+    webull.failing = (module.WEBULL_TARGET_PATH, module.WEBULL_RATING_PATH, module.WEBULL_EPS_PATH)
+    with pytest.raises(ProviderError) as total:
+        module.fetch_webull("NVDA")
+    assert not isinstance(total.value, PartialRead)
+
+
+class FakeTicker:
+    seen = []
+    broken = ()
+
+    def __init__(self, symbol):
+        FakeTicker.seen.append(symbol)
+
+    def __getattr__(self, name):
+        if name in FakeTicker.broken:
+            raise RuntimeError("429")
+        return None if name != "analyst_price_targets" else {"mean": 1.0, "median": 1.0, "high": 2.0, "low": 0.5}
+
+
+@pytest.fixture
+def yahoo_ticker(monkeypatch):
+    import sys
+    import types
+    FakeTicker.seen, FakeTicker.broken = [], ()
+    monkeypatch.setitem(sys.modules, "yfinance", types.SimpleNamespace(Ticker=FakeTicker))
+    return FakeTicker
+
+
+def test_fetch_yahoo_maps_share_classes_and_flags_partial_and_total_failure(yahoo_ticker):
+    module.fetch_yahoo("BRK.B")
+    assert yahoo_ticker.seen == ["BRK-B"]
+    yahoo_ticker.broken = ("earnings_estimate",)
+    with pytest.raises(PartialRead) as partial:
+        module.fetch_yahoo("NVDA")
+    assert "targets" in partial.value.data
+    yahoo_ticker.broken = ("analyst_price_targets", "recommendations_summary", "upgrades_downgrades", "earnings_estimate", "revenue_estimate", "earnings_history")
+    with pytest.raises(ProviderError) as total:
+        module.fetch_yahoo("NVDA")
+    assert not isinstance(total.value, PartialRead)

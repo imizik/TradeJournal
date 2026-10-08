@@ -173,7 +173,7 @@ export function ago(publishedAt: string, now: number): string {
 }
 export const newYorkTime = (publishedAt: string) => `${new Date(publishedAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`;
 
-export type AnalystBlock<T> = { state: "ready" | "none" | "unavailable"; source: string; provider?: string; fetched_at?: number; message?: string | null; value?: T };
+export type AnalystBlock<T> = { state: "ready" | "none" | "unavailable"; source: string; provider?: string; fetched_at?: number; message?: string | null; note?: string; value?: T };
 export type AnalystEstimate = { period: string; eps?: { avg: number; low: number | null; high: number | null; analysts: number | null; growth: number | null }; revenue?: { avg: number; low: number | null; high: number | null; analysts: number | null; growth: number | null } };
 export type AnalystAction = { date: string; firm: string; to_grade: string | null; from_grade: string | null; action: string | null; target: number | null; prior_target: number | null };
 export type AnalystBeat = { quarter: string; actual: number; estimate: number; surprise: number | null; result: "beat" | "miss" | "met" };

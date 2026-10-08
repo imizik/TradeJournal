@@ -13,6 +13,7 @@ its age, and is not retried for five minutes.
 """
 
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import math
@@ -44,6 +45,14 @@ class ProviderError(Exception):
     pass
 
 
+class PartialRead(ProviderError):
+    """Some of a provider's tables failed. ``data`` holds the rest; it is kept briefly, not for a day."""
+
+    def __init__(self, data: dict, why: str):
+        super().__init__(why)
+        self.data = data
+
+
 def _number(value):
     try:
         number = float(value)
@@ -57,67 +66,32 @@ def _count(value):
     return int(number) if number is not None and number >= 0 else None
 
 
-def _pick(row: dict, *names: str):
-    """The first present value among differently spelled keys (case and underscores ignored)."""
-    flat = {str(key).replace("_", "").lower(): value for key, value in row.items()}
-    for name in names:
-        value = flat.get(name.replace("_", "").lower())
-        if value not in (None, ""):
-            return value
-    return None
-
-
-def _payload_row(payload) -> dict:
-    """Webull wraps results unpredictably; take the first dict that holds scalars."""
-    if isinstance(payload, list):
-        payload = payload[0] if payload else {}
-    if isinstance(payload, dict):
-        for key in ("data", "result", "results"):
-            if isinstance(payload.get(key), (dict, list)):
-                return _payload_row(payload[key])
-        return payload
-    return {}
-
-
 def normalize_webull_targets(payload) -> dict | None:
-    row = _payload_row(payload)
-    values = {
-        "mean": _number(_pick(row, "mean", "meanTargetPrice", "avgTargetPrice", "average")),
-        "median": _number(_pick(row, "median", "medianTargetPrice")),
-        "high": _number(_pick(row, "high", "highTargetPrice", "highest")),
-        "low": _number(_pick(row, "low", "lowTargetPrice", "lowest")),
-    }
+    """/analysis/target-prices/get: a flat object with string numbers (recorded 2026-10-08)."""
+    row = payload if isinstance(payload, dict) else {}
+    values = {key: _number(row.get(key)) for key in TARGET_KEYS}
     return values if any(value is not None for value in values.values()) else None
 
 
 def normalize_webull_ratings(payload) -> dict | None:
-    row = _payload_row(payload)
-    values = {
-        "strong_buy": _count(_pick(row, "strongBuy", "strong_buy")),
-        "buy": _count(_pick(row, "buy")),
-        "hold": _count(_pick(row, "hold")),
-        "sell": _count(_pick(row, "sell")),
-        "strong_sell": _count(_pick(row, "strongSell", "strong_sell", "underPerform", "under_perform")),
-    }
+    """/analysis/ratings/get: a flat object of counts; ``under_perform`` is the lowest rating."""
+    row = payload if isinstance(payload, dict) else {}
+    values = {key: _count(row.get(key)) for key in RATING_KEYS if key != "strong_sell"}
+    values["strong_sell"] = _count(row.get("under_perform"))
     return values if any(value is not None for value in values.values()) else None
 
 
 def normalize_webull_eps(payload) -> list[dict] | None:
     """Reported quarters of /forecast-eps (fiscal year, period, actual, est, reported) as beat or miss rows."""
+    reported = [row for row in payload if isinstance(row, dict) and row.get("reported") is True] if isinstance(payload, list) else []
     rows = []
-    for row in payload if isinstance(payload, list) else []:
-        if not isinstance(row, dict) or row.get("reported") is not True:
-            continue
+    for row in sorted(reported, key=lambda r: (_number(r.get("fiscal_year")) or 0, _number(r.get("fiscal_period")) or 0), reverse=True):
         actual, expected = _number(row.get("actual")), _number(row.get("est"))
         if actual is None or expected is None or row.get("fiscal_year") is None or row.get("fiscal_period") is None:
             continue
         rows.append({"quarter": f"FY{row['fiscal_year']} Q{row['fiscal_period']}", "actual": actual, "estimate": expected,
                      "surprise": (actual - expected) / abs(expected) if expected else None,
-                     "result": "beat" if actual > expected else "miss" if actual < expected else "met",
-                     "_order": (int(row["fiscal_year"]), int(row["fiscal_period"]))})
-    rows.sort(key=lambda r: r["_order"], reverse=True)
-    for row in rows:
-        row.pop("_order")
+                     "result": "beat" if actual > expected else "miss" if actual < expected else "met"})
     return rows[:4] or None
 
 
@@ -184,16 +158,19 @@ def normalize_yahoo(targets, summary, actions, eps, revenue, history) -> dict:
 
 def fetch_yahoo(symbol: str) -> dict:
     import yfinance as yf  # imported late: it is slow to load and only this read needs it
-    ticker = yf.Ticker(symbol)
-    parts = []
+    ticker = yf.Ticker(symbol.replace(".", "-").replace("/", "-"))  # Yahoo writes share classes as BRK-B
+    parts, failed = [], []
     for name in ("analyst_price_targets", "recommendations_summary", "upgrades_downgrades", "earnings_estimate", "revenue_estimate", "earnings_history"):
         try:
             parts.append(getattr(ticker, name))
-        except Exception:  # yfinance raises many types; one missing table is not a failed read
+        except Exception:  # yfinance raises many types
             parts.append(None)
+            failed.append(name)
     result = normalize_yahoo(*parts)
-    if not result and all(part is None for part in parts):
+    if len(failed) == len(parts):
         raise ProviderError("Yahoo returned nothing.")
+    if failed:
+        raise PartialRead(result, "Yahoo answered only in part. Retrying in a few minutes.")
     return result
 
 
@@ -214,8 +191,8 @@ def fetch_webull(symbol: str) -> dict:
                 failures.append(str(exc))
     except WebullClientError as exc:
         raise ProviderError(str(exc)) from exc
-    if not out and failures:
-        raise ProviderError(failures[0])
+    if failures:
+        raise PartialRead(out, failures[0]) if out else ProviderError(failures[0])
     return out
 
 
@@ -226,16 +203,18 @@ class SymbolAnalysts:
         self._clock = clock
         self._fetchers = fetchers or {WEBULL: fetch_webull, YAHOO: fetch_yahoo}
         self._lock = threading.Lock()
-        self._fetching = threading.Lock()
+        self._fetching: dict[tuple[str, str], threading.Lock] = {}  # one read per provider and symbol; others reuse its result
+        self._partial: dict[tuple[str, str], tuple[float, str]] = {}  # a partial read: serve it until, with why
         self._entries: dict[tuple[str, str], tuple[float, dict]] = {}
         self._retry: dict[tuple[str, str], tuple[float, str]] = {}
 
     def view(self, symbol: str) -> dict:
-        with self._fetching:  # one symbol at a time keeps both providers' rates low; daily caches make it brief
-            reads = {provider: self._read(provider, symbol) for provider in self._fetchers}
+        with ThreadPoolExecutor(len(self._fetchers)) as pool:  # the providers are independent, so a slow one does not delay the other
+            reads = dict(zip(self._fetchers, pool.map(lambda provider: self._read(provider, symbol), self._fetchers)))
         blocks = {}
         # Webull first, Yahoo when Webull has none. Their rating counts differ for the same analysts (NVDA: Webull
-        # strong_buy 48, buy 10; Yahoo the reverse); Webull's matches what its own app shows, so it leads.
+        # strong_buy 48, buy 10; Yahoo the reverse); Webull's matches what its own app shows, so it leads, and a
+        # Yahoo rating block says its labels differ.
         for name in ("targets", "ratings", "history"):
             blocks[name] = self._block(name, reads, (WEBULL, YAHOO))
         for name in ("estimates", "actions"):  # Yahoo alone
@@ -248,35 +227,52 @@ class SymbolAnalysts:
         for provider in order:
             data, fetched, _ = reads[provider]
             if data and data.get(name):
-                return {"state": "ready", "source": LABELS[provider], "provider": provider, "fetched_at": int(fetched), "value": data[name]}
+                block = {"state": "ready", "source": LABELS[provider], "provider": provider, "fetched_at": int(fetched), "value": data[name],
+                         "message": reads[provider][2]}  # set when this copy is older or partial because the latest read failed
+                if name == "ratings" and provider == YAHOO:
+                    block["note"] = "Yahoo's Strong Buy and Buy labels differ from Webull's for the same analysts."
+                return block
         issues = [reads[p][2] for p in order if reads[p][2]]
         return {"state": "unavailable" if issues else "none", "source": " / ".join(LABELS[p] for p in order), "message": issues[0] if issues else None}
 
     def _read(self, provider: str, symbol: str) -> tuple[dict | None, float | None, str | None]:
         key = (provider, symbol)
-        entry = self._entry(key)
-        now = self._clock()
-        if entry and now - entry[0] < TTL_SECONDS:
-            return entry[1], entry[0], None
         with self._lock:
-            until, why = self._retry.get(key, (0.0, ""))
-        if now < until:
-            return (entry[1], entry[0], why) if entry else (None, None, why)
-        try:
-            data = self._fetchers[provider](symbol)
-        except ProviderError as exc:
-            why = str(exc)
-        except Exception:
-            log.exception("Analyst read failed: %s %s", provider, symbol)
-            why = f"{LABELS[provider]} could not be read."
-        else:
-            self._store(key, (now, data))
+            lock = self._fetching.setdefault(key, threading.Lock())
+        with lock:
+            entry = self._entry(key)
+            now = self._clock()
             with self._lock:
-                self._retry.pop(key, None)
-            return data, now, None
-        with self._lock:
-            self._retry[key] = (now + RETRY_SECONDS, why)
-        return (entry[1], entry[0], why) if entry else (None, None, why)
+                partial_until, partial_why = self._partial.get(key, (0.0, ""))
+                until, why = self._retry.get(key, (0.0, ""))
+            if entry and now - entry[0] < TTL_SECONDS and not partial_until:
+                return entry[1], entry[0], None
+            if now < partial_until:
+                return entry[1], entry[0], partial_why
+            if now < until:
+                return (entry[1], entry[0], why) if entry else (None, None, why)
+            try:
+                data = self._fetchers[provider](symbol)
+            except PartialRead as exc:
+                with self._lock:
+                    self._entries[key] = (now, exc.data)  # memory only: a restart reads again
+                    self._partial[key] = (now + RETRY_SECONDS, str(exc))
+                return exc.data, now, str(exc)
+            except ProviderError as exc:
+                why = str(exc)
+            except Exception:
+                log.exception("Analyst read failed: %s %s", provider, symbol)
+                why = f"{LABELS[provider]} could not be read."
+            else:
+                self._store(key, (now, data))
+                with self._lock:
+                    self._retry.pop(key, None)
+                    self._partial.pop(key, None)
+                return data, now, None
+            with self._lock:
+                self._retry[key] = (now + RETRY_SECONDS, why)
+                self._partial.pop(key, None)
+            return (entry[1], entry[0], why) if entry else (None, None, why)
 
     def _path(self, key: tuple[str, str]) -> Path:
         return self.root / key[0] / f"{key[1].replace('/', '_')}.json"
