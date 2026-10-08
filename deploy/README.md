@@ -568,7 +568,8 @@ stops and starts the entire service set. The upgrade polls a local stand-in
 for GitHub's releases API; the live Release workflow and the VPS polling
 GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
 covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
-schema holds, checksums, and notifications sent once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
+optional schema migrations, fresh backups, checksums, and notifications sent
+once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by
 `backend/tests/test_gmail_listener.py` with a fake subscriber. The workflow

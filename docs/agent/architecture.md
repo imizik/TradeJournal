@@ -63,9 +63,11 @@ two-minute check that sends phone alerts through ntfy when any of them, the API
 or real-time Gmail stops working. The
 Gmail timer rebuilds trades only when it imported new fills and never starts
 market-data enrichment; with real-time import enabled it is the safety net.
-When `/etc/tradejournal/autodeploy.env` exists, a five-minute timer installs
+When `/etc/tradejournal/autodeploy.env` exists, a three-minute timer installs
 the newest `main` build that passed every CI check. It pulls from GitHub,
-because nothing outside the tailnet can reach the server. Backup retention, prerequisites
+because nothing outside the tailnet can reach the server. Automatic schema
+migrations require an explicit server setting and a fresh verified backup.
+Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
 Two scheduled processes run off the server, both started by launchd on the
