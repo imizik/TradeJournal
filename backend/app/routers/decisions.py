@@ -2,6 +2,7 @@
 import uuid
 from datetime import datetime
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
@@ -53,7 +54,7 @@ def context(symbol: str, body: ContextCreate, db: Session = Depends(get_session)
         packet = build_ticker_analysis(symbol)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except RuntimeError:
+    except (RuntimeError, httpx.HTTPError):
         # An explicit unavailable context still lets a person record WAIT/SKIP
         # with an honest gap; it has no facts capable of validating a TAKE.
         packet = {"symbol": symbol.strip().upper(), "generated_at": None,

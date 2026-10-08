@@ -46,6 +46,7 @@ function Outcome({ label, o }: { label: string; o: PaperOutcome }) {
       <p className="font-medium">{label} <span className="text-muted-foreground">({o.cost_version})</span></p>
       <p>Paper entry {num(o.entry_fill)} → exit {num(o.exit_fill)} ({o.exit_kind})</p>
       <p>Net {num(o.net_per_share)}/share · planned R {num(o.planned_r, 3)}</p>
+      <p>Simulated entry-to-stop exposure {num(o.entry_to_stop_exposure)}/share</p>
       {(o.ambiguous || o.gap) && <p className="text-amber-700">{[o.ambiguous && "ambiguous bar", o.gap && "gap"].filter(Boolean).join(" · ")}</p>}
     </div>
   );
@@ -91,6 +92,7 @@ export default function PracticePaperPlan({ recordId, onState }: { recordId: str
         <span className="font-medium">Practice paper timeline</span>
         {state && <PaperBadge status={state.status} />}
       </div>
+      {state && <button onClick={load} className="underline">Refresh paper timeline</button>}
       <p className="text-muted-foreground">Paper only. No real order is ever placed.</p>
       {!state && !loadError && <p role="status">Loading paper state…</p>}
       {loadError && <p role="alert" className="text-red-600">{loadError} <button onClick={load} className="underline">Retry</button></p>}

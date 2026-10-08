@@ -90,6 +90,12 @@ def test_full_migration_chain_applies_to_postgres(migrated):
     assert expected <= tables, f"missing after migration: {sorted(expected - tables)}"
 
 
+def test_concurrent_paper_arms_enforce_symbol_cap_on_postgres(migrated, monkeypatch):
+    from tests.test_paper_plans import check_concurrent_symbol_cap
+
+    check_concurrent_symbol_cap(migrated, monkeypatch)
+
+
 def test_gmail_fill_keeps_new_york_clock_on_postgres(migrated, monkeypatch):
     inspector = inspect(migrated)
     for table, column in (("fill", "executed_at"), ("trade", "opened_at"), ("trade", "closed_at")):

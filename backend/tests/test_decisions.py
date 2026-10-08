@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
@@ -120,9 +121,10 @@ def test_context_serializes_live_analysis_datetime_and_retries_same_evidence(cli
     assert reopened["evidence"]["packet"]["short_term"] == context["packet"]["short_term"]
 
 
-def test_unavailable_context_still_records_wait_or_skip_but_cannot_support_take(client, monkeypatch):
+@pytest.mark.parametrize("failure", [RuntimeError("provider offline"), httpx.ReadTimeout("provider timed out")])
+def test_unavailable_context_still_records_wait_or_skip_but_cannot_support_take(client, monkeypatch, failure):
     def unavailable(_symbol):
-        raise RuntimeError("provider offline")
+        raise failure
 
     monkeypatch.setattr(routes, "build_ticker_analysis", unavailable)
     context = freeze(client, "ctx-unavailable")
