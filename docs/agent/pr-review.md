@@ -129,8 +129,9 @@ PR events, receipt status updates and main pushes reevaluate the gate. A
 fifteen-minute scheduled watchdog flags receipts pending/stale for over
 forty-five minutes. Managed PRs receive one failure comment per head from
 GitHub Actions. Schedules may be delayed by GitHub. The watchdog runs only
-after the workflow lands on main; explicit manual dispatch on the feature ref
-permits pre-adoption testing. A sleeping Mac cannot continue a local agent;
+after the workflow lands on main, including manual dispatch. Before adoption,
+exercise the script against API stand-ins and a live PR from the local runner.
+A sleeping Mac cannot continue a local agent;
 the gate stays incomplete and recovery resumes the owner after it returns.
 
 Make the review status plus Backend, Frontend, Browser, Postgres parity and

@@ -217,16 +217,25 @@ def model_process(command, snapshot, env, prompt, log_dir, timeout):
     with (log_dir / "stdout.jsonl").open("w") as stdout, (log_dir / "stderr.log").open("w") as stderr:
         p = subprocess.Popen(command, cwd=snapshot, env=env, stdin=subprocess.PIPE,
                              stdout=stdout, stderr=stderr, text=True, start_new_session=True)
+        def interrupted(*unused):
+            raise KeyboardInterrupt
+        previous = {sig: signal.getsignal(sig) for sig in (signal.SIGTERM, signal.SIGHUP)}
+        for sig in previous:
+            signal.signal(sig, interrupted)
         try:
-            p.communicate(prompt, timeout=timeout)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            os.killpg(p.pid, signal.SIGTERM)
             try:
-                p.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(p.pid, signal.SIGKILL)
-                p.wait()
-            raise ReviewError("Reviewer interrupted or exceeded its ten-minute deadline")
+                p.communicate(prompt, timeout=timeout)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                os.killpg(p.pid, signal.SIGTERM)
+                try:
+                    p.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    os.killpg(p.pid, signal.SIGKILL)
+                    p.wait()
+                raise ReviewError("Reviewer interrupted or exceeded its ten-minute deadline")
+        finally:
+            for sig, handler in previous.items():
+                signal.signal(sig, handler)
     if p.returncode:
         raise ReviewError(f"Reviewer failed (exit {p.returncode}); diagnostic logs: {log_dir}")
     return (log_dir / "stdout.jsonl").read_text()
@@ -442,8 +451,10 @@ def hook(root, args, payload):
     if event == "SessionStart":
         if not baseline.exists():
             atomic_json(baseline, current)
-        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext":
-                f"Independent review is automatic for work you change. Owner={args.owner}; session={session}. Before pushing, commit and run python3 scripts/pr_review.py review --owner {args.owner} --session {shlex.quote(session)}. Read docs/agent/pr-review.md. Never merge."}}
+        message = f"Independent review is automatic for work you change. Owner={args.owner}; session={session}. Before pushing, commit and run python3 scripts/pr_review.py review --owner {args.owner} --session {shlex.quote(session)}. Read docs/agent/pr-review.md. Never merge."
+        if args.owner == "codex":
+            return {"systemMessage": message}
+        return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": message}}
     if event != "Stop":
         return {}
     with locked(path):
@@ -492,6 +503,7 @@ def main():
     parser.add_argument("--pr", type=int)
     parser.add_argument("--previous-session")
     args = parser.parse_args()
+    payload = None
     try:
         payload = json.load(sys.stdin) if args.command == "hook" else None
         root = root_dir(payload.get("cwd") if payload else None)
