@@ -1,0 +1,27 @@
+{
+ "status": "OK",
+ "results": [
+  {
+   "settlement_date": "2026-09-15",
+   "ticker": "NVDA",
+   "short_interest": 294225803,
+   "avg_daily_volume": 115324892,
+   "days_to_cover": 2.55
+  },
+  {
+   "settlement_date": "2026-08-31",
+   "ticker": "NVDA",
+   "short_interest": 298301619,
+   "avg_daily_volume": 139118326,
+   "days_to_cover": 2.14
+  },
+  {
+   "settlement_date": "2026-08-14",
+   "ticker": "NVDA",
+   "short_interest": 285956804,
+   "avg_daily_volume": 113580992,
+   "days_to_cover": 2.52
+  }
+ ],
+ "next_url": "https://api.polygon.io/stocks/v1/short-interest?cursor=REDACTED"
+}

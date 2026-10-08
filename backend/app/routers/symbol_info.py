@@ -11,7 +11,7 @@ from app.database import get_session
 from app.engine.chart_math import ET
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
-from app.engine import symbol_info_analysts, symbol_info_financials_feed, symbol_info_news_feed, symbol_info_peers_feed, symbol_info_tradier
+from app.engine import symbol_info_analysts, symbol_info_financials_feed, symbol_info_news_feed, symbol_info_peers_feed, symbol_info_short_feed, symbol_info_tradier
 from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 from app.engine.symbol_info_reactions import SOURCE as REACTIONS_SOURCE, calculate as calculate_reactions, summary as reaction_summary
@@ -44,6 +44,13 @@ def news(symbol: str):
 def peers(symbol: str):
     """Related companies with today's move (T3.4): Polygon's list (cached 7 days) and one batched Tradier quote call."""
     return symbol_info_peers_feed.symbol_peers.view(_ticker(symbol))
+
+
+@router.get("/symbol/{symbol:path}/short")
+def short(symbol: str):
+    """FINRA short interest, daily short volume and the hard-to-borrow flag (T3.1). Polygon is cached a day
+    through the shared limiter; a 429 serves the cached copy with its age."""
+    return symbol_info_short_feed.short_feed.view(_ticker(symbol))
 
 
 @router.get("/symbol/{symbol:path}/events")

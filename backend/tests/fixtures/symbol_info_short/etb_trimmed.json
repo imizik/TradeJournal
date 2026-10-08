@@ -1,0 +1,36 @@
+{
+ "securities": {
+  "security": [
+   {
+    "symbol": "KIM",
+    "exchange": "N",
+    "type": "stock",
+    "description": "Kimco Realty Corp"
+   },
+   {
+    "symbol": "USHY",
+    "exchange": "Z",
+    "type": "etf",
+    "description": "iShares Broad USD High Yield Corporate Bond ETF"
+   },
+   {
+    "symbol": "SPY",
+    "exchange": "P",
+    "type": "etf",
+    "description": "State Street SPDR S&P 500 ETF Trust"
+   },
+   {
+    "symbol": "AAPL",
+    "exchange": "Q",
+    "type": "stock",
+    "description": "Apple Inc"
+   },
+   {
+    "symbol": "NVDA",
+    "exchange": "Q",
+    "type": "stock",
+    "description": "NVIDIA Corp"
+   }
+  ]
+ }
+}

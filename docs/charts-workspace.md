@@ -65,6 +65,24 @@ move is shown with its gap, so the average leans high; the report's time of day
 is unknown. A row refuses a number when a bar, calendar day or split check is
 missing, conflicting or unverified. The average needs four usable reports.
 
+Its **Short** tab (T3.1) reads `GET /charts/symbol/{symbol}/short`: the latest
+FINRA short interest in shares with its settlement date (FINRA publishes twice a
+month and the figure lags the date by about two weeks), days to cover (Polygon's,
+*observed*), short interest as a percent of **shares outstanding** (*calculated*;
+there is no float, so it is never labelled as a percent of float) and the change
+from the prior report. **Borrow** shows *Hard to borrow* when the symbol is
+missing from Tradier's easy-to-borrow list and *Easy to borrow* when it is on it.
+**Short volume** lists the last ten sessions' ratio (short volume over FINRA-reported
+volume, *calculated*), which is a share of the volume FINRA's facilities report
+and not of all trading. Shares outstanding come from Polygon's ticker details; if
+they are missing the percentage reads "—" with a note. A symbol without FINRA rows
+(an unknown ticker) reads "No FINRA short interest is published". Polygon is read
+at most once a day per symbol per dataset (cached under
+`backend/data/symbol_info/v1/polygon/`), through the enricher's limiter without
+waiting more than two seconds; a 429, failure or busy limiter serves the cached copy
+with its age and mutes Polygon for five minutes. Tradier's list is one call a day
+(cached under `.../tradier/`), apart from the chart feed. Each block degrades alone.
+
 Its **News** tab (T1.2) reads `GET /charts/symbol/{symbol}/news`: the newest
 20 headlines from Alpaca (Benzinga, cached 60 s) and Polygon (cached 15 minutes
 on disk under `backend/data/symbol_info/v1/polygon/`), merged and deduplicated by
