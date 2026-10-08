@@ -110,25 +110,36 @@ from app.engine import practice
 from app.models import PracticeOpportunity
 with Session(engine) as db:
     opp=db.get(PracticeOpportunity,uuid.UUID(sys.argv[1]))
-    practice.choose(db,opp,{"decision":"skip","rationale":"Agent fixture verdict withheld until reveal"},actor="agent:a3")
+    practice.choose(db,opp,{"decision":"wait","rationale":"Agent WAIT verdict withheld until reveal","wait_condition":"Price facts remain unavailable","wait_expiry":"2030-01-01T21:00:00Z"},actor="agent:a3")
 `;
   execFileSync(python, ["-c", script, fixture.oppId], { cwd: BACKEND_DIR, env: { ...process.env, DATABASE_URL: `sqlite:///${E2E_DB}`, MIGRATION_DATABASE_URL: `sqlite:///${E2E_DB}`, PRACTICE_AGENT_ENABLED: "false" } });
   await page.goto(`/?practice_run=${fixture.runId}`);
   const routine = page.getByTestId("practice-routine");
   const opp = routine.getByTestId("practice-opportunity");
-  await expect(routine).not.toContainText("Agent fixture verdict");
+  await expect(routine).not.toContainText("Agent WAIT verdict");
   const before = await request.get(`${API}/practice/runs/${fixture.runId}`);
   expect((await before.json()).opportunities[0].agent).toBeNull();
+  await routine.getByLabel("Review records").selectOption("wait");
+  await expect(routine.getByTestId("practice-opportunity")).toHaveCount(0);
+  await routine.getByLabel("Review records").selectOption("all");
   await opp.getByLabel("Rationale").fill("Human fixture committed without agent result");
   await opp.getByRole("button", { name: "Save frozen choice" }).click();
   await expect(opp).toContainText("Human: SKIP");
-  await expect(routine).not.toContainText("Agent fixture verdict");
+  await expect(routine).not.toContainText("Agent WAIT verdict");
   await opp.getByRole("button", { name: "Reveal agent choice after both commit" }).click();
-  await expect(opp).toContainText("Agent choice: SKIP");
-  await expect(opp).toContainText("Agent fixture verdict withheld until reveal");
+  await expect(opp).toContainText("Agent choice: WAIT");
+  await expect(opp).toContainText("Agent WAIT verdict withheld until reveal");
+  await routine.getByLabel("Review records").selectOption("wait");
+  await expect(routine.getByTestId("practice-opportunity")).toContainText("Human: SKIP");
+  await expect(routine.getByTestId("practice-opportunity")).toContainText("Agent choice: WAIT");
   await page.reload();
-  await expect(page.getByTestId("practice-routine")).toContainText("Agent choice: SKIP");
-  await expect(page.getByTestId("practice-routine").getByRole("button", { name: "Save frozen choice" })).toHaveCount(0);
+  const reopened = page.getByTestId("practice-routine");
+  await expect(reopened).toContainText("Agent choice: WAIT");
+  await expect(reopened).toContainText("Human: SKIP");
+  await reopened.getByLabel("Review records").selectOption("wait");
+  await expect(reopened.getByTestId("practice-opportunity")).toContainText("Agent choice: WAIT");
+  await expect(reopened.getByTestId("practice-opportunity")).toContainText("Human: SKIP");
+  await expect(reopened.getByRole("button", { name: "Save frozen choice" })).toHaveCount(0);
 });
 
 test("attention timing stays with its original run and a failed save preserves the timer", async ({ page, request }) => {

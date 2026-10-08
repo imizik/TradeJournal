@@ -578,7 +578,11 @@ def test_crash_between_trigger_and_intent_cannot_backdate_or_delay_entry_indefin
 
 def test_a3_paired_choices_cannot_arm_twice_even_after_first_plan_terminal(engine):
     first, second = record(engine), record(engine)
-    opportunity = f"a3:{uuid.uuid4()}"
+    from app.engine import practice
+    with Session(engine) as db:
+        run = practice.start(db, day=DAY)
+        opp = next(o for o in practice.opportunities(db, run.id) if o.symbol == "SPY")
+        opportunity = f"a3:{opp.id}"
     with Session(engine) as db:
         for rid, actor in ((first, "human"), (second, "agent:a3")):
             item = db.get(DecisionRecord, rid)
@@ -593,3 +597,21 @@ def test_a3_paired_choices_cannot_arm_twice_even_after_first_plan_terminal(engin
     with pytest.raises(paper.PaperError, match="shared opportunity"):
         arm(engine, second, when=at(DAY, 9, 2))
     assert arm(engine, first)[1] is False
+
+
+def test_a3_take_from_prior_run_cannot_arm_into_current_session(engine):
+    from app.engine import practice
+    rid = record(engine)
+    with Session(engine) as db:
+        # Model the original defect: a freshly received plan was attached to
+        # an older session. Other P0 arm eligibility remains valid today.
+        run = practice.start(db, day=DAY.replace(day=DAY.day - 1))
+        opp = next(o for o in practice.opportunities(db, run.id) if o.symbol == "SPY")
+        item = db.get(DecisionRecord, rid)
+        item.opportunity_id = f"a3:{opp.id}"
+        db.add(item)
+        db.commit()
+    with pytest.raises(paper.PaperError, match="run's market session date"):
+        arm(engine, rid)
+    with Session(engine) as db:
+        assert paper.events_for(db, rid) == []

@@ -154,21 +154,26 @@ def visible_record(db, record):
     return run.comparison == "assisted" or opp.revealed_at is not None
 
 
-def choose(db, opp, request, *, actor="human"):
+def choose(db, opp, request, *, actor="human", commit=True):
     run = db.get(PracticeRun, opp.run_id)
     if (actor == "human" and run.status in {"queued", "preparing"}) or opp.context_id is None:
         raise decisions.DecisionError("Preparation has not frozen this opportunity")
     if actor not in {"human", "agent:a3"}:
         raise decisions.DecisionError("Unapproved actor")
-    if request.get("decision") == "take" and json.loads(run.calendar_json).get("status") != "open":
-        raise decisions.DecisionError("TAKE requires a verified open session calendar")
+    if request.get("decision") == "take":
+        # Same-key retries still return the frozen record after the session ends.
+        existing = records(db, opp).get(actor)
+        if not existing and now_utc().replace(tzinfo=UTC).astimezone(ET).date() != run.day:
+            raise decisions.DecisionError("TAKE must be committed on its run's market session date")
+        if json.loads(run.calendar_json).get("status") != "open":
+            raise decisions.DecisionError("TAKE requires a verified open session calendar")
     allowed = {"decision", "rationale", "wait_condition", "wait_expiry", "plan"}
     if set(request) - allowed:
         raise decisions.DecisionError("Actor, context and ownership are server assigned")
     payload = {"operation_id": f"a3:{opp.id}:{actor}", "opportunity_id": f"a3:{opp.id}",
         "actor": actor, "context_id": str(opp.context_id), "symbol": opp.symbol,
         "plan": None, "rationale": "", "wait_condition": None, "wait_expiry": None, **request}
-    record, _ = decisions.create(db, payload, routine=True)
+    record, _ = decisions.create(db, payload, routine=True, commit=commit, expected_day=run.day)
     return record
 
 
@@ -274,12 +279,14 @@ def run_agent(db, run, *, adapter=practice_agent.invoke):
             elif decision == "wait" and decisions._utc(detail["wait_expiry"], "wait_expiry") <= now_utc():
                 raise ValueError("WAIT expiry must be future")
         for c in choices:
-            choose(db, opps[c["opportunity_id"]], {k: v for k, v in c.items() if k != "opportunity_id"}, actor="agent:a3")
+            choose(db, opps[c["opportunity_id"]], {k: v for k, v in c.items() if k != "opportunity_id"}, actor="agent:a3", commit=False)
         call.status = "completed"
     except (ValueError, KeyError, TypeError) as exc:
+        db.rollback()  # no partial response may survive receipt-time revalidation
         call.status = "invalid"
         call.error = str(exc)[:500]
     except Exception:
+        db.rollback()
         call.status = "uncertain"
         call.error = "Model call failed or timed out; completion/cost may be unknown. No retry."
     call.finished_at = now_utc()

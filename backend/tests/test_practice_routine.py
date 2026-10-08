@@ -324,3 +324,60 @@ def test_a3_agent_cap_refuses_all_four_take_output_before_any_commit(db, monkeyp
     practice.prepare(db, run, calendar=Calendar(), packet_loader=packet, adapter=too_many)
     assert db.exec(select(PracticeAgentCall)).one().status == "invalid"
     assert not db.exec(select(DecisionRecord)).all()
+
+
+@pytest.mark.parametrize("error,status", [(ValueError("WAIT expired at receipt"), "invalid"), (RuntimeError("storage interrupted"), "uncertain")])
+def test_agent_batch_rolls_back_all_choices_when_later_receipt_fails(db, http, monkeypatch, error, status):
+    enable(monkeypatch)
+    original_choose = practice.choose
+    calls = []
+    def fail_second(db, opp, request, **kwargs):
+        calls.append(opp.id)
+        if len(calls) == 2:
+            # The first flush is visible within this transaction but must never
+            # remain durable or revealable once the whole response fails.
+            assert len(db.exec(select(DecisionRecord)).all()) == 1
+            raise error
+        return original_choose(db, opp, request, **kwargs)
+    monkeypatch.setattr(practice, "choose", fail_second)
+    run = practice.start(db)
+    practice.prepare(db, run, calendar=Calendar(), packet_loader=packet, adapter=answer)
+    assert not db.exec(select(DecisionRecord)).all()
+    call = db.exec(select(PracticeAgentCall)).one()
+    assert call.status == status and call.output_json is not None
+    for opp in practice.opportunities(db, run.id):
+        assert http.post(f"/practice/opportunities/{opp.id}/reveal", json={}).status_code == 409
+
+
+def test_take_is_bound_to_run_day_but_same_key_retry_retains_original(db, http, monkeypatch):
+    run = prepared(db)
+    opp = practice.opportunities(db, run.id)[0]
+    plan = {"instrument": "stock", "direction": "long", "trigger": decisions_trigger(),
+        "trigger_level": 101, "trigger_fact": "minute:0:c", "stop": 99, "stop_fact": "minute:0:l",
+        "target": 102, "target_fact": "minute:0:h", "entry_guard": {"min": 101, "max": 101.5},
+        "expiry": (datetime.now(UTC) + timedelta(days=1)).isoformat(), "max_holding_sessions": 2,
+        "freshness_limit_seconds": 86400, "cost_model": paper.COST}
+    payload = {"decision": "take", "plan": plan}
+    first = practice.choose(db, opp, payload)
+    # A retry is a retrieval of old immutable evidence, never a new receipt.
+    later = practice.now_utc() + timedelta(days=1)
+    monkeypatch.setattr(practice, "now_utc", lambda: later)
+    assert practice.choose(db, opp, payload).id == first.id
+    other = practice.opportunities(db, run.id)[1]
+    response = http.post(f"/practice/opportunities/{other.id}/choice", json=payload)
+    assert response.status_code == 409 and "market session date" in response.text
+    assert practice.records(db, other) == {}
+
+
+def test_take_checks_actual_receipt_day_when_midnight_passes_after_preflight(db, http, monkeypatch):
+    from app.engine import decisions
+    run = prepared(db)
+    opp = practice.opportunities(db, run.id)[0]
+    class NextDayClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz) + timedelta(days=1)
+    monkeypatch.setattr(decisions, "datetime", NextDayClock)
+    response = http.post(f"/practice/opportunities/{opp.id}/choice", json={"decision": "take", "plan": {}})
+    assert response.status_code == 409 and "market session date" in response.text
+    assert practice.records(db, opp) == {}

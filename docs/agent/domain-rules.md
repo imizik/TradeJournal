@@ -484,7 +484,10 @@ from journal and factory records. One canonical ET day/P0 cohort predeclares all
 five opportunities; assisted revisions retain the original link. Server-owned
 A1 IDs enforce one immutable choice per actor/opportunity. Unobserved human or
 agent choices never become SKIP. Independent reveal requires both commitments;
-generic decision and paper routes enforce the same visibility. A shared
+generic decision and paper routes enforce the same visibility. All five agent
+choices commit atomically with completed-call status; a failed batch retains
+its durable raw response/usage but no partial choices. New TAKEs and arm events
+must belong to the run's ET session date; retries retrieve original records. A shared
 opportunity can be armed through only one actor, even after its first plan is
 terminal; global P0 arm and active-symbol caps remain authoritative.
 

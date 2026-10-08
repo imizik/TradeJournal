@@ -29,7 +29,7 @@ from app.engine import paper_execution as px
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, chart_bars, normalize_bars, session_windows
 from app.engine.level_alerts import LATENESS
-from app.models import DecisionEvent, DecisionRecord
+from app.models import DecisionEvent, DecisionRecord, PracticeOpportunity, PracticeRun
 
 log = logging.getLogger(__name__)
 
@@ -200,6 +200,14 @@ def arm(db: Session, record_id: uuid.UUID, operation_id: str, *, now: datetime, 
     session = regular_session(today, calendar.hours(today))
     if session is None:
         raise PaperError("the market calendar does not show an open session today, so nothing can be armed")
+    if record.opportunity_id.startswith("a3:"):
+        try:
+            opportunity = db.get(PracticeOpportunity, uuid.UUID(record.opportunity_id[3:]))
+        except ValueError:
+            opportunity = None
+        routine = db.get(PracticeRun, opportunity.run_id) if opportunity else None
+        if routine is None or routine.day != today:
+            raise PaperError("A3 plan must be armed on its run's market session date")
     if record.received_at.replace(tzinfo=UTC).astimezone(ET).date() != today:
         raise PaperError("only a plan decided today can be armed today")
     cutoff = watch_cutoff(session)

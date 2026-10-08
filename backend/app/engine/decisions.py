@@ -6,11 +6,12 @@ import json
 import math
 import re
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+from app.engine.chart_math import ET
 from app.models import DecisionContext, DecisionRecord, PracticeOpportunity
 
 MAX_FRESHNESS_SECONDS = 86_400  # one regular-session day; P0 may choose less
@@ -255,7 +256,7 @@ def row(record: DecisionRecord) -> dict:
     }
 
 
-def create(db: Session, request: dict, *, routine: bool = False) -> tuple[DecisionRecord, bool]:
+def create(db: Session, request: dict, *, routine: bool = False, commit: bool = True, expected_day: date | None = None) -> tuple[DecisionRecord, bool]:
     if not routine:
         if str(request.get("opportunity_id", "")).startswith("a3:") or request.get("actor") == "agent:a3":
             raise DecisionError("A3 ownership requires the routine choice service")
@@ -291,6 +292,8 @@ def create(db: Session, request: dict, *, routine: bool = False) -> tuple[Decisi
     cutoff = context.captured_at
     evidence = json.loads(context.data_json)
     if decision == "take":
+        if expected_day is not None and now.replace(tzinfo=timezone.utc).astimezone(ET).date() != expected_day:
+            raise DecisionError("TAKE must be committed on its run's market session date")
         detail["plan"] = _validate_take(symbol, cutoff, evidence, detail["plan"], now)
     elif decision == "wait":
         expiry = _utc(detail["wait_expiry"], "wait_expiry")
@@ -305,8 +308,14 @@ def create(db: Session, request: dict, *, routine: bool = False) -> tuple[Decisi
                           decision_json=_canonical(detail), record_sha256=record_sha)
     db.add(item)
     try:
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except IntegrityError:
+        if not commit:
+            # The batch owner rolls back every actor choice together.
+            raise DecisionError("operation_id already exists with different content")
         db.rollback()
         existing = db.exec(select(DecisionRecord).where(DecisionRecord.operation_id == operation_id)).first()
         if existing and existing.record_sha256 == record_sha:

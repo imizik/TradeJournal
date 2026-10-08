@@ -188,7 +188,12 @@ The child receives no database credentials, private API origin, journal MCP,
 human records, raw packet or application tools. A finite subprocess enforces
 wall-clock runtime. Model outputs cannot assign actor, context or operations;
 the orchestrator validates all five choices before writing through A1 and
-accepts at most three TAKEs. Generic decision/list/paper/arm routes also enforce
+accepts at most three TAKEs. All five agent records and completed-call status
+commit atomically; a later receipt-time validation or storage failure rolls
+back the entire choice batch while retaining the earlier durable call/output
+reservation. New TAKE receipts and new arm events must match the run's ET
+session date; same-key retries retrieve original evidence.
+Generic decision/list/paper/arm routes also enforce
 A3 visibility and context ownership. This preserves the private owner boundary;
 it does not add public API authentication or protect against the owner directly
 reading their database. No independent external runner endpoint is exposed.
@@ -231,3 +236,21 @@ checks prepared, but no CI run for this unpushed source has been observed.
 The final A3 browser recheck passed all three real-backend fixture scenarios
 on disposable ports 8127/3127, including the timer correction. The subsequent
 frontend typecheck and documentation link/freshness checks passed as well.
+
+
+### Hosted review follow-up
+
+Codex reviewed published head `7581d7f` in PR #156 and identified atomic agent
+writes, cross-session TAKE/arm ownership, and revealed-agent filter coverage.
+The follow-up addresses those cases with rollback fixtures, session-date
+refusals that preserve idempotent retrieval, and a real-backend disagreement
+filter test. Human and visible-agent counts are separately labeled. These
+corrections do not enable paid calls, scheduling, or deployment; AC10 remains
+0/3 observed sessions.
+
+The review follow-up passed `scripts/verify.sh --fast` (1,560 backend tests,
+32 skipped), 76 focused decision/paper/routine regression tests including an
+actual-receipt midnight case, and all three real-backend A3 browser scenarios.
+All required CI checks on original head `7581d7f` passed, including Postgres
+parity/roles and native Ubuntu package/systemd. The correction head needs its
+own CI and hosted re-review; no merge or deployment is authorized.
