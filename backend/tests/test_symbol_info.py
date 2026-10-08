@@ -108,6 +108,67 @@ def test_forecast_route_passes_the_price_and_the_next_report_from_the_events_cac
         result = client.get("/charts/symbol/nvda/forecast?spot=182.4").json()
         assert result["moves"] == []
         assert result["earnings"]["date"] == "2026-10-28"
-        assert result["reactions"]["state"] == "none"
+        assert "reactions" not in result
         assert client.get("/charts/symbol/NVDA/forecast?spot=0").status_code == 422
     assert calls == [("NVDA", 182.4, "2026-10-28")]
+
+
+def _reactions_client(monkeypatch, events, splits, daily):
+    class Events:
+        def forecast_earnings(self, symbol, today):
+            return events
+
+    class Feed:
+        pass
+
+    feed = Feed()
+    feed.splits = type("S", (), {"get": staticmethod(lambda symbol: splits)})() if splits is not None else None
+    feed.daily = daily
+    monkeypatch.setattr(symbol_info.symbol_info_tradier, "symbol_events", Events())
+    monkeypatch.setattr(symbol_info, "chart_feed", feed)
+    app = FastAPI()
+    app.include_router(symbol_info.router, prefix="/charts")
+    return TestClient(app)
+
+
+class _Daily:
+    def __init__(self, entry=None, error=None):
+        self._entry, self._error = entry, error
+
+    def entry(self, symbol, today, info):
+        if self._error:
+            raise self._error
+        return self._entry
+
+
+def _entry(states=None):
+    from types import SimpleNamespace
+    return SimpleNamespace(bars=[], conflicts=set(), fetched_at=5, states=states or {})
+
+
+_EVENTS = {"state": "ready", "reports": [{"date": "2026-01-05", "label": "Q4"}], "fetched_at": 1, "message": None}
+
+
+def test_reactions_route_states(monkeypatch):
+    from app.engine.chart_feed import ChartFeedError
+
+    ok = {"status": "ok", "splits": [], "as_of": 1, "issue": None}
+    with _reactions_client(monkeypatch, {**_EVENTS, "reports": []}, ok, _Daily()) as client:
+        assert client.get("/charts/symbol/NVDA/reactions").json()["state"] == "none"
+    with _reactions_client(monkeypatch, _EVENTS, {"status": "unknown", "issue": "no splits"}, _Daily()) as client:
+        body = client.get("/charts/symbol/NVDA/reactions").json()
+        assert body["state"] == "unavailable" and body["message"] == "no splits"
+    with _reactions_client(monkeypatch, _EVENTS, ok, _Daily(error=ChartFeedError("down"))) as client:
+        assert client.get("/charts/symbol/NVDA/reactions").json()["message"] == "down"
+    with _reactions_client(monkeypatch, _EVENTS, ok, _Daily(error=RuntimeError("boom"))) as client:
+        body = client.get("/charts/symbol/NVDA/reactions").json()
+        assert body["state"] == "unavailable" and "could not be calculated" in body["message"]
+    stale = {"status": "stale", "splits": [], "as_of": 1, "issue": None}
+    with _reactions_client(monkeypatch, {**_EVENTS, "message": "refresh failed"}, stale, _Daily(_entry())) as client:
+        body = client.get("/charts/symbol/NVDA/reactions").json()
+        assert body["state"] == "ready" and body["stale"] and body["earnings_stale"]
+        assert "Split adjustment data is stale." in body["message"] and "refresh failed" in body["message"]
+    with _reactions_client(monkeypatch, _EVENTS, ok, _Daily(_entry({"2026-01-02": "unverified"}))) as client:
+        body = client.get("/charts/symbol/NVDA/reactions").json()
+        assert body["usable_count"] == 0 and "could not be verified" in body["message"]
+        assert body["rows"][0]["state"] == "unavailable"

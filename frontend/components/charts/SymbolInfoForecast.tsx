@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { eventDay, readAt } from "@/lib/symbolInfo";
-import type { ImpliedMove, SymbolForecast } from "@/lib/symbolInfo";
+import { eventDay, fetchSymbolReactions, readAt } from "@/lib/symbolInfo";
+import type { ImpliedMove, ReactionSummary, SymbolForecast } from "@/lib/symbolInfo";
 
 const clock = (seconds: number) => new Date(seconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" });
 const quote = (bid: number | null | undefined, ask: number | null | undefined) => `${bid?.toFixed(2) ?? "—"} × ${ask?.toFixed(2) ?? "—"}`;
@@ -19,7 +19,16 @@ function names(move: ImpliedMove, data: SymbolForecast): string {
  * or very wide market shows why there is no number instead of one.
  */
 export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
-  const reactions = data.reactions;
+  const [loaded, setLoaded] = useState<{ symbol: string; value: ReactionSummary | null } | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    fetchSymbolReactions(data.symbol, controller.signal).then((value) => setLoaded({ symbol: data.symbol, value }))
+      .catch(() => { if (!controller.signal.aborted) setLoaded({ symbol: data.symbol, value: null }); });
+    return () => controller.abort();
+  }, [data.symbol]);
+  const current = loaded?.symbol === data.symbol ? loaded : null;
+  const reactions = current?.value ?? null;
+  const reactionError = current != null && current.value == null;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 15000); return () => clearInterval(id); }, []);
   const earningsMove = data.moves.find((move) => move.tags.includes("earnings"));
@@ -47,10 +56,11 @@ export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
       {data.message && data.state !== "unavailable" && <p className="text-[10px] text-amber-300">{data.message}</p>}
       <p className="text-[10px] leading-4 text-slate-500">What the options market prices for a move either way by expiry, at {data.spot?.toFixed(2) ?? "—"}: not a direction or a forecast of one. {data.source}.</p>
     </section>
-    {reactions && <section aria-label="Past earnings reactions" className="space-y-2 border-t border-slate-800 pt-3">
+    {(reactions || reactionError) && <section aria-label="Past earnings reactions" className="space-y-2 border-t border-slate-800 pt-3">
       <h3 className="text-slate-300">Past earnings reactions <span className="ml-1 rounded bg-slate-800 px-1 text-[9px] uppercase tracking-wider text-slate-400">inferred</span></h3>
-      <p className="text-[10px] leading-4 text-slate-500">Report timing is unknown. For each report, the larger absolute full-day move across the report session and next session is shown. This is descriptive, not a forecast. {reactions.source} ({readAt(reactions.fetched_at)}); split-adjusted, dividends not adjusted.{reactions.stale ? " Split data is stale." : ""}{reactions.earnings_stale ? " Earnings dates use an older cached calendar because refresh failed." : ""}</p>
-      {reactions.state === "loading" || reactions.state === "unavailable" ? <p role="status" className="text-amber-300">{reactions.message ?? "Earnings reactions unavailable."}</p>
+      <p className="text-[10px] leading-4 text-slate-500">Report timing is unknown. For each report, the larger absolute full-day move across the report session and next session is shown, so the average leans high. This is descriptive, not a forecast. {reactions?.source ?? "Tradier daily history"} ({readAt(reactions?.fetched_at ?? null)}); split-adjusted, dividends not adjusted.{reactions?.stale ? " Split data is stale." : ""}{reactions?.earnings_stale ? " Earnings dates use an older cached calendar because refresh failed." : ""}</p>
+      {!reactions ? <p role="status" className="text-amber-300">Earnings reactions unavailable. Reopen the tab to retry.</p>
+        : reactions.state === "loading" || reactions.state === "unavailable" ? <p role="status" className="text-amber-300">{reactions.message ?? "Earnings reactions unavailable."}</p>
         : reactions.state === "none" ? <p className="text-slate-500">{reactions.message ?? "No past earnings history."}</p>
         : <>
           <ul className="divide-y divide-slate-800">{reactions.rows.map((row) => <li key={row.report_date} className="py-2">

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
-import type { Earnings, NewsArticle, NewsSource, SymbolEvents, SymbolForecast, SymbolNews, SymbolOverview } from "../lib/symbolInfo";
+import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, SymbolForecast, SymbolNews, SymbolOverview } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
@@ -288,15 +288,16 @@ test("a failed events request retries", async ({ page }) => {
 // ---- Forecast (T2.1): the implied move from stubbed chains; the backend tests choose the straddle and refuse wide markets ----
 
 const QUOTED = Date.parse("2026-10-05T14:28:00Z") / 1000;
-function forecast(symbol: string, spot: number): SymbolForecast {
-  return { symbol, today: "2026-10-05", source: "Tradier option chains", spot, state: "ready", message: null,
-    earnings: { date: "2026-11-19", status: "estimated", label: "Q3 FY2027" }, earnings_note: null,
-    reactions: { state: "ready", message: null, source: "Tradier daily history", fetched_at: QUOTED, earnings_fetched_at: QUOTED,
+const REACTIONS: ReactionSummary = { state: "ready", message: null, source: "Tradier daily history", fetched_at: QUOTED, earnings_fetched_at: QUOTED,
       earnings_stale: false, earnings_message: null, stale: false, price_basis: "split_adjusted", adjustment: {},
       usable_count: 4, average_abs_pct: 6.4, report_range: { from: "2025-10-01", to: "2026-07-30" },
       rows: [{ report_date: "2026-07-30", label: "Q2 FY2026", state: "ready", reason: null, reaction_date: "2026-07-30", gap_pct: 2.3, reaction_pct: -4.1,
         sessions: [{ date: "2026-07-30", previous_date: "2026-07-29", state: "ready", reason: null, gap_pct: 2.3, day_pct: -4.1 },
-          { date: "2026-07-31", previous_date: "2026-07-30", state: "ready", reason: null, gap_pct: 1.2, day_pct: 2.5 }] }] },
+          { date: "2026-07-31", previous_date: "2026-07-30", state: "ready", reason: null, gap_pct: 1.2, day_pct: 2.5 }] }] };
+
+function forecast(symbol: string, spot: number): SymbolForecast {
+  return { symbol, today: "2026-10-05", source: "Tradier option chains", spot, state: "ready", message: null,
+    earnings: { date: "2026-11-19", status: "estimated", label: "Q3 FY2027" }, earnings_note: null,
     moves: [
       { tags: ["nearest", "friday"], expiration: "2026-10-09", days: 4, state: "ready", strike: 100, move: 4.4, percent: 4.4 / spot, iv: 0.512,
         quoted_at: QUOTED, fetched_at: QUOTED + 60, call: { symbol: "NVDA261009C00100000", bid: 2.2, ask: 2.3, iv: 0.5 }, put: { symbol: "NVDA261009P00100000", bid: 2.1, ask: 2.2, iv: 0.524 } },
@@ -307,6 +308,7 @@ function forecast(symbol: string, spot: number): SymbolForecast {
 
 test("Forecast shows the implied move at the chart's price for the nearest expiration, Friday and after earnings, and refuses a one-sided market", async ({ page }) => {
   const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/reactions", (route) => route.fulfill({ json: REACTIONS }));
   await page.route("**/api/backend/charts/symbol/*/forecast**", async (route) => {
     const url = new URL(route.request().url());
     reads.push(url.pathname + url.search);
@@ -342,6 +344,7 @@ test("Forecast shows the implied move at the chart's price for the nearest expir
 
 test("phone Forecast keeps inferred reaction details inside the watchlist sheet", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.route("**/api/backend/charts/symbol/*/reactions", (route) => route.fulfill({ json: REACTIONS }));
   await page.route("**/api/backend/charts/symbol/*/forecast**", async (route) => {
     const url = new URL(route.request().url());
     await route.fulfill({ json: forecast(decodeURIComponent(url.pathname.split("/").at(-2)!), Number(url.searchParams.get("spot"))) });

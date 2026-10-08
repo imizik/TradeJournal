@@ -61,20 +61,29 @@ def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
     # Refresh the active symbol's earnings calendar independently of option and daily history reads.
     events = symbol_info_tradier.symbol_events.forecast_earnings(symbol, today)
     earnings = events.get("next")
-    result = options_feed.forecast(symbol, spot, earnings)
-    reactions = {"state": "unavailable", "message": None, "source": REACTIONS_SOURCE, "fetched_at": None,
-                 "stale": False, "price_basis": "split_adjusted", "adjustment": {}, "rows": [],
-                 "usable_count": 0, "average_abs_pct": None, "report_range": None,
-                 "earnings_fetched_at": events.get("fetched_at"), "earnings_stale": bool(events.get("message")),
-                 "earnings_message": events.get("message")}
+    return options_feed.forecast(symbol, spot, earnings)
+
+
+@router.get("/symbol/{symbol:path}/reactions")
+def reactions(symbol: str):
+    """T2.2 inferred earnings reactions. Separate from the forecast so a slow daily-history read
+    never delays the implied move; the daily series and calendar are cached per day."""
+    symbol = _ticker(symbol)
+    today = datetime.now(ET).date()
+    events = symbol_info_tradier.symbol_events.forecast_earnings(symbol, today)
+    out = {"state": "unavailable", "message": None, "source": REACTIONS_SOURCE, "fetched_at": None,
+           "stale": False, "price_basis": "split_adjusted", "adjustment": {}, "rows": [],
+           "usable_count": 0, "average_abs_pct": None, "report_range": None,
+           "earnings_fetched_at": events.get("fetched_at"), "earnings_stale": bool(events.get("message")),
+           "earnings_message": events.get("message")}
     if events["state"] in ("loading", "unavailable"):
-        reactions.update(state=events["state"], message=events.get("message") or "Earnings history is loading.")
+        out.update(state=events["state"], message=events.get("message") or "Earnings history is loading.")
     elif not events["reports"]:
-        reactions.update(state="none", message="No confirmed past earnings reports are listed.", fetched_at=events.get("fetched_at"))
+        out.update(state="none", message="No confirmed past earnings reports are listed.", fetched_at=events.get("fetched_at"))
     else:
         info = chart_feed.splits.get(symbol) if chart_feed.splits else None
         if not info or info.get("status") == "unknown":
-            reactions["message"] = (info or {}).get("issue") or "Split adjustment data is unavailable."
+            out["message"] = (info or {}).get("issue") or "Split adjustment data is unavailable."
         else:
             try:
                 entry = chart_feed.daily.entry(symbol, today, info)
@@ -91,13 +100,12 @@ def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
                                    reaction_date=None, gap_pct=None, reaction_pct=None)
                     summary = reaction_summary(rows)
                     warnings.append("A stock split could not be verified for this history.")
-                reactions.update(state="ready", message=" ".join(warnings) or None, fetched_at=entry.fetched_at,
-                                 stale=bool(info.get("status") == "stale"), adjustment={"status": info.get("status"), "as_of": info.get("as_of"),
-                                 "issue": info.get("issue"), "daily": entry.states}, rows=rows, **summary)
+                out.update(state="ready", message=" ".join(warnings) or None, fetched_at=entry.fetched_at,
+                           stale=info.get("status") == "stale", adjustment={"status": info.get("status"), "as_of": info.get("as_of"),
+                           "issue": info.get("issue"), "daily": entry.states}, rows=rows, **summary)
             except ChartFeedError as exc:
-                reactions["message"] = str(exc)
-            except Exception:  # reactions are an add-on; the implied move must still be returned
+                out["message"] = str(exc)
+            except Exception:  # the section degrades on its own
                 log.exception("Earnings reactions failed for %s", symbol)
-                reactions["message"] = "Earnings reactions could not be calculated."
-    result["reactions"] = reactions
-    return result
+                out["message"] = "Earnings reactions could not be calculated."
+    return out
