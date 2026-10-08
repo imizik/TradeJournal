@@ -48,7 +48,7 @@ after them, clearly labelled.
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |
-| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS, ratings labels disagree with Yahoo's |
+| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS |
 | T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS | 3 Depth | todo |
 | T3.3 | Ownership and insider activity | 3 Depth | todo |
@@ -302,11 +302,10 @@ call from the VPS on 2026-10-08 (after the VPS, 15.204.255.2, was added to the
 key's IP allowlist) showed `symbol` and `category=US_STOCK` work, values come
 back as strings, ratings use `under_perform`, and `/forecast-eps/get` is a bare
 list of fiscal quarters with `actual`, `est` and `reported`. Webull leads for
-targets and for beat or miss. **Rating counts follow Yahoo's labels**: for NVDA
-Webull reports `strong_buy` 48 and `buy` 10 where Yahoo reports 10 and 48 (the
-same total, and the same target figures, so the same vendor); until Webull's
-meaning is settled, Webull's counts are only the fallback. *Done when:* the
-tab renders these on the VPS and the ratings mapping is settled.
+targets, ratings and beat or miss. The two disagree on rating labels for the
+same analysts (NVDA: Webull `strong_buy` 48 and `buy` 10, Yahoo 10 and 48,
+same total); Webull's matches what the Webull app shows, so it leads and
+Yahoo is the fallback. *Done when:* the tab renders these on the VPS.
 
 ### Phase 3 — Depth
 
