@@ -1,0 +1,1 @@
+{"status":"OK","results":[{"settlement_date":"2026-09-15","ticker":"SPY","short_interest":99297854,"avg_daily_volume":40427733,"days_to_cover":2.46},{"settlement_date":"2026-08-31","ticker":"SPY","short_interest":81719964,"avg_daily_volume":36546310,"days_to_cover":2.24}],"next_url":"https://api.polygon.io/stocks/v1/short-interest?cursor=REDACTED"}

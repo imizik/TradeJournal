@@ -49,10 +49,10 @@ after them, clearly labelled.
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | in PR ([PR #150](https://github.com/imizik/TradeJournal/pull/150)) |
 | T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS |
-| T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
+| T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | done ([PR #157](https://github.com/imizik/TradeJournal/pull/157)) |
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | done ([PR #155](https://github.com/imizik/TradeJournal/pull/155)) |
-| T3.3 | Ownership and insider activity | 3 Depth | built (branch `claude/t3-3-ownership-insiders`); insiders from Yahoo, unofficial |
-| T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | todo |
+| T3.3 | Ownership and insider activity | 3 Depth | built ([PR #158](https://github.com/imizik/TradeJournal/pull/158)); insiders from Yahoo, unofficial |
+| T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | done ([PR #154](https://github.com/imizik/TradeJournal/pull/154)) |
 | T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
 | T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
 | T3.7 | Economic calendar from FRED release dates | 3 Depth | todo, not built (needs a free FRED key) |
@@ -336,6 +336,14 @@ covered 41.6M shares on a roughly 100M-share day), and a hard-to-borrow
 flag when the symbol is missing from Tradier's easy-to-borrow list. Polygon
 calls cached one day. *Done when:* fixtures render, and a Polygon 429 serves
 the cached copy with its age.
+
+*Built as the **Short** tab.* Shares outstanding come from Polygon's ticker
+details (`share_class_shares_outstanding`, else `weighted_shares_outstanding`),
+one more cached call, read only when a short-interest row exists; without it
+the percentage is omitted and the tab says so. Probes on 2026-10-08: ETFs
+(SPY) have short-interest rows; an unknown ticker returns empty `results`;
+Polygon's `short_volume_ratio` is a percent and the tab recomputes it from the
+two volumes; Tradier's easy-to-borrow list was 1,520 symbols (stocks and ETFs).
 
 **T3.2 Financials.** The last eight quarters of revenue, gross margin,
 operating margin, net income and diluted EPS from SEC EDGAR's XBRL

@@ -2,17 +2,19 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast,fetchSymbolJournal, fetchSymbolNews, fetchSymbolOverview } from "@/lib/symbolInfo";
-import type { SymbolEvents, SymbolFinancials, SymbolForecast,SymbolJournal, SymbolNews, SymbolOverview } from "@/lib/symbolInfo";
+import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolNews, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
+import type { SymbolEvents, SymbolFinancials, SymbolForecast, SymbolJournal, SymbolNews, SymbolOverview, SymbolShort } from "@/lib/symbolInfo";
 import type { ChartQuote } from "@/lib/charts";
 import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoFinancials from "./SymbolInfoFinancials";
 import SymbolInfoForecast from "./SymbolInfoForecast";
 import SymbolInfoNews from "./SymbolInfoNews";
+import SymbolInfoPeers from "./SymbolInfoPeers";
+import SymbolInfoShort from "./SymbolInfoShort";
 import SymbolInfoYou from "./SymbolInfoYou";
 
-const TABS = ["Overview", "News", "Events", "Forecast", "Financials", "You"] as const;
+const TABS = ["Overview", "News", "Events", "Forecast", "Financials", "Short", "You"] as const;
 type Tab = typeof TABS[number];
 const TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
 /** The tabs built so far: one request each, for the open tab only. The Forecast tab needs the price. Forecast and News read again each minute while open and visible. */
@@ -23,12 +25,13 @@ const BUILT = {
   Events: { load: fetchSymbolEvents, name: "events", title: "Events" },
   Forecast: { load: fetchSymbolForecast, name: "forecast", title: "Forecast" },
   Financials: { load: fetchSymbolFinancials, name: "financials", title: "Financials" },
+  Short: { load: fetchSymbolShort, name: "short", title: "Short" },
 } satisfies Partial<Record<Tab, { load(symbol: string, signal: AbortSignal, spot: number | null): Promise<unknown>; name: string; title: string }>>;
 const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
 const REFRESH_MS = 60_000;
 
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
-export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null }) {
+export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void }) {
   const id = useId();
   const priceOf = useRef(price);
   useEffect(() => { priceOf.current = price; });
@@ -76,6 +79,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt }: { s
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
     {view.expanded && <div id={`${id}-content`}>
+      {onSelectSymbol && <SymbolInfoPeers symbol={symbol} onSelect={onSelectSymbol} />}
       <div role="tablist" aria-label="Symbol info tabs" className="flex border-y border-slate-700/40">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {
@@ -87,6 +91,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt }: { s
         {!built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
+            : view.tab === "Short" ? <SymbolInfoShort data={shown.data as SymbolShort} />
             : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} />
             : view.tab === "Financials" ? <SymbolInfoFinancials data={shown.data as SymbolFinancials} />
             : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
