@@ -231,18 +231,22 @@ def check_expiry(state: Paper, terms: Terms, now: float) -> list[dict]:
 
 
 def advance(state: Paper, terms: Terms, bars: list[dict], sessions: list[Session], *,
-            reconstructed: bool = False) -> list[dict]:
+            reconstructed: bool = False, durable_at: float | None = None) -> list[dict]:
     """Judge completed one-minute bars ``{start, o, h, l, c}`` and return the new events.
 
     ``bars`` must hold every regular minute from the first the position needs (the eligible entry minute,
     or the entry minute when already open) onward; earlier ones are skipped. ``sessions`` are the regular
     sessions from the entry day on, as far as the calendar knows them. Minutes outside a session are ignored; a minute
-    missing between two supplied ones makes the position ``unresolved``.
+    missing between two supplied ones makes the position ``unresolved``. ``durable_at`` is when the
+    trigger was stored: the entry minute must start after both detection and that moment.
     """
     if state.status not in ("triggered", "open"):
         return []
     run = _Run(state, reconstructed)
-    expected = _next_minute(state.trigger["detected_at"]) if state.status == "triggered" else state.entry["bar_start"]
+    if state.status == "triggered":
+        expected = _next_minute(max(state.trigger["detected_at"], durable_at or 0))
+    else:
+        expected = state.entry["bar_start"]
     hold_end = None
     for bar in _regular(bars, sessions):
         if bar["start"] < expected:

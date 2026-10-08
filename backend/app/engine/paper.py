@@ -237,64 +237,95 @@ class PaperWatcher:
             return result
 
     def run(self) -> None:
-        now = self.clock()
         for record, terms, state in self.active():
             try:
-                self._judge(record, terms, state, now)
+                self._judge(record, terms, state)
             except (ChartFeedError, ValueError) as exc:
                 log.warning("Paper plan %s not judged this pass: %s", record.id, exc)
+            except Exception:  # one plan's failure must not stop the others
+                log.exception("Paper plan %s failed this pass", record.id)
 
-    def _judge(self, record: DecisionRecord, terms: px.Terms, state: px.Paper, now: float) -> None:
-        events = px.check_expiry(state, terms, now)
-        if events:
-            return self._store(record, events, now)
+    def _judge(self, record: DecisionRecord, terms: px.Terms, state: px.Paper) -> None:
+        now = self.clock()
         today = datetime.fromtimestamp(now, ET).date()
         first = datetime.fromtimestamp(state.armed_at, ET).date()
-        if state.status in ("triggered", "open") and self._split_since(record.symbol, first, today):
-            return self._store(record, px.end_unresolved(state, now, "split"), now)
+        if state.status == "armed":
+            past_expiry = now > terms.expiry + px.MAX_DETECTION_DELAY
+            session = regular_session(today, self.calendar.hours(today))
+            in_session = session is not None and session.open_at < now <= session.close_at + LATENESS + 120
+            if not (in_session or past_expiry):
+                return  # nothing can have closed since the last pass
+            # The trigger is judged before expiry, so a restart past the expiry still finds a missed trigger.
+            minutes = self._minutes(record.symbol, first, today)
+            detected = self.clock()  # after the read: the bars cannot be newer than this
+            events = px.watch(state, terms, self._bars15(minutes, detected), detected)
+            if not events:
+                events = px.check_expiry(state, terms, detected)
+            if not events:
+                return
+            self._store(record, events)
+            state = px.fold(self._history(record.id))
+            if state.status != "triggered":
+                return
+        if state.status not in ("triggered", "open"):
+            return
+        split = self._split_since(record.symbol, first, today)
+        if split is None:
+            return  # the split source is unavailable: wait rather than judge across a possible split
+        if split:
+            return self._store(record, px.end_unresolved(state, now, "split"))
         session = regular_session(today, self.calendar.hours(today))
         if session is None or not session.open_at < now <= session.close_at + LATENESS + 120:
-            return  # nothing can have closed since the last pass
+            return
         minutes = self._minutes(record.symbol, first, today)
-        if state.status == "armed":
-            candles = chart_bars(minutes, [], "15m", "regular", {today: self.calendar.hours(today)})
-            bars15 = [{"start": b["time"], "end": b["end_time"], "close": b["close"]}
-                      for b in candles if b["end_time"] + LATENESS <= now]
-            events = px.watch(state, terms, bars15, now)
-            self._store(record, events, now)
-            state = px.fold([*self._history(record.id), *events]) if events else state
-        if state.status in ("triggered", "open"):
-            bars = [{"start": b["time"], "o": b["open"], "h": b["high"], "l": b["low"], "c": b["close"]}
-                    for b in minutes if b["end_time"] + LATENESS <= now]
-            events = px.advance(state, terms, bars, sessions_from(self.calendar, first, today))
-            self._store(record, events, now, reconstructed_before=now - px.MAX_DETECTION_DELAY - 60)
+        seen = self.clock()
+        bars = [{"start": b["time"], "o": b["open"], "h": b["high"], "l": b["low"], "c": b["close"]}
+                for b in minutes if b["end_time"] + LATENESS <= seen]
+        events = px.advance(state, terms, bars, sessions_from(self.calendar, first, today),
+                            durable_at=self._trigger_stored_at(record.id))
+        self._store(record, events, reconstructed_before=seen - px.MAX_DETECTION_DELAY - 60)
+
+    def _bars15(self, minutes: list[dict], now: float) -> list[dict]:
+        days = {datetime.fromtimestamp(b["time"], ET).date() for b in minutes}
+        candles = chart_bars(minutes, [], "15m", "regular", {d: self.calendar.hours(d) for d in days})
+        return [{"start": b["time"], "end": b["end_time"], "close": b["close"]} for b in candles if b["end_time"] + LATENESS <= now]
 
     def _history(self, record_id: uuid.UUID) -> list[dict]:
         with Session(self.engine) as db:
             return _data(events_for(db, record_id))
 
-    def _store(self, record: DecisionRecord, events: list[dict], now: float, **kwargs) -> None:
+    def _trigger_stored_at(self, record_id: uuid.UUID) -> float | None:
         with Session(self.engine) as db:
-            if not append(db, record.id, events, now=now, **kwargs):
+            row = db.exec(select(DecisionEvent).where(DecisionEvent.record_id == record_id,
+                                                      DecisionEvent.event_type == "trigger")).first()
+            return _epoch(row.recorded_at) if row else None
+
+    def _store(self, record: DecisionRecord, events: list[dict], **kwargs) -> None:
+        with Session(self.engine) as db:
+            if not append(db, record.id, events, now=self.clock(), **kwargs):
                 log.info("Paper events for %s were already stored by another pass", record.id)
 
     def _minutes(self, symbol: str, first: date, today: date) -> list[dict]:
-        data, _, _ = self.feed.read("/v1/markets/timesales", {
+        data, _, issue = self.feed.read("/v1/markets/timesales", {
             "symbol": symbol, "interval": "1min", "session_filter": "all",
             "start": first.strftime("%Y-%m-%d 04:00"), "end": today.strftime("%Y-%m-%d 20:00"),
         }, 15)
+        if issue:
+            # A stale or partial answer (an outage served from cache) is never judged as final bars.
+            raise ChartFeedError(f"minute bars not current: {issue}")
         series = (data or {}).get("series") or {}
         rows = series.get("data") if isinstance(series, dict) else None
         return normalize_bars(rows if isinstance(rows, list) else [rows] if isinstance(rows, dict) else [])
 
-    def _split_since(self, symbol: str, first: date, today: date) -> bool:
+    def _split_since(self, symbol: str, first: date, today: date) -> bool | None:
+        """True or False from the split source; None when it cannot answer."""
         if self.splits is None:
             return False
         try:
             found = self.splits.get(symbol, today).get("splits") or []
-        except Exception:  # an unavailable split source is not evidence of a split
-            return False
-        return any(first < date.fromisoformat(s["ex_date"]) <= today for s in found)
+            return any(first < date.fromisoformat(s["ex_date"]) <= today for s in found)
+        except Exception:
+            return None
 
     # -------------------------------------------------------------- delivery
 
@@ -349,7 +380,9 @@ def message(record: DecisionRecord, event: dict, now: float) -> tuple[str, str]:
                 + (" (ambiguous bar)" if event.get("ambiguous") else ""),
         "unresolved": f"Paper outcome unresolved: {event.get('reason')}",
     }[event["type"]]
-    age = now - event["at"]
+    # Bar events are dated by the minute's start; they are knowable once it closed and was final.
+    knowable = event["bar_start"] + 60 + LATENESS if event["type"] in ("entry", "entry_rejected", "exit") else event["at"] + LATENESS
+    age = now - max(event["at"], knowable)
     if age > LATE_SECONDS:
         what += f" (late by {int(age // 60)} min)"
     return f"PRACTICE · {record.symbol} {event['type'].replace('_', ' ')}", what + ". Not a real trade."

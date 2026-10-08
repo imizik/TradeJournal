@@ -31,11 +31,11 @@ function Flags({ e }: { e: PaperEvent }) {
   if (e.reconstructed) flags.push("reconstructed");
   if (e.type === "exit" && e.ambiguous) flags.push("ambiguous");
   if (e.type === "missed_trigger" && e.reason === "detected_late") flags.push("late");
-  const delivery = e.delivery == null ? "" : e.delivery === "sent" ? "phone alert sent" : e.delivery_error ? `phone alert ${e.delivery}: ${e.delivery_error}` : `phone alert ${e.delivery}`;
+  const delivery = e.delivery == null || e.delivery === "none" ? "" : e.delivery === "sent" ? "phone alert sent" : e.delivery_error ? `phone alert ${e.delivery}: ${e.delivery_error}` : `phone alert ${e.delivery}`;
   return (
     <>
       {flags.map((f) => <span key={f} className="ml-1 rounded bg-amber-500/10 px-1 text-amber-700">{f}</span>)}
-      {delivery && <span className={`ml-1 ${e.delivery === "sent" ? "text-emerald-700" : "text-red-600"}`}>{delivery}</span>}
+      {delivery && <span className={`ml-1 ${e.delivery === "sent" ? "text-emerald-700" : e.delivery_error || e.delivery === "expired" ? "text-red-600" : "text-slate-500"}`}>{delivery}</span>}
     </>
   );
 }

@@ -118,6 +118,17 @@ class LevelAlertMonitor:
             self._wake.clear()
 
     async def run_once(self) -> None:
+        try:
+            await self._run_alerts()
+        finally:
+            # Paper plans are judged even when a level-alert stage failed this pass.
+            if self.paper is not None:
+                try:
+                    await asyncio.to_thread(self.paper.run)
+                finally:
+                    await asyncio.to_thread(self.paper.deliver)
+
+    async def _run_alerts(self) -> None:
         await self._record_found()
         await asyncio.to_thread(self.deliver)
         await asyncio.to_thread(self.reload)
@@ -128,11 +139,6 @@ class LevelAlertMonitor:
             self._found.extend(fired)
             await self._record_found()
             await asyncio.to_thread(self.deliver)
-        if self.paper is not None:
-            try:
-                await asyncio.to_thread(self.paper.run)
-            finally:
-                await asyncio.to_thread(self.paper.deliver)
 
     async def _record_found(self) -> None:
         """Write the firings waiting in memory. If the database fails, they wait for the next pass:

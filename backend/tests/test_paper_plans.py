@@ -38,10 +38,17 @@ class Calendar:
 class Feed:
     def __init__(self):
         self.minutes = []
+        self.issue = None
+        self.fail = set()  # symbols whose read raises unexpectedly
+        self.on_read = None
 
     def read(self, path, params, ttl):
+        if params["symbol"] in self.fail:
+            raise RuntimeError("boom")
+        if self.on_read:
+            self.on_read()
         rows = [{"timestamp": s, "open": o, "high": h, "low": low, "close": c, "volume": 100} for s, o, h, low, c in self.minutes]
-        return {"series": {"data": rows}}, 0, None
+        return {"series": {"data": rows}}, 0, self.issue
 
     def flat(self, first, last, price=100.5):
         self.minutes += [(t, price, price, price, price) for t in range(first, last, 60)]
@@ -256,10 +263,130 @@ def test_each_paper_event_is_sent_once_and_retried_on_failure(engine, monkeypatc
     assert title == "PRACTICE · SPY trigger" and "Not a real trade" in body and path == f"/?decision={rid}"
 
 
-def test_a_late_message_says_it_is_late():
+def test_a_late_message_says_it_is_late_and_an_on_time_one_does_not():
     item = DecisionRecord(symbol="SPY")
-    _, body = paper.message(item, {"type": "entry", "at": 1000, "fill": 100.5}, 1000 + 600)
+    _, body = paper.message(item, {"type": "entry", "at": 1020, "bar_start": 1020, "fill": 100.5}, 1020 + 60 + 30 + 600)
     assert "late by 10 min" in body
+    # An entry minute is dated by its start but only knowable a minute and a half later: not late.
+    _, body = paper.message(item, {"type": "entry", "at": 1020, "bar_start": 1020, "fill": 100.5}, 1020 + 60 + 30 + 20)
+    assert "late" not in body
+    _, body = paper.message(item, {"type": "trigger", "at": 1000, "close": 100.2, "level": 100}, 1000 + 40)
+    assert "late" not in body
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def test_a_stale_feed_answer_is_never_judged(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    feed.issue = "stale: provider unreachable"
+    w.run()
+    assert types(engine, rid) == ["armed"]
+    feed.issue = None
+    w.run()
+    assert types(engine, rid) == ["armed", "trigger"]
+
+
+def test_a_restart_past_expiry_still_records_the_missed_trigger(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    clock.now = at(DAY, 15, 30)  # restarted after the plan's expiry; the 10:15 trigger was never seen
+    w.run()
+    assert types(engine, rid) == ["armed", "missed_trigger"]
+
+
+def test_a_stale_read_past_expiry_does_not_expire_the_plan_blind(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    feed.issue = "stale"
+    clock.now = at(DAY, 15, 30)
+    w.run()
+    assert types(engine, rid) == ["armed"]
+
+
+def test_an_unavailable_split_source_pauses_judging_instead_of_assuming_no_split(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    w.run()
+
+    class Down:
+        def get(self, symbol, day):
+            raise RuntimeError("splits unreachable")
+
+    w.splits = Down()
+    feed.minutes.append((at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5))
+    clock.now = at(DAY, 10, 17, 31)
+    w.run()
+    assert types(engine, rid) == ["armed", "trigger"]
+    w.splits = None
+    w.run()
+    assert types(engine, rid) == ["armed", "trigger", "entry"]
+
+
+def test_the_entry_minute_starts_after_the_trigger_was_stored(engine):
+    rid, feed, clock, w = lifecycle(engine)
+    clock.now = at(DAY, 10, 15, 58)
+
+    def slow_read():  # the read takes past the next minute boundary before the trigger is stored
+        clock.now = at(DAY, 10, 16, 3)
+
+    feed.on_read = slow_read
+    w.run()
+    feed.on_read = None
+    with Session(engine) as db:
+        trigger = [r for r in paper.events_for(db, rid) if r.event_type == "trigger"][0]
+    assert json.loads(trigger.data_json)["detected_at"] == at(DAY, 10, 16, 3)
+    feed.minutes += [(at(DAY, 10, 16), 100.5, 100.6, 100.4, 100.5), (at(DAY, 10, 17), 100.7, 100.8, 100.6, 100.7)]
+    clock.now = at(DAY, 10, 18, 31)
+    w.run()
+    with Session(engine) as db:
+        entry = [json.loads(r.data_json) for r in paper.events_for(db, rid) if r.event_type == "entry"][0]
+    assert entry["bar_start"] == at(DAY, 10, 17)
+
+
+def test_the_reducer_waits_for_the_minute_after_the_trigger_was_durable():
+    terms = px.terms_from_plan(plan())
+    state = px.fold([px.arm_event(at(DAY, 9, 0)), {"type": "trigger", "key": "trigger", "at": at(DAY, 10, 15),
+                                                   "detected_at": at(DAY, 10, 15, 35)}])
+    sessions = [px.Session(DAY.isoformat(), at(DAY, 9, 30), at(DAY, 16, 0))]
+    bars = [{"start": at(DAY, 10, m), "o": 100.5, "h": 100.5, "l": 100.5, "c": 100.5} for m in (16, 17)]
+    events = px.advance(state, terms, bars, sessions, durable_at=at(DAY, 10, 16, 1))
+    assert events[0]["bar_start"] == at(DAY, 10, 17)
+
+
+def test_one_plans_failure_does_not_stop_the_others(engine):
+    spy = record(engine, "SPY")
+    qqq = record(engine, "QQQ")
+    arm(engine, spy, op="a")
+    arm(engine, qqq, op="b")
+    feed, clock = Feed(), Clock(at(DAY, 10, 15, 35))
+    feed.flat(at(DAY, 9, 30), at(DAY, 10, 14), 99.8)
+    feed.minutes.append((at(DAY, 10, 14), 99.9, 100.3, 99.9, 100.2))
+    feed.fail = {"SPY"}
+    watcher(engine, feed, clock).run()
+    assert types(engine, spy) == ["armed"] and types(engine, qqq) == ["armed", "trigger"]
+
+
+def test_paper_plans_are_judged_even_when_the_level_alert_stage_fails(engine):
+    import asyncio
+
+    from app.engine.level_alert_monitor import LevelAlertMonitor
+
+    calls = []
+
+    class Paper:
+        def run(self):
+            calls.append("run")
+
+        def deliver(self):
+            calls.append("deliver")
+
+    monitor = LevelAlertMonitor(engine, None, feed=None, paper=Paper())
+
+    async def broken():
+        raise RuntimeError("level alerts failed")
+
+    monitor._run_alerts = broken
+    with pytest.raises(RuntimeError):
+        asyncio.run(monitor.run_once())
+    assert calls == ["run", "deliver"]
 
 
 # ---------------------------------------------------------------- the routes
@@ -275,6 +402,10 @@ def test_arm_and_paper_routes(engine, monkeypatch):
     app.include_router(routes.router, prefix="/decisions")
     app.dependency_overrides[get_session] = session
     monkeypatch.setattr(routes, "chart_calendar", Calendar())
+    with TestClient(app) as http:
+        response = http.post(f"/decisions/{uuid.uuid4()}/arm", json={"operation_id": "a"})
+        assert response.status_code == 503 and "watcher" in response.json()["detail"]
+    app.state.level_alerts = type("M", (), {"paper": object(), "changed": lambda self: None})()
     rid = record(engine, received=at(date(2026, 10, 6), 9, 0))
     real = paper.arm
     monkeypatch.setattr(routes.paper, "arm", lambda db, r, op, now, calendar: real(

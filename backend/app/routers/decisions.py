@@ -97,6 +97,10 @@ def get_decision(record_id: uuid.UUID, db: Session = Depends(get_session)):
 @router.post("/{record_id}/arm", status_code=201)
 def arm(record_id: uuid.UUID, body: ArmCreate, request: Request, response: Response, db: Session = Depends(get_session)):
     """Arm a frozen TAKE as a Practice paper plan under the complete P0 policy (A2)."""
+    monitor = getattr(request.app.state, "level_alerts", None)
+    if monitor is None or getattr(monitor, "paper", None) is None:
+        # Arming without a running watcher would use a session slot for a plan nobody judges.
+        raise HTTPException(status_code=503, detail="The paper watcher is not running on this server, so nothing can be armed.")
     try:
         _, created = paper.arm(db, record_id, body.operation_id, now=datetime.now(ET), calendar=chart_calendar)
     except LookupError as exc:
@@ -105,9 +109,7 @@ def arm(record_id: uuid.UUID, body: ArmCreate, request: Request, response: Respo
         raise HTTPException(status_code=409 if "operation_id" in str(exc) else 422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    monitor = getattr(request.app.state, "level_alerts", None)
-    if monitor is not None:
-        monitor.changed()
+    monitor.changed()
     response.status_code = 201 if created else 200
     return paper.paper_row(db, record_id)
 
