@@ -44,13 +44,13 @@ after them, clearly labelled.
 |---|---|---|---|
 | T1.1 | Panel shell and the **You** tab: your own trades on this underlying | 1 Core | done ([PR #115](https://github.com/imizik/TradeJournal/pull/115)) |
 | T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga, plus Polygon with provider-supplied sentiment) | 1 Core | done (branch `claude/roadmap-features-7kd6u6`) |
-| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | built locally; browser verification pending |
+| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | built ([PR #146](https://github.com/imizik/TradeJournal/pull/146)); the fundamentals parser was rewritten against recorded responses on 2026-10-08 after it showed nothing for every symbol |
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | in PR ([PR #150](https://github.com/imizik/TradeJournal/pull/150)) |
 | T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS |
 | T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
-| T3.2 | Financials: last eight quarters of revenue, margins and EPS | 3 Depth | todo |
+| T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | built (branch `worktree-agent-ad98a3a9a83fc8ff7`) |
 | T3.3 | Ownership and insider activity | 3 Depth | todo |
 | T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | built (branch `worktree-agent-aac8457f5447293c2`) |
 | T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
@@ -78,7 +78,7 @@ Probed 2026-10-02 with NVDA, CVNA, AMD, LLY and SPY.
 | Forecast: analyst targets, ratings, estimates | Polygon/Massive Benzinga endpoints (`/benzinga/v1/ratings`, `/consensus-ratings`, `/earnings`) | **HTTP 403**, "not entitled", needs a paid plan | Not available on current plans |
 | Forecast: same data | Yahoo via `yfinance` (already a dependency for quotes) | Price targets (NVDA mean 327.7, median 315, high 515, low 180), rating counts (NVDA 10/48/2/1/0), 984 upgrade/downgrade rows with target changes, next-quarter EPS and revenue estimates with analyst counts, EPS trend over 90 days, last four quarters beat/miss, 150 insider transactions | **Works**, unofficial and unlicensed: [decision 1](#open-decisions) |
 | Forecast, trader edition | Tradier option chains (Charts C4.1 adapter) + Tradier daily bars | ATM straddle per expiration; daily bars back to the 1990s | **Feasible now**, calculated locally (T2.1, T2.2) |
-| Financials | Polygon `/vX/reference/financials` | Quarterly income statement, balance sheet, cash flow from SEC XBRL (NVDA Q2 FY27: revenue 96.2B, diluted EPS 2.46), with filing date | Feasible; `vX` is Polygon's experimental route and the newer `/stocks/financials/v1` is 403, so it may be retired |
+| Financials | SEC EDGAR `data.sec.gov/api/xbrl/companyfacts/CIK##########.json`, ticker map `www.sec.gov/files/company_tickers.json` (probed from the VPS 2026-10-08: both 200; NVDA 4 MB in 0.47 s) | XBRL facts with period start/end, filing date and form (NVDA Q2 FY27: revenue 96.2B, diluted EPS 2.46) | **Built in T3.2.** Polygon's `/vX/reference/financials` returns 410 and sunsets 2026-10-09; its successor is 403 on our plan |
 | Short interest | Polygon `/stocks/v1/short-interest`, `/stocks/v1/short-volume`; Tradier `/v1/markets/etb` | FINRA short interest twice a month with days to cover (NVDA 294M, 2.55 days, settled 2026-09-15); daily short-volume ratio (NVDA 54.1% on 2026-10-01); the easy-to-borrow list | Feasible |
 | Ownership, insiders | Tradier `/company` (13F summary); Yahoo insider transactions; SEC EDGAR Form 4 | 13F: 6,065 holders, 69.5% held. Yahoo: Form 4 rows with insider, role, shares, value. EDGAR: *unverified*, blocked by this sandbox's network, not by SEC | 13F feasible; insiders via Yahoo or a later EDGAR probe from the VPS |
 | Peers | Polygon `/v1/related-companies` | Ten tickers (NVDA: GOOGL, AMD, MSFT, META, AMZN, TSLA, AAPL, AVGO, INTC) | Feasible |
@@ -103,6 +103,17 @@ and the item that consumes the data owns the test.
   second class (`0PDXF29G25`, IPO 1970, nearly empty) that carries its own
   beta and averages. Pick the share class matching the request's primary
   listing and ignore the rest. Do not merge fields across classes. (T1.3)
+  On 2026-10-08 the 30/60/90-day volume averages arrived only on that second
+  class (NVDA 107.9M), so the statistics read takes the class that has them.
+- **The tables are not named after the endpoints.** The company call holds
+  `share_class`, `share_class_profile` (market cap, enterprise value, shares
+  outstanding), `ownership_summary` (13F), `company_profile`,
+  `historical_asset_classification` (a numeric Morningstar sector code) and
+  `long_descriptions`; ratios are `valuation_ratios` (`p_e_ratio`,
+  `e_v_to_e_b_i_t_d_a`, `forward_dividend_yield`) and `alpha_beta`. There is
+  no company name, percentages are fractions, and an ETF's market cap reads 0.
+  The first parser guessed other names and showed nothing; parse only against
+  the recorded fixture `backend/tests/fixtures/tradier/overview_2026-10-08.json`. (T1.3)
 - **Calendars can hold two "next earnings" rows.** CVNA had Q3 results on
   2026-10-28 *Confirmed* and 2026-10-29 *Estimated*. A confirmed row wins for
   the same fiscal quarter. (T1.4) By 2026-10-04 the estimated row was gone;
@@ -320,11 +331,16 @@ calls cached one day. *Done when:* fixtures render, and a Polygon 429 serves
 the cached copy with its age.
 
 **T3.2 Financials.** The last eight quarters of revenue, gross margin,
-operating margin, net income and diluted EPS from Polygon's XBRL financials,
-as small bars with year-over-year growth. Cached until the next filing date.
-Isolate the `vX` route behind the adapter: if Polygon retires it, this tab
-degrades and nothing else breaks. *Done when:* the NVDA fixture renders and
-the margins are calculated, not read.
+operating margin, net income and diluted EPS from SEC EDGAR's XBRL
+companyfacts (Polygon's `vX` route is retired), as small bars with
+year-over-year growth. A quarter is a 10-Q fact of 80-105 days, not an `fp`
+(year-to-date facts share it); values come from the latest filing, fiscal
+labels from the earliest; Q4 lives only in the 10-K and shows as a gap, never
+derived; a missing field is null, never 0. Issuers that file only 20-Fs (NBIS)
+and ETFs get an explanatory state. Cached (normalized quarters only) until the
+next 10-Q is due, then re-checked daily. `SEC_USER_AGENT` must carry a contact
+or www.sec.gov answers 403. *Done when:* the NVDA fixture renders and the
+margins are calculated, not read.
 
 **T3.3 Ownership and insiders.** The 13F summary from the Tradier company
 call T1.3 already makes (holders, % held, buyers versus sellers, new and
@@ -358,7 +374,11 @@ right candle on 1m and 1D in a browser test, and a layer toggle hides them.
 - **EDGAR news source** (T3.6): 8-K and Form 4 filings as headlines in the
   News tab, normalized into the same shape with `provider: "edgar"`. EDGAR
   needs a descriptive `User-Agent` and a 10-requests-a-second courtesy limit,
-  and this sandbox cannot reach it, so probe it from the VPS first. Not built.
+  and this sandbox cannot reach it, so probe it from the VPS first. The VPS
+  probe of 2026-10-08 showed EDGAR reachable for T3.2: `data.sec.gov` companyfacts
+  and `www.sec.gov/files/company_tickers.json` both returned 200 (the latter 403
+  without a contact in the `User-Agent`, see `SEC_USER_AGENT`); the submissions
+  and Form 4 endpoints are still unprobed. Not built.
 - **Economic calendar** (T3.7): FRED `/fred/releases/dates` for CPI, jobs and
   FOMC-adjacent releases on the Events tab or as chart markers. Needs a free
   FRED API key. Not built.

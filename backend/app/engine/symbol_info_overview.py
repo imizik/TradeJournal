@@ -1,8 +1,23 @@
 """Pure normalizers for the Symbol Info Overview tab (T1.3).
 
-Tradier's fundamentals endpoints wrap each requested symbol in a list and can
-return more than one share class. Keep only the best matching class for each
-dataset; never fill missing fields from a second class.
+Tradier's fundamentals endpoints (Morningstar) wrap each requested symbol in a
+list of results: ``Company`` results keyed by company id and ``Stock`` results
+keyed by share-class id, each with named tables. A symbol can come back with a
+second, nearly empty share class (ids like ``0PDXF...``). Each dataset reads one
+result, the best populated, and never fills a field from another class.
+
+Where the fields actually live (recorded in
+``tests/fixtures/tradier/overview_2026-10-08.json``):
+
+- company: ``share_class`` (symbol, IPO date, listing), ``share_class_profile``
+  (market cap, enterprise value, shares outstanding) and ``ownership_summary``
+  (13F) on the Stock result; ``company_profile`` (employees),
+  ``historical_asset_classification`` (Morningstar sector code) and
+  ``long_descriptions`` on the Company result the share class names.
+- ratios: ``valuation_ratios`` and ``alpha_beta`` on a Stock result.
+- statistics: ``price_statistics`` on a Stock result.
+
+There is no company name in any of them. Percentages are fractions.
 """
 
 from __future__ import annotations
@@ -10,41 +25,31 @@ from __future__ import annotations
 import math
 
 
+# Morningstar sector codes (historical_asset_classification.morningstar_sector_code).
+SECTORS = {
+    101: "Basic Materials", 102: "Consumer Cyclical", 103: "Financial Services", 104: "Real Estate",
+    205: "Consumer Defensive", 206: "Healthcare", 207: "Utilities",
+    308: "Communication Services", 309: "Energy", 310: "Industrials", 311: "Technology",
+}
+PLACEHOLDER_IPO = "1970-01-01"  # what the empty share classes carry
+
 FIELDS = {
-    "company": ("name", "sector", "employees", "ipo_date", "description"),
+    "company": ("name", "sector", "employees", "ipo_date", "description",
+                "market_cap", "enterprise_value", "shares_outstanding", "institutional_ownership", "ownership"),
     "ratios": ("pe", "price_to_sales", "price_to_book", "ev_to_ebitda", "dividend_yield", "beta_60_month"),
-    "statistics": ("market_cap", "enterprise_value", "shares_outstanding", "institutional_ownership", "average_volume_30_day"),
+    "statistics": ("average_volume_30_day", "average_volume_90_day"),
 }
-
-ALIASES = {
-    "name": ("company_name", "name"),
-    "sector": ("sector",),
-    "employees": ("employees", "number_of_employees"),
-    "ipo_date": ("ipo_date", "initial_public_offering_date"),
-    "description": ("description", "long_description"),
-    "pe": ("pe_ratio", "price_to_earnings"),
-    "price_to_sales": ("price_to_sales", "price_sales_ratio", "ps_ratio"),
-    "price_to_book": ("price_to_book", "price_book_ratio", "pb_ratio"),
-    "ev_to_ebitda": ("ev_to_ebitda", "enterprise_value_to_ebitda"),
-    "dividend_yield": ("dividend_yield",),
-    "beta_60_month": ("beta_60_month", "beta_60_months", "beta_5_year"),
-    "market_cap": ("market_cap", "market_capitalization"),
-    "enterprise_value": ("enterprise_value",),
-    "shares_outstanding": ("shares_outstanding",),
-    "institutional_ownership": ("institutional_ownership", "percent_held_by_institutions", "institutional_holdings_percent"),
-    "average_volume_30_day": ("average_volume_30_day", "average_daily_volume_30_day", "avg_volume_30_day"),
+OWNERSHIP = {
+    "as_of": "as_of_date", "holders": "13_f_holder_number", "percent_held": "13_f_percent_held",
+    "buyers": "13_f_number_of_existing_owner_buying", "sellers": "13_f_number_of_existing_owner_selling",
+    "new_holders": "13_f_number_of_new_owners", "sold_out_holders": "13_f_number_of_sold_out_owners",
+    "shares_bought": "13_f_shares_bought", "shares_sold": "13_f_shares_sold",
 }
 
 
-def _rows(value) -> list[dict]:
-    if isinstance(value, dict):
-        return [row for row in value.values() if isinstance(row, dict)] if value and all(isinstance(row, dict) for row in value.values()) else [value]
-    if isinstance(value, list):
-        return [row for row in value if isinstance(row, dict)]
-    return []
-
-
-def _finite(value):
+def _finite(value) -> float | None:
+    if isinstance(value, bool):
+        return None
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -52,52 +57,119 @@ def _finite(value):
     return number if math.isfinite(number) else None
 
 
-def _value(row: dict, key: str):
-    for alias in ALIASES[key]:
-        value = row.get(alias)
-        if value not in (None, ""):
-            if key in ("name", "sector", "description", "ipo_date"):
-                return str(value).strip() or None
-            if key == "employees":
-                number = _finite(value)
-                return int(number) if number is not None and number >= 0 else None
-            return _finite(value)
-    return None
+def _positive(value) -> float | None:
+    """Morningstar writes 0 for unknown market cap and enterprise value (SPY)."""
+    number = _finite(value)
+    return number if number is not None and number > 0 else None
 
 
-def _table_rows(result: dict, table: str) -> list[dict]:
-    tables = result.get("tables") if isinstance(result.get("tables"), dict) else {}
-    return _rows(tables.get(table))
+def _count(value) -> int | None:
+    number = _finite(value)
+    return int(number) if number is not None and number >= 0 else None
 
 
-def _candidate_key(row: dict, symbol: str, fields: tuple[str, ...]) -> tuple[int, int, int]:
-    named = str(row.get("symbol") or row.get("ticker") or "").strip().upper() == symbol
-    primary = row.get("is_primary") is True or str(row.get("primary") or "").lower() in ("true", "yes", "primary")
-    populated = sum(_value(row, field) is not None for field in fields)
-    return (int(primary), int(named), populated)
+def _text(value) -> str | None:
+    return value.strip() or None if isinstance(value, str) else None
+
+
+def _table(result: dict, name: str) -> dict:
+    tables = result.get("tables")
+    value = tables.get(name) if isinstance(tables, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def _results(item: dict, kind: str) -> list[dict]:
+    results = item.get("results") or []
+    results = [results] if isinstance(results, dict) else results
+    return [row for row in results if isinstance(row, dict) and row.get("type") == kind]
+
+
+def _populated(row: dict) -> int:
+    return sum(value is not None for value in row.values())
+
+
+def _company(item: dict, symbol: str) -> dict:
+    stocks = _results(item, "Stock")
+
+    def rank(stock: dict) -> tuple[int, int, int]:
+        share = _table(stock, "share_class")
+        named = str(share.get("symbol") or "").strip().upper() == symbol
+        listed = bool(share.get("m_i_c")) and share.get("i_p_o_date") != PLACEHOLDER_IPO
+        filled = len(_table(stock, "share_class_profile")) + len(_table(stock, "ownership_summary"))
+        return (int(named), int(listed), filled)
+
+    stock = max(stocks, key=rank) if stocks else {}
+    share = _table(stock, "share_class")
+    profile = _table(stock, "share_class_profile")
+    owners = _table(stock, "ownership_summary")
+    company_id = share.get("company_id")
+    company = next((row for row in _results(item, "Company") if row.get("id") == company_id), {})
+    tables = company.get("tables") if isinstance(company.get("tables"), dict) else {}
+    sector = _count(_table(company, "historical_asset_classification").get("morningstar_sector_code"))
+    ipo = _text(share.get("i_p_o_date"))
+    ownership = {key: (_text(owners.get(source)) if key == "as_of" else _finite(owners.get(source)) if key == "percent_held"
+                       else _count(owners.get(source))) for key, source in OWNERSHIP.items()}
+    return {
+        "name": None,
+        "sector": SECTORS.get(sector) if sector is not None else None,
+        "employees": _count(_table(company, "company_profile").get("total_employee_number")),
+        "ipo_date": None if ipo == PLACEHOLDER_IPO else ipo,
+        "description": _text(tables.get("long_descriptions")),
+        "market_cap": _positive(profile.get("market_cap")),
+        "enterprise_value": _positive(profile.get("enterprise_value")),
+        "shares_outstanding": _positive(profile.get("shares_outstanding")),
+        "institutional_ownership": ownership["percent_held"],
+        "ownership": ownership if ownership["holders"] is not None else None,
+    }
+
+
+def _ratios(item: dict, _symbol: str) -> dict:
+    def read(stock: dict) -> dict:
+        values = _table(stock, "valuation_ratios")
+        beta = _table(stock, "alpha_beta").get("period_60m")
+        return {
+            "pe": _finite(values.get("p_e_ratio")),
+            "price_to_sales": _finite(values.get("p_s_ratio")),
+            "price_to_book": _finite(values.get("p_b_ratio")),
+            "ev_to_ebitda": _finite(values.get("e_v_to_e_b_i_t_d_a")),
+            "dividend_yield": _finite(values.get("forward_dividend_yield")),
+            "beta_60_month": _finite(beta.get("beta")) if isinstance(beta, dict) else None,
+        }
+
+    rows = [read(stock) for stock in _results(item, "Stock")]
+    return max(rows, key=_populated) if rows else {}
+
+
+def _statistics(item: dict, _symbol: str) -> dict:
+    def read(stock: dict) -> dict:
+        periods = _table(stock, "price_statistics")
+
+        def volume(period: str):
+            row = periods.get(period)
+            return _positive(row.get("average_volume")) if isinstance(row, dict) else None
+
+        return {"average_volume_30_day": volume("period_30d"), "average_volume_90_day": volume("period_90d")}
+
+    rows = [read(stock) for stock in _results(item, "Stock")]
+    return max(rows, key=_populated) if rows else {}
+
+
+READERS = {"company": _company, "ratios": _ratios, "statistics": _statistics}
 
 
 def parse(payload, dataset: str) -> dict[str, list[dict]]:
-    """Return one normalized, unmerged row per requested symbol."""
+    """Return one normalized, unmerged row per requested symbol, or [] when Tradier has nothing."""
     if dataset not in FIELDS:
         raise ValueError(f"Unsupported fundamentals dataset: {dataset}")
     if not isinstance(payload, list):
         raise ValueError("Tradier fundamentals responses are lists")
-    fields = FIELDS[dataset]
-    table = {"company": "company", "ratios": "ratios", "statistics": "price_statistics"}[dataset]
-    found: dict[str, dict] = {}
+    found: dict[str, list[dict]] = {}
     for item in payload:
         if not isinstance(item, dict) or not isinstance(item.get("request"), str):
             continue
         symbol = item["request"].strip().upper()
-        results = item.get("results") or []
-        results = [results] if isinstance(results, dict) else results
-        candidates = [row for result in results if isinstance(result, dict) for row in _table_rows(result, table)]
-        if not candidates:
-            found[symbol] = []
-            continue
-        row = max(candidates, key=lambda candidate: _candidate_key(candidate, symbol, fields))
-        normalized = {field: _value(row, field) for field in fields}
+        row = READERS[dataset](item, symbol)
+        normalized = {field: row.get(field) for field in FIELDS[dataset]}
         found[symbol] = [normalized] if any(value is not None for value in normalized.values()) else []
     return found
 

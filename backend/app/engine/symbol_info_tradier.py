@@ -35,6 +35,8 @@ log = logging.getLogger(__name__)
 
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "symbol_info" / "v1" / "tradier"
 SCHEMA = 1
+# Overview rows were re-shaped on 2026-10-08 (the first parser read tables Tradier does not send); older copies are re-read.
+SCHEMAS = {"company": 2, "ratios": 2, "statistics": 2}
 PER_MINUTE = 10
 BATCH = 10  # symbols per request; one company's calendar is up to about 50 KB
 RETRY_SECONDS = 60
@@ -114,13 +116,23 @@ class SymbolEvents:
         }
 
     def overview(self, symbol: str) -> dict:
-        """Tradier company facts, with independent 24-hour caches per dataset."""
-        datasets = {}
+        """Tradier company facts, with independent 24-hour caches per dataset.
+
+        Market cap, enterprise value, shares outstanding and 13F ownership arrive
+        in the company call, so the Key statistics block takes them from there and
+        only the volume averages from the statistics call."""
+        read = {}
         for dataset in OVERVIEW_DATASETS:
             issue = self.refresh(dataset, [symbol])
             entry, meta = self._block(dataset, symbol, issue)
-            values = entry.rows[0] if entry and entry.rows else {}
-            datasets[dataset] = {**meta, **values}
+            read[dataset] = (meta, entry.rows[0] if entry and entry.rows else {})
+        (company_meta, company), (ratio_meta, ratios), (stat_meta, stats) = (read[d] for d in OVERVIEW_DATASETS)
+        moved = ("market_cap", "enterprise_value", "shares_outstanding", "institutional_ownership")
+        datasets = {
+            "company": {**company_meta, **{k: v for k, v in company.items() if k not in moved}},
+            "ratios": {**ratio_meta, **ratios},
+            "statistics": {**_joined(company_meta, stat_meta), **{k: company.get(k) for k in moved}, **stats},
+        }
         has_data = any(block["state"] == "ready" for block in datasets.values())
         return {"symbol": symbol, "state": "ready" if has_data else "none" if all(block["state"] == "none" for block in datasets.values()) else "unavailable",
                 "datasets": datasets}
@@ -202,7 +214,7 @@ class SymbolEvents:
     def _load(self, dataset: str, symbol: str) -> Entry | None:
         try:
             data = json.loads(self._path(dataset, symbol).read_text())
-            if (data.get("schema"), data.get("provider"), data.get("dataset"), data.get("symbol")) != (SCHEMA, "tradier", dataset, symbol):
+            if (data.get("schema"), data.get("provider"), data.get("dataset"), data.get("symbol")) != (SCHEMAS.get(dataset, SCHEMA), "tradier", dataset, symbol):
                 return None
             fetched, rows = float(data["fetched_at"]), data["rows"]
             if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
@@ -216,7 +228,7 @@ class SymbolEvents:
             self._entries[(dataset, symbol)] = entry
             self._absent.discard((dataset, symbol))
         path = self._path(dataset, symbol)
-        record = {"schema": SCHEMA, "provider": "tradier", "dataset": dataset, "symbol": symbol,
+        record = {"schema": SCHEMAS.get(dataset, SCHEMA), "provider": "tradier", "dataset": dataset, "symbol": symbol,
                   "fetched_at": entry.fetched_at, "rows": entry.rows}
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -258,6 +270,17 @@ class SymbolEvents:
             return parse(response.json())
         except (ValueError, TypeError, KeyError, AttributeError) as exc:
             raise SymbolEventsError(f"Tradier returned an unreadable {label.removeprefix('Tradier ')} response.") from exc
+
+
+def _joined(first: dict, second: dict) -> dict:
+    """One status for a block built from two cached reads: ready if either has
+    rows, dated by the older ready copy, with the first problem either reports."""
+    states = {first["state"], second["state"]}
+    ready = [meta for meta in (first, second) if meta["state"] == "ready"]
+    state = "ready" if ready else next((s for s in ("unavailable", "loading") if s in states), "none")
+    return {"state": state, "source": first["source"],
+            "fetched_at": min(meta["fetched_at"] for meta in ready) if ready else first["fetched_at"] or second["fetched_at"],
+            "message": first["message"] or second["message"]}
 
 
 symbol_events = SymbolEvents()

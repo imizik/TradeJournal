@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { fakeChartSettings } from "./fixtures/chartSettings";
 import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
+import type { FinancialQuarter, SymbolFinancials } from "../lib/symbolInfo";
 import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, SymbolForecast, SymbolNews, SymbolOverview } from "../lib/symbolInfo";
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
@@ -27,7 +28,7 @@ const OVERVIEW_READ = Date.parse("2026-10-05T13:40:00Z") / 1000;
 function overview(symbol: string): SymbolOverview {
   const block = { state: (symbol === "SPY" ? "none" : "ready") as "none" | "ready", source: "Tradier company fundamentals", fetched_at: OVERVIEW_READ, message: null };
   return { symbol, state: symbol === "SPY" ? "none" : "ready", datasets: {
-    company: { ...block, name: symbol === "SPY" ? null : "NVIDIA Corporation", sector: symbol === "SPY" ? null : "Technology", employees: symbol === "SPY" ? null : 36000,
+    company: { ...block, name: null, sector: symbol === "SPY" ? null : "Technology", employees: symbol === "SPY" ? null : 36000,
       ipo_date: symbol === "SPY" ? null : "1999-01-22", description: symbol === "SPY" ? null : "GPU designer" },
     ratios: { ...block, pe: symbol === "SPY" ? null : 52.5, price_to_sales: symbol === "SPY" ? null : 25, price_to_book: symbol === "SPY" ? null : 40,
       ev_to_ebitda: symbol === "SPY" ? null : 48, dividend_yield: symbol === "SPY" ? null : 0.0003, beta_60_month: symbol === "SPY" ? null : 1.8 },
@@ -50,7 +51,10 @@ test("Overview combines the chart's existing quote with cached company fundament
   await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$189.12");
   await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$185.00 – $191.00");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
+  await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("NVDA company"); // Tradier fundamentals have no name; the quote's is used
+  await expect(info.getByRole("heading", { name: "NVDA company" })).toHaveAttribute("title", /^Tradier chart quote/);
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("$4.5T");
+  await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("68.00%"); // 13F share arrives as a fraction
   await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
   await expect(info.getByText("52.5", { exact: true }).locator("..")).toHaveAttribute("title", /Tradier company fundamentals · read/);
   expect(reads).toEqual(["NVDA"]);
@@ -486,4 +490,50 @@ test("News keeps the same 20 rows behind the banner when a poll adds one and the
   await expect(rows).toHaveCount(20);
   await expect(info.getByRole("link", { name: "Story 21", exact: true })).toBeVisible();
   await expect(info.getByRole("link", { name: "Story 1", exact: true })).toHaveCount(0);
+});
+
+// ---- Financials (T3.2): stubbed normalized quarters; the backend tests prove the SEC selection and the margin math ----
+function quarter(end: string, label: [number, string], revenue: number | null, rest: Partial<FinancialQuarter> = {}): FinancialQuarter {
+  const gap = revenue == null;
+  return { start: gap ? null : end, end, gap, fiscal_year: label[0], fiscal_period: label[1], filed: gap ? null : end, revenue, gross_profit: null, operating_income: null,
+    net_income: gap ? null : revenue * 0.5, eps_diluted: gap ? null : 1.25, gross_margin: gap ? null : 0.72, operating_margin: gap ? null : 0.6,
+    revenue_yoy: null, net_income_yoy: null, eps_diluted_yoy: null, ...rest };
+}
+function financials(symbol: string): SymbolFinancials {
+  const base = { symbol, source: "SEC EDGAR", entity: null, fetched_at: OVERVIEW_READ, stale: false, latest_end: null, quarters: [] as FinancialQuarter[] };
+  if (symbol === "AMD") return { ...base, state: "none", message: "No quarterly SEC financials for this issuer." };
+  if (symbol === "SPY") return { ...base, state: "none", message: "Not available for ETFs or funds." };
+  return { ...base, state: "ready", message: null, entity: "NVIDIA CORP", latest_end: "2026-07-26", quarters: [
+    quarter("2024-10-27", [2025, "Q3"], 35082000000, { revenue_yoy: 1.1 }), quarter("2025-01-26", [2025, "Q4"], null),
+    quarter("2025-04-27", [2026, "Q1"], 44062000000, { revenue_yoy: 0.69 }), quarter("2025-07-27", [2026, "Q2"], 46743000000, { revenue_yoy: 0.56 }),
+    quarter("2025-10-26", [2026, "Q3"], 57006000000, { revenue_yoy: 0.62 }), quarter("2026-01-25", [2026, "Q4"], null),
+    quarter("2026-04-26", [2027, "Q1"], 81615000000, { revenue_yoy: 0.85, net_income: -1000000000 }), quarter("2026-07-26", [2027, "Q2"], 96221000000, { revenue_yoy: 1.06, eps_diluted: 2.46 }),
+  ] };
+}
+
+test("Financials draws eight quarters as bars with year-over-year growth, leaves Q4 as a gap, and explains issuers without quarterly filings", async ({ page }) => {
+  const reads: string[] = [];
+  await page.route("**/api/backend/charts/symbol/*/financials", async (route) => {
+    const symbol = decodeURIComponent(new URL(route.request().url()).pathname.split("/").at(-2)!);
+    reads.push(symbol);
+    await route.fulfill({ json: financials(symbol) });
+  });
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Financials", exact: true }).click();
+  const revenue = info.getByRole("region", { name: "Revenue", exact: true });
+  await expect(revenue).toContainText("$96.2B");
+  await expect(revenue).toContainText("+106%");
+  await expect(revenue.getByTestId("bar")).toHaveCount(6); // eight columns, the two Q4 gaps draw no bar
+  await expect(revenue.locator("li").nth(1)).toContainText("—");
+  await expect(info.getByRole("list", { name: "Quarters" })).toContainText("Q4 FY26");
+  await expect(info.getByRole("region", { name: "Gross margin" })).toContainText("72.0%");
+  await expect(info.getByRole("region", { name: "Net income" })).toContainText("-$1.0B");
+  await expect(info.getByRole("region", { name: "Diluted EPS" })).toContainText("$2.46");
+  await expect(info).toContainText("SEC EDGAR");
+  await choose(page, "AMD");
+  await expect(info).toContainText("No quarterly SEC financials for this issuer.");
+  await choose(page, "SPY");
+  await expect(info).toContainText("Not available for ETFs or funds.");
+  expect(reads).toEqual(["NVDA", "AMD", "SPY"]);
 });
