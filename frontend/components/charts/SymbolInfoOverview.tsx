@@ -7,7 +7,6 @@ const number = (value: number | null, digits = 2) => value == null ? "—" : val
 const dollars = (value: number | null) => value == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(value);
 const yieldPercent = (value: number | null) => value == null ? "—" : `${(value * 100).toFixed(2)}%`;
 const price = (value: number) => value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const reportedPercent = (value: number | null) => value == null ? "—" : `${number(value)}%`;
 const quoteLabel = (quote: ChartQuote | null | undefined, fetchedAt: number | null) => {
   const traded = quote?.trade_time ? `last trade ${readAt(quote.trade_time)}` : null;
   return [`Tradier chart quote`, traded, fetchedAt ? `response ${readAt(fetchedAt)}` : null].filter(Boolean).join(" · ");
@@ -35,8 +34,12 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
   const spot = quote?.last ?? null;
   const weekPosition = weekLow != null && weekHigh != null && weekHigh > weekLow && spot != null
     ? Math.max(0, Math.min(100, (spot - weekLow) / (weekHigh - weekLow) * 100)) : null;
-  const { company, ratios, statistics } = data.datasets;
   const isFund = /etf|fund/i.test(quote?.instrument_type ?? "");
+  // Morningstar lists an ETF's share count and beta but no company; show the ETF state rather than a page of dashes.
+  const { company, ratios, statistics } = isFund
+    ? Object.fromEntries(Object.entries(data.datasets).map(([key, block]) => [key, { ...block, state: "none" }])) as SymbolOverview["datasets"]
+    : data.datasets;
+  const name = company.name ?? quote?.name ?? null;
   const noFundamentals = isFund ? "Not available for ETFs or funds." : "Tradier returned no company fundamentals for this symbol.";
 
   return <div className="space-y-4 text-[11px]">
@@ -57,7 +60,7 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
     </section>
 
     <Dataset title="Company" block={company} unavailable={noFundamentals}>
-      {company.name && <h4 title={blockLabel(company)} className="font-medium text-slate-200">{company.name}</h4>}
+      {name && <h4 title={company.name ? blockLabel(company) : qTitle} className="font-medium text-slate-200">{name}</h4>}
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
         <Value label="Sector" value={company.sector ?? "—"} title={blockLabel(company)} />
         <Value label="Employees" value={number(company.employees, 0)} title={blockLabel(company)} />
@@ -71,7 +74,7 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
         <Value label="Market cap" value={dollars(statistics.market_cap)} title={blockLabel(statistics)} />
         <Value label="Enterprise value" value={dollars(statistics.enterprise_value)} title={blockLabel(statistics)} />
         <Value label="Shares outstanding" value={number(statistics.shares_outstanding, 0)} title={blockLabel(statistics)} />
-        <Value label="Held by institutions" value={reportedPercent(statistics.institutional_ownership)} title={blockLabel(statistics)} />
+        <Value label="Held by institutions" value={yieldPercent(statistics.institutional_ownership)} title={blockLabel(statistics)} />
         <Value label="30-day average volume" value={number(statistics.average_volume_30_day, 0)} title={blockLabel(statistics)} />
       </dl>
     </Dataset>

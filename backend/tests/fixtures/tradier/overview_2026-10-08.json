@@ -1,0 +1,685 @@
+{
+ "_note": "Production Tradier /beta/markets/fundamentals company, ratios and statistics responses read 2026-10-08 for NVDA, SPY and NBIS (NBIS is a Dutch issuer with a second empty share class), trimmed: long descriptions shortened, fund-company ownership fields and Company-level operation ratios removed. The 30/60/90-day volume averages arrive only on the second share class.",
+ "company": [
+  {
+   "request": "NVDA",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Company",
+     "id": "0C00000BXN",
+     "tables": {
+      "company_profile": {
+       "company_id": "0C00000BXN",
+       "total_employee_number": 42000,
+       "TotalEmployeeNumber.asOfDate": "2026-01-25"
+      },
+      "asset_classification": {},
+      "historical_asset_classification": {
+       "company_id": "0C00000BXN",
+       "as_of_date": "2026-10-01",
+       "morningstar_sector_code": 311
+      },
+      "long_descriptions": "Nvidia is a leading developer of graphics processing units. Traditionally, GPUs were used to enhance the experience on computing platforms, most notably in gami"
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0P000003RE",
+     "tables": {
+      "ownership_summary": {
+       "share_class_id": "0P000003RE",
+       "as_of_date": "2026-09-30",
+       "13_f_holder_number": 6065,
+       "13_f_number_of_existing_owner_buying": 2949,
+       "13_f_number_of_existing_owner_selling": 2326,
+       "13_f_number_of_new_owners": 283,
+       "13_f_number_of_sold_out_owners": 193,
+       "13_f_percent_held": 0.6964579225576676,
+       "13_f_shares_bought": 466090327,
+       "13_f_shares_held": 16817369456,
+       "13_f_shares_sold": 403238924,
+       "13_f_total_market_value": 3353711513195,
+       "13_f_total_shares_bought_by_new_owners": 186556080,
+       "13_f_total_shares_sold_out": 38598881,
+       "float": 0,
+       "insider_percent_owned": 0.003539,
+       "insider_shares_bought": 172507,
+       "insider_shares_owned": 85722548,
+       "insider_shares_sold": 5430271,
+       "institution_holder_number": 2894,
+       "institution_percent_held": 0.5268667139603264,
+       "institution_shares_bought": 399031781,
+       "institution_shares_held": 12722250542,
+       "institution_shares_sold": 218797367,
+       "number_of_insider_buys": 1,
+       "number_of_insider_sellers": 32,
+       "quoted_shares_outstanding": 0,
+       "share_class_level_shares_outstanding_balance_sheet": 0,
+       "share_class_level_shares_outstanding_interim": 0,
+       "share_class_level_treasury_share_outstanding": 0,
+       "shares_outstanding": 24147000000,
+       "shares_outstanding_with_balance_sheet_ending_date": "1970-01-01",
+       "un_quoted_shares_outstanding": 0
+      },
+      "share_class_profile": {
+       "share_class_id": "0P000003RE",
+       "enterprise_value": 5710070090000,
+       "EnterpriseValue.asOfDate": "2026-10-07",
+       "market_cap": 5734188090000,
+       "MarketCap.asOfDate": "2026-10-07",
+       "shares_outstanding": 24147000000,
+       "SharesOutstanding.asOfDate": "2026-08-21"
+      },
+      "ownership_details": null,
+      "share_class": {
+       "company_id": "0C00000BXN",
+       "share_class_id": "0P000003RE",
+       "currency_id": "USD",
+       "i_p_o_date": "1999-01-22",
+       "m_i_c": "XNAS",
+       "security_type": "ST00000001",
+       "share_class_status": "A",
+       "symbol": "NVDA",
+       "trading_status": false
+      }
+     }
+    },
+    {
+     "type": "Company",
+     "id": "0CDXF29G25",
+     "tables": {
+      "company_profile": null,
+      "asset_classification": null,
+      "historical_asset_classification": null,
+      "long_descriptions": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF29G25",
+     "tables": {
+      "ownership_summary": null,
+      "share_class_profile": null,
+      "ownership_details": null,
+      "share_class": {
+       "company_id": "0CDXF29G25",
+       "share_class_id": "0PDXF29G25",
+       "currency_id": "USD",
+       "i_p_o_date": "1970-01-01",
+       "security_type": "STOCK",
+       "share_class_status": "A",
+       "symbol": "NVDA",
+       "trading_status": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "request": "SPY",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Company",
+     "id": "0CDXF02GCS",
+     "tables": {
+      "company_profile": null,
+      "asset_classification": null,
+      "historical_asset_classification": null,
+      "long_descriptions": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF02GCS",
+     "tables": {
+      "ownership_summary": null,
+      "share_class_profile": null,
+      "ownership_details": null,
+      "share_class": {
+       "company_id": "0CDXF02GCS",
+       "share_class_id": "0PDXF02GCS",
+       "currency_id": "USD",
+       "i_p_o_date": "1970-01-01",
+       "security_type": "ETF",
+       "share_class_status": "A",
+       "symbol": "SPY",
+       "trading_status": false
+      }
+     }
+    },
+    {
+     "type": "Company",
+     "id": "0CMRG00112",
+     "tables": {
+      "company_profile": null,
+      "asset_classification": null,
+      "historical_asset_classification": null,
+      "long_descriptions": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PMRGTBOK3",
+     "tables": {
+      "ownership_summary": null,
+      "share_class_profile": {
+       "share_class_id": "0PMRGTBOK3",
+       "enterprise_value": 0,
+       "market_cap": 0,
+       "shares_outstanding": 1056782116,
+       "SharesOutstanding.asOfDate": "2026-10-07"
+      },
+      "ownership_details": null,
+      "share_class": {
+       "company_id": "0CMRG00112",
+       "share_class_id": "0PMRGTBOK3",
+       "currency_id": "USD",
+       "i_p_o_date": "1993-01-22",
+       "m_i_c": "ARCX",
+       "security_type": "ST00000005",
+       "share_class_status": "A",
+       "symbol": "SPY",
+       "trading_status": false
+      }
+     }
+    }
+   ]
+  },
+  {
+   "request": "NBIS",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Company",
+     "id": "0C00008PT1",
+     "tables": {
+      "company_profile": {
+       "company_id": "0C00008PT1",
+       "total_employee_number": 1500,
+       "TotalEmployeeNumber.asOfDate": "2025-12-31"
+      },
+      "asset_classification": {},
+      "historical_asset_classification": {
+       "company_id": "0C00008PT1",
+       "as_of_date": "2026-10-01",
+       "morningstar_sector_code": 308
+      },
+      "long_descriptions": "Nebius is a vertically integrated cloud provider focusing on AI and high-performance computing. It is a carve-out of the previous Russian tech firm Yandex, foll"
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0P0000TDA0",
+     "tables": {
+      "ownership_summary": {
+       "share_class_id": "0P0000TDA0",
+       "as_of_date": "2026-09-30",
+       "13_f_holder_number": 1153,
+       "13_f_number_of_existing_owner_buying": 300,
+       "13_f_number_of_existing_owner_selling": 278,
+       "13_f_number_of_new_owners": 391,
+       "13_f_number_of_sold_out_owners": 102,
+       "13_f_percent_held": 0.5890520519639244,
+       "13_f_shares_bought": 42132403,
+       "13_f_shares_held": 160136874,
+       "13_f_shares_sold": 17525593,
+       "13_f_total_market_value": 41998430750,
+       "13_f_total_shares_bought_by_new_owners": 21848284,
+       "13_f_total_shares_sold_out": 7318320,
+       "float": 0,
+       "insider_percent_owned": 0.001079,
+       "insider_shares_bought": 17816,
+       "insider_shares_owned": 273885,
+       "insider_shares_sold": 47720,
+       "institution_holder_number": 744,
+       "institution_percent_held": 0.2379928495615633,
+       "institution_shares_bought": 6240025,
+       "institution_shares_held": 64699598,
+       "institution_shares_sold": 18471245,
+       "number_of_insider_buys": 10,
+       "number_of_insider_sellers": 16,
+       "quoted_shares_outstanding": 0,
+       "share_class_level_shares_outstanding_balance_sheet": 0,
+       "share_class_level_shares_outstanding_interim": 0,
+       "share_class_level_treasury_share_outstanding": 0,
+       "shares_outstanding": 271855218,
+       "shares_outstanding_with_balance_sheet_ending_date": "1970-01-01",
+       "un_quoted_shares_outstanding": 0
+      },
+      "share_class_profile": {
+       "share_class_id": "0P0000TDA0",
+       "enterprise_value": 66599364947,
+       "EnterpriseValue.asOfDate": "2026-10-07",
+       "market_cap": 64470464947,
+       "MarketCap.asOfDate": "2026-10-07",
+       "shares_outstanding": 271855218,
+       "SharesOutstanding.asOfDate": "2026-06-30"
+      },
+      "ownership_details": null,
+      "share_class": {
+       "company_id": "0C00008PT1",
+       "share_class_id": "0P0000TDA0",
+       "currency_id": "USD",
+       "i_p_o_date": "2011-05-24",
+       "i_s_i_n": "NL0009805522",
+       "m_i_c": "XNAS",
+       "security_type": "ST00000001",
+       "share_class_status": "A",
+       "symbol": "NBIS",
+       "trading_status": false
+      }
+     }
+    },
+    {
+     "type": "Company",
+     "id": "0CDXF28TEU",
+     "tables": {
+      "company_profile": null,
+      "asset_classification": null,
+      "historical_asset_classification": null,
+      "long_descriptions": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF28TEU",
+     "tables": {
+      "ownership_summary": null,
+      "share_class_profile": null,
+      "ownership_details": null,
+      "share_class": {
+       "company_id": "0CDXF28TEU",
+       "share_class_id": "0PDXF28TEU",
+       "currency_id": "USD",
+       "i_p_o_date": "1970-01-01",
+       "security_type": "STOCK",
+       "share_class_status": "A",
+       "symbol": "NBIS",
+       "trading_status": false
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "ratios": [
+  {
+   "request": "NVDA",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Company",
+     "id": "0C00000BXN",
+     "tables": {
+      "operation_ratios_restate": null,
+      "operation_ratios_a_o_r": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0P000003RE",
+     "tables": {
+      "earning_ratios_restate": null,
+      "valuation_ratios": {
+       "share_class_id": "0P000003RE",
+       "as_of_date": "2026-10-07",
+       "book_value_per_share": 9.4829,
+       "dividend_rate": 1.0,
+       "e_v_to_e_b_i_t_d_a": 24.4131,
+       "expected_dividend_growth_rate": 0.9231,
+       "forward_dividend_yield": 0.0042,
+       "payout_ratio": 0.0354,
+       "p_b_ratio": 25.041872,
+       "p_e_ratio": 30.021492,
+       "p_s_ratio": 19.122931
+      },
+      "alpha_beta": {
+       "period_36m": {
+        "share_class_id": "0P000003RE",
+        "as_of_date": "2026-09-30",
+        "period": "36M",
+        "alpha": 0.015954,
+        "beta": 1.983695
+       },
+       "period_48m": {
+        "share_class_id": "0P000003RE",
+        "as_of_date": "2026-09-30",
+        "period": "48M",
+        "alpha": 0.035419,
+        "beta": 1.96779
+       },
+       "period_60m": {
+        "share_class_id": "0P000003RE",
+        "as_of_date": "2026-09-30",
+        "period": "60M",
+        "alpha": 0.025483,
+        "beta": 2.232201
+       }
+      }
+     }
+    },
+    {
+     "type": "Company",
+     "id": "0CDXF29G25",
+     "tables": {
+      "operation_ratios_restate": null,
+      "operation_ratios_a_o_r": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF29G25",
+     "tables": {
+      "earning_ratios_restate": null,
+      "valuation_ratios": null,
+      "alpha_beta": {
+       "period_60m": {
+        "share_class_id": "0PDXF29G25",
+        "as_of_date": "2026-09-30",
+        "period": "60M",
+        "alpha": 0.017919871300275017,
+        "beta": 2.230602233233449
+       }
+      }
+     }
+    }
+   ]
+  },
+  {
+   "request": "SPY",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Company",
+     "id": "0CDXF02GCS",
+     "tables": {
+      "operation_ratios_restate": null,
+      "operation_ratios_a_o_r": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF02GCS",
+     "tables": {
+      "earning_ratios_restate": null,
+      "valuation_ratios": null,
+      "alpha_beta": {
+       "period_60m": {
+        "share_class_id": "0PDXF02GCS",
+        "as_of_date": "2026-09-30",
+        "period": "60M",
+        "alpha": -9.022358921942035e-05,
+        "beta": 1.0094935537115535
+       }
+      }
+     }
+    },
+    {
+     "type": "Company",
+     "id": "0CMRG00112",
+     "tables": {
+      "operation_ratios_restate": null,
+      "operation_ratios_a_o_r": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PMRGTBOK3",
+     "tables": {
+      "earning_ratios_restate": null,
+      "valuation_ratios": null,
+      "alpha_beta": null
+     }
+    }
+   ]
+  },
+  {
+   "request": "NBIS",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Company",
+     "id": "0C00008PT1",
+     "tables": {
+      "operation_ratios_restate": null,
+      "operation_ratios_a_o_r": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0P0000TDA0",
+     "tables": {
+      "earning_ratios_restate": null,
+      "valuation_ratios": {
+       "share_class_id": "0P0000TDA0",
+       "as_of_date": "2026-10-07",
+       "book_value_per_share": 38.0331,
+       "e_v_to_e_b_i_t_d_a": 57.6169,
+       "payout_ratio": 0.0,
+       "p_b_ratio": 6.235356,
+       "p_s_ratio": 48.451218
+      },
+      "alpha_beta": {
+       "period_36m": {
+        "share_class_id": "0P0000TDA0",
+        "as_of_date": "2026-09-30",
+        "period": "36M",
+        "alpha": 0.050199,
+        "beta": 2.709914
+       },
+       "period_48m": {
+        "share_class_id": "0P0000TDA0",
+        "as_of_date": "2026-09-30",
+        "period": "48M",
+        "alpha": 0.042574,
+        "beta": 1.753498
+       },
+       "period_60m": {
+        "share_class_id": "0P0000TDA0",
+        "as_of_date": "2026-09-30",
+        "period": "60M",
+        "alpha": 0.023625,
+        "beta": 1.480309
+       }
+      }
+     }
+    },
+    {
+     "type": "Company",
+     "id": "0CDXF28TEU",
+     "tables": {
+      "operation_ratios_restate": null,
+      "operation_ratios_a_o_r": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF28TEU",
+     "tables": {
+      "earning_ratios_restate": null,
+      "valuation_ratios": null,
+      "alpha_beta": {
+       "period_60m": {
+        "share_class_id": "0PDXF28TEU",
+        "as_of_date": "2026-09-30",
+        "period": "60M",
+        "alpha": 0.011489569249155791,
+        "beta": 3.030846094329182
+       }
+      }
+     }
+    }
+   ]
+  }
+ ],
+ "statistics": [
+  {
+   "request": "NVDA",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Stock",
+     "id": "0P000003RE",
+     "tables": {
+      "price_statistics": {
+       "period_1y": {
+        "share_class_id": "0P000003RE",
+        "period": "1Y"
+       },
+       "period_3y": {
+        "share_class_id": "0P000003RE",
+        "period": "3Y"
+       },
+       "period_5y": {
+        "share_class_id": "0P000003RE",
+        "period": "5Y"
+       },
+       "period_10y": {
+        "share_class_id": "0P000003RE",
+        "period": "10Y"
+       }
+      },
+      "trailing_returns": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF29G25",
+     "tables": {
+      "price_statistics": {
+       "period_30d": {
+        "share_class_id": "0PDXF29G25",
+        "period": "30D",
+        "average_volume": 107936931.0
+       },
+       "period_60d": {
+        "share_class_id": "0PDXF29G25",
+        "period": "60D",
+        "average_volume": 117928920.0
+       },
+       "period_90d": {
+        "share_class_id": "0PDXF29G25",
+        "period": "90D",
+        "average_volume": 121363650.0
+       },
+       "period_1y": {
+        "share_class_id": "0PDXF29G25",
+        "period": "1Y",
+        "high_price": 243.37,
+        "low_price": 164.27
+       }
+      },
+      "trailing_returns": null
+     }
+    }
+   ]
+  },
+  {
+   "request": "SPY",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Stock",
+     "id": "0PDXF02GCS",
+     "tables": {
+      "price_statistics": {
+       "period_30d": {
+        "share_class_id": "0PDXF02GCS",
+        "period": "30D",
+        "average_volume": 45398912.0
+       },
+       "period_60d": {
+        "share_class_id": "0PDXF02GCS",
+        "period": "60D",
+        "average_volume": 41077032.0
+       },
+       "period_90d": {
+        "share_class_id": "0PDXF02GCS",
+        "period": "90D",
+        "average_volume": 43838152.0
+       },
+       "period_1y": {
+        "share_class_id": "0PDXF02GCS",
+        "period": "1Y",
+        "high_price": 781.62,
+        "low_price": 629.28
+       }
+      },
+      "trailing_returns": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PMRGTBOK3",
+     "tables": {
+      "price_statistics": null,
+      "trailing_returns": null
+     }
+    }
+   ]
+  },
+  {
+   "request": "NBIS",
+   "type": "Symbol",
+   "results": [
+    {
+     "type": "Stock",
+     "id": "0P0000TDA0",
+     "tables": {
+      "price_statistics": {
+       "period_1y": {
+        "share_class_id": "0P0000TDA0",
+        "period": "1Y"
+       },
+       "period_3y": {
+        "share_class_id": "0P0000TDA0",
+        "period": "3Y"
+       },
+       "period_5y": {
+        "share_class_id": "0P0000TDA0",
+        "period": "5Y"
+       },
+       "period_10y": {
+        "share_class_id": "0P0000TDA0",
+        "period": "10Y"
+       }
+      },
+      "trailing_returns": null
+     }
+    },
+    {
+     "type": "Stock",
+     "id": "0PDXF28TEU",
+     "tables": {
+      "price_statistics": {
+       "period_30d": {
+        "share_class_id": "0PDXF28TEU",
+        "period": "30D",
+        "average_volume": 15986725.0
+       },
+       "period_60d": {
+        "share_class_id": "0PDXF28TEU",
+        "period": "60D",
+        "average_volume": 18785001.0
+       },
+       "period_90d": {
+        "share_class_id": "0PDXF28TEU",
+        "period": "90D",
+        "average_volume": 20165319.0
+       },
+       "period_1y": {
+        "share_class_id": "0PDXF28TEU",
+        "period": "1Y",
+        "high_price": 299.86,
+        "low_price": 73.52
+       }
+      },
+      "trailing_returns": null
+     }
+    }
+   ]
+  }
+ ]
+}

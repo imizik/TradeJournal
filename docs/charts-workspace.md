@@ -86,10 +86,16 @@ Overview is a placeholder for the
 on this device. Only an expanded Overview, You, News, Events or Forecast tab
 fetches, once after the ticker settles for 300 ms; old requests are cancelled.
 Overview shows price, change, day range and a 52-week range from the chart's
-existing quote, so it does not make a second quote request. Its company
-profile, valuation ratios and statistics come from three independent Tradier
-fundamentals reads, each cached for 24 hours under
-`backend/data/symbol_info/v1/tradier/`. Every value has its source and read
+existing quote, so it does not make a second quote request; the company name
+comes from that quote too, because Tradier's fundamentals carry none. Three
+independent Tradier fundamentals reads, each cached for 24 hours under
+`backend/data/symbol_info/v1/tradier/`, supply the rest: the company call
+gives sector (a Morningstar code), employees, IPO date, description, market
+cap, enterprise value, shares outstanding and the 13F share held by
+institutions; the ratios call gives the valuation ratios and 60-month beta;
+the statistics call gives only the volume averages. Key statistics joins the
+company and statistics reads and shows the older read time. Each read uses one
+share class, never mixing fields across them. Every value has its source and read
 time on hover; ETF/fund fundamentals and individual provider failures are
 shown as unavailable without hiding other blocks. The panel starts
 collapsed below 1024 px and follows the watchlist's visibility in full-screen

@@ -27,7 +27,7 @@ const OVERVIEW_READ = Date.parse("2026-10-05T13:40:00Z") / 1000;
 function overview(symbol: string): SymbolOverview {
   const block = { state: (symbol === "SPY" ? "none" : "ready") as "none" | "ready", source: "Tradier company fundamentals", fetched_at: OVERVIEW_READ, message: null };
   return { symbol, state: symbol === "SPY" ? "none" : "ready", datasets: {
-    company: { ...block, name: symbol === "SPY" ? null : "NVIDIA Corporation", sector: symbol === "SPY" ? null : "Technology", employees: symbol === "SPY" ? null : 36000,
+    company: { ...block, name: null, sector: symbol === "SPY" ? null : "Technology", employees: symbol === "SPY" ? null : 36000,
       ipo_date: symbol === "SPY" ? null : "1999-01-22", description: symbol === "SPY" ? null : "GPU designer" },
     ratios: { ...block, pe: symbol === "SPY" ? null : 52.5, price_to_sales: symbol === "SPY" ? null : 25, price_to_book: symbol === "SPY" ? null : 40,
       ev_to_ebitda: symbol === "SPY" ? null : 48, dividend_yield: symbol === "SPY" ? null : 0.0003, beta_60_month: symbol === "SPY" ? null : 1.8 },
@@ -50,7 +50,10 @@ test("Overview combines the chart's existing quote with cached company fundament
   await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$189.12");
   await expect(info.getByRole("region", { name: "Price and range" })).toContainText("$185.00 – $191.00");
   await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("Technology");
+  await expect(info.getByRole("region", { name: "Company", exact: true })).toContainText("NVDA company"); // Tradier fundamentals have no name; the quote's is used
+  await expect(info.getByRole("heading", { name: "NVDA company" })).toHaveAttribute("title", /^Tradier chart quote/);
   await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("$4.5T");
+  await expect(info.getByRole("region", { name: "Key statistics" })).toContainText("68.00%"); // 13F share arrives as a fraction
   await expect(info.getByRole("region", { name: "Valuation" })).toContainText("EV/EBITDA");
   await expect(info.getByText("52.5", { exact: true }).locator("..")).toHaveAttribute("title", /Tradier company fundamentals · read/);
   expect(reads).toEqual(["NVDA"]);

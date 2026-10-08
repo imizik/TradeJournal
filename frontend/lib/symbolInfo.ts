@@ -74,7 +74,7 @@ export type OverviewBlock = {
 };
 export type OverviewCompany = OverviewBlock & { name: string | null; sector: string | null; employees: number | null; ipo_date: string | null; description: string | null };
 export type OverviewRatios = OverviewBlock & { pe: number | null; price_to_sales: number | null; price_to_book: number | null; ev_to_ebitda: number | null; dividend_yield: number | null; beta_60_month: number | null };
-export type OverviewStatistics = OverviewBlock & { market_cap: number | null; enterprise_value: number | null; shares_outstanding: number | null; institutional_ownership: number | null; average_volume_30_day: number | null };
+export type OverviewStatistics = OverviewBlock & { market_cap: number | null; enterprise_value: number | null; shares_outstanding: number | null; institutional_ownership: number | null; average_volume_30_day: number | null; average_volume_90_day?: number | null };
 export type SymbolOverview = {
   symbol: string; state: "ready" | "none" | "unavailable";
   datasets: { company: OverviewCompany; ratios: OverviewRatios; statistics: OverviewStatistics };
