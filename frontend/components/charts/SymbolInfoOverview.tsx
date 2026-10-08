@@ -6,6 +6,7 @@ import type { OverviewBlock, SymbolOverview } from "@/lib/symbolInfo";
 const number = (value: number | null, digits = 2) => value == null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
 const dollars = (value: number | null) => value == null ? "—" : new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", notation: "compact", maximumFractionDigits: 2 }).format(value);
 const yieldPercent = (value: number | null) => value == null ? "—" : `${(value * 100).toFixed(2)}%`;
+const price = (value: number) => value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const reportedPercent = (value: number | null) => value == null ? "—" : `${number(value)}%`;
 const quoteLabel = (quote: ChartQuote | null | undefined, fetchedAt: number | null) => {
   const traded = quote?.trade_time ? `last trade ${readAt(quote.trade_time)}` : null;
@@ -42,12 +43,12 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
     <section aria-label="Price and range" className="space-y-2">
       <h3 className="text-slate-400">Price and range</h3>
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2">
-        <Value label="Price" value={spot == null ? "—" : `$${number(spot)}`} title={qTitle} />
+        <Value label="Price" value={spot == null ? "—" : `$${price(spot)}`} title={qTitle} />
         <Value label="Change" value={quote?.change == null ? "—" : `${quote.change >= 0 ? "+" : "−"}$${number(Math.abs(quote.change))} (${quote.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${number(quote.change_percentage)}%`})`} title={qTitle} />
-        <Value label="Day range" value={quote?.day_low == null || quote?.day_high == null ? "—" : `$${number(quote.day_low)} – $${number(quote.day_high)}`} title={qTitle} />
+        <Value label="Day range" value={quote?.day_low == null || quote?.day_high == null ? "—" : `$${price(quote.day_low)} – $${price(quote.day_high)}`} title={qTitle} />
         <div title={qTitle} className="min-w-0">
           <dt className="text-slate-500">52-week range</dt>
-          <dd className="mt-1 text-slate-300">{weekLow == null || weekHigh == null ? "—" : `$${number(weekLow)} – $${number(weekHigh)}`}
+          <dd className="mt-1 text-slate-300">{weekLow == null || weekHigh == null ? "—" : `$${price(weekLow)} – $${price(weekHigh)}`}
             {weekPosition != null && <div className="relative mt-1.5 h-1 rounded bg-slate-700" aria-label={`Price is ${Math.round(weekPosition)} percent through the 52-week range`}><span className="absolute -top-0.5 h-2 w-1 rounded bg-sky-300" style={{ left: `${weekPosition}%` }} /></div>}
           </dd>
         </div>
