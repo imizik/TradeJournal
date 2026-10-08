@@ -70,7 +70,8 @@ else:
     if name == 'claude':
         assert '--bare' not in args and '--restricted' in args
         assert args[args.index('--tools') + 1] == 'Read,Grep,Glob'
-        print(json.dumps({'subtype': 'success', 'is_error': False, 'permission_denials': ['Read'] if os.getenv('FAKE_DENIAL') else [], 'structured_output': result}))
+        print(json.dumps({'type': 'system', 'subtype': 'init'}))
+        print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'permission_denials': ['Read'] if os.getenv('FAKE_DENIAL') else [], 'structured_output': result}))
     else:
         assert args[args.index('--sandbox') + 1] == 'read-only'
         pathlib.Path(args[args.index('--output-last-message') + 1]).write_text(json.dumps(result))

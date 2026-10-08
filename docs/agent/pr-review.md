@@ -41,7 +41,9 @@ incorrect findings with code/test evidence so the independent reviewer can
 reassess them. Do not silently discard findings. Run relevant checks, commit,
 and invoke the same command again. Each pass inspects the complete current diff
 and verifies previous fixes. There are at most three passes total, with a
-ten-minute process deadline per pass. Failures consume a pass too.
+fifteen-minute process deadline per pass. Progress is streamed into the saved
+JSONL log, and the runner reports liveness every thirty seconds. Failures
+consume a pass too.
 
 After a clean result, push the feature branch and open/update its draft PR.
 Then publish and finish:
