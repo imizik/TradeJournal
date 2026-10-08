@@ -53,8 +53,8 @@ If this track is selected, start with A1, then A2, then A3. Assign and review
 | ID | Deliverable | Depends on | Status / exit evidence |
 |---|---|---|---|
 | P0 | Set the first practice policy, universe and schedule | Selection of this track | selected in [P0 v1](agent/practice-policy.md); synthetic plan/outcome and real read-only source-time check recorded; forward use awaits A1/A2 operational gates |
-| A1 | Freeze and retrieve a human or agent decision | P0 | [PR #143](https://github.com/imizik/TradeJournal/pull/143) merged; merged CI including Postgres parity passed; read-only provider time/unit check and 390px automated WAIT save/reopen observed; human timing and provider-backed TAKE remain unobserved; records remain practice drafts and unarmed |
-| A2 | Watch, alert and paper-track a fixed-rule plan | A1 | in progress: backend arm/watch/paper events/phone outbox built locally (fixture tests only) and the Today UI (arm button, paper timeline, base and 3× outcome, `/?decision=<id>` deep link, browser-tested with mocked paper endpoints); no live phone or restart drill yet; exit: one observed phone alert and restart-safe paper lifecycle, with any operational probe labeled and excluded from strategy results |
+| A1 | Freeze and retrieve a human or agent decision | P0 | [PR #143](https://github.com/imizik/TradeJournal/pull/143) merged; merged CI including Postgres parity passed; 390px automated WAIT save/reopen and a provider-backed human TAKE save/reopen observed; human comprehension timing remains unobserved; A1 decisions stay immutable and A2 arming is separate |
+| A2 | Watch, alert and paper-track a fixed-rule plan | A1 | live operational lifecycle observed 2026-10-08 after deployed [PR #147](https://github.com/imizik/TradeJournal/pull/147) and [PR #152](https://github.com/imizik/TradeJournal/pull/152): user-confirmed phone receipt and exact-card deep link, accepted SPY paper entry, API restart while open preserving the entry, then one stop exit with independently checked base/3× cost outcomes and no duplicate event keys; this late-session operational probe is outside the on-time strategy cohort; [evidence and remaining boundaries](agent/practice-policy.md#a2-live-operational-observation-2026-10-08) |
 | A3 | Run the short daily routine and compare independent choices | A2 | proposed third build; exit: three observed sessions with honest run status, paired choices and review timing |
 | B | Use the same policy for forward observation | A3, or manual preparation using A1/A2 | proposed observation; exit: at least ten eligible sessions with coverage and attention results |
 | C | Select one research or thesis improvement | B review and a named recurring obstacle | conditional decision gate; write one new scoped contract after choosing the obstacle |
@@ -1131,6 +1131,18 @@ observed plan-to-paper lifecycle and does not change C5.2 deployment status.
 the system watches while he works and retains an outcome worth reviewing.
 
 ### A3 — Run a daily routine and compare independent choices
+
+**Local implementation (2026-10-08):** the manual daily routine, frozen common
+opportunities, immutable choice/reveal service, deterministic review and
+benchmark, bounded disabled adapter and opt-in timer are implemented on the
+owned A3 branch. The [implementation contract](agent/a3-implementation-contract.md)
+records the exact semantics. Deployment, paid/scheduled enablement, CI and the
+three observed human-timed sessions remain separate gates; A3 is not fully accepted.
+
+The [A3 implementation contract](agent/a3-implementation-contract.md) scopes
+the manual-first build, bounded adapter, opt-in scheduling and acceptance
+gates. The [Sol handoff prompt](agent/a3-sol-handoff.md) carries that scope to
+a new chat. Neither document enables a runtime or selects another slice.
 
 **User outcome:** one short morning board and one after-work review make the
 loop habitual. On selected opportunities Isaac records one tap before seeing

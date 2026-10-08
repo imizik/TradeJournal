@@ -569,3 +569,26 @@ ntfy.sh itself is proved only by `alerts.py test` on the server.
 The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
 and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites).
+
+### A3 Practice preparation (opt-in, disabled)
+
+The package includes a dedicated `practice` worker lane and
+`tradejournal-practice.service` / `tradejournal-practice.timer`. The release
+controller installs the timer but does not enable it. It runs at 08:50
+America/New_York only after a separate operator enablement decision. The finite
+job uses the same persistent `JOB_LOCK_DIR`; manual requests do not wait behind
+broker imports or voice transcription. Calendar failures/closures and missed
+09:00 deadlines produce explicit records. Preparation never arms a plan.
+
+Both `PRACTICE_SCHEDULE_ENABLED` and `PRACTICE_AGENT_ENABLED` default off.
+Enabling an agent requires explicit approval of the exact Anthropic model,
+`PRACTICE_AGENT_TIMEOUT_SECONDS` (≤120), `PRACTICE_AGENT_INPUT_TOKENS` (≤20000),
+`PRACTICE_AGENT_OUTPUT_TOKENS` (≤4000), `PRACTICE_AGENT_DAILY_USD`,
+`PRACTICE_AGENT_INPUT_USD_PER_MILLION` and
+`PRACTICE_AGENT_OUTPUT_USD_PER_MILLION`, with operator-verified rate provenance.
+There is at most one reserved attempt per ET day, including revisions; failed
+or uncertain calls never retry automatically. Missing usage/cost remains unknown.
+Do not enable the timer or paid runtime merely because these units are packaged.
+A3 deployment requires separate approval and migration/Ubuntu CI verification.
+Three real sessions with actual morning-plus-review timings are still required
+for [live acceptance](../docs/agent/a3-implementation-contract.md).

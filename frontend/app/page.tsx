@@ -3,6 +3,7 @@ import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
 import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeDecisions from "@/components/PracticeDecisions";
+import PracticeRoutine from "@/components/PracticeRoutine";
 import {
   buildOpenPositionMeta,
   computeUnrealizedPnl,
@@ -201,6 +202,8 @@ export default async function DashboardPage({
       </div>
 
       <PerformanceOverview trades={trades} />
+
+      <PracticeRoutine />
 
       <PracticeDecisions records={decisions.decisions} focusId={resolvedParams.decision} />
 

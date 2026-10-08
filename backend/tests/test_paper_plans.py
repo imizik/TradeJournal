@@ -574,3 +574,22 @@ def test_crash_between_trigger_and_intent_cannot_backdate_or_delay_entry_indefin
     clock.now = at(DAY, 10, 25)
     watcher(engine, feed, clock).run()
     assert types(engine, rid) == ["armed", "trigger", "unresolved"]
+
+
+def test_a3_paired_choices_cannot_arm_twice_even_after_first_plan_terminal(engine):
+    first, second = record(engine), record(engine)
+    opportunity = f"a3:{uuid.uuid4()}"
+    with Session(engine) as db:
+        for rid, actor in ((first, "human"), (second, "agent:a3")):
+            item = db.get(DecisionRecord, rid)
+            item.opportunity_id, item.actor = opportunity, actor
+            db.add(item)
+        db.commit()
+    arm(engine, first)
+    with Session(engine) as db:
+        # Synthetic terminal fixture checks ownership independently of active-symbol caps.
+        paper.append(db, first, [{"type": "expired", "key": "fixture-expired", "at": at(DAY, 9, 1)}], now=at(DAY, 9, 1))
+        assert paper.state_of(db, first).status == "expired"
+    with pytest.raises(paper.PaperError, match="shared opportunity"):
+        arm(engine, second, when=at(DAY, 9, 2))
+    assert arm(engine, first)[1] is False

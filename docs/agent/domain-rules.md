@@ -476,3 +476,22 @@ is verifiable rather than hopeful.
 - `GET /fills` takes `limit` (default 2000) and `offset`.
 - On SQLite, avoid long write transactions in historical jobs, or `job_run`
   progress updates hit "database is locked".
+
+## Daily Practice routine (A3)
+
+`practice_run`, `practice_opportunity` and `practice_agent_call` are separate
+from journal and factory records. One canonical ET day/P0 cohort predeclares all
+five opportunities; assisted revisions retain the original link. Server-owned
+A1 IDs enforce one immutable choice per actor/opportunity. Unobserved human or
+agent choices never become SKIP. Independent reveal requires both commitments;
+generic decision and paper routes enforce the same visibility. A shared
+opportunity can be armed through only one actor, even after its first plan is
+terminal; global P0 arm and active-symbol caps remain authoritative.
+
+The runner receives only allowlisted frozen market facts/policy, no human or
+journal data/tools. Its JSON cannot select actor/context ownership or arm plans.
+One reserved paid attempt per ET day includes uncertain completions; limits
+and missing cost provenance remain explicit. The shared regular-session
+underlying benchmark requires complete minute and no-split coverage, never
+substitutes actor paper fills or actual journal P&L. See
+[the complete A3 contract](a3-implementation-contract.md).

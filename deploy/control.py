@@ -24,13 +24,14 @@ ROOT = Path("/opt/tradejournal")
 STATE = Path("/var/lib/tradejournal")
 CONFIG = Path("/etc/tradejournal")
 UNITS = Path("/etc/systemd/system")
-SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail", "capture")]]
+SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail", "capture", "practice")]]
 AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-options-snapshot", "tradejournal-rvol-history", "tradejournal-alerts"]
 # Its timer pauses with the others during an operation. Its service is never
 # stopped from here: that service is what runs the controller unattended.
 AUTODEPLOY = "tradejournal-autodeploy"
 TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
-OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
+PRACTICE_UNITS = ["tradejournal-practice.service", "tradejournal-practice.timer"]
+OPTIONAL_UNITS = [*PRACTICE_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
 # Retired units stay listed until upgrades have removed their installed copies.
 RETIRED_SERVICES = ["tradejournal-ingress"]
 # The alert check keeps running through a deployment, so a release that fails
@@ -177,7 +178,7 @@ def install_units(release: Path) -> None:
 
 def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
-    for service in [*RETIRED_SERVICES, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    for service in [*RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
@@ -225,6 +226,12 @@ def start_services(release: Path, confirmation: str) -> None:
     if available_timers:
         run("systemctl", "enable", "--now", *available_timers)
         run("systemctl", "is-active", *available_timers)
+    # An explicitly enabled opt-in timer survives release restarts. Never enable it here.
+    practice_timer = "tradejournal-practice.timer"
+    if (release / "deploy/systemd" / practice_timer).is_file():
+        enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", practice_timer], check=False)
+        if enabled.returncode == 0:
+            run("systemctl", "start", practice_timer)
 
 
 def activate(release: Path, confirmation: str) -> None:

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-from app.models import DecisionContext, DecisionRecord
+from app.models import DecisionContext, DecisionRecord, PracticeOpportunity
 
 MAX_FRESHNESS_SECONDS = 86_400  # one regular-session day; P0 may choose less
 POLICY_VERSION = "practice-long-15m-v1"
@@ -255,7 +255,16 @@ def row(record: DecisionRecord) -> dict:
     }
 
 
-def create(db: Session, request: dict) -> tuple[DecisionRecord, bool]:
+def create(db: Session, request: dict, *, routine: bool = False) -> tuple[DecisionRecord, bool]:
+    if not routine:
+        if str(request.get("opportunity_id", "")).startswith("a3:") or request.get("actor") == "agent:a3":
+            raise DecisionError("A3 ownership requires the routine choice service")
+        try:
+            context_id = uuid.UUID(str(request.get("context_id")))
+        except ValueError:
+            context_id = None
+        if context_id and db.exec(select(PracticeOpportunity).where(PracticeOpportunity.context_id == context_id)).first():
+            raise DecisionError("A3 contexts require the routine choice service")
     operation_id = request.get("operation_id")
     # Idempotency is evaluated before expiry/freshness checks. A retry returns
     # the saved record even if its opportunity has since expired.

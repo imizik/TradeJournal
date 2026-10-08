@@ -275,3 +275,64 @@ def test_stopping_a_queued_listener_does_not_start_it(database):
     job_id = create_run(database, "webull_listener", status="queued_stop")
     assert runtime.recover_interrupted(lane="webull") == 1
     assert read_job(database, job_id).status == "succeeded"
+
+
+def test_a3_preparation_lane_does_not_queue_behind_import_or_capture(database, tmp_path):
+    sync_id = create_run(database)
+    worker = held_worker(sync_id, tmp_path / "release", tmp_path / "effects")
+    try:
+        wait_until_inside(database, sync_id, worker)
+        practice_id = create_run(database, "practice_prepare")
+        with runtime._lock(runtime.lock_directory(), "lane-capture") as held:
+            assert held
+            runtime.execute_job(practice_id, runner=lambda: jobs._finish_job(practice_id, 1, 1))
+        assert read_job(database, practice_id).status == "succeeded"
+        assert read_job(database, sync_id).status == "running"
+    finally:
+        worker.kill()
+        worker.communicate(timeout=5)
+
+
+def test_a3_killed_owner_retains_reserved_call_and_original_cohort(database, tmp_path):
+    from app.engine import practice
+    from app.models import PracticeAgentCall, PracticeRun
+    with Session(database) as db:
+        run = practice.start(db)
+        run.status = "preparing"
+        db.add(run)
+        db.commit()
+        run_id, job_id = run.id, run.job_id
+    gate = tmp_path / "reserved"
+    code = f'''
+import time,uuid
+from pathlib import Path
+from sqlmodel import Session
+from app.database import engine
+from app.models import PracticeRun,PracticeAgentCall
+from app.engine import job_runtime
+
+def hold():
+    with Session(engine) as db:
+        run=db.get(PracticeRun,uuid.UUID({str(run_id)!r}))
+        db.add(PracticeAgentCall(day=run.day,run_id=run.id,model="fixture",prompt_version="fixture",payload_json="{{}}",config_json="{{}}"))
+        db.commit()
+    Path({str(gate)!r}).touch()
+    while True:
+        time.sleep(.1)
+job_runtime.execute_job(uuid.UUID({str(job_id)!r}),runner=hold)
+'''
+    process = subprocess.Popen([sys.executable, "-c", code], cwd=BACKEND, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 15
+        while not gate.exists():
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.025)
+    finally:
+        process.kill()
+        process.communicate(timeout=5)
+    assert runtime.recover_interrupted(lane="practice") == 1
+    with Session(database) as db:
+        run = db.get(PracticeRun, run_id)
+        assert practice.view(db, run)["agent"]["status"] == "uncertain"
+        assert practice.start(db).id == run_id
+        assert db.exec(select(PracticeAgentCall)).one().output_json is None

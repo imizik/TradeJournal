@@ -47,3 +47,27 @@ After the trigger commit returns, the watcher samples the clock and persists one
 Unknown or stale split metadata pauses entry/exit evaluation. Every completed 15-minute interval evaluated before the first crossing needs complete one-minute coverage; missing intervals or unavailable historical calendars pause evaluation rather than producing a trigger or a quiet expiry. Completed regular-session entry/exit bars can be recovered after the market closes, with late reconstruction marked. Today resolves a phone-linked decision by ID even when it has aged out of the recent list. Use **Refresh paper timeline** to retrieve new events while the card stays open; the outcomes show simulated entry-to-stop exposure separately from planned R.
 
 These behaviors have fixture regression coverage in `backend/tests/test_paper_plans.py` and a phone-link browser check in `frontend/e2e/practice-decisions.spec.ts`. PostgreSQL concurrency is additionally covered by `backend/tests/test_postgres_parity.py` when a disposable test database is supplied. None proves real provider coverage, phone receipt, or a production restart. A2 acceptance still requires the controlled live lifecycle and restart drill described in the roadmap.
+
+## A2 live operational observation (2026-10-08)
+
+The VPS deployed merged commit `d00257286dd0` after the merge CI and Ubuntu deployment checks passed. A fresh production backup verified before Alembic applied the A2 event-table migration. API/frontend identity, restored Gmail/timers, watcher readiness, live Alpaca IEX context save/reopen, Tradier regular-session minute bars, and current split metadata passed post-deploy checks.
+
+One SPY software-lifecycle probe used genuine frozen source facts: trigger 772.465, stop 771.82, target 775.475 and guard 772.465–774.00. It armed at 13:12:24 ET, so its immutable arm event has `on_time=false`. Treat this as an operational acceptance observation outside the on-time cohort, not a strategy result or evidence of an edge; no policy or price was amended to force its outcome.
+
+The 13:15 close triggered, a post-commit order intent selected the 13:16 entry minute, and the accepted paper fill was 773.297321. The user confirmed the trigger notification arrived on the phone and opened this exact frozen card. At 13:18:31 ET, an API restart while SPY was open changed the API process ID, preserved every original SPY and QQQ economic event, retained exactly one SPY entry, and left SPY open. At 13:22 ET, SPY exited through its fixed stop: reference 771.82, simulated fill 771.732818, no gap or ambiguous bar. The final timeline has exactly one entry and one exit, unique event keys, the unchanged original entry, and `tradier_timesales_1min` provenance throughout. None of its events was marked reconstructed; the brief restart did not create a prolonged observation gap.
+
+Independent arithmetic from the stored reference prices and frozen cost parameters matched base net −1.564503/share (−2.425586 planned R) and triple-cost net −1.913509/share (−2.966681 planned R). Both use the original 0.645 trigger-minus-stop denominator. The loss exceeds one planned R because the delayed entry was above the frozen trigger and includes adverse costs; simulated entry-to-stop exposure was 1.477321/share. The exit outbox is `sent`; physical receipt of the exit notification was not separately confirmed. The hourly follow-up was paused after verification.
+
+This observes the core live phone → accepted paper entry → restart → fixed-rule exit path. Human comprehension timing, on-time forward cohorts, and live observation of the adverse paths remain separate evidence; fixture/CI coverage is not a claim that each adverse path occurred in production. A3 and strategy-performance conclusions are not authorized by this observation.
+
+
+## A3 evidence boundary
+
+The local daily-run implementation reuses this exact P0 policy and A1/A2
+validation/events. It adds five common opportunities, immutable choices,
+explicit reveal, source/coverage review, attention timing and a separate
+regular-session underlying benchmark. The [A3 contract](a3-implementation-contract.md)
+records canonical retries/revisions, disabled paid/scheduled execution and the
+remaining acceptance gates. No A3 human routine has been observed: **0/3
+eligible sessions**, with morning-plus-review timings unmeasured. Browser
+fixture timings are software evidence, not human attention observations.
