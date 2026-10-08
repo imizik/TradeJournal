@@ -157,10 +157,11 @@ export type MarketDay = {
   sessions: { part: "pre" | "regular" | "post"; start: number; end: number }[]; note: string | null;
 };
 export type ChartQuote = {
-  symbol: string; name: string; last: number | null; change: number | null;
+  symbol: string; name: string; instrument_type?: string; last: number | null; change: number | null;
   change_percentage: number | null; volume: number | null; previous_close: number | null;
   /** Tradier's explicit current regular-session close; null until it is known. */
   regular_close?: number | null; trade_time: number | null;
+  day_high?: number | null; day_low?: number | null; week_52_high?: number | null; week_52_low?: number | null;
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {

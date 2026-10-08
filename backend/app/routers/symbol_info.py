@@ -41,6 +41,12 @@ def events(symbol: str):
     return symbol_info_tradier.symbol_events.events(_ticker(symbol), datetime.now(ET).date())
 
 
+@router.get("/symbol/{symbol:path}/overview")
+def overview(symbol: str):
+    """Company profile and valuation/statistics (T1.3), from cached Tradier fundamentals."""
+    return symbol_info_tradier.symbol_events.overview(_ticker(symbol))
+
+
 @router.get("/symbol/{symbol:path}/forecast")
 def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
     """The implied move (T2.1): the at-the-money straddle at ``spot`` (the chart's latest price)

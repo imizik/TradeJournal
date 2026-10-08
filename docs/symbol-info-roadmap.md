@@ -44,7 +44,7 @@ after them, clearly labelled.
 |---|---|---|---|
 | T1.1 | Panel shell and the **You** tab: your own trades on this underlying | 1 Core | done ([PR #115](https://github.com/imizik/TradeJournal/pull/115)) |
 | T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga, plus Polygon with provider-supplied sentiment) | 1 Core | done (branch `claude/roadmap-features-7kd6u6`) |
-| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | todo |
+| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | built locally; browser verification pending |
 | T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
 | T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
 | T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |

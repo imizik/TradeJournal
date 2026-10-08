@@ -176,12 +176,15 @@ class ChartFeed:
         for q in _rows(quote_data, "quotes", "quote"):
             rows.append({
                 "symbol": str(q.get("symbol", "")), "name": str(q.get("description") or q.get("symbol") or ""),
+                "instrument_type": str(q.get("type") or ""),
                 "last": _number(q.get("last")), "change": _number(q.get("change")),
                 "change_percentage": _number(q.get("change_percentage")),
                 "volume": _number(q.get("volume")), "previous_close": _number(q.get("prevclose")),
                 # Tradier's `close` is the current regular-session close. It is
                 # often null before/while RTH is open; never infer it from last.
                 "regular_close": _number(q.get("close")),
+                "day_high": _number(q.get("high")), "day_low": _number(q.get("low")),
+                "week_52_high": _number(q.get("week_52_high")), "week_52_low": _number(q.get("week_52_low")),
                 "trade_time": _number(q.get("trade_date"), divisor=1000),
             })
 

@@ -68,6 +68,24 @@ export type SymbolEvents = {
   splits: EventsBlock & { rows: Split[] };
 };
 
+export type OverviewBlock = {
+  state: "ready" | "none" | "loading" | "unavailable"; source: string;
+  fetched_at: number | null; message: string | null;
+};
+export type OverviewCompany = OverviewBlock & { name: string | null; sector: string | null; employees: number | null; ipo_date: string | null; description: string | null };
+export type OverviewRatios = OverviewBlock & { pe: number | null; price_to_sales: number | null; price_to_book: number | null; ev_to_ebitda: number | null; dividend_yield: number | null; beta_60_month: number | null };
+export type OverviewStatistics = OverviewBlock & { market_cap: number | null; enterprise_value: number | null; shares_outstanding: number | null; institutional_ownership: number | null; average_volume_30_day: number | null };
+export type SymbolOverview = {
+  symbol: string; state: "ready" | "none" | "unavailable";
+  datasets: { company: OverviewCompany; ratios: OverviewRatios; statistics: OverviewStatistics };
+};
+
+export async function fetchSymbolOverview(symbol: string, signal: AbortSignal): Promise<SymbolOverview> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/overview`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Overview unavailable. Try again.");
+  return response.json();
+}
+
 export async function fetchSymbolEvents(symbol: string, signal: AbortSignal): Promise<SymbolEvents> {
   const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/events`), { signal, cache: "no-store" });
   if (!response.ok) throw new Error("Events unavailable. Try again.");
