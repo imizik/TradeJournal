@@ -193,3 +193,24 @@ export function ago(publishedAt: string, now: number): string {
   return minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 1440 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / 1440)} d ago`;
 }
 export const newYorkTime = (publishedAt: string) => `${new Date(publishedAt).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} ET`;
+
+export type AnalystBlock<T> = { state: "ready" | "none" | "unavailable"; source: string; provider?: string; fetched_at?: number; message?: string | null; note?: string; value?: T };
+export type AnalystEstimate = { period: string; eps?: { avg: number; low: number | null; high: number | null; analysts: number | null; growth: number | null }; revenue?: { avg: number; low: number | null; high: number | null; analysts: number | null; growth: number | null } };
+export type AnalystAction = { date: string; firm: string; to_grade: string | null; from_grade: string | null; action: string | null; target: number | null; prior_target: number | null };
+export type AnalystBeat = { quarter: string; actual: number; estimate: number; surprise: number | null; result: "beat" | "miss" | "met" };
+export type SymbolAnalysts = {
+  symbol: string; state: "ready" | "none" | "unavailable";
+  blocks: {
+    targets: AnalystBlock<{ mean: number | null; median: number | null; high: number | null; low: number | null }>;
+    ratings: AnalystBlock<{ strong_buy: number | null; buy: number | null; hold: number | null; sell: number | null; strong_sell: number | null }>;
+    estimates: AnalystBlock<AnalystEstimate[]>; history: AnalystBlock<AnalystBeat[]>; actions: AnalystBlock<AnalystAction[]>;
+  };
+  providers: Record<string, { label: string; fetched_at: number | null; message: string | null }>;
+};
+
+/** Analyst targets, ratings, estimates and actions (T2.3), cached a day on the server. */
+export async function fetchSymbolAnalysts(symbol: string, signal: AbortSignal): Promise<SymbolAnalysts> {
+  const response = await fetch(apiUrl(`/charts/symbol/${encodeURIComponent(symbol)}/analysts`), { signal, cache: "no-store" });
+  if (!response.ok) throw new Error("Analyst data unavailable. Try again.");
+  return response.json();
+}

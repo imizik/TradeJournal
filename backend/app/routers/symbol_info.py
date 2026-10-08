@@ -11,7 +11,7 @@ from app.database import get_session
 from app.engine.chart_math import ET
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_feed import ChartFeedError, chart_feed
-from app.engine import symbol_info_news_feed, symbol_info_tradier
+from app.engine import symbol_info_analysts, symbol_info_news_feed, symbol_info_tradier
 from app.engine.options_feed import options_feed
 from app.engine.symbol_info_journal import read_journal
 from app.engine.symbol_info_reactions import SOURCE as REACTIONS_SOURCE, calculate as calculate_reactions, summary as reaction_summary
@@ -62,6 +62,13 @@ def forecast(symbol: str, spot: float | None = Query(None, gt=0)):
     events = symbol_info_tradier.symbol_events.forecast_earnings(symbol, today)
     earnings = events.get("next")
     return options_feed.forecast(symbol, spot, earnings)
+
+
+@router.get("/symbol/{symbol:path}/analysts")
+def analysts(symbol: str):
+    """Analyst targets, ratings, estimates and recent actions (T2.3): Webull first, Yahoo for the rest.
+    Cached a day per provider; each block says which source it came from."""
+    return symbol_info_analysts.symbol_analysts.view(_ticker(symbol))
 
 
 @router.get("/symbol/{symbol:path}/reactions")
