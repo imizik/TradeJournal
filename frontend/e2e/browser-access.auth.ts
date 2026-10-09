@@ -27,6 +27,7 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Today", exact: true })).toBeVisible();
   await expect(page.getByText("Read-only assistant access")).toBeVisible();
+  await expect(page.getByText("Sample journal · read-only trial", { exact: true })).toBeVisible();
   await expect(page.getByText("No practice runs are shared with this assistant for this day.")).toBeVisible();
   await expect(page.getByText("No decision records are shared with this assistant.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Fills", exact: true })).toHaveCount(0);
@@ -111,4 +112,38 @@ test("assistant login fits phone width", async ({ page }) => {
   await expect(async () => {
     await page.screenshot({ path: test.info().outputPath("assistant-login-phone.png"), animations: "disabled" });
   }).toPass({ timeout: 5_000, intervals: [100, 250, 500] });
+});
+
+test("journal calendar dates hydrate across browser locales and timezones", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: ownerOrigin, locale: "en-GB", timezoneId: "Pacific/Honolulu" });
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await page.goto("/");
+  const trades = await (await context.request.get("/api/backend/trades")).json();
+  const expiration = trades.find((trade: { ticker: string; expiration: string; status: string }) => trade.ticker === "AAPL" && trade.status === "open").expiration;
+  const date = new Intl.DateTimeFormat("en-US", { timeZone: "UTC" }).format(new Date(`${expiration}T12:00:00Z`));
+  await expect(page.getByRole("table").first().getByText(date, { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "1M", exact: true }).click();
+  await expect(page.getByText("1M Closed P&L", { exact: true })).toBeVisible();
+  expect(errors).toEqual([]);
+  await context.close();
+});
+
+test("native login submission never puts an access key in the URL", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: publicOrigin, javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto("/login");
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeDisabled();
+  await page.getByLabel("Assistant ID").fill("native-proof");
+  await page.getByLabel("Access key").fill("synthetic-native-proof-key");
+  const sent = page.waitForRequest(request => request.url().startsWith(publicOrigin + "/login") && request.isNavigationRequest());
+  // Bypass React intentionally: this is the browser's pre-hydration fallback.
+  await page.evaluate(() => document.querySelector("form")!.submit());
+  const request = await sent;
+  expect(request.method()).toBe("POST");
+  expect(new URL(request.url()).search).toBe("");
+  expect(request.postData()).toContain("synthetic-native-proof-key");
+  expect((await context.request.get("/api/backend/trades")).status()).toBe(401);
+  await context.close();
 });
