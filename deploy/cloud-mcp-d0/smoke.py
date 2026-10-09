@@ -330,6 +330,24 @@ def main():
             ):
                 diagnostic = subprocess.run(command, check=False, capture_output=True)
                 sys.stderr.write(diagnostic.stdout.decode())
+            # Diagnose a failed publisher in the same sandbox, using only the
+            # anonymous local fixture. The shipped CLI deliberately suppresses
+            # exception values; this failed smoke must still identify its cause.
+            subprocess.run(["systemctl", "stop", KEY_TIMER, KEY_SERVICE], check=False, capture_output=True)
+            helper = ROOT / "diagnose_publisher.py"
+            helper.write_text(f'''import asyncio, sys
+from pathlib import Path
+sys.path.insert(0, "{ROOT}/backend")
+from cloud_mcp_d0_refresh import publish
+asyncio.run(publish(Path("{CONFIG}/refresh.json")))
+''')
+            Path("/etc/systemd/system", KEY_SERVICE + ".d", "diagnostic.conf").write_text(
+                f"[Service]\nExecStart=\nExecStart={ROOT}/backend/.venv/bin/python {helper}\n")
+            subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
+            subprocess.run(["systemctl", "start", KEY_SERVICE], check=False, capture_output=True)
+            diagnostic = subprocess.run(["journalctl", "--unit=" + KEY_SERVICE,
+                "--no-pager", "--no-hostname", "-n", "80"], check=False, capture_output=True)
+            sys.stderr.write(diagnostic.stdout.decode())
             raise SystemExit(result.returncode)
         sys.stdout.write(result.stdout.decode())
     finally:
