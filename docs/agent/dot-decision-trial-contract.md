@@ -90,12 +90,16 @@ and both choices committed before reveal.
 
 ## Operations
 
-The [updater](../../deploy/dot_trial_update.py) accepts only the eleven selected
+The [updater](../../deploy/dot_trial_update.py) accepts only its explicit selected
 backend/control source files and portable compiled frontend files. Keep the
 verified Linux `node_modules`; never include data, OAuth files or environment
 secrets in either archive. The updater records the exact source commit and
 archive hashes, preserves root-private recovery files and checks that restarted
 trial services share a namespace distinct from the host.
+
+The [D1 read contract](cloud-mcp-d1-contract.md) adds the independently
+authenticated sample reader to that selected source set and requires staged,
+pinned backend dependencies before switching the older installed runtime.
 
 The [sample preparation command](../../deploy/dot_trial_seed.py) runs with the
 trial's exact marked SQLite environment and source-provenance check. It creates

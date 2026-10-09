@@ -183,19 +183,23 @@ def identify(request, *, consume_budget=True):
         _serialized(db)
         row, principal = _session(db, token, audience)
         if principal.id != OWNER and consume_budget:
-            # Persist a per-principal request budget across process restarts.
-            bucket_id = digest("requests:" + principal.id)
-            bucket = db.get(AccessLoginLimit, bucket_id) or AccessLoginLimit(id=bucket_id)
-            if bucket.window_at + timedelta(minutes=1) <= now():
-                bucket.window_at, bucket.attempts = now(), 0
-            if bucket.attempts >= 240:
-                raise HTTPException(429, "Request budget exceeded; try again later")
-            bucket.attempts += 1
-            db.add(bucket)
+            consume_request_budget(db, principal.id)
         identity = Identity(principal.id, audience, principal.id == OWNER,
             json.loads(principal.grants_json), row.digest, row.csrf)
         db.commit()
         return identity
+
+
+def consume_request_budget(db, identifier):
+    # Browser and connector share the persisted per-principal budget.
+    bucket_id = digest("requests:" + identifier)
+    bucket = db.get(AccessLoginLimit, bucket_id) or AccessLoginLimit(id=bucket_id)
+    if bucket.window_at + timedelta(minutes=1) <= now():
+        bucket.window_at, bucket.attempts = now(), 0
+    if bucket.attempts >= 240:
+        raise HTTPException(429, "Request budget exceeded; try again later")
+    bucket.attempts += 1
+    db.add(bucket)
 
 
 def csrf_check(request, identity):

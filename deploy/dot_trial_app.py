@@ -176,4 +176,5 @@ def build_app(root=ROOT):
         raise RuntimeError("Dot trial authentication middleware order changed")
     app.user_middleware.insert(1, Middleware(FixtureMarket))
     app.state.sample_replay_isolated = True
+    app.state.cloud_mcp_sample_only = True
     return app

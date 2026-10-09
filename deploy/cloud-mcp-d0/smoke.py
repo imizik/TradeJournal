@@ -22,6 +22,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROOT = Path("/opt/tradejournal-d0")
 CONFIG = Path("/etc/tradejournal-d0")
+D1_CONFIG = Path("/etc/tradejournal-d1")
 SOCKET = "tradejournal-d0-https.socket"
 SERVICE = "tradejournal-d0-https.service"
 PROXY = "tradejournal-d0-smoke-proxy.service"
@@ -39,7 +40,7 @@ def run(*args):
 
 
 def prepare():
-    if any(path.exists() for path in (ROOT, CONFIG, KEYS)):
+    if any(path.exists() for path in (ROOT, CONFIG, KEYS, D1_CONFIG)):
         raise ValueError("Refusing to overwrite an existing probe installation")
     for unit in (SOCKET, SERVICE, PROXY, KEY_SERVICE, KEY_TIMER):
         if Path("/etc/systemd/system", unit).exists():
@@ -53,6 +54,9 @@ def prepare():
     (ROOT / "backend").mkdir(parents=True)
     CONFIG.mkdir(mode=0o750)
     run("chown", f"root:{USER}", CONFIG)
+    D1_CONFIG.mkdir(mode=0o750)
+    run("chown", f"root:{USER}", D1_CONFIG)
+    write_json(D1_CONFIG / "config.json", {"fixture": "sample profile binding"})
     shutil.copy2(HERE.parents[1] / "backend/cloud_mcp_d0.py", ROOT / "backend/cloud_mcp_d0.py")
     shutil.copy2(HERE.parents[1] / "backend/cloud_mcp_d0_refresh.py", ROOT / "backend/cloud_mcp_d0_refresh.py")
     KEYS.mkdir(mode=0o750)
@@ -122,6 +126,12 @@ except OSError:
     pass
 else:
     raise SystemExit("Publisher can read profile grants")
+try:
+    open("{D1_CONFIG}/config.json", "rb")
+except OSError:
+    pass
+else:
+    raise SystemExit("Publisher can read D1 profile bindings")
 print("Unprivileged public-key publisher cannot read profile grants")
 ''')
     key_dropin = Path("/etc/systemd/system", KEY_SERVICE + ".d")
@@ -304,6 +314,7 @@ def cleanup():
     subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
     shutil.rmtree(ROOT, ignore_errors=True)
     shutil.rmtree(CONFIG, ignore_errors=True)
+    shutil.rmtree(D1_CONFIG, ignore_errors=True)
     shutil.rmtree(KEYS, ignore_errors=True)
     shutil.rmtree("/run/tradejournal-d0", ignore_errors=True)
     subprocess.run(["userdel", KEY_USER], check=False, capture_output=True)

@@ -1,6 +1,6 @@
 # Dots cloud MCP integration scope
 
-**2026-10-09 — synthetic direct HTTPS D0 connected; domain tools remain proposed.** Isaac selected a combined
+**2026-10-09 — synthetic direct HTTPS D0 connected; first sample D1 reads selected.** Isaac selected a combined
 direction: the personal Dot uses structured tools for data and supported
 operations, and the actual TradeJournal UI for visual inspection and workflow
 feedback. This document scopes the connected-app side. The
@@ -14,7 +14,9 @@ The [synthetic D0 runbook](cloud-mcp-d0-runbook.md) records its standalone
 resource server, offline public-key verification, direct HTTPS packaging and
 remaining cloud acceptance. Isaac subsequently required ChatGPT plan usage
 with no API credits; direct HTTPS supersedes the earlier tunnel-first recommendation.
-D1–D3 remain proposed. The actual Dot has called the synthetic profile tool,
+D1 now selects only two sample Practice reads; the
+[D1 contract](cloud-mcp-d1-contract.md) records implementation and activation gates.
+The remaining D1 tools and D2–D3 remain proposed. The actual Dot has called the synthetic profile tool,
 and Isaac reported the same fresh result with his Mac asleep. The runbook
 separates live, fixture and user-reported evidence and remaining gates.
 
@@ -101,7 +103,7 @@ This is an inspection of the current checkout, not a production-state audit.
 | Current source | Reuse and limitation |
 |---|---|
 | [Local MCP adapter](../../backend/mcp_server.py) | Thin stdio adapter with market, journal and decision tools. In authenticated mode it uses the broad `manual_mcp` service capability. It is not the cloud catalog or a per-assistant credential. |
-| [Access engine](../../backend/app/engine/access.py) and [route manifest](../../backend/app/access_manifest.py) | Existing assistant identity, revocation, symbol/run grants and route classification. Browser identity uses cookies plus an ingress credential; OAuth bearer authentication does not exist here yet. |
+| [Access engine](../../backend/app/engine/access.py) and [route manifest](../../backend/app/access_manifest.py) | Existing assistant identity, revocation, symbol/run grants and route classification. Browser identity uses cookies plus an ingress credential; D1 adds a separate sample-only bearer path with independent token checks. |
 | [Practice routes](../../backend/app/routers/practice.py) | Restricted reads filter selected runs, sanitize errors and disable read-triggered recovery. Reuse these projections; do not call an unrestricted view behind an adapter. |
 | [Decision routes](../../backend/app/routers/decisions.py) | Immutable records, visibility checks and retry semantics exist. Authenticated writes currently support owner/manual MCP identities; cloud writer ownership still needs a contract and implementation. |
 | [Deployment access](../../deploy/README.md#optional-browser-authentication-disabled-by-default) | Separate assistant process and secret isolation provide a pattern. Cloud MCP and its dedicated ingress are installed only in the approved synthetic trial; normal deployment keeps the manual-only templates opt-in. |
@@ -118,7 +120,8 @@ must resolve to an ordinary restricted principal, not reuse `manual_mcp`.
 The personal Dot is a reviewer/inspector in this version. Begin on an isolated
 fixture installation, then enable only explicitly granted live market symbols
 and Practice runs after the live gate. No full journal export is necessary for
-this slice. These are proposed names, not existing registered cloud tools.
+this slice. The D1 implementation registers the profile and two Practice reads;
+the other names below remain proposed and cannot be called.
 
 | Proposed tool | Contract and owning implementation |
 |---|---|
@@ -129,8 +132,8 @@ this slice. These are proposed names, not existing registered cloud tools.
 | `get_decision(record_id)` | Authorized, visible immutable decision and its frozen evidence. Reject unrelated or unrevealed records before serialization. |
 | `get_paper_status(record_id)` | Authorized paper events and persisted monitoring/delivery evidence. Preserve unknown delivery/phone-receipt states; keep real journal fills and P&L outside the response. |
 
-Scope names such as `market:read` and `practice:read` are proposed connector
-permissions. Effective access is the intersection of the linked connection's
+`practice:read` is the selected D1 permission, pending actual consent;
+`market:read` remains proposed. Effective access is the intersection of the linked connection's
 OAuth grant and the current backend principal/resource grants. A token cannot
 widen its principal's access. Explicit run grants will require owner updates
 as new daily runs appear; an automatic rolling grant is later scope.
@@ -165,8 +168,8 @@ The same plugin may be callable from other permitted chats; do not claim OAuth
 proves a particular Dot or conversation originated a request.
 
 Design the MCP adapter and its private backend operations as one OAuth resource
-boundary: the adapter passes the access token only to a fixed loopback backend
-target that independently validates the same issuer, intended resource, expiry,
+boundary: the adapter passes the access token only over a fixed Unix bridge to
+the isolated sample backend loopback target, which independently validates the same issuer, intended resource, expiry,
 scope and principal status. Never pass it to market providers or another
 resource server. Backend authorization uses the current principal grant on
 every request; neither MCP discovery nor untrusted identity headers confer
@@ -240,12 +243,13 @@ operation must not be submitted twice via different entrances.
 | Slice | Deliverable | Exit evidence |
 |---|---|---|
 | D0 — connection feasibility | Select issuer and tested SDK; a synthetic `get_profile` tool, restricted test identity and direct HTTPS/OAuth personal plugin on an isolated always-on host. Offline verification, no model credentials and native network denial; record account/workspace access and usage controls. | Actual Dot discovers and calls the tool after OAuth while the laptop is off; refresh, disconnect, principal revocation and expired/removed local keys behave as specified. IPv4/IPv6 creation is denied while Unix ingress works. No real journal/provider data. |
-| D1 — selected reads | The six-tool catalog, bearer identity path, bounded projections, opt-in packaging, routing instructions and operations runbook. Start with fixtures. | Negative authorization tests, existing owner/browser regressions, native deployment evidence and an actual Dot reading granted fixture records. Then a separately approved narrow live read proves data freshness and laptop-off operation. |
+| D1 — selected reads | First increment: `get_profile`, `list_practice_runs(day)` and `get_practice_run(run_id)` for one assigned simulated MU/NBIS run; independent bearer checks, Unix bridge and manual-only packaging. Other read tools remain proposed. | Negative authorization tests, owner/browser regressions, native namespace evidence and an actual Dot reading the assigned fixture and comparing its UI. Any live data is a separate approval and later increment. |
 | D2 — own draft writes | Separately scoped `freeze_decision_context`, `record_agent_decision` and operation-status retrieval. Durable context/record ownership and principal-scoped retry keys. | Same-key retry yields one record; changed content conflicts; actor spoofing and other-principal IDs fail. Uncertain writes recover by receipt; drafts remain unarmed. |
 | D3 — follow-through | One user-selected subscription or bounded schedule, not a general workflow engine. | Real event/run and cancellation, expiry, restart, duplicate delivery and revoked-resource tests; unchanged state stays quiet. |
 
-D0 is the recommended first implementation assignment. D1 depends on a working
-authentication/transport result. Each slice gets its own implementation review;
+D0's actual synthetic connection supplied the first authentication/transport
+result. D1's selected sample reads now need their own implementation review and
+actual tool/UI acceptance. Each slice gets its own implementation review;
 this sequence does not promote writes, journal coaching or monitoring into D0/D1.
 
 Personal journal coaching is a separately selectable extension after D1:

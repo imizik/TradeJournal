@@ -289,9 +289,10 @@ async def check_issuer(config: Config, *, http_transport=None):
 class JWKSVerifier:
     """Only configured RS256 keys; no token-selected URLs or identity headers."""
 
-    def __init__(self, config_path: Path, *, http_transport=None):
+    def __init__(self, config_path: Path, *, http_transport=None, config_reader=read_config):
         self.config_path = config_path
-        self.config = read_config(config_path)
+        self.config_reader = config_reader
+        self.config = config_reader(config_path)
         if not self.config.enabled:
             raise ValueError("Synthetic MCP probe is disabled")
         self.http_transport = http_transport
@@ -301,7 +302,7 @@ class JWKSVerifier:
 
     def active_config(self) -> Config | None:
         try:
-            current = read_config(self.config_path)
+            current = self.config_reader(self.config_path)
             # Grant changes/revocation take effect immediately. Changing the
             # issuer/client/resource needs a restart, never an implicit relink.
             immutable = {"issuer_url", "resource_url", "jwks_url", "jwks_file", "client_id", "client_claim"}

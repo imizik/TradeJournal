@@ -1,0 +1,27 @@
+[Unit]
+Description=Fixed sample backend bridge; forwards no owner or service credential
+Requires=tradejournal-dot-trial-api.service tradejournal-d1-reads.socket
+After=tradejournal-dot-trial-api.service tradejournal-d1-reads.socket
+JoinsNamespaceOf=tradejournal-dot-trial-api.service
+BindsTo=tradejournal-dot-trial-api.service
+PartOf=tradejournal-dot-trial-api.service
+
+[Service]
+Type=notify
+DynamicUser=yes
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --connections-max=16 127.0.0.1:8091
+PrivateNetwork=true
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=-/etc/tradejournal -/var/lib/tradejournal -/etc/tradejournal-dot-trial -/var/lib/tradejournal-dot-trial -/etc/tradejournal-d0 -/etc/tradejournal-d1
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+TasksMax=16
+MemoryMax=64M
+CPUQuota=25%
+
+# This process joins only the isolated sample namespace, never production.
