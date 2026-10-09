@@ -506,9 +506,12 @@ A newer build waits, and is installed later or by a person, while:
   the private app for about a minute. Adding the `deploy-now` label to the pull request, before or after
   merging, releases it on the next check;
 - a sync or enrichment job is running, or the API is not answering;
-- it adds or removes an Alembic revision. The release is installed but not
-  activated, and the phone is told. `run --allow-migration` (below) takes and
-  verifies a backup, migrates and activates;
+- it adds or removes an Alembic revision and `AUTODEPLOY_AUTO_MIGRATE` is not
+  `true`. With that setting enabled, the deployer creates and verifies a fresh
+  backup for the confirmed database and running commit, migrates, and activates.
+  A backup or migration failure stops the release and alerts the phone. After
+  a migration failure, the controller attempts to restart the prior release
+  only when the database is still compatible;
 - it is not ahead of the running commit on `main`. The deployer never moves
   the server backwards, and never replaces a build deployed by hand from a
   branch;
@@ -525,6 +528,13 @@ an `NTFY_URL` in `autodeploy.env` sends them to a different topic instead. The
 timer is enabled by every activation; without that file its service is
 skipped.
 
+Set `AUTODEPLOY_AUTO_MIGRATE=true` in the root-only configuration to let green
+`main` builds with schema changes deploy after the market-hours hold. This does
+not make an old release schema-compatible: a failed migration may require a
+forward fix or a deliberate database restore. Keep the offsite backup and
+restore drill healthy; the deployer's immediate pre-migration check verifies
+the new local restore point, not an offsite restore.
+
 ```bash
 sudo install -m 0600 /opt/tradejournal/current/deploy/autodeploy.env.example /etc/tradejournal/autodeploy.env
 sudoedit /etc/tradejournal/autodeploy.env
@@ -533,7 +543,7 @@ PY=/opt/tradejournal/current/backend/.venv/bin/python
 sudo $PY $AUTODEPLOY status
 # Skip the market-hours wait for the newest build:
 sudo $PY $AUTODEPLOY run --now
-# Apply a held schema change: verified backup, migrate, activate:
+# Apply a held schema change once when automatic migrations are disabled:
 sudo $PY $AUTODEPLOY run --now --allow-migration
 sudo journalctl -u tradejournal-autodeploy --since today
 ```
@@ -558,7 +568,8 @@ stops and starts the entire service set. The upgrade polls a local stand-in
 for GitHub's releases API; the live Release workflow and the VPS polling
 GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
 covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
-schema holds, checksums, and notifications sent once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
+optional schema migrations, fresh backups, checksums, and notifications sent
+once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by
 `backend/tests/test_gmail_listener.py` with a fake subscriber. The workflow
@@ -592,3 +603,72 @@ Do not enable the timer or paid runtime merely because these units are packaged.
 A3 deployment requires separate approval and migration/Ubuntu CI verification.
 Three real sessions with actual morning-plus-review timings are still required
 for [live acceptance](../docs/agent/a3-implementation-contract.md).
+
+## Optional browser authentication (disabled by default)
+
+The existing installation stays private through Tailscale. Chunk 2 adds an
+opt-in authenticated mode and a separately configured assistant frontend;
+there is no bundled public TLS ingress and the assistant unit is never enabled
+by the release controller. The
+[access contract](../docs/agent/cloud-browser-auth-contract.md) defines the
+sample-data browser trial and the separate live-exposure gate.
+
+The owner frontend remains on loopback port 3000 and establishes owner sessions
+through its private server credential. The assistant frontend is a separate
+process on loopback port 3001 with a separate credential and OS identity. Its
+credential can transport browser sessions but cannot bootstrap an owner. API
+port 8080 and PostgreSQL remain loopback-only. Do not publish the private owner
+frontend or the legacy unauthenticated API.
+
+Auth configuration is generated explicitly, after selecting origins, with
+`deploy/access-config.py`. It writes six mode-0600 files into a named directory
+without printing secrets or replacing existing credentials:
+
+- `access-backend.env`: backend auth settings and distinct ingress/service keys.
+- `access-owner.env`: the private frontend's ingress credential and origin.
+- `access-assistant.env`: the assistant credential/origin, with
+  `TJ_ASSISTANT_ENABLED=false`.
+- `access-monitor.env`: health-monitor capability.
+- `access-automation.env`: only the existing scheduled job operations.
+- `access-mcp.env`: a private manual MCP capability, not a Dot credential.
+
+The API and owner units load their optional files on restart. The monitor and
+job units load only their named capabilities. The assistant unit uses a dynamic
+OS user, cannot read private state/configuration, and has no database or owner
+credentials. Backup archives include any installed auth configuration files.
+The existing private profile remains the default when no auth files exist;
+an assistant profile cannot fall back to it.
+
+On a configured private owner frontend, `/access` creates/revokes/resets
+assistant logins and shows new access keys once. Public signup is unavailable.
+The inspector gets explicit market symbols and selected practice-run IDs,
+never write, paid-model, import or arm rights. Optional journal inspection is
+available only when the operator has explicitly configured a sample-data
+installation and grants it. That configuration flag is an operator assertion,
+not proof that a database contains no real data; verify the actual isolated
+fixture installation before issuing the grant. Market-only chart responses
+omit journal markers, positions and alert data. Assistant chart preferences
+stay in its browser.
+
+Only an approved sample/live trial may turn on `TJ_ASSISTANT_ENABLED` and start
+`tradejournal-assistant.service`. No Tailscale Funnel, firewall change, DNS/TLS
+service or public reverse proxy is installed by this package. In authenticated
+mode, the production browser origin must use HTTPS; insecure cookies are
+accepted only with the explicit loopback-fixture switch. Session revocation is
+checked on every request and at most every 15 seconds on active SSE streams.
+
+Deployment and rollback stop the assistant unit before switching code and do
+not restart it automatically. Keep it stopped when rolling back to a release
+without auth. Re-enablement requires checking the exact code/configuration and
+approved ingress. Owner access, API/worker health and deterministic paper
+monitoring are checked independently.
+
+Verification: `scripts/verify.sh` now includes the ordinary browser suite and
+`frontend/playwright.auth.config.ts`, using a separate sample database and two
+loopback frontend instances. Browser fixtures prove login, private owner
+bootstrap, denied writes/reads, session audience separation, logout and
+revocation; they do not establish a live Dot connection, HTTPS deployment or
+actual Tailscale ACL behavior. Auth Postgres round-trip/revocation and schema
+checks are included in parity CI; native process sandbox behavior is exercised by the disposable Ubuntu
+`deploy/auth-smoke.py` trial and must pass CI before live exposure. No local
+Mac run establishes that native result.

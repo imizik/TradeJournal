@@ -1,0 +1,23 @@
+[Unit]
+Description=TradeJournal restricted assistant frontend (disabled until approved)
+After=network-online.target tradejournal-api.service
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/tradejournal/current/frontend
+EnvironmentFile=/etc/tradejournal/access-assistant.env
+ExecStart=/opt/tradejournal/current/bin/node /opt/tradejournal/current/frontend/server.js
+Environment=HOSTNAME=127.0.0.1 PORT=3001 API_INTERNAL_URL=http://127.0.0.1:8080
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=/etc/tradejournal /var/lib/tradejournal
+
+[Install]
+WantedBy=multi-user.target

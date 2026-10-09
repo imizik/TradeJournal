@@ -621,14 +621,15 @@ export type TradingViewAlertDetail = TradingViewAlert & {
   analysis_error: string | null;
 };
 
+export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, init)) {
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(apiUrl(path), { cache: "no-store" });
+  const res = await fetcher(apiUrl(path), { cache: "no-store" });
   if (!res.ok) throw await buildApiError(path, res);
   return res.json();
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+  const res = await fetcher(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -638,7 +639,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function put<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+  const res = await fetcher(apiUrl(path), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -666,7 +667,7 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
   return new Error(`API ${path} -> ${res.status}${detail ? `: ${detail}` : ""}`);
 }
 
-export const api = {
+return {
   decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
   decision: (id: string) => get<DecisionRecord>(`/decisions/${encodeURIComponent(id)}`),
   paperState: (id: string) => get<PaperState>(`/decisions/${encodeURIComponent(id)}/paper`),
@@ -726,3 +727,6 @@ export const api = {
   tradingViewAlert: (alertId: string) =>
     get<TradingViewAlertDetail>(`/tradingview/alerts/${encodeURIComponent(alertId)}`),
 };
+
+}
+export const api = createApi();

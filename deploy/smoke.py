@@ -280,6 +280,7 @@ def main():
         control.start_services(release, IDENTITY)
         assert request("/stats")["total_trades"] == 6
         assert job_status() == "succeeded"
+        control.run(release / "backend/.venv/bin/python", release / "deploy/auth-smoke.py")
         print("Native deployment smoke passed: install, migration, private proxy, workers, retired ingress cleanup, no 8090 listener, backup, timers, phone alerts, API restart, crash restart, unattended upgrade, rollback that stays rolled back, prune, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)

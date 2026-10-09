@@ -1,3 +1,4 @@
+import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetStateAction } from "react";
 import { apiUrl } from "@/lib/api";
@@ -153,6 +154,9 @@ function writeLocal(settings: ChartSettings, meta: Meta): boolean {
  * refreshed when the page regains focus or every 30 seconds while visible.
  */
 export function useChartSettings() {
+  const { owner, grants } = useAppAccess();
+  const localOnly = !owner;
+  const allowedSymbols = (grants.symbols ?? []).join(",");
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const [sync, setSync] = useState<SyncState>("loading");
@@ -167,6 +171,7 @@ export function useChartSettings() {
   const pending = useRef<number | undefined>(undefined);
 
   const push = useCallback(async () => {
+    if (localOnly) return;
     const sending = shared(latest.current);
     if (saving.current || same(sending, confirmed.current)) return;
     saving.current = true;
@@ -190,11 +195,18 @@ export function useChartSettings() {
     saving.current = false;
     setStored(writeLocal(latest.current, { revision: revision.current, base: confirmed.current }));
     setSync(saved);
-  }, []);
+  }, [localOnly]);
 
   useEffect(() => {
     let alive = true;
     const local = readLocal();
+    if (localOnly) {
+      const allowed = allowedSymbols.split(",").filter(Boolean);
+      const saved = local.settings ?? DEFAULT_SETTINGS;
+      const safe = { ...saved, watchlist: allowed, symbol: allowed.includes(saved.symbol) ? saved.symbol : allowed[0] ?? "SPY", recent: [], levels: {}, drawings: {} };
+      queueMicrotask(() => { if (alive) { setSettings(safe); setReady(true); setSync("saved"); } });
+      return () => { alive = false; };
+    }
     const base = local.meta?.base ?? shared(DEFAULT_SETTINGS);
     // This browser's copy shows while the server's loads (read after hydration,
     // so the server render matches). Anything changed meanwhile is part of this
@@ -219,7 +231,7 @@ export function useChartSettings() {
       setSync("offline");
     }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
-  }, []);
+  }, [localOnly, allowedSymbols]);
 
   useEffect(() => {
     latest.current = settings;
@@ -227,15 +239,15 @@ export function useChartSettings() {
     edits.current += 1;
     setStored(writeLocal(settings, { revision: revision.current, base: confirmed.current }));
     window.clearTimeout(pending.current);
-    if (same(shared(settings), confirmed.current)) return;
+    if (localOnly || same(shared(settings), confirmed.current)) return;
     setSync((state) => state === "saved" ? "saving" : state);
     // A change made while a save is in flight waits for it, then saves on top.
     const attempt = () => { if (saving.current) pending.current = window.setTimeout(attempt, 250); else void push(); };
     pending.current = window.setTimeout(attempt, 400);
-  }, [settings, ready, push]);
+  }, [settings, ready, push, localOnly]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || localOnly) return;
     const refresh = async () => {
       if (document.hidden || saving.current) return;
       // Unsaved changes (made offline, or while a save failed) go first; a conflict merges them.
@@ -257,7 +269,7 @@ export function useChartSettings() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
-  }, [ready, push]);
+  }, [ready, push, localOnly]);
 
   useEffect(() => () => window.clearTimeout(pending.current), []);
 

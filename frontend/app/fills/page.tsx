@@ -1,4 +1,5 @@
-import { api, Account, Fill } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { Account, Fill } from "@/lib/api";
 import ManualFillForm from "@/components/ManualFillForm";
 import { cn } from "@/lib/utils";
 

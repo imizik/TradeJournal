@@ -6,10 +6,11 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, ConfigDict, Field
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, paper, practice
+from app.engine import decisions, paper, practice, access
+from app.models import DecisionRecord
 from app.engine.analyzer import build_ticker_analysis
 from app.engine.chart_calendar import chart_calendar
 from app.engine.chart_math import ET
@@ -74,9 +75,18 @@ def context(symbol: str, body: ContextCreate, db: Session = Depends(get_session)
 
 
 @router.post("", status_code=201)
-def create(body: DecisionCreate, response: Response, db: Session = Depends(get_session)):
+def create(body: DecisionCreate, response: Response, request: Request, db: Session = Depends(get_session)):
     try:
-        item, created = decisions.create(db, body.model_dump())
+        payload = body.model_dump()
+        if access.enabled():
+            who = request.state.access
+            if who.owner:
+                payload["actor"] = "human"
+            elif who.service and who.identifier == "service:manual_mcp":
+                payload["actor"] = "agent:manual_mcp"
+            else:
+                raise HTTPException(403, "Decision writer not permitted")
+        item, created = decisions.create(db, payload)
     except decisions.DecisionError as exc:
         raise HTTPException(status_code=409 if "operation_id" in str(exc) else 422, detail=str(exc)) from exc
     response.status_code = 201 if created else 200
@@ -84,12 +94,20 @@ def create(body: DecisionCreate, response: Response, db: Session = Depends(get_s
 
 
 @router.get("")
-def list_decisions(limit: int = Query(30, ge=1, le=100), db: Session = Depends(get_session)):
-    return {"decisions": [decisions.row(item) for item in decisions.recent(db, limit) if practice.visible_record(db, item)]}
+def list_decisions(request: Request, limit: int = Query(30, ge=1, le=100), db: Session = Depends(get_session)):
+    allowed = access.permitted_record_ids(request, db)
+    if allowed is None:
+        items = decisions.recent(db, limit)
+    else:
+        items = db.exec(select(DecisionRecord).where(DecisionRecord.id.in_(allowed)).order_by(DecisionRecord.received_at.desc()).limit(limit)).all()
+    return {"decisions": [decisions.row(item) for item in items if practice.visible_record(db, item)]}
 
 
 @router.get("/{record_id}")
-def get_decision(record_id: uuid.UUID, db: Session = Depends(get_session)):
+def get_decision(record_id: uuid.UUID, request: Request, db: Session = Depends(get_session)):
+    allowed = access.permitted_record_ids(request, db)
+    if allowed is not None and record_id not in allowed:
+        raise HTTPException(status_code=404, detail="Decision record not found")
     item = decisions.get(db, record_id)
     if item is None or not practice.visible_record(db, item):
         raise HTTPException(status_code=404, detail="Decision record not found")
@@ -120,7 +138,10 @@ def arm(record_id: uuid.UUID, body: ArmCreate, request: Request, response: Respo
 
 
 @router.get("/{record_id}/paper")
-def get_paper(record_id: uuid.UUID, db: Session = Depends(get_session)):
+def get_paper(record_id: uuid.UUID, request: Request, db: Session = Depends(get_session)):
+    allowed = access.permitted_record_ids(request, db)
+    if allowed is not None and record_id not in allowed:
+        raise HTTPException(status_code=404, detail="Decision record not found")
     item = decisions.get(db, record_id)
     if item is None or not practice.visible_record(db, item):
         raise HTTPException(status_code=404, detail="Decision record not found")

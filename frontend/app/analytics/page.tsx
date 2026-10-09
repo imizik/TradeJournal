@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { api } from "@/lib/api";
+import { api } from "@/lib/serverApi";
 import AnalyticsExplorer from "@/components/AnalyticsExplorer";
 
 type Params = { start?: string; end?: string; account_id?: string; instrument_type?: string };

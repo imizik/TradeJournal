@@ -12,7 +12,7 @@ describe shipped code, including deep-history pagination, the split-adjusted pri
 
 ## The screens
 
-The sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button
+The private legacy sidebar (`components/Nav.tsx`) has nine entries plus a **Sync** button
 at its foot that opens a drawer on any page. Everything else is reached from
 one of these by a row link or a button.
 
@@ -38,7 +38,7 @@ one of these by a row link or a button.
 Things worth knowing before you touch a page:
 
 - Pages under `app/` are server components that call the API from the Next
-  server through `lib/api.ts` (`NEXT_PUBLIC_API_URL`, default
+  server through the session-aware `lib/serverApi.ts` (shared types/client helpers in `lib/api.ts`) (`NEXT_PUBLIC_API_URL`, default
   `http://localhost:8080`), except `/trades/{id}`, which is a client page.
   Client components may fetch from the browser; AnalyticsExplorer instead
   receives server-calculated metrics and trade rows as page props, so changing
@@ -268,3 +268,21 @@ scheduling in a separate lane. Tests live in
 `frontend/e2e/practice-routine.spec.ts`. See the
 [A3 acceptance contract](a3-implementation-contract.md); live acceptance is
 unobserved until three real sessions and their actual routine timings exist.
+
+
+## Optional assistant browser access
+
+Private owners in authenticated mode also have `/access` for credential
+administration; a restricted assistant sees only granted pages and no Sync
+controls. `/login` is the dedicated assistant sign-in page. Authentication is
+disabled by default, and the optional assistant listener has no bundled
+internet ingress. See the [access contract](cloud-browser-auth-contract.md)
+for scope and rollout gates.
+
+Code: backend `app/engine/access.py`, `app/access_manifest.py`,
+`app/access_middleware.py`, `app/routers/access.py`; frontend
+`proxy.ts`, `lib/accessServer.ts`, `lib/backendProxy.ts`, `lib/serverApi.ts`,
+`components/AccessProvider.tsx`, `components/AssistantAccess.tsx`.
+Proof: backend `tests/test_browser_access.py`, `tests/test_access_deployment.py`,
+Postgres parity; frontend `e2e/browser-access.auth.ts` through
+`playwright.auth.config.ts`. Fixtures are not a live Dot or TLS observation.

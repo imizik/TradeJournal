@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppAccess } from "@/components/AccessProvider";
 import { useEffect, useRef, useState } from "react";
 import type { DecisionRecord, PaperState } from "@/lib/api";
 import PracticeDecisionForm from "@/components/PracticeDecisionForm";
@@ -48,6 +49,7 @@ function DecisionCard({ record, focused, withPaper }: { record: DecisionRecord; 
 }
 
 export default function PracticeDecisions({ records, focusId }: { records: DecisionRecord[]; focusId?: string }) {
+  const { owner } = useAppAccess();
   const paperIds = new Set(records.filter((r) => r.decision === "take").slice(0, PAPER_FETCH_LIMIT).map((r) => r.id));
   if (focusId && records.some((r) => r.id === focusId && r.decision === "take")) paperIds.add(focusId);
   return (
@@ -56,9 +58,9 @@ export default function PracticeDecisions({ records, focusId }: { records: Decis
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Practice decisions</h2>
         <p className="mt-1 text-xs text-muted-foreground">Frozen choices and evidence. Practice only; a TAKE is a paper plan once you arm it, never a real order.</p>
       </div>
-      <PracticeDecisionForm />
+      {owner && <PracticeDecisionForm />}
       {records.length === 0 ? (
-        <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">No saved decisions yet.</div>
+        <div className="rounded-lg border bg-card p-4 text-sm text-muted-foreground">{owner ? "No saved decisions yet." : "No decision records are shared with this assistant."}</div>
       ) : records.map((record) => (
         <DecisionCard key={record.id} record={record} focused={record.id === focusId} withPaper={paperIds.has(record.id)} />
       ))}

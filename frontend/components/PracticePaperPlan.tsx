@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type PaperEvent, type PaperOutcome, type PaperState } from "@/lib/api";
 
@@ -53,6 +54,7 @@ function Outcome({ label, o }: { label: string; o: PaperOutcome }) {
 }
 
 export default function PracticePaperPlan({ recordId, onState }: { recordId: string; onState?: (s: PaperState) => void }) {
+  const { owner } = useAppAccess();
   const [state, setState] = useState<PaperState | null>(null);
   const [loadError, setLoadError] = useState("");
   const [arming, setArming] = useState(false);
@@ -96,7 +98,7 @@ export default function PracticePaperPlan({ recordId, onState }: { recordId: str
       <p className="text-muted-foreground">Paper only. No real order is ever placed.</p>
       {!state && !loadError && <p role="status">Loading paper state…</p>}
       {loadError && <p role="alert" className="text-red-600">{loadError} <button onClick={load} className="underline">Retry</button></p>}
-      {state?.status === "unarmed" && (
+      {owner && state?.status === "unarmed" && (
         <button onClick={arm} disabled={arming} className="rounded bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50">
           {arming ? "Arming paper plan…" : "Arm paper plan"}
         </button>

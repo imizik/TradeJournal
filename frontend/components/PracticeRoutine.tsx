@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import PracticePaperPlan from "@/components/PracticePaperPlan";
@@ -25,6 +26,7 @@ const stamp = (value?: string | null) => value ? `${new Date(value).toLocaleStri
 const objText = (value: unknown) => JSON.stringify(value, null, 2);
 
 export default function PracticeRoutine({ day }: { day?: string | null }) {
+  const { owner } = useAppAccess();
   const selectedDay = day ?? localDay();
   const [runs, setRuns] = useState<Run[]>([]);
   const [active, setActive] = useState<Run | null>(null);
@@ -111,7 +113,7 @@ export default function PracticeRoutine({ day }: { day?: string | null }) {
     active.opportunities.filter((opp) => (active.comparison === "assisted" || opp.revealed) && opp.agent?.decision === decision).length,
   ])) : { take: 0, wait: 0, skip: 0 };
 
-  return <section className="min-w-0 space-y-4 rounded-lg border bg-card p-4 [overflow-wrap:anywhere]" data-testid="practice-routine">
+  return <fieldset disabled={!owner} className="min-w-0"><section className="min-w-0 space-y-4 rounded-lg border bg-card p-4 [overflow-wrap:anywhere]" data-testid="practice-routine">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-sm font-semibold uppercase tracking-wide">Daily practice routine</h2><p className="mt-1 text-sm text-muted-foreground">{selectedDay} · {active?.mode ?? "manual"} preparation · choices and paper practice stay separate from journal fills.</p></div>
       <button type="button" onClick={load} className="rounded border px-3 py-2 text-sm">Reload run</button>
@@ -124,7 +126,7 @@ export default function PracticeRoutine({ day }: { day?: string | null }) {
       <p className="text-xs text-muted-foreground">08:50 scheduling is {active?.scheduling_configured ? "configured; timer execution remains unobserved" : "disabled"}. Arming a paper plan remains explicit.</p>
     {error && <p role="alert" className="break-words text-sm text-red-600">{error}</p>}
     {runs.length > 1 && <label className="text-sm">Saved run <select aria-label="Saved run" value={active?.id ?? ""} onChange={(e) => void loadRun(e.target.value)} className="block w-full min-w-0 max-w-full rounded border bg-background p-2">{runs.map((run) => <option key={run.id} value={run.id}>{run.id} · {run.status} · {stamp(run.created_at)}</option>)}</select></label>}
-    {!active && !error && <p className="text-sm text-muted-foreground">No run prepared for this session.</p>}
+    {!active && !error && <p className="text-sm text-muted-foreground">{owner ? "No run prepared for this session." : "No practice runs are shared with this assistant for this day."}</p>}
     {active && <div className="space-y-4" data-testid="practice-run">
       <div className="rounded border p-3 text-sm"><p><strong>{active.status.toUpperCase()}</strong> · {active.result ?? "result pending"}{active.late ? " · LATE" : ""}</p><p>Created {stamp(active.created_at)} · finished {stamp(active.finished_at)} · deadline {stamp(active.deadline)}</p><p>Calendar {active.calendar?.status ?? "unavailable"} · policy {active.policy_version} · hash {active.policy_hash}</p><p>Revision {active.revision ?? 0}{active.parent_id ? ` · revises ${active.parent_id}` : " · original run"}</p><p>Agent {active.agent?.status ?? "disabled"}{active.agent?.error ? ` · ${active.agent.error}` : ""} · model {active.agent?.model ?? "unavailable"} · cost {active.agent?.cost == null ? "unavailable" : active.agent.cost} ({active.agent?.cost_provenance ?? "cost provenance unavailable"})</p><details><summary>Agent usage</summary><pre className="overflow-auto">{active.agent?.usage ? objText(active.agent.usage) : "unavailable"}</pre></details>{active.error && <p role="status" className="break-words text-amber-700">Preparation issue: {active.error}</p>}<details><summary>Agent runtime and cost provenance</summary><pre className="overflow-auto whitespace-pre-wrap text-xs">{objText(active.agent)}</pre></details><p>Human choices: TAKE {active.counts?.take ?? 0} · WAIT {active.counts?.wait ?? 0} · SKIP {active.counts?.skip ?? 0} · nonresponse {active.opportunities?.filter((o) => !o.human).length ?? 0}</p><p>Visible agent choices: TAKE {visibleAgentCounts.take} · WAIT {visibleAgentCounts.wait} · SKIP {visibleAgentCounts.skip}</p><p>Timing: morning {active.timings?.morning ? `${active.timings.morning.seconds}s${active.timings.morning.reason ? ` (${active.timings.morning.reason})` : ""}` : "unrecorded"}; review {active.timings?.review ? `${active.timings.review.seconds}s${active.timings.review.reason ? ` (${active.timings.review.reason})` : ""}` : "unrecorded"}</p>{((active.timings?.morning?.seconds ?? 0) + (active.timings?.review?.seconds ?? 0)) > 300 && <p className="text-amber-700">Morning and review together exceeded five minutes. Keep the recorded time and add a reason if helpful.</p>}</div>
       {["queued", "preparing"].includes(active.status) === false && (active.revision ?? 0) < 10 && active.day === localDay() && <button type="button" disabled={busy} onClick={() => void retryRevision()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Prepare assisted revision</button>}
@@ -150,5 +152,5 @@ export default function PracticeRoutine({ day }: { day?: string | null }) {
       </article>)}</div>
       {active.opportunities?.some((opp) => !opp.human) && <p className="text-sm text-amber-700">Nonresponse remains unobserved; it is never counted as SKIP.</p>}
     </div>}
-  </section>;
+  </section></fieldset>;
 }
