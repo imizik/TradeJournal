@@ -14,10 +14,10 @@ BASE = "a" * 40
 HEAD = "b" * 40
 
 
-def gate(receipt=None, *, comments=None, base=BASE, event="schedule", previous=None):
+def gate(receipt=None, *, comments=None, base=BASE, event="schedule", previous=None, labels=None):
     fixture = {
         "pr": {"number": 1, "state": "open", "head": {"sha": HEAD}, "base": {"sha": base},
-               "labels": [{"name": "review-loop"}], "html_url": "https://github.com/owner/repo/pull/1"},
+               "labels": labels if labels is not None else [{"name": "review-loop"}], "html_url": "https://github.com/owner/repo/pull/1"},
         "statuses": ([receipt] if receipt else []) + ([previous] if previous else []), "comments": comments or [], "event": event,
     }
     program = """
@@ -98,3 +98,21 @@ def test_gate_overwrites_owner_status_and_deduplicates_only_actions_validation()
     assert gate(receipt(), previous=previous)["updates"]
     previous["creator"]["login"] = "github-actions[bot]"
     assert gate(receipt(), previous=previous)["updates"] == []
+
+
+def test_explicit_or_auto_exemption_passes_only_with_visible_label_and_trusted_exact_receipt():
+    item = receipt(description=f"exempt base:{BASE} owner:codex mode:auto reason:docs-only")
+    result = gate(item, labels=[{"name": "review-exempt"}])
+    assert result["updates"][0]["state"] == "success"
+    assert result["updates"][0]["description"] == "verified " + item["description"]
+    assert gate(item)["updates"][0]["state"] != "success"
+    assert gate(item, labels=[{"name": "review-exempt"}], base="c" * 40)["updates"][0]["state"] != "success"
+
+
+@pytest.mark.parametrize("description", [
+    f"exempt base:{BASE} owner:codex mode:auto reason:docs-only extra:1",
+    f"exempt base:{BASE} owner:codex mode:manual reason:docs-only",
+    f"exempt base:{BASE} owner:codex mode:auto reason:two words",
+])
+def test_malformed_exemption_receipts_never_pass(description):
+    assert gate(receipt(description=description), labels=[{"name": "review-exempt"}])["updates"][0]["state"] != "success"

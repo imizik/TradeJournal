@@ -1,6 +1,7 @@
 // Runs only from the trusted base branch in Actions. Never checks out PR code.
 const RECEIPT = 'tradejournal/review-receipt';
 const GATE = 'tradejournal/independent-review';
+const EXEMPT = 'review-exempt';
 
 module.exports = async function reviewGate({ github, context, core, now = Date.now() }) {
   const repo = context.repo;
@@ -19,6 +20,7 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
     const receipt = statuses.filter(s => s.context === RECEIPT)
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
     const identity = receipt?.description?.match(/^clean base:([a-f0-9]{40}) owner:(codex|claude) pass:([1-9][0-9]*)(?: extra:([1-9][0-9]*))?$/);
+    const exemption = receipt?.description?.match(/^exempt base:([a-f0-9]{40}) owner:(codex|claude) mode:(auto|explicit) reason:([a-z0-9-]{3,48})$/);
     // Every extra pass attests to a separately recorded human authorization;
     // the owner cannot automatically reset or extend the three-pass budget.
     const pass = Number(identity?.[3]), extra = Number(identity?.[4]);
@@ -27,9 +29,12 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
     // The local owner publishes with the user's gh login. A contributor's
     // status, arbitrary prose, or an older-base receipt cannot certify a PR.
     const trusted = receipt?.creator?.login === repo.owner;
+    const exempt = exemption && pr.labels.some(label => label.name === EXEMPT) && exemption[1] === pr.base.sha;
     const previous = statuses.find(s => s.context === GATE);
     let state = 'pending', description = 'Independent local review has not completed for this head and base';
-    if (receipt?.state === 'success' && trusted && bounded && identity[1] === pr.base.sha) {
+    if (receipt?.state === 'success' && trusted && exempt) {
+      state = 'success'; description = `verified ${receipt.description}`;
+    } else if (receipt?.state === 'success' && trusted && bounded && identity[1] === pr.base.sha) {
       state = 'success'; description = `verified ${receipt.description}`;
     } else if (receipt?.state === 'error' || receipt?.state === 'failure') {
       state = 'error'; description = 'Review stopped; resume the owning session and inspect its findings';
