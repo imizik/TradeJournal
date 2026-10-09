@@ -13,7 +13,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [dots-integration.md](dots-integration.md) | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
-| [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Proposed cloud-browser authentication and permissions: owner Tailscale continuity, separate assistant login, sample-data trial and live exposure gates; private implementation, public access disabled |
+| [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Browser authentication and permissions: owner Tailscale continuity, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, actual Dot observation pending |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |

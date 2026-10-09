@@ -672,3 +672,50 @@ actual Tailscale ACL behavior. Auth Postgres round-trip/revocation and schema
 checks are included in parity CI; native process sandbox behavior is exercised by the disposable Ubuntu
 `deploy/auth-smoke.py` trial and must pass CI before live exposure. No local
 Mac run establishes that native result.
+
+### Approved isolated Dot sample trial
+
+The separately approved temporary trial and its actual observations are in the
+[access contract](../docs/agent/cloud-browser-auth-contract.md#approved-sample-installation-and-handoff).
+It is a pinned copied runtime, not the production assistant unit. Production
+authentication configuration and private access are unchanged.
+
+The [preparation script](dot_trial_install.py) requires root, an explicit verified
+release and a portable frontend archive. It refuses to overwrite trial state or
+credentials or pre-existing trial units. Failed preparation stops/removes only
+units, identities and directories created by that invocation before allowing a
+retry. If cleanup cannot stop a process, it retains state and reports incomplete
+rollback for inspection. Keep the verified release's Linux dependencies: a local
+archive contains compiled JS/assets, never native macOS `node_modules`. The
+[fixture entry point](dot_trial_app.py) checks both configuration and actual
+sample-fill provenance before importing the application. HTTP fixture responses
+sit inside authorization, not in front of it. The running trial rejects all
+non-authentication domain writes for owners as well as assistants; the sole
+POST exception returns fixture position quotes without writing journal data.
+
+The trial's services share a private network namespace. Only frontend bridges
+3101/3102 bind host loopback; the API does not bind the host namespace. The public
+proxy points only to 3101; private sample administration uses Tailscale Serve
+8443. Original public Caddy routes and private Serve 443 remain unchanged.
+The temporary DNS service is [sslip.io](https://sslip.io/), with HTTPS managed
+by the existing [Caddy proxy](https://caddyserver.com/docs/automatic-https).
+
+Keys are root-owned mode-0600 files under `/etc/tradejournal-dot-trial`. Do not
+print them, include them in chat, commit them or reuse production credentials.
+The owner can reset/revoke the dedicated inspector from the private sample
+`/access` page. Operator controls on the pinned copied runtime are:
+
+```bash
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_control.py revoke trader-jo
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_control.py disable
+```
+
+`disable` removes the public Caddy import before revoking every non-owner
+principal and version-bumping each to invalidate existing sessions,
+disabling the assistant profile and stopping trial sockets/processes. It retains
+sample data and revoked credential records for explicit recovery; every
+assistant needs a new key before re-enabling. It preserves unrelated Caddy
+configuration. The private sample Serve mapping may remain stopped/unavailable;
+do not reset the full Tailscale configuration to remove it. Native revocation
+was observed; the full shutdown/re-enable recovery drill remains unobserved.
+Production deployment does not update or restart this pinned sample runtime.
