@@ -142,6 +142,7 @@ test("streamed trades move the selected price and candle, then pause freezes the
 });
 
 test("watchlist rows use shared stream trades and the regular close for postmarket change", async ({ page }) => {
+  await page.clock.install();
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
     class MockEventSource {
@@ -177,6 +178,10 @@ test("watchlist rows use shared stream trades and the regular close for postmark
   await page.getByRole("button", { name: "Pause chart updates" }).click();
   await expect(row).toContainText("275.00");
   await expect(row.locator("span[title]").first()).toHaveAttribute("title", /Paused trade/);
+  // A trade older than 45 seconds stays shown until a newer one arrives; it keeps its change, dimmed, not a dash.
+  await page.clock.fastForward(50_000);
+  await expect(row.locator("span[title]").nth(1)).toHaveAttribute("title", /Paused trade · \d+s old · change as of this trade/);
+  await expect(row).toContainText("+1.85");
 });
 
 test("newer extended-hours candle is labeled instead of showing an older quote", async ({ page }) => {
@@ -198,6 +203,36 @@ test("newer extended-hours candle is labeled instead of showing an older quote",
   await page.goto("/charts");
   await expect(page.getByLabel("Selected symbol quote")).toContainText("280.25");
   await expect(page.getByLabel("Selected symbol quote")).toContainText("Extended-hours candle");
+});
+
+test("after hours the headline names its session beside the regular close, and the watchlist dims the closing change", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const at = Date.parse("2026-09-29T21:30:00Z") / 1000; // 5:30 PM New York
+  await openAt(page, at, (url) => {
+    const data = currentFixture(url, at);
+    data.market = { date: "2026-09-29", status: "open", source: "tradier", description: null, note: null, sessions: [
+      { part: "pre", start: Date.parse("2026-09-29T08:00:00Z") / 1000, end: Date.parse("2026-09-29T13:30:00Z") / 1000 },
+      { part: "regular", start: Date.parse("2026-09-29T13:30:00Z") / 1000, end: Date.parse("2026-09-29T20:00:00Z") / 1000 },
+      { part: "post", start: Date.parse("2026-09-29T20:00:00Z") / 1000, end: Date.parse("2026-09-30T00:00:00Z") / 1000 }] };
+    for (const quote of data.quotes) Object.assign(quote, { last: 250, previous_close: 260, regular_close: 250, trade_time: Date.parse("2026-09-29T19:59:00Z") / 1000 });
+    for (const panel of Object.values(data.panels)) {
+      const bar = panel?.bars.at(-1);
+      if (bar && bar.end_time - bar.time < 86400) Object.assign(bar, { close: 252.5, high: Math.max(bar.high, 252.5), extended: true });
+    }
+    return data;
+  });
+  const quote = page.getByLabel("Selected symbol quote");
+  // The after-hours candle, measured from the regular close; the close itself, measured from the day before.
+  await expect(quote).toContainText("252.50");
+  await expect(quote).toContainText("+1.00%");
+  await expect(quote).toContainText("After hours");
+  await expect(quote).toContainText("Close 250.00 -3.85%");
+  // No trade in the last 45 seconds: the watchlist keeps the day's closing change, dimmed, instead of a dash.
+  const row = page.locator("[data-watch-row]").filter({ hasText: "MRVL" });
+  await expect(row).toContainText("250.00");
+  await expect(row).toContainText("-3.85");
+  await expect(row.locator("span[title]").nth(1)).toHaveAttribute("title", /change as of this quote/);
+  await expect(page.locator("footer[aria-label='Chart status']")).toContainText("may be forming");
 });
 
 test("refreshes once per cycle, stops while hidden or paused, and retains data on errors", async ({ page }) => {
@@ -406,8 +441,13 @@ test("a holiday from the market calendar reads Market closed and names the closu
   await openAt(page, at, (url) => ({ ...currentFixture(url, at), market: THANKSGIVING }));
   // The clock rule alone would count down here: it is a Thursday morning with fresh bars.
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Market closed");
-  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("Market closed");
+  // Closed reads the same everywhere: the main chart says it once, the smaller charts not at all.
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveCount(0);
   await expect(page.getByLabel("Market hours")).toHaveText("Market is closed for Thanksgiving Day");
+  // With no session open, no candle is forming, and the status strip does not say one may be.
+  const status = page.locator("footer[aria-label='Chart status']");
+  await expect(status).toContainText("Last minute candle");
+  await expect(status).not.toContainText("may be forming");
 });
 
 test("an early close ends the regular session at 13:00 and the last bar's countdown respects it", async ({ page }) => {
@@ -423,8 +463,8 @@ test("an early close ends the regular session at 13:00 and the last bar's countd
   await page.clock.pauseAt(now * 1000);
   // Postmarket starts at the early close and anchors its own buckets.
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("4:55");
-  await page.getByRole("button", { name: "Extended hours on" }).click();
-  await expect(page.getByRole("button", { name: "Regular hours only" })).toBeVisible();
+  await page.getByRole("button", { name: "Extended hours", pressed: true }).click();
+  await expect(page.getByRole("button", { name: "Extended hours", pressed: false })).toBeVisible();
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Market closed");
 });
 
@@ -597,7 +637,7 @@ test("switching symbol, interval, session and RSI keeps every chart instance and
   await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending", "");
   await expect(page.getByLabel("main candle values")).toContainText("C ");
   // A new session is new candles: labeled until they arrive.
-  await page.getByRole("button", { name: "Extended hours on" }).click();
+  await page.getByRole("button", { name: "Extended hours", pressed: true }).click();
   await expect(pending("Loading regular hours…")).toHaveCount(5);
   open();
   await expect(pending("Loading regular hours…")).toHaveCount(0);
@@ -2542,6 +2582,20 @@ type SavedDrawing = { id: string; kind: string; points: { time: number; price: n
 const registerLayers = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjDrawings?: Map<string, unknown> }).__tjDrawings = new Map(); });
 const drawingsOf = (server: SettingsStore, symbol = "MRVL") => (server.data?.drawings as Record<string, SavedDrawing[]> | undefined)?.[symbol] ?? [];
 const anchorsOf = (page: Page, panel: string, id: string) => page.evaluate(([key, item]) => (window as unknown as { __tjDrawings: LayerProbe }).__tjDrawings.get(key)!.anchors(item), [panel, id] as const);
+test("levels priced out of view keep one tag at each edge, with an arrow, instead of piling up there", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeChartSettings(context, { revision: 1, data: { levels: { MRVL: [
+    { id: "far", price: 420, label: "Far above" }, { id: "near", price: 400, label: "Above" }, { id: "low", price: 100, label: "Below" }, { id: "in", price: 262, label: "In view" }] } } });
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "420.00,400.00,100.00,262.00");
+  const edgeTags = () => page.evaluate(() => (window as unknown as { __tjDrawings: Map<string, { edgeTags(): string[] }> }).__tjDrawings.get("main")!.edgeTags());
+  // The nearest level each side of the view; 420 waits behind 400, and 262 is in view with its plain price.
+  await expect.poll(edgeTags).toEqual(["↑400.00", "↓100.00"]);
+  await drawn(page, "main").screenshot({ path: test.info().outputPath("edge-tags.png") });
+});
+
 /** Where bar `index` and `price` are drawn on a chart's candle pane. */
 const screenAt = (page: Page, id: string, index: number, value: number) => page.evaluate(([key, at, p]) => {
   const chart = (window as unknown as { __tjCharts: CoordinateProbe }).__tjCharts.get(key as string)!;
@@ -4184,7 +4238,7 @@ test("two browsers share the chart proportions but not the dock's width, merge a
   // The older tab deletes the layout; this browser's next save lets its proportions go.
   expect((await request.put("/api/backend/charts/settings", { data: { base_revision: after.revision, data: { ...older, session: "regular", layouts: [] } } })).ok()).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(page.getByRole("button", { name: "Extended hours on" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Extended hours", pressed: false })).toBeVisible();
   await rowDivider(page).focus();
   await page.keyboard.press("ArrowDown");
   await expect.poll(async () => (await settingsNow()).data?.layoutProportions).toEqual({});
@@ -4447,6 +4501,14 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-auto-levels", NEAREST_IDS);
+  // The main chart names each zone on a tag, its most telling member first and the rest counted; tags never
+  // overlap, and the smaller charts carry none.
+  const tagsOf = (panel: string) => page.evaluate((key) => (window as unknown as { __tjAutoLevels: Map<string, { tags(): { text: string; top: number; bottom: number }[] }> }).__tjAutoLevels.get(key)!.tags(), panel);
+  await expect.poll(async () => (await tagsOf("main")).map((tag) => tag.text)).toEqual(expect.arrayContaining(["PDH +1", "ONH"]));
+  const tags = (await tagsOf("main")).sort((a, b) => a.top - b.top);
+  for (let index = 1; index < tags.length; index++) expect(tags[index].top).toBeGreaterThanOrEqual(tags[index - 1].bottom);
+  expect(tags.map((tag) => tag.text).filter((text) => /^\d/.test(text))).toEqual([]); // a round number reads "Round 252", never a bare price
+  expect(await tagsOf("Panel 2")).toEqual([]);
 
   // Hovering the 254 zone on the 5m chart reads its card: members, sources, and today's tests and breaks.
   const box = (await drawn(page, "main").boundingBox())!;
