@@ -2,20 +2,20 @@
 
 How a Claude Code session started on Opus splits work with Sonnet workers.
 The goal is to spend Opus on judgment, not to minimize total tokens. This is
-two subagent definitions and this policy, not an orchestration framework
-([roadmap.md](roadmap.md#deliberately-not-doing)). Other coding agents can
-ignore it; nothing else in the working agreement depends on it.
+native subagent definitions and this policy, not an orchestration framework
+([roadmap.md](roadmap.md#deliberately-not-doing)). Other coding agents use their own delegation guide and the shared review policy.
 
 | Piece | What it is |
 |---|---|
 | `.claude/agents/engineer.md` | Sonnet worker: owns one bounded task through implementation and verification, returns a short report or an escalation |
 | `.claude/agents/reviewer.md` | Sonnet reviewer: reads a finished diff against the contract and `domain-rules.md`, returns verified findings |
-| `.claude/settings.json` | `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`: any other subagent the lead spawns (general-purpose, Plan) runs on Sonnet unless the call names a model |
+| `.claude/agents/risk-reviewer.md` | Opus reviewer for consequential changes, with a separate focused invocation when needed |
 
-Sonnet costs half of Opus per token. Delegation pays when the work moved to
-Sonnet is large (exploration, implementation, test loops, logs) compared with
-what it costs a worker to start cold: about 10-30k tokens of `CLAUDE.md` and
-docs, and the brief.
+Profiles explicitly select their model and effort. Other subagents inherit the
+client's defaults; the repo no longer forces a global Sonnet override. Reviewer
+selection and observed model overrides are governed by [pr-review.md](pr-review.md).
+Delegation shares the subscription allowance; measure savings rather than
+inferring them from API prices.
 
 ## Who does what
 
@@ -42,7 +42,7 @@ docs, and the brief.
 - financial correctness: PnL, FIFO (`backend/app/engine/reconstructor.py`),
   fill import and dedupe, account identity, Gmail parsing, reconciliation
 - debugging after a worker has failed twice
-- targeted review of high-risk hunks, git push, PRs and merges
+- targeted review of high-risk hunks, git push and PRs; the user alone merges
 
 **Do it directly, without a worker,** when spawning costs more than it saves:
 a fix of a few lines, a question answerable from one or two files, a follow-up
@@ -88,25 +88,16 @@ behavior, spending, production data.
 
 ## Review tiers
 
-Pick by what the diff touches, not by how big it is.
-
-| Tier | When | What the lead reads |
-|---|---|---|
-| 0 | tests, docs, UI-only changes, mechanical refactors | the worker's report; verify.sh is the evidence |
-| 1 | normal features and endpoints | the `reviewer` agent's findings, not the diff |
-| 2 | PnL, FIFO, fills, account identity, Gmail, reconciliation, migrations, `deploy/`, the TradingView ingress, destructive or production-data paths | the risky hunks themselves, plus the reviewer's findings |
-
-Before publishing ready work, the lead also runs the shared
-[independent PR review loop](pr-review.md), with Codex as the independent
-reviewer. This cross-provider pass applies to every tier, including docs.
-The internal Sonnet reviewer can still answer focused questions during work;
-it does not replace the independent completion receipt.
-
-CI is the final gate either way, and merging to `main` deploys.
+Use the shared [native pre-PR review policy](pr-review.md) as the only tier table.
+Normal changes use a fresh Sonnet `reviewer`. Consequential changes use an Opus
+`risk-reviewer` plus a separate focused invocation; the lead reads the risky
+hunks and verifies acceptance evidence. The owner fixes findings and re-reviews
+the final diff before publishing ready work. Small UI, test or refactor diffs
+are not automatically exempt. CI remains required; the user alone merges.
 
 ## Recording it
 
-In the pull request body, one line: `Delegation: worker | direct; escalations: N; review tier: 0/1/2`.
+Include the review evidence required by the shared guide. Also record: `Delegation: worker | direct; escalations: N; review tier: 0/1/2`.
 It costs nothing and is what makes the pattern measurable from git history:
 how often workers finished without rework, which escalations were real, and
 whether tier-0 changes ever needed a fix later.

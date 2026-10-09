@@ -9,10 +9,12 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
-| [pr-review.md](pr-review.md) | Automatic independent review for Codex and Claude owners; subscriptions, hooks, bounded fixes and GitHub readiness |
+| [pr-review.md](pr-review.md) | Native pre-PR review; risk-based model selection, direct findings, bounded fixes and required CI |
 | [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [dots-integration.md](dots-integration.md) | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
+| [cloud-mcp-integration-scope.md](cloud-mcp-integration-scope.md) | Proposed Dots cloud connector: tunnel feasibility, OAuth identity, selected read tools, UI/tool routing and bounded D0–D3 implementation slices |
+| [cloud-mcp-d0-runbook.md](cloud-mcp-d0-runbook.md) | D0 synthetic OAuth/MCP resource server, isolated trial setup, revocation/stop path and outstanding actual Dot/tunnel acceptance |
 | [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Browser authentication and permissions: owner Tailscale continuity, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, actual Dot observation pending |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |

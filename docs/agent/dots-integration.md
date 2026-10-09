@@ -1,9 +1,11 @@
 # Future Dots integration
 
-This is a handoff for connecting a future Dots client to TradeJournal. It does
-not establish that Dots supports MCP, that a connection exists, or that a cloud
-agent can reach this installation. Keep TradeJournal as the owner of decision
-records, frozen market context and any later paper outcomes.
+This is a handoff for connecting a future Dots client to TradeJournal. Official
+documentation now describes Dots plugins and ChatGPT custom MCP connections;
+the [cloud MCP scope](cloud-mcp-integration-scope.md) records those sources,
+the proposed tunnel-first transport and the unverified account/runtime gates.
+No connection to this installation is established. Keep TradeJournal as the
+owner of decision records, frozen market context and paper outcomes.
 
 **Direction updated 2026-10-08; design only.** Dot owns bounded preparation,
 explanation and follow-through. TradeJournal owns durable evidence, objective
@@ -19,6 +21,12 @@ separate authenticated assistant entrance, backend-enforced permissions and
 a sample-data browser trial before any live exposure. It does not establish
 a working connection or authorize publishing the current frontend/API. The
 personal Dot's app inspection remains separate from independent Shadow Isaac.
+
+**Combined access direction scoped 2026-10-08.** Use a connected app for exact
+records and supported operations, and browser access for visual inspection and
+workflow feedback. The [cloud connector scope](cloud-mcp-integration-scope.md)
+defines the initial read catalog, OAuth boundary, routing guidance and D0–D3
+sequence. It adds no active connection or permission.
 
 OpenAI documents ongoing responsibilities, selective memory, delegation and
 event monitoring where a connected service supports it in
@@ -52,18 +60,27 @@ current A1 schema hash alone does not make a draft prospectively eligible.
 
 ## Requirements before connecting another agent
 
+The requirements below govern an independent shadow runner. The personal Dot's
+initial reviewer/inspector catalog is scoped separately in the
+[cloud connector plan](cloud-mcp-integration-scope.md); the backend, identity
+and transport boundaries apply to both roles.
+
 1. Confirm Dots' actual supported transport and authentication contract. Do
    not assume it can launch a local stdio process or call this API.
 2. Create a separate shadow-agent tool profile that includes only market
    context and the agent's own decision records. Exclude fills, journal trades,
    account data, Isaac's decisions and all journal-analysis tools.
 3. Enforce the same capability policy in backend services. Hiding tools from an
-   MCP catalog is not access control. Current private API routes have no
-   authentication, and `actor` is caller supplied; neither is a cloud boundary.
-4. If Dots is remote, design a separately scoped gateway/token on the private
-   host. Do not expose or tunnel ports 8080/8000, do not give the agent raw
-   HTTP or shell access, and do not add a proxy that forwards arbitrary API
-   routes. Public access requires a new reviewed security design.
+   MCP catalog is not access control. Legacy private mode has no authentication
+   and accepts a caller-supplied actor. Optional authenticated mode has browser
+   principals and named service capabilities; decision writes derive the actor
+   for owner/manual MCP identities. Neither mode implements the proposed cloud
+   OAuth and per-agent ownership boundary yet.
+4. If Dots is remote, design a separately scoped gateway/identity on the private
+   host. The cloud scope proposes testing Secure MCP Tunnel only to a new
+   restricted MCP service. Do not expose or tunnel ports 8080/8000, do not give
+   the agent raw HTTP or shell access, and do not add a proxy that forwards
+   arbitrary API routes. Public access requires a new reviewed security design.
 5. Test allowlisted tool discovery, denied journal reads/writes at the service
    layer, idempotent decision submission, identity attribution, timeouts and
    failure behavior before enabling a Dots connection.

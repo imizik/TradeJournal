@@ -141,12 +141,13 @@ live-provider, deployment and user-observed result are separate evidence
 layers; report only the layers actually observed. Never replace a required
 check with an informal review.
 
-The owner runs the shared [independent PR review loop](pr-review.md) before
-publishing ready work. Codex calls the Claude CLI on a fresh read-only snapshot;
-Claude calls Codex. Findings return to the owner in the same active session.
-Deterministic checks and the lead's high-consequence review remain required.
-The GitHub-hosted reviewer is an optional additional service, not this loop's
-completion signal. Do not finish on an empty GitHub comment list.
+The owner follows the [native pre-PR review workflow](pr-review.md), including
+its risk tiers, explicit reviewer models, fresh context, three-round budget,
+final-diff coverage and current-head CI check. Review is required even when the
+lead implemented the change directly. Luna worker defaults do not apply to
+reviewers. A reviewer returns findings to the owner through the native subagent
+tool; no external CLI or GitHub waiter sits between them. The lead still owns
+consequential decisions and final verification.
 
 ## Completion report
 

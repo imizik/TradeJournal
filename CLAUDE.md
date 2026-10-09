@@ -22,7 +22,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
 | `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory, chart price basis |
 | `docs/agent/verification.md` | How to prove a change works |
-| `docs/agent/pr-review.md` | Automatic cross-provider review, bounded repair loop, readiness and subscription setup |
+| `docs/agent/pr-review.md` | Native pre-PR reviewers, risk/model selection, bounded repairs and CI readiness |
 | `docs/agent/codex-workflow.md` | Sol-led substantial work, bounded Luna assignments, escalation, and completion reports |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
@@ -35,6 +35,8 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
 | `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
+| `docs/agent/cloud-mcp-integration-scope.md` | Proposed Dots cloud connector: tunnel feasibility, OAuth identity, selected read tools, UI/tool routing and bounded D0–D3 implementation slices |
+| `docs/agent/cloud-mcp-d0-runbook.md` | D0 synthetic OAuth/MCP resource server, isolated trial setup, revocation/stop path and outstanding actual Dot/tunnel acceptance |
 | `docs/agent/cloud-browser-auth-contract.md` | Browser authentication and permissions: preserve owner Tailscale access, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, actual Dot observation pending |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 | `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
@@ -81,29 +83,26 @@ close unless the PR carries the `deploy-now` label. Schema changes wait for a
 person. A PR is ready to merge only when it is ready to go live; see
 [automatic deployment](deploy/README.md#automatic-deployment).
 
-## Independent review before ready work
+## Independent review and completion
 
-When implementation and required checks are ready, commit the feature branch
-and run the [shared independent review loop](docs/agent/pr-review.md).
-Codex uses Claude Code CLI; Claude uses Codex CLI. Keep the owning session
-active: inspect findings, fix valid issues, verify, commit and re-review.
-Three reviewer passes are the automatic limit. A human may explicitly authorize
-each additional pass through the documented extension; preserve all attempts. Authentication, quota,
-missing evidence and unresolved disputes are explicit incomplete outcomes.
-Never reset the budget or switch billing/providers to get a clean result.
+Follow the [native pre-PR review workflow](docs/agent/pr-review.md) before
+publishing ready work. The owner classifies the full diff, invokes a fresh
+reviewer in the same client, receives its findings directly, repairs valid
+issues and obtains review of the final candidate. Normal changes get one
+reviewer; consequential changes get a stronger general reviewer and a separate
+focused reviewer. Use the explicit model profiles in the guide, not the default
+implementation worker. Reviewers do not invoke reviewers themselves.
 
-Before invoking the other model, the user may say “skip review” or “decide
-whether review is warranted.” An explicit skip remains visible as a
-`review-exempt` PR label and reason while CI still runs. An agent may decide
-only for Markdown-only README/non-agent documentation changes; it must use the
-normal independent review for every other path. See `docs/agent/pr-review.md`.
+The agent may skip only genuinely explanatory, non-agent documentation, with
+a reason in the PR. Other changes require review unless the user explicitly
+requests a skip. CI always runs. At most three rounds are automatic; timeouts,
+quota errors, missing results and unresolved findings are incomplete, never a
+pass. Keep the owner active until review and current-head CI finish, or report
+a specific blocker and leave the PR draft. Do not call another provider's CLI
+or wait for GitHub comments as the normal review path.
 
-After clean review, push the feature branch, open/update a draft PR, publish
-its receipt and wait for CI through the runner's `finish` command. The user
-has authorized these branch pushes, PR updates and review repairs as the
-normal workflow. Merge and auto-merge remain the user's actions.
-Completion hooks enforce pending work for newly started/trusted local sessions;
-existing sessions must follow the same command workflow explicitly.
+The user authorizes branch pushes, PR updates and bounded review repairs as the
+normal workflow. The user alone merges; never merge or enable auto-merge.
 
 ## Operating style
 
