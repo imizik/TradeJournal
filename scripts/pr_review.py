@@ -420,6 +420,7 @@ def review(root, args):
             post_status(root, pending, ident)
         state.update(pending)
         state.pop("error", None)
+        state.pop("publication_attention", None)
         log_dir = path.parent / f"pass-{len(state['passes']) + 1}"
         log_dir.mkdir(mode=0o700)
         entry = {"identity": ident, "started": time.time()}
@@ -511,7 +512,9 @@ def wait_checks(root, number, deadline):
             checks = json.loads(p.stdout)
         except ValueError as exc:
             raise ReviewError("GitHub did not return CI results") from exc
-        checks = [c for c in checks if c["name"] not in {RECEIPT_CONTEXT, "Screenshots"}]
+        # The validator's status is the gate. Its event/cron wrapper can be
+        # superseded in GitHub's concurrency queue without invalidating it.
+        checks = [c for c in checks if c["name"] not in {RECEIPT_CONTEXT, "Screenshots", "Update review gate"}]
         if any(c["bucket"] in {"fail", "cancel"} for c in checks):
             raise ReviewError("CI failed or was cancelled. Fix it, rerun checks, and re-review code changes")
         if required.issubset({c["name"] for c in checks}) and all(c["bucket"] in {"pass", "skipping"} for c in checks):
@@ -554,6 +557,7 @@ def publish(root, args, finish=False):
             if pr["isDraft"]:
                 run(["gh", "pr", "ready", str(pr["number"])], cwd=root)
             state["phase"] = "ready"
+            state.pop("publication_attention", None)
             save(path, state)
         print(f"{state['phase']}: {pr['url']} (merge remains with the user)")
 
@@ -596,6 +600,8 @@ def hook(root, args, payload):
             state.update(phase="error", error="Review process disappeared before recording completion")
         if state["phase"] == "ready" and matches(state, ident):
             return {}
+        if state.get("publication_attention") and state["phase"] == "clean" and matches(state, ident):
+            return {"systemMessage": "Independent review is clean but readiness is blocked. Report the blocker. Retry publish/finish when it clears; no new review is needed for unchanged head/base."}
         if state["phase"] in TERMINAL:
             # One continuation makes the failure visible; never trap the owner
             # in an endless stop-hook loop trying to repair login/quota.
@@ -608,6 +614,12 @@ def hook(root, args, payload):
         state["nudges"] = state.get("nudges", 0) + 1 if state.get("nudge_key") == key else 1
         state["nudge_key"] = key
         if state["nudges"] >= 3:
+            if state["phase"] == "clean" and matches(state, ident):
+                # Bound stalled delivery continuations without destroying the
+                # review result or forcing another model call to recover.
+                state["publication_attention"] = True
+                save(path, state)
+                return {"decision": "block", "reason": "Independent review remains clean, but publication/readiness stalled. Report the blocker and stop. Retry publish/finish once it clears; preserve the clean receipt."}
             state.update(phase="attention", error="Owner stopped repeatedly without advancing the review")
             save(path, state)
             return {"decision": "block", "reason": "Review stopped after three unchanged continuations. Report the blocker and unresolved findings; do not claim ready."}

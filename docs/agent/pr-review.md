@@ -61,7 +61,9 @@ python3 scripts/pr_review.py finish --owner codex --session SESSION_ID --pr PR_N
 `finish` waits up to twenty minutes for reported gating checks and requires
 Backend, Frontend, Browser, Postgres parity, Ubuntu package/systemd and the
 independent review gate to be present. It excludes the report-only Screenshots
-job and permits deliberate skipped CI checks. The review gate must pass and
+job and the gate workflow's scheduling wrapper (`Update review gate`), whose
+pending runs GitHub may supersede. It permits deliberate skipped CI checks.
+The required `tradejournal/independent-review` status must pass and
 carry the validator's exact current receipt. A failed, cancelled or missing
 gating check cannot produce readiness. It rechecks the PR identity, marks a
 draft ready, and reports its URL. CI repairs that change code require re-review.
@@ -86,7 +88,10 @@ feedback. Read-only sessions with no changed work are left alone. Explicit
 The hooks only inspect state and direct the owner to commands; they do not
 make model calls inside a ten-second hook timeout. The reviewer disables hooks
 and carries a reviewer-role marker to prevent recursion. Three identical
-no-progress continuations become an attention outcome. Terminal failures get
+no-progress continuations become an attention outcome. If review is already
+clean, stalled publication/readiness is reported separately and the clean
+receipt is preserved: retry `publish`/`finish` when the operational blocker
+clears, without a new model call for unchanged head/base. Terminal failures get
 one final continuation to report the blocker, then allow the session to end.
 
 Ignored `.review-loop/` contains atomic state, owner/session identity, per-pass

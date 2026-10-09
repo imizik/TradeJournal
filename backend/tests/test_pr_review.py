@@ -375,8 +375,9 @@ def passing_checks():
 
 
 @pytest.mark.parametrize("advisory", ["pass", "fail", "cancel", "pending"])
-def test_advisory_screenshots_cannot_block_required_checks(repo, monkeypatch, advisory):
-    checks = passing_checks() + [{"name": "Screenshots", "bucket": advisory}]
+@pytest.mark.parametrize("name", ["Screenshots", "Update review gate"])
+def test_advisory_or_wrapper_jobs_cannot_block_required_statuses(repo, monkeypatch, advisory, name):
+    checks = passing_checks() + [{"name": name, "bucket": advisory}]
     monkeypatch.setattr(reviewer.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stdout=json.dumps(checks)))
     reviewer.wait_checks(repo, 1, 0)
 
@@ -424,6 +425,37 @@ def test_third_unchanged_continuation_stops_instead_of_requesting_more_work(repo
     result = reviewer.hook(repo, args(), payload)
     assert state(repo)["phase"] == "attention"
     assert "stopped after three" in result["reason"]
+
+
+def test_readiness_failures_bound_continuations_without_destroying_clean_review(repo, cli, monkeypatch):
+    reviewer.review(repo, args())
+    ident = reviewer.identity(repo, "origin/main")
+    pr = {"number": 1, "isDraft": True, "url": "https://github.com/owner/repo/pull/1"}
+    monkeypatch.setattr(reviewer, "post_status", lambda *a: (pr, True))
+    def pending(*a):
+        raise reviewer.ReviewError("CI did not complete within twenty minutes")
+    monkeypatch.setattr(reviewer, "wait_checks", pending)
+    payload = {"session_id": "owner-session", "hook_event_name": "Stop"}
+    reviewer.hook(repo, args(), payload)
+    for _ in range(2):
+        with pytest.raises(reviewer.ReviewError, match="CI did not complete"):
+            reviewer.publish(repo, args(), finish=True)
+        result = reviewer.hook(repo, args(), payload)
+    assert "review remains clean" in result["reason"]
+    s = state(repo)
+    assert s["phase"] == "clean" and s["reviewed"] == ident
+    assert s["publication_attention"] is True
+    assert "decision" not in reviewer.hook(repo, args(), payload)
+    # Once the external blocker clears, finish directly; no retry or model.
+    monkeypatch.setattr(reviewer, "wait_checks", lambda *a: None)
+    monkeypatch.setattr(reviewer, "verify_gate", lambda *a: None)
+    monkeypatch.setattr(reviewer, "pr_info", lambda *a: pr)
+    original_run = reviewer.run
+    monkeypatch.setattr(reviewer, "run", lambda a, **kw: "" if a[0] == "gh" else original_run(a, **kw))
+    reviewer.publish(repo, args(), finish=True)
+    assert state(repo)["phase"] == "ready"
+    assert len(state(repo)["passes"]) == 1
+    assert "publication_attention" not in state(repo)
 
 
 def test_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli, monkeypatch):
