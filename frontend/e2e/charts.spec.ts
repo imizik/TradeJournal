@@ -916,6 +916,13 @@ test("older history failure retries without clearing current candles; a stale re
   let holdNext = false;
   let release: (() => void) | undefined;
   await page.route("**/api/backend/charts/history?**", async (route) => {
+    const asked = new URL(route.request().url()).searchParams;
+    // A short tail asks for history at once; only the main MRVL 5m chart's pages are under test.
+    // NVDA's own has none, so its candles can only grow from a stale MRVL page.
+    if (asked.get("symbol") !== "MRVL" || asked.get("interval") !== "5m")
+      return route.fulfill({ json: { symbol: asked.get("symbol"), interval: asked.get("interval"), session: asked.get("session"), before: Number(asked.get("before")),
+        limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
+        warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
     calls++;
     if (calls === 1) return route.fulfill({ status: 503, json: { detail: { message: "History unavailable" } } });
     if (holdNext) {

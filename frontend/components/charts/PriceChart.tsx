@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
+import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
 import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings } from "@/lib/symbolInfo";
 import { useClock, useLivePanel } from "@/lib/chartStore";
@@ -63,7 +63,7 @@ const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestam
  * right with room to their left, so the history fills in at this zoom instead of
  * stretching the first few candles across the chart.
  */
-const openingRange = (bars: number, main: boolean) => ({ from: bars - (main ? OPENING_BARS : 65), to: bars + 4 });
+const openingRange = (bars: number, main: boolean) => ({ from: bars - (main ? OPENING_BARS : PANEL_OPENING_BARS), to: bars + 4 });
 /**
  * Reset: the latest candles at the opening zoom, every pane's price scale back
  * to automatic (dragging an axis turns it off). Realtime: the latest candle at
