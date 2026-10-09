@@ -3627,7 +3627,18 @@ test("dock, navigation and window resizes keep every chart, the selection, the s
   await expect(page.getByLabel("Selected symbol quote")).toContainText("281.50");
   await page.keyboard.press("Alt+r");
   await expect.poll(async () => (await roundedRange(page, "main"))?.to).toBeGreaterThanOrEqual(244); // the trade opened a newer candle
+  // Alt+R and the new candle make the price scale re-autoscale over the next frames; measuring pixels before it settles
+  // gave a stale click and a drag of a fraction of a pixel. Wait until two reads 100ms apart agree and $2 spans real pixels.
+  let lastY = Number.NaN;
+  await expect.poll(async () => {
+    const y = await levelY(page, "main", 250);
+    const span = Math.abs(await levelY(page, "main", 252) - y);
+    const settled = y === lastY && span > 4;
+    lastY = y;
+    return settled;
+  }).toBe(true);
   await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
   await mouseDrag(page, "main", await levelY(page, "main", 250), await levelY(page, "main", 252));
   await expect.poll(() => savedLevels(server)[0].price).toBeGreaterThan(251);
 });
