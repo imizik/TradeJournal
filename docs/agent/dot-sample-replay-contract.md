@@ -81,7 +81,11 @@ and a restart proving the outcome persists. Tier-2 native reviews and exact-head
 CI are required. Jo reported saving/reopening WAIT for both symbols in the first
 replay exercise; read-only deployed checks corroborated the hashes and no events.
 The owner separately observed a TAKE replay over public HTTPS, including restart.
-Jo itself has not yet selected TAKE or observed its own replay outcome.
+Jo subsequently reported MU TAKE and NBIS WAIT saved before revealing the v2
+continuation, followed by MU replay/reload/reopen. Read-only deployed checks
+corroborated the original choices, hashes and sealed commitment, one MU entry/exit,
+no NBIS events, and MU base/3x net -$1.24192/-$1.32576 per share. This closes
+Jo sample workflow acceptance; it is not a live market or independent human test.
 
 This is a sample workflow exercise, not a blind human/agent comparison, live
 forward cohort, automatic WAIT monitor or evidence of trading edge.
@@ -129,3 +133,29 @@ the new `trader-jo-scenarios` identity. `--scenarios` without `--replay` refuses
 Do not rotate or repoint either prior Jo identity. Revoke only the separate
 disposable scenario proof identity after acceptance. Replay and ordinary v1
 preparation remain available without the new explicit option.
+
+
+## Frozen evidence chart
+
+The sample decision form and saved review show the exact context's completed
+minute candles, supplied VWAP, volume and fixed trigger/stop/target. This
+component receives only `DecisionContext`; it never uses the replay continuation
+or requests Charts/provider/stream data. Context ID, cutoff and evidence hash
+remain visible; displaying the hash does not claim automatic hash verification.
+
+One-minute and 15-minute views use Eastern labels and actual timestamp spacing.
+15-minute groups align to UTC clock quarters (also New York clock quarters),
+with first open, maximum high, minimum low, last close and summed share volume.
+A group is complete only with all 15 contiguous completed minutes. First/last
+partial groups and missing minutes remain partial; they are not regular-session
+trigger confirmation evidence. No calendar/session status is inferred. The
+15-minute VWAP point is the last supplied value, not a recalculated interval
+VWAP. Missing VWAP stays unavailable and is never bridged. Invalid, duplicate,
+unaligned, unfinished or unsupported bars show an explicit unavailable chart;
+the original packet and choice workflow remain accessible.
+
+The page places this view beside the decision or original saved result on wide
+screens and stacks it on phones. Reload and replay do not alter its evidence.
+The separate Charts page continues using its other sample window. Numeric
+aggregation/refusal and real browser save/replay/reload/phone checks are
+required, together with native preservation of Jo's existing choices/receipt.

@@ -1,4 +1,5 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
+import { frozenWindow } from "../lib/frozen-evidence";
 const ownerOrigin = `http://127.0.0.1:${process.env.SAMPLE_OWNER_PORT ?? 3141}`;
 const assistantOrigin = `http://127.0.0.1:${process.env.SAMPLE_ASSISTANT_PORT ?? 3142}`;
 
@@ -131,7 +132,7 @@ for (const timezoneId of ["America/Los_Angeles", "America/New_York", "UTC"]) {
       const mu = page.getByRole("article", { name: "MU sample opportunity" });
       await mu.getByLabel("MU choice").selectOption("wait");
       const input = mu.getByLabel(`MU waiting ends (${timezoneId})`, { exact: true });
-      const preview = mu.locator("time[datetime]");
+      const preview = mu.locator("form time[datetime]");
       const deadlineMinute = new Date(Math.floor(new Date(run.deadline).getTime() / 60_000) * 60_000).toISOString();
       await expect(preview).toHaveAttribute("datetime", deadlineMinute);
       // Choose one future UTC instant, then enter its wall time in each browser.
@@ -248,4 +249,106 @@ test("a delayed pre-start reload cannot hide the committed replay receipt", asyn
   await expect(page.getByRole("button", { name: "Reload saved practice" })).toBeEnabled();
   await expect(closed).toBeVisible();
   await expect(mu.getByRole("button", { name: "Start MU sample replay", exact: true })).toHaveCount(0);
+});
+
+
+test("frozen reducer aligns quarters, preserves gaps and refuses invalid source data", () => {
+  const start = Date.parse("2026-10-09T13:07:00Z");
+  const bars = Array.from({ length: 30 }, (_, i) => ({ t: new Date(start+i*60000).toISOString(),
+    o: 100+i, h: 102+i, l: 99+i, c: 101+i, v: 10+i, vw: i === 12 ? null : 100.5+i }));
+  const original = JSON.stringify(bars);
+  const cutoff = "2026-10-09T13:37:05Z";
+  const result = frozenWindow([...bars].reverse(), cutoff);
+  expect(JSON.stringify(bars)).toBe(original);
+  expect(result.quarters.map(b => [new Date(b.at).toISOString(),b.count,b.complete])).toEqual([
+    ["2026-10-09T13:00:00.000Z",8,false], ["2026-10-09T13:15:00.000Z",15,true], ["2026-10-09T13:30:00.000Z",7,false]]);
+  expect(result.quarters[1]).toMatchObject({o:108,h:124,l:107,c:123,v:375,vw:122.5});
+  expect(result.minutes[12].vw).toBeNull();
+  const gap = frozenWindow(bars.filter((_,i) => i !== 12),cutoff);
+  expect(gap.minutes).toHaveLength(29);expect(gap.quarters[1]).toMatchObject({count:14,complete:false,v:353});
+  for (const invalid of [ [...bars,bars[0]], [{...bars[0],t:"2026-10-09T13:07:01Z"}],
+    [{...bars[0],h:90}], [{...bars[0],v:null}], [{...bars[0],o:Infinity}],
+    [{...bars[0],t:"2026-10-09T13:37:00Z"}] ]) expect(() => frozenWindow(invalid,cutoff)).toThrow();
+  expect(() => frozenWindow(bars,"2026-10-09T13:37:05")).toThrow();
+  expect(frozenWindow([{...bars[0],t:"2026-10-09T09:07:00-04:00"}],cutoff).minutes[0].at).toBe(start);
+});
+
+test("frozen chart matches the assigned packet through decisions, replay and reload", async ({ page,browser }) => {
+  const live: string[] = [], errors: string[] = [];
+  page.on("request", request => { if (/\/api\/backend\/(charts|packets)(?:[/?]|$)/.test(request.url())) live.push(request.url()); });
+  page.on("pageerror", error => errors.push(error.message));
+  const run = await login(page,browser,true,true);
+  const before = await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json();
+  const mu = before.opportunities.find((o: {symbol:string}) => o.symbol === "MU");
+  const region = page.getByRole("region",{name:"MU frozen evidence chart"});
+  await expect(region).toHaveAttribute("data-context-id",mu.context.context_id);
+  await expect(region).toHaveAttribute("data-evidence-sha256",mu.context.context_sha256);
+  await expect(region.getByRole("img",{name:"MU frozen 1m price and volume"})).toBeVisible();
+  await expect(region.locator("g[data-minute-start]")).toHaveCount(60);
+  await region.getByRole("button",{name:"15m",exact:true}).click();
+  await expect(region.getByRole("button",{name:"15m",exact:true})).toHaveAttribute("aria-pressed","true");
+  const raw = mu.context.packet.recent_minute_bars as {t:string;o:number;h:number;l:number;c:number;v:number}[];
+  const grouped = new Map<number,typeof raw>();
+  for (const bar of [...raw].sort((a,b) => Date.parse(a.t)-Date.parse(b.t))) {
+    const key = Math.floor(Date.parse(bar.t)/900000)*900000;grouped.set(key,[...(grouped.get(key)??[]),bar]);
+  }
+  const table = region.getByRole("table",{name:"MU frozen 15-minute summary"});
+  for (const [at,bars] of grouped) {
+    const row = table.locator(`tr[data-start="${new Date(at).toISOString()}"]`);
+    const cells = await row.getByRole("cell").allTextContents();
+    expect(cells).toEqual([`${bars.length===15?"Complete":"Partial"} · ${bars.length}/15`,
+      `$${bars.at(-1)!.c.toFixed(4)}`,bars.reduce((n,b)=>n+b.v,0).toLocaleString("en-US"),...[bars[0].o,Math.max(...bars.map(b=>b.h)),Math.min(...bars.map(b=>b.l))].map(p=>`$${p.toFixed(4)}`)]);
+  }
+  const summary = await table.textContent();
+  const article = page.getByRole("article",{name:"MU sample opportunity"});
+  await article.getByLabel("MU choice").selectOption("take");await article.getByLabel("MU reason").fill("Frozen-chart workflow proof; conditional sample plan.");
+  await article.getByRole("button",{name:"Save MU decision",exact:true}).click();
+  await expect(article.getByRole("button",{name:"Start MU sample replay",exact:true})).toBeEnabled();
+  await article.getByRole("button",{name:"Start MU sample replay",exact:true}).click();
+  await expect(article.getByRole("heading",{name:"Sample paper replay · closed",exact:true})).toBeVisible();
+  expect(await table.textContent()).toBe(summary);
+  const after = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((o:{symbol:string})=>o.symbol==="MU");
+  expect(after.context).toEqual(mu.context);
+  await page.reload();await expect(region).toHaveAttribute("data-evidence-sha256",mu.context.context_sha256);
+  expect(await table.textContent()).toBe(summary);
+  await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+  await region.screenshot({path:test.info().outputPath("frozen-evidence-phone.png")});
+  await page.setViewportSize({width:1440,height:1000});await article.screenshot({path:test.info().outputPath("frozen-evidence-desktop.png")});
+  expect(live).toEqual([]);expect(errors).toEqual([]);
+});
+
+test("unusable frozen bars show an explicit unavailable chart without replacing the packet", async ({page,browser}) => {
+  await login(page,browser,true,true);
+  await page.route("**/api/backend/practice/runs/*",async route => {
+    const response = await route.fetch(), body = await response.json();
+    body.opportunities[0].context.packet.recent_minute_bars[0].v = null;
+    await route.fulfill({response,json:body});
+  });
+  await page.getByRole("button",{name:"Reload saved practice"}).click();
+  await expect(page.getByText(/Chart unavailable: Invalid frozen price or volume/)).toBeVisible();
+  await expect(page.getByText("Inspect frozen packet and rules").first()).toBeVisible();
+});
+
+
+test("isolated supplied VWAP is visible in both minute and quarter views", async ({page,browser}) => {
+  await login(page,browser,true,true);
+  await page.route("**/api/backend/practice/runs/*",async route => {
+    const response=await route.fetch(),body=await response.json();
+    const packet=body.opportunities.find((o:{symbol:string})=>o.symbol==="MU").context.packet;
+    const grouped=new Map<number,{t:string;vw:number|null}[]>();
+    for (const bar of packet.recent_minute_bars as {t:string;vw:number|null}[]) {
+      const key=Math.floor(Date.parse(bar.t)/900000);grouped.set(key,[...(grouped.get(key)??[]),bar]);
+    }
+    const complete=[...grouped.values()].find(bars=>bars.length===15)!;
+    complete.sort((a,b)=>Date.parse(a.t)-Date.parse(b.t));
+    packet.recent_minute_bars=complete.map((bar,i)=>({...bar,vw:i===14?bar.vw:null}));
+    await route.fulfill({response,json:body});
+  });
+  await page.getByRole("button",{name:"Reload saved practice"}).click();
+  const region=page.getByRole("region",{name:"MU frozen evidence chart"});
+  await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
+  await expect(region.getByText(/VWAP unavailable for 14 frozen minutes/)).toBeVisible();
+  await region.getByRole("button",{name:"15m",exact:true}).click();
+  await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
+  await expect(region.getByRole("table").getByText("Complete · 15/15",{exact:true})).toBeVisible();
 });
