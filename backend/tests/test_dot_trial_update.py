@@ -157,3 +157,61 @@ def test_partial_service_stop_restarts_original_trial_without_mutating_files(upd
     assert [call[1] for call in calls] == ["stop", "start"]
     assert (runtime / "frontend/server.js").read_text() == "old server"
     assert "TJ_SAMPLE_DECISION_WRITES=false" in (config / "trial-runtime.env").read_text()
+
+
+def test_preflight_uses_runtime_interpreter_without_host_app_imports(tmp_path, monkeypatch):
+    import os
+    import sys
+    runtime, config = tmp_path / "runtime", tmp_path / "config"
+    backend, deploy = runtime / "backend", runtime / "deploy"
+    (backend / ".venv/bin").mkdir(parents=True)
+    deploy.mkdir()
+    config.mkdir()
+    (config / "manifest.json").write_text(json.dumps({"published": True}))
+    # An actual subprocess proves cwd/PYTHONPATH and prevents inherited provider keys.
+    interpreter = backend / ".venv/bin/python"
+    interpreter.write_text(f"#!{sys.executable}\nimport os, subprocess, sys\nassert 'OPENAI_API_KEY' not in os.environ\nsubprocess.run([sys.executable, '-S', *sys.argv[1:]], check=True)\n")
+    interpreter.chmod(0o700)
+    (deploy / "dot_trial_control.py").write_text("def environment(): return {'sample': True}\n")
+    (backend / "dot_trial_app.py").write_text("from pathlib import Path\ndef validate_environment(env):\n assert env == {'sample': True}\n Path('validated').write_text('ok')\n")
+    monkeypatch.setattr(updater, "RUNTIME", runtime)
+    monkeypatch.setattr(updater, "CONFIG", config)
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-child")
+    updater.check_target()
+    assert (backend / "validated").read_text() == "ok"
+
+
+@pytest.mark.parametrize("broken", ["assistant_backend", "owner_login", "owner_backend", "api_health", None])
+def test_readiness_requires_both_backend_proxies_and_api_health(monkeypatch, broken):
+    from types import SimpleNamespace
+    probes = []
+    ticks = iter([0, 0, 46])
+    monkeypatch.setattr(updater.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(updater.time, "sleep", lambda _: None)
+    def open_url(url, timeout):
+        probes.append(url)
+        failing = ((broken == "assistant_backend" and ':3101/api/' in url)
+                   or (broken == "owner_backend" and ':3102/api/' in url)
+                   or (broken == "owner_login" and ':3102/login' in url))
+        if failing:
+            raise OSError("unavailable")
+        response = io.BytesIO(json.dumps({"csrf": "challenge"}).encode())
+        response.status = 200
+        return response
+    monkeypatch.setattr(updater, "urlopen", open_url)
+    monkeypatch.setattr(Path, "readlink", lambda path: Path('host' if str(path) == '/proc/1/ns/net' else 'trial'))
+    commands = []
+    def run(*args):
+        commands.append(args)
+        if args[0] == 'nsenter':
+            return SimpleNamespace(stdout=json.dumps({"status": "failed" if broken == "api_health" else "ok"}))
+        return SimpleNamespace(stdout="123")
+    monkeypatch.setattr(updater, "run", run)
+    if broken:
+        with pytest.raises(RuntimeError, match="did not become ready"):
+            updater.ready()
+    else:
+        updater.ready()
+        assert len(probes) == 4
+        assert any(command[0] == 'nsenter' for command in commands)

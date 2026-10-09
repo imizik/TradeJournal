@@ -1,16 +1,15 @@
 """Update only the approved isolated sample runtime, with rollback on failure."""
 import argparse
 import hashlib
-import importlib.util
 import json
 import os
-from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
 import time
+from pathlib import Path, PurePosixPath
 from urllib.request import urlopen
 
 RUNTIME = Path("/opt/tradejournal-dot-trial/runtime")
@@ -28,19 +27,14 @@ def run(*args):
     return subprocess.run(list(args), check=True, capture_output=True, text=True)
 
 
-def load(path, name):
-    spec = importlib.util.spec_from_file_location(name, path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def check_target():
     if os.geteuid() != 0 or RUNTIME.is_symlink() or not RUNTIME.is_dir() or CONFIG.is_symlink():
         raise ValueError("Run as root on the existing isolated sample installation")
-    control = load(RUNTIME / "deploy/dot_trial_control.py", "sample_update_control")
-    fixture = load(RUNTIME / "backend/dot_trial_app.py", "sample_update_fixture")
-    fixture.validate_environment(control.environment())
+    # The root updater uses only stdlib; app dependencies belong to the pinned venv.
+    subprocess.run([str(RUNTIME / "backend/.venv/bin/python"), "-c",
+        "from dot_trial_control import environment\nfrom dot_trial_app import validate_environment\nvalidate_environment(environment())"],
+        cwd=RUNTIME / "backend", env={"PATH": os.defpath, "PYTHONPATH": str(RUNTIME / "deploy")},
+        check=True, capture_output=True, text=True)
     if not json.loads((CONFIG / "manifest.json").read_text()).get("published"):
         raise ValueError("This update requires the existing approved trial")
 
@@ -82,13 +76,24 @@ def ready():
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         try:
-            with urlopen("http://127.0.0.1:3101/login", timeout=2) as response:
-                if response.status == 200:
-                    pids = [run("systemctl", "show", name, "--property=MainPID", "--value").stdout.strip() for name in SERVICES]
-                    networks = [Path(f"/proc/{pid}/ns/net").readlink() for pid in pids]
-                    if len(set(networks)) == 1 and networks[0] != Path("/proc/1/ns/net").readlink():
-                        return
-        except (OSError, subprocess.CalledProcessError):
+            for port in (3101, 3102):
+                with urlopen(f"http://127.0.0.1:{port}/login", timeout=2) as response:
+                    if response.status != 200:
+                        raise ValueError("Trial login unavailable")
+                # Both entrances must exercise their gateway, backend and database.
+                # Anonymous /health through a gateway is intentionally unauthorized.
+                with urlopen(f"http://127.0.0.1:{port}/api/access/challenge", timeout=2) as response:
+                    if response.status != 200 or not isinstance(json.load(response).get("csrf"), str):
+                        raise ValueError("Trial backend challenge unavailable")
+            pids = [run("systemctl", "show", name, "--property=MainPID", "--value").stdout.strip() for name in SERVICES]
+            networks = [Path(f"/proc/{pid}/ns/net").readlink() for pid in pids]
+            if len(set(networks)) == 1 and networks[0] != Path("/proc/1/ns/net").readlink():
+                health = run("nsenter", "--target", pids[0], "--net", "--", "python3", "-c",
+                    "import json\nfrom urllib.request import urlopen\n"
+                    "with urlopen('http://127.0.0.1:8091/health', timeout=2) as response: print(json.dumps(json.load(response)))")
+                if json.loads(health.stdout).get("status") == "ok":
+                    return
+        except (OSError, ValueError, subprocess.CalledProcessError):
             pass
         time.sleep(.5)
     raise RuntimeError("Trial did not become ready in its isolated network namespace")
