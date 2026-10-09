@@ -4,6 +4,7 @@ import { useState } from "react";
 import { cn } from "@/lib/utils";
 import type { Account, PositionQuote, Trade } from "@/lib/api";
 import { computeUnrealizedPnl, formatHoldDuration, getCurrentMark, type OpenPositionRow } from "@/lib/dashboard";
+import { money, quantity } from "@/lib/format";
 
 export type { OpenPositionMeta, OpenPositionRow } from "@/lib/dashboard";
 
@@ -20,6 +21,7 @@ type OpenSortKey =
   | "avg_cost"
   | "cost_left"
   | "current_price"
+  | "underlying"
   | "unrealized_pnl"
   | "realized"
   | "opened_at"
@@ -51,25 +53,15 @@ function pnlColor(val: number | null | undefined) {
   return val >= 0 ? "text-emerald-400" : "text-red-400";
 }
 
-function fmt$(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
-}
-
-function fmtMoney(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `$${val.toFixed(2)}`;
-}
+const fmt$ = (val: number | null | undefined) => money(val, { signed: true, cents: false });
+const fmtMoney = (val: number | null | undefined) => money(val);
 
 function fmtPct(val: number | null | undefined) {
   if (val == null) return "-";
   return `${val >= 0 ? "+" : ""}${(val * 100).toFixed(1)}%`;
 }
 
-function fmtQty(val: number | null | undefined) {
-  if (val == null) return "-";
-  return String(Number(val.toFixed(6)));
-}
+const fmtQty = quantity;
 
 function fmtDateShort(val: string | null | undefined) {
   if (!val) return "-";
@@ -108,6 +100,9 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   if (!active) return <span className="ml-1 text-xs text-muted-foreground/30">-</span>;
   return <span className="ml-1 text-xs">{dir === "asc" ? "^" : "v"}</span>;
 }
+
+/** One account in the rows: its badge on every row says nothing, so the column goes. */
+const oneAccount = (accountIds: string[]) => new Set(accountIds).size <= 1;
 
 function Th<K extends string>({
   children,
@@ -171,6 +166,8 @@ function getOpenSortVal(
       return meta.capitalLeft;
     case "current_price":
       return getCurrentMark(trade, quotes[trade.id]);
+    case "underlying":
+      return trade.instrument_type === "option" ? quotes[trade.id]?.underlying_price ?? null : null;
     case "unrealized_pnl":
       return computeUnrealizedPnl(trade, meta, quotes[trade.id]);
     case "realized":
@@ -215,12 +212,17 @@ export function OpenPositionsTable({
   rows,
   accountMap,
   quotes = {},
+  today,
 }: {
   rows: OpenPositionRow[];
   accountMap: Record<string, Account>;
   quotes?: Record<string, PositionQuote>;
+  /** New York's date (YYYY-MM-DD): an option expiring on it is flagged. */
+  today?: string;
 }) {
-  const [sort, setSort] = useState<{ key: OpenSortKey; dir: SortDir } | null>(null);
+  // Biggest unrealized losers first: the positions that need a decision.
+  const [sort, setSort] = useState<{ key: OpenSortKey; dir: SortDir } | null>({ key: "unrealized_pnl", dir: "asc" });
+  const showAccount = !oneAccount(rows.map(({ trade }) => trade.account_id));
 
   function handleSort(key: OpenSortKey) {
     setSort((prev) =>
@@ -253,11 +255,11 @@ export function OpenPositionsTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full text-sm sm:min-w-[1380px]">
+      <table className="w-full text-sm sm:min-w-[1280px]">
         <thead className="bg-muted text-xs uppercase text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
-            <Th {...thProps("account", true)}>Account</Th>
+            {showAccount && <Th {...thProps("account", true)}>Account</Th>}
             <Th {...thProps("instrument_type", true)}>Instrument</Th>
             <Th {...thProps("strike", true)}>Strike</Th>
             <Th {...thProps("option_type", true)}>Type</Th>
@@ -266,6 +268,7 @@ export function OpenPositionsTable({
             <Th {...thProps("avg_cost", true)}>Avg Cost</Th>
             <Th {...thProps("cost_left", true)}>Entry Value Left</Th>
             <Th {...thProps("current_price")}>Mark</Th>
+            <Th {...thProps("underlying", true)}>Stock</Th>
             <Th {...thProps("unrealized_pnl")}>Unreal. P&amp;L</Th>
             <Th {...thProps("realized", true)}>Realized</Th>
             <Th {...thProps("opened_at", true)}>Opened</Th>
@@ -277,18 +280,27 @@ export function OpenPositionsTable({
             const quote = quotes[trade.id];
             const currentMark = getCurrentMark(trade, quote);
             const unrealizedPnl = computeUnrealizedPnl(trade, meta, quote);
-            const showUnderlying = trade.instrument_type === "option" && quote?.underlying_price != null;
+            const expiresToday = trade.instrument_type === "option" && !!today && trade.expiration?.slice(0, 10) === today;
 
             return (
               <tr key={trade.id} className="hover:bg-muted/50">
                 <Td>
-                  <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
-                    {trade.ticker}
-                  </a>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <a href={`/trades/${trade.id}`} className="font-semibold hover:underline">
+                      {trade.ticker}
+                    </a>
+                    {expiresToday && (
+                      <span className="whitespace-nowrap rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] font-medium text-amber-300">
+                        Expires today
+                      </span>
+                    )}
+                  </div>
                 </Td>
-                <Td wide>
-                  <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
-                </Td>
+                {showAccount && (
+                  <Td wide>
+                    <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
+                  </Td>
+                )}
                 <Td wide>
                   <span className="capitalize">{trade.instrument_type}</span>
                 </Td>
@@ -302,28 +314,24 @@ export function OpenPositionsTable({
                 <Td>
                   <div className="flex flex-col">
                     <span className="font-medium">{fmtQty(meta.qtyLeft)}</span>
-                    <span className="text-xs text-muted-foreground">
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">
                       {`opened ${fmtQty(meta.openedQty)}${meta.exitedQty > 0 ? ` | trimmed ${fmtQty(meta.exitedQty)}` : ""}`}
                     </span>
                   </div>
                 </Td>
                 <Td wide>{fmtMoney(trade.avg_entry_premium)}</Td>
                 <Td wide>{fmtMoney(meta.capitalLeft)}</Td>
-                <Td>
-                  <div className="flex flex-col">
-                    <span>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">--</span>}</span>
-                    {showUnderlying && (
-                      <span className="text-xs text-muted-foreground">
-                        {`U ${fmtMoney(quote?.underlying_price)}`}
-                      </span>
-                    )}
-                  </div>
+                <Td>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">—</span>}</Td>
+                <Td wide>
+                  {trade.instrument_type === "option" && quote?.underlying_price != null
+                    ? <span className="text-muted-foreground">{fmtMoney(quote.underlying_price)}</span>
+                    : <span className="text-muted-foreground/40">—</span>}
                 </Td>
                 <Td>
                   {unrealizedPnl != null ? (
                     <span className={pnlColor(unrealizedPnl)}>{fmt$(unrealizedPnl)}</span>
                   ) : (
-                    <span className="text-muted-foreground/40">--</span>
+                    <span className="text-muted-foreground/40">—</span>
                   )}
                 </Td>
                 <Td wide>
@@ -348,6 +356,7 @@ export function RecentClosedTable({
   accountMap: Record<string, Account>;
 }) {
   const [sort, setSort] = useState<{ key: ClosedSortKey; dir: SortDir } | null>(null);
+  const showAccount = !oneAccount(trades.map((trade) => trade.account_id));
 
   function handleSort(key: ClosedSortKey) {
     setSort((prev) =>
@@ -380,7 +389,7 @@ export function RecentClosedTable({
         <thead className="bg-muted text-xs uppercase text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
-            <Th {...thProps("account", true)}>Account</Th>
+            {showAccount && <Th {...thProps("account", true)}>Account</Th>}
             <Th {...thProps("instrument_type", true)}>Instrument</Th>
             <Th {...thProps("strike", true)}>Strike</Th>
             <Th {...thProps("option_type", true)}>Type</Th>
@@ -394,7 +403,7 @@ export function RecentClosedTable({
         <tbody className="divide-y divide-border">
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={10} className="px-4 py-8 text-center text-muted-foreground">
+              <td colSpan={showAccount ? 10 : 9} className="px-4 py-8 text-center text-muted-foreground">
                 No closed trades yet.
               </td>
             </tr>
@@ -406,9 +415,11 @@ export function RecentClosedTable({
                   {trade.ticker}
                 </a>
               </Td>
-              <Td wide>
-                <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
-              </Td>
+              {showAccount && (
+                <Td wide>
+                  <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
+                </Td>
+              )}
               <Td wide>
                 <span className="capitalize">{trade.instrument_type}</span>
               </Td>
