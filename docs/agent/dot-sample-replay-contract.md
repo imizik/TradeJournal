@@ -159,3 +159,17 @@ screens and stacks it on phones. Reload and replay do not alter its evidence.
 The separate Charts page continues using its other sample window. Numeric
 aggregation/refusal and real browser save/replay/reload/phone checks are
 required, together with native preservation of Jo's existing choices/receipt.
+
+
+Jo reported direct chart-to-current-packet checks for all 120 minute candles
+and eight complete 15-minute buckets, and original-choice/replay persistence
+after reload. Historical matching used previously recorded IDs/hashes because
+its original audit file was unavailable; these complete fixtures did not
+exercise missing/partial coverage. Keep that distinction from automated tests
+and the operator's stored pre-update row snapshot.
+
+Chart polish follows that review: the VWAP legend names the selected interval;
+level labels sit outside the candle area; candle tooltips and the quarter table
+show supplied numeric VWAP (or unavailable), with the table using the last
+observed minute, not an interval average. Intermediate clock labels aid exact
+readings. No price/volume reduction, decisions, outcomes or permissions change.
