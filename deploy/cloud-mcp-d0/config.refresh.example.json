@@ -1,0 +1,5 @@
+{
+  "issuer_url": "https://issuer.example/realm",
+  "jwks_url": "https://issuer.example/realm/keys",
+  "jwks_file": "/var/lib/tradejournal-d0-keys/jwks.json"
+}
