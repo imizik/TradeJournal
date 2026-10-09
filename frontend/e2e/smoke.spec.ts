@@ -45,9 +45,10 @@ test.describe("dashboard", () => {
     const main = page.locator("main").first();
     const order = await main.evaluate((root) => {
       const text = root.textContent ?? "";
-      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Open Positions"), performance: text.indexOf("Trading Performance") };
+      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Shows what is still open"), performance: text.indexOf("Trading Performance") };
     });
     expect(order.today).toBeGreaterThanOrEqual(0);
+    expect(order.positions).toBeGreaterThanOrEqual(0);
     expect(order.today).toBeLessThan(order.performance);
     expect(order.positions).toBeLessThan(order.performance);
     // Money always puts the sign before the dollar sign.
