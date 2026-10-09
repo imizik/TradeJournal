@@ -1,0 +1,21 @@
+# Dedicated hostname; do not add this handler to the private API or owner site.
+# Replace probe.example with the exact origin in resource_url. Install manually
+# only after OAuth configuration and the synthetic trial are ready.
+probe.example {
+    @probe {
+        path /mcp /.well-known/oauth-protected-resource/mcp
+        method GET HEAD POST DELETE OPTIONS
+    }
+    handle @probe {
+        reverse_proxy unix//run/tradejournal-d0/mcp.sock {
+            flush_interval -1
+            transport http {
+                dial_timeout 3s
+                response_header_timeout 15s
+            }
+        }
+    }
+    handle {
+        respond 404
+    }
+}

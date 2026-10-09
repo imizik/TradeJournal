@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "synthetic_only": true,
+  "issuer_url": "https://issuer.example/realm",
+  "resource_url": "https://probe.example/mcp",
+  "jwks_url": "https://issuer.example/realm/keys",
+  "jwks_file": "/etc/tradejournal-d0/jwks.json",
+  "client_id": "replace-with-predefined-oauth-client-id",
+  "client_claim": "client_id",
+  "profiles": [
+    {
+      "subject": "replace-with-the-approved-issuer-subject",
+      "id": "d0_11111111-1111-4111-8111-111111111111",
+      "enabled": true
+    }
+  ]
+}

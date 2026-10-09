@@ -1,6 +1,6 @@
 # Dots cloud MCP integration scope
 
-**2026-10-08 — proposal, no connection enabled.** Isaac selected a combined
+**2026-10-09 — selected direct HTTPS D0, no connection enabled.** Isaac selected a combined
 direction: the personal Dot uses structured tools for data and supported
 operations, and the actual TradeJournal UI for visual inspection and workflow
 feedback. This document scopes the connected-app side. The
@@ -11,38 +11,52 @@ data, create credentials, enable schedules or spend on a new service.
 
 **D0 implementation update:** Isaac subsequently selected the first chunk.
 The [synthetic D0 runbook](cloud-mcp-d0-runbook.md) records its standalone
-resource server, local OAuth interoperability evidence and remaining cloud
-acceptance. D1–D3 remain proposed; no actual Dot/tunnel connection is enabled.
+resource server, offline public-key verification, direct HTTPS packaging and
+remaining cloud acceptance. Isaac subsequently required ChatGPT plan usage
+with no API credits; direct HTTPS supersedes the earlier tunnel-first recommendation.
+D1–D3 remain proposed; no actual Dot MCP connection is enabled.
 
 ## Recommended shape
 
 Create a private TradeJournal plugin backed by a **new restricted MCP adapter
-on the always-on VPS**. Test OpenAI Secure MCP Tunnel first. Use loopback
-Streamable HTTP between the tunnel client and the restricted adapter so the
-same MCP implementation can support a separately approved HTTPS entrance if
-the tunnel route is unavailable. The laptop is not a runtime dependency.
+on the always-on VPS**. Use ChatGPT Server URL + OAuth with a dedicated HTTPS
+proxy forwarding only MCP and its metadata to a Unix socket. The D0 service
+verifies tokens using an expiring operator-managed public-key file and has no
+outgoing IP networking or model credentials. No OpenAI tunnel/runtime key or
+API inference is part of this route. The laptop is not a runtime dependency.
 
 ```mermaid
 flowchart LR
     Dot[Dot in the cloud] --> Plugin[Private TradeJournal plugin]
-    Plugin --> Tunnel[OpenAI MCP tunnel]
-    Client[VPS tunnel client] -->|Outbound HTTPS| Tunnel
-    Client --> MCP[Restricted loopback MCP adapter]
+    Plugin --> Proxy[Dedicated HTTPS proxy]
+    Proxy -->|Unix socket| MCP[Restricted MCP adapter]
     MCP --> API[Authenticated backend operations]
     API --> Records[TradeJournal records and providers]
     Browser[Dot cloud browser] --> UI[Separate assistant UI entrance]
     UI --> API
 ```
 
-Both entrances resolve to restricted application identities and the same
+For later domain tools, both entrances must resolve to restricted application identities and the same
 backend permission rules. Keep transport-specific credentials separate. The
 browser session is not a connector credential, and connecting a plugin does
 not sign the Dot into the website. TradeJournal remains the authority for
 calculations, durable records, reveal rules and deterministic paper monitoring.
+D0 contains synthetic data only and never reaches the application backend.
+
+**No API-credit spending:** keep reasoning in Dot/ChatGPT; connector tools
+return data or deterministic results. The selected D0 service has no model
+keys, no model/sampling tools, no app job routes and no outgoing IP sockets.
+D1 and any later UI/connector grants must also deny indirect paid model jobs;
+neither a data read nor an assistant browser action may launch model
+preparation. Do not add API-key authentication, API Playground tests or paid
+fallbacks. Account-level purchased credits/overages are separate from API
+billing and require their own usage-settings check before actual acceptance.
+No connector can guarantee a product allowance or change those account limits.
+Hosting/OAuth costs remain separate. See the runbook for concrete controls.
 
 ## What official documentation establishes
 
-Sources checked 2026-10-08; these are product capabilities, not observations
+Sources checked 2026-10-09; these are product capabilities, not observations
 of Isaac's account or this installation.
 
 - Dots can use supported installed plugins. Their cloud browser has separate
@@ -68,12 +82,13 @@ of Isaac's account or this installation.
   does not support the draft's polling/streaming event delivery modes.
   [MCP Events](https://developers.openai.com/plugins/build/mcp-events)
 
-**Inference to validate:** a personal tunnel-backed plugin should be a suitable
-Dot connection. Verify installation, discovery, OAuth and invocation from the
-actual Dot before choosing it as the production transport. A successful local
-MCP Inspector call, Codex call or Responses API call is insufficient evidence.
-Also verify any account restrictions, current usage charges and service limits;
-this scope assumes neither free tunnel use nor unlimited Dot work.
+**Inference to validate:** a personal Server URL + OAuth plugin should be a
+suitable Dot connection. Verify installation, discovery, OAuth and invocation
+from the actual Dot before choosing it as the production transport. Local
+Inspector/Codex fixtures are insufficient evidence. Check account restrictions,
+plan/purchased-credit usage controls and service limits; this scope assumes
+neither unlimited Dot work nor free hosting. Secure MCP Tunnel remains a
+documented alternative, but is excluded from the selected no-API-credit trial.
 
 ## Existing code and the work it saves
 
@@ -85,7 +100,7 @@ This is an inspection of the current checkout, not a production-state audit.
 | [Access engine](../../backend/app/engine/access.py) and [route manifest](../../backend/app/access_manifest.py) | Existing assistant identity, revocation, symbol/run grants and route classification. Browser identity uses cookies plus an ingress credential; OAuth bearer authentication does not exist here yet. |
 | [Practice routes](../../backend/app/routers/practice.py) | Restricted reads filter selected runs, sanitize errors and disable read-triggered recovery. Reuse these projections; do not call an unrestricted view behind an adapter. |
 | [Decision routes](../../backend/app/routers/decisions.py) | Immutable records, visibility checks and retry semantics exist. Authenticated writes currently support owner/manual MCP identities; cloud writer ownership still needs a contract and implementation. |
-| [Deployment access](../../deploy/README.md#optional-browser-authentication-disabled-by-default) | Separate assistant process and secret isolation provide a pattern. The cloud MCP process and tunnel client are additional disabled-by-default services, not installed capabilities today. |
+| [Deployment access](../../deploy/README.md#optional-browser-authentication-disabled-by-default) | Separate assistant process and secret isolation provide a pattern. The cloud MCP process, Unix socket and dedicated HTTPS proxy are manual-only trial components, not installed capabilities today. |
 | [Backend dependencies](../../backend/pyproject.toml) | D0 now pins `mcp==1.28.1` and `PyJWT[crypto]==2.13.0`. The synthetic SDK OAuth/tool fixture negotiates `2025-11-25`; this is not MCP Events compatibility or actual Dot evidence. |
 
 The current assistant grant contains `symbols`, `run_ids` and `journal_read`;
@@ -164,21 +179,22 @@ Keep OAuth consent/refresh state separate from assistant browser sessions.
 Before real data, review the issuer/client registration, token and refresh
 lifecycle, exact OAuth callback origins, mapping to application grants and
 credential storage. If a public authorization service is needed, that is a
-separate reviewed ingress decision even when MCP itself uses the tunnel.
-Do not treat tunnel transport authentication as application authorization.
+separate reviewed ingress decision. HTTPS transport does not replace OAuth
+identity or application authorization.
 
 ## Deployment and operations
 
-- Run the restricted adapter and tunnel client on the VPS under separate
-  restricted OS identities. They get no database, Gmail, broker, owner-gateway
-  or broad manual-MCP credentials. The tunnel's Platform runtime key stays in
-  its own protected service configuration; tokens never enter model arguments.
-- Configure exactly one fixed loopback MCP destination. Never tunnel ports
-  8080/8000, the owner frontend, arbitrary backend paths or the existing broad
-  adapter. Keep tunnel administration on loopback. Scope outbound access to
-  required tunnel/auth services and existing backend provider policy.
+- Run the restricted adapter under its own VPS identity. It gets no database,
+  Gmail, broker, model, owner-gateway or broad manual-MCP credentials. The
+  selected D0 service has no outgoing IP sockets; issuer keys are refreshed by
+  a separate operator command. Tokens never enter model arguments.
+- Publish only the exact MCP/metadata paths on a dedicated HTTPS hostname,
+  forwarding to its Unix socket. Never forward ports 8080/8000, an owner
+  frontend, arbitrary backend paths or the existing broad adapter. D1 must
+  deliberately review any new network/backend capability without introducing
+  a model-provider path or credentials.
 - Package opt-in services, versioned configuration and a rollback/stop path.
-  Both services remain disabled until the selected trial is approved. Validate
+  Services remain disabled until the selected trial is approved. Validate
   protocol compatibility on upgrade and refuse rollback to a release without
   the connector's authorization boundary.
 - Bound concurrency, body/response size, provider calls, deadlines and retries.
@@ -187,12 +203,12 @@ Do not treat tunnel transport authentication as application authorization.
   Report connection failure as unavailable rather than using cached data as
   fresh evidence or falling back to owner access.
 - Prove restart recovery, token expiration and disconnect/revoke behavior.
-  Adapter/tunnel failure must leave existing deterministic monitoring running.
+  Adapter/proxy failure must leave existing deterministic monitoring running.
   The browser entrance remains a separate connectivity requirement.
 
-If the actual Dot cannot use the tunnel, the fallback is an authenticated
-HTTPS endpoint serving only the restricted MCP resource, with the same backend
-checks. This requires its own reviewed TLS/ingress deployment. Public plugin
+If the actual account cannot install/use this custom OAuth plugin, record the
+limitation rather than falling back to API billing or a tunnel runtime key.
+Direct HTTPS requires its own reviewed TLS/ingress deployment. Public plugin
 directory distribution and an embedded ChatGPT UI are outside this scope.
 
 ## How the Dot chooses tools or the UI
@@ -219,7 +235,7 @@ operation must not be submitted twice via different entrances.
 
 | Slice | Deliverable | Exit evidence |
 |---|---|---|
-| D0 — connection feasibility | Select issuer and tested SDK; a synthetic `get_profile` tool, restricted test identity and tunnel-backed personal plugin on an isolated always-on host. Record account/workspace access and charges/limits. | Actual Dot discovers and calls the tool after OAuth while the laptop is off; refresh, disconnect and principal revocation behave as specified. No real journal/provider data. |
+| D0 — connection feasibility | Select issuer and tested SDK; a synthetic `get_profile` tool, restricted test identity and direct HTTPS/OAuth personal plugin on an isolated always-on host. Offline verification, no model credentials and native network denial; record account/workspace access and usage controls. | Actual Dot discovers and calls the tool after OAuth while the laptop is off; refresh, disconnect, principal revocation and expired/removed local keys behave as specified. IPv4/IPv6 creation is denied while Unix ingress works. No real journal/provider data. |
 | D1 — selected reads | The six-tool catalog, bearer identity path, bounded projections, opt-in packaging, routing instructions and operations runbook. Start with fixtures. | Negative authorization tests, existing owner/browser regressions, native deployment evidence and an actual Dot reading granted fixture records. Then a separately approved narrow live read proves data freshness and laptop-off operation. |
 | D2 — own draft writes | Separately scoped `freeze_decision_context`, `record_agent_decision` and operation-status retrieval. Durable context/record ownership and principal-scoped retry keys. | Same-key retry yields one record; changed content conflicts; actor spoofing and other-principal IDs fail. Uncertain writes recover by receipt; drafts remain unarmed. |
 | D3 — follow-through | One user-selected subscription or bounded schedule, not a general workflow engine. | Real event/run and cancellation, expiry, restart, duplicate delivery and revoked-resource tests; unchanged state stays quiet. |
@@ -266,7 +282,7 @@ Postgres/native deployment, live provider and actual Dot evidence separately.
 Test route selection with the prompts above; access-denied responses must not
 cause a switch to a more privileged entrance.
 
-The remaining environment choices are: actual account/tunnel eligibility,
+The remaining environment choices are: actual account/custom-plugin eligibility,
 OAuth issuer and reachability, tested SDK/protocol, isolated trial host and
 data, and permission/cost limits. These are D0 investigation outputs, not
 reasons to build a broad connector first. No connection, credential, public
