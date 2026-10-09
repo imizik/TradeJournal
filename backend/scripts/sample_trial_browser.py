@@ -23,5 +23,5 @@ def build_app():
     with Session(engine) as db:
         sample_practice.prepare(db)
         if access.sample_replays_enabled():
-            sample_replay.prepare(db)
+            sample_replay.prepare(db, scenarios=True)
     return app
