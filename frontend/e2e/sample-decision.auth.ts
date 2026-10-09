@@ -132,7 +132,7 @@ for (const timezoneId of ["America/Los_Angeles", "America/New_York", "UTC"]) {
       const mu = page.getByRole("article", { name: "MU sample opportunity" });
       await mu.getByLabel("MU choice").selectOption("wait");
       const input = mu.getByLabel(`MU waiting ends (${timezoneId})`, { exact: true });
-      const preview = mu.locator("time[datetime]");
+      const preview = mu.locator("form time[datetime]");
       const deadlineMinute = new Date(Math.floor(new Date(run.deadline).getTime() / 60_000) * 60_000).toISOString();
       await expect(preview).toHaveAttribute("datetime", deadlineMinute);
       // Choose one future UTC instant, then enter its wall time in each browser.
