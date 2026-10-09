@@ -3,8 +3,8 @@
 This is a handoff for connecting a future Dots client to TradeJournal. Official
 documentation now describes Dots plugins and ChatGPT custom MCP connections;
 the [cloud MCP scope](cloud-mcp-integration-scope.md) records those sources,
-the proposed tunnel-first transport and the unverified account/runtime gates.
-No connection to this installation is established. Keep TradeJournal as the
+the selected direct HTTPS/OAuth transport and unverified account/runtime gates.
+No MCP connection to this installation is established. Keep TradeJournal as the
 owner of decision records, frozen market context and paper outcomes.
 
 **Direction updated 2026-10-08; design only.** Dot owns bounded preparation,
@@ -29,6 +29,14 @@ records and supported operations, and browser access for visual inspection and
 workflow feedback. The [cloud connector scope](cloud-mcp-integration-scope.md)
 defines the initial read catalog, OAuth boundary, routing guidance and D0–D3
 sequence. It adds no active connection or permission.
+
+**Connector spending constraint selected 2026-10-09.** Use ChatGPT plan usage
+with no API credits. The selected D0 package uses Server URL + OAuth, local
+public keys and a network-disabled Unix-socket service with no model keys or
+model-call tools. The [runbook](cloud-mcp-d0-runbook.md) distinguishes that
+enforced service boundary from account-level allowances/extra-credit settings
+and pending actual Dot acceptance. Later UI/MCP grants must also deny paid
+model-job triggers; connecting a plugin does not change the current browser grant.
 
 OpenAI documents ongoing responsibilities, selective memory, delegation and
 event monitoring where a connected service supports it in

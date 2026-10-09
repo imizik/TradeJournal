@@ -1,0 +1,32 @@
+[Unit]
+Description=Offline synthetic MCP probe for ChatGPT plan usage (manual trial only)
+Requires=tradejournal-d0-https.socket
+After=tradejournal-d0-https.socket
+
+[Service]
+Type=simple
+User=tradejournal-d0
+Group=tradejournal-d0
+WorkingDirectory=/opt/tradejournal-d0/backend
+ExecStart=/opt/tradejournal-d0/backend/.venv/bin/python /opt/tradejournal-d0/backend/cloud_mcp_d0.py --config /etc/tradejournal-d0/config.json --socket-activated
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=-/etc/tradejournal -/var/lib/tradejournal -/var/backups/tradejournal -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=32
+MemoryMax=256M
+CPUQuota=50%
+
+# No EnvironmentFile: model keys, application configuration and tunnel credentials
+# must not be passed to this standalone process. Only systemd's Unix fd is used.

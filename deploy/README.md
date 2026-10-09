@@ -749,3 +749,23 @@ Tailscale/Caddy routes and journal data are outside this update. Saving a
 simulated TAKE never arms a paper plan; its distinct sample policy cannot pass
 A2's schema check. Native update and actual Dot write/reopen observations must
 be reported separately from local browser/fixture checks.
+
+
+### Manual synthetic MCP HTTPS trial
+
+The [D0 runbook](../docs/agent/cloud-mcp-d0-runbook.md) prepares a standalone
+synthetic `get_profile` service for a private ChatGPT Server URL + OAuth plugin.
+Use the manual-only templates under `deploy/cloud-mcp-d0/`; normal releases
+neither install nor activate them. A dedicated HTTPS hostname forwards only
+MCP/metadata to a mode-0660 Unix socket. The service verifies expiring local
+public keys under a network-disabled systemd sandbox, with no model keys, app
+imports, paid jobs, OpenAI tunnel or Platform runtime key. Operator key refresh
+is a separate bounded HTTPS fetch of issuer metadata/public keys. No scheduler
+is added. Stop both socket and service to prevent reactivation.
+
+The deployment CI adds a separate disposable TLS/Caddy/socket smoke after the
+ordinary package smoke. It checks real IPv4/IPv6 socket denial and offline
+verification, authentication refusal, exact route allowlisting, revocation,
+restart and teardown. This fixture evidence does not prove an actual Dot, live
+issuer, laptop-off use or account-level usage controls. Those remain trial
+acceptance steps; no public route is created by merging the implementation.
