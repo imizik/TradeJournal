@@ -48,13 +48,13 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
       await github.rest.repos.createCommitStatus({ ...repo, sha: pr.head.sha,
         context: GATE, state, description, target_url: pr.html_url });
     }
-    if (state === 'error' && pr.labels.some(l => l.name === 'review-loop')) {
+    if (state === 'error' && pr.labels.some(l => l.name === 'review-loop' || l.name === EXEMPT)) {
       const marker = `<!-- review-loop-alert:${pr.head.sha} -->`;
       const comments = await github.paginate(github.rest.issues.listComments,
         { ...repo, issue_number: pr.number, per_page: 100 });
       if (!comments.some(c => c.user?.login === 'github-actions[bot]' && c.body?.includes(marker))) {
         await github.rest.issues.createComment({ ...repo, issue_number: pr.number,
-          body: `${marker}\nIndependent review needs attention: ${description}.\n\nThe PR has not passed the review gate. Resume its owning Codex/Claude session; do not treat missing findings as a clean review.` });
+          body: `${marker}\nPR review gate needs attention: ${description}.\n\nThe PR has not passed the review gate. Resume its owning Codex/Claude session; do not treat missing findings as a clean review.` });
       }
     }
     core.info(`PR #${pr.number}: ${state}`);

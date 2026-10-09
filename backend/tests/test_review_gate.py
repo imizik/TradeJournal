@@ -67,6 +67,17 @@ def test_overdue_review_is_error_and_notifies_once_per_head():
     assert gate(pending, comments=[comment])["notifications"] == []
 
 
+def test_overdue_exempt_pr_is_notified_once_per_head():
+    pending = receipt(state="pending", description=f"pending base:{BASE} owner:codex pass:0",
+                      created_at="1970-01-01T00:00:00Z")
+    labels = [{"name": "review-exempt"}]
+    result = gate(pending, labels=labels)
+    assert result["updates"][0]["state"] == "error"
+    assert len(result["notifications"]) == 1
+    comment = {"user": {"login": "github-actions[bot]"}, "body": result["notifications"][0]["body"]}
+    assert gate(pending, comments=[comment], labels=labels)["notifications"] == []
+
+
 def test_explicit_review_error_notifies_without_waiting():
     result = gate(receipt(state="error"))
     assert result["updates"][0]["state"] == "error"

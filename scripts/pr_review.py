@@ -530,7 +530,9 @@ def pr_info(root, number=None):
 
 def receipt_description(state, ident, clean):
     if state.get("exemption") and state["phase"] in {"exempt", "ready"}:
-        exemption = state.get("exemption", {})
+        if not clean or not matches(state, ident):
+            return f"pending base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}"
+        exemption = state["exemption"]
         return f"exempt base:{ident['base']} owner:{state['owner']} mode:{exemption.get('mode', '')} reason:{exemption.get('reason', '')}"
     extra = f" extra:{len(state['passes']) - MAX_PASSES}" if len(state["passes"]) > MAX_PASSES else ""
     return f"{'clean' if clean else state['phase']} base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}{extra}"

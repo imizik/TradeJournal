@@ -459,6 +459,22 @@ def test_explicit_exemption_uses_gate_safe_reason_for_short_input(repo):
     assert state(repo)["exemption"]["reason"] == "owner-request"
 
 
+def test_new_commit_does_not_claim_the_old_exemption(repo):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "User requested review skip"
+    reviewer.exempt(repo, a)
+    original = state(repo)
+    (repo / "a.py").write_text("value = 3\n")
+    git(repo, "add", "a.py")
+    git(repo, "commit", "-qm", "more work")
+    ident = reviewer.identity(repo, "origin/main")
+    assert not reviewer.matches(original, ident)
+    description = reviewer.receipt_description(original, ident, False)
+    assert description.startswith("pending base:")
+    assert not description.startswith("exempt ")
+
+
 def test_real_review_after_exemption_clears_stale_exemption_state(repo, monkeypatch):
     a = args()
     a.mode = "explicit"
