@@ -2588,6 +2588,7 @@ test("levels priced out of view keep one tag at each edge, with an arrow, instea
   const edgeTags = () => page.evaluate(() => (window as unknown as { __tjDrawings: Map<string, { edgeTags(): string[] }> }).__tjDrawings.get("main")!.edgeTags());
   // The nearest level each side of the view; 420 waits behind 400, and 262 is in view with its plain price.
   await expect.poll(edgeTags).toEqual(["↑400.00", "↓100.00"]);
+  await drawn(page, "main").screenshot({ path: test.info().outputPath("edge-tags.png") });
 });
 
 /** Where bar `index` and `price` are drawn on a chart's candle pane. */

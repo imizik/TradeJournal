@@ -353,8 +353,9 @@ cd backend
   price, so a level is at the same price on every panel of its symbol at any
   zoom. Each level and ray tags its price on the price axis; one priced out of
   view keeps a tag only if it is the nearest on its side, pinned to that edge
-  with an arrow ("↑236.59"), so levels out of view never pile up at the edge
-  looking like prices in view. A mouse press on a level selects it and dragging moves it; the level
+  with a small arrow beside it pointing the way, so levels out of view never
+  pile up at the edge looking like prices in view. The arrow is drawn in the
+  pane rather than added to the tag's text, which would widen the price axis. A mouse press on a level selects it and dragging moves it; the level
   moves by the drag (it does not jump to the pointer) and the chart does not
   pan underneath. On touch, a tap within 14px selects a level and only a
   selected level drags, so panning across a level never moves it, and the page
