@@ -1,6 +1,9 @@
 # Follow the user's model choice in ~/.codex/config.toml or the Desktop picker.
 # Workflow and escalation rules live in docs/agent/codex-workflow.md.
 
+[features]
+hooks = true
+
 [agents]
 enabled = true
 default_subagent_model = "gpt-6-luna"

@@ -96,6 +96,12 @@ Pick by what the diff touches, not by how big it is.
 | 1 | normal features and endpoints | the `reviewer` agent's findings, not the diff |
 | 2 | PnL, FIFO, fills, account identity, Gmail, reconciliation, migrations, `deploy/`, the TradingView ingress, destructive or production-data paths | the risky hunks themselves, plus the reviewer's findings |
 
+Before publishing ready work, the lead also runs the shared
+[independent PR review loop](pr-review.md), with Codex as the independent
+reviewer. This cross-provider pass applies to every tier, including docs.
+The internal Sonnet reviewer can still answer focused questions during work;
+it does not replace the independent completion receipt.
+
 CI is the final gate either way, and merging to `main` deploys.
 
 ## Recording it
