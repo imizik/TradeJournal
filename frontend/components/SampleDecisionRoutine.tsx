@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiUrl, type DecisionContext, type DecisionRecord } from "@/lib/api";
 import { DecisionCard } from "@/components/PracticeDecisions";
 import { useAppAccess } from "@/components/AccessProvider";
+import FrozenSampleChart from "@/components/FrozenSampleChart";
 import SampleReplayPanel, { type SampleReplay } from "@/components/SampleReplayPanel";
 
 type Opportunity = { id: string; symbol: string; context: DecisionContext; choice: DecisionRecord | null; replay?: SampleReplay | null };
@@ -106,6 +107,7 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
     <div className="flex flex-wrap items-center gap-3"><h3 className="text-lg font-semibold">{opp.symbol}</h3><a href={`/charts?symbol=${opp.symbol}`} className="text-primary underline">Open {opp.symbol} chart</a><a href={`/daily/${run.day}?practice_run=${run.id}`} className="text-primary underline">Daily Review</a></div>
     <div className="space-y-2 text-sm"><p><strong>Frozen sample evidence</strong> · captured {stamp(opp.context.captured_at)} · {opp.context.price_facts.length} timestamped price facts</p><p>Source: simulated bars · USD per share · cutoff {stamp(opp.context.captured_at)}</p><p>{String(opp.context.packet.scenario)}</p><p>Sample long plan: trigger ${String(plan.trigger_level ?? "unavailable")}, stop ${String(plan.stop ?? "unavailable")}, target ${String(plan.target ?? "unavailable")}. A regular-session 15-minute close above the trigger is the stated condition; the plan uses fixed levels, an entry guard, and a two-session maximum.</p><p className="text-muted-foreground">EMA/RSI charts use a separate simulated chart window. Live news, options and daily history are outside this exercise. No model calls, monitoring or execution are started by saving.</p><details><summary className="cursor-pointer">Inspect frozen packet and rules</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(opp.context, null, 2)}</pre></details></div>
     {run.replay_exercise && <p className="text-sm text-muted-foreground">{String(opp.context.packet.replay_notice)} The hidden continuation is revealed only after you start a saved TAKE. WAIT/SKIP produce no paper entry.</p>}
+    <div className="grid min-w-0 gap-4 xl:grid-cols-2"><FrozenSampleChart context={opp.context} /><div className="min-w-0 space-y-4">
     {opp.choice ? <><p role="status">Saved decision {opp.choice.id}{reopened ? " · original record reopened" : ""}.</p><button type="button" disabled={busy} onClick={() => void reopen()} className="rounded border px-3 py-2">Reopen saved {opp.symbol} decision</button><DecisionCard record={opp.choice} focused={false} withPaper={false} /></> : <form onSubmit={save} className="grid gap-3 text-sm">
       <label className="grid gap-1">{opp.symbol} choice<select value={decision} onChange={event => setDecision(event.target.value as typeof decision)} className="rounded border bg-background p-2"><option value="take">TAKE · simulated draft</option><option value="wait">WAIT</option><option value="skip">SKIP</option></select></label>
       <label className="grid gap-1">{opp.symbol} reason<textarea required maxLength={2000} value={rationale} onChange={event => setRationale(event.target.value)} className="rounded border bg-background p-2" rows={3} /></label>
@@ -115,5 +117,6 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
     </form>}
     {run.replay_exercise && opp.choice && <SampleReplayPanel symbol={opp.symbol} decision={opp.choice.decision} value={opp.replay ?? null} busy={busy} canStart={Boolean(grants.sample_replay && sample_replay_enabled)} reopened={replayReopened} onStart={() => void replay(true)} onReopen={() => void replay(false)} />}
     {error && <p role="alert" className="text-red-500">{error}</p>}
+    </div></div>
   </article>;
 }
