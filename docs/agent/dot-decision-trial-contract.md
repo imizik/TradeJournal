@@ -50,7 +50,8 @@ internal argument used only by the guarded sample choice service. All simulated
 choices stay `practice_draft_unarmed`, with visible SIMULATED labels. A2 rejects
 their different schema even through an owner/direct service path. This chunk
 does not change the P0 universe, live strategy rules, costs or paper watcher.
-MU/NBIS paper eligibility belongs to the separately selected next chunk.
+The new [sample replay contract](dot-sample-replay-contract.md) selects a fresh
+MU/NBIS exercise and distinct schema; these original records remain unarmed.
 
 Charts use a separate limited synthetic history window. Their responses include
 all required nullable study fields and calculate EMA/RSI using the normal math.
@@ -83,13 +84,13 @@ and both choices committed before reveal.
   assets and permission flag when startup fails. Production services/config,
   private API and network routes are unaffected.
 - Required local checks, native tier-2 reviews and current-head CI complete
-  before PR readiness. Actual Dot write/reopen acceptance remains a subsequent
-  user-observed step; no paid model, timer, live provider or paper outcome follows
+  before PR readiness. Actual Dot WAIT save/reload/reopen was reported on 2026-10-09 and
+  corroborated on the server; no paid model, timer, live provider or paper outcome follows
   from these fixture checks.
 
 ## Operations
 
-The [updater](../../deploy/dot_trial_update.py) accepts only the nine selected
+The [updater](../../deploy/dot_trial_update.py) accepts only the eleven selected
 backend/control source files and portable compiled frontend files. Keep the
 verified Linux `node_modules`; never include data, OAuth files or environment
 secrets in either archive. The updater records the exact source commit and

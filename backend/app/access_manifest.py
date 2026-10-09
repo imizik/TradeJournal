@@ -1,6 +1,7 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    'POST /practice/opportunities/{opp_id}/sample-replay',
     'DELETE /charts/alerts/{alert_id}',
     'DELETE /charts/captures/templates/{template_id}',
     'GET /accounts',

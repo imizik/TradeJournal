@@ -32,6 +32,14 @@ patterns that can create N+1 calls.
   and A2 refuses their distinct schema. Its internal sample validation cannot
   relax the ordinary raw Alpaca requirement or imply P0 eligibility.
 
+- The separately selected `practice-sample-replay-long-15m-v1` record schema
+  uses a salted, precommitted invented continuation and relative sample clock.
+  Only the guarded sample factory admits its scoped replay start. Atomic sample
+  events use `sample_replay_` types and no notification delivery; the live P0
+  watcher ignores them. Outcome snapshots and original decisions stay immutable.
+  P0 rejects sample schemas before any existing-event retry. See the
+  [sample replay contract](dot-sample-replay-contract.md).
+
 ### Practice paper events (A2)
 
 - `decision_event` is append-only; the unique (record, key) and (record, seq)

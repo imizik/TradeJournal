@@ -29,6 +29,7 @@ class Grant(Strict):
     run_ids: list[str] = Field(default_factory=list, max_length=30)
     journal_read: bool = False
     decision_write: bool = Field(default=False, strict=True)
+    sample_replay: bool = Field(default=False, strict=True)
 
 
 class Assistant(Strict):
@@ -79,7 +80,8 @@ def me(request: Request):
         raise HTTPException(403, "Browser session required")
     return {"enabled": True, "identifier": who.identifier, "owner": who.owner,
         "grants": who.grants, "csrf": who.csrf, "sample_data": os.environ.get("TJ_ACCESS_SAMPLE_DATA") == "true",
-        "sample_decision_writes_enabled": access.sample_writes_enabled()}
+        "sample_decision_writes_enabled": access.sample_writes_enabled(),
+        "sample_replay_enabled": access.sample_replays_enabled() and getattr(request.app.state, "sample_replay_isolated", False) is True}
 
 
 @router.post("/logout")

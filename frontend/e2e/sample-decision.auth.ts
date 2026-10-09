@@ -2,13 +2,13 @@ import { test, expect, type Browser, type Page } from "@playwright/test";
 const ownerOrigin = `http://127.0.0.1:${process.env.SAMPLE_OWNER_PORT ?? 3141}`;
 const assistantOrigin = `http://127.0.0.1:${process.env.SAMPLE_ASSISTANT_PORT ?? 3142}`;
 
-async function login(page: Page, browser: Browser, write: boolean) {
+async function login(page: Page, browser: Browser, write: boolean, replay = false) {
   const owner = await browser.newContext({ baseURL: ownerOrigin });
   const session = await (await owner.request.get("/api/access/me")).json();
-  const run = (await (await owner.request.get("/api/backend/practice/runs")).json()).runs.find((item: { policy_version: string }) => item.policy_version === "practice-sample-long-15m-v1");
+  const run = (await (await owner.request.get("/api/backend/practice/runs")).json()).runs.find((item: { policy_version: string }) => item.policy_version === (replay ? "practice-sample-replay-long-15m-v1" : "practice-sample-long-15m-v1"));
   expect(run).toBeTruthy();
   const identity = `sample-${Date.now()}-${write ? "writer" : "reader"}`;
-  const created = await owner.request.post("/api/access/assistants", { headers: { Origin: ownerOrigin, "x-tj-csrf": session.csrf }, data: { identifier: identity, grants: { symbols: write ? ["MU", "NBIS"] : ["MU", "NBIS", "RNXT", "AAPL", "RCAT"], run_ids: [run.id], journal_read: !write, decision_write: write } } });
+  const created = await owner.request.post("/api/access/assistants", { headers: { Origin: ownerOrigin, "x-tj-csrf": session.csrf }, data: { identifier: identity, grants: { symbols: write ? ["MU", "NBIS"] : ["MU", "NBIS", "RNXT", "AAPL", "RCAT"], run_ids: [run.id], journal_read: !write, decision_write: write, sample_replay: replay } } });
   expect(created.status()).toBe(201);
   const key = (await created.json()).key;
   await page.goto("/login");
@@ -173,3 +173,76 @@ for (const timezoneId of ["America/Los_Angeles", "America/New_York", "UTC"]) {
     } finally { await context.close(); }
   });
 }
+
+test("scoped agent starts its own TAKE replay and reopens a complete immutable sample outcome", async ({ page, browser }) => {
+  const errors: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  const run = await login(page, browser, true, true);
+  await expect(page.getByText("Simulated paper replay trial", { exact: true })).toBeVisible();
+  const before = await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json();
+  expect(JSON.stringify(before)).not.toContain('"nonce"');
+  expect(before.opportunities.every((opp: { replay: unknown }) => opp.replay === null)).toBe(true);
+  const mu = page.getByRole("article", { name: "MU sample opportunity" });
+  await mu.getByLabel("MU choice").selectOption("take");
+  await mu.getByLabel("MU reason").fill("Conditional long plan; the replay must confirm its trigger before entry.");
+  await mu.getByRole("button", { name: "Save MU decision", exact: true }).click();
+  await expect(mu.getByRole("button", { name: "Reopen saved MU decision", exact: true })).toBeVisible();
+  const saved = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((opp: { symbol: string }) => opp.symbol === "MU");
+  const button = mu.getByRole("button", { name: "Start MU sample replay", exact: true });
+  await expect(button).toBeEnabled();
+  await button.dblclick();
+  const panel = mu.getByRole("region", { name: "MU sample paper replay" });
+  await expect(panel.getByRole("heading", { name: "Sample paper replay · closed", exact: true })).toBeVisible();
+  await expect(panel.getByRole("list", { name: "MU replay timeline" }).getByRole("listitem")).toHaveCount(5);
+  await expect(panel.getByText("Sample entry per share", { exact: true })).toBeVisible();
+  await expect(panel.getByText("Net per share at 3× sample costs", { exact: true })).toBeVisible();
+  const complete = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((opp: { symbol: string }) => opp.symbol === "MU");
+  expect(complete.choice).toEqual(saved.choice);
+  expect(complete.replay.events.map((event: { type: string }) => event.type)).toEqual(["armed", "trigger", "order_intent", "entry", "exit"]);
+  const auth = await (await page.request.get("/api/access/me")).json();
+  const retry = await page.request.post(`/api/backend/practice/opportunities/${complete.id}/sample-replay`, { headers: { Origin: assistantOrigin, "x-tj-csrf": auth.csrf }, data: {} });
+  expect(retry.status()).toBe(200);
+  expect((await retry.json()).opportunities.find((opp: { symbol: string }) => opp.symbol === "MU").replay).toEqual(complete.replay);
+  expect((await page.request.post(`/api/backend/decisions/${complete.choice.id}/arm`, { headers: { Origin: assistantOrigin, "x-tj-csrf": auth.csrf }, data: { operation_id: "not-live" } })).status()).toBe(403);
+  await page.goto(`/daily/${run.day}?practice_run=${run.id}`);
+  await page.reload();
+  await page.getByRole("button", { name: "Reopen MU sample replay", exact: true }).click();
+  await expect(page.getByRole("region", { name: "MU sample paper replay" }).getByRole("status")).toContainText("original replay reopened");
+  const reopened = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((opp: { symbol: string }) => opp.symbol === "MU");
+  expect(reopened.replay.receipt_sha256).toBe(complete.replay.receipt_sha256);
+  expect(reopened.choice.record_sha256).toBe(saved.choice.record_sha256);
+  const nbis = page.getByRole("article", { name: "NBIS sample opportunity" });
+  await nbis.getByLabel("NBIS reason").fill("No conditional plan selected in this invented exercise.");
+  await nbis.getByRole("button", { name: "Save NBIS decision", exact: true }).click();
+  await expect(nbis.getByText("SKIP stays unarmed and creates no paper entry.", { exact: true })).toBeVisible();
+  await expect(nbis.getByRole("button", { name: "Start NBIS sample replay" })).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await page.getByRole("region", { name: "MU sample paper replay" }).screenshot({ path: test.info().outputPath("sample-paper-replay-phone.png") });
+  expect(errors).toEqual([]);
+});
+
+test("a delayed pre-start reload cannot hide the committed replay receipt", async ({ page, browser }) => {
+  await login(page, browser, true, true);
+  const mu = page.getByRole("article", { name: "MU sample opportunity" });
+  await mu.getByLabel("MU choice").selectOption("take");
+  await mu.getByLabel("MU reason").fill("Conditional sample plan before the hidden continuation.");
+  await mu.getByRole("button", { name: "Save MU decision", exact: true }).click();
+  await expect(mu.getByRole("button", { name: "Start MU sample replay", exact: true })).toBeEnabled();
+  let release: (() => void) | undefined;
+  let captured: (() => void) | undefined;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const seen = new Promise<void>(resolve => { captured = resolve; });
+  await page.route("**/api/backend/practice/runs/*", async route => {
+    const before = await route.fetch(); captured?.(); await pending; await route.fulfill({ response: before });
+  });
+  await page.getByRole("button", { name: "Reload saved practice" }).click();
+  await seen;
+  await mu.getByRole("button", { name: "Start MU sample replay", exact: true }).click();
+  const closed = mu.getByRole("heading", { name: "Sample paper replay · closed", exact: true });
+  await expect(closed).toBeVisible();
+  release?.();
+  await expect(page.getByRole("button", { name: "Reload saved practice" })).toBeEnabled();
+  await expect(closed).toBeVisible();
+  await expect(mu.getByRole("button", { name: "Start MU sample replay", exact: true })).toHaveCount(0);
+});

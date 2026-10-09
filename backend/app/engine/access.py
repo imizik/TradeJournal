@@ -46,6 +46,7 @@ PRACTICE_PATHS = frozenset({"GET /practice/runs", "GET /practice/runs/{run_id}",
     "GET /decisions", "GET /decisions/{record_id}", "GET /decisions/{record_id}/paper"})
 SAMPLE_WRITER_PATHS = frozenset({"GET /practice/runs", "GET /practice/runs/{run_id}",
     "GET /decisions", "GET /decisions/{record_id}", "POST /practice/opportunities/{opp_id}/agent-choice"})
+SAMPLE_REPLAY_PATH = "POST /practice/opportunities/{opp_id}/sample-replay"
 SERVICE_PATHS = {
     "monitor": {"GET /health", "GET /gmail/health", "GET /sync/summary"},
     "automation": {"GET /health", "GET /gmail/health", "GET /gmail/watch/status", "POST /gmail/watch",
@@ -292,7 +293,7 @@ def bootstrap(request):
 
 
 def grant_valid(grants):
-    if set(grants) not in ({"symbols", "run_ids", "journal_read"}, {"symbols", "run_ids", "journal_read", "decision_write"}):
+    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay"}:
         raise HTTPException(422, "Invalid permission grant")
     if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > 10 or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
         raise HTTPException(422, "Choose one to ten market symbols")
@@ -312,6 +313,10 @@ def grant_valid(grants):
     if grants.get("decision_write") and (not sample_writes_enabled() or grants["journal_read"]
             or len(grants["run_ids"]) != 1 or len(grants["symbols"]) > 2):
         raise HTTPException(403, "Sample writers require one selected run, at most two symbols, and no journal access")
+    if not isinstance(grants.get("sample_replay", False), bool):
+        raise HTTPException(422, "Invalid sample replay permission")
+    if grants.get("sample_replay") and (not sample_replays_enabled() or grants.get("decision_write") is not True):
+        raise HTTPException(403, "Replay requires an enabled sample writer and explicit sample replay flag")
 
 
 def sample_writes_enabled():
@@ -323,6 +328,15 @@ def decision_writer(request):
     who = getattr(request.state, "access", None)
     return bool(who and not who.owner and not who.service and who.grants.get("decision_write")
                 and not who.grants.get("journal_read") and sample_writes_enabled())
+
+
+def sample_replays_enabled():
+    return sample_writes_enabled() and os.environ.get("TJ_SAMPLE_REPLAY_ENABLED") == "true"
+
+
+def replay_writer(request):
+    return (decision_writer(request) and request.state.access.grants.get("sample_replay") is True
+        and sample_replays_enabled() and getattr(request.app.state, "sample_replay_isolated", False) is True)
 
 
 def create_assistant(db, identifier, grants):
@@ -404,6 +418,10 @@ def authorize(request, operation, params):
     if who.grants.get("decision_write"):
         if not decision_writer(request):
             raise HTTPException(403, "Sample decision writing is disabled")
+        if operation == SAMPLE_REPLAY_PATH:
+            if not replay_writer(request):
+                raise HTTPException(403, "Sample replay is not permitted")
+            return
         if operation in SAMPLE_WRITER_PATHS:
             return
         if operation in MARKET_PATHS:
