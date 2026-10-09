@@ -47,6 +47,7 @@ PRACTICE_PATHS = frozenset({"GET /practice/runs", "GET /practice/runs/{run_id}",
 SAMPLE_WRITER_PATHS = frozenset({"GET /practice/runs", "GET /practice/runs/{run_id}",
     "GET /decisions", "GET /decisions/{record_id}", "POST /practice/opportunities/{opp_id}/agent-choice"})
 SAMPLE_REPLAY_PATH = "POST /practice/opportunities/{opp_id}/sample-replay"
+HISTORICAL_REPLAY_PATH = "POST /practice/opportunities/{opp_id}/historical-replay"
 SERVICE_PATHS = {
     "monitor": {"GET /health", "GET /gmail/health", "GET /sync/summary"},
     "automation": {"GET /health", "GET /gmail/health", "GET /gmail/watch/status", "POST /gmail/watch",
@@ -297,7 +298,7 @@ def bootstrap(request):
 
 
 def grant_valid(grants):
-    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write"}:
+    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write", "historical_replay"}:
         raise HTTPException(422, "Invalid permission grant")
     if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > 10 or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
         raise HTTPException(422, "Choose one to ten market symbols")
@@ -327,6 +328,10 @@ def grant_valid(grants):
             or grants.get("decision_write") or grants.get("sample_replay") or len(grants["run_ids"]) != 1
             or not set(grants["symbols"]) <= {"MU", "NBIS"}):
         raise HTTPException(403, "Market writer requires one MU/NBIS session and no other write/journal grant")
+    if not isinstance(grants.get("historical_replay", False), bool):
+        raise HTTPException(422, "Invalid historical replay permission")
+    if grants.get("historical_replay") and (not historical_replays_enabled() or grants.get("market_decision_write") is not True):
+        raise HTTPException(403, "Historical replay requires its explicit isolated market writer grant")
 
 
 def sample_writes_enabled():
@@ -362,6 +367,15 @@ def market_writer(request):
         and market_writes_enabled() and getattr(request.app.state, "market_decisions_isolated", False) is True)
 
 
+def historical_replays_enabled():
+    return market_writes_enabled() and os.environ.get("TJ_HISTORICAL_REPLAY_ENABLED") == "true"
+
+
+def historical_writer(request):
+    return (market_writer(request) and request.state.access.grants.get("historical_replay") is True
+        and historical_replays_enabled() and getattr(request.app.state, "historical_replay_isolated", False) is True)
+
+
 def create_assistant(db, identifier, grants):
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", identifier) or identifier == OWNER:
         raise HTTPException(422, "Invalid assistant ID")
@@ -380,14 +394,19 @@ def create_assistant(db, identifier, grants):
 def grant_targets_valid(db, identifier, grants):
     """The new market dataset is bound to one frozen actor, including read grants."""
     import uuid
-    from app.engine import market_practice
+    from app.engine import market_practice, historical_replay
     from app.models import PracticeRun
     for value in grants["run_ids"]:
         run = db.get(PracticeRun, uuid.UUID(value))
         if run and market_practice.recognized(run):
-            if (not market_practice.eligible(run) or not market_practice.visible_to(run, identifier)
+            historical = historical_replay.eligible(run)
+            if (not (market_practice.eligible(run) or historical) or not market_practice.visible_to(run, identifier)
                     or grants.get("decision_write") or grants.get("sample_replay")):
                 raise HTTPException(403, "Market session is outside this frozen assignment")
+            if grants.get("market_decision_write") and historical != bool(grants.get("historical_replay")):
+                raise HTTPException(403, "The historical grant must match its frozen policy")
+            if grants.get("historical_replay") and not historical:
+                raise HTTPException(403, "Historical replay requires a historical session")
         elif grants.get("market_decision_write"):
             raise HTTPException(403, "Market writer requires its assigned real-market session")
 
@@ -466,6 +485,12 @@ def authorize(request, operation, params):
     if who.grants.get("market_decision_write"):
         if not market_writer(request):
             raise HTTPException(403, "Market decision writing is disabled")
+        if operation == HISTORICAL_REPLAY_PATH:
+            if not historical_writer(request):
+                raise HTTPException(403, "Historical replay is not permitted")
+            return
+        if operation == "POST /practice/opportunities/{opp_id}/agent-choice" and who.grants.get("historical_replay") and not historical_writer(request):
+            raise HTTPException(403, "Historical decision writing is disabled")
         if operation in SAMPLE_WRITER_PATHS:
             return
         raise HTTPException(403, "Operation not permitted for the frozen market session")

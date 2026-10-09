@@ -20,6 +20,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [dot-decision-trial-contract.md](dot-decision-trial-contract.md) | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
 | [dot-sample-replay-contract.md](dot-sample-replay-contract.md) | Jo’s own bounded sample TAKE replay: hidden continuation, scoped start permission, isolated event ledger and acceptance gates |
 | [dot-market-decision-contract.md](dot-market-decision-contract.md) | Real MU/NBIS evidence handoff, isolated own-decision login, and manual native/browser acceptance |
+| [dot-historical-replay-contract.md](dot-historical-replay-contract.md) | Weekend historical replay with original source times, a simulated cutoff, sealed continuation and isolated own paper outcomes |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |

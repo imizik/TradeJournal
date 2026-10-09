@@ -38,6 +38,22 @@ def test_backend_archive_requires_exact_selected_source_set(tmp_path):
         updater.extract(path, tmp_path / "unpacked", backend=True)
 
 
+def test_historical_flag_is_explicit_and_rolls_back_with_runtime(update_fixture, monkeypatch):
+    _, config, backend, frontend, _ = update_fixture
+    attempts = []
+    def ready():
+        attempts.append(True)
+        if len(attempts) == 1:
+            raise RuntimeError("historical update failed")
+    monkeypatch.setattr(updater, "ready", ready)
+    with pytest.raises(RuntimeError):
+        updater.update(backend, frontend, "a"*40, enable_historical_replay=True)
+    assert "TJ_HISTORICAL_REPLAY_ENABLED" not in (config / "trial-runtime.env").read_text()
+    monkeypatch.setattr(updater, "ready", lambda: None)
+    updater.update(backend, frontend, "b"*40, enable_historical_replay=True)
+    assert "TJ_HISTORICAL_REPLAY_ENABLED=true" in (config / "trial-runtime.env").read_text()
+
+
 @pytest.fixture
 def update_fixture(tmp_path, monkeypatch):
     runtime, config = tmp_path / "runtime", tmp_path / "config"

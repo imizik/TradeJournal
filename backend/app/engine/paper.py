@@ -454,7 +454,8 @@ def paper_row(db: Session, record_id: uuid.UUID, *, record: DecisionRecord | Non
     record = record if record is not None else db.get(DecisionRecord, record_id)
     if record is None:
         raise LookupError("Decision record not found")
-    if record.policy_version in {decisions.SAMPLE_POLICY_VERSION, decisions.REPLAY_POLICY_VERSION, decisions.MARKET_POLICY_VERSION}:
+    if record.policy_version in {decisions.SAMPLE_POLICY_VERSION, decisions.REPLAY_POLICY_VERSION, decisions.MARKET_POLICY_VERSION,
+            decisions.HISTORICAL_POLICY_VERSION}:
         raise LookupError("Isolated decision trials have no P0 paper view")
     rows = event_rows if event_rows is not None else events_for(db, record_id)
     state = px.fold(_data(rows))
