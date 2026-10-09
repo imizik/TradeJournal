@@ -62,7 +62,7 @@ export default async function DailyReviewPage() {
           No trades found yet.
         </section>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-6" data-testid="daily-calendar">
           <Legend />
           {groups.map(([month, monthDays]) => (
             <MonthGrid key={month} month={month} days={monthDays} weekends={weekends} />

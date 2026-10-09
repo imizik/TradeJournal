@@ -123,15 +123,16 @@ test.describe("trades", () => {
     await expect(page.getByText("+$19").first()).toBeVisible();
     // Short calendar expiries, cents on prices, hold in hours and days.
     const table = page.getByRole("table");
-    await expect(table).toContainText("Jan 7, 2027");
-    await expect(table).not.toContainText("2027-01-07");
+    // Seed dates move with the run date, so the check is on the form, not a fixed day.
+    await expect(table.getByRole("cell", { name: /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/ }).first()).toBeVisible();
+    await expect(table).not.toContainText(/\d{4}-\d{2}-\d{2}/);
     await expect(table).not.toContainText("$-");
   });
 
   test("the daily review calendar tints each trade day by what closed and links to its review", async ({ page }) => {
     await page.goto("/daily");
     await expect(page.getByRole("heading", { name: "Daily Review Calendar" })).toBeVisible();
-    const days = page.locator('a[href^="/daily/2"]');
+    const days = page.getByTestId("daily-calendar").locator('a[href^="/daily/2"]');
     await expect(days.first()).toBeVisible();
     // Every trade day names its trades, what closed and whether it is reviewed.
     for (const label of await days.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label") ?? ""))) {

@@ -121,15 +121,17 @@ function Td({ children, wide }: { children: React.ReactNode; wide?: boolean }) {
 export default function TradesTable({
   trades,
   accountMap,
+  thisYear,
 }: {
   trades: Trade[];
   accountMap: Record<string, Account>;
+  /** New York's year, from the server, so the server and browser label expiries alike. */
+  thisYear: number;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
   const [shown, setShown] = useState(PAGE);
   // One account in the list: its badge on every row says nothing.
   const showAccount = new Set(trades.map((t) => t.account_id)).size > 1;
-  const thisYear = new Date().getFullYear();
 
   function handleSort(key: SortKey) {
     setSort((prev) =>
@@ -213,7 +215,7 @@ export default function TradesTable({
       </table>
       {sorted.length > shown && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
-          <span>Showing {shown.toLocaleString()} of {sorted.length.toLocaleString()} trades</span>
+          <span>Showing {shown.toLocaleString("en-US")} of {sorted.length.toLocaleString("en-US")} trades</span>
           <div className="flex gap-2">
             <button type="button" onClick={() => setShown((count) => count + PAGE)} className="rounded-md border px-3 py-1.5 font-medium text-foreground hover:bg-secondary">Show {Math.min(PAGE, sorted.length - shown)} more</button>
             <button type="button" onClick={() => setShown(sorted.length)} className="rounded-md px-3 py-1.5 hover:bg-secondary hover:text-foreground">Show all</button>
