@@ -1,9 +1,1 @@
-{
-  "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/pr_review.py\" hook --owner claude", "timeout": 10}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/pr_review.py\" hook --owner claude", "timeout": 10}]}]
-  },
-  "env": {
-    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"
-  }
-}
+{}

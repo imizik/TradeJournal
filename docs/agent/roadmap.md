@@ -58,10 +58,11 @@ place. What each of them proves is documented where it is enforced, not here.
 - **Staging.** No persistent staging host. Staging and production must not
   share a database, credentials, webhook tokens, Gmail state or
   external-integration identity (`environments.md`).
-- **Review that is required rather than advisory.** An independent reviewer
-  exists — the Codex GitHub App reviews pull requests — but `main` has no
-  branch protection, so a pull request can still merge with no review at all
-  (`verification.md`).
+- **Durable review follow-through.** The [native review workflow](pr-review.md)
+  returns subagent findings to the active owner before publishing ready work.
+  CI is protected on `main`; native model review is instruction-driven after
+  retiring the receipt gate. Automatically resuming a closed local session
+  would require a persistent runner; it is not shipped.
 
 ## Decided, with the reasoning worth keeping
 
