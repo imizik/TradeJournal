@@ -58,8 +58,9 @@ def prepare(python):
         run("chown", f"root:{group}", path)
     (STATE / "data").mkdir(parents=True)
     (STATE / ".sample-installation").touch()
+    (RUNTIME / "backend/data").symlink_to(STATE / "data", target_is_directory=True)
     url = f"sqlite:///{STATE}/data/trial.db"
-    env = {"PATH": os.defpath, "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url,
+    env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url,
         "TJ_ACCESS_ENABLED": "true", "TJ_ACCESS_SAMPLE_DATA": "true", "TJ_DOT_TRIAL_ENABLED": "true",
         "TJ_SAMPLE_DECISION_WRITES": "true", "JOB_EXECUTION_MODE": "external",
         "JOB_LOCK_DIR": str(STATE / "job_locks"), "CAPTURE_TRANSCRIBER": "off"}
@@ -196,7 +197,18 @@ def exercise(run_id, day):
         ns = Path(f"/proc/{pid}/ns/net").readlink()
         assert ns != Path("/proc/1/ns/net").readlink()
     assert run("systemctl", "show", MCP, "--property=RestrictAddressFamilies", "--value").stdout.strip() == "AF_UNIX"
-    print("Native D1 passed: actual Unix bridge, independent bearer checks, assigned simulation, no domain mutation, denied writes, revocation, restart and expired keys; MCP IP sockets denied")
+    from dot_trial_control import stop_cloud_reads
+    stop_cloud_reads()
+    run("systemctl", "stop", API)
+    with httpx.Client(transport=httpx.HTTPTransport(uds="/run/tradejournal-d1/reads.sock"), timeout=2) as client:
+        try:
+            client.get("http://localhost/cloud-mcp/practice/runs", params={"day": day})
+        except httpx.ConnectError:
+            pass
+        else:
+            raise AssertionError("Stopped socket reactivated the sample API")
+    assert run("systemctl", "show", API, "--property=ActiveState", "--value").stdout.strip() == "inactive"
+    print("Native D1 passed: actual Unix bridge, independent bearer checks, assigned simulation, no domain mutation, denied writes, revocation, restart, expired keys and stopped activation; MCP IP sockets denied")
 
 
 def main():

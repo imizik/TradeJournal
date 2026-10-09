@@ -96,8 +96,13 @@ subject, keys, tokens, gateway secrets or private credential files.
    public snapshot through a supplementary group and cannot read D0 config.
    MCP remains AF_UNIX-only and cannot read sample DB/owner configuration.
    The bridge joins only the sample API namespace and follows its restart.
-9. Enable the approved link, reload, restart only the isolated API/MCP and start
-   the read socket manually. No new hostname, Caddy route, public backend port,
+9. Enable the approved link and reload. Stop the read socket/bridge, then stop
+   the sample frontend bridge sockets/services and all three sample services.
+   Start the sample API, both sample frontends and their bridge sockets together
+   using the updater's service sets/readiness check; confirm all three share the
+   same new namespace. Restart the isolated MCP and start the read socket
+   manually. Restarting just the API can strand existing frontends in its old
+   namespace. No new hostname, Caddy route, public backend port,
    production configuration, service credential or boot enablement is added.
    Confirm service UID/mount permissions, fixed 8091 namespace target, distinct
    host namespace, immediate revocation and restoration, and fresh keys.
@@ -108,11 +113,13 @@ subject, keys, tokens, gateway secrets or private credential files.
 
 Rollback: stop `tradejournal-d1-reads.socket` and its bridge first; remove the
 API/MCP D1 drop-ins, restore the previous API source/environment and D0 source/
-config, reload systemd and restart only those isolated services. Verify the
+config, reload systemd and restart the isolated API/frontends/bridges as one
+namespace group plus MCP. Verify the
 synthetic profile still works and browser permissions are unchanged. Keep the
 publisher's D1 mask; disabling/stopping D1 cannot widen D0. Disable/revoke the
 OAuth permission/refresh grant separately at the issuer when disconnecting.
-The existing sample shutdown revokes principals, which also revokes D1 reads.
+The existing sample shutdown revokes principals and stops the optional D1
+socket/bridge before the API, preventing socket-driven reactivation.
 
 ## Evidence and remaining acceptance
 

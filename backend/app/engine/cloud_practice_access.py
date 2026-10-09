@@ -32,6 +32,13 @@ def verifier(path):
     return SampleReadVerifier(Path(path))
 
 
+def initialize():
+    """Pin the approved binding before the isolated API accepts any requests."""
+    if os.environ.get("TJ_CLOUD_MCP_ENABLED") == "true":
+        reject_model_credentials()
+        verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
+
+
 def identify(request):
     require_sample(request)
     if (len(request.headers.getlist("authorization")) != 1

@@ -169,6 +169,8 @@ class FixtureMarket:
 
 def build_app(root=ROOT):
     validate_environment(os.environ, root)
+    from app.engine.cloud_practice_access import initialize
+    initialize()
     from app.main import app
     from app.access_middleware import AccessMiddleware
     # Fixture replies must never sit outside the real authentication boundary.

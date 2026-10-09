@@ -21,6 +21,7 @@ from tests.test_browser_access import boundary as boundary
 from tests.test_sample_practice import writer as writer, choose
 from tests.test_sample_replay import replay as replay, saved, start
 from tests.test_cloud_mcp_d0 import signing_key as signing_key, _token, _jwks, _write_config, _request, PROFILE_ID, ISSUER, JWKS_URL
+from tests.test_dot_trial import trial
 
 
 @pytest.fixture
@@ -289,3 +290,26 @@ def test_unprepared_run_and_binding_change_refuse_without_fallback(linked):
     config["profiles"][0]["principal_id"] = "someone-else"
     linked.config.write_text(json.dumps(config))
     assert detail(linked).status_code == 401
+
+
+def test_factory_pins_binding_before_first_request_and_relink_needs_restart(linked):
+    # Other tests cover the real sample-installation preflight. Here isolate
+    # factory lifetime from the fixture's temporary database location.
+    linked.patch.setattr(trial, "validate_environment", lambda *args: None)
+    linked.patch.setattr(app, "user_middleware", list(app.user_middleware))
+    linked.patch.setattr(app.state, "sample_replay_isolated", False, raising=False)
+    assert trial.build_app() is app
+    config = json.loads(linked.config.read_text())
+    config["profiles"][0]["principal_version"] = 2
+    linked.config.write_text(json.dumps(config))
+    with Session(linked.engine) as db:
+        row = db.get(AccessPrincipal, "writer")
+        row.version = 2
+        db.add(row)
+        db.commit()
+    # A newly created lazy verifier would accept both matching version-2 values.
+    assert detail(linked).status_code == 401
+    # Simulate the new process cache created by an explicit API restart.
+    cloud_practice_access.verifier.cache_clear()
+    trial.build_app()
+    assert detail(linked).status_code == 200
