@@ -23,7 +23,7 @@ import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
 import ToolbarMenu from "./ToolbarMenu";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, optionsQuery, parseChartTick, price, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, optionsQuery, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, MarketDay, OptionsLayer, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
@@ -121,13 +121,25 @@ const NO_ENTRY: Entry = { typed: "", invalid: false };
 // The stream also carries symbols that panels hold: the headline reads only the
 // main symbol's trades, so a SPY trade never hides the newest MRVL one.
 const latestTrade = (ticks: ChartStreamTick[], symbol: string) => ticks.findLast((tick) => tick.symbol === symbol);
-function LiveQuote({ live, quote, candle }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar }) {
+function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; market?: MarketDay }) {
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
   const shown = shownPrice({ tick, quote, candle, scope: live });
-  const change = shown.price != null && quote?.previous_close && quote.previous_close > 0
-    ? (shown.price / quote.previous_close - 1) * 100 : quote?.change_percentage;
-  return <div className="flex min-w-0 items-baseline gap-2" aria-label="Selected symbol quote"><span className="sr-only">{live.symbol}</span><span className="font-mono text-base font-medium tracking-tight text-white">{price(shown.price)}</span>
-    <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</span>{/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-slate-500 2xl:not-sr-only">{shown.source}</span></div>;
+  // A premarket or after-hours price is measured from that session's own reference and says
+  // which session it is; after hours the regular close stands beside it, as the watchlist shows it.
+  const part = shown.source === "Live trade" ? tick?.session ?? null : marketSessionAt(shown.at, market);
+  const extended = part === "pre" || part === "post" ? part : null;
+  const change = extended ? sessionChange(shown.price, extended, quote)
+    : shown.price != null && quote?.previous_close && quote.previous_close > 0 ? (shown.price / quote.previous_close - 1) * 100 : quote?.change_percentage;
+  const close = extended === "post" ? quote?.regular_close : extended === "pre" ? quote?.previous_close : null;
+  const closeChange = extended === "post" && close != null && quote?.previous_close ? (close / quote.previous_close - 1) * 100 : null;
+  const sessionName = extended === "post" ? "After hours" : extended === "pre" ? "Premarket" : null;
+  const signed = (value: number) => `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  const closeText = close == null ? "" : `${extended === "post" ? "Close" : "Prev close"} ${price(close)}${closeChange == null ? "" : ` ${signed(closeChange)}`}`;
+  return <div className="flex min-w-0 items-baseline gap-2" aria-label="Selected symbol quote" title={[sessionName && `${sessionName} price, change from ${extended === "post" ? "the regular close" : "the previous close"}`, closeText].filter(Boolean).join(". ") || undefined}><span className="sr-only">{live.symbol}</span><span className="font-mono text-base font-medium tracking-tight text-white">{price(shown.price)}</span>
+    <span className={`font-mono text-xs ${change != null && change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : signed(change)}</span>
+    {sessionName && <span className="hidden whitespace-nowrap text-[10px] text-slate-400 sm:inline">{sessionName}</span>}
+    {close != null && <span className="hidden whitespace-nowrap font-mono text-[10px] text-slate-500 lg:inline">· {extended === "post" ? "Close" : "Prev close"} <span className="text-slate-300">{price(close)}</span>{closeChange != null && <span className={closeChange < 0 ? " text-rose-400" : " text-emerald-400"}> {signed(closeChange)}</span>}</span>}
+    {/* The status strip names the source too; here it shows where the toolbar has room. */}<span className="sr-only whitespace-nowrap text-[10px] text-slate-500 2xl:not-sr-only">{shown.source}</span></div>;
 }
 
 function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote?: ChartQuote; market?: MarketDay; paused: boolean }) {
@@ -142,17 +154,20 @@ function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote
   const quoteSession = marketSessionAt(quote?.trade_time, market);
   const freshQuote = quote?.trade_time != null && now >= quote.trade_time && now - quote.trade_time <= 45 ? quote : undefined;
   const displayPrice = shownTick?.price ?? quote?.last;
+  // Without a fresh trade the quote's own change shows, dimmed: after the close, the day's closing change.
+  const closing = !shownTick && !freshQuote;
   const change = shownTick
     ? tickFresh ? sessionChange(shownTick.price, shownTick.session, quote) : null
-    : freshQuote ? sessionChange(freshQuote.last, quoteSession, freshQuote) : null;
+    : freshQuote ? sessionChange(freshQuote.last, quoteSession, freshQuote) : quoteChange(quote, quoteSession);
   const quoteAge = quote?.trade_time == null || now < quote.trade_time ? null : Math.floor(now - quote.trade_time);
   const source = shownTick
     ? `${tickIsLive ? "Live trade" : paused ? "Paused trade" : tickAge! <= 45 ? "Recent trade" : "Stale streamed trade"} · ${tickAge}s old`
     : quoteAge == null ? "Tradier quote · timestamp unavailable"
       : `${quoteAge <= 45 ? "Tradier quote" : "Stale Tradier quote"} · ${quoteAge}s old`;
+  const changeSource = closing && change != null ? `${source} · change as of this quote` : source;
   return <><span title={source} className="text-right font-mono text-slate-400">{price(displayPrice)}</span>
-    <span title={source} aria-label={`${change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)} percent`}; ${source}`}
-      className={`text-right font-mono ${change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400"}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}`}</span></>;
+    <span title={changeSource} aria-label={`${change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)} percent`}; ${changeSource}`}
+      className={`text-right font-mono ${change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}`}</span></>;
 }
 
 function FeedStatus({ live, paused, delayed, hasData, failed, loading }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean }) {
@@ -166,14 +181,16 @@ function FeedStatus({ live, paused, delayed, hasData, failed, loading }: { live:
 }
 
 /** The status strip's freshness: the newest minute candle (left out when `brief`, on a phone in full screen) and the shown price's age. */
-function LiveFooter({ live, quote, candle, asOf, brief = false }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; asOf?: number | null; brief?: boolean }) {
+function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; market?: MarketDay; asOf?: number | null; brief?: boolean }) {
   const minute = useStream(live, (ticks) => asOf === undefined ? 0
     : ticks.reduce((latest, tick) => liveTick(tick, live) ? Math.max(latest, tick.minute) : latest, asOf ?? 0));
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
   const shown = shownPrice({ tick, quote, candle, scope: live });
   const age = useClock((now) => shown.at ? Math.max(0, Math.floor(now - shown.at)) : null);
+  // Outside every session no candle is forming; without the calendar it may be.
+  const closed = useClock((now) => !!market && marketSessionAt(now, market) === null);
   return <>
-    {!brief && <span className="min-w-0 truncate">{minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET · latest candle may be forming` : "New York time"}</span>}
+    {!brief && <span className="min-w-0 truncate">{minute ? `Last minute candle ${etTime(minute, true)} ${etTime(minute)} ET${closed ? "" : " · latest candle may be forming"}` : "New York time"}</span>}
     <span className="shrink-0">{age !== null ? `${shown.source} ${age < 60 ? `${age}s` : `${Math.floor(age / 60)}m`} ago` : "No price timestamp"}</span>
   </>;
 }
@@ -1478,13 +1495,14 @@ export default function ChartWorkspace() {
           <button type="button" aria-label="Open symbol search" title="Search symbols (⌘K / Ctrl+K)" onClick={() => setPalette(0)} className={`${plain(false)} ${tap}`}><Search size={14} /></button><input aria-label="Chart symbol" value={symbolInput} placeholder={settings.symbol} onChange={(e) => setSymbolInput(e.target.value.toUpperCase())} maxLength={15} className="w-20 bg-transparent px-1 text-sm font-semibold uppercase text-slate-100 outline-none placeholder:text-slate-200" />
           <button type="submit" aria-label="Load symbol" className={`${plain(false)} ${tap}`}><ArrowUpRight size={14} /></button>
         </form>
-        <LiveQuote live={live} quote={selected} candle={latestCandle} />
+        <LiveQuote live={live} quote={selected} candle={latestCandle} market={market} />
         {/* A phone keeps the dock's buttons beside the quote; the intervals get a row of their own that scrolls sideways. */}
         {narrow ? <div className="ml-auto flex shrink-0 items-center">{dockTabs}</div> : sep}
         <div role="group" aria-label="Main chart interval" className={`flex items-center ${narrow ? "min-w-0 basis-full overflow-x-auto" : ""}`}>
           {INTERVALS.map((interval) => <button key={interval} onClick={() => setIntervalAt(0, interval)} aria-pressed={settings.intervals[0] === interval} className={`${plain(settings.intervals[0] === interval)} ${control} text-[11px]`}>{interval}</button>)}
         </div>
-        <button aria-pressed={settings.session === "extended"} title="Show premarket and after-hours candles, or the regular session only" onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(false)} ${control} whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? "Extended hours on" : "Regular hours only"}</button>
+        {/* A toggle that looks like one: lit while premarket and after-hours candles show. */}
+        <button aria-pressed={settings.session === "extended"} title={settings.session === "extended" ? "Showing premarket and after-hours candles. Click for the regular session only." : "Showing the regular session only. Click to add premarket and after-hours candles."} onClick={() => setSettings((s) => ({ ...s, session: s.session === "extended" ? "regular" : "extended" }))} className={`${plain(settings.session === "extended")} ${control} gap-1 whitespace-nowrap text-[11px]`}>{settings.session === "extended" ? <Check size={12} aria-hidden /> : <Square size={11} aria-hidden />}Extended hours</button>
         {!narrow && sep}
         <ToolbarMenu label="Chart indicators" title="Studies and fill arrows on every chart" className={`${plain(false)} ${control} text-[11px]`}
           content={() => <div className="flex w-44 flex-col">
@@ -1587,7 +1605,7 @@ export default function ChartWorkspace() {
         {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`shrink-0 rounded px-1.5 py-px ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
         {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`shrink-0 rounded px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
           {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}
-        <LiveFooter live={live} quote={selected} candle={latestCandle} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />
+        <LiveFooter live={live} quote={selected} candle={latestCandle} market={market} asOf={current ? current.intraday_as_of : undefined} brief={narrow && immersive} />
         <div className={`ml-auto flex items-center gap-x-3 gap-y-1 ${fill && !narrow ? "shrink-0" : "min-w-0 flex-wrap"}`}>
           <span role="status" aria-label="Chart settings" className={`flex items-center gap-1 ${sync === "offline" || merged ? "text-amber-300" : ""}`}>{sync === "saving" || sync === "loading" ? <Loader2 size={11} className="animate-spin" /> : <Check size={11} />}{sync !== "offline" && merged ? "Merged with changes from another device" : SYNC_TEXT[sync]}{sync === "offline" && !stored ? " · browser storage unavailable" : ""}</span>
           {!narrow && <ToolbarMenu label="About chart data" above align="right" title="About this data" className={`${plain(false)} h-5 w-5`} content={() => about}>

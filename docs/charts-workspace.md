@@ -17,6 +17,7 @@ access. Keys remain on the private backend.
 
 The section below the watchlist in the Watchlist dock tab follows the main
 chart's underlying. On a phone it lives inside the Watchlist bottom sheet. Its
+tabs keep their full names and wrap onto a second row in a narrow dock. Its
 **You** tab reads all accounts' journal history through
 `GET /charts/symbol/{symbol}/you`, independently of candles or the stream.
 It shows completed-trade count, realized P&L, win rate, average stored hold
@@ -175,7 +176,8 @@ license payment. See the version's [LICENSE](https://github.com/tradingview/ligh
 and [attribution instructions](https://github.com/tradingview/lightweight-charts/tree/v5.2.1#license).
 
 Preserve the upstream notices and license. The current source enables
-`attributionLogo` in `PriceChart.tsx`, links TradingView and its notice in the
+`attributionLogo` on the main chart in `PriceChart.tsx` (one logo, not one per
+chart), links TradingView and its notice in the
 workspace's status strip (in the toolbar's More menu on a phone, in full screen
 too), and ships `frontend/public/lightweight-charts-NOTICE.txt`
 and `frontend/public/lightweight-charts-LICENSE.txt`. Keep attribution available
@@ -320,7 +322,10 @@ cd backend
   expected move from the at-the-money straddle, priced five minutes after the
   open and fixed for the session, and VWAP ±1σ/±2σ (see
   [Range bands](#range-bands-c27)).
-- Extended-session shading and regular/extended hours selection. Daily and
+- Extended-session shading, one flat band per run of premarket or after-hours
+  candles (`frontend/lib/sessionShade.ts`), and regular/extended hours
+  selection: the toolbar's **Extended hours** toggle is lit while those candles
+  show. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
@@ -346,7 +351,10 @@ cd backend
 - **Drawing layer (C1.1).** Levels are drawn by one series primitive per chart
   (`frontend/lib/drawings.ts`) instead of library price lines, anchored to
   price, so a level is at the same price on every panel of its symbol at any
-  zoom. A mouse press on a level selects it and dragging moves it; the level
+  zoom. Each level and ray tags its price on the price axis; one priced out of
+  view keeps a tag only if it is the nearest on its side, pinned to that edge
+  with an arrow ("↑236.59"), so levels out of view never pile up at the edge
+  looking like prices in view. A mouse press on a level selects it and dragging moves it; the level
   moves by the drag (it does not jump to the pointer) and the chart does not
   pan underneath. On touch, a tap within 14px selects a level and only a
   selected level drags, so panning across a level never moves it, and the page
@@ -450,8 +458,13 @@ cd backend
 - **Automatic levels (C2.3).** Every chart draws the
   [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
   dimmer than the user's own: a lone level as a thin dotted line, a confluence
-  zone as a shaded band, named at the left on the main chart (three names at
-  most, then "+2"). Only the nearest three zones above and below the latest
+  zone as a shaded band, named at the left on the main chart on a solid tag:
+  its most telling member (option landmarks, then the expected move, prior day
+  and week, session ranges, swings, round numbers, ranked strikes) and how many
+  more it holds ("Max pain +2"; a round number reads "Round 223"). Tags never
+  overlap: the open card's zone wins, then the zones nearest the price, and a
+  tag that would cover another or be cut by the pane's edge is left out. Only
+  the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
   the pointer in that chart only; linked crosshairs never open cards in other
@@ -510,6 +523,10 @@ cd backend
   Premarket percent compares its timestamped trade with `prevclose`, and
   postmarket percent compares it with Tradier's explicit regular-session
   `close`. If that close is absent, the postmarket percent is unavailable.
+  With no trade in the last 45 seconds and no fresh quote, a row shows its
+  quote's change dimmed, by the same rule in pre- and postmarket and otherwise
+  its last regular-session price against the previous close (after the close,
+  the day's closing change), rather than a dash; the hover says so.
   Hidden or paused tabs disconnect; the stream reconnects after provider or
   network failures.
 - The 15-second visible-tab REST refresh remains the source of truth for volume,
@@ -546,11 +563,16 @@ cd backend
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
 - The selected price says whether it is a streamed trade, an extended-hours
-  candle, or a Tradier quote. Watchlist rows use streamed trades when available;
+  candle, or a Tradier quote. A premarket or after-hours price names its
+  session and is measured from the previous close or the regular close, by the
+  watchlist's rule; after hours the regular close and its day change stand
+  beside it ("252.50 +1.00% After hours · Close 250.00 -3.85%"), so the
+  headline and the watchlist's close never disagree silently. Watchlist rows use streamed trades when available;
   their batched quote fallback can show regular-session closes after hours.
 - Intraday charts load older SIP/raw pages when the visible range nears the
   loaded left edge. A 5m chart can navigate six months through pages. The
-  candle hover legend says **SIP** or **Tradier**. Today's forming bars and
+  candle hover legend says **SIP** or **Tradier** (a smaller chart names its
+  source only when it is SIP; the status strip names Tradier). Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier and page
   back through the symbol's whole daily history (see Daily and weekly depth).
 - When today has no intraday bars (before 04:00, weekends, holidays), each
@@ -573,8 +595,10 @@ cd backend
   updates are running, data is not delayed or stale (refresh within 45 seconds,
   no error or partial refresh), the clock is inside the selected session, and
   the newest candle belongs to the current session segment. Otherwise it says
-  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. A
-  holiday reads Market closed, and on an early-close day the regular session
+  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. Market
+  closed shows on the main chart only, since it is the same on every chart; the
+  status strip stops saying the latest candle may be forming while no session
+  is open. A holiday reads Market closed, and on an early-close day the regular session
   and its last buckets end at 13:00. Only unusual days get a label beside the
   quote: *Early close 1:00 PM ET*, the closure's name on a weekday holiday, or
   a warning that clock hours apply because the calendar is unavailable.
