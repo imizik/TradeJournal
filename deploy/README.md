@@ -719,3 +719,33 @@ configuration. The private sample Serve mapping may remain stopped/unavailable;
 do not reset the full Tailscale configuration to remove it. Native revocation
 was observed; the full shutdown/re-enable recovery drill remains unobserved.
 Production deployment does not update or restart this pinned sample runtime.
+
+
+### Selected sample decision-writing increment
+
+Isaac selected [Trader Jo's first saved sample decision](../docs/agent/dot-decision-trial-contract.md)
+on 2026-10-09. The original inspector remains read-only. A separate writer is
+bound to one MU/NBIS sample run, has no journal access, and may only save its own
+simulated choices. `TJ_SAMPLE_DECISION_WRITES` is disabled unless explicitly set
+on the guarded sample runtime. No production profile is enabled by this change.
+
+Use [dot_trial_update.py](dot_trial_update.py) with the exact reviewed commit,
+the selected-source backend archive and portable standalone frontend archive.
+It validates archives before stopping trial processes, preserves Linux
+dependencies and old code/assets/permission flags, and rolls back on startup
+failure. Root-private recovery files remain under the isolated trial root.
+Then [dot_trial_seed.py](dot_trial_seed.py) prepares today's immutable simulated
+MU/NBIS packets and privately saves the separate login. Existing credentials
+require explicit `--rotate`; resets invalidate prior sessions. Never print the
+access key or put it in a chat prompt.
+
+```bash
+sudo python3 /path/to/dot_trial_update.py --backend-archive /path/to/backend.tar.gz --frontend-archive /path/to/frontend.tar.gz --commit <reviewed-40-character-commit>
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_seed.py
+```
+
+Both commands refuse other runtime/database targets. Production configuration,
+Tailscale/Caddy routes and journal data are outside this update. Saving a
+simulated TAKE never arms a paper plan; its distinct sample policy cannot pass
+A2's schema check. Native update and actual Dot write/reopen observations must
+be reported separately from local browser/fixture checks.

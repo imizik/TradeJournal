@@ -164,7 +164,11 @@ happen where you ran, say so rather than reporting the pass as proof.
 
 ## Browser tests
 
-`frontend/e2e/` holds Playwright smoke tests. They exist because typecheck,
+`frontend/e2e/` holds Playwright smoke tests.
+The additional `playwright.sample.config.ts` suite boots the real authenticated
+fixture profile to exercise scoped MU/NBIS sample saves, reload/reopen, chart
+indicators/URLs and practice-only calendar links. Its namespace/file isolation
+remains a separate native check; its choices are simulated and cannot arm. They exist because typecheck,
 lint and build all pass on a component that is broken at runtime -- verified:
 a one-character change making the dashboard render every dollar figure 100x
 too small passes all three, and fails the browser tests.

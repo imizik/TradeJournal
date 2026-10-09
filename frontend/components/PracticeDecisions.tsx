@@ -10,7 +10,7 @@ import PracticePaperPlan, { PaperBadge } from "@/components/PracticePaperPlan";
 const PAPER_FETCH_LIMIT = 10;
 const ET = "America/New_York";
 
-function DecisionCard({ record, focused, withPaper }: { record: DecisionRecord; focused: boolean; withPaper: boolean }) {
+export function DecisionCard({ record, focused, withPaper }: { record: DecisionRecord; focused: boolean; withPaper: boolean }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const [paper, setPaper] = useState<PaperState | null>(null);
   useEffect(() => {
@@ -19,18 +19,19 @@ function DecisionCard({ record, focused, withPaper }: { record: DecisionRecord; 
     ref.current.scrollIntoView?.({ block: "start" });
   }, [focused]);
   const plan = record.plan as { trigger_level?: number; stop?: number; target?: number; target_source?: { source?: string } };
+  const sample = (record.evidence.packet as { sample_data?: boolean } | undefined)?.sample_data === true;
   return (
     <details ref={ref} id={`decision-${record.id}`} data-decision-id={record.id} className="rounded-lg border bg-card p-4">
       <summary className="cursor-pointer list-none">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-semibold">{record.symbol} · {record.decision.toUpperCase()}</span>
-          {record.decision === "take" && paper ? <PaperBadge status={paper.status} /> : <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700">PRACTICE · UNARMED</span>}
+          {record.decision === "take" && paper ? <PaperBadge status={paper.status} /> : <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700">{sample ? "SIMULATED · UNARMED" : "PRACTICE · UNARMED"}</span>}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{record.actor} · received {new Date(record.received_at).toLocaleString("en-US", { timeZone: ET })} ET</p>
         {record.decision === "take" && <p className="mt-2 text-sm">Trigger {plan.trigger_level ?? "—"} · Stop {plan.stop ?? "—"} · Target {plan.target ?? "—"} ({plan.target_source?.source ?? "source unavailable"})</p>}
       </summary>
       <div className="mt-4 border-t pt-3 text-xs">
-        {record.decision === "take" && withPaper && <PracticePaperPlan recordId={record.id} onState={setPaper} />}
+        {record.decision === "take" && withPaper && !sample && <PracticePaperPlan recordId={record.id} onState={setPaper} />}
         <dl className="mt-3 grid gap-2 sm:grid-cols-2">
           <div><dt className="text-muted-foreground">Opportunity</dt><dd className="break-all">{record.opportunity_id}</dd></div>
           {record.rationale && <div><dt className="text-muted-foreground">Rationale</dt><dd className="whitespace-pre-wrap">{record.rationale}</dd></div>}

@@ -62,3 +62,4 @@ backend/pubsub-subscriber.json
 
 # Installers
 *.exe
+frontend/sample-test-results/

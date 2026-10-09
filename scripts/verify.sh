@@ -130,6 +130,7 @@ if want_e2e; then
     fi
     run "browser tests" frontend npm run --silent e2e
     run "authenticated browser tests" frontend npx playwright test --config playwright.auth.config.ts
+    run "sample decision browser tests" frontend npx playwright test --config playwright.sample.config.ts
   fi
 fi
 

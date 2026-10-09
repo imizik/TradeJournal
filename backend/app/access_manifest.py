@@ -109,6 +109,7 @@ DOMAIN_ROUTES = frozenset({
     'POST /market-context/enrich',
     'POST /market-context/trade-path/compute',
     'POST /practice/opportunities/{opp_id}/choice',
+    'POST /practice/opportunities/{opp_id}/agent-choice',
     'POST /practice/opportunities/{opp_id}/feedback',
     'POST /practice/opportunities/{opp_id}/reveal',
     'POST /practice/prepare',

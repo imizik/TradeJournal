@@ -668,6 +668,7 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
 }
 
 return {
+  practiceRuns: () => get<{ runs: { id: string; day: string }[] }>("/practice/runs"),
   decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
   decision: (id: string) => get<DecisionRecord>(`/decisions/${encodeURIComponent(id)}`),
   paperState: (id: string) => get<PaperState>(`/decisions/${encodeURIComponent(id)}/paper`),

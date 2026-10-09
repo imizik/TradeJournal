@@ -13,13 +13,15 @@ monitoring, validation and calculations. Codex implements selected changes;
 Isaac owns priorities and consequential approvals. No integration, schedule,
 new permission or implementation is activated by this document.
 
-**Cloud browser direction selected 2026-10-08; private implementation, no live connection.** Isaac wants the
+**Cloud browser direction selected 2026-10-08; isolated sample sign-in reported 2026-10-09.** Isaac wants the
 Dot to use the actual UI with his laptop closed, while keeping his own
 Tailscale entrance without another login. The
 [cloud-browser access contract](cloud-browser-auth-contract.md) defines the opt-in
 separate authenticated assistant entrance, backend-enforced permissions and
-a sample-data browser trial before any live exposure. It does not establish
-a working connection or authorize publishing the current frontend/API. The
+a sample-data browser trial before any live exposure. Isaac subsequently reported Trader Jo using the isolated sample UI. The
+[first saved sample decision contract](dot-decision-trial-contract.md) owns the
+next selected browser permission increment. Production remains private; this
+sample observation does not establish a connector or independent runner. The
 personal Dot's app inspection remains separate from independent Shadow Isaac.
 
 **Combined access direction scoped 2026-10-08.** Use a connected app for exact

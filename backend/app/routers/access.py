@@ -28,6 +28,7 @@ class Grant(Strict):
     symbols: list[str] = Field(min_length=1, max_length=10)
     run_ids: list[str] = Field(default_factory=list, max_length=30)
     journal_read: bool = False
+    decision_write: bool = Field(default=False, strict=True)
 
 
 class Assistant(Strict):
@@ -77,7 +78,8 @@ def me(request: Request):
     if who.service:
         raise HTTPException(403, "Browser session required")
     return {"enabled": True, "identifier": who.identifier, "owner": who.owner,
-        "grants": who.grants, "csrf": who.csrf, "sample_data": os.environ.get("TJ_ACCESS_SAMPLE_DATA") == "true"}
+        "grants": who.grants, "csrf": who.csrf, "sample_data": os.environ.get("TJ_ACCESS_SAMPLE_DATA") == "true",
+        "sample_decision_writes_enabled": access.sample_writes_enabled()}
 
 
 @router.post("/logout")

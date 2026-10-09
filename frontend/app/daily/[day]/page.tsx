@@ -319,6 +319,8 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         <StatCard label="Closed From Prior" value={String(closedOnlyTrades.length)} />
       </div>
 
+      <PracticeRoutine day={selectedDay} />
+
       <DailyAiPanel
         tradeCount={selectedTrades.length}
         day={selectedDay ?? null}
@@ -327,8 +329,6 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         initialReview={savedDailyReview?.review ?? null}
         initialGeneratedAt={savedDailyReview?.generated_at ?? null}
       />
-
-      <PracticeRoutine day={selectedDay} />
 
       {selectedTrades.length === 0 ? (
         <section className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
