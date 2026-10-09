@@ -72,6 +72,7 @@ else:
     if os.getenv('FAKE_MALFORMED'): result.pop('summary')
     if name == 'claude':
         assert '--bare' not in args and '--restricted' in args
+        assert args[args.index('--effort') + 1] == 'medium'
         assert args[args.index('--tools') + 1] == 'Read,Grep,Glob'
         print(json.dumps({'type': 'system', 'subtype': 'init'}))
         print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'permission_denials': ['Read'] if os.getenv('FAKE_DENIAL') else [], 'structured_output': result}))
@@ -111,8 +112,7 @@ def test_both_directions_use_complete_isolated_snapshot_and_subscription(repo, c
 
 
 @pytest.mark.parametrize("owner,setting,value", [
-    ("codex", "FAKE_AUTH", "missing"), ("codex", "FAKE_AUTH", "api"),
-    ("claude", "FAKE_AUTH", "api"), ("codex", "FAKE_DENIAL", "1"),
+    ("codex", "FAKE_DENIAL", "1"),
     ("codex", "FAKE_MALFORMED", "1"), ("claude", "FAKE_FAILED", "1"),
     ("codex", "FAKE_VERDICT", "incomplete"),
 ])
@@ -129,6 +129,18 @@ def test_missing_auth_denied_tools_invalid_and_incomplete_output_never_pass(repo
     with pytest.raises(reviewer.ReviewError):
         reviewer.review(repo, args(owner))
     assert len(state(repo)["passes"]) == 1
+
+
+@pytest.mark.parametrize("owner,auth", [("codex", "missing"), ("codex", "api"), ("claude", "api")])
+def test_auth_prerequisites_spend_no_pass_and_recover_without_retry(repo, cli, monkeypatch, owner, auth):
+    monkeypatch.setenv("FAKE_AUTH", auth)
+    with pytest.raises(reviewer.ReviewError, match="login is required"):
+        reviewer.review(repo, args(owner))
+    assert state(repo)["passes"] == []
+    assert state(repo)["phase"] == "needs_review"
+    monkeypatch.delenv("FAKE_AUTH")
+    reviewer.review(repo, args(owner))
+    assert state(repo)["phase"] == "clean"
 
 
 def test_budget_exhaustion_is_terminal_and_preserves_findings(repo, cli, monkeypatch):
@@ -164,7 +176,7 @@ def test_new_commit_dirty_files_and_updated_base_invalidate_receipt(repo, cli):
     assert not reviewer.matches(receipt, reviewer.identity(repo, "origin/main"))
 
 
-def test_change_during_review_cannot_return_clean(repo, monkeypatch):
+def test_change_during_review_cannot_return_clean(repo, cli, monkeypatch):
     def mutate(*unused):
         (repo / "a.py").write_text("value = 9\n")
         return {"verdict": "clean", "summary": "fine", "findings": []}, "claude"
@@ -309,3 +321,137 @@ def test_missing_and_failed_ci_cannot_mark_ready(repo, monkeypatch, checks):
     monkeypatch.setattr(reviewer.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=json.dumps(checks)))
     with pytest.raises(reviewer.ReviewError):
         reviewer.wait_checks(repo, 1, 0)
+
+
+def test_pre_review_publication_failure_does_not_spend_a_pass(repo, cli, monkeypatch):
+    a = args()
+    a.pr = 1
+    def unavailable(*unused):
+        raise reviewer.ReviewError("PR base changed or label/network unavailable")
+    monkeypatch.setattr(reviewer, "post_status", unavailable)
+    with pytest.raises(reviewer.ReviewError, match="unavailable"):
+        reviewer.review(repo, a)
+    assert state(repo)["phase"] == "needs_review"
+    assert state(repo)["passes"] == []
+    monkeypatch.setattr(reviewer, "post_status", lambda *unused: None)
+    reviewer.review(repo, a)
+    assert state(repo)["phase"] == "clean"
+    assert len(state(repo)["passes"]) == 1
+
+
+def test_failed_result_publication_preserves_clean_review(repo, cli, monkeypatch):
+    a = args()
+    a.pr = 1
+    def publish(*values):
+        if values[1]["phase"] == "clean":
+            raise reviewer.ReviewError("network unavailable after review")
+    monkeypatch.setattr(reviewer, "post_status", publish)
+    with pytest.raises(reviewer.ReviewError, match="after review"):
+        reviewer.review(repo, a)
+    assert state(repo)["phase"] == "clean"
+    reviewer.review(repo, a)
+    assert len(state(repo)["passes"]) == 1
+
+
+def test_runner_can_publish_receipt_but_never_gate(repo, cli, monkeypatch):
+    reviewer.review(repo, args())
+    s = state(repo)
+    ident = reviewer.identity(repo, "origin/main")
+    pr = {"state": "OPEN", "headRefName": "codex/task", "headRefOid": ident["head"],
+          "baseRefOid": ident["base"], "number": 1, "url": "https://github.com/owner/repo/pull/1"}
+    monkeypatch.setattr(reviewer, "pr_info", lambda *a: pr)
+    monkeypatch.setattr(reviewer, "github_repo", lambda *a: "owner/repo")
+    monkeypatch.setattr(reviewer, "run", lambda *a, **kw: "")
+    posts = []
+    monkeypatch.setattr(reviewer, "api", lambda *a: posts.append(a[-1]))
+    reviewer.post_status(repo, s, ident)
+    assert [p["context"] for p in posts] == [reviewer.RECEIPT_CONTEXT]
+    assert posts[0]["state"] == "success"
+
+
+def passing_checks():
+    return [{"name": name, "bucket": "pass"} for name in
+            ["Backend", "Frontend", "Browser", "Postgres parity", "Ubuntu package and systemd build", reviewer.GATE_CONTEXT]]
+
+
+@pytest.mark.parametrize("advisory", ["pass", "fail", "cancel", "pending"])
+def test_advisory_screenshots_cannot_block_required_checks(repo, monkeypatch, advisory):
+    checks = passing_checks() + [{"name": "Screenshots", "bucket": advisory}]
+    monkeypatch.setattr(reviewer.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=1, stdout=json.dumps(checks)))
+    reviewer.wait_checks(repo, 1, 0)
+
+
+@pytest.mark.parametrize("status", [None, "fail", "cancel", "pending", "skipping"])
+def test_validator_gate_must_be_present_and_pass(repo, monkeypatch, status):
+    checks = passing_checks()[:-1]
+    if status:
+        checks.append({"name": reviewer.GATE_CONTEXT, "bucket": status})
+    monkeypatch.setattr(reviewer.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout=json.dumps(checks)))
+    with pytest.raises(reviewer.ReviewError):
+        reviewer.wait_checks(repo, 1, 0)
+
+
+def test_finish_requires_exact_validated_receipt_not_old_runner_success(repo, cli, monkeypatch):
+    reviewer.review(repo, args())
+    s = state(repo)
+    ident = reviewer.identity(repo, "origin/main")
+    gate = {"id": 2, "context": reviewer.GATE_CONTEXT, "state": "success",
+            "creator": {"login": "github-actions[bot]"},
+            "description": reviewer.receipt_description(s, ident, True)}
+    monkeypatch.setattr(reviewer, "github_repo", lambda *a: "owner/repo")
+    monkeypatch.setattr(reviewer, "run", lambda *a, **kw: json.dumps([[gate]]))
+    with pytest.raises(reviewer.ReviewError, match="validator"):
+        reviewer.verify_gate(repo, s, ident)
+    gate["description"] = "verified " + gate["description"]
+    reviewer.verify_gate(repo, s, ident)
+    gate["creator"]["login"] = "outsider"
+    with pytest.raises(reviewer.ReviewError, match="validator"):
+        reviewer.verify_gate(repo, s, ident)
+    gate["creator"]["login"] = "owner"  # Explicit initial-adoption bootstrap.
+    # Latest invalidation on the second API page must win over older success.
+    newer = {**gate, "id": 3, "state": "pending"}
+    monkeypatch.setattr(reviewer, "run", lambda *a, **kw: json.dumps([[gate], [newer]]))
+    with pytest.raises(reviewer.ReviewError, match="validator"):
+        reviewer.verify_gate(repo, s, ident)
+
+
+def test_third_unchanged_continuation_stops_instead_of_requesting_more_work(repo):
+    reviewer.owner_state(repo, "codex", "owner-session", contract="CLAUDE.md")
+    payload = {"session_id": "owner-session", "hook_event_name": "Stop"}
+    for _ in range(2):
+        reviewer.hook(repo, args(), payload)
+        assert state(repo)["phase"] == "needs_review"
+    result = reviewer.hook(repo, args(), payload)
+    assert state(repo)["phase"] == "attention"
+    assert "stopped after three" in result["reason"]
+
+
+def test_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli, monkeypatch):
+    monkeypatch.setenv("FAKE_VERDICT", "findings")
+    for _ in range(3):
+        reviewer.review(repo, args())
+    path, s = reviewer.owner_state(repo, "codex", "owner-session")
+    history = s["passes"][:]
+    with pytest.raises(reviewer.ReviewError, match="authorization"):
+        reviewer.extend_budget(path, s, "")
+    reviewer.extend_budget(path, s, "User explicitly approved one additional review")
+    reviewer.review(repo, args())
+    s = state(repo)
+    assert s["passes"][:3] == history
+    assert len(s["passes"]) == 4
+    assert s["phase"] == "exhausted"
+    assert "pass:4 extra:1" in reviewer.receipt_description(s, s["reviewed"], False)
+    with pytest.raises(reviewer.ReviewError, match="only one"):
+        reviewer.extend_budget(path, s, "again")
+    with pytest.raises(reviewer.ReviewError):
+        reviewer.review(repo, args())
+
+
+def test_progress_reports_observed_activity_and_ignores_partial_line(tmp_path, monkeypatch):
+    path = tmp_path / "stdout.jsonl"
+    path.write_text(json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read"}]}}) + '\n{"unfinished":')
+    monkeypatch.setattr(reviewer.time, "monotonic", lambda: 125)
+    summary = reviewer.progress_summary(path, 0)
+    assert "2m 05s: 1 events, 1 tool calls" in summary
+    assert "last log activity" in summary

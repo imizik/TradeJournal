@@ -42,13 +42,17 @@ def receipt(**kwargs):
 
 
 def test_clean_exact_head_and_base_passes():
-    assert gate(receipt(), event="pull_request_target")["updates"][0]["state"] == "success"
+    status = gate(receipt(), event="pull_request_target")["updates"][0]
+    assert status["state"] == "success"
+    assert status["description"] == "verified " + receipt()["description"]
 
 
 @pytest.mark.parametrize("item,base", [
     (None, BASE), (receipt(creator={"login": "outsider"}), BASE),
     (receipt(description="looks fine"), BASE), (receipt(), "c" * 40),
     (receipt(description=f"clean base:{BASE} owner:codex pass:4"), BASE),
+    (receipt(description=f"clean base:{BASE} owner:codex pass:5 extra:1"), BASE),
+    (receipt(description=f"clean base:{BASE} owner:codex pass:3 extra:1"), BASE),
 ])
 def test_missing_forged_malformed_or_stale_receipts_never_pass(item, base):
     assert gate(item, base=base)["updates"][0]["state"] != "success"
@@ -78,3 +82,17 @@ def test_managed_pr_with_no_receipt_expires_and_remains_failed():
 
 def test_success_does_not_expire_while_head_and_base_stay_same():
     assert gate(receipt(created_at="1970-01-01T00:00:00Z"))["updates"][0]["state"] == "success"
+
+
+def test_fourth_pass_requires_explicit_extension_attestation():
+    extended = receipt(description=f"clean base:{BASE} owner:codex pass:4 extra:1")
+    assert gate(extended)["updates"][0]["state"] == "success"
+
+
+def test_gate_overwrites_owner_status_and_deduplicates_only_actions_validation():
+    previous = receipt(context="tradejournal/independent-review")
+    assert gate(receipt(), previous=previous)["updates"][0]["state"] == "success"
+    previous["description"] = "verified " + receipt()["description"]
+    assert gate(receipt(), previous=previous)["updates"]
+    previous["creator"]["login"] = "github-actions[bot]"
+    assert gate(receipt(), previous=previous)["updates"] == []

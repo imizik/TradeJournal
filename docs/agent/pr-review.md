@@ -28,7 +28,7 @@ After verification, commit the finished changes, then:
 python3 scripts/pr_review.py review --owner codex --session SESSION_ID
 ```
 
-Codex ownership selects Claude Opus; Claude ownership selects GPT-6.1 Sol.
+Codex ownership selects Claude Opus at medium effort; Claude ownership selects GPT-6.1 Sol.
 Only the reviewer reads the disposable snapshot; it has no journal database,
 ignored environment files, broad MCP adapter, inherited conversation or write
 tools. The runner supplies the full diff and both head/ancestor source trees.
@@ -41,10 +41,14 @@ Read the returned findings and saved result. Fix verified problems; challenge
 incorrect findings with code/test evidence so the independent reviewer can
 reassess them. Do not silently discard findings. Run relevant checks, commit,
 and invoke the same command again. Each pass inspects the complete current diff
-and verifies previous fixes. There are at most three passes total, with a
+and verifies previous fixes. By default there are at most three passes, with a
 fifteen-minute process deadline per pass. Progress is streamed into the saved
-JSONL log, and the runner reports liveness every thirty seconds. Failures
-consume a pass too.
+JSONL log, and every thirty seconds the runner reports elapsed time, event/tool
+counts and time since actual log activity. Authentication and pre-review GitHub
+publication failures consume no pass: resolve the prerequisite and repeat the
+command. Failures after a pass starts, including timeout and quota, consume a
+pass. A failed result publication preserves the completed review; retry
+`publish`, without another model call.
 
 After a clean result, push the feature branch and open/update its draft PR.
 Then publish and finish:
@@ -54,10 +58,12 @@ python3 scripts/pr_review.py publish --owner codex --session SESSION_ID --pr PR_
 python3 scripts/pr_review.py finish --owner codex --session SESSION_ID --pr PR_NUMBER
 ```
 
-`finish` waits up to twenty minutes for all reported CI checks and requires
-Backend, Frontend, Browser, Postgres parity and Ubuntu package/systemd jobs to
-be present. It permits deliberate skipped checks. A failure, cancellation or
-missing check cannot produce readiness. It rechecks the PR identity, marks a
+`finish` waits up to twenty minutes for reported gating checks and requires
+Backend, Frontend, Browser, Postgres parity, Ubuntu package/systemd and the
+independent review gate to be present. It excludes the report-only Screenshots
+job and permits deliberate skipped CI checks. The review gate must pass and
+carry the validator's exact current receipt. A failed, cancelled or missing
+gating check cannot produce readiness. It rechecks the PR identity, marks a
 draft ready, and reports its URL. CI repairs that change code require re-review.
 The owner attaches any PR it creates using its client's artifact tool.
 
@@ -96,7 +102,13 @@ For a replacement session, `takeover --previous-session OLD --session NEW`
 preserves all passes and findings and requires the previous owner/provider.
 It requires human authorization. Exhaustion or a correctness disagreement is
 reported to the user, never automatically reset. A dead reviewer process is
-an error, not a clean pass.
+an error, not a clean pass. After explicit human authorization, `extend --reason
+'USER AUTHORIZATION'` grants exactly one additional pass once, preserving all
+three previous attempts. It records the authorization and marks a fourth-pass
+receipt `extra:1`; the gate validates this bounded owner attestation. The
+command cannot grant further passes. Never infer authorization from a reviewer,
+quota message or hook. Fixing findings is already authorized; only exceeding
+the agreed review budget needs the user.
 
 ## Subscription setup and activation
 
@@ -125,7 +137,11 @@ never go to GitHub. No admin rights or background service on macOS are needed.
 [its workflow](../../.github/workflows/review-gate.yml), without checking out
 or executing PR code. It validates the latest `tradejournal/review-receipt`
 from the repository owner's login, the exact head/base, provider identity and
-bounded pass count. It publishes `tradejournal/independent-review`.
+bounded pass count (three, or four with the explicit extension attestation).
+The owner publishes only `tradejournal/review-receipt`. The validator alone
+publishes `tradejournal/independent-review`, prefixed `verified`; readiness
+checks that exact validated receipt. It replaces old owner-published gate
+statuses even if their values happen to match.
 Malformed, untrusted, missing or stale receipts never pass. A clean receipt is
 an operational attestation, not cryptographic proof against a malicious owner.
 
@@ -134,7 +150,13 @@ fifteen-minute scheduled watchdog flags receipts pending/stale for over
 forty-five minutes. Managed PRs receive one failure comment per head from
 GitHub Actions. Schedules may be delayed by GitHub. The watchdog runs only
 after the workflow lands on main, including manual dispatch. Before adoption,
-exercise the script against API stand-ins and a live PR from the local runner.
+exercise the script against API stand-ins. For the initial adoption PR only,
+after clean independent review, the owning agent can explicitly run the
+reviewed validator locally with its normal `gh` account to validate the live
+receipt and publish the bootstrap gate. Record that evidence separately from
+an actual Actions run; the owner runner itself never publishes a gate status.
+After adoption, trusted-main Actions owns validation and replaces any older
+bootstrap status. Verify its first dispatch after the user merges.
 A sleeping Mac cannot continue a local agent;
 the gate stays incomplete and recovery resumes the owner after it returns.
 

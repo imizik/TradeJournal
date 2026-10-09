@@ -18,14 +18,17 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
       { ...repo, ref: pr.head.sha, per_page: 100 });
     const receipt = statuses.filter(s => s.context === RECEIPT)
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
-    const identity = receipt?.description?.match(/^clean base:([a-f0-9]{40}) owner:(codex|claude) pass:([1-3])$/);
+    const identity = receipt?.description?.match(/^clean base:([a-f0-9]{40}) owner:(codex|claude) pass:([1-4])( extra:1)?$/);
+    // A fourth pass is an explicit owner attestation of human authorization,
+    // never an automatic budget reset. Earlier attempts remain in local state.
+    const bounded = identity && (Number(identity[3]) <= 3 ? !identity[4] : !!identity[4]);
     // The local owner publishes with the user's gh login. A contributor's
     // status, arbitrary prose, or an older-base receipt cannot certify a PR.
     const trusted = receipt?.creator?.login === repo.owner;
     const previous = statuses.find(s => s.context === GATE);
     let state = 'pending', description = 'Independent local review has not completed for this head and base';
-    if (receipt?.state === 'success' && trusted && identity?.[1] === pr.base.sha) {
-      state = 'success'; description = receipt.description;
+    if (receipt?.state === 'success' && trusted && bounded && identity[1] === pr.base.sha) {
+      state = 'success'; description = `verified ${receipt.description}`;
     } else if (receipt?.state === 'error' || receipt?.state === 'failure') {
       state = 'error'; description = 'Review stopped; resume the owning session and inspect its findings';
     } else if ((!receipt && previous?.state === 'error') ||
@@ -33,7 +36,8 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
       state = 'error'; description = 'Review is overdue or its base changed; owning session needs attention';
     }
     // Avoid spamming identical statuses on every watchdog tick.
-    if (previous?.state !== state || previous?.description !== description) {
+    if (previous?.state !== state || previous?.description !== description ||
+        previous?.creator?.login !== 'github-actions[bot]') {
       await github.rest.repos.createCommitStatus({ ...repo, sha: pr.head.sha,
         context: GATE, state, description, target_url: pr.html_url });
     }

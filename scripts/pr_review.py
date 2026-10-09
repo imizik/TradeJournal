@@ -120,6 +120,28 @@ def matches(state, ident):
     return not ident["dirty"] and state.get("reviewed") == ident
 
 
+def pass_limit(state):
+    extension = state.get("extension")
+    if extension is None:
+        return MAX_PASSES
+    if (not isinstance(extension, dict) or extension.get("additional_passes") != 1
+            or not isinstance(extension.get("reason"), str) or not extension["reason"].strip()
+            or extension.get("session") != state.get("session")):
+        raise ReviewError("Invalid human-authorized review extension")
+    return MAX_PASSES + 1
+
+
+def extend_budget(path, state, reason):
+    if (state["phase"] not in TERMINAL or len(state["passes"]) != MAX_PASSES
+            or state.get("extension") is not None or not reason.strip()):
+        raise ReviewError("Extension requires three used passes, explicit human authorization and a recorded reason; only one extra pass is allowed")
+    state["extension"] = {"additional_passes": 1, "reason": reason,
+                          "session": state["session"], "authorized_at": time.time()}
+    state.update(phase="needs_review", nudges=0, terminal_reported=False)
+    state.pop("error", None)
+    save(path, state)
+
+
 def owner_state(root, owner, session, base_ref="origin/main", contract=""):
     if not session or len(session) > 200:
         raise ReviewError("An explicit owning session id is required")
@@ -130,7 +152,7 @@ def owner_state(root, owner, session, base_ref="origin/main", contract=""):
         phases = {"needs_review", "reviewing", "findings", "clean", "ready"} | TERMINAL
         if (not isinstance(state, dict) or not required.issubset(state) or state["version"] != 1
                 or state["owner"] not in {"codex", "claude"} or state["phase"] not in phases
-                or not isinstance(state["passes"], list) or len(state["passes"]) > MAX_PASSES
+                or not isinstance(state["passes"], list) or len(state["passes"]) > pass_limit(state)
                 or not all(isinstance(state[k], str) and state[k] for k in ("session", "branch", "base_ref"))
                 or not isinstance(state["contract"], str)
                 or state["branch"] != git(root, "symbolic-ref", "--short", "HEAD")):
@@ -230,6 +252,29 @@ def validate_result(result, snapshot):
     return result
 
 
+def progress_summary(path, started):
+    events = []
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+        age = max(0, int(time.time() - path.stat().st_mtime))
+    except OSError:
+        return "Reviewer is running; progress log is temporarily unavailable"
+    for line in lines:
+        try:
+            event = json.loads(line)
+            if isinstance(event, dict):
+                events.append(event)
+        except ValueError:
+            pass  # The CLI may still be writing the final line.
+    tools = sum(block.get("type") == "tool_use" for event in events
+                if isinstance(event.get("message"), dict) and isinstance(event["message"].get("content"), list)
+                for block in event.get("message", {}).get("content", []) if isinstance(block, dict))
+    tools += sum(event.get("type") == "item.completed" and
+                 event["item"].get("type") == "command_execution" for event in events if isinstance(event.get("item"), dict))
+    elapsed = int(time.monotonic() - started)
+    return f"Reviewer {elapsed // 60}m {elapsed % 60:02d}s: {len(events)} events, {tools} tool calls; last log activity {age}s ago"
+
+
 def model_process(command, snapshot, env, prompt, log_dir, timeout):
     # Kill the complete process group on deadline; child CLI retries cannot
     # silently keep spending after the runner has reported failure.
@@ -243,7 +288,8 @@ def model_process(command, snapshot, env, prompt, log_dir, timeout):
             signal.signal(sig, interrupted)
         try:
             try:
-                deadline = time.monotonic() + timeout
+                started = time.monotonic()
+                deadline = started + timeout
                 pending_input = prompt
                 while True:
                     remaining = deadline - time.monotonic()
@@ -256,7 +302,7 @@ def model_process(command, snapshot, env, prompt, log_dir, timeout):
                         pending_input = None
                         if time.monotonic() >= deadline:
                             raise
-                        print(f"Reviewer is still working; progress log: {log_dir / 'stdout.jsonl'}", flush=True)
+                        print(progress_summary(log_dir / "stdout.jsonl", started), flush=True)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 os.killpg(p.pid, signal.SIGTERM)
                 try:
@@ -288,7 +334,6 @@ def model_process(command, snapshot, env, prompt, log_dir, timeout):
 def invoke_reviewer(root, state, ident, log_dir, timeout=REVIEW_TIMEOUT):
     reviewer = "claude" if state["owner"] == "codex" else "codex"
     env = review_env()
-    authenticate(reviewer, env)
     with tempfile.TemporaryDirectory(prefix="tj-independent-review-") as name:
         snapshot = Path(name)
         unpack(root, ident["head"], snapshot / "head")
@@ -307,10 +352,11 @@ Previous independent findings: {json.dumps(previous)}
 Verify previous fixes AND inspect the whole current change for regressions. Do not edit, run code/tests, call other agents or access the network.
 Paths in findings must be repository-relative, with actual one-based lines in head/ or base/.
 Return the schema supplied in schema.json. clean means no actionable findings; unresolved correctness disputes remain findings.
+Keep the summary to two sentences and each finding to one concise paragraph with the concrete failure and suggested correction.
 Reviewed head: {ident['head']}; base: {ident['base']}; diff ancestor: {ident['merge_base']}.
 """
         if reviewer == "claude":
-            command = ["claude", "-p", "--model", "opus", "--effort", "high", "--restricted",
+            command = ["claude", "-p", "--model", "opus", "--effort", "medium", "--restricted",
                        "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob",
                        "--permission-mode", "dontAsk", "--permission-prompts", "none",
                        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -360,40 +406,42 @@ def review(root, args):
             return
         if state["phase"] in TERMINAL:
             raise ReviewError(f"Review stopped: {state['phase']}. {state.get('error', '')} Human intervention is required")
-        if len(state["passes"]) >= MAX_PASSES:
+        limit = pass_limit(state)
+        if len(state["passes"]) >= limit:
             state["phase"] = "exhausted"
             save(path, state)
-            raise ReviewError("Three review passes used; report unresolved findings to the user")
+            raise ReviewError("Review pass budget used; report unresolved findings to the user")
+        # Setup failures are recoverable by the owner and spend no model pass.
+        authenticate("claude" if state["owner"] == "codex" else "codex", review_env())
+        pending = {**state, "phase": "needs_review"}
+        if args.pr:
+            pending["pr"] = args.pr
+        if pending.get("pr"):
+            post_status(root, pending, ident)
+        state.update(pending)
+        state.pop("error", None)
         log_dir = path.parent / f"pass-{len(state['passes']) + 1}"
         log_dir.mkdir(mode=0o700)
         entry = {"identity": ident, "started": time.time()}
         state["passes"].append(entry)
         state["phase"] = "reviewing"
         save(path, state)
-        print(f"Independent review pass {len(state['passes'])}/{MAX_PASSES} starting", flush=True)
+        print(f"Independent review pass {len(state['passes'])}/{limit} starting", flush=True)
         try:
-            if args.pr:
-                state["pr"] = args.pr
-                save(path, state)
-            if state.get("pr"):
-                post_status(root, state, ident)
             result, reviewer = invoke_reviewer(root, state, ident, log_dir)
             if identity(root, state["base_ref"]) != ident:
                 raise ReviewError("The worktree or base changed during review; the result is invalid")
             entry.update(result=result, reviewer=reviewer,
                          requested_model="opus" if reviewer == "claude" else "gpt-6.1-sol",
+                         effort="medium" if reviewer == "claude" else "default",
                          completed=time.time())
             atomic_json(log_dir / "result.json", result)
             state["reviewed"] = ident
             state["phase"] = {"clean": "clean", "findings": "findings", "incomplete": "attention"}[result["verdict"]]
-            if state["phase"] == "findings" and len(state["passes"]) == MAX_PASSES:
+            if state["phase"] == "findings" and len(state["passes"]) == limit:
                 state["phase"] = "exhausted"
             state["nudges"] = 0
             save(path, state)
-            if state.get("pr"):
-                post_status(root, state, ident)
-            print(json.dumps(result, indent=2))
-            print(f"Receipt: {log_dir / 'result.json'}")
         except (ReviewError, ValueError, OSError, subprocess.SubprocessError) as exc:
             state.update(phase="error", error=str(exc))
             entry["error"] = str(exc)
@@ -404,6 +452,11 @@ def review(root, args):
                 except ReviewError:
                     print("GitHub publication also failed; local error receipt is preserved", file=sys.stderr)
             raise ReviewError(str(exc)) from exc
+        print(json.dumps(result, indent=2))
+        print(f"Receipt: {log_dir / 'result.json'}")
+        # Publication can be retried without discarding a completed review.
+        if state.get("pr"):
+            post_status(root, state, ident)
 
 
 def github_repo(root):
@@ -427,6 +480,11 @@ def pr_info(root, number=None):
     return json.loads(run(args, cwd=root))
 
 
+def receipt_description(state, ident, clean):
+    extra = " extra:1" if len(state["passes"]) > MAX_PASSES and pass_limit(state) == MAX_PASSES + 1 else ""
+    return f"{'clean' if clean else state['phase']} base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}{extra}"
+
+
 def post_status(root, state, ident, number=None):
     pr = pr_info(root, number or state.get("pr"))
     if pr["state"] != "OPEN" or pr["headRefName"] != state["branch"] or pr["headRefOid"] != ident["head"] or pr["baseRefOid"] != ident["base"]:
@@ -434,17 +492,16 @@ def post_status(root, state, ident, number=None):
     repo = github_repo(root)
     clean = state["phase"] in {"clean", "ready"} and matches(state, ident)
     status = "success" if clean else ("error" if state["phase"] in TERMINAL else "pending")
-    description = f"{'clean' if clean else state['phase']} base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}"
-    for context in (RECEIPT_CONTEXT, GATE_CONTEXT):
-        api(root, f"repos/{repo}/statuses/{ident['head']}", {
-            "state": status, "context": context, "description": description, "target_url": pr["url"],
-        })
     run(["gh", "pr", "edit", str(pr["number"]), "--add-label", "review-loop"], cwd=root)
+    api(root, f"repos/{repo}/statuses/{ident['head']}", {
+        "state": status, "context": RECEIPT_CONTEXT,
+        "description": receipt_description(state, ident, clean), "target_url": pr["url"],
+    })
     return pr, clean
 
 
 def wait_checks(root, number, deadline):
-    required = {"Backend", "Frontend", "Browser", "Postgres parity", "Ubuntu package and systemd build"}
+    required = {"Backend", "Frontend", "Browser", "Postgres parity", "Ubuntu package and systemd build", GATE_CONTEXT}
     while True:
         p = subprocess.run(["gh", "pr", "checks", str(number), "--json", "name,state,bucket"],
                            cwd=root, capture_output=True, text=True, timeout=30)
@@ -454,15 +511,28 @@ def wait_checks(root, number, deadline):
             checks = json.loads(p.stdout)
         except ValueError as exc:
             raise ReviewError("GitHub did not return CI results") from exc
-        checks = [c for c in checks if c["name"] not in {RECEIPT_CONTEXT, GATE_CONTEXT}]
+        checks = [c for c in checks if c["name"] not in {RECEIPT_CONTEXT, "Screenshots"}]
         if any(c["bucket"] in {"fail", "cancel"} for c in checks):
             raise ReviewError("CI failed or was cancelled. Fix it, rerun checks, and re-review code changes")
         if required.issubset({c["name"] for c in checks}) and all(c["bucket"] in {"pass", "skipping"} for c in checks):
-            return
+            if any(c["name"] == GATE_CONTEXT and c["bucket"] == "pass" for c in checks):
+                return
         if time.time() >= deadline:
             raise ReviewError("CI did not complete within twenty minutes; PR remains incomplete")
         print("Waiting for current-head CI (PR stays draft)", flush=True)
         time.sleep(15)
+
+
+def verify_gate(root, state, ident):
+    repo = github_repo(root)
+    pages = json.loads(run(["gh", "api", "--paginate", "--slurp",
+                           f"repos/{repo}/commits/{ident['head']}/statuses?per_page=100"], cwd=root))
+    gates = [s for page in pages for s in page if s["context"] == GATE_CONTEXT]
+    latest = max(gates, key=lambda s: s["id"], default=None)
+    expected = "verified " + receipt_description(state, ident, True)
+    if (not latest or latest["state"] != "success" or latest["description"] != expected
+            or latest.get("creator", {}).get("login") not in {"github-actions[bot]", repo.split("/")[0]}):
+        raise ReviewError("The independent validator has not approved this exact receipt; wait for the GitHub gate")
 
 
 def publish(root, args, finish=False):
@@ -477,6 +547,7 @@ def publish(root, args, finish=False):
             if not clean:
                 raise ReviewError("PR cannot become ready without a clean current review")
             wait_checks(root, pr["number"], time.time() + 1200)
+            verify_gate(root, state, ident)
             # Recheck the remote after reading checks; never ready a newer push.
             if pr_info(root, pr["number"]) != pr or identity(root, state["base_ref"]) != ident:
                 raise ReviewError("PR changed while checking CI")
@@ -536,8 +607,10 @@ def hook(root, args, payload):
         key = json.dumps([ident, state["phase"], len(state["passes"])], sort_keys=True)
         state["nudges"] = state.get("nudges", 0) + 1 if state.get("nudge_key") == key else 1
         state["nudge_key"] = key
-        if state["nudges"] > 3:
+        if state["nudges"] >= 3:
             state.update(phase="attention", error="Owner stopped repeatedly without advancing the review")
+            save(path, state)
+            return {"decision": "block", "reason": "Review stopped after three unchanged continuations. Report the blocker and unresolved findings; do not claim ready."}
         save(path, state)
         command = f"python3 scripts/pr_review.py review --owner {args.owner} --session {shlex.quote(session)}"
         if not state["contract"]:
@@ -553,13 +626,14 @@ def hook(root, args, payload):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["begin", "review", "status", "publish", "finish", "hook", "takeover", "retry"])
+    parser.add_argument("command", choices=["begin", "review", "status", "publish", "finish", "hook", "takeover", "retry", "extend"])
     parser.add_argument("--owner", choices=["codex", "claude"], default="codex")
     parser.add_argument("--session", default=os.environ.get("CODEX_THREAD_ID", ""))
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--contract", default="")
     parser.add_argument("--pr", type=int)
     parser.add_argument("--previous-session")
+    parser.add_argument("--reason", default="", help="Record the user's explicit authorization for one extra pass")
     args = parser.parse_args()
     payload = None
     try:
@@ -576,11 +650,15 @@ def main():
         else:
             path = state_path(root)
             with locked(path):
-                if args.command == "retry":
+                if args.command == "extend":
                     path, state = owner_state(root, args.owner, args.session)
-                    if state["phase"] != "error" or len(state["passes"]) >= MAX_PASSES:
+                    extend_budget(path, state, args.reason)
+                elif args.command == "retry":
+                    path, state = owner_state(root, args.owner, args.session)
+                    if state["phase"] != "error" or len(state["passes"]) >= pass_limit(state):
                         raise ReviewError("Retry only recovers a failed pass with remaining budget; human authorization is required")
                     state.update(phase="needs_review", nudges=0, terminal_reported=False)
+                    state.pop("error", None)
                     state.setdefault("retries", []).append(time.time())
                     save(path, state)
                 elif args.command == "takeover":
@@ -588,6 +666,8 @@ def main():
                     if not state or state["session"] != args.previous_session or state["owner"] != args.owner:
                         raise ReviewError("Takeover must name the previous owning session and provider")
                     state["session"] = args.session
+                    if state.get("extension"):
+                        state["extension"]["session"] = args.session
                     state.setdefault("takeovers", []).append({"previous": args.previous_session, "new": args.session, "at": time.time()})
                     save(path, state)
                 else:
