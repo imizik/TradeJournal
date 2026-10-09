@@ -6,8 +6,8 @@ name: Release
 # needs no credential to do so because the repository is public.
 #
 # A release exists only for a main commit on which BOTH CI and Deployment
-# package passed. main has no branch protection, so a red pull request can
-# still merge; this is the gate that keeps it off the server.
+# package passed. Branch protection requires CI before merge; this separate
+# gate also checks the actual main commit before it reaches the server.
 #
 # workflow_run fires once per completed workflow. Whichever of the pair
 # finishes first finds the other still running and stops; the second one

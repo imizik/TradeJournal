@@ -1,8 +1,8 @@
 ---
-name: reviewer
-description: General pre-PR review for normal changes. Return verified findings directly to the owner.
-model: sonnet
-effort: medium
+name: risk-reviewer
+description: Review consequential changes before PR publication. Use separate invocations for general and focused risk review.
+model: opus
+effort: high
 tools: Read, Grep, Glob, Bash
 disallowedTools: Agent, Write, Edit
 ---
