@@ -258,6 +258,13 @@ def validate_result(result, snapshot):
     return result
 
 
+def parse_claude_result(text):
+    if not isinstance(text, str):
+        raise ReviewError("Claude did not return a final JSON review")
+    fenced = re.fullmatch(r"\s*```(?:json)?\s*\n(.*?)\n```\s*", text, re.DOTALL)
+    return json.loads(fenced[1] if fenced else text)
+
+
 def progress_summary(path, started):
     events = []
     try:
@@ -328,6 +335,8 @@ def model_process(command, snapshot, env, prompt, log_dir, timeout):
             events = [json.loads(line) for line in (log_dir / "stdout.jsonl").read_text().splitlines() if line.strip()]
             for event in events:
                 if event.get("type") == "result" and event.get("is_error"):
+                    if event.get("subtype") == "error_max_structured_output_retries":
+                        raise ReviewError("Claude output formatting failed; no valid review receipt was returned")
                     message = str(event.get("result", "")).lower()
                     if "hit your session limit" in message or "hit your weekly limit" in message or "usage limit" in message:
                         raise ReviewError("Claude subscription allowance is exhausted. Check /usage for its reset time; no API fallback was used")
@@ -358,6 +367,7 @@ Previous independent findings: {json.dumps(previous)}
 Verify previous fixes AND inspect the whole current change for regressions. Do not edit, run code/tests, call other agents or access the network.
 Paths in findings must be repository-relative, with actual one-based lines in head/ or base/.
 Return the schema supplied in schema.json. clean means no actionable findings; unresolved correctness disputes remain findings.
+Your final message must be the JSON object itself, including an explicit findings array (empty for clean). No XML tags or prose outside the JSON.
 Keep the summary to two sentences and each finding to one concise paragraph with the concrete failure and suggested correction.
 Reviewed head: {ident['head']}; base: {ident['base']}; diff ancestor: {ident['merge_base']}.
 """
@@ -367,7 +377,7 @@ Reviewed head: {ident['head']}; base: {ident['base']}; diff ancestor: {ident['me
                        "--permission-mode", "dontAsk", "--permission-prompts", "none",
                        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                        "--setting-sources", "", "--no-session-persistence",
-                       "--output-format", "stream-json", "--verbose", "--json-schema", json.dumps(SCHEMA)]
+                       "--output-format", "stream-json", "--verbose"]
             output = model_process(command, snapshot, env, prompt, log_dir, timeout)
             events = [json.loads(line) for line in output.splitlines() if line.strip()]
             results = [event for event in events if event.get("type") == "result"]
@@ -376,7 +386,7 @@ Reviewed head: {ident['head']}; base: {ident['base']}; diff ancestor: {ident['me
             envelope = results[0]
             if envelope.get("is_error") or envelope.get("permission_denials") or envelope.get("subtype") != "success":
                 raise ReviewError("Claude review failed, was truncated, or lacked permissions")
-            result = envelope.get("structured_output")
+            result = parse_claude_result(envelope.get("result"))
         else:
             result_path = snapshot / "result.json"
             command = ["codex", "exec", "--ignore-user-config", "--ephemeral",

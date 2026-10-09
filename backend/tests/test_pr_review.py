@@ -74,9 +74,10 @@ else:
         assert '--bare' not in args and '--restricted' in args
         assert args[args.index('--effort') + 1] == 'low'
         assert args[args.index('--model') + 1] == 'sonnet'
+        assert '--json-schema' not in args
         assert args[args.index('--tools') + 1] == 'Read,Grep,Glob'
         print(json.dumps({'type': 'system', 'subtype': 'init'}))
-        print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'permission_denials': ['Read'] if os.getenv('FAKE_DENIAL') else [], 'structured_output': result}))
+        print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'permission_denials': ['Read'] if os.getenv('FAKE_DENIAL') else [], 'result': json.dumps(result)}))
     else:
         assert args[args.index('--sandbox') + 1] == 'read-only'
         pathlib.Path(args[args.index('--output-last-message') + 1]).write_text(json.dumps(result))
@@ -315,6 +316,26 @@ def test_finish_refuses_head_drift_without_publishing_success(repo, cli, monkeyp
     monkeypatch.setattr(reviewer, "api", lambda *a: pytest.fail("must not publish"))
     with pytest.raises(reviewer.ReviewError, match="differs"):
         reviewer.publish(repo, args(), finish=True)
+
+
+@pytest.mark.parametrize("fenced", [False, True])
+def test_claude_final_json_is_validated_without_structured_output_tool(tmp_path, fenced):
+    value = {"verdict": "clean", "summary": "No defects found", "findings": []}
+    text = json.dumps(value)
+    if fenced:
+        text = "```json\n" + text + "\n```"
+    assert reviewer.validate_result(reviewer.parse_claude_result(text), tmp_path) == value
+
+
+@pytest.mark.parametrize("text", [
+    'prefix {"verdict":"clean","summary":"fine","findings":[]}',
+    '{"verdict":"clean","summary":"fine</parameter><parameter name=\\"findings\\">[]"}',
+    '{"verdict":"clean","summary":"fine","findings":[',
+    '{"verdict":"clean","summary":"fine","findings":[{"priority":"P1"}]}',
+])
+def test_malformed_or_incomplete_review_text_never_becomes_clean(tmp_path, text):
+    with pytest.raises((reviewer.ReviewError, ValueError)):
+        reviewer.validate_result(reviewer.parse_claude_result(text), tmp_path)
 
 
 @pytest.mark.parametrize("checks", [[], [{"name": "Only one job", "bucket": "pass"}], [{"name": "Backend", "bucket": "fail"}]])

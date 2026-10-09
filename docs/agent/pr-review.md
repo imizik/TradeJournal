@@ -36,6 +36,10 @@ Configuration files stay available as evidence inside those trees but are not
 the client's working-root settings. Claude's tools are Read/Grep/Glob only;
 Codex uses a read-only sandbox. The reviewer must mark unavailable essential
 evidence incomplete. It never executes tests, fixes, or another review loop.
+Claude returns JSON in its final message, validated locally against the same
+result contract; this avoids the CLI's structured-output tool serialization
+failure observed during rollout. Missing fields, malformed JSON, failed CLI
+completion and contradictory verdicts remain incomplete, never guessed clean.
 
 Read the returned findings and saved result. Fix verified problems; challenge
 incorrect findings with code/test evidence so the independent reviewer can
