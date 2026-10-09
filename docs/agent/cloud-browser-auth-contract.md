@@ -333,14 +333,26 @@ production backend/database port or owner frontend is published.
 [Fixture entry point](../../deploy/dot_trial_app.py) refuses an unmarked,
 non-SQLite, symlinked, integration-enabled or non-seeded installation. Fixture
 market replies run inside the existing authentication middleware. All sample
-fills must retain the `seed:` prefix; no real database is copied. Trial services
-are enabled on the VPS and need no laptop process or SSH tunnel.
+fills must retain the `seed:` prefix; no real database is copied. The running
+trial also rejects domain mutations from the private owner, so imports and
+journal edits cannot introduce real data after the startup check. Authentication
+management and the fixture-only position quote POST remain available. Trial
+services are enabled on the VPS and need no laptop process or SSH tunnel.
 
 [Trial controls](../../deploy/dot_trial_control.py) revoke a selected assistant
-or remove the public route before disabling the profile and stopping services.
+or remove the public route, revoke every non-owner principal and invalidate all
+assistant sessions before disabling the profile and stopping services. Failed
+preparation rolls back only artifacts created by that invocation; an incomplete
+cleanup reports retained state for inspection instead of deleting live state.
 They refuse any other database and do not replace the complete Caddy config
 with an old snapshot. A disable/re-enable recovery drill has not been observed.
-The setup does not automatically follow production releases.
+The setup does not automatically follow production releases. The review fixes
+were applied to the pinned sample runtime separately. Live owner fill creation,
+import, editing, rebuild and practice preparation were refused with 403; sample
+fills remained unchanged, fixture position quotes and authentication management
+worked, and revoking a temporary test principal preserved Trader Jo's key.
+Failed-install cleanup and all-principal session revocation have automated
+fixture evidence; the full native shutdown/re-enable drill remains unobserved.
 
 Native observations: production health/release unchanged; trial processes use
 non-root identities and the same private network namespace, different from

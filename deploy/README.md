@@ -682,11 +682,16 @@ authentication configuration and private access are unchanged.
 
 The [preparation script](dot_trial_install.py) requires root, an explicit verified
 release and a portable frontend archive. It refuses to overwrite trial state or
-credentials. Keep the verified release's Linux dependencies: a local archive
-contains compiled JS/assets, never native macOS `node_modules`. The
+credentials or pre-existing trial units. Failed preparation stops/removes only
+units, identities and directories created by that invocation before allowing a
+retry. If cleanup cannot stop a process, it retains state and reports incomplete
+rollback for inspection. Keep the verified release's Linux dependencies: a local
+archive contains compiled JS/assets, never native macOS `node_modules`. The
 [fixture entry point](dot_trial_app.py) checks both configuration and actual
 sample-fill provenance before importing the application. HTTP fixture responses
-sit inside authorization, not in front of it.
+sit inside authorization, not in front of it. The running trial rejects all
+non-authentication domain writes for owners as well as assistants; the sole
+POST exception returns fixture position quotes without writing journal data.
 
 The trial's services share a private network namespace. Only frontend bridges
 3101/3102 bind host loopback; the API does not bind the host namespace. The public
@@ -705,9 +710,11 @@ sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejour
 sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_control.py disable
 ```
 
-`disable` removes the public Caddy import before revoking the dedicated login,
+`disable` removes the public Caddy import before revoking every non-owner
+principal and version-bumping each to invalidate existing sessions,
 disabling the assistant profile and stopping trial sockets/processes. It retains
-sample data and credentials for explicit recovery, and preserves unrelated Caddy
+sample data and revoked credential records for explicit recovery; every
+assistant needs a new key before re-enabling. It preserves unrelated Caddy
 configuration. The private sample Serve mapping may remain stopped/unavailable;
 do not reset the full Tailscale configuration to remove it. Native revocation
 was observed; the full shutdown/re-enable recovery drill remains unobserved.

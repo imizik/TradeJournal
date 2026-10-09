@@ -134,6 +134,13 @@ class FixtureMarket:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             request = Request(scope)
+            # Even the private trial owner may only mutate authentication.
+            # Keep imports, journal edits, jobs and future writes out of this
+            # sample installation for its entire lifetime, not just startup.
+            if (request.method not in {"GET", "HEAD", "OPTIONS"}
+                    and not request.url.path.startswith("/access/")
+                    and (request.method, request.url.path) != ("POST", "/quotes/positions")):
+                return await JSONResponse({"detail": "Sample trial data is read-only"}, 403)(scope, receive, send)
             if request.method == "GET" or (request.method == "POST" and request.url.path == "/quotes/positions"):
                 try:
                     data = market_response(request)

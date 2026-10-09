@@ -27,28 +27,41 @@ def environment():
 def revoke(identifier):
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", identifier) or identifier == "owner":
         raise ValueError("Choose an assistant ID")
+    revoke_assistants(identifier)
+
+
+def revoke_rows(db, identifier=None):
+    from sqlmodel import select
+    from app.engine import access
+    from app.models import AccessPrincipal
+    access._serialized(db)
+    rows = db.exec(select(AccessPrincipal).where(AccessPrincipal.id != access.OWNER)).all()
+    if identifier is not None:
+        rows = [row for row in rows if row.id == identifier]
+        if not rows:
+            raise ValueError("Assistant not found")
+    for row in rows:
+        row.enabled = False
+        row.version += 1
+        db.add(row)
+        access.audit(db, access.OWNER, "assistant_revoke", "accepted", row.id)
+    db.commit()
+
+
+def revoke_assistants(identifier=None):
     script = """
 from sqlmodel import Session
 from app.database import engine
-from app.engine import access
-from app.models import AccessPrincipal
+from dot_trial_control import revoke_rows
 from dot_trial_app import validate_environment
 import os
 validate_environment(os.environ)
 with Session(engine) as db:
-    access._serialized(db)
-    row = db.get(AccessPrincipal, IDENTIFIER)
-    if row is None:
-        raise ValueError('Assistant not found')
-    row.enabled = False
-    row.version += 1
-    db.add(row)
-    access.audit(db, access.OWNER, 'assistant_revoke', 'accepted', IDENTIFIER)
-    db.commit()
+    revoke_rows(db, IDENTIFIER)
 """
     subprocess.run([str(RUNTIME / "backend/.venv/bin/python"), "-c", f"IDENTIFIER={identifier!r}\n" + script],
-        cwd=RUNTIME / "backend", env=environment(), check=True, capture_output=True, text=True)
-    print("Trial assistant revoked; its existing sessions are invalidated.")
+        cwd=RUNTIME / "backend", env={**environment(), "PYTHONPATH": str(RUNTIME / "deploy")}, check=True, capture_output=True, text=True)
+    print("Trial assistants revoked; existing sessions are invalidated.")
 
 
 def disable():
@@ -71,9 +84,9 @@ def disable():
         source.write_text(old)
         subprocess.run(["systemctl", "restart", "caddy"], capture_output=True)
         raise
-    # Remove public access first, revoke the trial login and disable its
+    # Remove public access first, revoke every trial login and disable its
     # frontend profile before stopping services. Re-enabling needs a new key.
-    revoke("trader-jo")
+    revoke_assistants()
     assistant_file = CONFIG / "access-assistant.env"
     assistant_file.write_text(assistant_file.read_text().replace("TJ_ASSISTANT_ENABLED=true", "TJ_ASSISTANT_ENABLED=false"))
     services = ["tradejournal-dot-trial-api.service", "tradejournal-dot-trial-assistant.service", "tradejournal-dot-trial-owner.service"]
