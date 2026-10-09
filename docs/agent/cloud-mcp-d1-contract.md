@@ -82,9 +82,11 @@ subject, keys, tokens, gateway secrets or private credential files.
    files or rolling back. It restores only a previously active socket after
    readiness succeeds; an absent/inactive entrance stays off, and failed recovery
    leaves it stopped. It never boot-enables D1.
-4. Stage `cloud_mcp_d0.py`, `cloud_mcp_d1_common.py` and `cloud_mcp_d1.py` in the
-   separate D0 runtime; its pinned standalone environment already provides the
-   SDK. Keep D0 source/config snapshots and profile ID for rollback.
+4. Stage `cloud_mcp_d0.py`, `cloud_mcp_d1_common.py`, `cloud_mcp_d2_common.py`
+   and `cloud_mcp_d1.py` in the separate D0 runtime. The D2 shared module is
+   required even when choice writes are disabled. Its pinned standalone
+   environment already provides the SDK. Keep D0 source/config snapshots and
+   profile ID for rollback.
 5. Prepare `/etc/tradejournal-d1/config.json`, root:tradejournal-d0, directory
    0750/file 0640, from the disabled example. Use the same issuer/resource/
    client claim/key snapshot as D0, and the selected principal ID/version.
