@@ -119,3 +119,57 @@ test("a slow pre-save reload cannot hide the immutable SKIP receipt", async ({ p
   await expect(mu.getByRole("button", { name: "Reopen saved MU decision" })).toBeVisible();
   await expect(mu.getByLabel("MU reason")).toHaveCount(0);
 });
+
+for (const timezoneId of ["America/Los_Angeles", "America/New_York", "UTC"]) {
+  test(`WAIT expiry previews and saves the same instant in ${timezoneId}`, async ({ browser }) => {
+    const context = await browser.newContext({ baseURL: assistantOrigin, timezoneId });
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    try {
+      const run = await login(page, browser, true);
+      const mu = page.getByRole("article", { name: "MU sample opportunity" });
+      await mu.getByLabel("MU choice").selectOption("wait");
+      const input = mu.getByLabel(`MU waiting ends (${timezoneId})`, { exact: true });
+      const preview = mu.locator("time[datetime]");
+      const deadlineMinute = new Date(Math.floor(new Date(run.deadline).getTime() / 60_000) * 60_000).toISOString();
+      await expect(preview).toHaveAttribute("datetime", deadlineMinute);
+      // Choose one future UTC instant, then enter its wall time in each browser.
+      const instant = new Date(Math.floor((Date.now() + 10 * 60_000) / 60_000) * 60_000);
+      const localInput = new Intl.DateTimeFormat("sv-SE", { timeZone: timezoneId,
+        year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(instant).replace(" ", "T");
+      await input.fill(localInput);
+      await expect(preview).toHaveAttribute("datetime", instant.toISOString());
+      const eastern = `${instant.toLocaleString("en-US", { timeZone: "America/New_York" })} ET`;
+      await expect(preview).toHaveText(eastern);
+      await expect(input).toHaveAccessibleDescription(`Will save as ${eastern}. Daily Review shows Eastern time.`);
+      if (timezoneId === "America/Los_Angeles") {
+        await page.setViewportSize({ width: 390, height: 844 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+        await mu.screenshot({ path: test.info().outputPath("wait-expiry-preview-phone.png") });
+      }
+      await input.fill("");
+      await expect(mu.getByText("Choose an expiry to preview its Eastern time.", { exact: true })).toBeVisible();
+      await expect(preview).toHaveCount(0);
+      await input.fill(localInput);
+      await mu.getByLabel("MU reason").fill("Verify local-time input and Eastern-time preview preserve the same instant.");
+      await mu.getByLabel("MU wait condition").fill("Reassess the invented trigger before this expiry.");
+      await mu.getByRole("button", { name: "Save MU decision", exact: true }).click();
+      await expect(mu.getByRole("button", { name: "Reopen saved MU decision" })).toBeVisible();
+      await mu.getByText("MU · WAIT", { exact: true }).click();
+      await expect(mu.getByText(eastern, { exact: true })).toBeVisible();
+      const records = (await (await page.request.get("/api/backend/decisions")).json()).decisions;
+      expect(records).toHaveLength(1);
+      expect(new Date(records[0].wait_expiry).toISOString()).toBe(instant.toISOString());
+      await page.goto(`/daily/${run.day}?practice_run=${run.id}`);
+      await page.reload();
+      await page.getByRole("button", { name: "Reopen saved MU decision" }).click();
+      await page.getByRole("article", { name: "MU sample opportunity" }).getByText("MU · WAIT", { exact: true }).click();
+      await expect(page.getByRole("article", { name: "MU sample opportunity" }).getByText(eastern, { exact: true })).toBeVisible();
+      const reopened = (await (await page.request.get(`/api/backend/decisions/${records[0].id}`)).json());
+      expect(reopened.wait_expiry).toBe(records[0].wait_expiry);
+      expect(reopened.record_sha256).toBe(records[0].record_sha256);
+      expect(errors).toEqual([]);
+    } finally { await context.close(); }
+  });
+}

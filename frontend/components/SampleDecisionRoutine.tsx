@@ -62,6 +62,9 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
     const ends = new Date(run.deadline);
     return new Date(ends.getTime() - ends.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   });
+  const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const expiryDate = new Date(expiry);
+  const expiryInstant = Number.isFinite(expiryDate.getTime()) ? expiryDate.toISOString() : null;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reopened, setReopened] = useState(false);
@@ -92,7 +95,7 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
       <label className="grid gap-1">{opp.symbol} choice<select value={decision} onChange={event => setDecision(event.target.value as typeof decision)} className="rounded border bg-background p-2"><option value="take">TAKE · simulated draft</option><option value="wait">WAIT</option><option value="skip">SKIP</option></select></label>
       <label className="grid gap-1">{opp.symbol} reason<textarea required maxLength={2000} value={rationale} onChange={event => setRationale(event.target.value)} className="rounded border bg-background p-2" rows={3} /></label>
       {decision === "take" && <p>Saving TAKE uses the frozen sample plan above, including its entry guard, expiry and sample cost assumptions. It cannot be armed.</p>}
-      {decision === "wait" && <><label className="grid gap-1">{opp.symbol} wait condition<input required maxLength={500} value={condition} onChange={event => setCondition(event.target.value)} className="rounded border bg-background p-2" /></label><label className="grid gap-1">{opp.symbol} waiting ends<input required type="datetime-local" value={expiry} onChange={event => setExpiry(event.target.value)} className="rounded border bg-background p-2" /></label></>}
+      {decision === "wait" && <><label className="grid gap-1">{opp.symbol} wait condition<input required maxLength={500} value={condition} onChange={event => setCondition(event.target.value)} className="rounded border bg-background p-2" /></label><label className="grid gap-1">{opp.symbol} waiting ends ({browserTimeZone})<input required type="datetime-local" value={expiry} onChange={event => setExpiry(event.target.value)} aria-describedby={`${opp.id}-expiry-preview`} className="rounded border bg-background p-2" /></label><p id={`${opp.id}-expiry-preview`} className="text-muted-foreground">{expiryInstant ? <>Will save as <time dateTime={expiryInstant}>{stamp(expiryInstant)}</time>. Daily Review shows Eastern time.</> : "Choose an expiry to preview its Eastern time."}</p></>}
       <button disabled={busy} className="w-fit rounded bg-primary px-4 py-2 text-primary-foreground">Save {opp.symbol} decision</button>
     </form>}
     {error && <p role="alert" className="text-red-500">{error}</p>}
