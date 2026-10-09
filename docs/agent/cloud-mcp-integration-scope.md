@@ -1,6 +1,6 @@
 # Dots cloud MCP integration scope
 
-**2026-10-09 — selected direct HTTPS D0, no connection enabled.** Isaac selected a combined
+**2026-10-09 — synthetic direct HTTPS D0 connected; domain tools remain proposed.** Isaac selected a combined
 direction: the personal Dot uses structured tools for data and supported
 operations, and the actual TradeJournal UI for visual inspection and workflow
 feedback. This document scopes the connected-app side. The
@@ -14,7 +14,9 @@ The [synthetic D0 runbook](cloud-mcp-d0-runbook.md) records its standalone
 resource server, offline public-key verification, direct HTTPS packaging and
 remaining cloud acceptance. Isaac subsequently required ChatGPT plan usage
 with no API credits; direct HTTPS supersedes the earlier tunnel-first recommendation.
-D1–D3 remain proposed; no actual Dot MCP connection is enabled.
+D1–D3 remain proposed. The actual Dot has called the synthetic profile tool,
+and Isaac reported the same fresh result with his Mac asleep. The runbook
+separates live, fixture and user-reported evidence and remaining gates.
 
 ## Recommended shape
 
@@ -22,7 +24,9 @@ Create a private TradeJournal plugin backed by a **new restricted MCP adapter
 on the always-on VPS**. Use ChatGPT Server URL + OAuth with a dedicated HTTPS
 proxy forwarding only MCP and its metadata to a Unix socket. The D0 service
 verifies tokens using an expiring operator-managed public-key file and has no
-outgoing IP networking or model credentials. No OpenAI tunnel/runtime key or
+outgoing IP networking or model credentials. A separate optional unprivileged
+publisher refreshes only public issuer keys on a timer; requests cannot trigger
+that publisher or change their grants. No OpenAI tunnel/runtime key or
 API inference is part of this route. The laptop is not a runtime dependency.
 
 ```mermaid
@@ -100,7 +104,7 @@ This is an inspection of the current checkout, not a production-state audit.
 | [Access engine](../../backend/app/engine/access.py) and [route manifest](../../backend/app/access_manifest.py) | Existing assistant identity, revocation, symbol/run grants and route classification. Browser identity uses cookies plus an ingress credential; OAuth bearer authentication does not exist here yet. |
 | [Practice routes](../../backend/app/routers/practice.py) | Restricted reads filter selected runs, sanitize errors and disable read-triggered recovery. Reuse these projections; do not call an unrestricted view behind an adapter. |
 | [Decision routes](../../backend/app/routers/decisions.py) | Immutable records, visibility checks and retry semantics exist. Authenticated writes currently support owner/manual MCP identities; cloud writer ownership still needs a contract and implementation. |
-| [Deployment access](../../deploy/README.md#optional-browser-authentication-disabled-by-default) | Separate assistant process and secret isolation provide a pattern. The cloud MCP process, Unix socket and dedicated HTTPS proxy are manual-only trial components, not installed capabilities today. |
+| [Deployment access](../../deploy/README.md#optional-browser-authentication-disabled-by-default) | Separate assistant process and secret isolation provide a pattern. Cloud MCP and its dedicated ingress are installed only in the approved synthetic trial; normal deployment keeps the manual-only templates opt-in. |
 | [Backend dependencies](../../backend/pyproject.toml) | D0 now pins `mcp==1.28.1` and `PyJWT[crypto]==2.13.0`. The synthetic SDK OAuth/tool fixture negotiates `2025-11-25`; this is not MCP Events compatibility or actual Dot evidence. |
 
 The current assistant grant contains `symbols`, `run_ids` and `journal_read`;
@@ -285,5 +289,6 @@ cause a switch to a more privileged entrance.
 The remaining environment choices are: actual account/custom-plugin eligibility,
 OAuth issuer and reachability, tested SDK/protocol, isolated trial host and
 data, and permission/cost limits. These are D0 investigation outputs, not
-reasons to build a broad connector first. No connection, credential, public
-endpoint, production grant, schedule or subscription was created by this scope.
+reasons to build a broad connector first. The original scoping document enabled
+none of these. The subsequent approved D0 trial enabled only synthetic access;
+domain tools, production grants and follow-through subscriptions remain proposed.
