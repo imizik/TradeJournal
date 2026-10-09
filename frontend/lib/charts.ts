@@ -652,6 +652,19 @@ export function sessionChange(priceValue: number | null | undefined, session: "p
     ? (priceValue / reference - 1) * 100 : null;
 }
 
+/**
+ * A quote's change when no trade is fresh: in pre- or postmarket, by the same
+ * rule as a trade (`sessionChange`); otherwise its last regular-session price
+ * against the previous close, else Tradier's own day change. After the close
+ * this is the day's closing change.
+ */
+export function quoteChange(quote: ChartQuote | undefined, session: "pre" | "regular" | "post" | null): number | null {
+  if (!quote) return null;
+  if (session === "pre" || session === "post") return sessionChange(quote.last, session, quote);
+  return quote.last != null && quote.last > 0 && quote.previous_close != null && quote.previous_close > 0
+    ? (quote.last / quote.previous_close - 1) * 100 : quote.change_percentage;
+}
+
 export function parseChartTick(value: unknown): ChartStreamTick | null {
   if (!value || typeof value !== "object") return null;
   const tick = value as Partial<ChartStreamTick>;

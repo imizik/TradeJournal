@@ -12,6 +12,7 @@ import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHan
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
 import { AutoLevelLayer, isOption, isRange, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
+import { SessionShade } from "@/lib/sessionShade";
 import type { AlertMark } from "@/lib/alerts";
 import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
@@ -55,7 +56,6 @@ function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
 const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close });
 // Up or down by the candle, brighter with its relative volume (C2.4).
 const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: (b.close >= b.open ? "#2bc9a4" : "#ee617a") + volumeAlpha(b.rvol) });
-const shadePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: 1, color: b.extended ? "#6b84bd10" : "transparent" });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
 /**
  * Reset: the latest candles at the opening zoom, every pane's price scale back
@@ -107,7 +107,8 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
     const clock = barClock({ now, interval, bars, ...rest, stale: failed || staleCandles(now, fetched) });
     return clock?.state === "live" ? clock.remaining : clock?.state ?? null;
   });
-  if (value === null) return null;
+  // Closed reads the same on every chart: the main chart says it once.
+  if (value === null || (!main && value === "closed")) return null;
   const live = typeof value === "number";
   return <span role="timer" aria-label={`${label} next bar`} title={live ? "Time until this candle closes" : undefined}
     className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${live ? "bg-sky-400/10 text-sky-300" : value === "closed" || value === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
@@ -116,7 +117,7 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
-  shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
+  shade: SessionShade; rsi?: ISeriesApi<"Line">;
   lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
@@ -232,19 +233,18 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const chart = createChart(element, {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: "#10151e" }, textColor: "#8593a9", fontSize: 10,
-        attributionLogo: true, panes: { separatorColor: "#27303d", separatorHoverColor: "#46576b" } },
+        // The status strip credits the library on every layout; one logo, on the main chart, is enough.
+        attributionLogo: main, panes: { separatorColor: "#27303d", separatorHoverColor: "#46576b" } },
       grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
-      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 } },
+      // entireTextOnly: a price cut off at a pane's edge is left out rather than printed against the next pane's.
+      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 }, entireTextOnly: true },
       timeScale: { borderColor: "#263141", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
           return kind <= TickMarkType.DayOfMonth ? tickFormats[kind as keyof typeof tickFormats].format(time * 1000) : etTime(time);
         } },
     });
-    const shade = chart.addSeries(HistogramSeries, { priceScaleId: "sessions", priceLineVisible: false, lastValueVisible: false,
-      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }) });
-    shade.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 } });
     const candles = chart.addSeries(CandlestickSeries, { upColor: "#2bc9a4", downColor: "#ee617a", wickUpColor: "#2bc9a4", wickDownColor: "#ee617a", borderVisible: false });
     const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
@@ -254,6 +254,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: Math.abs(k) === 1 ? "#f5e6a170" : "#f5e6a145", lineWidth: 1,
       lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     const markers = createSeriesMarkers(candles, []);
+    const shade = new SessionShade(() => barsRef.current);
+    candles.attachPrimitive(shade);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
     const layer = new DrawingLayer(timeline);
     candles.attachPrimitive(layer);
@@ -666,7 +668,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
-      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); chart.remove(); bundle.current = null; barsRef.current = [];
+      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]);
 
@@ -677,6 +679,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (current.rsi) { current.chart.removeSeries(current.rsi); current.rsi = undefined; return; }
     const rsi = current.chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
+    // Keep 100 and 0 clear of the divider, so they never sit against the price pane's bottom label.
+    rsi.priceScale().applyOptions({ scaleMargins: { top: 0.24, bottom: 0.18 } });
     rsi.createPriceLine({ price: 70, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
     rsi.createPriceLine({ price: 30, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
     current.chart.panes()[1].setHeight(main ? 85 : 60);
@@ -727,7 +731,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
-      current.shade.update(shadePoint(bars[last]));
+      current.shade.update();
       for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
       for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
@@ -745,7 +749,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     quiet();
     current.candles.setData(bars.map(candlePoint));
     current.volume.setData(bars.map(volumePoint));
-    current.shade.setData(bars.map(shadePoint));
+    current.shade.update();
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
     for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
@@ -821,14 +825,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
-    current.auto.set(zones, main);
+    current.auto.set(zones, main, lastClose);
     setCard((open) => open && !zones.some((zone) => zone.id === open.id) ? null : open);
     if (container.current) {
       container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
       container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
       container.current.dataset.rangeLevels = zones.filter((zone) => zone.members.some(isRange)).map((zone) => zone.label).join(",");
     }
-  }, [zones, pending, main]);
+  }, [zones, pending, main, lastClose]);
   useEffect(() => {
     bundle.current?.auto.setHighlight(pending ? null : highlight);
     if (container.current) container.current.dataset.highlight = highlight === null || pending ? "" : String(highlight);
@@ -887,7 +891,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       </div>
       <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
-        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span></> : <span>No candles in this window</span>}
+        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
+          {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
       </div>
