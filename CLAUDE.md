@@ -37,7 +37,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
 | `docs/agent/cloud-mcp-integration-scope.md` | Proposed Dots cloud connector: tunnel feasibility, OAuth identity, selected read tools, UI/tool routing and bounded D0–D3 implementation slices |
 | `docs/agent/cloud-mcp-d0-runbook.md` | D0 synthetic OAuth/MCP resource server, isolated trial setup, revocation/stop path and outstanding actual Dot/tunnel acceptance |
-| `docs/agent/cloud-browser-auth-contract.md` | Proposed cloud-browser authentication and permissions: preserve owner Tailscale access, separate restricted assistant login, sample-data browser trial and live exposure gates; private implementation, public access disabled |
+| `docs/agent/cloud-browser-auth-contract.md` | Browser authentication and permissions: preserve owner Tailscale access, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, actual Dot observation pending |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 | `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
 | `docs/swing-strategy-roadmap.md` | Swing families (1–16 sessions) in the factory, the after-close practice loop (signal, phone, Take/Skip, shadow trade), the setups board and confluence scan, macro/news/earnings as-of rules, stages from research to live |
@@ -140,8 +140,10 @@ and `test_schema_migrations.py` fails on that deliberately.
 
 ## Hard constraints
 
-- Never expose or tunnel the private API (8080/8000). It has no auth. There is
-  no public application ingress in the current deployment.
+- Never expose or tunnel the production private API (8080/8000). Its default
+  profile has no auth and production remains private. A separately approved
+  isolated sample trial may publish only its authenticated assistant frontend;
+  see the cloud-browser contract for its data and namespace boundaries.
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the
   test suite writes to whatever `DATABASE_URL` resolves to, including the
   production VPS database.

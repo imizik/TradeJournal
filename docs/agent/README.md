@@ -15,7 +15,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [dots-integration.md](dots-integration.md) | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
 | [cloud-mcp-integration-scope.md](cloud-mcp-integration-scope.md) | Proposed Dots cloud connector: tunnel feasibility, OAuth identity, selected read tools, UI/tool routing and bounded D0–D3 implementation slices |
 | [cloud-mcp-d0-runbook.md](cloud-mcp-d0-runbook.md) | D0 synthetic OAuth/MCP resource server, isolated trial setup, revocation/stop path and outstanding actual Dot/tunnel acceptance |
-| [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Proposed cloud-browser authentication and permissions: owner Tailscale continuity, separate assistant login, sample-data trial and live exposure gates; private implementation, public access disabled |
+| [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Browser authentication and permissions: owner Tailscale continuity, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, actual Dot observation pending |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |
