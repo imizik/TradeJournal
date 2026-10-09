@@ -285,9 +285,20 @@ test("frozen chart matches the assigned packet through decisions, replay and rel
   await expect(region).toHaveAttribute("data-evidence-sha256",mu.context.context_sha256);
   await expect(region.getByRole("img",{name:"MU frozen 1m price and volume"})).toBeVisible();
   await expect(region.locator("g[data-minute-start]")).toHaveCount(60);
+  await expect(region.getByTestId("frozen-vwap-legend")).toContainText("supplied packet VWAP per minute");
+  await expect(region.getByTestId("frozen-vwap-legend")).not.toContainText("15-minute");
+  expect(await region.locator("text[data-time-tick]").count()).toBeGreaterThan(2);
+  const nbisRegion = page.getByRole("region",{name:"NBIS frozen evidence chart"});
+  const labelBox = await nbisRegion.getByLabel("NBIS frozen plan levels").boundingBox();
+  const plotBox = await nbisRegion.getByRole("img").boundingBox();
+  expect(labelBox!.y).toBeGreaterThanOrEqual(plotBox!.y+plotBox!.height);
+  await expect(nbisRegion.locator("svg text").filter({hasText:"Trigger"})).toHaveCount(0);
+  const firstBar = [...mu.context.packet.recent_minute_bars].sort((a,b)=>Date.parse(a.t)-Date.parse(b.t))[0];
+  await expect(region.locator(`g[data-minute-start="${new Date(firstBar.t).toISOString()}"] title`)).toContainText(`packet VWAP $${firstBar.vw.toFixed(4)}`);
   await region.getByRole("button",{name:"15m",exact:true}).click();
   await expect(region.getByRole("button",{name:"15m",exact:true})).toHaveAttribute("aria-pressed","true");
-  const raw = mu.context.packet.recent_minute_bars as {t:string;o:number;h:number;l:number;c:number;v:number}[];
+  await expect(region.getByTestId("frozen-vwap-legend")).toContainText("per complete 15-minute interval");
+  const raw = mu.context.packet.recent_minute_bars as {t:string;o:number;h:number;l:number;c:number;v:number;vw:number|null}[];
   const grouped = new Map<number,typeof raw>();
   for (const bar of [...raw].sort((a,b) => Date.parse(a.t)-Date.parse(b.t))) {
     const key = Math.floor(Date.parse(bar.t)/900000)*900000;grouped.set(key,[...(grouped.get(key)??[]),bar]);
@@ -297,7 +308,7 @@ test("frozen chart matches the assigned packet through decisions, replay and rel
     const row = table.locator(`tr[data-start="${new Date(at).toISOString()}"]`);
     const cells = await row.getByRole("cell").allTextContents();
     expect(cells).toEqual([`${bars.length===15?"Complete":"Partial"} · ${bars.length}/15`,
-      `$${bars.at(-1)!.c.toFixed(4)}`,bars.reduce((n,b)=>n+b.v,0).toLocaleString("en-US"),...[bars[0].o,Math.max(...bars.map(b=>b.h)),Math.min(...bars.map(b=>b.l))].map(p=>`$${p.toFixed(4)}`)]);
+      `$${bars.at(-1)!.c.toFixed(4)}`,bars.reduce((n,b)=>n+b.v,0).toLocaleString("en-US"),bars.at(-1)!.vw === null ? "Unavailable" : `$${bars.at(-1)!.vw!.toFixed(4)}`,...[bars[0].o,Math.max(...bars.map(b=>b.h)),Math.min(...bars.map(b=>b.l))].map(p=>`$${p.toFixed(4)}`)]);
   }
   const summary = await table.textContent();
   const article = page.getByRole("article",{name:"MU sample opportunity"});
@@ -348,7 +359,27 @@ test("isolated supplied VWAP is visible in both minute and quarter views", async
   const region=page.getByRole("region",{name:"MU frozen evidence chart"});
   await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
   await expect(region.getByText(/VWAP unavailable for 14 frozen minutes/)).toBeVisible();
+  expect(await region.locator("g[data-minute-start] title").allTextContents()).toEqual(expect.arrayContaining([expect.stringContaining("packet VWAP unavailable")]));
   await region.getByRole("button",{name:"15m",exact:true}).click();
   await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
   await expect(region.getByRole("table").getByText("Complete · 15/15",{exact:true})).toBeVisible();
+});
+
+
+test("widely separated frozen minutes remain partial with a small time axis", async ({page,browser}) => {
+  await login(page,browser,true,true);
+  await page.route("**/api/backend/practice/runs/*",async route => {
+    const response=await route.fetch(), body=await response.json();
+    const context=body.opportunities.find((o:{symbol:string})=>o.symbol==="MU").context;
+    const source=context.packet.recent_minute_bars.at(-1);
+    context.captured_at="2026-10-09T13:01:00Z";
+    context.packet.recent_minute_bars=[{...source,t:"0001-01-01T00:00:00Z"},{...source,t:"2026-10-09T13:00:00Z"}];
+    await route.fulfill({response,json:body});
+  });
+  await page.getByRole("button",{name:"Reload saved practice"}).click();
+  const region=page.getByRole("region",{name:"MU frozen evidence chart"});
+  await expect(region.locator("g[data-minute-start]")).toHaveCount(2);
+  expect(await region.locator("text[data-time-tick]").count()).toBeLessThanOrEqual(6);
+  await expect(region.getByRole("table").getByText("Partial · 1/15",{exact:true})).toHaveCount(2);
+  await page.unrouteAll({behavior:"wait"});
 });
