@@ -213,7 +213,18 @@ verified TLS certificate, runs the shipped Caddy routing and systemd units,
 checks actual IPv4/IPv6 denial in the service sandbox, and exercises discovery,
 call/refusal, route denial, key expiry, profile revoke, restart and full stop.
 It uses no live issuer, model or production data and does not prove an actual
-Dot connection. Record its observed CI result separately from local tests.
+Dot connection.
+
+Observed 2026-10-09: full local verification passed **1,804 backend tests
+(33 skipped), 196 ordinary browser tests, five authenticated browser tests and
+four sample-decision browser tests**, plus lint/typecheck/build/import checks.
+The focused D0 resource/issuer/offline checks passed **71 tests**. The native
+Ubuntu job on implementation commit `a3dee5c` passed real TLS/Unix ingress,
+OAuth refusal, offline key expiry, revocation, restart, stop and IPv4/IPv6
+socket-creation denial. Its fixtures do not establish provider or Dot evidence.
+Two test-only socket paths were subsequently made portable from macOS to
+Ubuntu; the corrected offline suite passed 27 tests locally. PR readiness still
+requires current-head CI and native review.
 
 External issuer login/refresh, actual Dot invocation, laptop-off use, account
 usage controls and real-host ingress/isolation remain pending until the trial.

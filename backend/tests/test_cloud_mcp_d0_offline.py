@@ -312,7 +312,7 @@ def test_socket_activation_accepts_actual_unix_listener(tmp_path: Path, monkeypa
     cfg, snapshot = tmp_path / "config.json", tmp_path / "keys.json"
     _config(cfg, snapshot)
     _snapshot(snapshot, key)
-    path = Path("/private/tmp") / f"d0-{uuid.uuid4().hex[:10]}.sock"
+    path = Path("/tmp") / f"d0-{uuid.uuid4().hex[:10]}.sock"
     listener = _unix_listener(path)
     _activation_env(monkeypatch)
     _map_listener_fd(monkeypatch, listener)
@@ -351,7 +351,7 @@ def test_socket_activation_rejects_nonlistening_unix_socket(tmp_path: Path, monk
     cfg, snapshot = tmp_path / "config.json", tmp_path / "keys.json"
     _config(cfg, snapshot)
     _snapshot(snapshot, key)
-    path = Path("/private/tmp") / f"d0-{uuid.uuid4().hex[:10]}.sock"
+    path = Path("/tmp") / f"d0-{uuid.uuid4().hex[:10]}.sock"
     candidate = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     candidate.bind(str(path))
     _activation_env(monkeypatch)
