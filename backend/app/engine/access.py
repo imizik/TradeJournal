@@ -297,7 +297,7 @@ def bootstrap(request):
 
 
 def grant_valid(grants):
-    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay"}:
+    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write"}:
         raise HTTPException(422, "Invalid permission grant")
     if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > 10 or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
         raise HTTPException(422, "Choose one to ten market symbols")
@@ -321,6 +321,12 @@ def grant_valid(grants):
         raise HTTPException(422, "Invalid sample replay permission")
     if grants.get("sample_replay") and (not sample_replays_enabled() or grants.get("decision_write") is not True):
         raise HTTPException(403, "Replay requires an enabled sample writer and explicit sample replay flag")
+    if not isinstance(grants.get("market_decision_write", False), bool):
+        raise HTTPException(422, "Invalid market decision permission")
+    if grants.get("market_decision_write") and (not market_writes_enabled() or grants["journal_read"]
+            or grants.get("decision_write") or grants.get("sample_replay") or len(grants["run_ids"]) != 1
+            or not set(grants["symbols"]) <= {"MU", "NBIS"}):
+        raise HTTPException(403, "Market writer requires one MU/NBIS session and no other write/journal grant")
 
 
 def sample_writes_enabled():
@@ -341,6 +347,19 @@ def sample_replays_enabled():
 def replay_writer(request):
     return (decision_writer(request) and request.state.access.grants.get("sample_replay") is True
         and sample_replays_enabled() and getattr(request.app.state, "sample_replay_isolated", False) is True)
+
+
+def market_writes_enabled():
+    return all(os.environ.get(name) == "true" for name in
+        ("TJ_ACCESS_ENABLED", "TJ_ACCESS_SAMPLE_DATA", "TJ_DOT_TRIAL_ENABLED", "TJ_MARKET_DECISION_WRITES"))
+
+
+def market_writer(request):
+    who = getattr(request.state, "access", None)
+    return bool(who and not who.owner and not who.service and who.grants.get("market_decision_write") is True
+        and not any(who.grants.get(k) for k in ("journal_read", "decision_write", "sample_replay"))
+        and len(who.grants.get("run_ids", [])) == 1 and set(who.grants.get("symbols", [])) <= {"MU", "NBIS"}
+        and market_writes_enabled() and getattr(request.app.state, "market_decisions_isolated", False) is True)
 
 
 def create_assistant(db, identifier, grants):
@@ -380,7 +399,7 @@ def permitted_record_ids(request, db):
     from app.models import PracticeOpportunity, DecisionRecord
     opps = db.exec(select(PracticeOpportunity.id).where(PracticeOpportunity.run_id.in_([uuid.UUID(value) for value in allowed]))).all()
     query = select(DecisionRecord.id).where(DecisionRecord.opportunity_id.in_([f"a3:{value}" for value in opps]))
-    if request.state.access.grants.get("decision_write"):
+    if request.state.access.grants.get("decision_write") or request.state.access.grants.get("market_decision_write"):
         query = query.where(DecisionRecord.actor == "agent:" + request.state.access.identifier,
             DecisionRecord.symbol.in_(request.state.access.grants.get("symbols", [])))
     return frozenset(db.exec(query).all())
@@ -419,6 +438,12 @@ def authorize(request, operation, params):
         return
     if operation in {"GET /access/me", "POST /access/logout"}:
         return
+    if who.grants.get("market_decision_write"):
+        if not market_writer(request):
+            raise HTTPException(403, "Market decision writing is disabled")
+        if operation in SAMPLE_WRITER_PATHS:
+            return
+        raise HTTPException(403, "Operation not permitted for the frozen market session")
     if who.grants.get("decision_write"):
         if not decision_writer(request):
             raise HTTPException(403, "Sample decision writing is disabled")

@@ -28,7 +28,7 @@ export default async function DashboardPage({
   searchParams: Promise<{ account?: string; type?: string; decision?: string }>;
 }) {
   const access = await requireAccess();
-  if (access.grants.decision_write) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /></div>;
+  if (access.grants.decision_write || access.grants.market_decision_write) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /></div>;
   if (!access.owner && !access.grants.journal_read) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /><PracticeDecisions records={(await api.decisions()).decisions} /></div>;
   const resolvedParams = await searchParams;
   const statsParams = new URLSearchParams();

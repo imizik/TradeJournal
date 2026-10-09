@@ -30,6 +30,7 @@ class Grant(Strict):
     journal_read: bool = False
     decision_write: bool = Field(default=False, strict=True)
     sample_replay: bool = Field(default=False, strict=True)
+    market_decision_write: bool = Field(default=False, strict=True)
 
 
 class Assistant(Strict):

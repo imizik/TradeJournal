@@ -79,7 +79,9 @@ class AccessMiddleware:
                 message["headers"] = [(k, v) for k, v in message.get("headers", []) if k.lower() != b"cache-control"] + [(b"cache-control", b"no-store")]
             await send(message)
         received = 0
-        maximum = 16_384 if request.url.path.startswith("/access/") else 16_000_000
+        who = getattr(request.state, "access", None)
+        maximum = 16_384 if (request.url.path.startswith("/access/")
+            or (who and who.grants.get("market_decision_write"))) else 16_000_000
         async def bounded_receive():
             nonlocal received
             message = await receive()

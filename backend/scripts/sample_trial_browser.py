@@ -24,4 +24,7 @@ def build_app():
         sample_practice.prepare(db)
         if access.sample_replays_enabled():
             sample_replay.prepare(db, scenarios=True)
+        if access.market_writes_enabled():
+            from scripts import market_trial_fixture
+            market_trial_fixture.prepare(db)
     return app

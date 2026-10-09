@@ -10,7 +10,7 @@ type Source = { url: string; label: string; formed_at?: string | null; observed_
 type Decision = { id: string; decision: "take" | "wait" | "skip"; rationale: string; policy_version?: string; policy_hash?: string; wait_condition?: string | null; wait_expiry?: string | null; plan?: Record<string, unknown> };
 type Context = { captured_at?: string; provider?: string; context_sha256?: string; price_facts?: { name: string; value: number; unit: string; source: string; formed_at: string; observed_at: string }[]; packet?: Record<string, unknown> };
 type Opportunity = { id: string; symbol: string; context: Context | null; human: Decision | null; agent: Decision | null; revealed: boolean; comparison_status: string; benchmark: { status?: string; reason?: string; [key: string]: unknown }; paper: { status?: string } | null; agent_paper?: { status?: string } | null; feedback: { rating: string; phone_received: boolean | null } };
-type Run = { id: string; day: string; revision?: number; parent_id?: string | null; status: string; result: string | null; error?: string | null; mode: string; comparison: string; late: boolean; created_at: string; finished_at: string | null; deadline: string | null; calendar: { status?: string; [key: string]: unknown }; policy_version: string; policy_hash: string; brief: { title: string; text: string; sources: Source[] }[]; agent: { status: string; error?: string | null; model?: string | null; usage?: Record<string, unknown> | null; cost?: number | null; cost_provenance?: string }; timings: { morning?: { seconds: number; reason?: string }; review?: { seconds: number; reason?: string } }; scheduling_configured?: boolean; counts?: Record<string, number>; opportunities: Opportunity[] };
+type Run = { market_data?: boolean; id: string; day: string; revision?: number; parent_id?: string | null; status: string; result: string | null; error?: string | null; mode: string; comparison: string; late: boolean; created_at: string; finished_at: string | null; deadline: string | null; calendar: { status?: string; [key: string]: unknown }; policy_version: string; policy_hash: string; brief: { title: string; text: string; sources: Source[] }[]; agent: { status: string; error?: string | null; model?: string | null; usage?: Record<string, unknown> | null; cost?: number | null; cost_provenance?: string }; timings: { morning?: { seconds: number; reason?: string }; review?: { seconds: number; reason?: string } }; scheduling_configured?: boolean; counts?: Record<string, number>; opportunities: Opportunity[] };
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(apiUrl(path), { method: body === undefined ? "GET" : "POST", cache: "no-store", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -28,7 +28,7 @@ const objText = (value: unknown) => JSON.stringify(value, null, 2);
 
 export default function PracticeRoutine({ day }: { day?: string | null }) {
   const { grants } = useAppAccess();
-  return grants.decision_write ? <SampleDecisionRoutine day={day} /> : <ReadPracticeRoutine day={day} />;
+  return (grants.decision_write || grants.market_decision_write) ? <SampleDecisionRoutine day={day} /> : <ReadPracticeRoutine day={day} />;
 }
 
 function ReadPracticeRoutine({ day }: { day?: string | null }) {
@@ -119,6 +119,7 @@ function ReadPracticeRoutine({ day }: { day?: string | null }) {
     active.opportunities.filter((opp) => (active.comparison === "assisted" || opp.revealed) && opp.agent?.decision === decision).length,
   ])) : { take: 0, wait: 0, skip: 0 };
 
+  if (active?.market_data) return <SampleDecisionRoutine day={day} marketOnly />;
   return <fieldset disabled={!owner} className="min-w-0"><section className="min-w-0 space-y-4 rounded-lg border bg-card p-4 [overflow-wrap:anywhere]" data-testid="practice-routine">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h2 className="text-sm font-semibold uppercase tracking-wide">Daily practice routine</h2><p className="mt-1 text-sm text-muted-foreground">{selectedDay} · {active?.mode ?? "manual"} preparation · choices and paper practice stay separate from journal fills.</p></div>
