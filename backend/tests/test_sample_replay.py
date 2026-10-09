@@ -299,6 +299,34 @@ def test_tampered_continuation_and_plan_refused(replay):
         assert db.exec(select(DecisionEvent)).all() == []
 
 
+@pytest.mark.parametrize(
+    "change",
+    ["risk_200", "risk_zero", "trigger_source", "stop_source", "target_source"],
+)
+def test_corrupted_derived_plan_fields_refused_without_events(replay, change):
+    record = saved(replay)
+    with Session(replay.engine) as db:
+        row = db.get(DecisionRecord, uuid.UUID(record["id"]))
+        detail = json.loads(row.decision_json)
+        if change.startswith("risk"):
+            detail["plan"]["initial_risk_per_share"] = (
+                200 if change == "risk_200" else 0
+            )
+        else:
+            detail["plan"][change]["source_path"] = "corrupted-source"
+        row.decision_json = decisions._canonical(detail)
+        db.add(row)
+        db.commit()
+    response = start(replay)
+    assert response.status_code == 422
+    assert "risk or provenance mismatch" in response.text
+    with Session(replay.engine) as db:
+        assert db.exec(select(DecisionEvent)).all() == []
+        row = db.get(DecisionRecord, uuid.UUID(record["id"]))
+        assert row.record_sha256 == record["record_sha256"]
+        assert row.evidence_sha256 == record["evidence_sha256"]
+
+
 def test_concurrent_starts_have_exactly_one_immutable_receipt(replay):
     saved(replay)
     with ThreadPoolExecutor(max_workers=2) as pool:

@@ -366,15 +366,17 @@ def start(db, opp_id, who):
     if expected != record.record_sha256:
         raise decisions.DecisionError("Frozen decision hash mismatch")
     # Freshness/start expiry are real time; the sealed paper clock is explicitly relative.
-    decisions._validate_take(
+    validated_plan = decisions._validate_take(
         record.symbol,
         context.captured_at,
         json.loads(context.data_json),
-        example,
+        request["plan"],
         now,
         sample=True,
     )
-    terms = replace(px.terms_from_plan(plan), expiry=POLICY["expiry_second"])
+    if plan != validated_plan:
+        raise decisions.DecisionError("Frozen plan risk or provenance mismatch")
+    terms = replace(px.terms_from_plan(validated_plan), expiry=POLICY["expiry_second"])
     sessions = [
         px.Session("sample-session-1", 0, POLICY["session_seconds"]),
         px.Session("sample-session-2", 86400, 86400 + POLICY["session_seconds"]),
