@@ -198,14 +198,18 @@ async def refresh_keys(config: Config, *, http_transport=None):
         "login_observed": False}
 
 
-def activated_socket(config: Config):
-    if config.jwks_file is None:
-        raise ValueError("Socket deployment requires offline public keys")
+def reject_model_credentials():
     # Refuse accidental model/tunnel credential inheritance without printing values.
     prefixes = ("OPENAI_", "AZURE_OPENAI_", "ANTHROPIC_", "TUNNEL_")
     names = {"GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENROUTER_API_KEY"}
     if any(value and (name.startswith(prefixes) or name in names) for name, value in os.environ.items()):
         raise ValueError("Remove model and tunnel credentials from the probe environment")
+
+
+def activated_socket(config: Config):
+    if config.jwks_file is None:
+        raise ValueError("Socket deployment requires offline public keys")
+    reject_model_credentials()
     if os.environ.get("LISTEN_PID") != str(os.getpid()) or os.environ.get("LISTEN_FDS") != "1":
         raise ValueError("Exactly one systemd listening socket is required")
     # Auto-detect the actual socket family rather than assigning AF_UNIX to a TCP fd.

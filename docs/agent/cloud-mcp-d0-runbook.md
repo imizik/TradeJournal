@@ -1,6 +1,6 @@
 # D0 synthetic cloud MCP trial
 
-**2026-10-09 — direct HTTPS implementation, actual Dot acceptance pending.**
+**2026-10-09 — synthetic Dot connection observed; automatic key refresh added.**
 The [connector scope](cloud-mcp-integration-scope.md) defines D0–D3. Isaac
 selected ChatGPT-plan usage with no API credits. The selected connection is
 now a private ChatGPT plugin using **Server URL + OAuth**, backed by a dedicated
@@ -86,8 +86,9 @@ Official sources checked 2026-10-09:
 Use a separate host/install directory and OS user, without copying production
 `.env`, database, model/provider keys or broad MCP configuration. The included
 units are manual-only and outside the normal deployment unit directory; merging
-this code does not start or publish the probe. No hostname, issuer account,
-credential or public route has been created by this implementation.
+this code does not start or publish the probe. Packaging by itself creates no
+hostname, issuer account, credential or public route; the separately approved
+trial's observed setup is recorded below.
 
 Copy [config.https.example.json](../../deploy/cloud-mcp-d0/config.https.example.json)
 to a protected file outside Git. Keep `enabled` false while preparing. Select:
@@ -138,9 +139,9 @@ lists `d0:profile`; resource-specific API scopes may be absent there. Its
 `scope_enforcement: access_token` field records that every
 authenticated MCP request still requires that scope in its verified token.
 Missing/other token scopes fail even after successful issuer preflight.
-Refresh manually before its one-hour
-expiry during the short trial. Missed refresh stops authenticated calls; it
-never enables network access or another billing mode. No scheduler is added.
+Refresh before its one-hour expiry. Missed refresh stops authenticated calls;
+it never enables network access or another billing mode. The optional publisher
+below automates only public-key maintenance, outside the serving process.
 
 Install the HTTPS socket/service templates manually in `/etc/systemd/system`
 on the selected host. Confirm the proxy runs under the `caddy` group (adapt
@@ -161,6 +162,80 @@ sudo systemctl start tradejournal-d0-https.socket
 Do not enable boot startup in the first temporary trial. The first permitted
 proxy request activates the service. Check native sandbox/socket behavior on
 the actual host; template reading alone cannot prove enforcement.
+
+## Optional automatic public-key refresh
+
+Isaac authorized this increment after the synthetic call worked with his Mac
+asleep. [The publisher](../../backend/cloud_mcp_d0_refresh.py) reads a separate
+three-field configuration containing only issuer URL, JWKS URL and output path.
+It refuses profile grants, client credentials and inherited model/tunnel
+credentials. It uses the same bounded, verified HTTPS discovery/JWKS fetches
+and atomic public-key validation as manual refresh. It never contacts login,
+token, model, application or job endpoints. Errors exit nonzero with a generic
+message rather than logging input or response values.
+
+[The oneshot service](../../deploy/cloud-mcp-d0/tradejournal-d0-keys.service)
+runs as a separate `tradejournal-d0-keys` UID, with no capabilities or environment
+file. Its network access supports those fixed public fetches; the MCP serving
+process retains `PrivateNetwork=true` and `AF_UNIX` only. The publisher cannot
+read `/etc/tradejournal-d0/config.json` or production data/configuration, and
+its writable persistent directory is `/var/lib/tradejournal-d0-keys`. Systemd
+creates that directory mode 0750, owned by the publisher and group
+`tradejournal-d0`. Published snapshots remain mode 0640: the serving UID can
+read them but cannot modify them. The service has a 30-second start deadline.
+
+[The timer](../../deploy/cloud-mcp-d0/tradejournal-d0-keys.timer) runs after
+boot and every 15 minutes, with up to 30 seconds each of timer accuracy and
+random delay. Systemd serializes runs of the same oneshot. Snapshot lifetime
+remains one hour; failed fetch/validation/publication does not extend the last
+good snapshot. Removed issuer keys take effect after the next successful
+publication. A missed refresh eventually denies authentication, without a
+request-triggered fetch or paid fallback. The timer does not renew OAuth user
+grants or change disabled profiles. This is unrelated to Practice/model-job
+scheduling and enables no such jobs.
+
+These units remain manual-only, outside normal deployment installation. On the
+approved isolated host, create the publisher account with the serving group:
+
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin --gid tradejournal-d0 tradejournal-d0-keys
+```
+
+Install the publisher source beside `cloud_mcp_d0.py` and both key units under
+`/etc/systemd/system`. Copy
+[config.refresh.example.json](../../deploy/cloud-mcp-d0/config.refresh.example.json)
+to `/etc/tradejournal-d0/refresh.json`, mode 0640, root-owned with group
+`tradejournal-d0`; set the selected issuer/JWKS URLs and keep its output path
+`/var/lib/tradejournal-d0-keys/jwks.json`. Do not copy client IDs, subjects,
+secrets or the serving configuration into this file. If the account already
+exists, verify its identity/group rather than recreating or repurposing it.
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl start tradejournal-d0-keys.service
+sudo systemctl status tradejournal-d0-keys.service
+```
+
+Only after successful publication and verifying snapshot ownership/permissions,
+atomically change the serving configuration's `jwks_file` to the new path,
+preserving all profile IDs, grants and permissions. Restart only
+`tradejournal-d0-https.service`: changing the key-file path otherwise denies
+requests until restart. Verify a fresh synthetic call, then enable the selected
+maintenance timer:
+
+```bash
+sudo systemctl enable --now tradejournal-d0-keys.timer
+sudo systemctl list-timers tradejournal-d0-keys.timer
+```
+
+This enables publisher maintenance across boots; it does not enable the MCP
+socket at boot. Observe at least one actual scheduled successful run and a new
+snapshot deadline. Inspect service result/journal on failure and restore valid
+publication; do not extend expiry or bypass validation. Root can still perform
+manual refresh against the selected serving configuration, preserving the
+publisher's snapshot ownership. Prefer starting the oneshot through systemd
+for manual maintenance too; stop timer/service before running a separate CLI
+publisher to avoid overlapping writers.
 
 In [ChatGPT Plugins](https://chatgpt.com/plugins), select **+ → Add custom MCP
 server**, choose **Server URL**, enter the dedicated `/mcp` URL and configure
@@ -198,6 +273,12 @@ sudo systemctl stop tradejournal-d0-https.socket tradejournal-d0-https.service
 Stopping the service alone allows socket activation to restart it. Remove the
 public stanza before teardown, and preserve unrelated Caddy routes. D0 has no
 subscription and never controls paper monitoring or owner access.
+If the maintenance timer was selected, stop it and its active publisher too:
+
+```bash
+sudo systemctl disable --now tradejournal-d0-keys.timer
+sudo systemctl stop tradejournal-d0-keys.service
+```
 
 ## Verification evidence
 
@@ -232,8 +313,9 @@ Two test-only socket paths were subsequently made portable from macOS to
 Ubuntu; the corrected offline suite passed 27 tests locally. PR readiness still
 requires current-head CI and native review.
 
-External issuer login/refresh, actual Dot invocation, laptop-off use, account
-usage controls and real-host ingress/isolation remain pending until the trial.
+Account-level purchased-credit controls, issuer refresh-grant revocation and
+complete live teardown remain unobserved. Public-key upkeep does not establish
+any of those controls or authorize production journal access.
 
 
 ## Auth0 discovery observation
@@ -267,3 +349,37 @@ transient process under the service's sandbox denied actual IPv4/IPv6 socket
 creation and imported no application/model SDKs. Existing Caddy configuration,
 production release and browser trial remained unchanged/active. The D0 units
 remained inactive and its configuration disabled pending issuer/client setup.
+
+Subsequent live trial on 2026-10-09: the private ChatGPT Server URL + OAuth
+plugin connected to Auth0 using a predefined Native public client, without a
+client secret or OpenAI Platform key. Its API required per-app `d0:profile`
+authorization and explicit consent, denied machine access, and issued access
+tokens with maximum lifetime 300 seconds. The client enabled only code/refresh
+flows with rotating refresh tokens, idle maximum 3600 seconds and absolute
+maximum 86400 seconds. OIDC profile/email scopes were disabled in the plugin;
+the Google sign-in used Auth0 development keys only for the synthetic trial.
+Auth0's resource-parameter compatibility setting was selected for standard MCP
+resource indicators. Production OAuth readiness is not claimed.
+
+Trader Jo discovered and directly called the single `get_profile({})` tool.
+The returned invented ID matched configuration, and server request timestamps
+corroborated the call. Auth0 recorded code and refresh-token exchanges, including
+a refresh before a successful call beyond the original five-minute token's
+lifetime. One initial negative probe was never executed by the Dot and is not
+acceptance evidence. A subsequent fresh call while the local profile was
+disabled returned `UNAUTHORIZED`/reauthentication required without a profile or
+retry. Restoring the grant, reconnecting the same app and making a fresh call
+proved recovery. Isaac then reported the same fresh result from his phone while
+the Mac was sleeping; laptop sleep is user-reported evidence, not an independently
+measured host state. Actual browser PKCE parameters were not captured; S256
+support and its maintained-SDK flow are separate metadata/fixture evidence.
+
+The dedicated public hostname had trusted TLS; anonymous MCP calls returned
+401 and unrelated paths returned 404. The actual serving unit had private
+networking, Unix-only sockets, zero effective capabilities, seccomp and
+no-new-privileges. Existing private API and sample-browser services remained
+healthy. The shared proxy used its public IPv4 bind and TLS-ALPN certificate
+challenge policy; Caddy 2.11's supported `SIGUSR1` reload preserved its disabled
+admin interface. No model API calls, Work/Codex delegation or real journal
+data were used. The updater's scheduled native execution and selected-host
+activation need their own evidence rather than inheriting this connection test.
