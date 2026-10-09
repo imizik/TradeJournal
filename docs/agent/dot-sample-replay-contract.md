@@ -1,0 +1,95 @@
+# Jo's own sample paper replay
+
+Isaac selected this next increment on 2026-10-09: Jo may start and review a
+bounded paper replay for its own assigned sample TAKE. The first cloud-browser
+save/reload/reopen test was reported successful for MU/NBIS WAIT, and separately
+corroborated through their deployed receipts. Those records and credentials are
+retained. This replay uses a fresh exercise and separate `trader-jo-replay` login.
+
+## Scope and clocks
+
+A root-only preparation creates one MU/NBIS run under the distinct
+`practice-sample-replay-long-15m-v1` schema. It freezes completed invented price
+facts using actual capture timestamps, a fixed conditional long plan and a real
+20-hour decision/start deadline. TAKE commits that conditional plan before its
+future trigger; WAIT/SKIP remain valid and create no replay entry.
+
+The continuation is a short, invented regular-session sequence, sealed before
+any decision. It uses seconds from a simulated session open: arm at minute 15,
+a completed 15-minute close at minute 30, detect two seconds later, then use the
+first full eligible minute. Replay expiry is minute 60. This relative clock is
+separate from real capture/receipt timestamps and the real start deadline. No
+historical or future live market observation is claimed. Event `effective_at`
+is mapped to the frozen capture anchor; UI event times are labelled replay
+minutes. `recorded_at` is the actual server commit time.
+
+The private continuation lives in `PracticeOpportunity.benchmark_json`; only its
+salted SHA-256 commitment and rules are published in frozen context. A random
+private nonce prevents guessing the stop/target variant from its commitment.
+Preparation persists the sealed continuation before committing its context, so
+recovery cannot replace a published commitment. Assistant views, including a
+read-only inspector or partially prepared run, never reveal the private tape
+before that actor starts its own committed TAKE.
+
+## Permission and execution boundary
+
+Enablement requires all existing four sample/auth flags plus the explicit
+`TJ_SAMPLE_REPLAY_ENABLED=true`. The actual request must also originate in the
+sample factory that validated the marked seeded SQLite installation; flags
+alone on normal `app.main` do not admit replay requests. The separate login
+requires `decision_write=true`, `sample_replay=true`, one assigned run, up to two
+symbols and no journal access. All flags/capabilities default off.
+
+Only `POST /practice/opportunities/{opp_id}/sample-replay` is added. Its body is
+empty/strict: actor, decision, context, plan, tape, clock and retry identity are
+server-owned. The service serializes against access revocation/grant changes,
+rechecks the current session/principal/grants, resolves only its own TAKE, checks
+schema, context/decision hashes, sealed commitment, fixed plan and freshness,
+and rejects new starts past the real deadline. An identical completed retry
+returns the original result after expiry; disabled/revoked permission still
+refuses execution requests. Own committed results remain readable through the
+existing sanitized run view.
+
+The pure `paper_execution` reducer supplies next-minute fills, entry guard,
+stop-first exits, fixed sample costs and 3x costs. Its normal P0 policy/universe,
+raw-provider source guard, watcher and schedule are unchanged. The replay's
+complete execution policy/hash declares its separate clock/expiry. It never
+arms a P0 plan, contacts providers, starts a timer/model, sends notifications,
+creates broker orders, or writes account fills/FIFO/trades.
+
+Sample events use `sample_replay_` event types, `sample-replay:` keys, the
+`sample_replay_fixture` source and `delivery=none`. The normal watcher selects
+only `armed` events, so sample results consume no live P0 slots or outbox work.
+P0 arming checks schema before existing-event retries, and its generic paper
+view refuses sample schemas. The sample view owns its event timeline/result.
+
+## Persistence and acceptance
+
+All replay events and the base/stressed outcome snapshot commit in one bounded
+transaction. An interruption leaves either no events or the complete replay;
+retries cannot create another entry/exit. The view reads stored outcome snapshots
+rather than recalculating history through a future reducer. The saved decision
+and evidence never change. The receipt hash binds the committed event data.
+
+Required checks: refusal of WAIT/SKIP, old sample/live records, other actors,
+unassigned runs/symbols, forged fields, missing factory/flags/grants, bad CSRF,
+expired starts, revoked sessions, changed plans and corrupt commitments; exact
+numerical base/stress outcomes; simultaneous retries and pre-commit interruption;
+preparation recovery preserving its nonce; real UI start/reload/reopen, phone
+layout and delayed pre-start response; native namespace/key/receipt preservation
+and a restart proving the outcome persists. Tier-2 native reviews and exact-head
+CI are required. Actual Jo replay acceptance remains user-observed after delivery.
+
+This is a sample workflow exercise, not a blind human/agent comparison, live
+forward cohort, automatic WAIT monitor or evidence of trading edge.
+
+## Operations
+
+Use the existing guarded updater with the exact reviewed source commit and
+`--enable-sample-replay`. Its selected source archive now has eleven files;
+Linux dependencies, credentials and data remain outside the archive. Rollback
+restores the prior code/assets and all permission flags. Then run the guarded
+seed command with `--replay`, which defaults to a new `trader-jo-replay` identity
+and saves its key privately. Existing identities require explicit `--rotate`;
+the selected path does not rotate old logins. Revoke the disposable proof login
+after native acceptance. No production route or Tailscale change is selected.

@@ -769,3 +769,23 @@ verification, authentication refusal, exact route allowlisting, revocation,
 restart and teardown. This fixture evidence does not prove an actual Dot, live
 issuer, laptop-off use or account-level usage controls. Those remain trial
 acceptance steps; no public route is created by merging the implementation.
+
+### Selected sample paper replay increment
+
+Isaac selected [Jo’s own sample paper replay](../docs/agent/dot-sample-replay-contract.md)
+on 2026-10-09. Keep prior inspector/writer keys and decisions. The updater’s
+eleven-file selected source set adds the replay engine and P0 schema refusal.
+Enable the new capability only on the already-approved guarded sample runtime:
+
+```bash
+sudo python3 /path/to/dot_trial_update.py --backend-archive /path/to/backend.tar.gz --frontend-archive /path/to/frontend.tar.gz --commit <reviewed-40-character-commit> --enable-sample-replay
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_seed.py --replay
+```
+
+The new default ID is `trader-jo-replay`, with one fresh sample run, MU/NBIS, no
+journal access and explicit replay permission. The key remains in a mode-0600
+private file and is entered only in the sign-in flow. The original WAIT records
+cannot become replay plans. No live provider, watcher, model, timer, broker or
+notification is enabled. New flags/code/assets roll back together if the isolated
+runtime fails readiness. Future continuations are hidden until each actor starts
+its own TAKE; stored sample outcomes never write journal fills or P0 events.

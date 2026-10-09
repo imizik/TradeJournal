@@ -13,8 +13,9 @@ PREFIX = "dot-sample-decision:"
 
 def eligible(run):
     return (run.session_key.startswith(PREFIX)
-        and run.policy_version == decisions.SAMPLE_POLICY_VERSION
-        and run.policy_hash == decisions.SAMPLE_POLICY_HASH and run.status == "prepared")
+        and (run.policy_version, run.policy_hash) in {
+            (decisions.SAMPLE_POLICY_VERSION, decisions.SAMPLE_POLICY_HASH),
+            (decisions.REPLAY_POLICY_VERSION, decisions.REPLAY_POLICY_HASH)} and run.status == "prepared")
 
 
 def actor(identifier):
@@ -22,11 +23,12 @@ def actor(identifier):
 
 
 def view(db, run, identifier, symbols, *, details=True):
+    from app.engine import sample_replay
     if not eligible(run):
         raise decisions.DecisionError("Sample run not found")
     result = {"id": str(run.id), "day": run.day.isoformat(), "sample_data": True,
               "policy_version": run.policy_version, "policy_hash": run.policy_hash,
-              "deadline": run.deadline.isoformat() + "Z", "opportunities": []}
+              "deadline": run.deadline.isoformat() + "Z", "replay_exercise": sample_replay.eligible(run), "opportunities": []}
     if not details:
         return result
     for opp in db.exec(select(PracticeOpportunity).where(PracticeOpportunity.run_id == run.id)).all():
@@ -41,11 +43,13 @@ def view(db, run, identifier, symbols, *, details=True):
         choice = db.exec(select(DecisionRecord).where(
             DecisionRecord.opportunity_id == f"a3:{opp.id}", DecisionRecord.actor == actor(identifier))).first()
         result["opportunities"].append({"id": str(opp.id), "symbol": opp.symbol,
-            "context": decisions.context_row(context, evidence), "choice": decisions.row(choice) if choice else None})
+            "context": decisions.context_row(context, evidence), "choice": decisions.row(choice) if choice else None,
+            "replay": sample_replay.view(db, choice) if choice and sample_replay.eligible(run) else None})
     return result
 
 
 def choose(db, run, opp, identifier, body):
+    from app.engine import sample_replay
     if not eligible(run):
         raise decisions.DecisionError("Sample run not found")
     if not str(body.get("rationale", "")).strip():
@@ -54,7 +58,8 @@ def choose(db, run, opp, identifier, body):
     payload = {"operation_id": f"sample:{opp.id}:{identifier}", "opportunity_id": f"a3:{opp.id}",
         "actor": identity, "symbol": opp.symbol, "context_id": str(opp.context_id),
         **{key: body.get(key) for key in ("decision", "rationale", "wait_condition", "wait_expiry", "plan")}}
-    return decisions.create(db, payload, routine=True, sample=True, receipt_deadline=run.deadline)
+    return decisions.create(db, payload, routine=True, sample=True, receipt_deadline=run.deadline,
+        sample_replay=sample_replay.eligible(run))
 
 
 def prepare(db):

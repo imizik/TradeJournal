@@ -421,3 +421,9 @@ def test_app_access_session_and_revocation_on_postgres(migrated, monkeypatch):
     with pytest.raises(HTTPException) as denied:
         access.identify(request)
     assert denied.value.status_code == 401
+
+
+def test_concurrent_sample_replay_is_atomic_on_postgres(migrated, monkeypatch):
+    from tests.test_sample_replay import check_concurrent_replay_store
+
+    check_concurrent_replay_store(migrated, monkeypatch)

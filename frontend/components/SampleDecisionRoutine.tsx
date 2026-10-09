@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl, type DecisionContext, type DecisionRecord } from "@/lib/api";
 import { DecisionCard } from "@/components/PracticeDecisions";
+import { useAppAccess } from "@/components/AccessProvider";
+import SampleReplayPanel, { type SampleReplay } from "@/components/SampleReplayPanel";
 
-type Opportunity = { id: string; symbol: string; context: DecisionContext; choice: DecisionRecord | null };
-type Run = { id: string; day: string; sample_data: true; policy_version: string; deadline: string; opportunities: Opportunity[] };
+type Opportunity = { id: string; symbol: string; context: DecisionContext; choice: DecisionRecord | null; replay?: SampleReplay | null };
+type Run = { id: string; day: string; sample_data: true; policy_version: string; deadline: string; replay_exercise?: boolean; opportunities: Opportunity[] };
 const stamp = (value: string) => `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York" })} ET`;
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
@@ -28,7 +30,8 @@ export default function SampleDecisionRoutine({ day }: { day?: string | null }) 
   const acceptRun = useCallback((next: Run | null) => setActive(previous => {
     if (!next || previous?.id !== next.id) return next;
     return { ...next, opportunities: next.opportunities.map(opp => ({ ...opp,
-      choice: opp.choice ?? previous.opportunities.find(saved => saved.id === opp.id)?.choice ?? null })) };
+      choice: opp.choice ?? previous.opportunities.find(saved => saved.id === opp.id)?.choice ?? null,
+      replay: opp.replay ?? previous.opportunities.find(saved => saved.id === opp.id)?.replay ?? null })) };
   }), []);
   const load = useCallback(async () => {
     setError(""); setLoading(true);
@@ -55,6 +58,7 @@ export default function SampleDecisionRoutine({ day }: { day?: string | null }) 
 }
 
 function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Opportunity; run: Run; onSaved: (run: Run) => void }) {
+  const { grants, sample_replay_enabled } = useAppAccess();
   const [decision, setDecision] = useState<"take" | "wait" | "skip">("skip");
   const [rationale, setRationale] = useState("");
   const [condition, setCondition] = useState("");
@@ -68,6 +72,7 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reopened, setReopened] = useState(false);
+  const [replayReopened, setReplayReopened] = useState(false);
   const plan = (opp.context.packet.sample_plan ?? {}) as Record<string, unknown>;
   async function save(event: React.FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
@@ -88,9 +93,19 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
     } catch (err) { setError(err instanceof Error ? err.message : "The saved record could not be reopened."); }
     finally { setBusy(false); }
   }
+  async function replay(start: boolean) {
+    setBusy(true); setError("");
+    try {
+      const next = start ? await request<Run>(`/practice/opportunities/${opp.id}/sample-replay`, {})
+        : await request<Run>(`/practice/runs/${run.id}`);
+      onSaved(next); setReplayReopened(!start);
+    } catch (err) { setError(err instanceof Error ? err.message : "Reload before retrying an uncertain replay."); }
+    finally { setBusy(false); }
+  }
   return <article className="space-y-4 rounded-lg border bg-card p-4" aria-label={`${opp.symbol} sample opportunity`}>
     <div className="flex flex-wrap items-center gap-3"><h3 className="text-lg font-semibold">{opp.symbol}</h3><a href={`/charts?symbol=${opp.symbol}`} className="text-primary underline">Open {opp.symbol} chart</a><a href={`/daily/${run.day}?practice_run=${run.id}`} className="text-primary underline">Daily Review</a></div>
     <div className="space-y-2 text-sm"><p><strong>Frozen sample evidence</strong> · captured {stamp(opp.context.captured_at)} · {opp.context.price_facts.length} timestamped price facts</p><p>Source: simulated bars · USD per share · cutoff {stamp(opp.context.captured_at)}</p><p>{String(opp.context.packet.scenario)}</p><p>Sample long plan: trigger ${String(plan.trigger_level ?? "unavailable")}, stop ${String(plan.stop ?? "unavailable")}, target ${String(plan.target ?? "unavailable")}. A regular-session 15-minute close above the trigger is the stated condition; the plan uses fixed levels, an entry guard, and a two-session maximum.</p><p className="text-muted-foreground">EMA/RSI charts use a separate simulated chart window. Live news, options and daily history are outside this exercise. No model calls, monitoring or execution are started by saving.</p><details><summary className="cursor-pointer">Inspect frozen packet and rules</summary><pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap text-xs">{JSON.stringify(opp.context, null, 2)}</pre></details></div>
+    {run.replay_exercise && <p className="text-sm text-muted-foreground">{String(opp.context.packet.replay_notice)} The hidden continuation is revealed only after you start a saved TAKE. WAIT/SKIP produce no paper entry.</p>}
     {opp.choice ? <><p role="status">Saved decision {opp.choice.id}{reopened ? " · original record reopened" : ""}.</p><button type="button" disabled={busy} onClick={() => void reopen()} className="rounded border px-3 py-2">Reopen saved {opp.symbol} decision</button><DecisionCard record={opp.choice} focused={false} withPaper={false} /></> : <form onSubmit={save} className="grid gap-3 text-sm">
       <label className="grid gap-1">{opp.symbol} choice<select value={decision} onChange={event => setDecision(event.target.value as typeof decision)} className="rounded border bg-background p-2"><option value="take">TAKE · simulated draft</option><option value="wait">WAIT</option><option value="skip">SKIP</option></select></label>
       <label className="grid gap-1">{opp.symbol} reason<textarea required maxLength={2000} value={rationale} onChange={event => setRationale(event.target.value)} className="rounded border bg-background p-2" rows={3} /></label>
@@ -98,6 +113,7 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
       {decision === "wait" && <><label className="grid gap-1">{opp.symbol} wait condition<input required maxLength={500} value={condition} onChange={event => setCondition(event.target.value)} className="rounded border bg-background p-2" /></label><label className="grid gap-1">{opp.symbol} waiting ends ({browserTimeZone})<input required type="datetime-local" value={expiry} onChange={event => setExpiry(event.target.value)} aria-describedby={`${opp.id}-expiry-preview`} className="rounded border bg-background p-2" /></label><p id={`${opp.id}-expiry-preview`} className="text-muted-foreground">{expiryInstant ? <>Will save as <time dateTime={expiryInstant}>{stamp(expiryInstant)}</time>. Daily Review shows Eastern time.</> : "Choose an expiry to preview its Eastern time."}</p></>}
       <button disabled={busy} className="w-fit rounded bg-primary px-4 py-2 text-primary-foreground">Save {opp.symbol} decision</button>
     </form>}
+    {run.replay_exercise && opp.choice && <SampleReplayPanel symbol={opp.symbol} decision={opp.choice.decision} value={opp.replay ?? null} busy={busy} canStart={Boolean(grants.sample_replay && sample_replay_enabled)} reopened={replayReopened} onStart={() => void replay(true)} onReopen={() => void replay(false)} />}
     {error && <p role="alert" className="text-red-500">{error}</p>}
   </article>;
 }

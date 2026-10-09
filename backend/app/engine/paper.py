@@ -172,6 +172,12 @@ def arm(db: Session, record_id: uuid.UUID, operation_id: str, *, now: datetime, 
     record = db.get(DecisionRecord, record_id)
     if record is None:
         raise LookupError("Decision record not found")
+    # Check the schema before any existing-event retry: sample replays have a
+    # separate ledger namespace and can never become a P0 arm by retrying it.
+    if record.decision != "take":
+        raise PaperError("only a TAKE plan can be armed")
+    if (record.policy_version, record.policy_hash) != (decisions.POLICY_VERSION, decisions.POLICY_HASH):
+        raise PaperError("the plan was saved under a different plan schema and must be decided again")
     existing = events_for(db, record.id)
     if existing:
         armed = json.loads(existing[0].data_json)
@@ -185,10 +191,6 @@ def arm(db: Session, record_id: uuid.UUID, operation_id: str, *, now: datetime, 
         if paired_arm is not None:
             raise PaperError("this shared opportunity was already armed through another actor; paired choices cannot create another paper plan")
     plan = json.loads(record.decision_json)["plan"]
-    if record.decision != "take":
-        raise PaperError("only a TAKE plan can be armed")
-    if (record.policy_version, record.policy_hash) != (decisions.POLICY_VERSION, decisions.POLICY_HASH):
-        raise PaperError("the plan was saved under a different plan schema and must be decided again")
     if record.symbol not in UNIVERSE:
         raise PaperError(f"{record.symbol} is outside the P0 universe ({', '.join(UNIVERSE)})")
     costs = plan.get("cost_model") or {}
@@ -452,6 +454,8 @@ def paper_row(db: Session, record_id: uuid.UUID, *, record: DecisionRecord | Non
     record = record if record is not None else db.get(DecisionRecord, record_id)
     if record is None:
         raise LookupError("Decision record not found")
+    if record.policy_version in {decisions.SAMPLE_POLICY_VERSION, decisions.REPLAY_POLICY_VERSION}:
+        raise LookupError("Sample decisions require the sample replay view")
     rows = event_rows if event_rows is not None else events_for(db, record_id)
     state = px.fold(_data(rows))
     terms = px.terms_from_plan(json.loads(record.decision_json)["plan"]) if record.decision == "take" else None
