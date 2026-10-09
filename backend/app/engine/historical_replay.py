@@ -12,7 +12,8 @@ from app.engine.chart_math import ET
 from app.models import AccessPrincipal, DecisionContext, DecisionEvent, DecisionRecord, JobRun, PracticeOpportunity, PracticeRun
 
 PREFIX = "dot-historical-replay:"
-VERSION = "historical-paper-replay-v1"
+LEGACY_VERSION = "historical-paper-replay-v1"
+VERSION = "historical-paper-replay-v2"
 SOURCE = "historical_alpaca_replay"
 UTC = timezone.utc
 POLICY = {"version": VERSION, "decision_schema": decisions.HISTORICAL_POLICY_HASH,
@@ -21,6 +22,9 @@ POLICY = {"version": VERSION, "decision_schema": decisions.HISTORICAL_POLICY_HAS
     "stop_first": True, "max_holding_sessions": 2, "cost_model": paper.COST,
     "stress_factor": 3, "source": SOURCE, "universe": ["MU", "NBIS"],
     "missing_minutes": "unresolved", "live_execution": False, "notifications": False}
+LEGACY_POLICY = {**POLICY, "version": LEGACY_VERSION}
+LEGACY_POLICY_HASH = decisions._hash(decisions._canonical(LEGACY_POLICY))
+POLICY = {**POLICY, "split_coverage": "unavailable", "session_transition": "unresolved_without_frozen_split_evidence"}
 POLICY_HASH = decisions._hash(decisions._canonical(POLICY))
 PLAN_FIELDS = frozenset({"instrument", "direction", "trigger", "trigger_level", "trigger_fact", "stop", "stop_fact",
     "target", "target_fact", "entry_guard", "expiry", "max_holding_sessions", "freshness_limit_seconds", "cost_model"})
@@ -104,7 +108,7 @@ def prepare(db, bundle, *, identifier="trader-jo-history", proof=False):
         raise decisions.DecisionError("Choose a new historical assistant ID")
     retrieved, cutoff, sessions = validate_bundle(bundle)
     digest = decisions._hash(decisions._canonical(bundle))
-    key = PREFIX + ("proof:" if proof else "") + cutoff.strftime("%Y%m%dT%H%M") + ":" + identifier
+    key = PREFIX + VERSION + ":" + ("proof:" if proof else "") + cutoff.strftime("%Y%m%dT%H%M") + ":" + identifier
     previous = db.exec(select(PracticeRun).where(PracticeRun.session_key == key)).first()
     if previous:
         if (eligible(previous) and market_practice.metadata(previous).get("handoff_sha256") == digest
@@ -178,6 +182,8 @@ def checked_context(context):
 
 def take_unavailable(context, run):
     evidence = checked_context(context)
+    if evidence["packet"].get("replay_rules") != {**POLICY, "hash": POLICY_HASH}:
+        return "This historical exercise uses older replay rules; its saved receipts remain readable"
     cutoff = decisions._utc(evidence["packet"]["simulated_as_of"], "historical cutoff")
     if access.now() > run.deadline:
         return "Exercise deadline expired; saved records remain readable"
@@ -268,7 +274,8 @@ def replay_view(db, record):
     if (result.get("type") != "replay_result" or first.get("record_sha256") != record.record_sha256
             or first.get("evidence_sha256") != record.evidence_sha256
             or decisions._hash(record.evidence_json) != record.evidence_sha256
-            or first.get("policy_hash") != POLICY_HASH
+            or (first.get("policy_version"), first.get("policy_hash")) not in {
+                (VERSION, POLICY_HASH), (LEGACY_VERSION, LEGACY_POLICY_HASH)}
             or decisions._hash(decisions._canonical(result["continuation"])) != first.get("tape_sha256")
             or first["tape_sha256"] != evidence["packet"].get("replay_commitment")):
         raise decisions.DecisionError("Historical replay receipt integrity check failed")
@@ -285,6 +292,11 @@ def simulate(plan, sealed):
     """Pure bounded replay. No clock, network, database, outbox or gap filling."""
     terms = px.terms_from_plan(plan)
     sessions = sessions_from(sealed["sessions"])
+    # Raw prices can change share basis between sessions. This capture has no
+    # frozen corporate-action coverage: never evaluate that transition or
+    # silently interpret a split as a gap stop. Preserve all original bars
+    # in the sealed receipt, but judge only the first session's stable window.
+    sessions = sessions[:1]
     cutoff = decisions._utc(sealed["simulated_as_of"], "historical cutoff").replace(tzinfo=UTC).timestamp()
     bars = [{"start": int(decisions._utc(b["t"], "minute time").replace(tzinfo=UTC).timestamp()),
         **{key: b[key] for key in ("o", "h", "l", "c")}} for b in sealed["minutes"]]
@@ -325,11 +337,14 @@ def simulate(plan, sealed):
         if missing is not None:
             events.append({"type": "unresolved", "key": "unresolved", "at": missing,
                 "stage": "trigger", "reason": "missing historical confirmation minutes"})
-        else:
+        elif terms.expiry <= sessions[0].close_at:
             events.extend(px.check_expiry(state, terms, end + px.MAX_DETECTION_DELAY + 1))
+        else:
+            events.append({"type": "unresolved", "key": "unresolved", "at": sessions[0].close_at,
+                "stage": "trigger", "reason": "split coverage unavailable across session boundary"})
     elif state.status in {"open", "triggered"}:
         events.extend(px.end_unresolved(state, sessions[-1].close_at,
-            "bounded historical tape ended before a complete outcome"))
+            "split coverage unavailable across session boundary"))
     state = px.fold(events)
     return events, state, px.outcome(state, terms), px.outcome(state, terms, 3)
 

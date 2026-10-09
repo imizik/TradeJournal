@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--cutoff", default="13:45")
     parser.add_argument("--proof", action="store_true", help="Separate operational proof session; never Jo's decisions")
     args = parser.parse_args()
-    args.identifier = args.identifier or ("historical-replay-proof" if args.proof else "trader-jo-history")
+    args.identifier = args.identifier or ("historical-replay-proof-v2" if args.proof else "trader-jo-history-v2")
     if os.geteuid() != 0 or CONFIG.is_symlink() or not CONFIG.is_dir():
         raise ValueError("Run only as root on the approved trial")
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", args.identifier) or args.identifier == "owner":

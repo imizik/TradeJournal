@@ -232,7 +232,40 @@ def test_pure_replay_missing_confirmation_entry_hold_and_bounded_end(historical)
     for bar in tape["minutes"]:
         bar.update(o=110, c=110, h=110.2, l=109.9)
     events, state, normal, stressed = history.simulate(valid, tape)
-    assert state.status == "expired" and normal is None
+    assert state.status == "unresolved" and normal is None
+    assert events[-1]["reason"] == "split coverage unavailable across session boundary"
+    same_session = {**valid, "expiry": datetime.fromtimestamp(history.sessions_from(sealed["sessions"])[0].close_at,
+        timezone.utc).isoformat()}
+    assert history.simulate(same_session, tape)[1].status == "expired"
+
+
+@pytest.mark.parametrize("second_session_price", [55.125, 110.25])
+def test_split_or_unknown_overnight_basis_is_unresolved_not_a_gap_loss(historical, second_session_price):
+    h = historical
+    with Session(h.b.engine) as db:
+        opp = db.get(PracticeOpportunity, h.ids["MU"])
+        ctx = db.get(DecisionContext, opp.context_id)
+        evidence = json.loads(ctx.data_json)
+        cutoff = decisions._utc(evidence["packet"]["simulated_as_of"], "cutoff")
+        valid = decisions._validate_take("MU", cutoff, evidence, h.plan, cutoff, historical=True)
+        sealed = json.loads(opp.benchmark_json)
+    boundary_at = history.sessions_from(sealed["sessions"])[0].close_at
+    for bar in sealed["minutes"]:
+        first = decisions._utc(bar["t"], "time").replace(tzinfo=timezone.utc).timestamp() < boundary_at
+        price = 110.25 if first else second_session_price
+        bar.update(o=price, h=price+.1, l=price-.1, c=price)
+    events, state, normal, stressed = history.simulate(valid, sealed)
+    assert state.status == "unresolved" and events[-1]["at"] == boundary_at
+    assert events[-1]["reason"] == "split coverage unavailable across session boundary"
+    assert not any(e["type"] == "exit" for e in events)
+    assert normal is None and stressed is None
+    assert all(e["at"] <= boundary_at for e in events)
+    # A first crossing visible only in session two cannot become an entry either.
+    for bar in sealed["minutes"]:
+        if decisions._utc(bar["t"], "time").replace(tzinfo=timezone.utc).timestamp() < boundary_at:
+            bar.update(o=110, h=110.1, l=109.9, c=110)
+    events, state, _, _ = history.simulate(valid, sealed)
+    assert state.status == "unresolved" and not any(e["type"] == "entry" for e in events)
 
 
 def test_simultaneous_replay_start_is_one_atomic_receipt(historical):
@@ -245,6 +278,56 @@ def test_simultaneous_replay_start_is_one_atomic_receipt(historical):
     assert values[0] == values[1]
     with Session(h.b.engine) as db:
         assert len(db.exec(select(DecisionEvent)).all()) == 6
+
+
+def test_legacy_receipt_is_readable_but_new_legacy_replay_is_refused(historical):
+    h = historical
+    assert choose(h).status_code == 201
+    assert start(h).status_code == 201
+    with Session(h.b.engine) as db:
+        record = db.exec(select(DecisionRecord)).first()
+        events = db.exec(select(DecisionEvent).where(DecisionEvent.record_id == record.id).order_by(DecisionEvent.seq)).all()
+        # Construct a bound v1 snapshot, as left by the unpublished initial trial.
+        evidence = json.loads(record.evidence_json)
+        sealed = json.loads(events[-1].data_json)["continuation"]
+        sealed["version"] = history.LEGACY_VERSION
+        tape_hash = decisions._hash(decisions._canonical(sealed))
+        evidence["packet"].update(replay_rules={**history.LEGACY_POLICY, "hash": history.LEGACY_POLICY_HASH},
+            replay_commitment=tape_hash)
+        record.evidence_json = decisions._canonical(evidence)
+        record.evidence_sha256 = decisions._hash(record.evidence_json)
+        request_body = {"operation_id": record.operation_id, "opportunity_id": record.opportunity_id,
+            "actor": record.actor, "symbol": record.symbol, "context_id": str(record.context_id), "decision": "take",
+            "plan": h.plan, "rationale": "Historical fixture choice; no live performance claim",
+            "wait_condition": None, "wait_expiry": None}
+        record.record_sha256 = decisions._hash(decisions._canonical({"request": request_body,
+            "context_sha256": record.evidence_sha256}))
+        for row in events:
+            event = json.loads(row.data_json)
+            if event["type"] == "armed":
+                event.update(policy_version=history.LEGACY_VERSION, policy_hash=history.LEGACY_POLICY_HASH,
+                    evidence_sha256=record.evidence_sha256, record_sha256=record.record_sha256, tape_sha256=tape_hash)
+            if event["type"] == "replay_result":
+                event["continuation"] = sealed
+            row.data_json = decisions._canonical(event)
+            db.add(row)
+        db.add(record)
+        db.commit()
+        assert history.replay_view(db, record)["policy_version"] == history.LEGACY_VERSION
+        context = db.get(DecisionContext, record.context_id)
+        context.data_json = record.evidence_json
+        context.context_sha256 = record.evidence_sha256
+        db.add(context)
+        db.commit()
+        assert "older replay rules" in history.take_unavailable(context, db.get(PracticeRun, h.run_id))
+        assert start(h).status_code == 200  # exact old receipt remains an idempotent read
+        for event in events:
+            db.delete(event)
+        opp = db.get(PracticeOpportunity, h.ids["MU"])
+        opp.benchmark_json = decisions._canonical(sealed)
+        db.add(opp)
+        db.commit()
+    assert start(h).status_code == 422  # no new execution under the old contract
 
 
 def test_unassigned_readonly_projection_and_assignment_reset_refuse(historical):

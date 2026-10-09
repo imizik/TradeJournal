@@ -20,7 +20,7 @@ remain unchanged. Provider history may contain subsequent corrections; this
 does not prove what the provider actually published at the historical cutoff.
 
 The new schema is `practice-historical-replay-long-15m-v1`; the execution
-contract is `historical-paper-replay-v1`. It supports MU/NBIS long shares,
+contract is `historical-paper-replay-v2`. It supports MU/NBIS long shares,
 source-linked trigger/stop/target, regular-session complete 15-minute close
 confirmation, an entry guard, two-session maximum and `p0-cost-v1`. The public
 packet has at most sixty pre-cutoff minutes. Coverage reports minutes without
@@ -42,6 +42,16 @@ two-session hold is unresolved rather than a fabricated exit. Stop-first,
 reference entry guard, costs, planned-R denominator and three-times costs keep
 the existing reducer semantics. Save the entire receipt atomically once; exact
 retries/read/restart return it without recomputation or changing the decision.
+
+This capture does not supply frozen split-coverage evidence. V2 evaluates only
+the first historical session: an open position or pending trigger needing the
+next session becomes unresolved at the first close, even if next-session bars
+are available. A split must never look like an economic gap-stop loss, and raw
+prices are never adjusted silently. Same-session stop/target outcomes and
+within-session expiry remain evaluable. A verified overnight basis is a later
+data prerequisite, not an inferred absence of splits. Original v1 receipts are
+readable snapshots, but no new v1 replay can start; use a fresh v2 exercise and
+identity without replacing prior evidence/keys.
 
 ## Isolation and operations
 
