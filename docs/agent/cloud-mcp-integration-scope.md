@@ -1,6 +1,6 @@
 # Dots cloud MCP integration scope
 
-**2026-10-09 — synthetic direct HTTPS D0 connected; first sample D1 reads selected.** Isaac selected a combined
+**2026-10-09 — direct HTTPS D0 and sample D1 reads accepted; first demo D2 writes selected.** Isaac selected a combined
 direction: the personal Dot uses structured tools for data and supported
 operations, and the actual TradeJournal UI for visual inspection and workflow
 feedback. This document scopes the connected-app side. The
@@ -16,7 +16,11 @@ remaining cloud acceptance. Isaac subsequently required ChatGPT plan usage
 with no API credits; direct HTTPS supersedes the earlier tunnel-first recommendation.
 D1 now selects only two sample Practice reads; the
 [D1 contract](cloud-mcp-d1-contract.md) records implementation and activation gates.
-The remaining D1 tools and D2–D3 remain proposed. The actual Dot has called the synthetic profile tool,
+The remaining D1 tools, broader D2 context creation and D3 remain proposed.
+The [first D2 contract](cloud-mcp-d2-contract.md) selects only saving an own
+choice against existing frozen sample evidence and recovering its receipt.
+Actual D1 OAuth reads and Jo's tool/cloud-UI comparison passed on 2026-10-09;
+physical laptop-off D1 observation remains separate. The actual Dot has called the synthetic profile tool,
 and Isaac reported the same fresh result with his Mac asleep. The runbook
 separates live, fixture and user-reported evidence and remaining gates.
 
@@ -132,7 +136,7 @@ the other names below remain proposed and cannot be called.
 | `get_decision(record_id)` | Authorized, visible immutable decision and its frozen evidence. Reject unrelated or unrevealed records before serialization. |
 | `get_paper_status(record_id)` | Authorized paper events and persisted monitoring/delivery evidence. Preserve unknown delivery/phone-receipt states; keep real journal fills and P&L outside the response. |
 
-`practice:read` is the selected D1 permission, pending actual consent;
+`practice:read` is the consented D1 permission;
 `market:read` remains proposed. Effective access is the intersection of the linked connection's
 OAuth grant and the current backend principal/resource grants. A token cannot
 widen its principal's access. Explicit run grants will require owner updates
@@ -229,7 +233,7 @@ do not depend on a skill installed only on Isaac's laptop.
 | “Review today's practice outcomes” | Read granted runs, decisions and paper events through MCP; disclose missing grants/data. |
 | “Try the daily review flow and tell me what's confusing” | Navigate the actual UI with its assistant login; cite observed pages and interactions. |
 | “Why does this chart disagree with the saved decision?” | Inspect the UI and retrieve frozen/current facts, comparing timestamp, source, units and price basis. |
-| “Save this as your draft decision” | Explain that version one has no write capability; later use the dedicated write tool and its durable receipt. |
+| “Save this as your draft decision” | In an explicitly opted-in D2 demo connection, save only an own choice for an assigned frozen opportunity and return its durable receipt. D1-only connections remain read-only. |
 | “Watch this and tell me when it changes” | Require a supported, explicitly established schedule/subscription with cancellation and delivery evidence; connection alone is insufficient. |
 
 Prefer structured tools for precise records and supported mutations, UI for
@@ -244,12 +248,12 @@ operation must not be submitted twice via different entrances.
 |---|---|---|
 | D0 — connection feasibility | Select issuer and tested SDK; a synthetic `get_profile` tool, restricted test identity and direct HTTPS/OAuth personal plugin on an isolated always-on host. Offline verification, no model credentials and native network denial; record account/workspace access and usage controls. | Actual Dot discovers and calls the tool after OAuth while the laptop is off; refresh, disconnect, principal revocation and expired/removed local keys behave as specified. IPv4/IPv6 creation is denied while Unix ingress works. No real journal/provider data. |
 | D1 — selected reads | First increment: `get_profile`, `list_practice_runs(day)` and `get_practice_run(run_id)` for one assigned simulated MU/NBIS run; independent bearer checks, Unix bridge and manual-only packaging. Other read tools remain proposed. | Negative authorization tests, owner/browser regressions, native namespace evidence and an actual Dot reading the assigned fixture and comparing its UI. Any live data is a separate approval and later increment. |
-| D2 — own draft writes | Separately scoped `freeze_decision_context`, `record_agent_decision` and operation-status retrieval. Durable context/record ownership and principal-scoped retry keys. | Same-key retry yields one record; changed content conflicts; actor spoofing and other-principal IDs fail. Uncertain writes recover by receipt; drafts remain unarmed. |
+| D2 — own draft writes | First demo increment: separately scoped `record_practice_choice` and `get_practice_choice` for existing frozen assigned opportunities. Arbitrary context creation and generic `record_agent_decision` remain later scope. | Same logical choice across UI/MCP yields one record; changed content conflicts; actor spoofing and other-principal IDs fail. Uncertain writes recover by receipt; drafts remain unarmed. |
 | D3 — follow-through | One user-selected subscription or bounded schedule, not a general workflow engine. | Real event/run and cancellation, expiry, restart, duplicate delivery and revoked-resource tests; unchanged state stays quiet. |
 
 D0's actual synthetic connection supplied the first authentication/transport
-result. D1's selected sample reads now need their own implementation review and
-actual tool/UI acceptance. Each slice gets its own implementation review;
+result. D1's selected sample reads completed review, CI and actual tool/UI
+acceptance; D2 has its own implementation and live acceptance gates. Each slice gets its own implementation review;
 this sequence does not promote writes, journal coaching or monitoring into D0/D1.
 
 Personal journal coaching is a separately selectable extension after D1:
