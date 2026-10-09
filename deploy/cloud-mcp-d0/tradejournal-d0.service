@@ -1,0 +1,27 @@
+[Unit]
+Description=TradeJournal synthetic cloud MCP feasibility probe (manual trial only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tradejournal-d0
+Group=tradejournal-d0
+WorkingDirectory=/opt/tradejournal-d0/backend
+ExecStart=/opt/tradejournal-d0/backend/.venv/bin/python /opt/tradejournal-d0/backend/cloud_mcp_d0.py --config /etc/tradejournal-d0/config.json --port 8788
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=/etc/tradejournal /var/lib/tradejournal
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

@@ -31,7 +31,9 @@ dependencies = [
     "psycopg[binary]>=3.1.18",
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
-    "mcp>=1.2.0",
+    # D0's isolated cloud probe uses the verified Streamable HTTP/OAuth helpers.
+    "mcp==1.28.1",
+    "PyJWT[crypto]==2.13.0",
     # Voice plans (Charts C3.5) are transcribed on this server by Whisper.
     # faster-whisper 1.2 passes a keyword PyAV 17 removed; 16.1 is verified.
     "faster-whisper>=1.2,<2",
