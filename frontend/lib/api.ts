@@ -233,6 +233,8 @@ export type DailyReviewResponse = {
 export type DailyReviewIndexItem = {
   day: string;
   trade_count: number;
+  /** Realized P&L of the trades that closed that day; null when none closed with a recorded P&L. */
+  closed_pnl?: number | null;
   saved: boolean;
   generated_at: string | null;
   source_data_stale: boolean;

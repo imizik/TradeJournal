@@ -119,8 +119,31 @@ test.describe("trades", () => {
     }
 
     // Values, not just presence: a table of empty rows would pass otherwise.
-    await expect(page.getByText("+$1300").first()).toBeVisible();
+    await expect(page.getByText("+$1,300").first()).toBeVisible();
     await expect(page.getByText("+$19").first()).toBeVisible();
+    // Short calendar expiries, cents on prices, hold in hours and days.
+    const table = page.getByRole("table");
+    await expect(table).toContainText("Jan 7, 2027");
+    await expect(table).not.toContainText("2027-01-07");
+    await expect(table).not.toContainText("$-");
+  });
+
+  test("the daily review calendar tints each trade day by what closed and links to its review", async ({ page }) => {
+    await page.goto("/daily");
+    await expect(page.getByRole("heading", { name: "Daily Review Calendar" })).toBeVisible();
+    const days = page.locator('a[href^="/daily/2"]');
+    await expect(days.first()).toBeVisible();
+    // Every trade day names its trades, what closed and whether it is reviewed.
+    for (const label of await days.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label") ?? ""))) {
+      expect(label).toMatch(/^\w{3}, \w{3} \d{1,2}, \d{4}: \d+ trades?, (nothing closed|[+-]?\$[\d,]+), (reviewed|not reviewed|review needs refresh)$/);
+    }
+    expect((await days.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))).some((label) => /[+-]\$/.test(label ?? ""))).toBe(true);
+    await expect(page.getByText("trade(s)")).toHaveCount(0);
+    // Every trade day the index lists has a cell, weekends included.
+    const listed = (await (await page.request.get("/api/backend/daily-review")).json()) as { day: string }[];
+    await expect(days).toHaveCount(listed.length);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.screenshot({ path: test.info().outputPath("daily-calendar.png") });
   });
 
   test("a trade opens its detail page with a fill timeline", async ({ page }) => {

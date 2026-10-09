@@ -3,6 +3,20 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Trade, Account } from "@/lib/api";
+import { formatHoldDuration } from "@/lib/dashboard";
+import { money } from "@/lib/format";
+
+/** Rows shown at first and added by each "Show more": a long history stays quick to open and scroll. */
+const PAGE = 50;
+
+/** An expiration as a short calendar date ("Oct 9"), with the year when it is not this year ("Jan 15, 2027"). */
+function fmtExpiry(value: string, thisYear: number) {
+  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric", ...(year === thisYear ? {} : { year: "numeric" }) });
+}
+
+/** The entry-time bucket in words ("open" → "Open"). */
+const bucketName = (value: string) => value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ");
 
 type SortKey =
   | "ticker" | "account" | "strike" | "option_type" | "expiration"
@@ -43,10 +57,7 @@ function pnlColor(val: number | null | undefined) {
   return val >= 0 ? "text-emerald-400" : "text-red-400";
 }
 
-function fmt$(val: number | null | undefined) {
-  if (val == null) return "—";
-  return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
-}
+const fmt$ = (val: number | null | undefined) => money(val, { signed: true, cents: false });
 
 function fmtPct(val: number | null | undefined) {
   if (val == null) return "—";
@@ -115,6 +126,10 @@ export default function TradesTable({
   accountMap: Record<string, Account>;
 }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
+  const [shown, setShown] = useState(PAGE);
+  // One account in the list: its badge on every row says nothing.
+  const showAccount = new Set(trades.map((t) => t.account_id)).size > 1;
+  const thisYear = new Date().getFullYear();
 
   function handleSort(key: SortKey) {
     setSort((prev) =>
@@ -141,7 +156,7 @@ export default function TradesTable({
         <thead className="bg-muted text-xs text-muted-foreground uppercase">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
-            <Th {...thProps("account", true)}>Account</Th>
+            {showAccount && <Th {...thProps("account", true)}>Account</Th>}
             <Th {...thProps("strike", true)}>Strike</Th>
             <Th {...thProps("option_type", true)}>Type</Th>
             <Th {...thProps("expiration", true)}>Expiry</Th>
@@ -151,49 +166,60 @@ export default function TradesTable({
             <Th {...thProps("realized_pnl")}>P&amp;L</Th>
             <Th {...thProps("pnl_pct", true)}>P&amp;L %</Th>
             <Th {...thProps("hold_duration_mins", true)}>Hold</Th>
-            <Th {...thProps("entry_time_bucket", true)}>Bucket</Th>
+            <Th {...thProps("entry_time_bucket", true)}>Entered</Th>
             <Th {...thProps("status")}>Status</Th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
           {sorted.length === 0 && (
             <tr>
-              <td colSpan={13} className="px-4 py-8 text-center text-muted-foreground">
+              <td colSpan={showAccount ? 13 : 12} className="px-4 py-8 text-center text-muted-foreground">
                 No trades found.
               </td>
             </tr>
           )}
-          {sorted.map((t) => (
+          {sorted.slice(0, shown).map((t) => (
             <tr key={t.id} className="hover:bg-muted/50">
               <Td>
                 <a href={`/trades/${t.id}`} className="font-semibold hover:underline">
                   {t.ticker}
                 </a>
               </Td>
-              <Td wide>
-                <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-                  accountMap[t.account_id]?.type === "roth_ira"
-                    ? "bg-purple-900/40 text-purple-300"
-                    : "bg-sky-900/40 text-sky-300"
-                }`}>
-                  {accountMap[t.account_id]?.name ?? "—"}
-                </span>
-              </Td>
-              <Td wide>{t.strike != null ? `$${t.strike}` : <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td wide>{t.option_type ?? <span className="text-muted-foreground/40">—</span>}</Td>
-              <Td wide>{t.expiration ?? <span className="text-muted-foreground/40">—</span>}</Td>
+              {showAccount && (
+                <Td wide>
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
+                    accountMap[t.account_id]?.type === "roth_ira"
+                      ? "bg-purple-900/40 text-purple-300"
+                      : "bg-sky-900/40 text-sky-300"
+                  }`}>
+                    {accountMap[t.account_id]?.name ?? "—"}
+                  </span>
+                </Td>
+              )}
+              <Td wide>{t.strike != null ? money(t.strike) : <span className="text-muted-foreground/40">—</span>}</Td>
+              <Td wide>{t.option_type ? <span className="uppercase">{t.option_type}</span> : <span className="text-muted-foreground/40">—</span>}</Td>
+              <Td wide><span className="whitespace-nowrap">{t.expiration ? fmtExpiry(t.expiration, thisYear) : <span className="text-muted-foreground/40">—</span>}</span></Td>
               <Td>{t.contracts}</Td>
-              <Td wide>${t.avg_entry_premium}</Td>
-              <Td wide>{t.avg_exit_premium != null ? `$${t.avg_exit_premium}` : "—"}</Td>
+              <Td wide>{money(t.avg_entry_premium)}</Td>
+              <Td wide>{t.avg_exit_premium != null ? money(t.avg_exit_premium) : <span className="text-muted-foreground/40">—</span>}</Td>
               <Td><span className={pnlColor(t.realized_pnl)}>{fmt$(t.realized_pnl)}</span></Td>
               <Td wide><span className={pnlColor(t.pnl_pct)}>{fmtPct(t.pnl_pct)}</span></Td>
-              <Td wide>{t.hold_duration_mins != null ? `${Math.round(t.hold_duration_mins)}m` : "—"}</Td>
-              <Td wide>{t.entry_time_bucket ?? "—"}</Td>
+              <Td wide><span className="whitespace-nowrap">{t.hold_duration_mins != null ? formatHoldDuration(t.hold_duration_mins) : "—"}</span></Td>
+              <Td wide>{t.entry_time_bucket ? bucketName(t.entry_time_bucket) : "—"}</Td>
               <Td><StatusBadge status={t.status} /></Td>
             </tr>
           ))}
         </tbody>
       </table>
+      {sorted.length > shown && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3 text-xs text-muted-foreground">
+          <span>Showing {shown.toLocaleString()} of {sorted.length.toLocaleString()} trades</span>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setShown((count) => count + PAGE)} className="rounded-md border px-3 py-1.5 font-medium text-foreground hover:bg-secondary">Show {Math.min(PAGE, sorted.length - shown)} more</button>
+            <button type="button" onClick={() => setShown(sorted.length)} className="rounded-md px-3 py-1.5 hover:bg-secondary hover:text-foreground">Show all</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
