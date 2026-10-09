@@ -298,12 +298,23 @@ test("slow provider responses never overlap polling requests", async ({ page }) 
   await expect.poll(() => requests).toBe(3);
 });
 
+/** A phone keeps one/five charts in the More menu. */
+async function singleChart(page: Page) {
+  await page.getByRole("button", { name: "More chart controls" }).click();
+  await page.getByRole("button", { name: "Show single chart" }).click();
+}
+/** A phone keeps the drawing tools behind the Draw button. */
+async function showDrawing(page: Page) {
+  await page.getByRole("button", { name: "Show drawing tools" }).click();
+  await expect(page.getByRole("toolbar", { name: "Drawing" })).toBeVisible();
+}
+
 test("mobile layout stays within the viewport and chart controls work", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await stub(page);
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toBeVisible();
-  await page.getByRole("button", { name: "Show single chart" }).click();
+  await singleChart(page);
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
@@ -1836,7 +1847,7 @@ test.describe("phone layouts", () => {
     await stub(page);
     await page.goto("/charts");
     await expect(page.getByTestId("canvas-main")).toBeVisible();
-    await page.getByRole("button", { name: "Show single chart" }).click();
+    await singleChart(page);
     await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
     await layoutsButton(page).tap();
     let dialog = layoutsDialog(page);
@@ -1859,6 +1870,7 @@ test.describe("phone layouts", () => {
     await dialog.getByRole("button", { name: "Close layouts" }).tap();
 
     // Back to five charts, then the single-chart layout in one tap.
+    await page.getByRole("button", { name: "More chart controls" }).tap();
     await page.getByRole("button", { name: "Show five charts" }).tap();
     await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
     await layoutsButton(page).tap();
@@ -2563,6 +2575,7 @@ test.describe("phone drawing layer", () => {
     await stub(page);
     await page.goto("/charts");
     await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await showDrawing(page); // Undo and Redo live with the drawing tools on a phone
     await addLevel(page, "Support", "256.00");
     await drawn(page, "main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
@@ -2912,6 +2925,7 @@ test.describe("phone drawing tools", () => {
     await stub(page);
     await page.goto("/charts");
     await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await showDrawing(page);
     await drawn(page, "main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
     const box = (await drawn(page, "main").boundingBox())!;
@@ -4300,6 +4314,12 @@ test.describe("phone workspace", () => {
     expect((await fit(page)).pageWidth).toBeLessThanOrEqual(390);
     const canvas = (await drawn(page, "main").boundingBox())!;
     expect(canvas.height).toBeGreaterThanOrEqual(400);
+    // No app title bar on the charts page and the drawing tools behind Draw: the chart starts high on the screen.
+    // Measured from the chart toolbar, so an app banner above it does not count; with the tools row it was about 300px.
+    const toolbarTop = (await toolbar.boundingBox())!.y;
+    expect(canvas.y - toolbarTop).toBeLessThan(270);
+    await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeHidden();
+    await page.screenshot({ path: test.info().outputPath("phone-toolbar-top.png") });
     await page.screenshot({ path: test.info().outputPath("phone-toolbar.png"), fullPage: true });
 
     // The secondary controls, the data note and the library's attribution wait in the More menu.

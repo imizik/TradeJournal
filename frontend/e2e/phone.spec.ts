@@ -41,17 +41,38 @@ test("the sidebar is replaced by a menu that navigates", async ({ page }) => {
 
   // The desktop sidebar must not be taking the width at this size.
   const sidebarWidth = await page.evaluate(() => {
-    const sidebars = [...document.querySelectorAll("nav")].filter((nav) => nav.clientWidth > 0);
+    // The bottom tab bar is the phone's own navigation, not the sidebar.
+    const sidebars = [...document.querySelectorAll("nav")].filter((nav) => nav.clientWidth > 0 && nav.getAttribute("aria-label") !== "Main tabs");
     return Math.max(0, ...sidebars.map((nav) => nav.clientWidth));
   });
   expect(sidebarWidth).toBe(0);
 
   await page.getByRole("button", { name: "Open menu" }).click();
-  await page.getByRole("link", { name: "Trades" }).click();
+  await page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "Trades" }).click();
 
   await expect(page).toHaveURL(/\/trades$/);
   await expect(page.getByRole("button", { name: "Close menu" })).toHaveCount(0); // menu closed on navigate
   await expect(page.getByRole("heading", { name: "Trades" })).toBeVisible();
+});
+
+test("a tab bar at the bottom reaches the main pages in one tap and never covers the page's end", async ({ page }) => {
+  await page.goto("/");
+  const tabs = page.getByRole("navigation", { name: "Main tabs" });
+  await expect(tabs).toBeInViewport();
+  for (const name of ["Dashboard", "Charts", "Daily", "Trades", "More"]) {
+    const target = name === "More" ? tabs.getByRole("button", { name: "Open menu" }) : tabs.getByRole("link", { name });
+    expect(Math.min(...Object.values((await target.boundingBox())!).slice(2)), name).toBeGreaterThanOrEqual(44);
+  }
+  await expect(tabs.getByRole("link", { name: "Dashboard" })).toHaveAttribute("aria-current", "page");
+  await tabs.getByRole("link", { name: "Trades" }).click();
+  await expect(page).toHaveURL(/\/trades$/);
+  await expect(tabs.getByRole("link", { name: "Trades" })).toHaveAttribute("aria-current", "page");
+  // Scrolled to the end, the last of the page sits above the bar, not under it.
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const bar = (await tabs.boundingBox())!;
+  const lastBottom = await page.evaluate(() => Math.max(...[...document.querySelectorAll("main *")].map((el) => el.getBoundingClientRect().bottom)));
+  expect(lastBottom).toBeLessThanOrEqual(bar.y + 1);
+  await page.screenshot({ path: test.info().outputPath("phone-tabs.png") });
 });
 
 test("main content gets the width, and key numbers are readable", async ({ page }) => {

@@ -65,7 +65,12 @@ Things worth knowing before you touch a page:
   Google OAuth consent screen links to it; keep it true to what the Gmail
   integration does.
 - Phone layout: below `md` the sidebar in `components/Nav.tsx` is replaced by a
-  bar plus a slide-out menu (same `navItems`), and below `sm` tables mark
+  tab bar fixed at the bottom (Dashboard, Charts, Daily, Trades, and More,
+  which opens the slide-out menu with every `navItems` page and the Sync
+  drawer) and a slim title bar, hidden on `/charts` so the chart starts
+  higher; `AppMain` pads pages above the tab bar. On `/charts` a phone keeps
+  the drawing tools and Undo/Redo behind a **Draw** button and the one/five
+  charts switch in the toolbar's More menu. Below `sm` tables mark
   secondary columns `wide` so only a few show -- `TradesTable`,
   `DashboardTables`, `app/fills/page.tsx`. A row still opens the full record.
   `app/manifest.ts` plus `public/icon-*.png` (regenerate with
