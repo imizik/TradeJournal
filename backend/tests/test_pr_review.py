@@ -459,6 +459,22 @@ def test_explicit_exemption_uses_gate_safe_reason_for_short_input(repo):
     assert state(repo)["exemption"]["reason"] == "owner-request"
 
 
+def test_real_review_after_exemption_clears_stale_exemption_state(repo, monkeypatch):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "User requested review skip"
+    reviewer.exempt(repo, a)
+    (repo / "a.py").write_text("changed after exemption\n")
+    git(repo, "add", "a.py")
+    git(repo, "commit", "-qm", "review after exemption")
+    monkeypatch.setattr(reviewer, "authenticate", lambda *unused: None)
+    monkeypatch.setattr(reviewer, "invoke_reviewer", lambda *unused: (
+        {"verdict": "clean", "summary": "Checked changed work", "findings": []}, "claude"))
+    reviewer.review(repo, args())
+    assert state(repo)["phase"] == "clean"
+    assert "exemption" not in state(repo)
+
+
 def test_explicit_exemption_requires_reason_and_never_runs_model(repo, cli):
     a = args()
     a.mode = "explicit"
@@ -485,6 +501,7 @@ def test_exemption_receipt_adds_exempt_label_not_review_loop(repo, monkeypatch):
     monkeypatch.setattr(reviewer, "api", lambda *a: posts.append(a[-1]))
     reviewer.post_status(repo, s, ident)
     assert any(call[-2:] == ["--add-label", reviewer.EXEMPT_LABEL] for call in calls)
+    assert any(call[-2:] == ["--remove-label", "review-loop"] for call in calls)
     assert posts[0]["state"] == "success"
     s["phase"] = "ready"
     assert reviewer.receipt_description(s, ident, True).endswith("mode:explicit reason:tiny-user-requested-change")

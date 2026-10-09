@@ -457,10 +457,14 @@ def review(root, args):
         # Setup failures are recoverable by the owner and spend no model pass.
         authenticate("claude" if state["owner"] == "codex" else "codex", review_env())
         pending = {**state, "phase": "needs_review"}
+        # A new head after an exemption is now taking the normal review path.
+        # Do not let the prior exemption misrepresent its later receipt.
+        pending.pop("exemption", None)
         if args.pr:
             pending["pr"] = args.pr
         if pending.get("pr"):
             post_status(root, pending, ident)
+        state.pop("exemption", None)
         state.update(pending)
         state.pop("error", None)
         state.pop("publication_attention", None)
@@ -540,7 +544,9 @@ def post_status(root, state, ident, number=None):
     approved = state["phase"] in {"clean", "exempt", "ready"} and matches(state, ident)
     status = "success" if approved else ("error" if state["phase"] in TERMINAL else "pending")
     label = EXEMPT_LABEL if state.get("exemption") else "review-loop"
+    other_label = "review-loop" if label == EXEMPT_LABEL else EXEMPT_LABEL
     run(["gh", "pr", "edit", str(pr["number"]), "--add-label", label], cwd=root)
+    run(["gh", "pr", "edit", str(pr["number"]), "--remove-label", other_label], cwd=root)
     api(root, f"repos/{repo}/statuses/{ident['head']}", {
         "state": status, "context": RECEIPT_CONTEXT,
         "description": receipt_description(state, ident, approved), "target_url": pr["url"],
