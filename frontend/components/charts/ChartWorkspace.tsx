@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, NotebookPen, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
 import TradeCard from "./TradeCard";
 import { fetchFillCard, fetchTradeCard, openedOn, parsePastView, pastPageEnd, stockOpenPnl, type ChartPosition, type PastView, type TradeCardData } from "@/lib/chartJournal";
@@ -233,6 +233,8 @@ export default function ChartWorkspace() {
   const [symbolError, setSymbolError] = useState("");
   // The tool the main chart's next click places with; null when not drawing.
   const [tool, setTool] = useState<Tool | null>(null);
+  // On a phone the drawing tools wait behind the Draw button, so the chart starts higher; a chosen tool keeps them open.
+  const [drawOpen, setDrawOpen] = useState(false);
   // A note just placed, whose text field opens ready to type.
   const [fresh, setFresh] = useState<string | null>(null);
   const [drawError, setDrawError] = useState("");
@@ -1334,6 +1336,9 @@ export default function ChartWorkspace() {
         className={`h-11 min-w-11 px-1.5 ${settings.smallSize === size ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{size === "compact" ? "S" : size === "normal" ? "M" : "L"}</button>)}
     </div>}
   </>;
+  // One chart or five: in the toolbar on a desktop, in the More menu on a phone.
+  const focusButton = (close?: () => void) => <button className={`${plain(false)} ${control} text-[11px]`} onClick={() => { close?.(); setMaximized(null); setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" })); }} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"} title={settings.layout === "multi" ? "One chart" : "Five charts"}>
+          {settings.layout === "multi" ? <Square size={13} /> : <Columns3 size={13} />}{!narrow && <span className={label}>{settings.layout === "multi" ? "Focus" : "Five charts"}</span>}</button>;
   const pauseButton = <button className={`${plain(paused, "bg-amber-400/15 text-amber-300")} ${control} text-[11px]`} onClick={() => setPaused((v) => !v)} aria-label={paused ? "Resume chart updates" : "Pause chart updates"} title={paused ? "Resume updates" : "Pause updates"}>{paused ? <Play size={13} /> : <Pause size={13} />}<span className={label}>{paused ? "Resume" : "Pause"}</span></button>;
   const refreshButton = <button className={`${plain(false)} ${control}`} disabled={loading} aria-label="Refresh charts" title="Refresh now" onClick={() => { if (!inFlight.current) refreshNow.current(); }}><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>;
   const keysButton = <button className={`${plain(help)} ${control} hidden sm:inline-flex`} onClick={() => { if (palette === null && !layoutMenu) setHelp(true); }} aria-label="Keyboard shortcuts" aria-haspopup="dialog" aria-expanded={help} title="Keyboard shortcuts (?)"><Keyboard size={13} /></button>;
@@ -1538,14 +1543,15 @@ export default function ChartWorkspace() {
           </div>}><SlidersHorizontal size={13} aria-hidden /><span className={narrow ? "sr-only" : ""}>Indicators</span>{!narrow && <ChevronDown size={12} aria-hidden />}</ToolbarMenu>
         {settings.studiesHidden && <button onClick={toggleStudies} title="Indicators are hidden on every chart" className={`${plain(false)} ${control} gap-1 text-[10px] !text-amber-300`}><EyeOff size={11} />Indicators hidden · Show</button>}
         <button className={`${plain(layoutMenu)} ${control} text-[11px]`} onClick={() => { if (palette === null) setLayoutMenu(true); }} aria-haspopup="dialog" aria-expanded={layoutMenu} title="Saved layouts"><LayoutGrid size={13} /><span className={narrow ? "sr-only" : ""}>Layouts</span>{inUse && <span className={narrow ? "sr-only" : "max-w-24 truncate text-sky-300"}>{inUse.name}</span>}</button>
-        <button className={`${plain(false)} ${control} text-[11px]`} onClick={() => { setMaximized(null); setSettings((s) => ({ ...s, layout: s.layout === "multi" ? "single" : "multi" })); }} aria-label={settings.layout === "multi" ? "Show single chart" : "Show five charts"} title={settings.layout === "multi" ? "One chart" : "Five charts"}>
-          {settings.layout === "multi" ? <Square size={13} /> : <Columns3 size={13} />}{!narrow && <span className={label}>{settings.layout === "multi" ? "Focus" : "Five charts"}</span>}</button>
+        {!narrow && focusButton()}
+        {narrow && <button aria-label={drawOpen || tool ? "Hide drawing tools" : "Show drawing tools"} aria-expanded={drawOpen || !!tool} title="Drawing tools, undo and redo"
+          onClick={() => { if (tool) chooseTool(tool); setDrawOpen((open) => !(open || !!tool)); }} className={`${plain(drawOpen || !!tool, "bg-blue-400/15 text-blue-300")} ${control}`}><Pencil size={14} aria-hidden /></button>}
         {!narrow && secondary}
         <div className="ml-auto flex shrink-0 items-center gap-0.5">
           {narrow
             // A phone keeps one row of controls: the rest wait in a menu.
             ? <ToolbarMenu label="More chart controls" align="right" title="More chart controls" className={`${plain(false)} ${control}`}
-              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{secondary}{ladderButton(close)}{pauseButton}{refreshButton}{keysButton}
+              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{focusButton(close)}{secondary}{ladderButton(close)}{pauseButton}{refreshButton}{keysButton}
                 <div className="mt-1 w-full space-y-2 border-t border-slate-700/60 pt-2 text-[10px] text-slate-500">{about}{attribution}</div></div>}><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More chart controls</span></ToolbarMenu>
             : <>{planButton}{sep}{pauseButton}{refreshButton}{keysButton}</>}
           {immersive
@@ -1553,7 +1559,7 @@ export default function ChartWorkspace() {
             : <button className={`${plain(false)} ${control}`} onClick={() => setImmersive(true)} aria-label="Enter full-screen charts" title="Full screen: hide the app navigation"><Expand size={13} /></button>}
           {!narrow && <>{sep}{dockTabs}</>}
         </div>
-        {narrow && <div className="flex basis-full flex-wrap items-center">{tools}</div>}
+        {narrow && (drawOpen || tool) && <div role="toolbar" aria-label="Drawing" className="flex basis-full flex-wrap items-center">{tools}</div>}
       </header>
 
       {!!alerts.length && <div className={fill ? "max-h-28 shrink-0 space-y-1 overflow-y-auto px-2 pt-1" : "space-y-2"}>{alerts}</div>}

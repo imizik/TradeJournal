@@ -34,12 +34,12 @@ const SYNC_STATUS: Record<GmailHealth["status"], { label: string; dot: string }>
   off: { label: "Scheduled sync", dot: "bg-muted-foreground" },
 };
 
-function SyncStatusLine() {
+function SyncStatusLine({ inline = false }: { inline?: boolean }) {
   const health = useGmailHealth();
   if (!health) return null;
   const { label, dot } = SYNC_STATUS[health.status];
   return (
-    <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground" title={health.message}>
+    <p className={cn("flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground", !inline && "mt-1")} title={health.message}>
       <span className={cn("inline-block h-1.5 w-1.5 rounded-full", dot)} />
       {health.action === "reconnect_gmail" ? "Gmail disconnected" : label}
     </p>
@@ -83,12 +83,34 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
   );
 }
 
+/** Which pages this viewer may open: the owner sees all; an assistant sees the practice pages and, with journal access, the journal. */
+function shownHref(href: string, owner: boolean, enabled: boolean, journal: boolean) {
+  if (href === "/access") return owner && enabled;
+  return owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(href);
+}
+
+/** The phone tab bar's pages; everything else is under More. */
+const TABS = [
+  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/charts", label: "Charts", icon: ChartCandlestick },
+  { href: "/daily", label: "Daily", icon: ClipboardList },
+  { href: "/trades", label: "Trades", icon: FileText },
+];
+
+/** A dot on the More tab while sync is not live, so a stalled import is noticed without opening the menu. */
+function MenuSyncDot() {
+  const health = useGmailHealth();
+  if (!health || health.status === "live") return null;
+  const { label, dot } = SYNC_STATUS[health.status];
+  return <span title={label} className={cn("absolute right-[calc(50%-14px)] top-2 h-2 w-2 rounded-full", dot)}><span className="sr-only">{label}</span></span>;
+}
+
 function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
   const { owner, grants, enabled } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   return (
     <ul className="space-y-1">
-      {navItems.filter(item => item.href !== "/access" || (owner && enabled)).filter(item => owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(item.href)).map(({ href, label, icon: Icon }) => {
+      {navItems.filter(item => shownHref(item.href, owner, enabled, journal)).map(({ href, label, icon: Icon }) => {
         const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
         return (
           <li key={href}>
@@ -124,6 +146,9 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
   const [panelOpen, setPanelOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const anyRunning = useAnyJobRunning(owner);
+  const access = useAppAccess();
+  const enabled = access.enabled;
+  const journalOn = access.owner || !!access.grants.journal_read;
   // On the charts page the sidebar is a rail of icons unless this device asked for the full one.
   const chartsRoute = fullScreenRoute(pathname);
   const [wide, setWide] = useState(false);
@@ -148,19 +173,11 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
 
   return (
     <>
-      {/* Phone: a bar in normal flow, so no layout needs to reserve space for it. */}
-      <header className="sticky top-0 z-30 flex items-center gap-2 border-b bg-card px-2 pb-2 pt-[calc(0.5rem+env(safe-area-inset-top))] md:hidden">
-        <button
-          onClick={() => setMenuOpen(true)}
-          aria-label="Open menu"
-          aria-expanded={menuOpen}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-base font-semibold text-foreground">Trade Journal</h1>
-          {owner && <SyncStatusLine />}
+      {/* Phone: a slim title bar in normal flow; navigation is the tab bar at the bottom. The charts page gives this height to the chart. */}
+      <header className={cn("sticky top-0 z-30 items-center gap-2 border-b bg-card px-3 pb-1.5 pt-[calc(0.375rem+env(safe-area-inset-top))] md:hidden", chartsRoute ? "hidden" : "flex")}>
+        <div className="flex min-w-0 flex-1 items-baseline gap-2">
+          <h1 className="truncate text-sm font-semibold text-foreground">Trade Journal</h1>
+          {owner && <SyncStatusLine inline />}
         </div>
         {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />}
       </header>
@@ -173,6 +190,8 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-foreground">Trade Journal</h2>
                 {owner && <SyncStatusLine />}
+                {/* The charts page hides the phone title bar; the Sync drawer stays reachable here. */}
+                {owner && <div className="mt-2 -ml-2"><SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => { setMenuOpen(false); setPanelOpen(true); }} /></div>}
               </div>
               <button
                 onClick={() => setMenuOpen(false)}
@@ -186,6 +205,26 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
           </nav>
         </div>
       )}
+
+      {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
+      <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
+        {TABS.filter(({ href }) => shownHref(href, owner, enabled, journalOn)).map(({ href, label, icon: Icon }) => {
+          const active = pathname === href || (href !== "/" && pathname.startsWith(href));
+          return (
+            <Link key={href} href={href} aria-current={active ? "page" : undefined}
+              className={cn("flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition-colors", active ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
+              <Icon className={cn("h-5 w-5", active && "text-primary")} />
+              {label}
+            </Link>
+          );
+        })}
+        <button onClick={() => setMenuOpen(true)} aria-label="Open menu" aria-expanded={menuOpen}
+          className="relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground">
+          <Menu className="h-5 w-5" />
+          More
+          {owner && <MenuSyncDot />}
+        </button>
+      </nav>
 
       {/* Desktop: on the charts page, a rail of icons that gives the charts the width */}
       {rail && (

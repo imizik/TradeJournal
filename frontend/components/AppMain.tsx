@@ -14,14 +14,15 @@ export default function AppMain({ banner, children }: { banner: React.ReactNode;
   const charts = fullScreenRoute(usePathname());
   if (!charts) {
     return (
-      <main className="min-w-0 flex-1 p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:p-6 md:pb-6">
+      // pb on a phone clears the tab bar fixed at the bottom (Nav).
+      <main className="min-w-0 flex-1 p-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:p-6 md:pb-6">
         {banner}
         {children}
       </main>
     );
   }
   return (
-    <main data-shell="charts" className="flex min-w-0 flex-1 flex-col p-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] lg:h-dvh lg:overflow-hidden lg:p-0">
+    <main data-shell="charts" className="flex min-w-0 flex-1 flex-col p-2 pb-[calc(4rem+env(safe-area-inset-bottom))] md:pb-[calc(0.5rem+env(safe-area-inset-bottom))] lg:h-dvh lg:overflow-hidden lg:p-0">
       <div className="shrink-0 empty:hidden lg:px-2 lg:pt-2 [&>*]:!mb-2">{banner}</div>
       {children}
     </main>
