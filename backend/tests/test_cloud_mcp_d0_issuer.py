@@ -35,7 +35,8 @@ def check(document):
 def test_metadata_validation_does_not_claim_a_login():
     result = check(metadata())
     assert result == {"metadata": "valid", "mode": "synthetic_only", "pkce": "S256",
-        "refresh": "advertised", "login_observed": False}
+        "refresh": "advertised", "synthetic_scope_advertised": True,
+        "scope_enforcement": "access_token", "login_observed": False}
 
 
 @pytest.mark.parametrize("field,value", [
@@ -48,7 +49,9 @@ def test_metadata_validation_does_not_claim_a_login():
     ("code_challenge_methods_supported", "S256"),
     ("grant_types_supported", ["authorization_code"]),
     ("response_types_supported", ["token"]),
-    ("scopes_supported", ["journal:read"]),
+    ("scopes_supported", "d0:profile"),
+    ("scopes_supported", [42]),
+    ("scopes_supported", None),
     ("token_endpoint_auth_methods_supported", ["unsupported"]),
 ])
 def test_nonmatching_or_incompatible_issuer_is_rejected(field, value):
@@ -56,6 +59,41 @@ def test_nonmatching_or_incompatible_issuer_is_rejected(field, value):
     document[field] = value
     with pytest.raises(ValueError):
         check(document)
+
+
+@pytest.mark.parametrize("scopes", [[], ["openid", "profile", "offline_access"], ["journal:read"]])
+def test_resource_scope_not_advertised_does_not_imply_login_or_scope_grant(scopes):
+    document = metadata()
+    document["scopes_supported"] = scopes
+    result = check(document)
+    assert result["metadata"] == "valid"
+    assert result["synthetic_scope_advertised"] is False
+    assert result["scope_enforcement"] == "access_token"
+    assert result["login_observed"] is False
+
+
+def test_optional_scope_metadata_may_be_omitted():
+    document = metadata()
+    del document["scopes_supported"]
+    assert check(document)["synthetic_scope_advertised"] is False
+
+
+def test_recorded_auth0_discovery_contract_is_supported():
+    fixture = Path(__file__).parent / "fixtures/auth0-d0-discovery-2026-10-09.json"
+    recorded = json.loads(fixture.read_text())
+    document = recorded["metadata"]
+    selected = config().model_copy(update={"issuer_url": document["issuer"], "jwks_url": document["jwks_uri"]})
+    requested = []
+
+    def respond(request):
+        requested.append(str(request.url))
+        return httpx.Response(200, json=document)
+
+    result = asyncio.run(check_issuer(selected, http_transport=httpx.MockTransport(respond)))
+    assert requested == ["https://tenant.example/.well-known/oauth-authorization-server"]
+    assert result["synthetic_scope_advertised"] is False
+    assert result["scope_enforcement"] == "access_token"
+    assert result["login_observed"] is False
 
 
 def test_oidc_fallback_only_follows_a_missing_oauth_metadata_document():

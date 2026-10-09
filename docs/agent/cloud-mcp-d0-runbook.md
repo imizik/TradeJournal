@@ -127,12 +127,18 @@ sudo /opt/tradejournal-d0/backend/.venv/bin/python /opt/tradejournal-d0/backend/
 sudo chown root:tradejournal-d0 /etc/tradejournal-d0/jwks.json
 ```
 
-The command verifies issuer discovery, code/refresh/S256/scope/client-method
+The command verifies issuer discovery, code/refresh/S256/client-method
 metadata and origin, fetches only the fixed public JWKS URL, then atomically
 replaces the snapshot at mode 0640, preserving existing ownership/group.
 Redirects, oversized bodies and invalid keys fail without replacing the old
 snapshot. Its output says `login_observed: false`: no login, consent or actual
-token-exchange acceptance is implied. Refresh manually before its one-hour
+token-exchange acceptance is implied. The separate `--check-issuer` command
+reports `synthetic_scope_advertised`, indicating whether provider-wide discovery
+lists `d0:profile`; resource-specific API scopes may be absent there. Its
+`scope_enforcement: access_token` field records that every
+authenticated MCP request still requires that scope in its verified token.
+Missing/other token scopes fail even after successful issuer preflight.
+Refresh manually before its one-hour
 expiry during the short trial. Missed refresh stops authenticated calls; it
 never enables network access or another billing mode. No scheduler is added.
 
@@ -228,3 +234,36 @@ requires current-head CI and native review.
 
 External issuer login/refresh, actual Dot invocation, laptop-off use, account
 usage controls and real-host ingress/isolation remain pending until the trial.
+
+
+## Auth0 discovery observation
+
+On 2026-10-09 the selected free Auth0 tenant's public OAuth discovery supported
+authorization code, refresh, S256 and predefined public clients, but listed
+standard OIDC scopes rather than resource-specific API permissions. The
+[tenant-redacted captured contract](../../backend/tests/fixtures/auth0-d0-discovery-2026-10-09.json)
+records that response shape, date, original response digest and redaction.
+Requiring `d0:profile` in provider-wide metadata prevented the operator key
+refresh before any login. Preflight now reports that advertisement separately;
+signed-token scope enforcement, issuer/JWKS binding, singleton audience,
+client/subject/lifetime checks and network isolation remain required.
+
+Configure the dedicated API's `d0:profile` permission and the public client's
+code + S256/refresh flow explicitly. Request `d0:profile offline_access`; avoid
+adding OIDC profile/email permissions when the trial only needs its synthetic
+profile. Use the exact ChatGPT callback from its configuration. Verify actual
+token claims and consent before granting the observed issuer subject locally.
+Do not reuse unrelated applications or change their grants. Auth0's
+[API scopes](https://auth0.com/docs/get-started/apis/scopes/api-scopes) are
+resource permissions, and its
+[PKCE authorize reference](https://auth0.com/docs/api/authentication/authorization-code-flow-with-pkce/authorize-with-pkce)
+documents API scopes, `offline_access` and the resource/audience behavior.
+This metadata observation does not establish OAuth login or an actual Dot call.
+
+VPS preparation was separately observed on 2026-10-09: reviewed D0 source
+`7b47aeb` copied into its own root-owned runtime/configuration and unprivileged
+identity; manual units and the pending dedicated HTTPS stanza validated. A
+transient process under the service's sandbox denied actual IPv4/IPv6 socket
+creation and imported no application/model SDKs. Existing Caddy configuration,
+production release and browser trial remained unchanged/active. The D0 units
+remained inactive and its configuration disabled pending issuer/client setup.
