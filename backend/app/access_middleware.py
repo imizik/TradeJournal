@@ -34,12 +34,13 @@ class AccessMiddleware:
                 if operation in {"GET /access/challenge", "POST /access/login", "POST /access/bootstrap"}:
                     access.gateway(request)
                     return operation
-                if operation.startswith("GET /cloud-mcp/"):
+                if request.url.path.startswith("/cloud-mcp/"):
                     from app.engine import cloud_practice_access
                     from cloud_mcp_d1_common import READ_PATHS
-                    if operation not in READ_PATHS:
+                    from cloud_mcp_d2_common import WRITE_PATHS
+                    if operation not in READ_PATHS | WRITE_PATHS:
                         raise HTTPException(404, "Not found")
-                    request.state.access = cloud_practice_access.identify(request)
+                    request.state.access = cloud_practice_access.identify(request, write=operation in WRITE_PATHS)
                     return operation
                 request.state.access = access.identify(request)
                 access.authorize(request, operation, child.get("path_params", {}))
@@ -81,6 +82,7 @@ class AccessMiddleware:
         received = 0
         who = getattr(request.state, "access", None)
         maximum = 16_384 if (request.url.path.startswith("/access/")
+            or (request.method == "POST" and request.url.path.startswith("/cloud-mcp/"))
             or (who and who.grants.get("market_decision_write"))) else 16_000_000
         async def bounded_receive():
             nonlocal received

@@ -149,12 +149,23 @@ class FixtureMarket:
                 and request.url.path.endswith("/sample-replay") and access.replay_writer(request))
             historical_replay = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
                 and request.url.path.endswith("/historical-replay") and access.historical_writer(request))
+            cloud_choice = False
+            if (request.method == "POST" and request.url.path.startswith("/cloud-mcp/practice/opportunities/")
+                    and request.url.path.endswith("/choice")):
+                from fastapi import HTTPException
+                from app.engine.cloud_practice_access import require_choice_write
+                try:
+                    require_choice_write(request)
+                    cloud_choice = True
+                except HTTPException as exc:
+                    return await JSONResponse({"detail": exc.detail}, exc.status_code)(scope, receive, send)
             # Even the private trial owner may only mutate authentication.
             # Keep imports, journal edits, jobs and future writes out of this
             # sample installation for its entire lifetime, not just startup.
             if (request.method not in {"GET", "HEAD", "OPTIONS"}
                     and not request.url.path.startswith("/access/")
                     and not sample_choice
+                    and not cloud_choice
                     and not sample_replay
                     and not historical_replay
                     and (request.method, request.url.path) != ("POST", "/quotes/positions")):

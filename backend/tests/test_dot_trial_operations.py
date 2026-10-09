@@ -56,6 +56,12 @@ def test_private_owner_cannot_mutate_any_trial_domain_route(boundary):
                 continue
             path = re.sub(r"\{[^}]+\}", "sample", route.path)
             response = boundary.owner.request(method, path, json={})
+            if route.path.startswith("/cloud-mcp/"):
+                # OAuth-only routes refuse this non-connector runtime in the
+                # outer authentication boundary, before the browser trial guard.
+                assert response.status_code == 503, (method, path, response.text)
+                assert response.json()["detail"] == "Sample connector is unavailable"
+                continue
             assert response.status_code == 403, (method, path, response.text)
             assert response.json()["detail"] == "Sample trial data is read-only"
     with Session(boundary.engine) as db:

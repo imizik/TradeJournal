@@ -5,9 +5,10 @@ from typing import Literal
 from pydantic import Field, field_validator, model_validator
 
 from cloud_mcp_d0 import Config, JWKSVerifier, MAX_BYTES, ProfileGrant
+from cloud_mcp_d2_common import CHOICE_GET_PATH
 
 PRACTICE_SCOPE = "practice:read"
-READ_PATHS = frozenset({"GET /cloud-mcp/practice/runs", "GET /cloud-mcp/practice/runs/{run_id}"})
+READ_PATHS = frozenset({"GET /cloud-mcp/practice/runs", "GET /cloud-mcp/practice/runs/{run_id}", CHOICE_GET_PATH})
 MAX_RESPONSE_BYTES = 1048576
 
 
@@ -25,6 +26,7 @@ class LinkedProfile(ProfileGrant):
 
 class SampleReadConfig(Config):
     sample_only: Literal[True]
+    decision_writes: bool = Field(default=False, strict=True)
     profiles: list[LinkedProfile] = Field(min_length=1, max_length=1)
     backend_socket: str = "/run/tradejournal-d1/reads.sock"
 

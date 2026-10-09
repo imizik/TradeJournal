@@ -88,5 +88,6 @@ four stock-bar GETs (two symbols by two sessions), each bounded to one response
 and ten seconds. Root-owned 0600 handoffs stay under
 `/etc/tradejournal-dot-trial/historical-handoff-YYYY-MM-DDTHHMM.json`.
 The explicit updater option is `--enable-historical-replay`; its selected
-twenty-three source files include the three new historical modules, with no
+twenty-five source files include the three new historical modules and the
+existing D2 choice modules, with no
 test fixture, dependency, market data or credential in the archive.

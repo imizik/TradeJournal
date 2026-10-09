@@ -51,7 +51,7 @@ def prepare(python):
     shutil.copy2(SOURCE / "deploy/dot_trial_app.py", RUNTIME / "backend/dot_trial_app.py")
     (D0 / "backend").mkdir(parents=True)
     (D0 / "backend/.venv").symlink_to(python.parent.parent)
-    for name in ("cloud_mcp_d0.py", "cloud_mcp_d1_common.py", "cloud_mcp_d1.py"):
+    for name in ("cloud_mcp_d0.py", "cloud_mcp_d1_common.py", "cloud_mcp_d2_common.py", "cloud_mcp_d1.py"):
         shutil.copy2(SOURCE / "backend" / name, D0 / "backend" / name)
     for path, group in ((CONFIG, "tj-dot-trial"), (LINK, "tradejournal-d0"), (KEYS, "tradejournal-d0")):
         path.mkdir(mode=0o750)
@@ -63,6 +63,7 @@ def prepare(python):
     env = {"PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "DATABASE_URL": url, "MIGRATION_DATABASE_URL": url,
         "TJ_ACCESS_ENABLED": "true", "TJ_ACCESS_SAMPLE_DATA": "true", "TJ_DOT_TRIAL_ENABLED": "true",
         "TJ_SAMPLE_DECISION_WRITES": "true", "JOB_EXECUTION_MODE": "external",
+        "TJ_CLOUD_MCP_DECISION_WRITES": "true",
         "JOB_LOCK_DIR": str(STATE / "job_locks"), "CAPTURE_TRANSCRIBER": "off"}
     from dot_trial_app import OFF_FLAGS
     env.update({flag: "false" for flag in OFF_FLAGS})
@@ -110,7 +111,7 @@ def exercise(run_id, day):
     import jwt
     from cryptography.hazmat.primitives.asymmetric import rsa
     from app.database import engine
-    from app.models import AccessPrincipal, DecisionRecord, DecisionEvent, PracticeRun
+    from app.models import AccessPrincipal, DecisionContext, DecisionRecord, DecisionEvent, PracticeRun
     from sqlmodel import Session, select
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     numbers = key.public_key().public_numbers()
@@ -197,6 +198,56 @@ def exercise(run_id, day):
         ns = Path(f"/proc/{pid}/ns/net").readlink()
         assert ns != Path("/proc/1/ns/net").readlink()
     assert run("systemctl", "show", MCP, "--property=RestrictAddressFamilies", "--value").stdout.strip() == "AF_UNIX"
+    # Opt into D2 only after the unchanged D1 reader/refusal checks above.
+    snapshot["expires_at"] = now + 3600
+    write(KEYS / "jwks.json", json.dumps(snapshot))
+    with Session(engine) as db:
+        principal = db.get(AccessPrincipal, "native-inspector")
+        grants = json.loads(principal.grants_json)
+        principal.grants_json = json.dumps({**grants, "decision_write": True})
+        db.add(principal)
+        db.commit()
+        original_contexts = [row.model_dump(mode="json") for row in db.exec(select(DecisionContext)).all()]
+        original_events = [row.model_dump(mode="json") for row in db.exec(select(DecisionEvent)).all()]
+    config["decision_writes"] = True
+    write(LINK / "config.json", json.dumps(config))
+    run("systemctl", "restart", MCP)
+    write_token = token(scope="d0:profile practice:read practice:write")
+    def content(reply):
+        assert reply.get("isError") is not True, reply
+        # FastMCP wraps dict outputs under result in its structured schema.
+        structured = reply["structuredContent"]
+        return structured.get("result", structured)
+    assigned = content(call("get_practice_run", {"run_id": run_id}))["run"]
+    opportunity_id = assigned["opportunities"][0]["id"]
+    arguments = {"opportunity_id": opportunity_id, "decision": "skip",
+        "rationale": "Native simulated choice; no paper or provider activity"}
+    assert content(call("get_practice_choice", {"opportunity_id": opportunity_id}))["status"] == "not_recorded"
+    assert call("record_practice_choice", arguments)["isError"] is True  # reader token
+    saved = content(call("record_practice_choice", arguments, bearer=write_token))
+    assert saved["created"] is True and saved["choice"]["status"] == "practice_draft_unarmed"
+    again = content(call("record_practice_choice", arguments, bearer=write_token))
+    assert again["created"] is False and again["choice"] == saved["choice"]
+    assert call("record_practice_choice", {**arguments, "rationale": "Changed content"}, bearer=write_token)["isError"] is True
+    # The backend still validates scope when callers bypass MCP.
+    with httpx.Client(transport=httpx.HTTPTransport(uds="/run/tradejournal-d1/reads.sock"), timeout=10) as client:
+        path = "/cloud-mcp/practice/opportunities/" + opportunity_id + "/choice"
+        body = {key: value for key, value in arguments.items() if key != "opportunity_id"}
+        assert client.post("http://localhost" + path, headers={"Authorization": "Bearer " + signed}, json=body).status_code == 401
+    run("systemctl", "restart", API)
+    ready()
+    recovered = content(call("get_practice_choice", {"opportunity_id": opportunity_id}))
+    assert recovered["choice"] == saved["choice"]
+    with Session(engine) as db:
+        assert len(db.exec(select(DecisionRecord)).all()) == 1
+        assert [row.model_dump(mode="json") for row in db.exec(select(DecisionContext)).all()] == original_contexts
+        assert [row.model_dump(mode="json") for row in db.exec(select(DecisionEvent)).all()] == original_events
+        principal = db.get(AccessPrincipal, "native-inspector")
+        principal.grants_json = json.dumps(grants)  # revoke writes, retain receipt reads
+        db.add(principal)
+        db.commit()
+    assert call("record_practice_choice", arguments, bearer=write_token)["isError"] is True
+    assert content(call("get_practice_choice", {"opportunity_id": opportunity_id}))["choice"] == saved["choice"]
     # Exercise the updater's actual pause/restore helpers against installed units.
     from dot_trial_update import cloud_reads_state, stop_cloud_reads as pause_reads, restore_cloud_reads
     cloud_units, cloud_active = cloud_reads_state()
@@ -241,7 +292,7 @@ def exercise(run_id, day):
         else:
             raise AssertionError("Stopped socket reactivated the sample API")
     assert run("systemctl", "show", API, "--property=ActiveState", "--value").stdout.strip() == "inactive"
-    print("Native D1 passed: actual Unix bridge, independent bearer checks, assigned simulation, no domain mutation, denied writes, revocation, restart, expired keys, updater pause/recovery and stopped activation; MCP IP sockets denied")
+    print("Native D1/D2 passed: actual Unix bridge, independent bearer checks, assigned simulation, read invariance, opt-in immutable choice/retry/recovery, write-scope and principal denials, revocation, restart, expired keys, updater pause/recovery and stopped activation; MCP IP sockets denied")
 
 
 def main():

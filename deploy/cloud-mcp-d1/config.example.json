@@ -2,6 +2,7 @@
   "enabled": false,
   "synthetic_only": true,
   "sample_only": true,
+  "decision_writes": false,
   "issuer_url": "https://identity.example.test/",
   "resource_url": "https://journal.example.test/mcp",
   "jwks_url": "https://identity.example.test/.well-known/jwks.json",

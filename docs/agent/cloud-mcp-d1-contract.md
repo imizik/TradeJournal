@@ -1,7 +1,10 @@
 # D1 assigned sample Practice reads
 
-2026-10-09 — selected first useful D1 slice; live activation and actual Dot
-acceptance pending. D0 remains the connected synthetic profile probe. D1 adds
+2026-10-09 — first useful D1 slice activated after PR #182 merged. Actual Jo
+list/detail calls succeeded through OAuth; Jo reported exact frozen packet,
+own-choice and existing replay agreement with its separately signed-in cloud UI.
+Backend successful requests and persisted decision hashes were independently
+corroborated. D0 remains the connected synthetic profile probe. D1 adds
 only `list_practice_runs(day)` and `get_practice_run(run_id)` to that profile
 catalog. Market, journal, standalone decision/paper tools and writes remain
 later scope. See the [cloud scope](cloud-mcp-integration-scope.md) and
@@ -79,9 +82,11 @@ subject, keys, tokens, gateway secrets or private credential files.
    files or rolling back. It restores only a previously active socket after
    readiness succeeds; an absent/inactive entrance stays off, and failed recovery
    leaves it stopped. It never boot-enables D1.
-4. Stage `cloud_mcp_d0.py`, `cloud_mcp_d1_common.py` and `cloud_mcp_d1.py` in the
-   separate D0 runtime; its pinned standalone environment already provides the
-   SDK. Keep D0 source/config snapshots and profile ID for rollback.
+4. Stage `cloud_mcp_d0.py`, `cloud_mcp_d1_common.py`, `cloud_mcp_d2_common.py`
+   and `cloud_mcp_d1.py` in the separate D0 runtime. The D2 shared module is
+   required even when choice writes are disabled. Its pinned standalone
+   environment already provides the SDK. Keep D0 source/config snapshots and
+   profile ID for rollback.
 5. Prepare `/etc/tradejournal-d1/config.json`, root:tradejournal-d0, directory
    0750/file 0640, from the disabled example. Use the same issuer/resource/
    client claim/key snapshot as D0, and the selected principal ID/version.
@@ -136,8 +141,12 @@ with actual socket activation, namespace bridge, independent backend auth,
 restart, expired keys and MCP IP denial. D0 native smoke additionally proves
 the separate publisher cannot read D1 bindings.
 
-Native CI must pass on the exact candidate before readiness. Live setup,
-new-scope OAuth consent, fresh actual Dot tool/UI comparison and laptop-off D1
-operation remain unobserved. D0's existing live profile result does not satisfy
-those D1 gates. Purchased-credit account settings remain a separate check;
-this code has no API inference billing path.
+Native CI passed on the merged D1 candidate; live setup, new-scope OAuth consent
+and fresh actual Dot tool/UI comparison were observed on 2026-10-09. The assigned
+sample records stayed unchanged; later unrelated market-demo additions were
+separately identified. Physical laptop-off D1 operation and VPS reboot persistence
+remain unobserved. Purchased-credit account settings were checked separately
+at acceptance and can change; this code has no API inference billing path.
+The selected [D2 increment](cloud-mcp-d2-contract.md) adds opt-in own sample
+choices; its implementation/live evidence is separate from this completed read
+acceptance.
