@@ -328,3 +328,27 @@ test("unusable frozen bars show an explicit unavailable chart without replacing 
   await expect(page.getByText(/Chart unavailable: Invalid frozen price or volume/)).toBeVisible();
   await expect(page.getByText("Inspect frozen packet and rules").first()).toBeVisible();
 });
+
+
+test("isolated supplied VWAP is visible in both minute and quarter views", async ({page,browser}) => {
+  await login(page,browser,true,true);
+  await page.route("**/api/backend/practice/runs/*",async route => {
+    const response=await route.fetch(),body=await response.json();
+    const packet=body.opportunities.find((o:{symbol:string})=>o.symbol==="MU").context.packet;
+    const grouped=new Map<number,{t:string;vw:number|null}[]>();
+    for (const bar of packet.recent_minute_bars as {t:string;vw:number|null}[]) {
+      const key=Math.floor(Date.parse(bar.t)/900000);grouped.set(key,[...(grouped.get(key)??[]),bar]);
+    }
+    const complete=[...grouped.values()].find(bars=>bars.length===15)!;
+    complete.sort((a,b)=>Date.parse(a.t)-Date.parse(b.t));
+    packet.recent_minute_bars=complete.map((bar,i)=>({...bar,vw:i===14?bar.vw:null}));
+    await route.fulfill({response,json:body});
+  });
+  await page.getByRole("button",{name:"Reload saved practice"}).click();
+  const region=page.getByRole("region",{name:"MU frozen evidence chart"});
+  await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
+  await expect(region.getByText(/VWAP unavailable for 14 frozen minutes/)).toBeVisible();
+  await region.getByRole("button",{name:"15m",exact:true}).click();
+  await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
+  await expect(region.getByRole("table").getByText("Complete · 15/15",{exact:true})).toBeVisible();
+});
