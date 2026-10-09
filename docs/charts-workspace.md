@@ -524,10 +524,11 @@ cd backend
   Premarket percent compares its timestamped trade with `prevclose`, and
   postmarket percent compares it with Tradier's explicit regular-session
   `close`. If that close is absent, the postmarket percent is unavailable.
-  With no trade in the last 45 seconds and no fresh quote, a row shows its
-  quote's change dimmed, by the same rule in pre- and postmarket and otherwise
-  its last regular-session price against the previous close (after the close,
-  the day's closing change), rather than a dash; the hover says so.
+  With nothing fresh, a row shows its shown price's change dimmed rather than a
+  dash, and the hover says so: a streamed trade older than 45 seconds (it stays
+  shown until a newer one arrives) by its session's rule, and a quote by the
+  same rule in pre- and postmarket, otherwise its last regular-session price
+  against the previous close (after the close, the day's closing change).
   Hidden or paused tabs disconnect; the stream reconnects after provider or
   network failures.
 - The 15-second visible-tab REST refresh remains the source of truth for volume,

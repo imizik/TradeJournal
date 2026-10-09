@@ -154,17 +154,18 @@ function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote
   const quoteSession = marketSessionAt(quote?.trade_time, market);
   const freshQuote = quote?.trade_time != null && now >= quote.trade_time && now - quote.trade_time <= 45 ? quote : undefined;
   const displayPrice = shownTick?.price ?? quote?.last;
-  // Without a fresh trade the quote's own change shows, dimmed: after the close, the day's closing change.
-  const closing = !shownTick && !freshQuote;
-  const change = shownTick
-    ? tickFresh ? sessionChange(shownTick.price, shownTick.session, quote) : null
+  // Nothing fresh: the shown price's own change, dimmed, rather than a dash. A trade older than 45
+  // seconds stays shown until a newer one arrives, so it keeps its change; a quote's after the close
+  // is the day's closing change.
+  const closing = shownTick ? !tickFresh : !freshQuote;
+  const change = shownTick ? sessionChange(shownTick.price, shownTick.session, quote)
     : freshQuote ? sessionChange(freshQuote.last, quoteSession, freshQuote) : quoteChange(quote, quoteSession);
   const quoteAge = quote?.trade_time == null || now < quote.trade_time ? null : Math.floor(now - quote.trade_time);
   const source = shownTick
     ? `${tickIsLive ? "Live trade" : paused ? "Paused trade" : tickAge! <= 45 ? "Recent trade" : "Stale streamed trade"} · ${tickAge}s old`
     : quoteAge == null ? "Tradier quote · timestamp unavailable"
       : `${quoteAge <= 45 ? "Tradier quote" : "Stale Tradier quote"} · ${quoteAge}s old`;
-  const changeSource = closing && change != null ? `${source} · change as of this quote` : source;
+  const changeSource = closing && change != null ? `${source} · change as of this ${shownTick ? "trade" : "quote"}` : source;
   return <><span title={source} className="text-right font-mono text-slate-400">{price(displayPrice)}</span>
     <span title={changeSource} aria-label={`${change == null ? "Change unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)} percent`}; ${changeSource}`}
       className={`text-right font-mono ${change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}`}</span></>;

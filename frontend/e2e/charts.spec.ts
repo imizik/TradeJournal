@@ -142,6 +142,7 @@ test("streamed trades move the selected price and candle, then pause freezes the
 });
 
 test("watchlist rows use shared stream trades and the regular close for postmarket change", async ({ page }) => {
+  await page.clock.install();
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
     class MockEventSource {
@@ -177,6 +178,10 @@ test("watchlist rows use shared stream trades and the regular close for postmark
   await page.getByRole("button", { name: "Pause chart updates" }).click();
   await expect(row).toContainText("275.00");
   await expect(row.locator("span[title]").first()).toHaveAttribute("title", /Paused trade/);
+  // A trade older than 45 seconds stays shown until a newer one arrives; it keeps its change, dimmed, not a dash.
+  await page.clock.fastForward(50_000);
+  await expect(row.locator("span[title]").nth(1)).toHaveAttribute("title", /Paused trade · \d+s old · change as of this trade/);
+  await expect(row).toContainText("+1.85");
 });
 
 test("newer extended-hours candle is labeled instead of showing an older quote", async ({ page }) => {
