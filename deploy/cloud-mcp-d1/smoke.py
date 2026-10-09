@@ -197,6 +197,39 @@ def exercise(run_id, day):
         ns = Path(f"/proc/{pid}/ns/net").readlink()
         assert ns != Path("/proc/1/ns/net").readlink()
     assert run("systemctl", "show", MCP, "--property=RestrictAddressFamilies", "--value").stdout.strip() == "AF_UNIX"
+    # Exercise the updater's actual pause/restore helpers against installed units.
+    from dot_trial_update import cloud_reads_state, stop_cloud_reads as pause_reads, restore_cloud_reads
+    cloud_units, cloud_active = cloud_reads_state()
+    assert cloud_active and set(cloud_units) == {SOCKET, BRIDGE}
+    pause_reads(cloud_units)
+    run("systemctl", "stop", API)
+    with httpx.Client(transport=httpx.HTTPTransport(uds="/run/tradejournal-d1/reads.sock"), timeout=2) as client:
+        try:
+            client.get("http://localhost/cloud-mcp/practice/runs", params={"day": day})
+        except httpx.ConnectError:
+            pass
+        else:
+            raise AssertionError("Updater pause allowed socket activation")
+    assert run("systemctl", "show", API, "--property=ActiveState", "--value").stdout.strip() == "inactive"
+    assert cloud_reads_state()[1] is False
+    snapshot["expires_at"] = now + 3600
+    write(KEYS / "jwks.json", json.dumps(snapshot))
+    run("systemctl", "start", API)
+    deadline = time.monotonic() + 45
+    while True:
+        pid = run("systemctl", "show", API, "--property=MainPID", "--value").stdout.strip()
+        try:
+            run("nsenter", "--target", pid, "--net", "--", "python3", "-c",
+                "import json\nfrom urllib.request import urlopen\n"
+                "with urlopen('http://127.0.0.1:8091/health', timeout=2) as r: assert json.load(r)['status'] == 'ok'")
+            break
+        except subprocess.CalledProcessError:
+            if time.monotonic() > deadline:
+                raise AssertionError("Paused API did not recover")
+            time.sleep(.5)
+    assert cloud_reads_state()[1] is False
+    restore_cloud_reads(cloud_active)
+    assert ready().get("isError") is not True
     from dot_trial_control import stop_cloud_reads
     stop_cloud_reads()
     run("systemctl", "stop", API)
@@ -208,7 +241,7 @@ def exercise(run_id, day):
         else:
             raise AssertionError("Stopped socket reactivated the sample API")
     assert run("systemctl", "show", API, "--property=ActiveState", "--value").stdout.strip() == "inactive"
-    print("Native D1 passed: actual Unix bridge, independent bearer checks, assigned simulation, no domain mutation, denied writes, revocation, restart, expired keys and stopped activation; MCP IP sockets denied")
+    print("Native D1 passed: actual Unix bridge, independent bearer checks, assigned simulation, no domain mutation, denied writes, revocation, restart, expired keys, updater pause/recovery and stopped activation; MCP IP sockets denied")
 
 
 def main():

@@ -75,6 +75,10 @@ subject, keys, tokens, gateway secrets or private credential files.
    Supply a portable copy of the existing compiled frontend if no UI change is
    needed. Verify the selected source set against the installed runtime before
    changing it; new dependencies/files must exist before importing `app.main`.
+   The updater pauses installed D1 socket/bridge activation before replacing
+   files or rolling back. It restores only a previously active socket after
+   readiness succeeds; an absent/inactive entrance stays off, and failed recovery
+   leaves it stopped. It never boot-enables D1.
 4. Stage `cloud_mcp_d0.py`, `cloud_mcp_d1_common.py` and `cloud_mcp_d1.py` in the
    separate D0 runtime; its pinned standalone environment already provides the
    SDK. Keep D0 source/config snapshots and profile ID for rollback.

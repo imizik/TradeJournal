@@ -45,6 +45,7 @@ def update_fixture(tmp_path, monkeypatch):
     config.mkdir()
     monkeypatch.setattr(updater, "RUNTIME", runtime)
     monkeypatch.setattr(updater, "CONFIG", config)
+    monkeypatch.setattr(updater, "UNIT_DIR", tmp_path / "units")
     monkeypatch.setattr(updater, "check_target", lambda: None)
     for name in updater.SOURCE_FILES - {"backend/app/engine/sample_practice.py", "deploy/dot_trial_seed.py"}:
         path = runtime / name
@@ -236,3 +237,94 @@ def test_existing_update_does_not_enable_replay_implicitly(update_fixture, monke
     monkeypatch.setattr(updater, 'ready', lambda: None)
     updater.update(backend, frontend, 'a' * 40)
     assert 'TJ_SAMPLE_REPLAY_ENABLED' not in (config / 'trial-runtime.env').read_text()
+
+
+@pytest.mark.parametrize("failure", [None, "ready", "manifest", "cloud_stop", "normal_stop", "cloud_restore", "recovery"])
+def test_active_cloud_entrance_pauses_before_mutation_and_resumes_after_readiness(
+        update_fixture, monkeypatch, failure):
+    from types import SimpleNamespace
+    runtime, config, backend, frontend, calls = update_fixture
+    updater.UNIT_DIR.mkdir()
+    for unit in updater.CLOUD_UNITS:
+        (updater.UNIT_DIR / unit).touch()
+    state = {"active": True, "ready": False, "failed": False, "readiness_count": 0}
+    original_write = Path.write_bytes
+    original_move = shutil.move
+    def run(*args):
+        calls.append(args)
+        if args[1] == "show":
+            return SimpleNamespace(stdout="active")
+        if args[1] == "stop":
+            if updater.CLOUD_SOCKET in args:
+                state["active"] = False
+                if failure == "cloud_stop" and not state["failed"]:
+                    state["failed"] = True
+                    raise RuntimeError("cloud_stop")
+            else:
+                assert not state["active"]
+                if failure == "normal_stop" and not state["failed"]:
+                    state["failed"] = True
+                    raise RuntimeError("normal_stop")
+            state["ready"] = False
+        if args[1] == "start" and updater.CLOUD_SOCKET in args:
+            assert state["ready"]
+            expected = "new server" if failure is None or failure == "cloud_restore" and not state["failed"] else "old server"
+            assert (runtime / "frontend/server.js").read_text() == expected
+            state["active"] = True
+            if failure == "cloud_restore" and not state["failed"]:
+                state["failed"] = True
+                raise RuntimeError("cloud_restore")
+    def write(path, value):
+        if str(path).startswith(str(runtime) + "/"):
+            assert not state["active"]
+        return original_write(path, value)
+    # manifest success uses write_text; rollback restores write_bytes.
+    original_text = Path.write_text
+    def text(path, value, *args, **kwargs):
+        if failure == "manifest" and path == config / "manifest.json" and not state["failed"]:
+            state["failed"] = True
+            raise RuntimeError("manifest")
+        return original_text(path, value, *args, **kwargs)
+    def move(source, destination):
+        assert not state["active"]
+        return original_move(source, destination)
+    def ready():
+        assert not state["active"]
+        state["readiness_count"] += 1
+        expected = "old server" if failure in {"cloud_stop", "normal_stop"} or state["readiness_count"] > 1 else "new server"
+        assert (runtime / "frontend/server.js").read_text() == expected
+        if failure in {"ready", "recovery"} and (failure == "recovery" or not state["failed"]):
+            state["failed"] = True
+            raise RuntimeError(failure)
+        state["ready"] = True
+    monkeypatch.setattr(updater, "run", run)
+    monkeypatch.setattr(updater, "ready", ready)
+    monkeypatch.setattr(Path, "write_bytes", write)
+    monkeypatch.setattr(Path, "write_text", text)
+    monkeypatch.setattr(updater.shutil, "move", move)
+    if failure:
+        with pytest.raises(RuntimeError, match=failure):
+            updater.update(backend, frontend, "a" * 40)
+        assert (runtime / "frontend/server.js").read_text() == "old server"
+        assert json.loads((config / "manifest.json").read_text()) == {"published": True}
+    else:
+        updater.update(backend, frontend, "a" * 40)
+    assert state["active"] is (failure != "recovery")
+    assert calls[1] == ("systemctl", "stop", *updater.CLOUD_UNITS)
+    assert not any("enable" in call for call in calls)
+
+
+def test_installed_inactive_cloud_entrance_is_not_activated_by_update(update_fixture, monkeypatch):
+    from types import SimpleNamespace
+    _, _, backend, frontend, calls = update_fixture
+    updater.UNIT_DIR.mkdir()
+    for unit in updater.CLOUD_UNITS:
+        (updater.UNIT_DIR / unit).touch()
+    def run(*args):
+        calls.append(args)
+        return SimpleNamespace(stdout="inactive")
+    monkeypatch.setattr(updater, "run", run)
+    monkeypatch.setattr(updater, "ready", lambda: None)
+    updater.update(backend, frontend, "a" * 40)
+    assert ("systemctl", "stop", *updater.CLOUD_UNITS) in calls
+    assert not any(call[1] == "start" and updater.CLOUD_SOCKET in call for call in calls)
