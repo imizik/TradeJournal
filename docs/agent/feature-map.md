@@ -291,3 +291,18 @@ Code: backend `app/engine/access.py`, `app/access_manifest.py`,
 Proof: backend `tests/test_browser_access.py`, `tests/test_access_deployment.py`,
 Postgres parity; frontend `e2e/browser-access.auth.ts` through
 `playwright.auth.config.ts`. Fixtures are not a live Dot or TLS observation.
+
+## Optional sample cloud connector
+
+D0 exposes the synthetic profile. The selected D1 increment adds two read tools
+for one linked assistant's assigned simulated MU/NBIS Practice run. Structured
+tools retrieve frozen records; the separately signed-in assistant UI handles
+charts and visual flow. No connector writes or paid model/provider calls.
+See the [D1 contract](cloud-mcp-d1-contract.md) for manual activation and pending
+actual Dot acceptance.
+
+Code: `backend/cloud_mcp_d1.py`, `backend/cloud_mcp_d1_common.py`, backend
+`app/engine/cloud_practice_access.py`, `app/routers/cloud_practice.py` and the
+existing restricted sample projection. Proof: `backend/tests/test_cloud_mcp_d1.py`
+and `deploy/cloud-mcp-d1/smoke.py` on disposable Ubuntu; live OAuth/tool/UI evidence
+is a separate gate. Normal releases keep the templates disabled.

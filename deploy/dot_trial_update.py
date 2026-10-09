@@ -14,10 +14,16 @@ from urllib.request import urlopen
 
 RUNTIME = Path("/opt/tradejournal-dot-trial/runtime")
 CONFIG = Path("/etc/tradejournal-dot-trial")
+UNIT_DIR = Path("/etc/systemd/system")
+CLOUD_SOCKET = "tradejournal-d1-reads.socket"
+CLOUD_UNITS = (CLOUD_SOCKET, "tradejournal-d1-reads.service")
 SOURCE_FILES = frozenset({"backend/app/engine/decisions.py", "backend/app/engine/access.py",
     "backend/app/engine/paper.py", "backend/app/engine/sample_replay.py",
     "backend/app/engine/sample_practice.py", "backend/app/routers/practice.py", "backend/app/routers/access.py",
-    "backend/app/access_manifest.py", "backend/dot_trial_app.py", "deploy/dot_trial_control.py", "deploy/dot_trial_seed.py"})
+    "backend/app/access_manifest.py", "backend/app/access_middleware.py", "backend/app/main.py",
+    "backend/app/engine/cloud_practice_access.py", "backend/app/routers/cloud_practice.py",
+    "backend/cloud_mcp_d0.py", "backend/cloud_mcp_d1_common.py",
+    "backend/dot_trial_app.py", "deploy/dot_trial_control.py", "deploy/dot_trial_seed.py"})
 FRONTEND_FILES = (".next", "server.js", "package.json", "public")
 SERVICES = tuple(f"tradejournal-dot-trial-{part}.service" for part in ("api", "assistant", "owner"))
 SOCKETS = tuple(f"tradejournal-dot-trial-{part}-bridge.socket" for part in ("assistant", "owner"))
@@ -26,6 +32,25 @@ BRIDGES = tuple(f"tradejournal-dot-trial-{part}-bridge.service" for part in ("as
 
 def run(*args):
     return subprocess.run(list(args), check=True, capture_output=True, text=True)
+
+
+def cloud_reads_state():
+    """Older trials have no D1 units; preserve only an already-active entrance."""
+    units = tuple(name for name in CLOUD_UNITS if (UNIT_DIR / name).is_file())
+    active = CLOUD_SOCKET in units and run("systemctl", "show", CLOUD_SOCKET,
+        "--property=ActiveState", "--value").stdout.strip() in {"active", "activating"}
+    return units, active
+
+
+def stop_cloud_reads(units):
+    if units:
+        run("systemctl", "stop", *units)
+
+
+def restore_cloud_reads(active):
+    if active:
+        # Caller must finish source replacement/rollback and readiness first.
+        run("systemctl", "start", CLOUD_SOCKET)
 
 
 def check_target():
@@ -147,11 +172,14 @@ def update(backend_archive, frontend_archive, commit, *, enable_sample_replay=Fa
     manifest.setdefault("updates", []).append({"commit": commit, "recovery_directory": str(stage),
         "backend_sha256": hashlib.sha256(Path(backend_archive).read_bytes()).hexdigest(),
         "frontend_sha256": hashlib.sha256(Path(frontend_archive).read_bytes()).hexdigest()})
+    cloud_units, cloud_active = cloud_reads_state()
     try:
+        stop_cloud_reads(cloud_units)
         run("systemctl", "stop", *SOCKETS, *BRIDGES, *SERVICES)
     except BaseException:
         run("systemctl", "start", *SERVICES, *SOCKETS)
         ready()
+        restore_cloud_reads(cloud_active)
         raise
     try:
         for name in FRONTEND_FILES:
@@ -175,8 +203,10 @@ def update(backend_archive, frontend_archive, commit, *, enable_sample_replay=Fa
         run("systemctl", "start", *SERVICES, *SOCKETS)
         ready()
         manifest_file.write_text(json.dumps(manifest, indent=2))
+        restore_cloud_reads(cloud_active)
     except BaseException:
         # A failed stop is surfaced; retain snapshots instead of modifying live state.
+        stop_cloud_reads(cloud_units)
         run("systemctl", "stop", *SOCKETS, *BRIDGES, *SERVICES)
         for name in processed:
             remove(RUNTIME / "frontend" / name)
@@ -192,6 +222,7 @@ def update(backend_archive, frontend_archive, commit, *, enable_sample_replay=Fa
         manifest_file.write_bytes(original_manifest)
         run("systemctl", "start", *SERVICES, *SOCKETS)
         ready()
+        restore_cloud_reads(cloud_active)
         raise
     print("Sample runtime updated and ready. Production configuration and credentials unchanged.")
 

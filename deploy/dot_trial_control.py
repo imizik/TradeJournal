@@ -9,6 +9,16 @@ import subprocess
 CONFIG = Path("/etc/tradejournal-dot-trial")
 RUNTIME = Path("/opt/tradejournal-dot-trial/runtime")
 STATE = Path("/var/lib/tradejournal-dot-trial")
+UNIT_DIR = Path("/etc/systemd/system")
+
+
+def stop_cloud_reads():
+    # Stop activation before the API; otherwise a surviving socket can start it
+    # again after the trial's normal shutdown. Older trials have no D1 units.
+    names = [name for name in ("tradejournal-d1-reads.socket", "tradejournal-d1-reads.service")
+        if (UNIT_DIR / name).is_file()]
+    if names:
+        subprocess.run(["systemctl", "stop", *names], check=True, capture_output=True)
 
 
 def environment():
@@ -89,6 +99,7 @@ def disable():
     revoke_assistants()
     assistant_file = CONFIG / "access-assistant.env"
     assistant_file.write_text(assistant_file.read_text().replace("TJ_ASSISTANT_ENABLED=true", "TJ_ASSISTANT_ENABLED=false"))
+    stop_cloud_reads()
     services = ["tradejournal-dot-trial-api.service", "tradejournal-dot-trial-assistant.service", "tradejournal-dot-trial-owner.service"]
     sockets = [f"tradejournal-dot-trial-{profile}-bridge.socket" for profile in ("assistant", "owner")]
     bridges = [f"tradejournal-dot-trial-{profile}-bridge.service" for profile in ("assistant", "owner")]

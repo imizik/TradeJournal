@@ -31,6 +31,18 @@ control = module("dot_trial_control")
 installer = module("dot_trial_install")
 
 
+def test_optional_cloud_socket_shutdown_prevents_backend_reactivation(tmp_path, monkeypatch):
+    monkeypatch.setattr(control, "UNIT_DIR", tmp_path)
+    calls = []
+    monkeypatch.setattr(control.subprocess, "run", lambda command, **kwargs: calls.append(command))
+    control.stop_cloud_reads()
+    assert calls == []
+    for name in ("tradejournal-d1-reads.socket", "tradejournal-d1-reads.service", "tradejournal-api.service"):
+        (tmp_path / name).write_text("fixture unit")
+    control.stop_cloud_reads()
+    assert calls == [["systemctl", "stop", "tradejournal-d1-reads.socket", "tradejournal-d1-reads.service"]]
+
+
 def test_private_owner_cannot_mutate_any_trial_domain_route(boundary):
     boundary.patch.setenv("TJ_ACCESS_SAMPLE_DATA", "true")
     boundary.patch.setattr(app, "user_middleware", [app.user_middleware[0], Middleware(trial.FixtureMarket), *app.user_middleware[1:]])

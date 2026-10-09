@@ -34,6 +34,13 @@ class AccessMiddleware:
                 if operation in {"GET /access/challenge", "POST /access/login", "POST /access/bootstrap"}:
                     access.gateway(request)
                     return operation
+                if operation.startswith("GET /cloud-mcp/"):
+                    from app.engine import cloud_practice_access
+                    from cloud_mcp_d1_common import READ_PATHS
+                    if operation not in READ_PATHS:
+                        raise HTTPException(404, "Not found")
+                    request.state.access = cloud_practice_access.identify(request)
+                    return operation
                 request.state.access = access.identify(request)
                 access.authorize(request, operation, child.get("path_params", {}))
                 return operation

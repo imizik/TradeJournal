@@ -760,8 +760,9 @@ neither install nor activate them. A dedicated HTTPS hostname forwards only
 MCP/metadata to a mode-0660 Unix socket. The service verifies expiring local
 public keys under a network-disabled systemd sandbox, with no model keys, app
 imports, paid jobs, OpenAI tunnel or Platform runtime key. Operator key refresh
-is a separate bounded HTTPS fetch of issuer metadata/public keys. No scheduler
-is added. Stop both socket and service to prevent reactivation.
+is a separate bounded HTTPS fetch of issuer metadata/public keys; its optional
+15-minute timer publishes only public keys. No model/job scheduler is added.
+Stop both socket and service to prevent reactivation.
 
 The deployment CI adds a separate disposable TLS/Caddy/socket smoke after the
 ordinary package smoke. It checks real IPv4/IPv6 socket denial and offline
@@ -770,11 +771,23 @@ restart and teardown. This fixture evidence does not prove an actual Dot, live
 issuer, laptop-off use or account-level usage controls. Those remain trial
 acceptance steps; no public route is created by merging the implementation.
 
+### Manual assigned sample MCP reads
+
+The [D1 contract](../docs/agent/cloud-mcp-d1-contract.md) selects two read tools
+for one existing MU/NBIS sample assistant. Templates under `deploy/cloud-mcp-d1/`
+add only a private Unix socket bridge into the isolated sample API namespace;
+the offline adapter and backend both validate the same approved OAuth token.
+They do not expose the raw backend publicly or reuse an owner/service key.
+Normal deployment does not install these units/drop-ins or enable the new scope.
+The runbook covers staged pinned dependencies, exact principal/version binding,
+separate `practice:read` consent, manual activation and D0 rollback. CI exercises
+the actual namespace/Unix boundary; actual Dot tool/UI acceptance remains separate.
+
 ### Selected sample paper replay increment
 
 Isaac selected [Jo’s own sample paper replay](../docs/agent/dot-sample-replay-contract.md)
 on 2026-10-09. Keep prior inspector/writer keys and decisions. The updater’s
-eleven-file selected source set adds the replay engine and P0 schema refusal.
+explicit selected source set includes the replay engine and P0 schema refusal.
 Enable the new capability only on the already-approved guarded sample runtime:
 
 ```bash

@@ -1,6 +1,8 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    'GET /cloud-mcp/practice/runs',
+    'GET /cloud-mcp/practice/runs/{run_id}',
     'POST /practice/opportunities/{opp_id}/sample-replay',
     'DELETE /charts/alerts/{alert_id}',
     'DELETE /charts/captures/templates/{template_id}',
