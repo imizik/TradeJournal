@@ -6,6 +6,7 @@ import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTab
 import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import PracticeRoutine from "@/components/PracticeRoutine";
+import { money, newYorkToday } from "@/lib/format";
 import {
   buildOpenPositionMeta,
   computeUnrealizedPnl,
@@ -18,10 +19,7 @@ function pnlColor(val: number | null | undefined) {
   return val >= 0 ? "text-emerald-400" : "text-red-400";
 }
 
-function fmt$(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `${val >= 0 ? "+" : ""}$${val.toFixed(0)}`;
-}
+const fmt$ = (val: number | null | undefined) => money(val, { signed: true, cents: false });
 
 // Main dashboard route.
 export default async function DashboardPage({
@@ -206,17 +204,12 @@ export default async function DashboardPage({
         </FilterGroup>
       </div>
 
-      <PerformanceOverview trades={trades} />
-
-      <PracticeRoutine />
-
-      <PracticeDecisions records={decisions.decisions} focusId={resolvedParams.decision} />
-
+      {/* Today first: what is open and what it is doing now; all-time results and practice follow. */}
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Today's Closed P&L" value={fmt$(stats.today_pnl)} valueClass={pnlColor(stats.today_pnl)} />
         <StatCard
           label="Unrealized P&L"
-          value={totalUnrealizedPnl != null ? fmt$(totalUnrealizedPnl) : "-"}
+          value={fmt$(totalUnrealizedPnl)}
           valueClass={pnlColor(totalUnrealizedPnl)}
           detail={`${quotedPositions.length} of ${openPositionRows.length} open positions quoted`}
         />
@@ -238,17 +231,17 @@ export default async function DashboardPage({
           <div className="mb-4 grid gap-3 sm:grid-cols-3">
             <StatCard
               label="Gross Marked Value"
-              value={grossMarkedValue != null ? fmtMoney(grossMarkedValue) : "-"}
+              value={fmtMoney(grossMarkedValue)}
               detail={`${quotedPositions.length} of ${openPositionRows.length} positions marked`}
             />
             <StatCard
               label="Net Marked Value"
-              value={netMarkedValue != null ? fmtSignedMoney(netMarkedValue) : "-"}
+              value={fmtSignedMoney(netMarkedValue)}
               valueClass={pnlColor(netMarkedValue)}
             />
             <StatCard
               label="Largest Position"
-              value={largestMarkedPosition ? `${largestMarkedPosition.trade.ticker} · ${fmtMoney(largestMarkedPosition.marketValue)}` : "-"}
+              value={largestMarkedPosition ? `${largestMarkedPosition.trade.ticker} · ${fmtMoney(largestMarkedPosition.marketValue)}` : "—"}
             />
           </div>
 
@@ -264,9 +257,15 @@ export default async function DashboardPage({
             </div>
           </div>
 
-          <OpenPositionsTable rows={openPositionRows} accountMap={accountMap} quotes={quotesByTradeId} />
+          <OpenPositionsTable rows={openPositionRows} accountMap={accountMap} quotes={quotesByTradeId} today={newYorkToday()} />
         </section>
       )}
+
+      <PerformanceOverview trades={trades} />
+
+      <PracticeRoutine />
+
+      <PracticeDecisions records={decisions.decisions} focusId={resolvedParams.decision} />
 
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -298,15 +297,8 @@ function StatCard({
   );
 }
 
-function fmtMoney(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `$${val.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function fmtSignedMoney(val: number | null | undefined) {
-  if (val == null) return "-";
-  return `${val >= 0 ? "+" : "-"}$${Math.abs(val).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+const fmtMoney = (val: number | null | undefined) => money(val);
+const fmtSignedMoney = (val: number | null | undefined) => money(val, { signed: true });
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (

@@ -183,12 +183,15 @@ export default function DashboardActions() {
   return (
     <div className="flex items-center gap-2">
       <SyncStatusIndicator summary={summary} />
+      {/* Sync runs by itself now; this opens the Sync Center for a manual run, so it stays quiet. */}
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-2 rounded bg-foreground px-3 py-1.5 text-xs font-semibold text-background transition-colors hover:bg-foreground/90"
+        aria-label="Sync / Update Data"
+        title="Open the Sync Center to update data now"
+        className="inline-flex items-center gap-1.5 rounded border px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       >
         <RefreshCw className="h-3.5 w-3.5" />
-        Sync / Update Data
+        Sync
       </button>
       <SyncCenterDrawer
         open={open}

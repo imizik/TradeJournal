@@ -41,6 +41,20 @@ test.describe("dashboard", () => {
 
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
+    // Today comes first: today's P&L and the open positions sit above the all-time performance.
+    const main = page.locator("main").first();
+    const order = await main.evaluate((root) => {
+      const text = root.textContent ?? "";
+      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Open Positions"), performance: text.indexOf("Trading Performance") };
+    });
+    expect(order.today).toBeGreaterThanOrEqual(0);
+    expect(order.today).toBeLessThan(order.performance);
+    expect(order.positions).toBeLessThan(order.performance);
+    // Money always puts the sign before the dollar sign.
+    await expect(main).not.toContainText("$-");
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.screenshot({ path: test.info().outputPath("dashboard-desktop.png") });
+
     // Aggregates computed from the seeded, reconstructed closed trades.
     await expect(page.getByText("+$1,019.00").first()).toBeVisible();
     await expect(page.getByText("4.40", { exact: true })).toBeVisible();
