@@ -132,9 +132,10 @@ metadata and origin, fetches only the fixed public JWKS URL, then atomically
 replaces the snapshot at mode 0640, preserving existing ownership/group.
 Redirects, oversized bodies and invalid keys fail without replacing the old
 snapshot. Its output says `login_observed: false`: no login, consent or actual
-token-exchange acceptance is implied. `synthetic_scope_advertised` reports
-whether provider-wide discovery lists `d0:profile`; resource-specific API scopes
-may be absent there. `scope_enforcement: access_token` records that every
+token-exchange acceptance is implied. The separate `--check-issuer` command
+reports `synthetic_scope_advertised`, indicating whether provider-wide discovery
+lists `d0:profile`; resource-specific API scopes may be absent there. Its
+`scope_enforcement: access_token` field records that every
 authenticated MCP request still requires that scope in its verified token.
 Missing/other token scopes fail even after successful issuer preflight.
 Refresh manually before its one-hour
