@@ -297,7 +297,7 @@ test("frozen chart matches the assigned packet through decisions, replay and rel
     const row = table.locator(`tr[data-start="${new Date(at).toISOString()}"]`);
     const cells = await row.getByRole("cell").allTextContents();
     expect(cells).toEqual([`${bars.length===15?"Complete":"Partial"} · ${bars.length}/15`,
-      ...[bars[0].o,Math.max(...bars.map(b=>b.h)),Math.min(...bars.map(b=>b.l)),bars.at(-1)!.c].map(p=>`$${p.toFixed(4)}`),bars.reduce((n,b)=>n+b.v,0).toLocaleString("en-US")]);
+      `$${bars.at(-1)!.c.toFixed(4)}`,bars.reduce((n,b)=>n+b.v,0).toLocaleString("en-US"),...[bars[0].o,Math.max(...bars.map(b=>b.h)),Math.min(...bars.map(b=>b.l))].map(p=>`$${p.toFixed(4)}`)]);
   }
   const summary = await table.textContent();
   const article = page.getByRole("article",{name:"MU sample opportunity"});
