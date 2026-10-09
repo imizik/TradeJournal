@@ -499,8 +499,10 @@ bash startdev.sh                                  # backend 8080, frontend 3000
 
 ```
 
-The private API and frontend bind to `127.0.0.1`. The API has no auth and
-must only be reached through private access.
+The private API and frontend bind to `127.0.0.1`. The legacy profile has no
+auth and must only be reached through private access. Optional authenticated
+mode and its disabled assistant listener follow the
+[cloud-browser contract](cloud-browser-auth-contract.md).
 
 ## Historical metric evidence
 
@@ -512,3 +514,27 @@ for the snapshot format, report command, coverage and source-verification limits
 and deliberate input mutations, in addition to hand-calculated cases. A local
 match on cached inputs does not establish broker completeness, executable
 quotes or predictive value. Missing/stale results are not counted as matches.
+
+
+## Authenticated browser boundaries
+
+Full verification additionally runs `npx playwright test --config
+playwright.auth.config.ts` after the ordinary browser suite has built the
+frontend. It starts a separate seeded SQLite database, authenticated backend
+and two frontend instances on distinct loopback ports. Override
+`AUTH_BACKEND_PORT`, `AUTH_OWNER_PORT`, and `AUTH_ASSISTANT_PORT` together when
+needed. Running that configuration alone requires a fresh frontend build with
+`NEXT_PUBLIC_API_URL=/api/backend`. All optional provider/model/listener work
+is disabled in its fixture environment.
+
+Backend auth tests exercise the registered route inventory, forged identity,
+CSRF, credential/session expiry/reset/revocation, symbol/resource denial and
+active SSE revocation. Deployment fixtures prove secret-file separation and
+disabled unit packaging; Postgres parity exercises session persistence and
+revocation. Browser tests inspect actual rendered pages and direct requests,
+including session audience replay and protected server-rendered data.
+
+A local fixture browser is not the Dot's cloud browser. Real secure sign-in,
+HTTPS, Tailscale ACLs, native process isolation, live provider data and laptop-
+off operation require the separately approved sample-data trial. No internet
+entry is enabled by running these tests or merging this implementation.

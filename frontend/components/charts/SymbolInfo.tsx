@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppAccess } from "@/components/AccessProvider";
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolNews, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
@@ -32,6 +33,8 @@ const REFRESH_MS = 60_000;
 
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
 export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void }) {
+  const { owner, grants } = useAppAccess();
+  const journal = owner || !!grants.journal_read;
   const id = useId();
   const priceOf = useRef(price);
   useEffect(() => { priceOf.current = price; });
@@ -48,7 +51,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
 
   useEffect(() => {
     const tab = view.tab;
-    if (!view.ready || !view.expanded || !built(tab)) return;
+    if (!view.ready || !view.expanded || !built(tab) || (tab === "You" && !journal)) return;
     const controller = new AbortController();
     let active = true;
     let waiting: ReturnType<typeof setTimeout> | undefined;
@@ -66,7 +69,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     const timer = setTimeout(() => { setResult(null); run(false); }, 300);
     const again = tab === "Forecast" || tab === "News" ? setInterval(() => { if (!document.hidden) run(true); }, REFRESH_MS) : undefined;
     return () => { active = false; clearTimeout(timer); clearTimeout(waiting); clearInterval(again); controller.abort(); };
-  }, [symbol, view.ready, view.expanded, view.tab, retry]);
+  }, [symbol, view.ready, view.expanded, view.tab, retry, journal]);
 
   function select(tab: Tab) {
     setView((current) => ({ ...current, tab }));
@@ -88,7 +91,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
           }} className={`min-h-11 min-w-0 flex-1 px-1 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
-        {!built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
+        {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
             : view.tab === "Short" ? <SymbolInfoShort data={shown.data as SymbolShort} />

@@ -71,6 +71,9 @@ for _flag in (
 # QUOTES_PROVIDER=tradier would otherwise change which code path the suite
 # exercises. Tests that mean to exercise a provider set it themselves.
 os.environ["QUOTES_PROVIDER"] = "yfinance"
+# Ordinary regression fixtures exercise the private legacy profile. Auth tests
+# explicitly enable authenticated mode in their isolated app/database.
+os.environ["TJ_ACCESS_ENABLED"] = "false"
 os.environ.pop("WEBULL_LISTENER_ACCOUNTS", None)
 
 # The application no longer builds the schema. Alembic does (app/schema.py),

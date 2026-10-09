@@ -31,7 +31,7 @@ AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tr
 AUTODEPLOY = "tradejournal-autodeploy"
 TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
 PRACTICE_UNITS = ["tradejournal-practice.service", "tradejournal-practice.timer"]
-OPTIONAL_UNITS = [*PRACTICE_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
+OPTIONAL_UNITS = ["tradejournal-assistant.service", *PRACTICE_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
 # Retired units stay listed until upgrades have removed their installed copies.
 RETIRED_SERVICES = ["tradejournal-ingress"]
 # The alert check keeps running through a deployment, so a release that fails
@@ -178,7 +178,7 @@ def install_units(release: Path) -> None:
 
 def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
-    for service in [*RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    for service in ["tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
@@ -188,11 +188,21 @@ def stop_services() -> None:
         run("systemctl", "stop", service)
 
 
+def _monitor_headers():
+    path = CONFIG / "access-monitor.env"
+    if not path.exists():
+        return {}
+    for line in path.read_text().splitlines():
+        if line.startswith("TJ_SERVICE_KEY="):
+            return {"x-tj-service": line.split("=", 1)[1].strip()}
+    raise ValueError("Monitor credential is not configured")
+
+
 def health(release: Path, confirmation: str, timeout: float = 60) -> None:
     deadline = time.monotonic() + timeout
     while True:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=3) as response:
+            with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/health", headers=_monitor_headers()), timeout=3) as response:
                 backend = json.load(response)
             with urllib.request.urlopen("http://127.0.0.1:3000/deployment.json", timeout=3) as response:
                 frontend = json.load(response)

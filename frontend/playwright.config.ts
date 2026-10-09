@@ -38,6 +38,7 @@ const backendCommand = [
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "**/*.auth.ts",
   // Pages read from one shared backend, so parallel workers would race on
   // mutations. Each CI shard starts a separate backend, however, and
   // fullyParallel lets Playwright distribute individual tests between those

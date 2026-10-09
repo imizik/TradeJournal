@@ -20,6 +20,8 @@ from app.routers import captures as captures_router
 from app.routers import symbol_info
 from app.routers import decisions as decisions_router
 from app.routers import practice as practice_router
+from app.routers import access as access_router
+from app.access_middleware import AccessMiddleware
 from app.routers.fills import (
     _rebuild_trades,
     backup_manual_fills,
@@ -255,6 +257,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(access_router.router, prefix="/access", tags=["app access"])
 app.include_router(health.router, tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
@@ -282,3 +285,6 @@ app.include_router(
 )
 app.include_router(research.router, prefix="/research", tags=["research"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
+
+# Inspect the finalized route catalog; permission checks precede all handlers.
+app.add_middleware(AccessMiddleware, routes=app.router.routes)

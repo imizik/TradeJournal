@@ -1,5 +1,6 @@
 "use client";
 
+import { useAppAccess } from "@/components/AccessProvider";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -15,6 +16,7 @@ const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/access", label: "Assistant access", icon: FileText },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },
@@ -82,9 +84,11 @@ function SyncTrigger({ open, running, onToggle, compact = false }: { open: boole
 }
 
 function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
+  const { owner, grants, enabled } = useAppAccess();
+  const journal = owner || !!grants.journal_read;
   return (
     <ul className="space-y-1">
-      {navItems.map(({ href, label, icon: Icon }) => {
+      {navItems.filter(item => item.href !== "/access" || (owner && enabled)).filter(item => owner || ["/", "/charts", "/daily", ...(journal ? ["/trades", "/fills", "/analytics"] : [])].includes(item.href)).map(({ href, label, icon: Icon }) => {
         const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
         return (
           <li key={href}>
@@ -115,11 +119,11 @@ function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; on
   );
 }
 
-export function Nav() {
+export function Nav({ owner = true, journal = true }: { owner?: boolean; journal?: boolean }) {
   const pathname = usePathname();
   const [panelOpen, setPanelOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const anyRunning = useAnyJobRunning();
+  const anyRunning = useAnyJobRunning(owner);
   // On the charts page the sidebar is a rail of icons unless this device asked for the full one.
   const chartsRoute = fullScreenRoute(pathname);
   const [wide, setWide] = useState(false);
@@ -156,9 +160,9 @@ export function Nav() {
         </button>
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-base font-semibold text-foreground">Trade Journal</h1>
-          <SyncStatusLine />
+          {owner && <SyncStatusLine />}
         </div>
-        <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />
+        {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />}
       </header>
 
       {menuOpen && (
@@ -168,7 +172,7 @@ export function Nav() {
             <div className="mb-6 flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <h2 className="text-lg font-semibold text-foreground">Trade Journal</h2>
-                <SyncStatusLine />
+                {owner && <SyncStatusLine />}
               </div>
               <button
                 onClick={() => setMenuOpen(false)}
@@ -196,8 +200,8 @@ export function Nav() {
           </button>
           <NavLinks pathname={pathname} rail />
           <div className="mt-auto" />
-          <SyncStatusDot />
-          <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} compact />
+          {owner && <SyncStatusDot />}
+          {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} compact />}
         </nav>
       )}
 
@@ -206,7 +210,7 @@ export function Nav() {
         <div className="mb-6 flex items-start justify-between gap-2">
           <div className="min-w-0">
             <h1 className="text-lg font-semibold text-foreground">Trade Journal</h1>
-            <SyncStatusLine />
+            {owner && <SyncStatusLine />}
           </div>
           {chartsRoute && (
             <button
@@ -226,12 +230,12 @@ export function Nav() {
 
         {/* Trigger button — bottom right corner of sidebar */}
         <div className="flex justify-end pb-1 pt-3">
-          <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />
+          {owner && <SyncTrigger open={panelOpen} running={anyRunning} onToggle={() => setPanelOpen((o) => !o)} />}
         </div>
       </nav>
 
       {/* Drawer — fixed, independent of nav DOM, slides in from left */}
-      <StatusPanel open={panelOpen} onClose={() => setPanelOpen(false)} />
+      {owner && <StatusPanel open={panelOpen} onClose={() => setPanelOpen(false)} />}
     </>
   );
 }
