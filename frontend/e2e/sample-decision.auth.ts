@@ -381,4 +381,5 @@ test("widely separated frozen minutes remain partial with a small time axis", as
   await expect(region.locator("g[data-minute-start]")).toHaveCount(2);
   expect(await region.locator("text[data-time-tick]").count()).toBeLessThanOrEqual(6);
   await expect(region.getByRole("table").getByText("Partial · 1/15",{exact:true})).toHaveCount(2);
+  await page.unrouteAll({behavior:"wait"});
 });
