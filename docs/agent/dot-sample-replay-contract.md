@@ -78,7 +78,10 @@ numerical base/stress outcomes; simultaneous retries and pre-commit interruption
 preparation recovery preserving its nonce; real UI start/reload/reopen, phone
 layout and delayed pre-start response; native namespace/key/receipt preservation
 and a restart proving the outcome persists. Tier-2 native reviews and exact-head
-CI are required. Actual Jo replay acceptance remains user-observed after delivery.
+CI are required. Jo reported saving/reopening WAIT for both symbols in the first
+replay exercise; read-only deployed checks corroborated the hashes and no events.
+The owner separately observed a TAKE replay over public HTTPS, including restart.
+Jo itself has not yet selected TAKE or observed its own replay outcome.
 
 This is a sample workflow exercise, not a blind human/agent comparison, live
 forward cohort, automatic WAIT monitor or evidence of trading edge.
@@ -93,3 +96,36 @@ seed command with `--replay`, which defaults to a new `trader-jo-replay` identit
 and saves its key privately. Existing identities require explicit `--rotate`;
 the selected path does not rotate old logins. Revoke the disposable proof login
 after native acceptance. No production route or Tailscale change is selected.
+
+
+## Distinct frozen scenarios (v2)
+
+The user selected a fresh scenario exercise after Jo identified the first
+packet's repeated bars. `sample-scenarios-v2` uses a new daily run key below the
+same sample-only prefix. Original v1 runs, sealed continuations, decisions,
+receipts and credentials remain unchanged. Repeated preparation returns the
+same frozen v2 run; it does not refresh timestamps, deadlines or hashes.
+
+Each symbol has 60 contiguous completed invented minute bars, newest first
+in the frozen packet, with valid OHLC and positive volume. MU depicts a
+pullback and recovery toward $110, with recent rising volume and price above
+its window VWAP. Its frozen stop is the earlier $109 pivot, target the earlier
+$113 high, and entry guard $110–$110.20. NBIS depicts a rebound followed by
+choppy closes around $60 and declining volume; its earlier $58 pivot and $64
+high supply the fixed stop/target, with guard $60–$60.50. Fact references name
+those actual bars rather than assigning every extreme to the newest bar.
+These are illustrative scenarios, not recommended choices or real market data.
+
+VWAP is explicitly the cumulative volume-weighted OHLC typical price within
+this invented 60-minute window, not an exchange VWAP. No historical daily/news
+data or regular-session calendar evidence is added. The separate Charts page
+still uses its other simulated window. The hidden replay clock, continuation
+commitment, execution rules and permission boundary are unchanged; TAKE stays
+conditional and both stop/target continuations remain possible. Scenario
+version/id and the entire example plan are bound into the frozen evidence.
+
+Use the guarded seed command with `--replay --scenarios`, which defaults to
+the new `trader-jo-scenarios` identity. `--scenarios` without `--replay` refuses.
+Do not rotate or repoint either prior Jo identity. Revoke only the separate
+disposable scenario proof identity after acceptance. Replay and ordinary v1
+preparation remain available without the new explicit option.
