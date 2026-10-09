@@ -27,6 +27,7 @@ MAX_PASSES = 3
 REVIEW_TIMEOUT = 900
 RECEIPT_CONTEXT = "tradejournal/review-receipt"
 GATE_CONTEXT = "tradejournal/independent-review"
+EXEMPT_LABEL = "review-exempt"
 TERMINAL = {"error", "exhausted", "attention"}
 SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -120,6 +121,26 @@ def matches(state, ident):
     return not ident["dirty"] and state.get("reviewed") == ident
 
 
+def auto_exemption_paths(root, ident):
+    paths = [path for path in git(root, "diff", "--name-only", ident["merge_base"], ident["head"], "--").splitlines() if path]
+    safe = [path for path in paths if (
+        path == "README.md" or (path.startswith("docs/") and path.endswith(".md") and not path.startswith("docs/agent/"))
+    )]
+    if not paths or len(safe) != len(paths):
+        raise ReviewError("Automatic review exemption is only for README.md or non-agent docs Markdown changes; request an explicit exemption or run independent review")
+    return paths
+
+
+def exemption_reason(mode, reason):
+    if mode == "auto":
+        return "docs-only"
+    if not reason.strip():
+        raise ReviewError("Explicit review exemption requires the user's stated reason")
+    slug = re.sub(r"[^a-z0-9]+", "-", reason.lower()).strip("-")
+    slug = slug[:48]
+    return slug if len(slug) >= 3 else "owner-request"
+
+
 def budget_extensions(state):
     # Preserve the first rollout's single-extension record when upgrading.
     extensions = state.get("extensions", [state["extension"]] if "extension" in state else [])
@@ -155,7 +176,7 @@ def owner_state(root, owner, session, base_ref="origin/main", contract=""):
     state = load_json(path)
     if state is not None:
         required = {"version", "owner", "session", "branch", "base_ref", "contract", "phase", "passes"}
-        phases = {"needs_review", "reviewing", "findings", "clean", "ready"} | TERMINAL
+        phases = {"needs_review", "reviewing", "findings", "clean", "exempt", "ready"} | TERMINAL
         if (not isinstance(state, dict) or not required.issubset(state) or state["version"] != 1
                 or state["owner"] not in {"codex", "claude"} or state["phase"] not in phases
                 or not isinstance(state["passes"], list) or len(state["passes"]) > pass_limit(state)
@@ -261,8 +282,14 @@ def validate_result(result, snapshot):
 def parse_claude_result(text):
     if not isinstance(text, str):
         raise ReviewError("Claude did not return a final JSON review")
-    fenced = re.fullmatch(r"\s*```(?:json)?\s*\n(.*?)\n```\s*", text, re.DOTALL)
-    return json.loads(fenced[1] if fenced else text)
+    candidates = [text]
+    candidates.extend(re.findall(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL))
+    for candidate in reversed(candidates):
+        try:
+            return json.loads(candidate)
+        except ValueError:
+            pass
+    raise ReviewError("Claude did not return a final JSON review")
 
 
 def progress_summary(path, started):
@@ -417,8 +444,8 @@ def review(root, args):
             raise ReviewError("Commit the finished changes before review; ignored logs/dependencies are excluded")
         if ident["merge_base"] != ident["base"]:
             raise ReviewError("Bring the latest base into this feature branch before review; resolve conflicts and rerun checks")
-        if state["phase"] in {"clean", "ready"} and matches(state, ident):
-            print("Already clean for this exact head and base")
+        if state["phase"] in {"clean", "exempt", "ready"} and matches(state, ident):
+            print(f"Already {state['phase']} for this exact head and base")
             return
         if state["phase"] in TERMINAL:
             raise ReviewError(f"Review stopped: {state['phase']}. {state.get('error', '')} Human intervention is required")
@@ -430,10 +457,14 @@ def review(root, args):
         # Setup failures are recoverable by the owner and spend no model pass.
         authenticate("claude" if state["owner"] == "codex" else "codex", review_env())
         pending = {**state, "phase": "needs_review"}
+        # A new head after an exemption is now taking the normal review path.
+        # Do not let the prior exemption misrepresent its later receipt.
+        pending.pop("exemption", None)
         if args.pr:
             pending["pr"] = args.pr
         if pending.get("pr"):
             post_status(root, pending, ident)
+        state.pop("exemption", None)
         state.update(pending)
         state.pop("error", None)
         state.pop("publication_attention", None)
@@ -498,6 +529,11 @@ def pr_info(root, number=None):
 
 
 def receipt_description(state, ident, clean):
+    if state.get("exemption") and state["phase"] in {"exempt", "ready"}:
+        if not clean or not matches(state, ident):
+            return f"pending base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}"
+        exemption = state["exemption"]
+        return f"exempt base:{ident['base']} owner:{state['owner']} mode:{exemption.get('mode', '')} reason:{exemption.get('reason', '')}"
     extra = f" extra:{len(state['passes']) - MAX_PASSES}" if len(state["passes"]) > MAX_PASSES else ""
     return f"{'clean' if clean else state['phase']} base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}{extra}"
 
@@ -507,14 +543,17 @@ def post_status(root, state, ident, number=None):
     if pr["state"] != "OPEN" or pr["headRefName"] != state["branch"] or pr["headRefOid"] != ident["head"] or pr["baseRefOid"] != ident["base"]:
         raise ReviewError("PR head/base/branch differs from local review. Fetch, reconcile, re-review and push before publication")
     repo = github_repo(root)
-    clean = state["phase"] in {"clean", "ready"} and matches(state, ident)
-    status = "success" if clean else ("error" if state["phase"] in TERMINAL else "pending")
-    run(["gh", "pr", "edit", str(pr["number"]), "--add-label", "review-loop"], cwd=root)
+    approved = state["phase"] in {"clean", "exempt", "ready"} and matches(state, ident)
+    status = "success" if approved else ("error" if state["phase"] in TERMINAL else "pending")
+    label = EXEMPT_LABEL if state.get("exemption") else "review-loop"
+    other_label = "review-loop" if label == EXEMPT_LABEL else EXEMPT_LABEL
+    run(["gh", "pr", "edit", str(pr["number"]), "--add-label", label], cwd=root)
+    run(["gh", "pr", "edit", str(pr["number"]), "--remove-label", other_label], cwd=root)
     api(root, f"repos/{repo}/statuses/{ident['head']}", {
         "state": status, "context": RECEIPT_CONTEXT,
-        "description": receipt_description(state, ident, clean), "target_url": pr["url"],
+        "description": receipt_description(state, ident, approved), "target_url": pr["url"],
     })
-    return pr, clean
+    return pr, approved
 
 
 def wait_checks(root, number, deadline):
@@ -559,12 +598,12 @@ def publish(root, args, finish=False):
     with locked(path):
         path, state = owner_state(root, args.owner, args.session)
         ident = identity(root, state["base_ref"])
-        pr, clean = post_status(root, state, ident, args.pr)
+        pr, approved = post_status(root, state, ident, args.pr)
         state["pr"] = pr["number"]
         save(path, state)
         if finish:
-            if not clean:
-                raise ReviewError("PR cannot become ready without a clean current review")
+            if not approved:
+                raise ReviewError("PR cannot become ready without a clean review or recorded exemption")
             wait_checks(root, pr["number"], time.time() + 1200)
             verify_gate(root, state, ident)
             # Recheck the remote after reading checks; never ready a newer push.
@@ -576,6 +615,35 @@ def publish(root, args, finish=False):
             state.pop("publication_attention", None)
             save(path, state)
         print(f"{state['phase']}: {pr['url']} (merge remains with the user)")
+
+
+def exempt(root, args):
+    path = state_path(root)
+    with locked(path):
+        path, state = owner_state(root, args.owner, args.session, args.base, args.contract)
+        ident = identity(root, state["base_ref"])
+        if ident["dirty"]:
+            raise ReviewError("Commit the finished changes before choosing review exemption")
+        if ident["merge_base"] != ident["base"]:
+            raise ReviewError("Bring the latest base into this feature branch before choosing review exemption")
+        if state["passes"] or state["phase"] not in {"needs_review", "exempt"}:
+            raise ReviewError("Review exemption must be chosen before any independent review pass")
+        if args.mode == "auto":
+            paths = auto_exemption_paths(root, ident)
+        else:
+            paths = git(root, "diff", "--name-only", ident["merge_base"], ident["head"], "--").splitlines()
+            if not paths:
+                raise ReviewError("No committed changes to exempt")
+        state.update(phase="exempt", reviewed=ident, exemption={
+            "mode": args.mode, "reason": exemption_reason(args.mode, args.reason),
+            "requested_reason": args.reason, "paths": paths, "at": time.time(),
+        })
+        if args.pr:
+            state["pr"] = args.pr
+        save(path, state)
+        if state.get("pr"):
+            post_status(root, state, ident)
+        print(f"Review exempt ({state['exemption']['mode']}): {', '.join(paths)}")
 
 
 def hook(root, args, payload):
@@ -590,7 +658,7 @@ def hook(root, args, payload):
     if event == "SessionStart":
         if not baseline.exists():
             atomic_json(baseline, current)
-        message = f"Independent review is automatic for work you change. Owner={args.owner}; session={session}. Before pushing, commit and run python3 scripts/pr_review.py review --owner {args.owner} --session {shlex.quote(session)}. Read docs/agent/pr-review.md. Never merge."
+        message = f"Independent review is automatic for work you change. Owner={args.owner}; session={session}. Before pushing, commit. If the user explicitly says skip review, use exempt --mode explicit with their reason. If they say decide, auto exemption is allowed only for README/non-agent docs Markdown; otherwise run python3 scripts/pr_review.py review --owner {args.owner} --session {shlex.quote(session)}. Read docs/agent/pr-review.md. Never merge."
         if args.owner == "codex":
             return {"systemMessage": message}
         return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": message}}
@@ -616,8 +684,9 @@ def hook(root, args, payload):
             state.update(phase="error", error="Review process disappeared before recording completion")
         if state["phase"] == "ready" and matches(state, ident):
             return {}
-        if state.get("publication_attention") and state["phase"] == "clean" and matches(state, ident):
-            return {"systemMessage": "Independent review is clean but readiness is blocked. Report the blocker. Retry publish/finish when it clears; no new review is needed for unchanged head/base."}
+        if state.get("publication_attention") and state["phase"] in {"clean", "exempt"} and matches(state, ident):
+            outcome = "clean" if state["phase"] == "clean" else "exempt"
+            return {"systemMessage": f"Independent review is {outcome} but readiness is blocked. Report the blocker. Retry publish/finish when it clears; no new review is needed for unchanged head/base."}
         if state["phase"] in TERMINAL:
             # One continuation makes the failure visible; never trap the owner
             # in an endless stop-hook loop trying to repair login/quota.
@@ -630,12 +699,13 @@ def hook(root, args, payload):
         state["nudges"] = state.get("nudges", 0) + 1 if state.get("nudge_key") == key else 1
         state["nudge_key"] = key
         if state["nudges"] >= 3:
-            if state["phase"] == "clean" and matches(state, ident):
+            if state["phase"] in {"clean", "exempt"} and matches(state, ident):
                 # Bound stalled delivery continuations without destroying the
                 # review result or forcing another model call to recover.
                 state["publication_attention"] = True
                 save(path, state)
-                return {"decision": "block", "reason": "Independent review remains clean, but publication/readiness stalled. Report the blocker and stop. Retry publish/finish once it clears; preserve the clean receipt."}
+                outcome = "clean" if state["phase"] == "clean" else "exempt"
+                return {"decision": "block", "reason": f"Independent review remains {outcome}, but publication/readiness stalled. Report the blocker and stop. Retry publish/finish once it clears; preserve the receipt."}
             state.update(phase="attention", error="Owner stopped repeatedly without advancing the review")
             save(path, state)
             return {"decision": "block", "reason": "Review stopped after three unchanged continuations. Report the blocker and unresolved findings; do not claim ready."}
@@ -645,8 +715,9 @@ def hook(root, args, payload):
             command += " --contract 'AGREED TASK REQUIREMENTS OR REPOSITORY CONTRACT PATH'"
         if current["dirty"]:
             reason = f"Finish required checks and commit your changes, then run {command}. Preserve unrelated changes. Review must complete before publishing ready work."
-        elif state["phase"] == "clean" and matches(state, ident):
-            reason = f"The review is clean. Push the feature branch and open/update its draft PR, run python3 scripts/pr_review.py publish --owner {args.owner} --session {shlex.quote(session)}, wait for current CI, then run the same command with finish in place of publish. Never merge."
+        elif state["phase"] in {"clean", "exempt"} and matches(state, ident):
+            outcome = "The review is clean" if state["phase"] == "clean" else "The user-approved review exemption is recorded"
+            reason = f"{outcome}. Push the feature branch and open/update its draft PR, run python3 scripts/pr_review.py publish --owner {args.owner} --session {shlex.quote(session)}, wait for current CI, then run the same command with finish in place of publish. Never merge."
         else:
             reason = f"Independent review is pending. Read any saved findings under {path.parent}, fix valid findings, run checks, commit, and run {command}. Fresh review checks the full change. Stop after three passes or an explicit error and report remaining issues."
         return {"decision": "block", "reason": reason}
@@ -654,14 +725,19 @@ def hook(root, args, payload):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["begin", "review", "status", "publish", "finish", "hook", "takeover", "retry", "extend"])
+    parser.add_argument("command", choices=["begin", "review", "exempt", "status", "publish", "finish", "hook", "takeover", "retry", "extend"])
     parser.add_argument("--owner", choices=["codex", "claude"], default="codex")
     parser.add_argument("--session", default=os.environ.get("CODEX_THREAD_ID", ""))
     parser.add_argument("--base", default="origin/main")
     parser.add_argument("--contract", default="")
     parser.add_argument("--pr", type=int)
     parser.add_argument("--previous-session")
-    parser.add_argument("--reason", default="", help="Record the user's explicit authorization for one extra pass")
+    parser.add_argument(
+        "--reason",
+        default="",
+        help="Reason for an explicit review exemption or review-budget extension",
+    )
+    parser.add_argument("--mode", choices=["auto", "explicit"], default="explicit", help="Review-exemption decision source")
     args = parser.parse_args()
     payload = None
     try:
@@ -671,6 +747,8 @@ def main():
             print(json.dumps(hook(root, args, payload)))
         elif args.command == "review":
             review(root, args)
+        elif args.command == "exempt":
+            exempt(root, args)
         elif args.command in {"publish", "finish"}:
             publish(root, args, finish=args.command == "finish")
         elif args.command == "status":
@@ -684,7 +762,7 @@ def main():
                 elif args.command == "retry":
                     path, state = owner_state(root, args.owner, args.session)
                     if state["phase"] != "error" or len(state["passes"]) >= pass_limit(state):
-                        raise ReviewError("Retry only recovers a failed pass with remaining budget; human authorization is required")
+                        raise ReviewError("Retry only recovers a failed pass with remaining budget; it never resets the pass budget")
                     state.update(phase="needs_review", nudges=0, terminal_reported=False)
                     state.pop("error", None)
                     state.setdefault("retries", []).append(time.time())

@@ -78,6 +78,9 @@ works. The [local review loop](pr-review.md) uses the other provider's CLI and
 publishes a receipt for the exact PR head and base. The
 [independent review gate](../../.github/workflows/review-gate.yml) checks that
 receipt and flags overdue work without model credentials or PR-code execution.
+For a documented pre-review exemption, it instead requires a current,
+owner-authored exemption receipt and visible `review-exempt` PR label; CI
+remains unchanged.
 The GitHub-hosted `chatgpt-codex-connector` review remains an optional additional
 opinion; it is configured in ChatGPT and has separate quota and completion
 signals. See the review guide for hook trust, required GitHub checks and the

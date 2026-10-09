@@ -94,6 +94,12 @@ each additional pass through the documented extension; preserve all attempts. Au
 missing evidence and unresolved disputes are explicit incomplete outcomes.
 Never reset the budget or switch billing/providers to get a clean result.
 
+Before invoking the other model, the user may say “skip review” or “decide
+whether review is warranted.” An explicit skip remains visible as a
+`review-exempt` PR label and reason while CI still runs. An agent may decide
+only for Markdown-only README/non-agent documentation changes; it must use the
+normal independent review for every other path. See `docs/agent/pr-review.md`.
+
 After clean review, push the feature branch, open/update a draft PR, publish
 its receipt and wait for CI through the runner's `finish` command. The user
 has authorized these branch pushes, PR updates and review repairs as the

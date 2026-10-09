@@ -327,6 +327,12 @@ def test_claude_final_json_is_validated_without_structured_output_tool(tmp_path,
     assert reviewer.validate_result(reviewer.parse_claude_result(text), tmp_path) == value
 
 
+def test_claude_final_json_is_recovered_from_explanatory_prose_and_fence(tmp_path):
+    value = {"verdict": "clean", "summary": "No defects found", "findings": []}
+    text = "I checked the change.\n\n```json\n" + json.dumps(value) + "\n```"
+    assert reviewer.validate_result(reviewer.parse_claude_result(text), tmp_path) == value
+
+
 @pytest.mark.parametrize("text", [
     'prefix {"verdict":"clean","summary":"fine","findings":[]}',
     '{"verdict":"clean","summary":"fine</parameter><parameter name=\\"findings\\">[]"}',
@@ -389,6 +395,141 @@ def test_runner_can_publish_receipt_but_never_gate(repo, cli, monkeypatch):
     reviewer.post_status(repo, s, ident)
     assert [p["context"] for p in posts] == [reviewer.RECEIPT_CONTEXT]
     assert posts[0]["state"] == "success"
+
+
+def docs_only_change(repo):
+    git(repo, "reset", "--hard", "origin/main")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "note.md").write_text("# Note\n")
+    git(repo, "add", "docs/note.md")
+    git(repo, "commit", "-qm", "docs only")
+
+
+def test_auto_exemption_accepts_only_safe_docs_before_any_review(repo):
+    docs_only_change(repo)
+    path, s = reviewer.owner_state(repo, "codex", "owner-session", contract="CLAUDE.md")
+    a = args()
+    a.mode = "auto"
+    a.reason = ""
+    reviewer.exempt(repo, a)
+    s = state(repo)
+    assert s["phase"] == "exempt"
+    assert s["exemption"]["mode"] == "auto"
+    assert s["exemption"]["reason"] == "docs-only"
+    assert s["passes"] == []
+    assert s["exemption"]["paths"] == ["docs/note.md"]
+    assert reviewer.receipt_description(s, reviewer.identity(repo, "origin/main"), True).endswith("mode:auto reason:docs-only")
+
+
+@pytest.mark.parametrize("path", ["a.py", "CLAUDE.md", "docs/agent/pr-review.md"])
+def test_auto_exemption_rejects_code_or_agent_control_files(repo, path):
+    if path.startswith("docs/"):
+        (repo / "docs/agent").mkdir(parents=True)
+    target = repo / path
+    target.write_text("changed\n")
+    git(repo, "add", path)
+    git(repo, "commit", "-qm", "unsafe automatic exemption")
+    a = args()
+    a.mode = "auto"
+    a.reason = ""
+    with pytest.raises(reviewer.ReviewError, match="Automatic review exemption"):
+        reviewer.exempt(repo, a)
+    assert state(repo)["phase"] == "needs_review"
+
+
+def test_explicit_exemption_allows_owner_choice_and_is_visible_to_gate(repo, monkeypatch):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "Tiny user-requested change"
+    reviewer.exempt(repo, a)
+    s = state(repo)
+    assert s["phase"] == "exempt"
+    assert s["exemption"]["reason"] == "tiny-user-requested-change"
+    assert s["exemption"]["requested_reason"] == "Tiny user-requested change"
+    assert reviewer.receipt_description(s, reviewer.identity(repo, "origin/main"), True).endswith("mode:explicit reason:tiny-user-requested-change")
+    reviewer.review(repo, args())
+    assert state(repo)["passes"] == []
+
+
+def test_explicit_exemption_uses_gate_safe_reason_for_short_input(repo):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "ok"
+    reviewer.exempt(repo, a)
+    assert state(repo)["exemption"]["reason"] == "owner-request"
+
+
+def test_new_commit_does_not_claim_the_old_exemption(repo):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "User requested review skip"
+    reviewer.exempt(repo, a)
+    original = state(repo)
+    (repo / "a.py").write_text("value = 3\n")
+    git(repo, "add", "a.py")
+    git(repo, "commit", "-qm", "more work")
+    ident = reviewer.identity(repo, "origin/main")
+    assert not reviewer.matches(original, ident)
+    description = reviewer.receipt_description(original, ident, False)
+    assert description.startswith("pending base:")
+    assert not description.startswith("exempt ")
+
+
+def test_real_review_after_exemption_clears_stale_exemption_state(repo, monkeypatch):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "User requested review skip"
+    reviewer.exempt(repo, a)
+    (repo / "a.py").write_text("changed after exemption\n")
+    git(repo, "add", "a.py")
+    git(repo, "commit", "-qm", "review after exemption")
+    monkeypatch.setattr(reviewer, "authenticate", lambda *unused: None)
+    monkeypatch.setattr(reviewer, "invoke_reviewer", lambda *unused: (
+        {"verdict": "clean", "summary": "Checked changed work", "findings": []}, "claude"))
+    reviewer.review(repo, args())
+    assert state(repo)["phase"] == "clean"
+    assert "exemption" not in state(repo)
+
+
+def test_explicit_exemption_requires_reason_and_never_runs_model(repo, cli):
+    a = args()
+    a.mode = "explicit"
+    a.reason = ""
+    with pytest.raises(reviewer.ReviewError, match="requires"):
+        reviewer.exempt(repo, a)
+    assert state(repo)["passes"] == []
+
+
+def test_exemption_receipt_adds_exempt_label_not_review_loop(repo, monkeypatch):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "Tiny user-requested change"
+    reviewer.exempt(repo, a)
+    s = state(repo)
+    ident = reviewer.identity(repo, "origin/main")
+    pr = {"state": "OPEN", "headRefName": "codex/task", "headRefOid": ident["head"],
+          "baseRefOid": ident["base"], "number": 1, "url": "https://github.com/owner/repo/pull/1"}
+    monkeypatch.setattr(reviewer, "pr_info", lambda *a: pr)
+    monkeypatch.setattr(reviewer, "github_repo", lambda *a: "owner/repo")
+    calls = []
+    monkeypatch.setattr(reviewer, "run", lambda command, **kw: calls.append(command) or "")
+    posts = []
+    monkeypatch.setattr(reviewer, "api", lambda *a: posts.append(a[-1]))
+    reviewer.post_status(repo, s, ident)
+    assert any(call[-2:] == ["--add-label", reviewer.EXEMPT_LABEL] for call in calls)
+    assert any(call[-2:] == ["--remove-label", "review-loop"] for call in calls)
+    assert posts[0]["state"] == "success"
+    s["phase"] = "ready"
+    assert reviewer.receipt_description(s, ident, True).endswith("mode:explicit reason:tiny-user-requested-change")
+
+
+def test_exemption_cannot_replace_a_started_review(repo, cli):
+    reviewer.review(repo, args())
+    a = args()
+    a.mode = "explicit"
+    a.reason = "Too late"
+    with pytest.raises(reviewer.ReviewError, match="before any"):
+        reviewer.exempt(repo, a)
 
 
 def passing_checks():
@@ -478,6 +619,20 @@ def test_readiness_failures_bound_continuations_without_destroying_clean_review(
     assert state(repo)["phase"] == "ready"
     assert len(state(repo)["passes"]) == 1
     assert "publication_attention" not in state(repo)
+
+
+def test_exempt_readiness_failure_preserves_the_exemption(repo):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "User requested review skip"
+    reviewer.exempt(repo, a)
+    payload = {"session_id": "owner-session", "hook_event_name": "Stop"}
+    reviewer.hook(repo, args(), payload)
+    reviewer.hook(repo, args(), payload)
+    result = reviewer.hook(repo, args(), payload)
+    assert "remains exempt" in result["reason"]
+    assert state(repo)["phase"] == "exempt"
+    assert state(repo)["publication_attention"] is True
 
 
 def test_each_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli, monkeypatch):
