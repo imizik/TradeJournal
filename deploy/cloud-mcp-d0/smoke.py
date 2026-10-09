@@ -320,8 +320,16 @@ def main():
         result = subprocess.run([str(ROOT / "backend/.venv/bin/python"), str(Path(__file__).resolve()), "--exercise"],
             check=False, capture_output=True)
         if result.returncode:
-            # Fixture assertions/logs contain no bearer values; service logs are not dumped.
+            # The publisher receives only public fixture URLs/keys and reports
+            # generic errors. Never dump serving/proxy logs or bearer values.
             sys.stderr.write(result.stderr.decode())
+            for command in (
+                ["systemctl", "show", KEY_TIMER, "--property=ActiveState,Result,NextElapseUSecRealtime,LastTriggerUSec"],
+                ["systemctl", "show", KEY_SERVICE, "--property=ActiveState,Result,ExecMainStatus"],
+                ["journalctl", "--unit=" + KEY_SERVICE, "--no-pager", "--no-hostname", "-n", "40"],
+            ):
+                diagnostic = subprocess.run(command, check=False, capture_output=True)
+                sys.stderr.write(diagnostic.stdout.decode())
             raise SystemExit(result.returncode)
         sys.stdout.write(result.stdout.decode())
     finally:
