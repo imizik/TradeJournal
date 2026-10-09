@@ -72,7 +72,8 @@ else:
     if os.getenv('FAKE_MALFORMED'): result.pop('summary')
     if name == 'claude':
         assert '--bare' not in args and '--restricted' in args
-        assert args[args.index('--effort') + 1] == 'medium'
+        assert args[args.index('--effort') + 1] == 'low'
+        assert args[args.index('--model') + 1] == 'sonnet'
         assert args[args.index('--tools') + 1] == 'Read,Grep,Glob'
         print(json.dumps({'type': 'system', 'subtype': 'init'}))
         print(json.dumps({'type': 'result', 'subtype': 'success', 'is_error': False, 'permission_denials': ['Read'] if os.getenv('FAKE_DENIAL') else [], 'structured_output': result}))
@@ -458,7 +459,7 @@ def test_readiness_failures_bound_continuations_without_destroying_clean_review(
     assert "publication_attention" not in state(repo)
 
 
-def test_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli, monkeypatch):
+def test_each_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli, monkeypatch):
     monkeypatch.setenv("FAKE_VERDICT", "findings")
     for _ in range(3):
         reviewer.review(repo, args())
@@ -467,14 +468,25 @@ def test_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli
     with pytest.raises(reviewer.ReviewError, match="authorization"):
         reviewer.extend_budget(path, s, "")
     reviewer.extend_budget(path, s, "User explicitly approved one additional review")
+    # The first rollout stored one extension as an object; preserve it when
+    # a separately authorized later extension upgrades to the audit list.
+    s["extension"] = s.pop("extensions")[0]
+    reviewer.save(path, s)
     reviewer.review(repo, args())
     s = state(repo)
     assert s["passes"][:3] == history
     assert len(s["passes"]) == 4
     assert s["phase"] == "exhausted"
     assert "pass:4 extra:1" in reviewer.receipt_description(s, s["reviewed"], False)
+    with pytest.raises(reviewer.ReviewError):
+        reviewer.review(repo, args())
+    reviewer.extend_budget(path, s, "User separately approved one more review")
     with pytest.raises(reviewer.ReviewError, match="only one"):
-        reviewer.extend_budget(path, s, "again")
+        reviewer.extend_budget(path, s, "Cannot pre-authorize another pass")
+    reviewer.review(repo, args())
+    assert len(state(repo)["passes"]) == 5
+    assert len(state(repo)["extensions"]) == 2
+    assert state(repo)["phase"] == "exhausted"
     with pytest.raises(reviewer.ReviewError):
         reviewer.review(repo, args())
 

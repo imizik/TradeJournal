@@ -88,7 +88,7 @@ and run the [shared independent review loop](docs/agent/pr-review.md).
 Codex uses Claude Code CLI; Claude uses Codex CLI. Keep the owning session
 active: inspect findings, fix valid issues, verify, commit and re-review.
 Three reviewer passes are the automatic limit. A human may explicitly authorize
-one additional pass through the documented extension; preserve all attempts. Authentication, quota,
+each additional pass through the documented extension; preserve all attempts. Authentication, quota,
 missing evidence and unresolved disputes are explicit incomplete outcomes.
 Never reset the budget or switch billing/providers to get a clean result.
 

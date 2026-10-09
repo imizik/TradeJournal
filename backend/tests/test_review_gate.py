@@ -87,6 +87,8 @@ def test_success_does_not_expire_while_head_and_base_stay_same():
 def test_fourth_pass_requires_explicit_extension_attestation():
     extended = receipt(description=f"clean base:{BASE} owner:codex pass:4 extra:1")
     assert gate(extended)["updates"][0]["state"] == "success"
+    extended = receipt(description=f"clean base:{BASE} owner:codex pass:5 extra:2")
+    assert gate(extended)["updates"][0]["state"] == "success"
 
 
 def test_gate_overwrites_owner_status_and_deduplicates_only_actions_validation():

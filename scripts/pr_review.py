@@ -120,23 +120,29 @@ def matches(state, ident):
     return not ident["dirty"] and state.get("reviewed") == ident
 
 
+def budget_extensions(state):
+    # Preserve the first rollout's single-extension record when upgrading.
+    extensions = state.get("extensions", [state["extension"]] if "extension" in state else [])
+    if not isinstance(extensions, list):
+        raise ReviewError("Invalid human-authorized review extensions")
+    for extension in extensions:
+        if (not isinstance(extension, dict) or extension.get("additional_passes") != 1
+                or not isinstance(extension.get("reason"), str) or not extension["reason"].strip()
+                or extension.get("session") != state.get("session")):
+            raise ReviewError("Invalid human-authorized review extension")
+    return extensions
+
+
 def pass_limit(state):
-    extension = state.get("extension")
-    if extension is None:
-        return MAX_PASSES
-    if (not isinstance(extension, dict) or extension.get("additional_passes") != 1
-            or not isinstance(extension.get("reason"), str) or not extension["reason"].strip()
-            or extension.get("session") != state.get("session")):
-        raise ReviewError("Invalid human-authorized review extension")
-    return MAX_PASSES + 1
+    return MAX_PASSES + len(budget_extensions(state))
 
 
 def extend_budget(path, state, reason):
-    if (state["phase"] not in TERMINAL or len(state["passes"]) != MAX_PASSES
-            or state.get("extension") is not None or not reason.strip()):
-        raise ReviewError("Extension requires three used passes, explicit human authorization and a recorded reason; only one extra pass is allowed")
-    state["extension"] = {"additional_passes": 1, "reason": reason,
-                          "session": state["session"], "authorized_at": time.time()}
+    if state["phase"] not in TERMINAL or len(state["passes"]) != pass_limit(state) or not reason.strip():
+        raise ReviewError("Extension requires an exhausted budget, fresh explicit human authorization and a recorded reason; it grants only one pass")
+    state["extensions"] = [*budget_extensions(state), {"additional_passes": 1, "reason": reason,
+                          "session": state["session"], "authorized_at": time.time()}]
+    state.pop("extension", None)
     state.update(phase="needs_review", nudges=0, terminal_reported=False)
     state.pop("error", None)
     save(path, state)
@@ -356,7 +362,7 @@ Keep the summary to two sentences and each finding to one concise paragraph with
 Reviewed head: {ident['head']}; base: {ident['base']}; diff ancestor: {ident['merge_base']}.
 """
         if reviewer == "claude":
-            command = ["claude", "-p", "--model", "opus", "--effort", "medium", "--restricted",
+            command = ["claude", "-p", "--model", "sonnet", "--effort", "low", "--restricted",
                        "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob",
                        "--permission-mode", "dontAsk", "--permission-prompts", "none",
                        "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
@@ -433,8 +439,8 @@ def review(root, args):
             if identity(root, state["base_ref"]) != ident:
                 raise ReviewError("The worktree or base changed during review; the result is invalid")
             entry.update(result=result, reviewer=reviewer,
-                         requested_model="opus" if reviewer == "claude" else "gpt-6.1-sol",
-                         effort="medium" if reviewer == "claude" else "default",
+                         requested_model="sonnet" if reviewer == "claude" else "gpt-6.1-sol",
+                         effort="low" if reviewer == "claude" else "default",
                          completed=time.time())
             atomic_json(log_dir / "result.json", result)
             state["reviewed"] = ident
@@ -482,7 +488,7 @@ def pr_info(root, number=None):
 
 
 def receipt_description(state, ident, clean):
-    extra = " extra:1" if len(state["passes"]) > MAX_PASSES and pass_limit(state) == MAX_PASSES + 1 else ""
+    extra = f" extra:{len(state['passes']) - MAX_PASSES}" if len(state["passes"]) > MAX_PASSES else ""
     return f"{'clean' if clean else state['phase']} base:{ident['base']} owner:{state['owner']} pass:{len(state['passes'])}{extra}"
 
 
@@ -678,8 +684,9 @@ def main():
                     if not state or state["session"] != args.previous_session or state["owner"] != args.owner:
                         raise ReviewError("Takeover must name the previous owning session and provider")
                     state["session"] = args.session
-                    if state.get("extension"):
-                        state["extension"]["session"] = args.session
+                    extensions = budget_extensions({**state, "session": args.previous_session})
+                    for extension in extensions:
+                        extension["session"] = args.session
                     state.setdefault("takeovers", []).append({"previous": args.previous_session, "new": args.session, "at": time.time()})
                     save(path, state)
                 else:

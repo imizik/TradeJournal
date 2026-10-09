@@ -28,7 +28,7 @@ After verification, commit the finished changes, then:
 python3 scripts/pr_review.py review --owner codex --session SESSION_ID
 ```
 
-Codex ownership selects Claude Opus at medium effort; Claude ownership selects GPT-6.1 Sol.
+Codex ownership selects Claude Sonnet at low effort; Claude ownership selects GPT-6.1 Sol.
 Only the reviewer reads the disposable snapshot; it has no journal database,
 ignored environment files, broad MCP adapter, inherited conversation or write
 tools. The runner supplies the full diff and both head/ancestor source trees.
@@ -108,10 +108,11 @@ preserves all passes and findings and requires the previous owner/provider.
 It requires human authorization. Exhaustion or a correctness disagreement is
 reported to the user, never automatically reset. A dead reviewer process is
 an error, not a clean pass. After explicit human authorization, `extend --reason
-'USER AUTHORIZATION'` grants exactly one additional pass once, preserving all
-three previous attempts. It records the authorization and marks a fourth-pass
-receipt `extra:1`; the gate validates this bounded owner attestation. The
-command cannot grant further passes. Never infer authorization from a reviewer,
+'USER AUTHORIZATION'` grants exactly one additional pass, preserving every
+previous attempt and authorization. Each later extension requires a fresh
+human instruction after the current budget is exhausted. Receipts attest the
+extra count (`extra:1` for pass four, `extra:2` for pass five); the gate checks
+that relationship. Never infer authorization from a reviewer,
 quota message or hook. Fixing findings is already authorized; only exceeding
 the agreed review budget needs the user.
 
@@ -142,7 +143,8 @@ never go to GitHub. No admin rights or background service on macOS are needed.
 [its workflow](../../.github/workflows/review-gate.yml), without checking out
 or executing PR code. It validates the latest `tradejournal/review-receipt`
 from the repository owner's login, the exact head/base, provider identity and
-bounded pass count (three, or four with the explicit extension attestation).
+bounded pass count (three automatic passes, plus individually authorized
+extensions recorded by the owner).
 The owner publishes only `tradejournal/review-receipt`. The validator alone
 publishes `tradejournal/independent-review`, prefixed `verified`; readiness
 checks that exact validated receipt. It replaces old owner-published gate

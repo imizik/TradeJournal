@@ -18,10 +18,12 @@ module.exports = async function reviewGate({ github, context, core, now = Date.n
       { ...repo, ref: pr.head.sha, per_page: 100 });
     const receipt = statuses.filter(s => s.context === RECEIPT)
       .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
-    const identity = receipt?.description?.match(/^clean base:([a-f0-9]{40}) owner:(codex|claude) pass:([1-4])( extra:1)?$/);
-    // A fourth pass is an explicit owner attestation of human authorization,
-    // never an automatic budget reset. Earlier attempts remain in local state.
-    const bounded = identity && (Number(identity[3]) <= 3 ? !identity[4] : !!identity[4]);
+    const identity = receipt?.description?.match(/^clean base:([a-f0-9]{40}) owner:(codex|claude) pass:([1-9][0-9]*)(?: extra:([1-9][0-9]*))?$/);
+    // Every extra pass attests to a separately recorded human authorization;
+    // the owner cannot automatically reset or extend the three-pass budget.
+    const pass = Number(identity?.[3]), extra = Number(identity?.[4]);
+    const bounded = Number.isSafeInteger(pass) && (pass <= 3 ? !identity[4] :
+      Number.isSafeInteger(extra) && pass === 3 + extra);
     // The local owner publishes with the user's gh login. A contributor's
     // status, arbitrary prose, or an older-base receipt cannot certify a PR.
     const trusted = receipt?.creator?.login === repo.owner;
