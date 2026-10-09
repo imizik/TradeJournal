@@ -30,8 +30,9 @@ export default function FrozenSampleChart({ context }: { context: DecisionContex
   const width = Math.min(18, 310 * step / (end - begin) * .65);
   const maxVolume = Math.max(1, ...bars.map(b => b.v));
   const axisTicks = [begin];
-  // Clock-quarter labels with enough space for the first/last and adjacent ticks.
-  for (let at = Math.ceil((begin + 1) / 900_000) * 900_000; at < end; at += 900_000) {
+  // Four candidates bound rendering even when a sparse window spans years.
+  const tickCandidates = [1, 2, 3, 4].map(i => Math.round((begin + (end-begin)*i/5) / 900_000) * 900_000);
+  for (const at of tickCandidates) {
     if (at - axisTicks.at(-1)! >= (end - begin) * .18 && end - at >= (end - begin) * .18) axisTicks.push(at);
   }
   axisTicks.push(end);

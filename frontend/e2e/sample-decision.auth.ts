@@ -364,3 +364,21 @@ test("isolated supplied VWAP is visible in both minute and quarter views", async
   await expect(region.getByTestId("frozen-vwap-point")).toBeVisible();
   await expect(region.getByRole("table").getByText("Complete · 15/15",{exact:true})).toBeVisible();
 });
+
+
+test("widely separated frozen minutes remain partial with a small time axis", async ({page,browser}) => {
+  await login(page,browser,true,true);
+  await page.route("**/api/backend/practice/runs/*",async route => {
+    const response=await route.fetch(), body=await response.json();
+    const context=body.opportunities.find((o:{symbol:string})=>o.symbol==="MU").context;
+    const source=context.packet.recent_minute_bars.at(-1);
+    context.captured_at="2026-10-09T13:01:00Z";
+    context.packet.recent_minute_bars=[{...source,t:"0001-01-01T00:00:00Z"},{...source,t:"2026-10-09T13:00:00Z"}];
+    await route.fulfill({response,json:body});
+  });
+  await page.getByRole("button",{name:"Reload saved practice"}).click();
+  const region=page.getByRole("region",{name:"MU frozen evidence chart"});
+  await expect(region.locator("g[data-minute-start]")).toHaveCount(2);
+  expect(await region.locator("text[data-time-tick]").count()).toBeLessThanOrEqual(6);
+  await expect(region.getByRole("table").getByText("Partial · 1/15",{exact:true})).toHaveCount(2);
+});
