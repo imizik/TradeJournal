@@ -31,6 +31,7 @@ class Grant(Strict):
     decision_write: bool = Field(default=False, strict=True)
     sample_replay: bool = Field(default=False, strict=True)
     market_decision_write: bool = Field(default=False, strict=True)
+    historical_replay: bool = Field(default=False, strict=True)
 
 
 class Assistant(Strict):
@@ -82,7 +83,8 @@ def me(request: Request):
     return {"enabled": True, "identifier": who.identifier, "owner": who.owner,
         "grants": who.grants, "csrf": who.csrf, "sample_data": os.environ.get("TJ_ACCESS_SAMPLE_DATA") == "true",
         "sample_decision_writes_enabled": access.sample_writes_enabled(),
-        "sample_replay_enabled": access.sample_replays_enabled() and getattr(request.app.state, "sample_replay_isolated", False) is True}
+        "sample_replay_enabled": access.sample_replays_enabled() and getattr(request.app.state, "sample_replay_isolated", False) is True,
+        "historical_replay_enabled": access.historical_replays_enabled() and getattr(request.app.state, "historical_replay_isolated", False) is True}
 
 
 @router.post("/logout")

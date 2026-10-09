@@ -6,6 +6,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /cloud-mcp/practice/opportunities/{opportunity_id}/choice',
     'POST /cloud-mcp/practice/opportunities/{opportunity_id}/choice',
     'POST /practice/opportunities/{opp_id}/sample-replay',
+    'POST /practice/opportunities/{opp_id}/historical-replay',
     'DELETE /charts/alerts/{alert_id}',
     'DELETE /charts/captures/templates/{template_id}',
     'GET /accounts',

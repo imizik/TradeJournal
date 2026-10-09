@@ -10,18 +10,19 @@ import PracticePaperPlan, { PaperBadge } from "@/components/PracticePaperPlan";
 const PAPER_FETCH_LIMIT = 10;
 const ET = "America/New_York";
 
-export function DecisionCard({ record, focused, withPaper, idPrefix = "" }: { record: DecisionRecord; focused: boolean; withPaper: boolean; idPrefix?: string }) {
+export function DecisionCard({ record, focused, openToken, withPaper, idPrefix = "" }: { record: DecisionRecord; focused: boolean; openToken?: number; withPaper: boolean; idPrefix?: string }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const [paper, setPaper] = useState<PaperState | null>(null);
   useEffect(() => {
     if (!focused || !ref.current) return;
     ref.current.open = true;
     ref.current.scrollIntoView?.({ block: "start" });
-  }, [focused]);
+  }, [focused, openToken]);
   const plan = record.plan as { trigger_level?: number; stop?: number; target?: number; target_source?: { source?: string } };
-  const packet = record.evidence.packet as { sample_data?: boolean; market_pilot?: boolean } | undefined;
+  const packet = record.evidence.packet as { sample_data?: boolean; market_pilot?: boolean; historical_replay?: boolean } | undefined;
   const sample = packet?.sample_data === true;
   const market = record.policy_version === "practice-market-decision-only-v1" || packet?.market_pilot === true;
+  const historical = packet?.historical_replay === true;
   return (
     <details ref={ref} id={`${idPrefix}decision-${record.id}`} data-decision-id={record.id} className="rounded-lg border bg-card p-4">
       <summary className="cursor-pointer list-none">
@@ -33,7 +34,7 @@ export function DecisionCard({ record, focused, withPaper, idPrefix = "" }: { re
         {record.decision === "take" && <p className="mt-2 text-sm">Trigger {plan.trigger_level ?? "—"} · Stop {plan.stop ?? "—"} · Target {plan.target ?? "—"} ({plan.target_source?.source ?? "source unavailable"})</p>}
       </summary>
       <div className="mt-4 border-t pt-3 text-xs">
-        {record.decision === "take" && withPaper && !sample && !market && <PracticePaperPlan recordId={record.id} onState={setPaper} />}
+        {record.decision === "take" && withPaper && !sample && !market && !historical && <PracticePaperPlan recordId={record.id} onState={setPaper} />}
         <dl className="mt-3 grid gap-2 sm:grid-cols-2">
           <div><dt className="text-muted-foreground">Opportunity</dt><dd className="break-all">{record.opportunity_id}</dd></div>
           {record.rationale && <div><dt className="text-muted-foreground">Rationale</dt><dd className="whitespace-pre-wrap">{record.rationale}</dd></div>}
@@ -45,7 +46,7 @@ export function DecisionCard({ record, focused, withPaper, idPrefix = "" }: { re
         </dl>
         <pre className="mt-3 max-h-64 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.evidence, null, 2)}</pre>
         {record.decision === "take" && <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.plan, null, 2)}</pre>}
-        {!market && <a href={`/charts?symbol=${encodeURIComponent(record.symbol)}`} className="mt-3 inline-block text-primary underline">Open {record.symbol} in Charts</a>}
+        {!market && !historical && <a href={`/charts?symbol=${encodeURIComponent(record.symbol)}`} className="mt-3 inline-block text-primary underline">Open {record.symbol} in Charts</a>}
       </div>
     </details>
   );

@@ -329,9 +329,9 @@ test("frozen chart matches the assigned packet through decisions, replay and rel
 });
 
 test("unusable frozen bars show an explicit unavailable chart without replacing the packet", async ({page,browser}) => {
-  await login(page,browser,true,true);
-  await page.route("**/api/backend/practice/runs/*",async route => {
-    const response = await route.fetch(), body = await response.json();
+  const run = await login(page,browser,true,true);
+  await page.route(`**/api/backend/practice/runs/${run.id}`,async route => {
+    const response = await route.fetch(), body = JSON.parse(await response.text());
     body.opportunities[0].context.packet.recent_minute_bars[0].v = null;
     await route.fulfill({response,json:body});
   });
@@ -388,7 +388,7 @@ test("market pilot saves source-linked own decisions and privately reviews them 
   const owner = await browser.newContext({baseURL:ownerOrigin});
   const auth = await (await owner.request.get("/api/access/me")).json();
   const runs = (await (await owner.request.get("/api/backend/practice/runs")).json()).runs;
-  const run = runs.find((r:{market_data?:boolean;operational_proof?:boolean}) => r.market_data && r.operational_proof);
+  const run = runs.find((r:{market_data?:boolean;historical_replay?:boolean;operational_proof?:boolean}) => r.market_data && !r.historical_replay && r.operational_proof);
   expect(run).toBeTruthy();
   const id = run.assigned_agent.replace("agent:", "");
   const created = await owner.request.post("/api/access/assistants", {headers:{Origin:ownerOrigin,"x-tj-csrf":auth.csrf},data:{identifier:id,grants:{symbols:["MU","NBIS"],run_ids:[run.id],journal_read:false,market_decision_write:true}}});
@@ -403,6 +403,8 @@ test("market pilot saves source-linked own decisions and privately reviews them 
   const mu = page.getByRole("article",{name:"MU market opportunity"});
   const muData = data.opportunities.find((o:{symbol:string})=>o.symbol==="MU");
   await expect(mu.getByText("Frozen real-market evidence",{exact:true})).toBeVisible();
+  await expect(mu.getByText(/Supplied minute coverage/)).toBeVisible();
+  await expect(mu.getByText(/Packet input failures:/)).toBeVisible();
   await expect(mu.getByRole("link",{name:"Open MU chart"})).toHaveCount(0);
   await mu.getByLabel("MU reason").fill("Provider-shaped browser fixture decision; not a live market result.");
   if (!muData.take_unavailable) {
@@ -448,5 +450,110 @@ test("market pilot saves source-linked own decisions and privately reviews them 
   await page.setViewportSize({width:390,height:844});
   expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
   await page.screenshot({path:test.info().outputPath("market-pilot-phone.png"),animations:"disabled"});
+  await owner.close();
+});
+
+test("historical replay preserves source clocks and continuation isolation for its assigned writer", async ({page,browser}) => {
+  const errors: string[] = [];
+  const forbidden: string[] = [];
+  page.on("pageerror", error => errors.push(error.message));
+  page.on("request", request => {
+    if (/\/api\/backend\/(charts|packets)(?:[/?]|$)|\/sample-replay(?:[/?]|$)|\/charts\/stream/.test(request.url())) forbidden.push(request.url());
+  });
+  const owner = await browser.newContext({baseURL:ownerOrigin});
+  const auth = await (await owner.request.get("/api/access/me")).json();
+  const runs = (await (await owner.request.get("/api/backend/practice/runs")).json()).runs;
+  const run = runs.find((item:{historical_replay?:boolean;operational_proof?:boolean;assigned_agent?:string}) => item.historical_replay && item.operational_proof && item.assigned_agent?.startsWith("agent:historical-browser-"));
+  expect(run, "the deterministic historical browser proof run must be installed").toBeTruthy();
+  const identity = run.assigned_agent.replace("agent:", "");
+  const created = await owner.request.post("/api/access/assistants", {headers:{Origin:ownerOrigin,"x-tj-csrf":auth.csrf},data:{identifier:identity,grants:{symbols:["MU","NBIS"],run_ids:[run.id],journal_read:false,market_decision_write:true,historical_replay:true}}});
+  expect(created.status()).toBe(201);
+  await page.goto("/login");
+  await page.getByLabel("Assistant ID").fill(identity);
+  await page.getByLabel("Access key").fill((await created.json()).key);
+  await page.getByRole("button",{name:"Sign in",exact:true}).click();
+  await expect(page.getByText("Historical market replay trial",{exact:true})).toBeVisible();
+  await expect(page.getByRole("heading",{name:"Historical market replay practice",exact:true})).toBeVisible();
+  const before = await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json();
+  expect(before.sample_data).toBe(false);
+  expect(before.market_data).toBe(true);
+  expect(before.opportunities.every((item:{replay:unknown}) => item.replay === null)).toBe(true);
+  const muData = before.opportunities.find((item:{symbol:string}) => item.symbol === "MU");
+  const nbisPacket = before.opportunities.find((item:{symbol:string}) => item.symbol === "NBIS").context.packet;
+  expect(muData.context.packet).toMatchObject({historical_replay:true,market_pilot:false,sample_data:false});
+  expect(muData.context.packet.simulated_as_of).not.toBe(muData.context.captured_at);
+  const mu = page.getByRole("article",{name:"MU historical opportunity"});
+  await expect(mu.getByRole("region",{name:"MU frozen evidence chart"})).toBeVisible();
+  await expect(mu.getByText(/Simulated information cutoff/)).toBeVisible();
+  await expect(mu.getByText(/Real decision deadline/)).toBeVisible();
+  await expect(mu.getByText(/120 minutes/)).toBeVisible();
+  await expect(mu.getByText(/missing minute slots/)).toBeVisible();
+  await expect(mu.getByText(/Packet input failures:/)).toBeVisible();
+  await expect(mu.getByRole("link",{name:"Open MU chart"})).toHaveCount(0);
+  await expect(mu.getByRole("button",{name:/sample replay/i})).toHaveCount(0);
+  const start = Date.parse(nbisPacket.window_start);
+  const end = Date.parse(nbisPacket.window_end);
+  const supplied = new Set((nbisPacket.recent_minute_bars as {t:string}[]).map(bar=>Date.parse(bar.t)));
+  const missing = Array.from({length:(end-start)/60_000},(_,i)=>start+i*60_000).filter(at=>!supplied.has(at));
+  const nbis = page.getByRole("article",{name:"NBIS historical opportunity"});
+  await expect(nbis.getByText(new RegExp(`${missing.length} missing minute slots? in the declared coverage window`))).toBeVisible();
+  await expect(nbis.getByText(/Packet input failures:/)).toBeVisible();
+  if (missing.length) {
+    await nbis.getByText(`Original missing minute timestamps (${missing.length})`,{exact:true}).click();
+    for (const at of missing) await expect(nbis.getByText(`${new Date(at).toLocaleString("en-US",{timeZone:"America/New_York"})} ET`,{exact:true})).toBeVisible();
+  }
+  await mu.getByLabel("MU choice").selectOption("take");
+  await mu.getByLabel("MU reason").fill("Source-linked historical long plan; review only after saving the choice.");
+  await mu.getByLabel("MU trigger source fact").selectOption("minute:0:c");
+  await mu.getByLabel("MU stop source fact").selectOption("minute:0:l");
+  await mu.getByLabel("MU target source fact").selectOption("minute:0:h");
+  await mu.getByLabel("MU maximum reference entry price").fill("110.5");
+  const expiry = mu.getByLabel(/MU plan ends/);
+  await expect(expiry).toHaveAttribute("max",await expiry.inputValue());
+  await mu.getByRole("button",{name:"Save MU decision",exact:true}).click();
+  await expect(mu.getByRole("button",{name:"Start MU historical replay",exact:true})).toBeEnabled();
+  const saved = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((item:{symbol:string})=>item.symbol==="MU");
+  expect(saved.replay).toBeNull();
+  const ownerPage = await owner.newPage();
+  await ownerPage.goto(`/daily/${run.day}?practice_run=${run.id}`);
+  const ownerMu = ownerPage.getByRole("article",{name:"MU historical opportunity"});
+  await expect(ownerMu.getByRole("button",{name:"Start MU historical replay",exact:true})).toBeDisabled();
+  await nbis.getByLabel("NBIS choice").selectOption("wait");
+  await nbis.getByLabel("NBIS reason").fill("Wait for another source-linked condition.");
+  await nbis.getByLabel("NBIS wait condition").fill("Reassess after the next verified session.");
+  await nbis.getByRole("button",{name:"Save NBIS decision",exact:true}).click();
+  await expect(nbis.getByRole("region",{name:"NBIS historical paper replay"})).toHaveCount(0);
+  await expect(nbis.getByRole("button",{name:"Start NBIS historical replay"})).toHaveCount(0);
+  await page.goto(`/daily/${run.day}?practice_run=${run.id}`);
+  await page.reload();
+  await mu.getByRole("button",{name:"Reopen saved MU decision"}).click();
+  const savedCard = mu.locator("details[data-decision-id]");
+  await expect(savedCard).toHaveAttribute("open","");
+  await savedCard.locator("summary").click();
+  await expect(savedCard).not.toHaveAttribute("open","");
+  await mu.getByRole("button",{name:"Reopen saved MU decision"}).click();
+  await expect(savedCard).toHaveAttribute("open","");
+  await expect(mu.getByRole("button",{name:"Start MU historical replay",exact:true})).toBeEnabled();
+  await mu.getByRole("button",{name:"Start MU historical replay",exact:true}).click();
+  const panel = mu.getByRole("region",{name:"MU historical paper replay"});
+  await expect(panel.getByRole("heading",{name:/Historical paper replay · /})).toBeVisible();
+  const complete = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((item:{symbol:string})=>item.symbol==="MU");
+  expect(complete.replay.clock).toBe("historical_epoch_seconds");
+  expect(complete.replay.events.length).toBeGreaterThan(0);
+  for (const event of complete.replay.events) expect(Number.isInteger(event.at)).toBe(true);
+  const firstEvent = complete.replay.events[0];
+  await expect(panel.getByRole("listitem").first().locator("time")).toHaveAttribute("dateTime",new Date(firstEvent.at*1000).toISOString());
+  await expect(panel.getByText(/ET/).first()).toBeVisible();
+  expect((await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((item:{symbol:string})=>item.symbol==="NBIS").replay).toBeNull();
+
+  await ownerPage.reload();
+  await expect(ownerMu.getByRole("button",{name:"Reopen MU historical replay",exact:true})).toBeVisible();
+  await expect(ownerMu.getByRole("button",{name:"Start MU historical replay",exact:true})).toHaveCount(0);
+  await ownerMu.getByRole("button",{name:"Reopen MU historical replay",exact:true}).click();
+  await expect(ownerMu.getByRole("region",{name:"MU historical paper replay"}).getByRole("status")).toContainText("original replay reopened");
+  await page.setViewportSize({width:390,height:844});
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+  expect(forbidden).toEqual([]);
+  expect(errors).toEqual([]);
   await owner.close();
 });

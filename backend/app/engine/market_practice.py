@@ -21,14 +21,16 @@ def eligible(run):
 
 
 def recognized(run):
-    return run.session_key.startswith(PREFIX) or run.policy_version == decisions.MARKET_POLICY_VERSION
+    return (run.session_key.startswith((PREFIX, "dot-historical-replay:"))
+        or run.policy_version in {decisions.MARKET_POLICY_VERSION, decisions.HISTORICAL_POLICY_VERSION})
 
 
 def visible_to(run, identifier):
     if identifier is None:
         return True  # only the private owner/service projection passes None
     try:
-        return metadata(run).get("assigned_agent") == "agent:" + identifier
+        meta = metadata(run)
+        return isinstance(meta, dict) and meta.get("assigned_agent") == "agent:" + identifier
     except (ValueError, KeyError, IndexError, TypeError):
         return False
 

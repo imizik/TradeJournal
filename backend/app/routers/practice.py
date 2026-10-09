@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, practice, access, sample_practice, sample_replay, market_practice
+from app.engine import decisions, practice, access, sample_practice, sample_replay, market_practice, historical_replay
 from app.engine.job_runtime import submit_job
 from app.models import PracticeOpportunity, PracticeRun
 
@@ -81,7 +81,8 @@ def inspector_view(request, db, run, *, details=True):
         if restricted and not market_practice.visible_to(run, who.identifier):
             raise HTTPException(404, "Market session not found")
         try:
-            return market_practice.view(db, run, who.identifier if restricted else None,
+            service = historical_replay if historical_replay.eligible(run) else market_practice
+            return service.view(db, run, who.identifier if restricted else None,
                 who.grants.get("symbols", []) if restricted else market_practice.SYMBOLS, details=details)
         except decisions.DecisionError as exc:
             raise HTTPException(409, str(exc)) from exc
@@ -113,8 +114,9 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
         query = query.where(PracticeRun.policy_version.in_([decisions.SAMPLE_POLICY_VERSION, decisions.REPLAY_POLICY_VERSION]),
             PracticeRun.session_key.startswith(sample_practice.PREFIX))
     if access.market_writer(request):
-        query = query.where(PracticeRun.policy_version == decisions.MARKET_POLICY_VERSION,
-            PracticeRun.session_key.startswith(market_practice.PREFIX))
+        historical = request.state.access.grants.get("historical_replay") is True
+        query = query.where(PracticeRun.policy_version == (decisions.HISTORICAL_POLICY_VERSION if historical else decisions.MARKET_POLICY_VERSION),
+            PracticeRun.session_key.startswith(historical_replay.PREFIX if historical else market_practice.PREFIX))
     if day:
         query = query.where(PracticeRun.day == day)
     visible = [r for r in db.exec(query).all() if allowed is None or not market_practice.recognized(r)
@@ -147,7 +149,8 @@ def agent_choice(opp_id: uuid.UUID, body: Choice, request: Request, response: Re
         raise HTTPException(403, "Scoped decision writer required")
     if market:
         try:
-            run, created = market_practice.submit(db, request, opp_id, body.model_dump())
+            service = historical_replay if request.state.access.grants.get("historical_replay") else market_practice
+            run, created = service.submit(db, request, opp_id, body.model_dump())
         except decisions.DecisionError as exc:
             raise HTTPException(409 if "operation_id" in str(exc) else 422, str(exc)) from exc
         response.status_code = 201 if created else 200
@@ -179,6 +182,18 @@ def start_sample_replay(opp_id: uuid.UUID, body: Strict, request: Request, respo
         raise HTTPException(404, str(exc)) from exc
     except (decisions.DecisionError, ValueError, KeyError) as exc:
         raise HTTPException(422, str(exc) if isinstance(exc, decisions.DecisionError) else "Invalid sealed replay") from exc
+    response.status_code = 201 if created else 200
+    return inspector_view(request, db, run)
+
+
+@router.post("/opportunities/{opp_id}/historical-replay", status_code=201)
+def start_historical_replay(opp_id: uuid.UUID, body: Strict, request: Request, response: Response, db: Session = Depends(get_session)):
+    if not access.historical_writer(request):
+        raise HTTPException(403, "Scoped historical replay writer required")
+    try:
+        run, created = historical_replay.start(db, request, opp_id)
+    except (decisions.DecisionError, ValueError, KeyError) as exc:
+        raise HTTPException(422, str(exc) if isinstance(exc, decisions.DecisionError) else "Invalid historical replay") from exc
     response.status_code = 201 if created else 200
     return inspector_view(request, db, run)
 

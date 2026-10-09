@@ -98,10 +98,21 @@ provider/HTTPS/process-isolation/restart checks, full local verification,
 Postgres/Ubuntu CI and tier-2 native general plus focused security review.
 
 Operations use the existing guarded updater with the exact reviewed commit and
-`--enable-market-decisions`. Its twenty-file selected source archive includes
+`--enable-market-decisions`. Its current selected source archive includes
 only reviewed code, never dependencies, data or credentials. Rollback restores
 assets, source, permission flags and any already-active D1 socket; it never
 activates an absent cloud reader. Existing D1 tools remain sample-only and do
 not gain real-market reads from this browser increment. Do not change production
 service settings or network rules. Capture/import are manual, finite commands;
 merging code enables neither scheduling nor a live model call.
+
+Jo subsequently reported signing in as `trader-jo-market`, saving MU/NBIS SKIPs
+before the real deadline, and exact packet/record persistence after reload and
+reopen. Both choices cited ended-session/stale evidence; NBIS had fifteen minute
+slots without supplied bars across its seventy-five-minute span. `missing: []`
+described retrieval/input failure state, not complete minute coverage. The UI
+now distinguishes those fields and coverage. This closes the reported cloud
+decision workflow; no market-hour TAKE, live monitoring or trading result was
+observed. The selected weekend continuation is a separate
+[historical replay](dot-historical-replay-contract.md), which leaves these
+decisions and the live-market freshness rules intact.

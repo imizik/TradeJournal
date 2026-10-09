@@ -147,6 +147,8 @@ class FixtureMarket:
                 and request.url.path.endswith("/agent-choice") and (access.decision_writer(request) or access.market_writer(request)))
             sample_replay = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
                 and request.url.path.endswith("/sample-replay") and access.replay_writer(request))
+            historical_replay = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
+                and request.url.path.endswith("/historical-replay") and access.historical_writer(request))
             cloud_choice = False
             if (request.method == "POST" and request.url.path.startswith("/cloud-mcp/practice/opportunities/")
                     and request.url.path.endswith("/choice")):
@@ -165,6 +167,7 @@ class FixtureMarket:
                     and not sample_choice
                     and not cloud_choice
                     and not sample_replay
+                    and not historical_replay
                     and (request.method, request.url.path) != ("POST", "/quotes/positions")):
                 return await JSONResponse({"detail": "Sample trial data is read-only"}, 403)(scope, receive, send)
             if request.method == "GET" or (request.method == "POST" and request.url.path == "/quotes/positions"):
@@ -190,5 +193,6 @@ def build_app(root=ROOT):
     app.user_middleware.insert(1, Middleware(FixtureMarket))
     app.state.sample_replay_isolated = True
     app.state.market_decisions_isolated = True
+    app.state.historical_replay_isolated = True
     app.state.cloud_mcp_sample_only = True
     return app

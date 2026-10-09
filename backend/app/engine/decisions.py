@@ -38,6 +38,11 @@ MARKET_POLICY_SPEC = {**POLICY_SPEC, "version": MARKET_POLICY_VERSION,
     "decision_window_seconds": 3600, "latest_bar_max_age_seconds": 300,
     "plan_fact_max_age_seconds": 7200}
 MARKET_POLICY_HASH = hashlib.sha256(json.dumps(MARKET_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+HISTORICAL_POLICY_VERSION = "practice-historical-replay-long-15m-v1"
+HISTORICAL_POLICY_SPEC = {**MARKET_POLICY_SPEC, "version": HISTORICAL_POLICY_VERSION,
+    "execution": "separate_historical_replay_only", "clock": "fixed_historical_as_of",
+    "decision_window_seconds": 72000, "retrieval": "retrospective_provider_history"}
+HISTORICAL_POLICY_HASH = hashlib.sha256(json.dumps(HISTORICAL_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class DecisionError(ValueError):
@@ -187,7 +192,11 @@ def _finite_positive(value: object, label: str) -> float:
     return parsed
 
 
-def _validate_take(symbol: str, cutoff: datetime, evidence: dict, plan: dict, now: datetime, *, sample: bool = False) -> dict:
+def _validate_take(symbol: str, cutoff: datetime, evidence: dict, plan: dict, now: datetime, *, sample: bool = False,
+                   historical: bool = False) -> dict:
+    if historical and (sample or evidence.get("packet", {}).get("historical_replay") is not True
+            or _utc(evidence["packet"].get("simulated_as_of"), "historical cutoff") != cutoff or now != cutoff):
+        raise DecisionError("Historical validation requires its fixed separate replay clock")
     if plan.get("instrument") != "stock" or plan.get("direction") != "long":
         raise DecisionError("A1 supports long underlying shares only")
     if plan.get("trigger") != POLICY_SPEC["trigger"]:
@@ -234,9 +243,10 @@ def _validate_take(symbol: str, cutoff: datetime, evidence: dict, plan: dict, no
             raise DecisionError(f"{role} has no verified provider source")
         observed = _utc(fact["observed_at"], f"{role}.observed_at")
         formed = _utc(fact["formed_at"], f"{role}.formed_at")
-        if observed > now or formed > now:
+        actual_cutoff = _utc(evidence["captured_at"], "actual retrieval") if historical else cutoff
+        if (not historical and observed > now) or formed > now or (historical and observed < formed):
             raise DecisionError(f"{role} has a future timestamp")
-        if observed > cutoff or formed > cutoff:
+        if observed > actual_cutoff or formed > cutoff:
             raise DecisionError(f"{role} was not available at input_cutoff")
         if (cutoff - formed).total_seconds() > freshness or (now - formed).total_seconds() > freshness:
             raise DecisionError(f"{role} is stale for the declared freshness limit")
@@ -280,12 +290,15 @@ def row(record: DecisionRecord) -> dict:
 
 def create(db: Session, request: dict, *, routine: bool = False, commit: bool = True, expected_day: date | None = None,
            sample: bool = False, receipt_deadline: datetime | None = None, sample_replay: bool = False,
-           market_pilot: bool = False) -> tuple[DecisionRecord, bool]:
+           market_pilot: bool = False, historical_replay: bool = False) -> tuple[DecisionRecord, bool]:
+    if historical_replay and (sample or sample_replay or market_pilot or not routine):
+        raise DecisionError("Historical decisions require their separate routine service")
     if market_pilot and (sample or sample_replay or not routine):
         raise DecisionError("Market pilot requires its separate routine service")
     if sample_replay and not sample:
         raise DecisionError("Replay decisions require explicit sample validation")
-    policy_version, policy_hash = ((MARKET_POLICY_VERSION, MARKET_POLICY_HASH) if market_pilot else
+    policy_version, policy_hash = ((HISTORICAL_POLICY_VERSION, HISTORICAL_POLICY_HASH) if historical_replay else
+        (MARKET_POLICY_VERSION, MARKET_POLICY_HASH) if market_pilot else
         (REPLAY_POLICY_VERSION, REPLAY_POLICY_HASH) if sample_replay else
         (SAMPLE_POLICY_VERSION, SAMPLE_POLICY_HASH) if sample else (POLICY_VERSION, POLICY_HASH))
     if not routine:
@@ -326,6 +339,18 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
         raise DecisionError("Sample exercise deadline has passed; existing records remain readable")
     cutoff = context.captured_at
     evidence = json.loads(context.data_json)
+    validation_now = now
+    expiry_limit = receipt_deadline
+    if historical_replay:
+        packet = evidence.get("packet", {})
+        if (packet.get("historical_replay") is not True or packet.get("sample_data") is not False
+                or packet.get("market_pilot") is not False):
+            raise DecisionError("Historical decisions require their explicitly retrospective packet")
+        cutoff = _utc(packet.get("simulated_as_of"), "historical cutoff")
+        if cutoff >= context.captured_at:
+            raise DecisionError("Historical cutoff must precede actual retrieval")
+        validation_now = cutoff
+        expiry_limit = _utc(packet.get("plan_expiry_max"), "historical session end")
     if market_pilot and (evidence.get("packet", {}).get("market_pilot") is not True
             or evidence.get("packet", {}).get("sample_data") is not False):
         raise DecisionError("Market pilot requires its frozen real-market packet")
@@ -336,12 +361,13 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
     if decision == "take":
         if expected_day is not None and now.replace(tzinfo=timezone.utc).astimezone(ET).date() != expected_day:
             raise DecisionError("TAKE must be committed on its run's market session date")
-        detail["plan"] = _validate_take(symbol, cutoff, evidence, detail["plan"], now, sample=sample)
+        detail["plan"] = _validate_take(symbol, cutoff, evidence, detail["plan"], validation_now,
+            sample=sample, historical=historical_replay)
     elif decision == "wait":
         expiry = _utc(detail["wait_expiry"], "wait_expiry")
-        if expiry <= cutoff or expiry <= now:
+        if expiry <= cutoff or expiry <= validation_now:
             raise DecisionError("WAIT expiry must be after context cutoff and server receipt")
-        if receipt_deadline is not None and expiry > receipt_deadline:
+        if expiry_limit is not None and expiry > expiry_limit:
             raise DecisionError("Sample WAIT expiry must not exceed the exercise deadline")
     record_sha = _hash(_canonical({"request": request, "context_sha256": context.context_sha256}))
     item = DecisionRecord(operation_id=operation_id, opportunity_id=opportunity_id,

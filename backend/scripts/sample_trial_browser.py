@@ -27,4 +27,7 @@ def build_app():
         if access.market_writes_enabled():
             from scripts import market_trial_fixture
             market_trial_fixture.prepare(db)
+        if access.historical_replays_enabled():
+            from scripts import historical_trial_fixture
+            historical_trial_fixture.prepare(db)
     return app

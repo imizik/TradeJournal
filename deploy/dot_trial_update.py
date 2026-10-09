@@ -25,6 +25,7 @@ SOURCE_FILES = frozenset({"backend/app/engine/decisions.py", "backend/app/engine
     "backend/app/routers/cloud_choices.py", "backend/cloud_mcp_d2_common.py",
     "backend/cloud_mcp_d0.py", "backend/cloud_mcp_d1_common.py",
     "backend/app/engine/market_practice.py", "deploy/dot_market_capture.py", "deploy/dot_market_import.py",
+    "backend/app/engine/historical_replay.py", "deploy/dot_historical_capture.py", "deploy/dot_historical_import.py",
     "backend/dot_trial_app.py", "deploy/dot_trial_control.py", "deploy/dot_trial_seed.py"})
 FRONTEND_FILES = (".next", "server.js", "package.json", "public")
 SERVICES = tuple(f"tradejournal-dot-trial-{part}.service" for part in ("api", "assistant", "owner"))
@@ -127,7 +128,8 @@ def ready():
     raise RuntimeError("Trial did not become ready in its isolated network namespace")
 
 
-def update(backend_archive, frontend_archive, commit, *, enable_sample_replay=False, enable_market_decisions=False):
+def update(backend_archive, frontend_archive, commit, *, enable_sample_replay=False, enable_market_decisions=False,
+           enable_historical_replay=False):
     if not re.fullmatch(r"[a-f0-9]{40}", commit):
         raise ValueError("Record the exact reviewed source commit")
     check_target()
@@ -204,6 +206,9 @@ def update(backend_archive, frontend_archive, commit, *, enable_sample_replay=Fa
         if enable_market_decisions:
             lines = [line for line in lines if not line.startswith("TJ_MARKET_DECISION_WRITES=")]
             lines.append("TJ_MARKET_DECISION_WRITES=true")
+        if enable_historical_replay:
+            lines = [line for line in lines if not line.startswith("TJ_HISTORICAL_REPLAY_ENABLED=")]
+            lines.append("TJ_HISTORICAL_REPLAY_ENABLED=true")
         env_file.write_text("\n".join([*lines, "TJ_SAMPLE_DECISION_WRITES=true"]) + "\n")
         run("systemctl", "start", *SERVICES, *SOCKETS)
         ready()
@@ -239,9 +244,10 @@ def main():
     parser.add_argument("--commit", required=True)
     parser.add_argument("--enable-sample-replay", action="store_true", help="Explicitly enable the approved sample-only replay")
     parser.add_argument("--enable-market-decisions", action="store_true", help="Explicitly enable the isolated real-market decision handoff")
+    parser.add_argument("--enable-historical-replay", action="store_true", help="Explicitly enable the isolated historical exercise")
     args = parser.parse_args()
     update(args.backend_archive, args.frontend_archive, args.commit, enable_sample_replay=args.enable_sample_replay,
-        enable_market_decisions=args.enable_market_decisions)
+        enable_market_decisions=args.enable_market_decisions, enable_historical_replay=args.enable_historical_replay)
 
 
 if __name__ == "__main__":

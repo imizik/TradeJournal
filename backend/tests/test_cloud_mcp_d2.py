@@ -351,6 +351,32 @@ def test_d2_choice_io_does_not_reveal_or_start_sample_replay(linked, d1linked): 
         assert response.status_code in (401, 403, 404), (path, response.status_code, response.text)
 
 
+def test_sample_connector_refuses_assigned_historical_run_without_reveal_or_write(linked):
+    from app.engine import historical_replay
+    from scripts.historical_trial_fixture import bundle
+
+    with Session(linked.engine) as db:
+        run = historical_replay.prepare(db, bundle(), identifier="historical-connector-test", proof=True)
+        opportunity_ids = [row.id for row in db.exec(select(PracticeOpportunity).where(PracticeOpportunity.run_id == run.id)).all()]
+        principal = db.get(AccessPrincipal, "writer")
+        principal.grants_json = json.dumps({**linked.grants, "run_ids": [str(run.id)]})
+        db.add(principal)
+        db.commit()
+        before = {model: [row.model_dump(mode="json") for row in db.exec(select(model)).all()]
+                  for model in (PracticeRun, DecisionContext, DecisionRecord, DecisionEvent)}
+    for opportunity_id in opportunity_ids:
+        path = f"/cloud-mcp/practice/opportunities/{opportunity_id}/choice"
+        for response in (linked.backend.get(path), linked.backend.post(path, json=payload())):
+            assert response.status_code == 404, response.text
+            assert "nonce" not in response.text and "continuation" not in response.text
+        response = linked.backend.post(f"/practice/opportunities/{opportunity_id}/historical-replay", json={})
+        assert response.status_code in (401, 403, 404), response.text
+    with Session(linked.engine) as db:
+        after = {model: [row.model_dump(mode="json") for row in db.exec(select(model)).all()]
+                 for model in before}
+    assert after == before
+
+
 def test_oversize_and_mcp_backend_failures_are_generic(linked):
     huge = payload(rationale="x" * MAX_CHOICE_BYTES)
     assert linked.backend.post(choice_path(linked), json=huge).status_code in (413, 422)
