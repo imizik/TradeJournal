@@ -30,6 +30,8 @@ const LINE = "#659ef0";
 export const LEVEL_COLOR = LINE;
 const SELECTED = "#9cc2ff";
 const BACKGROUND = "#10151e";
+/** Where an out-of-view level's tag sits: this far inside the pane's top or bottom edge, in CSS pixels. */
+const EDGE_TAG = 8;
 const FONT = "ui-sans-serif, system-ui, sans-serif";
 
 export type DrawingKind = "ray" | "trend" | "zone" | "note";
@@ -399,6 +401,14 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
 
   priceAxisViews() { return this.axis; }
 
+  /** The levels priced out of view that keep a tag, with their arrow's direction ("↑400.00"); browser tests read it. */
+  edgeTags(): string[] {
+    return this.placed.flatMap(({ item }) => {
+      const edge = this.offscreen(item.id);
+      return edge?.nearest && this.series ? [`${edge.side === "above" ? "↑" : "↓"}${this.series.priceFormatter().format(item.points[0].price)}`] : [];
+    });
+  }
+
   hitTest(x: number, y: number): PrimitiveHoveredItem | null {
     if (!this.interactive) return null;
     const hit = this.hit(x, y, MOUSE_SLOP);
@@ -442,15 +452,35 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
     }
   }
 
+  /**
+   * A level or ray priced beyond the top or bottom of the pane: which side, and
+   * whether it is the nearest one on that side. Only the nearest keeps a tag,
+   * pinned to that edge with an arrow drawn beside it in the pane, so prices
+   * out of view never pile up at the edge looking like prices in view. Null
+   * while it is in view.
+   */
+  private offscreen(id: string): { side: "above" | "below"; nearest: boolean; height: number } | null {
+    const height = this.chart?.paneSize(0).height;
+    const y = (entry?: Placed) => entry && (entry.item.kind === "level" || entry.item.kind === "ray") ? entry.at[0]?.y ?? null : null;
+    const own = y(this.placed.find((entry) => entry.item.id === id));
+    if (own == null || !height) return null;
+    const side = own < 0 ? "above" : own > height ? "below" : null;
+    if (!side) return null;
+    const beyond = this.placed.map(y).filter((other): other is number => other !== null && (side === "above" ? other < 0 : other > height));
+    return { side, nearest: side === "above" ? own >= Math.max(...beyond) : own <= Math.min(...beyond), height };
+  }
+
   private axisView(id: string, index: number): ISeriesPrimitiveAxisView {
     const placed = () => this.placed.find((entry) => entry.item.id === id);
+    const away = () => index === 0 ? this.offscreen(id) : null;
     const color = () => { const item = placed()?.item; return !item ? LINE : item.kind === "level" ? levelColor(item, id === this.selected) : item.color; };
     return {
-      coordinate: () => placed()?.at[index]?.y ?? -100,
+      coordinate: () => { const edge = away(); return edge ? (edge.side === "above" ? EDGE_TAG : edge.height - EDGE_TAG) : placed()?.at[index]?.y ?? -100; },
+      // The price alone: an arrow in the text would widen the price axis and shift the chart. The pane draws it.
       text: () => { const entry = placed(); return entry && this.series ? this.series.priceFormatter().format(entry.item.points[index].price) : ""; },
       textColor: () => { const item = placed()?.item; return item?.kind === "level" && item.color === LINE && id !== this.selected ? "#ffffff" : BACKGROUND; },
       backColor: color,
-      visible: () => placed()?.at[index] != null,
+      visible: () => placed()?.at[index] != null && (away()?.nearest ?? true),
     };
   }
 
@@ -465,11 +495,25 @@ export class DrawingLayer implements ISeriesPrimitive<Time> {
         context.strokeStyle = color;
         context.stroke();
       };
+      // Beside an out-of-view level's pinned tag: a small arrow pointing to where it is.
+      const arrow = (side: "above" | "below", height: number, color: string) => {
+        const [x, y, size] = [bitmapSize.width - Math.round(8 * h), Math.round((side === "above" ? EDGE_TAG : height - EDGE_TAG) * v), Math.round(4 * h)];
+        const tip = side === "above" ? -size : size;
+        context.beginPath();
+        context.moveTo(x - size, y - tip / 2);
+        context.lineTo(x + size, y - tip / 2);
+        context.lineTo(x, y + tip);
+        context.closePath();
+        context.fillStyle = color;
+        context.fill();
+      };
       for (const entry of this.placed) {
         const { item, at, box } = entry;
         const [a, b] = at;
         if (!a) continue;
         const selected = item.id === this.selected;
+        const edge = item.kind === "level" || item.kind === "ray" ? this.offscreen(item.id) : null;
+        if (edge?.nearest) arrow(edge.side, edge.height, item.kind === "level" ? levelColor(item, selected) : item.color);
         context.setLineDash([]);
         if (item.kind === "level") {
           if (a.y < -2 || a.y * v > bitmapSize.height + 2 * v) continue;
