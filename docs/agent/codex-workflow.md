@@ -141,15 +141,12 @@ live-provider, deployment and user-observed result are separate evidence
 layers; report only the layers actually observed. Never replace a required
 check with an informal review.
 
-Do not start a separate reviewer automatically. Sol remains accountable for
-the integrated result: check scope, the relevant diff, the completion report,
-and acceptance evidence. Read enough code to evaluate correctness rather than
-accepting the worker's summary alone; avoid repeating its entire exploration.
-A focused Luna review is useful only when a specific independent question
-remains after checks. Sol personally reviews
-high-consequence changes and unresolved semantic risk. The hosted GitHub
-reviewer is a separate service with independent routing; do not promise that
-it will select Luna or treat it as a required check.
+The owner runs the shared [independent PR review loop](pr-review.md) before
+publishing ready work. Codex calls the Claude CLI on a fresh read-only snapshot;
+Claude calls Codex. Findings return to the owner in the same active session.
+Deterministic checks and the lead's high-consequence review remain required.
+The GitHub-hosted reviewer is an optional additional service, not this loop's
+completion signal. Do not finish on an empty GitHub comment list.
 
 ## Completion report
 

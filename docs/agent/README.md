@@ -9,6 +9,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
+| [pr-review.md](pr-review.md) | Automatic independent review for Codex and Claude owners; subscriptions, hooks, bounded fixes and GitHub readiness |
 | [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [dots-integration.md](dots-integration.md) | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |

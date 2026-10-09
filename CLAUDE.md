@@ -22,6 +22,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
 | `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory, chart price basis |
 | `docs/agent/verification.md` | How to prove a change works |
+| `docs/agent/pr-review.md` | Automatic cross-provider review, bounded repair loop, readiness and subscription setup |
 | `docs/agent/codex-workflow.md` | Sol-led substantial work, bounded Luna assignments, escalation, and completion reports |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
@@ -81,6 +82,24 @@ package pass on the merge commit, the VPS installs it by itself within about
 close unless the PR carries the `deploy-now` label. Schema changes wait for a
 person. A PR is ready to merge only when it is ready to go live; see
 [automatic deployment](deploy/README.md#automatic-deployment).
+
+## Independent review before ready work
+
+When implementation and required checks are ready, commit the feature branch
+and run the [shared independent review loop](docs/agent/pr-review.md).
+Codex uses Claude Code CLI; Claude uses Codex CLI. Keep the owning session
+active: inspect findings, fix valid issues, verify, commit and re-review.
+Three reviewer passes are the automatic limit. A human may explicitly authorize
+each additional pass through the documented extension; preserve all attempts. Authentication, quota,
+missing evidence and unresolved disputes are explicit incomplete outcomes.
+Never reset the budget or switch billing/providers to get a clean result.
+
+After clean review, push the feature branch, open/update a draft PR, publish
+its receipt and wait for CI through the runner's `finish` command. The user
+has authorized these branch pushes, PR updates and review repairs as the
+normal workflow. Merge and auto-merge remain the user's actions.
+Completion hooks enforce pending work for newly started/trusted local sessions;
+existing sessions must follow the same command workflow explicitly.
 
 ## Operating style
 
