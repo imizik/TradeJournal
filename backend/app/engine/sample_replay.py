@@ -23,6 +23,7 @@ from app.models import (
 VERSION = "sample-paper-replay-v1"
 SOURCE = "sample_replay_fixture"
 PREFIX = sample_practice.PREFIX + "paper-replay-v1:"
+SCENARIO_VERSION = "sample-scenarios-v2"
 POLICY = {
     "version": VERSION,
     "decision_schema": decisions.REPLAY_POLICY_HASH,
@@ -99,12 +100,101 @@ def seal(base):
     return payload, decisions._hash(decisions._canonical(payload))
 
 
-def prepare(db):
+def _interpolate(points, minute):
+    for (left, begin), (right, end) in zip(points, points[1:]):
+        if left <= minute <= right:
+            return begin + (end - begin) * (minute - left) / (right - left)
+    raise ValueError("Minute outside sample scenario")
+
+
+def scenario_packet(symbol, base, now, run):
+    """Invented completed history; no continuation or recommended choice is published."""
+    packet = sample_practice.packet(symbol, base, now, run)
+    if symbol == "MU":
+        closes = [
+            (0, base + 2.8),
+            (5, base + 0.6),
+            (19, base - 0.9),
+            (29, base - 0.7),
+            (44, base - 0.4),
+            (59, base),
+        ]
+        volumes = [(0, 300), (5, 500), (19, 1600), (29, 400), (44, 1200), (59, 2600)]
+        stop_minute, stop, target, guard_max = 19, base - 1, base + 3, base + 0.2
+        description = "Invented 60-minute history: a pullback followed by recovery toward the fixed trigger. Evaluate the completed bars and volume yourself; TAKE still requires confirmation in the hidden replay."
+    elif symbol == "NBIS":
+        closes = [
+            (0, base + 3.5),
+            (14, base - 1.6),
+            (29, base + 0.1),
+            (44, base - 0.2),
+            (59, base),
+        ]
+        volumes = [(0, 2200), (59, 850)]
+        stop_minute, stop, target, guard_max = 14, base - 2, base + 4, base + 0.5
+        description = "Invented 60-minute history: a rebound followed by alternating closes around the fixed trigger. Evaluate the completed bars and volume yourself; TAKE still requires confirmation in the hidden replay."
+    else:
+        raise ValueError("Scenario symbol outside MU/NBIS")
+    end = now.replace(second=0, microsecond=0) - timedelta(minutes=1)
+    bars = []
+    total_volume, weighted_price = 0, 0.0
+    previous = closes[0][1] + 0.1
+    for minute in range(60):
+        wiggle = (
+            0.015 * (minute % 4 - 1.5)
+            if symbol == "MU"
+            else 0.15 * ((minute % 6) - 2.5)
+        )
+        close = round(_interpolate(closes, minute) + wiggle, 4)
+        if minute in (0, stop_minute, 59):
+            close = _interpolate(closes, minute)
+        opening = round(previous, 4)
+        high = round(max(opening, close) + 0.06 + 0.01 * (minute % 3), 4)
+        low = round(min(opening, close) - 0.05 - 0.01 * (minute % 2), 4)
+        if minute == 0:
+            high = target
+        if minute == stop_minute:
+            low = stop
+        volume = round(_interpolate(volumes, minute))
+        total_volume += volume
+        weighted_price += ((opening + high + low + close) / 4) * volume
+        bars.append(
+            {
+                "t": (end - timedelta(minutes=59 - minute)).isoformat(),
+                "o": opening,
+                "h": high,
+                "l": low,
+                "c": close,
+                "vw": round(weighted_price / total_volume, 4),
+                "v": volume,
+            }
+        )
+        previous = close
+    # The established price-fact index is newest first; source references name
+    # the actual completed pivot/earlier high, not a made-up latest-bar extreme.
+    packet["recent_minute_bars"] = list(reversed(bars))
+    packet["sample_plan"].update(
+        stop=stop,
+        target=target,
+        stop_fact=f"minute:{59 - stop_minute}:l",
+        target_fact="minute:59:h",
+        entry_guard={"min": base, "max": guard_max},
+    )
+    packet.update(
+        scenario_version=SCENARIO_VERSION,
+        scenario_id=f"{symbol.lower()}-history-v2",
+        scenario=description,
+        vwap_basis="Cumulative volume-weighted OHLC typical price within this invented 60-minute window; not exchange VWAP.",
+    )
+    return packet
+
+
+def prepare(db, *, scenarios=False):
     if not access.sample_replays_enabled():
         raise decisions.DecisionError("Sample replay preparation is disabled")
     now = datetime.now(timezone.utc)
     day = now.astimezone(ET).date()
-    key = PREFIX + day.isoformat()
+    key = PREFIX + (SCENARIO_VERSION + ":" if scenarios else "") + day.isoformat()
     run = db.exec(select(PracticeRun).where(PracticeRun.session_key == key)).first()
     if run and eligible(run):
         return run
@@ -158,7 +248,9 @@ def prepare(db):
             db.commit()  # persist the continuation before freezing its public commitment
         payload = json.loads(opp.benchmark_json)
         digest = decisions._hash(decisions._canonical(payload))
-        packet = sample_practice.packet(symbol, base, now, run)
+        packet = (scenario_packet if scenarios else sample_practice.packet)(
+            symbol, base, now, run
+        )
         packet.update(
             replay_exercise=True,
             replay_commitment=digest,
@@ -170,7 +262,8 @@ def prepare(db):
                 "exercise_ends": run.deadline.isoformat() + "Z",
             },
             notice="Invented bars and prices. This sample replay is separate from live trading.",
-            scenario="TAKE saves a conditional plan before the replay trigger. WAIT/SKIP stay valid and create no entry. The continuation is hidden until you start your own TAKE replay.",
+            scenario=packet["scenario"]
+            + " TAKE saves a conditional plan before the replay trigger. WAIT/SKIP stay valid and create no entry. The continuation is hidden until you start your own TAKE replay.",
             replay_notice="Invented session clock: minute 0 is session open. Capture/save timestamps are real; replay seconds are simulated. Plan start must precede the real exercise deadline; replay expiry is minute 60.",
         )
         context, _ = decisions.freeze_context(

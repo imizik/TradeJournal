@@ -182,6 +182,9 @@ test("scoped agent starts its own TAKE replay and reopens a complete immutable s
   const before = await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json();
   expect(JSON.stringify(before)).not.toContain('"nonce"');
   expect(before.opportunities.every((opp: { replay: unknown }) => opp.replay === null)).toBe(true);
+  const packets = before.opportunities.map((opp: { context: { packet: { scenario_version: string; recent_minute_bars: { c: number }[] } } }) => opp.context.packet);
+  expect(packets.every((packet: { scenario_version: string }) => packet.scenario_version === "sample-scenarios-v2")).toBe(true);
+  expect(packets.every((packet: { recent_minute_bars: { c: number }[] }) => new Set(packet.recent_minute_bars.map(bar => bar.c)).size > 40)).toBe(true);
   const mu = page.getByRole("article", { name: "MU sample opportunity" });
   await mu.getByLabel("MU choice").selectOption("take");
   await mu.getByLabel("MU reason").fill("Conditional long plan; the replay must confirm its trigger before entry.");

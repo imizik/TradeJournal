@@ -45,10 +45,14 @@ def replay(boundary, request):
     )
     boundary.patch.setattr(app, "middleware_stack", None)
     boundary.patch.setattr(app.state, "sample_replay_isolated", True, raising=False)
-    if hasattr(request, "param"):
-        boundary.patch.setattr(sample_replay.secrets, "choice", lambda _: request.param)
+    config = getattr(request, "param", {})
+    config = config if isinstance(config, dict) else {"ending": config}
+    if "ending" in config:
+        boundary.patch.setattr(
+            sample_replay.secrets, "choice", lambda _: config["ending"]
+        )
     with Session(boundary.engine) as db:
-        run = sample_replay.prepare(db)
+        run = sample_replay.prepare(db, scenarios=config.get("scenarios", False))
         opps = db.exec(
             select(PracticeOpportunity).where(PracticeOpportunity.run_id == run.id)
         ).all()
@@ -360,7 +364,10 @@ def test_failure_before_commit_rolls_back_whole_replay_and_retry_recovers(
     assert start(replay).status_code == 200
 
 
-def test_preparation_resumes_with_original_sealed_nonce(boundary, monkeypatch):
+@pytest.mark.parametrize("scenarios", [False, True])
+def test_preparation_resumes_with_original_sealed_nonce(
+    boundary, monkeypatch, scenarios
+):
     for name in (
         "TJ_ACCESS_SAMPLE_DATA",
         "TJ_DOT_TRIAL_ENABLED",
@@ -381,10 +388,10 @@ def test_preparation_resumes_with_original_sealed_nonce(boundary, monkeypatch):
     monkeypatch.setattr(decisions, "freeze_context", interrupt)
     with Session(boundary.engine) as db:
         with pytest.raises(RuntimeError):
-            sample_replay.prepare(db)
+            sample_replay.prepare(db, scenarios=scenarios)
     with Session(boundary.engine) as db:
         original = db.exec(select(PracticeOpportunity)).first().benchmark_json
-        run = sample_replay.prepare(db)
+        run = sample_replay.prepare(db, scenarios=scenarios)
         opp = db.exec(
             select(PracticeOpportunity).where(
                 PracticeOpportunity.run_id == run.id, PracticeOpportunity.symbol == "MU"
@@ -590,3 +597,109 @@ def check_concurrent_replay_store(engine, monkeypatch):
 
 def test_shared_replay_transaction_check_on_sqlite(replay, monkeypatch):
     check_concurrent_replay_store(replay.engine, monkeypatch)
+
+
+def test_distinct_scenario_run_preserves_existing_waits_and_is_idempotent(replay):
+    for symbol in ("MU", "NBIS"):
+        saved(
+            replay,
+            symbol,
+            "wait",
+            wait_condition="Retain this original choice",
+            wait_expiry=(datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        )
+    with Session(replay.engine) as db:
+        originals = [row.model_dump() for row in db.exec(select(DecisionRecord)).all()]
+        old_contexts = [
+            row.model_dump() for row in db.exec(select(DecisionContext)).all()
+        ]
+        old_opps = [
+            row.model_dump() for row in db.exec(select(PracticeOpportunity)).all()
+        ]
+        fresh = sample_replay.prepare(db, scenarios=True)
+        assert fresh.id != replay.run.id
+        fresh_id, deadline = fresh.id, fresh.deadline
+        assert sample_replay.prepare(db, scenarios=True).id == fresh_id
+        assert db.get(PracticeRun, fresh_id).deadline == deadline
+        assert all(
+            db.get(DecisionRecord, row["id"]).model_dump() == row for row in originals
+        )
+        assert all(
+            db.get(DecisionContext, row["id"]).model_dump() == row
+            for row in old_contexts
+        )
+        assert all(
+            db.get(PracticeOpportunity, row["id"]).model_dump() == row
+            for row in old_opps
+        )
+        assert db.exec(select(DecisionEvent)).all() == []
+    assert replay.public.get(f"/practice/runs/{fresh_id}").status_code == 404
+
+
+@pytest.mark.parametrize(
+    "replay",
+    [{"scenarios": True, "ending": "stop"}, {"scenarios": True, "ending": "target"}],
+    indirect=True,
+)
+def test_distinct_frozen_histories_have_real_pivots_volume_and_replay_terms(replay):
+    before = replay.public.get(f"/practice/runs/{replay.run.id}").json()
+    packets = {o["symbol"]: o["context"] for o in before["opportunities"]}
+    for symbol, context in packets.items():
+        packet = context["packet"]
+        bars = list(reversed(packet["recent_minute_bars"]))
+        assert packet["scenario_version"] == sample_replay.SCENARIO_VERSION
+        assert len(bars) == 60 and len({b["c"] for b in bars}) > 40
+        times = [datetime.fromisoformat(b["t"]) for b in bars]
+        assert all((b - a).total_seconds() == 60 for a, b in zip(times, times[1:]))
+        cutoff = datetime.fromisoformat(context["captured_at"])
+        assert times[-1] + timedelta(minutes=1) <= cutoff
+        volume, weighted = 0, 0.0
+        for bar in bars:
+            assert (
+                0
+                < bar["l"]
+                <= min(bar["o"], bar["c"])
+                <= max(bar["o"], bar["c"])
+                <= bar["h"]
+            )
+            assert isinstance(bar["v"], int) and bar["v"] > 0
+            volume += bar["v"]
+            weighted += sum(bar[k] for k in ("o", "h", "l", "c")) / 4 * bar["v"]
+            assert bar["vw"] == pytest.approx(weighted / volume, abs=0.000051)
+        facts = {f["name"]: f for f in context["price_facts"]}
+        plan = packet["sample_plan"]
+        assert len(facts) == 300
+        assert facts[plan["trigger_fact"]]["value"] == plan["trigger_level"]
+        assert facts[plan["stop_fact"]]["value"] == plan["stop"]
+        assert facts[plan["target_fact"]]["value"] == plan["target"]
+        assert "nonce" not in json.dumps(packet) and "minutes" not in packet
+    mu = list(reversed(packets["MU"]["packet"]["recent_minute_bars"]))
+    nbis = list(reversed(packets["NBIS"]["packet"]["recent_minute_bars"]))
+    assert sum(b["v"] for b in mu[-15:]) > sum(b["v"] for b in mu[-30:-15:])
+    assert mu[-1]["c"] > mu[-15]["c"] and mu[-1]["c"] > mu[-1]["vw"]
+    assert sum(b["v"] for b in nbis[-15:]) < sum(b["v"] for b in nbis[-30:-15:])
+    diffs = [b["c"] - a["c"] for a, b in zip(nbis[-15:], nbis[-14:])]
+    assert any(v > 0 for v in diffs) and any(v < 0 for v in diffs)
+    plan = packets["MU"]["packet"]["sample_plan"]
+    assert (plan["target"] - plan["entry_guard"]["max"]) / (
+        plan["entry_guard"]["max"] - plan["stop"]
+    ) == pytest.approx(2.8 / 1.2)
+    mu_choice = saved(replay)
+    receipt = result(start(replay))
+    assert receipt["outcome"]["entry_fill"] == pytest.approx(110.22102)
+    net = 2.75768 if receipt["outcome"]["exit_kind"] == "target" else -1.24192
+    assert receipt["outcome"]["net_per_share"] == pytest.approx(net)
+    assert receipt["outcome"]["planned_r"] == pytest.approx(net)
+    stressed = 2.67304 if receipt["outcome"]["exit_kind"] == "target" else -1.32576
+    assert receipt["outcome_x3"]["net_per_share"] == pytest.approx(stressed)
+    assert replay.public.get("/decisions/" + mu_choice["id"]).json() == mu_choice
+    assert result(start(replay)) == receipt
+    # A separate NBIS choice still uses its own frozen levels/risk and receipt.
+    nbis_choice = saved(replay, "NBIS")
+    assert nbis_choice["plan"]["initial_risk_per_share"] == 2
+    nbis_receipt = result(start(replay, "NBIS"), "NBIS")
+    assert nbis_receipt["record_id"] == nbis_choice["id"]
+    assert nbis_receipt["outcome"]["entry_fill"] == pytest.approx(60.21602)
+    nbis_net = 3.76758 if nbis_receipt["outcome"]["exit_kind"] == "target" else -2.23182
+    assert nbis_receipt["outcome"]["net_per_share"] == pytest.approx(nbis_net)
+    assert nbis_receipt["outcome"]["planned_r"] == pytest.approx(nbis_net / 2)

@@ -19,8 +19,11 @@ def main():
     parser.add_argument("--identifier")
     parser.add_argument("--rotate", action="store_true")
     parser.add_argument("--replay", action="store_true", help="Prepare the separate sample paper replay")
+    parser.add_argument("--scenarios", action="store_true", help="New distinct frozen MU/NBIS exercise (requires --replay)")
     args = parser.parse_args()
-    args.identifier = args.identifier or ("trader-jo-replay" if args.replay else "trader-jo-decisions")
+    if args.scenarios and not args.replay:
+        parser.error("--scenarios requires --replay")
+    args.identifier = args.identifier or ("trader-jo-scenarios" if args.scenarios else "trader-jo-replay" if args.replay else "trader-jo-decisions")
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", args.identifier) or args.identifier == "owner":
         raise ValueError("Choose a separate sample assistant ID")
     sys.path.insert(0, str(RUNTIME / "backend"))
@@ -44,7 +47,7 @@ def main():
         previous = db.get(AccessPrincipal, args.identifier)
         if previous and not args.rotate:
             raise ValueError("Assistant already exists; explicit --rotate is required")
-        run = sample_replay.prepare(db) if args.replay else sample_practice.prepare(db)
+        run = sample_replay.prepare(db, scenarios=args.scenarios) if args.replay else sample_practice.prepare(db)
         grants = {"symbols": ["MU", "NBIS"], "run_ids": [str(run.id)], "journal_read": False, "decision_write": True}
         if args.replay:
             grants["sample_replay"] = True
