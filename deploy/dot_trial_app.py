@@ -15,7 +15,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 ROOT = Path("/var/lib/tradejournal-dot-trial")
-SOURCE = "Sample fixture (not live)"
+SOURCE = "sample_fixture"
 NOTICE = "Simulated prices for the UI trial; never use these for trading."
 BASES = {"SPY": 500, "QQQ": 430, "IWM": 210, "NVDA": 130, "AAPL": 220,
          "TSLA": 250, "RNXT": 1, "RCAT": 10, "MU": 110, "NBIS": 60}
@@ -44,9 +44,10 @@ def validate_environment(env, root=ROOT):
 
 
 def candles(symbol, interval, before=None, limit=120):
-    from app.engine.chart_math import ET
-    step = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "1D": 86400, "1W": 604800}[interval]
-    anchor = datetime.now(ET).replace(hour=16, minute=0, second=0, microsecond=0)
+    from app.engine.chart_math import ET, indicators
+    step = {"1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+            "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800}[interval]
+    anchor = datetime.now(ET).replace(second=0, microsecond=0)
     while anchor.weekday() >= 5:
         anchor -= timedelta(days=1)
     finish = min(int(anchor.timestamp()), before - step) if before else int(anchor.timestamp())
@@ -59,8 +60,9 @@ def candles(symbol, interval, before=None, limit=120):
         rows.append({"time": stamp, "end_time": stamp + step, "open": opening,
                      "high": round(max(opening, close) + base * 0.001, 4),
                      "low": round(min(opening, close) - base * 0.001, 4), "close": close,
-                     "volume": 1000 + i * 20, "extended": False, "source": SOURCE})
-    return rows
+                     "volume": 1000 + i * 20, "extended": False, "source": SOURCE,
+                     "vwap": None, "vwap_sd": None, "rvol": None})
+    return indicators(rows)
 
 
 def workspace(query):
@@ -75,7 +77,7 @@ def workspace(query):
         name, _, intervals = value.partition(":")
         extras[name] = {"panels": panels(name, intervals.split(".")), "fetched_at": {"intraday": stamp},
                         "intraday_as_of": stamp, "issues": [NOTICE], "positions": [], "fills_truncated": False}
-    return {"symbol": symbol, "session": query.get("session", "extended"), "provider": SOURCE,
+    return {"symbol": symbol, "session": query.get("session", "extended"), "provider": SOURCE, "sample_data": True,
             "delayed": True, "refresh_seconds": 60, "checked_at": stamp,
             "fetched_at": {"intraday": stamp, "quotes": stamp}, "intraday_as_of": stamp,
             "issues": [NOTICE], "history_note": NOTICE,
@@ -95,7 +97,13 @@ def market_response(request):
     if path == "/charts/history":
         return {"symbol": query["symbol"], "interval": query["interval"], "session": query["session"],
                 "provider": SOURCE, "bars": candles(query["symbol"], query["interval"], int(query["before"]), int(query.get("limit", 120))),
-                "markers": [], "fills_truncated": False, "next_before": None, "has_more": False, "issues": [NOTICE]}
+                "markers": [], "fills_truncated": False, "next_before": None, "has_more": False, "issues": [NOTICE],
+                "exhausted": True, "warmup": "ready", "continuation": None, "issue": None,
+                "source": SOURCE, "price_basis": "split_adjusted", "older_cursor": None,
+                "before": int(query["before"]), "limit": int(query.get("limit", 120)),
+                "adjustment": {"basis": "split_adjusted", "status": "unknown", "source": SOURCE,
+                    "as_of": None, "splits": [], "daily": {}, "dividends": "unsupported",
+                    "dividends_note": "Sample exercise only", "warnings": [NOTICE]}}
     if path == "/charts/stream":
         return JSONResponse({"detail": "Sample trial has static fixture prices, no live stream"}, 503)
     if path == "/quotes":
@@ -134,11 +142,15 @@ class FixtureMarket:
     async def __call__(self, scope, receive, send):
         if scope["type"] == "http":
             request = Request(scope)
+            from app.engine import access
+            sample_choice = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
+                and request.url.path.endswith("/agent-choice") and access.decision_writer(request))
             # Even the private trial owner may only mutate authentication.
             # Keep imports, journal edits, jobs and future writes out of this
             # sample installation for its entire lifetime, not just startup.
             if (request.method not in {"GET", "HEAD", "OPTIONS"}
                     and not request.url.path.startswith("/access/")
+                    and not sample_choice
                     and (request.method, request.url.path) != ("POST", "/quotes/positions")):
                 return await JSONResponse({"detail": "Sample trial data is read-only"}, 403)(scope, receive, send)
             if request.method == "GET" or (request.method == "POST" and request.url.path == "/quotes/positions"):
@@ -152,8 +164,8 @@ class FixtureMarket:
         await self.app(scope, receive, send)
 
 
-def build_app():
-    validate_environment(os.environ)
+def build_app(root=ROOT):
+    validate_environment(os.environ, root)
     from app.main import app
     from app.access_middleware import AccessMiddleware
     # Fixture replies must never sit outside the real authentication boundary.

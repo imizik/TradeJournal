@@ -204,6 +204,11 @@ jobs:
         working-directory: frontend
         run: npx playwright test --config playwright.auth.config.ts
 
+      - name: Sample decision browser boundaries
+        if: matrix.shard == '1/2'
+        working-directory: frontend
+        run: npx playwright test --config playwright.sample.config.ts
+
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
@@ -212,6 +217,7 @@ jobs:
           path: |
             frontend/test-results/
             frontend/auth-test-results/
+            frontend/sample-test-results/
           retention-days: 7
 
       # A pull request's pictures, for the Screenshots job to post. It never

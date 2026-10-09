@@ -4,8 +4,9 @@
 to let an AI use the actual TradeJournal UI with Isaac's laptop closed. Production
 remains private and its assistant profile remains disabled. Isaac separately
 approved a temporary HTTPS sample-data trial. That isolated installation has
-its own login, database and fixture providers; actual Dot cloud-browser and
-laptop-off observations remain outstanding. No live trading access or schedule
+its own login, database and fixture providers. On 2026-10-09 Isaac reported
+actual Dot cloud-browser sign-in, Dashboard/Trades/MU/NBIS navigation and saved
+evidence reopening. Physical laptop-off observation remains unreported. No live trading access or schedule
 has been activated.
 
 ## The user experience
@@ -20,8 +21,9 @@ actually navigate Charts, Today and review pages, then report friction with
 page names and concrete examples. Code access, fetched HTML, API-only calls
 and exported screenshots do not establish that the Dot used the app.
 
-The first trial is read-only. Writing an AI's own draft decisions is the next
-permission increment. Independent Shadow Isaac decisions require a separate
+The first trial is read-only. Isaac selected the [first saved sample decision
+chunk](dot-decision-trial-contract.md) on 2026-10-09: a separate sample writer,
+frozen MU/NBIS evidence and review/chart fixes. Actual Dot saving remains pending. Independent Shadow Isaac decisions require a separate
 runner without personal Dot memory or human choices. A personal Dot that
 reviews Isaac's journal is a coach/inspector, not a blind comparator.
 
@@ -271,7 +273,7 @@ execution remains disabled/budgeted under its existing contract.
    request/resource tests, SSR/RSC/prefetch leak tests, CSRF/replay tests,
    cross-ingress tests, active-stream revocation, owner/MCP/job regressions,
    full local verification and Postgres/native Ubuntu CI.
-3. **Sample-data Dot trial: server prepared, actual Dot observation pending.** Separately approved HTTPS test installation with
+3. **Sample-data Dot trial: cloud-browser sign-in reported 2026-10-09.** Separately approved HTTPS test installation with
    a different database, hostname, credentials and session audience from
    production. No copied real fills/email/OAuth or live import/listener
    identity; providers are fixtures initially and paid calls/arming/scheduling

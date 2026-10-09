@@ -4,12 +4,12 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, practice, access
+from app.engine import decisions, practice, access, sample_practice
 from app.engine.job_runtime import submit_job
 from app.models import PracticeOpportunity, PracticeRun
 
@@ -75,6 +75,12 @@ def prepare(body: Preparation, db: Session = Depends(get_session)):
 
 
 def inspector_view(request, db, run, *, details=True):
+    if access.decision_writer(request):
+        try:
+            return sample_practice.view(db, run, request.state.access.identifier,
+                request.state.access.grants["symbols"], details=details)
+        except decisions.DecisionError as exc:
+            raise HTTPException(404, "Sample run not found") from exc
     restricted = access.permitted_runs(request) is not None
     result = practice.view(db, run, details=details, recover=not restricted)
     if restricted:
@@ -90,6 +96,10 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
     allowed = access.permitted_runs(request)
     if allowed is not None:
         query = query.where(PracticeRun.id.in_([uuid.UUID(value) for value in allowed]))
+    if access.decision_writer(request):
+        query = query.where(PracticeRun.policy_version == decisions.SAMPLE_POLICY_VERSION,
+            PracticeRun.policy_hash == decisions.SAMPLE_POLICY_HASH,
+            PracticeRun.session_key.startswith(sample_practice.PREFIX))
     if day:
         query = query.where(PracticeRun.day == day)
     return {"runs": [inspector_view(request, db, r, details=False) for r in db.exec(query).all()]}
@@ -111,6 +121,24 @@ def choice(opp_id: uuid.UUID, body: Choice, db: Session = Depends(get_session)):
     except decisions.DecisionError as exc:
         raise HTTPException(409, str(exc)) from exc
     return practice.view(db, run_or_404(db, opp.run_id))
+
+
+@router.post("/opportunities/{opp_id}/agent-choice", status_code=201)
+def agent_choice(opp_id: uuid.UUID, body: Choice, request: Request, response: Response, db: Session = Depends(get_session)):
+    if not access.decision_writer(request):
+        raise HTTPException(403, "Sample decision writer required")
+    opp = opp_or_404(db, opp_id)
+    if str(opp.run_id) not in access.permitted_runs(request) or opp.symbol not in request.state.access.grants["symbols"]:
+        raise HTTPException(404, "Opportunity not found")
+    run = run_or_404(db, opp.run_id)
+    if not sample_practice.eligible(run):
+        raise HTTPException(404, "Sample run not found")
+    try:
+        _, created = sample_practice.choose(db, run, opp, request.state.access.identifier, body.model_dump())
+    except decisions.DecisionError as exc:
+        raise HTTPException(409 if "operation_id" in str(exc) else 422, str(exc)) from exc
+    response.status_code = 201 if created else 200
+    return inspector_view(request, db, run)
 
 
 @router.post("/opportunities/{opp_id}/reveal")

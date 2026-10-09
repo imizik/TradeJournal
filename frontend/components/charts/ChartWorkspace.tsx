@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpRight, ChartCandlestick, NotebookPen, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
@@ -171,12 +172,12 @@ function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote
       className={`text-right font-mono ${change == null ? "text-slate-500" : change < 0 ? "text-rose-400" : "text-emerald-400"} ${closing ? "opacity-70" : ""}`}>{change == null ? "—" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}`}</span></>;
 }
 
-function FeedStatus({ live, paused, delayed, hasData, failed, loading }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean }) {
+function FeedStatus({ live, paused, delayed, hasData, failed, loading, sample = false }: { live: LiveFeed; paused: boolean; delayed: boolean; hasData: boolean; failed: boolean; loading: boolean; sample?: boolean }) {
   const stale = useClock((now) => staleCandles(now, live.fetched));
   const streaming = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
   return <div className="flex shrink-0 items-center gap-1.5 text-slate-400" role="status">
     <span className={`h-1.5 w-1.5 rounded-full ${paused || failed || stale || delayed ? "bg-amber-400" : hasData ? "bg-sky-400" : "bg-slate-600"}`} />
-    {paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
+    {sample ? "Simulated chart snapshot" : paused ? "Updates paused" : delayed ? "Tradier sandbox · delayed" : streaming ? "Tradier stream · studies refresh 15s" : "Tradier · 15s refresh"}
     {loading && <Loader2 size={12} className="animate-spin" />}
   </div>;
 }
@@ -199,6 +200,29 @@ function LiveFooter({ live, quote, candle, market, asOf, brief = false }: { live
 export default function ChartWorkspace() {
   // Loaded from and saved to the server (lib/chartSync.ts); browser storage is the offline copy.
   const { settings, setSettings, ready, sync, merged, stored } = useChartSettings();
+  const { owner, grants } = useAppAccess();
+  const allowedSymbols = (grants.symbols ?? []).join(",");
+  const initialLinkSymbol = useRef<string | null | undefined>(undefined);
+  // Plain symbol links and subsequent selection use the same browser URL.
+  // Preserve Next's history state and historical trade parameters on entry.
+  useEffect(() => {
+    if (!ready) return;
+    const url = new URL(window.location.href);
+    if (initialLinkSymbol.current === undefined) {
+      const linked = url.searchParams.get("symbol")?.toUpperCase();
+      initialLinkSymbol.current = linked && validSymbol(linked) && (owner || allowedSymbols.split(",").includes(linked)) ? linked : null;
+    }
+    const linked = initialLinkSymbol.current;
+    initialLinkSymbol.current = null;
+    if (linked && linked !== settings.symbol) {
+      setSettings(current => ({ ...current, symbol: linked }));
+      return;
+    }
+    if (url.searchParams.get("symbol") === settings.symbol) return;
+    if (url.searchParams.has("symbol")) for (const name of ["from", "to", "trade", "fill"]) url.searchParams.delete(name);
+    url.searchParams.set("symbol", settings.symbol);
+    window.history.replaceState(window.history.state, "", url);
+  }, [ready, settings.symbol, setSettings, owner, allowedSymbols]);
   const [response, setResponse] = useState<{ key: string; session: ChartSettings["session"]; data: ChartData } | null>(null);
   const [older, setOlder] = useState<OlderState>({ key: "", panels: {} });
   const [rollover, setRollover] = useState<{ key: string; before: number; pending: string[] } | null>(null);
@@ -316,6 +340,7 @@ export default function ChartWorkspace() {
   // The newest response of any request, for what is not about one symbol
   // (watchlist quotes, market hours, notes).
   const latest = response?.data;
+  const sampleChart = latest?.sample_data === true;
   const requestFailed = error?.key === requestKey;
   const currentOlder = useMemo(() => older.key === session ? older.panels : {}, [older, session]);
   const hasData = !!current;
@@ -678,7 +703,7 @@ export default function ChartWorkspace() {
 
   // One stream for every symbol on screen; each chart applies only its own symbol's trades.
   useEffect(() => {
-    if (!ready || !hasData || paused) return;
+    if (!ready || !hasData || paused || sampleChart) return;
     let alive = true;
     let source: EventSource | null = null;
     const symbols = [...new Set([...symbolsKey.split(","), ...watchlistKey.split(",").filter(Boolean)])];
@@ -707,7 +732,7 @@ export default function ChartWorkspace() {
     connect();
     document.addEventListener("visibilitychange", visibility);
     return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
-  }, [ready, hasData, paused, symbolsKey, watchlistKey, streamKey, stream]);
+  }, [ready, hasData, paused, sampleChart, symbolsKey, watchlistKey, streamKey, stream]);
 
   const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? value : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
@@ -1482,7 +1507,7 @@ export default function ChartWorkspace() {
     symbolError && <p key="symbol" className="text-xs text-amber-300" role="alert">{symbolError}</p>,
     drawError && <p key="draw" className="text-xs text-amber-300" role="alert">{drawError}</p>,
     requestFailed && <div key="error" role="alert" aria-label="Chart data error" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">{error.message}{current && <span className="ml-1">Showing the last successful data.</span>}</div>,
-    !!issues.length && <div key="issues" role="alert" aria-label="Chart data warning" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">Refresh incomplete. {issues.join(" ")} Check timestamps before using these charts.</div>,
+    !!issues.length && <div key="issues" role="alert" aria-label="Chart data warning" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">{sampleChart ? "Simulated data. EMA/RSI use invented bars; VWAP and EMA200 are unavailable in this limited sample history. " : "Refresh incomplete. "}{issues.join(" ")} Check timestamps before using these charts.</div>,
     !!basisNotes.length && <div key="basis" role="status" aria-label="Price basis warning" className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-1.5 text-xs text-amber-200">{basisNotes.join(" ")}</div>,
   ].filter(Boolean);
 
@@ -1602,7 +1627,7 @@ export default function ChartWorkspace() {
 
       {/* Provider, freshness, session and price basis stay in view however dense the charts get; attribution too. */}
       <footer aria-label="Chart status" className={`flex items-center gap-x-3 gap-y-1 text-[10px] text-slate-500 ${fill && !narrow ? "h-6 shrink-0 whitespace-nowrap border-t border-slate-700/50 px-2" : fill ? "shrink-0 flex-wrap border-t border-slate-700/50 px-2 py-1" : "flex-wrap px-1 pt-1"}`}>
-        <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} />
+        <FeedStatus live={live} paused={paused} delayed={!!latest?.delayed} hasData={hasData} failed={failed} loading={loading} sample={sampleChart} />
         {marketLabel && <span aria-label="Market hours" title={market?.description ?? undefined} className={`shrink-0 rounded px-1.5 py-px ${market?.note ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>{marketLabel}</span>}
         {basis && <span role="status" aria-label="Price basis" title={basisTitle} className={`shrink-0 rounded px-1.5 py-px ${basisNotes.length ? "bg-amber-400/10 text-amber-300" : "bg-slate-800 text-slate-300"}`}>
           {basis.status === "unknown" ? "Splits unknown · prices as supplied" : `Split-adjusted${basis.splits.length ? ` · ${basis.splits.length} split${basis.splits.length > 1 ? "s" : ""}` : ""}`}</span>}

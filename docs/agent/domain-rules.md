@@ -27,6 +27,11 @@ patterns that can create N+1 calls.
   and stores its hash on the `armed` event. Never infer an execution from a
   record without events.
 
+- The approved browser sample exercise uses `practice-sample-long-15m-v1`,
+  `sample_fixture` facts and `simulated_raw` basis. Sample records stay unarmed,
+  and A2 refuses their distinct schema. Its internal sample validation cannot
+  relax the ordinary raw Alpaca requirement or imply P0 eligibility.
+
 ### Practice paper events (A2)
 
 - `decision_event` is append-only; the unique (record, key) and (record, seq)

@@ -4,6 +4,7 @@ import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import PracticePaperPlan from "@/components/PracticePaperPlan";
+import SampleDecisionRoutine from "@/components/SampleDecisionRoutine";
 
 type Source = { url: string; label: string; formed_at?: string | null; observed_at?: string | null };
 type Decision = { id: string; decision: "take" | "wait" | "skip"; rationale: string; policy_version?: string; policy_hash?: string; wait_condition?: string | null; wait_expiry?: string | null; plan?: Record<string, unknown> };
@@ -26,6 +27,11 @@ const stamp = (value?: string | null) => value ? `${new Date(value).toLocaleStri
 const objText = (value: unknown) => JSON.stringify(value, null, 2);
 
 export default function PracticeRoutine({ day }: { day?: string | null }) {
+  const { grants } = useAppAccess();
+  return grants.decision_write ? <SampleDecisionRoutine day={day} /> : <ReadPracticeRoutine day={day} />;
+}
+
+function ReadPracticeRoutine({ day }: { day?: string | null }) {
   const { owner } = useAppAccess();
   const selectedDay = day ?? localDay();
   const [runs, setRuns] = useState<Run[]>([]);

@@ -44,6 +44,8 @@ JOURNAL_PATHS = frozenset({"GET /accounts", "GET /fills", "GET /fills/{fill_id}"
     "GET /charts/journal/trades/{trade_id}", "GET /charts/journal/trades/{trade_id}/mark"})
 PRACTICE_PATHS = frozenset({"GET /practice/runs", "GET /practice/runs/{run_id}",
     "GET /decisions", "GET /decisions/{record_id}", "GET /decisions/{record_id}/paper"})
+SAMPLE_WRITER_PATHS = frozenset({"GET /practice/runs", "GET /practice/runs/{run_id}",
+    "GET /decisions", "GET /decisions/{record_id}", "POST /practice/opportunities/{opp_id}/agent-choice"})
 SERVICE_PATHS = {
     "monitor": {"GET /health", "GET /gmail/health", "GET /sync/summary"},
     "automation": {"GET /health", "GET /gmail/health", "GET /gmail/watch/status", "POST /gmail/watch",
@@ -290,7 +292,7 @@ def bootstrap(request):
 
 
 def grant_valid(grants):
-    if set(grants) != {"symbols", "run_ids", "journal_read"}:
+    if set(grants) not in ({"symbols", "run_ids", "journal_read"}, {"symbols", "run_ids", "journal_read", "decision_write"}):
         raise HTTPException(422, "Invalid permission grant")
     if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > 10 or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
         raise HTTPException(422, "Choose one to ten market symbols")
@@ -305,6 +307,22 @@ def grant_valid(grants):
         raise HTTPException(422, "Choose valid practice run IDs") from None
     if not isinstance(grants["journal_read"], bool) or (grants["journal_read"] and os.environ.get("TJ_ACCESS_SAMPLE_DATA") != "true"):
         raise HTTPException(403, "Journal inspection is available only on the sample installation")
+    if not isinstance(grants.get("decision_write", False), bool):
+        raise HTTPException(422, "Invalid decision permission")
+    if grants.get("decision_write") and (not sample_writes_enabled() or grants["journal_read"]
+            or len(grants["run_ids"]) != 1 or len(grants["symbols"]) > 2):
+        raise HTTPException(403, "Sample writers require one selected run, at most two symbols, and no journal access")
+
+
+def sample_writes_enabled():
+    return all(os.environ.get(name) == "true" for name in
+        ("TJ_ACCESS_ENABLED", "TJ_ACCESS_SAMPLE_DATA", "TJ_DOT_TRIAL_ENABLED", "TJ_SAMPLE_DECISION_WRITES"))
+
+
+def decision_writer(request):
+    who = getattr(request.state, "access", None)
+    return bool(who and not who.owner and not who.service and who.grants.get("decision_write")
+                and not who.grants.get("journal_read") and sample_writes_enabled())
 
 
 def create_assistant(db, identifier, grants):
@@ -344,6 +362,9 @@ def permitted_record_ids(request, db):
     from app.models import PracticeOpportunity, DecisionRecord
     opps = db.exec(select(PracticeOpportunity.id).where(PracticeOpportunity.run_id.in_([uuid.UUID(value) for value in allowed]))).all()
     query = select(DecisionRecord.id).where(DecisionRecord.opportunity_id.in_([f"a3:{value}" for value in opps]))
+    if request.state.access.grants.get("decision_write"):
+        query = query.where(DecisionRecord.actor == "agent:" + request.state.access.identifier,
+            DecisionRecord.symbol.in_(request.state.access.grants.get("symbols", [])))
     return frozenset(db.exec(query).all())
 
 
@@ -378,6 +399,17 @@ def authorize(request, operation, params):
         csrf_check(request, who)
     if who.owner:
         return
+    if operation in {"GET /access/me", "POST /access/logout"}:
+        return
+    if who.grants.get("decision_write"):
+        if not decision_writer(request):
+            raise HTTPException(403, "Sample decision writing is disabled")
+        if operation in SAMPLE_WRITER_PATHS:
+            return
+        if operation in MARKET_PATHS:
+            validate_symbols(request, params)
+            return
+        raise HTTPException(403, "Operation not permitted")
     if operation in MARKET_PATHS:
         validate_symbols(request, params)
         return

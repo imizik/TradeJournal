@@ -1,4 +1,5 @@
 import PracticeRoutine from "@/components/PracticeRoutine";
+import PracticeRunLinks from "@/components/PracticeRunLinks";
 import { requireAccess } from "@/lib/accessServer";
 import { api } from "@/lib/serverApi";
 import type { DailyReviewIndexItem } from "@/lib/api";
@@ -22,7 +23,7 @@ function monthLabel(value: string) {
 export default async function DailyReviewPage() {
   const access = await requireAccess();
   if (!access.owner && !access.grants.journal_read) return <PracticeRoutine />;
-  const days = await api.dailyReviews();
+  const [days, practice] = await Promise.all([api.dailyReviews(), api.practiceRuns()]);
   const savedCount = days.filter((day) => day.saved && !day.source_data_stale).length;
   const groups = groupByMonth(days);
 
@@ -44,6 +45,7 @@ export default async function DailyReviewPage() {
         </a>
       </div>
 
+      <PracticeRunLinks runs={practice.runs} />
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Trade Days" value={String(days.length)} />
         <StatCard label="Saved Reviews" value={String(savedCount)} />

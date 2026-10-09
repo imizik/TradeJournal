@@ -9,7 +9,7 @@ export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"
 export type Interval = typeof INTERVALS[number];
 export type ChartBar = {
   time: number; end_time: number; open: number; high: number; low: number; close: number; volume: number;
-  source: "alpaca_sip" | "tradier";
+  source: "alpaca_sip" | "tradier" | "sample_fixture";
   volumePending?: boolean;
   extended: boolean; ema9: number | null; ema20: number | null; ema50: number | null; ema200: number | null;
   vwap: number | null; rsi: number | null;
@@ -180,6 +180,7 @@ export type SymbolPanels = {
   positions?: ChartPosition[];
 };
 export type ChartData = SymbolPanels & {
+  sample_data?: boolean;
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
   refresh_seconds: number; checked_at: number; quotes: ChartQuote[];
   history_note: string; fills: FillMarker[]; fills_truncated: boolean;

@@ -25,6 +25,10 @@ POLICY_SPEC = {
     "status": "practice_draft_unarmed",
 }
 POLICY_HASH = hashlib.sha256(json.dumps(POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+SAMPLE_POLICY_VERSION = "practice-sample-long-15m-v1"
+SAMPLE_POLICY_SPEC = {**POLICY_SPEC, "version": SAMPLE_POLICY_VERSION,
+                      "source": "sample_fixture", "execution": "disabled"}
+SAMPLE_POLICY_HASH = hashlib.sha256(json.dumps(SAMPLE_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class DecisionError(ValueError):
@@ -89,7 +93,8 @@ def freeze_context(db: Session, operation_id: str, symbol: str, packet: dict) ->
                 "value": numeric, "currency": "USD", "unit": "USD/share", "source": source,
                 "formed_at": formed.replace(tzinfo=timezone.utc).isoformat(),
                 "observed_at": captured.replace(tzinfo=timezone.utc).isoformat(),
-                "symbol": symbol, "split_basis": "raw" if verified_source else "unknown",
+                "symbol": symbol, "split_basis": "raw" if verified_source else (
+                    "simulated_raw" if source == "sample_fixture" and packet.get("sample_data") is True else "unknown"),
             })
     state = "unavailable" if source == "unknown" or not packet.get("recent_minute_bars") else (
         "partial" if packet.get("missing") else "ready")
@@ -165,7 +170,7 @@ def _finite_positive(value: object, label: str) -> float:
     return parsed
 
 
-def _validate_take(symbol: str, cutoff: datetime, evidence: dict, plan: dict, now: datetime) -> dict:
+def _validate_take(symbol: str, cutoff: datetime, evidence: dict, plan: dict, now: datetime, *, sample: bool = False) -> dict:
     if plan.get("instrument") != "stock" or plan.get("direction") != "long":
         raise DecisionError("A1 supports long underlying shares only")
     if plan.get("trigger") != POLICY_SPEC["trigger"]:
@@ -206,9 +211,9 @@ def _validate_take(symbol: str, cutoff: datetime, evidence: dict, plan: dict, no
         fact = facts.get(name)
         if not fact:
             raise DecisionError(f"{role} must reference a price fact from the saved server context")
-        if fact.get("symbol") != symbol or fact.get("split_basis") != "raw":
+        if fact.get("symbol") != symbol or fact.get("split_basis") != ("simulated_raw" if sample else "raw"):
             raise DecisionError(f"{role} has an unsupported symbol or price basis")
-        if fact.get("source") not in {"alpaca_iex", "alpaca_sip"}:
+        if fact.get("source") not in ({"sample_fixture"} if sample else {"alpaca_iex", "alpaca_sip"}):
             raise DecisionError(f"{role} has no verified provider source")
         observed = _utc(fact["observed_at"], f"{role}.observed_at")
         formed = _utc(fact["formed_at"], f"{role}.formed_at")
@@ -256,7 +261,8 @@ def row(record: DecisionRecord) -> dict:
     }
 
 
-def create(db: Session, request: dict, *, routine: bool = False, commit: bool = True, expected_day: date | None = None) -> tuple[DecisionRecord, bool]:
+def create(db: Session, request: dict, *, routine: bool = False, commit: bool = True, expected_day: date | None = None,
+           sample: bool = False, receipt_deadline: datetime | None = None) -> tuple[DecisionRecord, bool]:
     if not routine:
         if str(request.get("opportunity_id", "")).startswith("a3:") or request.get("actor") == "agent:a3":
             raise DecisionError("A3 ownership requires the routine choice service")
@@ -276,6 +282,8 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
     if isinstance(operation_id, str):
         existing = db.exec(select(DecisionRecord).where(DecisionRecord.operation_id == operation_id)).first()
         if existing:
+            if existing.policy_version != (SAMPLE_POLICY_VERSION if sample else POLICY_VERSION):
+                raise DecisionError("operation_id already exists under a different policy")
             expected = _hash(_canonical({"request": request, "context_sha256": existing.evidence_sha256}))
             if existing.record_sha256 != expected:
                 raise DecisionError("operation_id already exists with different content")
@@ -289,21 +297,28 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
     if context.symbol != symbol:
         raise DecisionError("saved context symbol does not match decision symbol")
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if receipt_deadline is not None and now > receipt_deadline:
+        raise DecisionError("Sample exercise deadline has passed; existing records remain readable")
     cutoff = context.captured_at
     evidence = json.loads(context.data_json)
+    if sample and (context.provider != "sample_fixture" or evidence.get("packet", {}).get("sample_data") is not True):
+        raise DecisionError("Sample decisions require explicitly simulated server evidence")
     if decision == "take":
         if expected_day is not None and now.replace(tzinfo=timezone.utc).astimezone(ET).date() != expected_day:
             raise DecisionError("TAKE must be committed on its run's market session date")
-        detail["plan"] = _validate_take(symbol, cutoff, evidence, detail["plan"], now)
+        detail["plan"] = _validate_take(symbol, cutoff, evidence, detail["plan"], now, sample=sample)
     elif decision == "wait":
         expiry = _utc(detail["wait_expiry"], "wait_expiry")
         if expiry <= cutoff or expiry <= now:
             raise DecisionError("WAIT expiry must be after context cutoff and server receipt")
+        if receipt_deadline is not None and expiry > receipt_deadline:
+            raise DecisionError("Sample WAIT expiry must not exceed the exercise deadline")
     record_sha = _hash(_canonical({"request": request, "context_sha256": context.context_sha256}))
     item = DecisionRecord(operation_id=operation_id, opportunity_id=opportunity_id,
                           actor=actor, decision=decision, symbol=symbol, context_id=context.id,
                           received_at=now, input_cutoff=cutoff,
-                          policy_version=POLICY_VERSION, policy_hash=POLICY_HASH,
+                          policy_version=SAMPLE_POLICY_VERSION if sample else POLICY_VERSION,
+                          policy_hash=SAMPLE_POLICY_HASH if sample else POLICY_HASH,
                           evidence_json=context.data_json, evidence_sha256=context.context_sha256,
                           decision_json=_canonical(detail), record_sha256=record_sha)
     db.add(item)
