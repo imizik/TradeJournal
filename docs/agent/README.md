@@ -13,8 +13,8 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [dots-integration.md](dots-integration.md) | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
-| [cloud-mcp-integration-scope.md](cloud-mcp-integration-scope.md) | Proposed Dots cloud connector: tunnel feasibility, OAuth identity, selected read tools, UI/tool routing and bounded D0–D3 implementation slices |
-| [cloud-mcp-d0-runbook.md](cloud-mcp-d0-runbook.md) | D0 synthetic OAuth/MCP resource server, isolated trial setup, revocation/stop path and outstanding actual Dot/tunnel acceptance |
+| [cloud-mcp-integration-scope.md](cloud-mcp-integration-scope.md) | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
+| [cloud-mcp-d0-runbook.md](cloud-mcp-d0-runbook.md) | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
 | [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Browser authentication and permissions: owner Tailscale continuity, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, Dot cloud sign-in reported; simulated decision-writing contract is the next increment |
 | [dot-decision-trial-contract.md](dot-decision-trial-contract.md) | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
 | [feature-map.md](feature-map.md) | You know the feature but not the file |

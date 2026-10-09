@@ -35,8 +35,8 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
 | `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
-| `docs/agent/cloud-mcp-integration-scope.md` | Proposed Dots cloud connector: tunnel feasibility, OAuth identity, selected read tools, UI/tool routing and bounded D0–D3 implementation slices |
-| `docs/agent/cloud-mcp-d0-runbook.md` | D0 synthetic OAuth/MCP resource server, isolated trial setup, revocation/stop path and outstanding actual Dot/tunnel acceptance |
+| `docs/agent/cloud-mcp-integration-scope.md` | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
+| `docs/agent/cloud-mcp-d0-runbook.md` | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
 | `docs/agent/cloud-browser-auth-contract.md` | Browser authentication and permissions: preserve owner Tailscale access, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, Dot cloud sign-in reported; simulated decision-writing contract is the next increment |
 | `docs/agent/dot-decision-trial-contract.md` | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
