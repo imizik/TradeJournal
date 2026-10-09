@@ -73,7 +73,9 @@ function fmtQty(val: number | null | undefined) {
 
 function fmtDateShort(val: string | null | undefined) {
   if (!val) return "-";
-  return new Date(val).toLocaleDateString();
+  // Journal timestamps carry New York wall dates; option expirations are
+  // calendar dates. Neither date may shift with the server/browser timezone.
+  return new Date(`${val.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { timeZone: "UTC" });
 }
 
 function fmtOptionType(val: string | null | undefined) {

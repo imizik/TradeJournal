@@ -1,9 +1,12 @@
 # Cloud browser access: authentication and permissions contract
 
-**Chunks 1–2, 2026-10-08: design and private implementation.** Selected to let an AI use the
-actual TradeJournal UI with Isaac's laptop closed. Authentication code and fixture tests are present; no live assistant
-credential, public address, deployment or schedule has been activated. The current private deployment rules remain in force until a
-separately reviewed implementation and explicit exposure approval.
+**2026-10-08: chunks 1–2 deployed; chunk 3 sample installation prepared.** Selected
+to let an AI use the actual TradeJournal UI with Isaac's laptop closed. Production
+remains private and its assistant profile remains disabled. Isaac separately
+approved a temporary HTTPS sample-data trial. That isolated installation has
+its own login, database and fixture providers; actual Dot cloud-browser and
+laptop-off observations remain outstanding. No live trading access or schedule
+has been activated.
 
 ## The user experience
 
@@ -268,7 +271,7 @@ execution remains disabled/budgeted under its existing contract.
    request/resource tests, SSR/RSC/prefetch leak tests, CSRF/replay tests,
    cross-ingress tests, active-stream revocation, owner/MCP/job regressions,
    full local verification and Postgres/native Ubuntu CI.
-3. **Sample-data Dot trial.** Separately approved HTTPS test installation with
+3. **Sample-data Dot trial: server prepared, actual Dot observation pending.** Separately approved HTTPS test installation with
    a different database, hostname, credentials and session audience from
    production. No copied real fills/email/OAuth or live import/listener
    identity; providers are fixtures initially and paid calls/arming/scheduling
@@ -303,6 +306,67 @@ sample installation before live exposure.
 - Application authorization cannot remove information from a personal Dot's
   memory. A later independent runner needs verified isolation and a separate
   service principal. This project does not claim that separation already exists.
+
+## Approved sample installation and handoff
+
+Isaac selected a temporary HTTPS address. The isolated trial is
+`https://traderjo-demo.15-204-255-2.sslip.io`; production's original private
+Tailscale entrance remains unchanged. The dedicated `trader-jo` inspector can
+read the invented journal, selected synthetic SPY/QQQ practice evidence and
+fixture charts including MU/NBIS. This does not change the P0 paper universe.
+There are no live providers, paid calls, import listeners, workers, alerts,
+arming or schedules in the trial. Empty financial/news/options sections are
+intentional fixture gaps, not live-provider acceptance evidence. Shared chart
+components still contain ordinary provider labels; the explicit simulated-data
+notice and fixture payload identify the trial's actual source.
+
+[Trial preparation](../../deploy/dot_trial_install.py) copies a pinned verified
+runtime without its data, environment or OAuth files. It uses a fresh seeded
+SQLite database under `/var/lib/tradejournal-dot-trial`, separate credentials
+under `/etc/tradejournal-dot-trial`, distinct OS identities and a shared private
+network namespace. Socket-activated bridges publish only the frontends on host
+loopback 3101/3102; API 8091 exists only inside the trial namespace. The existing
+Caddy proxy routes the new hostname only to the assistant frontend. A private
+Tailscale Serve listener on 8443 supplies sample-owner administration. No
+production backend/database port or owner frontend is published.
+
+[Fixture entry point](../../deploy/dot_trial_app.py) refuses an unmarked,
+non-SQLite, symlinked, integration-enabled or non-seeded installation. Fixture
+market replies run inside the existing authentication middleware. All sample
+fills must retain the `seed:` prefix; no real database is copied. Trial services
+are enabled on the VPS and need no laptop process or SSH tunnel.
+
+[Trial controls](../../deploy/dot_trial_control.py) revoke a selected assistant
+or remove the public route before disabling the profile and stopping services.
+They refuse any other database and do not replace the complete Caddy config
+with an old snapshot. A disable/re-enable recovery drill has not been observed.
+The setup does not automatically follow production releases.
+
+Native observations: production health/release unchanged; trial processes use
+non-root identities and the same private network namespace, different from
+the host's. Protected production files and sample-owner credentials are
+unreadable from assistant mounts. Connections to production localhost 8080,
+Postgres 5432 and the external network fail inside the trial namespace.
+Public HTTPS certificate validation, actual browser login, sample journal
+navigation, frozen evidence reopening, correctly authenticated write denial,
+logout/re-login and revocation of a separate temporary identity were observed.
+These were Codex's browser checks, not the Dot's cloud browser.
+
+The HTTPS trial also exposed two pre-existing browser issues: calendar labels
+depended on server/browser locale and timezone, and a pre-hydration login form
+could submit its key in a GET URL. Calendar labels now retain the journal's
+wall-date portion; the login uses native POST and remains disabled until
+hydration. The trial key was rotated after the discovery. A no-JavaScript native
+form submission and a different browser locale/timezone are covered by the
+authenticated browser suite. Keys remain in private files and the supported
+private sign-in flow, never in a Dot chat prompt or a public URL.
+
+Dot handoff: open the public HTTPS login in the cloud browser, use the private
+website sign-in flow for `trader-jo`, then navigate Dashboard, sample Trades,
+Charts with MU/NBIS, and the dated sample Daily Review. Report the pages actually
+used, permission failures and concrete UX suggestions. Do not save decisions,
+arm plans, import data, invoke models, or claim a live Shadow Isaac run. Complete
+the real Dot sign-in and laptop-off observation before marking chunk 3 accepted.
 
 ## Primary references
 

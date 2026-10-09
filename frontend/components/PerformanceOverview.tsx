@@ -67,8 +67,9 @@ function shortMoney(value: number) {
 }
 
 function axisDate(value: string) {
-  const date = new Date(value);
-  return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
+  // Closed-trade timestamps carry New York wall dates, not browser-local instants.
+  const [, month, day] = value.slice(0, 10).split("-");
+  return `${Number(month)}/${Number(day)}`;
 }
 
 function PerformanceChart({ trades }: { trades: ClosedTrade[] }) {
