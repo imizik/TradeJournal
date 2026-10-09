@@ -7,6 +7,7 @@ contact an identity provider or imply that an external OAuth deployment works.
 from __future__ import annotations
 
 import json
+import asyncio
 import base64
 import hashlib
 import secrets
@@ -30,6 +31,7 @@ from mcp.client.streamable_http import streamable_http_client
 from mcp.shared.auth import OAuthClientInformationFull, OAuthClientMetadata
 
 from cloud_mcp_d0 import create_server
+import cloud_mcp_d0
 
 
 ISSUER = "https://identity.example.test/"
@@ -339,6 +341,36 @@ def test_sdk_oauth_pkce_refresh_and_revoked_configuration(
 ) -> None:
     """Exercise maintained MCP OAuth interoperability with a local issuer fixture."""
     anyio.run(_sdk_oauth_flow, config_path, signing_key)
+
+
+def test_slow_chunks_cannot_renew_the_complete_body_deadline(monkeypatch):
+    monkeypatch.setattr(cloud_mcp_d0, "BODY_READ_TIMEOUT", 0.05)
+
+    async def exercise():
+        chunks = 0
+        sent = []
+
+        async def receive():
+            nonlocal chunks
+            if chunks >= 2:
+                # Each chunk arrives sooner than the allowed upload duration,
+                # but the body never completes. A per-chunk timer would hang.
+                await asyncio.sleep(0.02)
+            chunks += 1
+            return {"type": "http.request", "body": b"x", "more_body": True}
+
+        async def send(message):
+            sent.append(message)
+
+        async def app(scope, receive, send):
+            pytest.fail("A timed-out upload reached the authenticated SDK app")
+
+        middleware = cloud_mcp_d0.RequestLimits(app)
+        await asyncio.wait_for(middleware({"type": "http", "method": "POST", "headers": []}, receive, send), timeout=1)
+        assert chunks >= 2
+        assert sent[0]["status"] == 408
+
+    anyio.run(exercise)
 
 
 async def _sdk_oauth_flow(config_path: Path, signing_key: rsa.RSAPrivateKey) -> None:

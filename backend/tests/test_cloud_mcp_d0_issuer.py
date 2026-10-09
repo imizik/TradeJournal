@@ -98,6 +98,14 @@ def test_probe_import_does_not_load_application_or_database():
     subprocess.run([sys.executable, "-c", code, str(script)], check=True, capture_output=True)
 
 
+def test_trial_service_denies_production_paths_even_when_they_are_absent():
+    root = Path(__file__).resolve().parents[2]
+    unit = (root / "deploy/cloud-mcp-d0/tradejournal-d0.service").read_text()
+    paths = next(line.split("=", 1)[1].split() for line in unit.splitlines() if line.startswith("InaccessiblePaths="))
+    # systemd's '-' prefix tolerates absent paths but still denies existing ones.
+    assert paths == ["-/etc/tradejournal", "-/var/lib/tradejournal"]
+
+
 def test_cli_requires_explicit_enable_and_only_binds_loopback(tmp_path, monkeypatch):
     path = tmp_path / "d0.json"
     path.write_text(config().model_dump_json())

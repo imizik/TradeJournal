@@ -36,7 +36,8 @@ JWKS requests have a five-second timeout, a 64 KiB response cap and no redirects
 or environment proxy inheritance. Successful and failed lookups cache for
 60 seconds; new signing keys may be unavailable for that period. Tokens never
 choose a key URL. Input bodies are bounded at 64 KiB, headers at 16 KiB, and
-the CLI limits HTTP concurrency to 16. Requests do not log bearer tokens or
+the complete body upload has one ten-second deadline, and the CLI limits HTTP
+concurrency to 16. Requests do not log bearer tokens or
 issuer responses. The listener always binds to `127.0.0.1`.
 
 Application-profile revocation is immediate for subsequent requests, including
@@ -90,6 +91,8 @@ replace configuration. Install this template manually on the selected trial
 host; it is outside the normal deployment unit directory and is not installed
 or started by the release controller. Native systemd sandbox behavior still
 needs to be observed on that host.
+The production paths in `InaccessiblePaths` are optional when absent on a clean
+trial host; if present, they remain inaccessible to the probe.
 
 ## Check the issuer and start the selected trial
 

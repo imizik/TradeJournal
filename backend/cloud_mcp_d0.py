@@ -32,6 +32,7 @@ SCOPE = "d0:profile"
 MAX_BYTES = 65536
 TOKEN_LIFETIME = 300
 JWKS_TTL = 60
+BODY_READ_TIMEOUT = 10
 
 
 class Strict(BaseModel):
@@ -275,19 +276,26 @@ class RequestLimits:
         if len([v for k, v in headers if k.lower() == b"authorization"]) > 1:
             return await JSONResponse({"error": "Ambiguous authorization"}, status_code=400)(scope, receive, send)
         if scope["method"] == "POST":
-            body = bytearray()
-            while True:
-                try:
-                    message = await asyncio.wait_for(receive(), timeout=10)
-                except asyncio.TimeoutError:
-                    return await JSONResponse({"error": "Request timed out"}, status_code=408)(scope, receive, send)
-                if message["type"] == "http.disconnect":
-                    return
-                body.extend(message.get("body", b""))
-                if len(body) > MAX_BYTES:
-                    return await JSONResponse({"error": "Request too large"}, status_code=413)(scope, receive, send)
-                if not message.get("more_body"):
-                    break
+            async def read_body():
+                body = bytearray()
+                while True:
+                    message = await receive()
+                    if message["type"] == "http.disconnect":
+                        return None
+                    body.extend(message.get("body", b""))
+                    if len(body) > MAX_BYTES or not message.get("more_body"):
+                        return body
+
+            # One deadline covers the entire upload. More chunks must never
+            # renew an unauthenticated caller's concurrency slot indefinitely.
+            try:
+                body = await asyncio.wait_for(read_body(), timeout=BODY_READ_TIMEOUT)
+            except asyncio.TimeoutError:
+                return await JSONResponse({"error": "Request timed out"}, status_code=408)(scope, receive, send)
+            if body is None:
+                return
+            if len(body) > MAX_BYTES:
+                return await JSONResponse({"error": "Request too large"}, status_code=413)(scope, receive, send)
             delivered = False
 
             async def replay():
