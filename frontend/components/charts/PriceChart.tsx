@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
+import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
 import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings } from "@/lib/symbolInfo";
 import { useClock, useLivePanel } from "@/lib/chartStore";
@@ -58,6 +58,13 @@ const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.op
 const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: (b.close >= b.open ? "#2bc9a4" : "#ee617a") + volumeAlpha(b.rvol) });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
 /**
+ * The opening zoom: the latest candles at a fixed width. Fewer candles than that
+ * (today's first premarket minutes, before the history pages arrive) sit at the
+ * right with room to their left, so the history fills in at this zoom instead of
+ * stretching the first few candles across the chart.
+ */
+const openingRange = (bars: number, main: boolean) => ({ from: bars - (main ? OPENING_BARS : PANEL_OPENING_BARS), to: bars + 4 });
+/**
  * Reset: the latest candles at the opening zoom, every pane's price scale back
  * to automatic (dragging an axis turns it off). Realtime: the latest candle at
  * the current zoom.
@@ -66,7 +73,7 @@ function moveView(chart: IChartApi, bars: number, main: boolean, command: ChartC
   const scale = chart.timeScale();
   if (command === "reset") {
     chart.panes().forEach((_, pane) => chart.priceScale("right", pane).applyOptions({ autoScale: true }));
-    scale.setVisibleLogicalRange({ from: Math.max(0, bars - (main ? 110 : 65)), to: bars + 4 });
+    scale.setVisibleLogicalRange(openingRange(bars, main));
     return;
   }
   const range = scale.getVisibleLogicalRange();
@@ -755,7 +762,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && (initial.current || !prior.length)) {
-      current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - (main ? 110 : 65)), to: bars.length + 4 });
+      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, main));
       initial.current = false;
     } else if (bars.length && following && logical) {
       const width = logical.to - logical.from;

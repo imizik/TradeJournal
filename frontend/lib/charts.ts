@@ -851,6 +851,9 @@ export const countdown = (seconds: number) => {
  * unchanged bar objects, so the prefix check is usually reference equality;
  * REST refreshes compare values, and any changed older bar forces a reset.
  */
+/** Candles a chart opens on: the main chart, and each smaller panel. */
+export const OPENING_BARS = 110;
+export const PANEL_OPENING_BARS = 65;
 export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" | "append" | "reset" {
   if (!prev.length || !next.length) return prev.length === next.length ? "same" : "reset";
   const appended = next.length === prev.length + 1;
