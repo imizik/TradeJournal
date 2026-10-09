@@ -48,6 +48,8 @@ def check_target():
 def extract(archive_path, destination, *, backend):
     with tarfile.open(archive_path) as archive:
         members = archive.getmembers()
+        if len(members) > 5000 or sum(member.size for member in members) > (4_000_000 if backend else 300_000_000):
+            raise ValueError("Trial archive exceeds the bounded update size")
         for member in members:
             path = PurePosixPath(member.name)
             if path.is_absolute() or ".." in path.parts or member.issym() or member.islnk() or not (member.isfile() or member.isdir()):
@@ -100,6 +102,8 @@ def update(backend_archive, frontend_archive, commit):
     original_env = env_file.read_bytes()
     manifest_file = CONFIG / "manifest.json"
     original_manifest = manifest_file.read_bytes()
+    if env_file.resolve() != env_file or manifest_file.resolve() != manifest_file:
+        raise ValueError("Trial configuration cannot traverse a symlink")
     # Root-private staging retains a recovery snapshot after successful updates.
     stage = Path(tempfile.mkdtemp(prefix="sample-update-", dir=RUNTIME.parent))
     stage.chmod(0o700)
@@ -122,7 +126,6 @@ def update(backend_archive, frontend_archive, commit):
     except BaseException:
         shutil.rmtree(stage)
         raise
-    run("systemctl", "stop", *SOCKETS, *BRIDGES, *SERVICES)
     moved = []
     processed = []
     (backup / "trial-runtime.env").write_bytes(original_env)
@@ -132,6 +135,18 @@ def update(backend_archive, frontend_archive, commit):
             path = backup / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(content)
+    manifest = json.loads(original_manifest)
+    manifest.update(decision_trial_commit=commit, fixture_sha256=hashlib.sha256((source / "backend/dot_trial_app.py").read_bytes()).hexdigest(),
+        control_sha256=hashlib.sha256((source / "deploy/dot_trial_control.py").read_bytes()).hexdigest())
+    manifest.setdefault("updates", []).append({"commit": commit, "recovery_directory": str(stage),
+        "backend_sha256": hashlib.sha256(Path(backend_archive).read_bytes()).hexdigest(),
+        "frontend_sha256": hashlib.sha256(Path(frontend_archive).read_bytes()).hexdigest()})
+    try:
+        run("systemctl", "stop", *SOCKETS, *BRIDGES, *SERVICES)
+    except BaseException:
+        run("systemctl", "start", *SERVICES, *SOCKETS)
+        ready()
+        raise
     try:
         for name in FRONTEND_FILES:
             path = RUNTIME / "frontend" / name
@@ -150,6 +165,7 @@ def update(backend_archive, frontend_archive, commit):
         env_file.write_text("\n".join([*lines, "TJ_SAMPLE_DECISION_WRITES=true"]) + "\n")
         run("systemctl", "start", *SERVICES, *SOCKETS)
         ready()
+        manifest_file.write_text(json.dumps(manifest, indent=2))
     except BaseException:
         # A failed stop is surfaced; retain snapshots instead of modifying live state.
         run("systemctl", "stop", *SOCKETS, *BRIDGES, *SERVICES)
@@ -168,20 +184,6 @@ def update(backend_archive, frontend_archive, commit):
         run("systemctl", "start", *SERVICES, *SOCKETS)
         ready()
         raise
-    manifest = json.loads(original_manifest)
-    manifest.update(decision_trial_commit=commit, fixture_sha256=hashlib.sha256((RUNTIME / "backend/dot_trial_app.py").read_bytes()).hexdigest(),
-        control_sha256=hashlib.sha256((RUNTIME / "deploy/dot_trial_control.py").read_bytes()).hexdigest())
-    manifest.setdefault("updates", []).append({"commit": commit, "recovery_directory": str(stage),
-        "backend_sha256": hashlib.sha256(Path(backend_archive).read_bytes()).hexdigest(),
-        "frontend_sha256": hashlib.sha256(Path(frontend_archive).read_bytes()).hexdigest()})
-    manifest_file.write_text(json.dumps(manifest, indent=2))
-    (backup / "trial-runtime.env").write_bytes(original_env)
-    (backup / "manifest.json").write_bytes(original_manifest)
-    for name, content in snapshots.items():
-        if content is not None:
-            path = backup / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content)
     print("Sample runtime updated and ready. Production configuration and credentials unchanged.")
 
 

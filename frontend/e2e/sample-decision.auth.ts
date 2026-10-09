@@ -94,3 +94,28 @@ test("read-only calendar includes the practice-only date and opens its saved evi
   await page.getByText("Frozen neutral context", { exact: true }).first().click();
   await expect(page.getByText(/sample_fixture/).first()).toBeVisible();
 });
+
+test("a slow pre-save reload cannot hide the immutable SKIP receipt", async ({ page, browser }) => {
+  await login(page, browser, true);
+  const mu = page.getByRole("article", { name: "MU sample opportunity" });
+  await expect(mu.getByLabel("MU reason")).toBeVisible();
+  let release: (() => void) | undefined;
+  let captured: (() => void) | undefined;
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  const seen = new Promise<void>(resolve => { captured = resolve; });
+  await page.route("**/api/backend/practice/runs/*", async route => {
+    const original = await route.fetch();
+    captured?.();
+    await pending;
+    await route.fulfill({ response: original });
+  });
+  await page.getByRole("button", { name: "Reload saved practice" }).click();
+  await seen;
+  await mu.getByLabel("MU reason").fill("No setup in this simulated exercise.");
+  await mu.getByRole("button", { name: "Save MU decision", exact: true }).click();
+  await expect(mu.getByRole("button", { name: "Reopen saved MU decision" })).toBeVisible();
+  release?.();
+  await expect(page.getByRole("button", { name: "Reload saved practice" })).toBeEnabled();
+  await expect(mu.getByRole("button", { name: "Reopen saved MU decision" })).toBeVisible();
+  await expect(mu.getByLabel("MU reason")).toHaveCount(0);
+});

@@ -23,17 +23,25 @@ export default function SampleDecisionRoutine({ day }: { day?: string | null }) 
   const [active, setActive] = useState<Run | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  // Choices are immutable: a slower reload/other choice response cannot hide
+  // a receipt already accepted for this same run and opportunity.
+  const acceptRun = useCallback((next: Run | null) => setActive(previous => {
+    if (!next || previous?.id !== next.id) return next;
+    return { ...next, opportunities: next.opportunities.map(opp => ({ ...opp,
+      choice: opp.choice ?? previous.opportunities.find(saved => saved.id === opp.id)?.choice ?? null })) };
+  }), []);
   const load = useCallback(async () => {
     setError(""); setLoading(true);
     try {
       const result = await request<{ runs: Run[] }>(`/practice/runs${day ? `?day=${encodeURIComponent(day)}` : ""}`);
       setRuns(result.runs);
       const linked = new URLSearchParams(window.location.search).get("practice_run");
+      if (linked && !result.runs.some(run => run.id === linked)) throw new Error("This practice run is not assigned to your login for this date.");
       const selected = result.runs.find(run => run.id === linked) ?? result.runs[0];
-      setActive(selected ? await request<Run>(`/practice/runs/${encodeURIComponent(selected.id)}`) : null);
+      acceptRun(selected ? await request<Run>(`/practice/runs/${encodeURIComponent(selected.id)}`) : null);
     } catch (err) { setError(err instanceof Error ? err.message : "Sample practice could not be loaded."); }
     finally { setLoading(false); }
-  }, [day]);
+  }, [day, acceptRun]);
   useEffect(() => { void load(); }, [load]);
 
   return <section className="min-w-0 space-y-5 [overflow-wrap:anywhere]" data-testid="sample-decision-routine">
@@ -42,7 +50,7 @@ export default function SampleDecisionRoutine({ day }: { day?: string | null }) 
     {error && <p role="alert" className="text-red-500">{error}</p>}
     {!active && !loading && !error && <p>No sample practice run is assigned for this date.</p>}
     {active && <><p className="text-sm">{active.day} · exercise ends {stamp(active.deadline)} · simulated drafts stay unarmed.</p>
-      {active.opportunities.map(opp => <SampleOpportunity key={opp.id} opportunity={opp} run={active} onSaved={setActive} />)}</>}
+      {active.opportunities.map(opp => <SampleOpportunity key={opp.id} opportunity={opp} run={active} onSaved={acceptRun} />)}</>}
   </section>;
 }
 

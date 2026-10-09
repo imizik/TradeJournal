@@ -113,3 +113,47 @@ def test_symlinked_code_parent_is_refused_before_service_changes(update_fixture,
         updater.update(backend, frontend, "a" * 40)
     assert calls == []
     assert (real / "engine/access.py").read_text() == "# old source\n"
+
+def test_manifest_failure_rolls_back_code_and_write_enablement(update_fixture, monkeypatch):
+    runtime, config, backend, frontend, _ = update_fixture
+    original = Path.write_text
+    def write(path, value, *args, **kwargs):
+        if path == config / "manifest.json":
+            raise OSError("manifest save failed")
+        return original(path, value, *args, **kwargs)
+    monkeypatch.setattr(Path, "write_text", write)
+    monkeypatch.setattr(updater, "ready", lambda: None)
+    with pytest.raises(OSError, match="manifest save failed"):
+        updater.update(backend, frontend, "a" * 40)
+    assert (runtime / "frontend/server.js").read_text() == "old server"
+    assert "TJ_SAMPLE_DECISION_WRITES=false" in (config / "trial-runtime.env").read_text()
+    assert json.loads((config / "manifest.json").read_text()) == {"published": True}
+
+
+def test_snapshot_failure_never_stops_the_live_trial(update_fixture, monkeypatch):
+    runtime, config, backend, frontend, calls = update_fixture
+    original = Path.write_bytes
+    def write(path, value):
+        if path.name == "trial-runtime.env" and "backup" in path.parts:
+            raise OSError("snapshot failed")
+        return original(path, value)
+    monkeypatch.setattr(Path, "write_bytes", write)
+    with pytest.raises(OSError, match="snapshot failed"):
+        updater.update(backend, frontend, "a" * 40)
+    assert calls == []
+    assert (runtime / "frontend/server.js").read_text() == "old server"
+
+
+def test_partial_service_stop_restarts_original_trial_without_mutating_files(update_fixture, monkeypatch):
+    runtime, config, backend, frontend, calls = update_fixture
+    def run(*args):
+        calls.append(args)
+        if args[1] == "stop":
+            raise RuntimeError("partial stop failed")
+    monkeypatch.setattr(updater, "run", run)
+    monkeypatch.setattr(updater, "ready", lambda: None)
+    with pytest.raises(RuntimeError, match="partial stop failed"):
+        updater.update(backend, frontend, "a" * 40)
+    assert [call[1] for call in calls] == ["stop", "start"]
+    assert (runtime / "frontend/server.js").read_text() == "old server"
+    assert "TJ_SAMPLE_DECISION_WRITES=false" in (config / "trial-runtime.env").read_text()

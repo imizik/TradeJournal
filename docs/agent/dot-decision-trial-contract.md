@@ -27,7 +27,9 @@ management remains available through the private owner entrance.
 
 The server derives actor, symbol, context, opportunity and retry key. One
 principal has at most one immutable choice per opportunity. Same-content retries
-return the original receipt; changed-content retries conflict. Symbol/run/record
+return the original receipt; changed-content retries conflict. New choices
+after the exercise deadline are refused; old records and identical retries
+remain available. WAIT cannot extend beyond that deadline. Symbol/run/record
 ownership, CSRF, feature disablement, expiry, rate budget and key revocation are
 application boundaries. UI visibility and prompts do not establish permission.
 
@@ -68,6 +70,8 @@ and both choices committed before reveal.
 - A real authenticated browser saves simulated TAKE/WAIT/SKIP through the actual
   UI, reloads and retrieves original IDs, cutoffs and hashes. Phone layout has no
   horizontal overflow. Exact API reads confirm the receipt, not just chat text.
+  A delayed pre-save reload or another choice response cannot hide an accepted
+  immutable receipt.
 - Refuse forged actor/context/symbol/key, other actors' records, unassigned runs
   and symbols, journal/account access, direct generic writes and paper arming.
   Sample records cannot pass the live source validator or A2 schema guard.
