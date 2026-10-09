@@ -16,6 +16,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [cloud-mcp-integration-scope.md](cloud-mcp-integration-scope.md) | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
 | [cloud-mcp-d0-runbook.md](cloud-mcp-d0-runbook.md) | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
 | [cloud-mcp-d1-contract.md](cloud-mcp-d1-contract.md) | Two assigned sample Practice reads, backend OAuth checks, Unix bridge and manual activation/rollback |
+| [cloud-mcp-d2-contract.md](cloud-mcp-d2-contract.md) | Opt-in own sample choice writes and receipt recovery, separate OAuth permission and demo acceptance |
 | [cloud-browser-auth-contract.md](cloud-browser-auth-contract.md) | Browser authentication and permissions: owner Tailscale continuity, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, Dot cloud sign-in reported; simulated decision-writing contract is the next increment |
 | [dot-decision-trial-contract.md](dot-decision-trial-contract.md) | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
 | [dot-sample-replay-contract.md](dot-sample-replay-contract.md) | Jo’s own bounded sample TAKE replay: hidden continuation, scoped start permission, isolated event ledger and acceptance gates |

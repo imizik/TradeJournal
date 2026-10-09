@@ -1,4 +1,4 @@
-"""Bearer identity for exactly two sample read routes; no browser/service fallback."""
+"""Independent bearer identity for allowlisted sample reads/opt-in choices."""
 import asyncio
 from functools import lru_cache
 import json
@@ -12,6 +12,7 @@ from app.engine import access
 from app.models import AccessPrincipal
 from cloud_mcp_d0 import SCOPE, reject_model_credentials
 from cloud_mcp_d1_common import PRACTICE_SCOPE, SampleReadVerifier
+from cloud_mcp_d2_common import WRITE_SCOPE
 
 
 def require_sample(request):
@@ -39,7 +40,22 @@ def initialize():
         verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
 
 
-def identify(request):
+def require_choice_write(request):
+    require_sample(request)
+    if not all(os.environ.get(name) == "true" for name in
+            ("TJ_SAMPLE_DECISION_WRITES", "TJ_CLOUD_MCP_DECISION_WRITES")):
+        raise HTTPException(503, "Sample choice writes are unavailable")
+    check = verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
+    config = check.active_config()
+    if config is None or config.decision_writes is not True:
+        raise HTTPException(503, "Sample choice writes are unavailable")
+    who = getattr(request.state, "access", None)
+    if (who is None or who.owner or who.service or who.grants.get("decision_write") is not True
+            or WRITE_SCOPE not in getattr(request.state, "cloud_mcp_scopes", ())):
+        raise HTTPException(403, "Sample choice write permission required")
+
+
+def identify(request, *, write=False):
     require_sample(request)
     if (len(request.headers.getlist("authorization")) != 1
             or any(request.headers.get(name) for name in ("cookie", "x-tj-gateway", "x-tj-service", "x-tj-bootstrap"))):
@@ -52,7 +68,8 @@ def identify(request):
         verified = asyncio.run(check.verify_token(token))
     except (OSError, ValueError):
         verified = None
-    if verified is None or not {SCOPE, PRACTICE_SCOPE} <= set(verified.scopes):
+    required = {SCOPE, PRACTICE_SCOPE, WRITE_SCOPE} if write else {SCOPE, PRACTICE_SCOPE}
+    if verified is None or not required <= set(verified.scopes):
         raise HTTPException(401, "Sample reader authentication required")
     config = check.active_config()
     if config is None:
@@ -81,4 +98,9 @@ def identify(request):
             raise HTTPException(403, "Sample reader grant is unavailable") from None
         access.consume_request_budget(db, row.id)
         db.commit()
-        return access.Identity(row.id, "assistant", grants=grants)
+        identity = access.Identity(row.id, "assistant", grants=grants)
+        request.state.cloud_mcp_scopes = frozenset(verified.scopes)
+        request.state.access = identity
+        if write:
+            require_choice_write(request)
+        return identity

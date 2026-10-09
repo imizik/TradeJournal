@@ -783,6 +783,16 @@ The runbook covers staged pinned dependencies, exact principal/version binding,
 separate `practice:read` consent, manual activation and D0 rollback. CI exercises
 the actual namespace/Unix boundary; actual Dot tool/UI acceptance remains separate.
 
+The [first D2 increment](../docs/agent/cloud-mcp-d2-contract.md) adds own sample
+choice save/receipt tools through that same private bridge. Its catalog remains
+off with `decision_writes=false` (the default). Writes also require
+`TJ_CLOUD_MCP_DECISION_WRITES=true`, existing sample-write flags, current
+`decision_write=true` and separate `practice:write` OAuth consent. Include
+`cloud_mcp_d2_common.py` when staging the standalone adapter; update API/MCP
+sources together with rollback retained. Receipt reads require only the existing
+read scope; withdrawing writes preserves existing D1 choice reads. This remains
+a manual demo increment, with no production activation or context creation.
+
 ### Selected sample paper replay increment
 
 Isaac selected [Jo’s own sample paper replay](../docs/agent/dot-sample-replay-contract.md)
