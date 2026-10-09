@@ -28,6 +28,31 @@ After verification, commit the finished changes, then:
 python3 scripts/pr_review.py review --owner codex --session SESSION_ID
 ```
 
+## Skip before model review
+
+The owner may skip independent model review while preserving the PR, all CI,
+the required GitHub gate and the user's merge decision. Choose this before any
+review pass:
+
+```bash
+# User explicitly requests a skip for this PR.
+python3 scripts/pr_review.py exempt --owner codex --session SESSION_ID --pr PR_NUMBER \
+  --mode explicit --reason 'user requested review skip for a tiny change'
+
+# User says “decide whether review is warranted.” The agent may use this only
+# for README.md or Markdown below docs/ except docs/agent/.
+python3 scripts/pr_review.py exempt --owner codex --session SESSION_ID --pr PR_NUMBER --mode auto
+```
+
+`auto` refuses code, tests, workflows, deployment, hooks, `CLAUDE.md`, and
+`docs/agent/` because those paths can alter runtime behavior or agent policy.
+For any other diff it tells the owner to run independent review. `explicit`
+requires the user's stated reason and may cover any committed diff. Both modes
+store the decision and changed paths in ignored local state, add the visible
+`review-exempt` label, and publish a base-bound exemption receipt. The trusted
+GitHub gate validates that receipt and label before it turns green. Agents do
+not infer a skip from change size or a failed/quota-limited review.
+
 Codex ownership selects Claude Sonnet at low effort; Claude ownership selects GPT-6.1 Sol.
 Only the reviewer reads the disposable snapshot; it has no journal database,
 ignored environment files, broad MCP adapter, inherited conversation or write
@@ -105,8 +130,9 @@ include the exact committed head, current base and diff ancestor; dirty work,
 new commits or a changed base invalidate clean/ready results. Refresh
 `origin/main` before review and reconcile it when the remote base changes.
 
-Use `status` to inspect state. After the user explicitly authorizes recovery,
-`retry` can recover an error with remaining budget; it never resets passes.
+Use `status` to inspect state. `retry` can recover an operational error with
+remaining budget; it never resets passes. Do not retry a quota or login failure
+until that prerequisite is resolved.
 For a replacement session, `takeover --previous-session OLD --session NEW`
 preserves all passes and findings and requires the previous owner/provider.
 It requires human authorization. Exhaustion or a correctness disagreement is
@@ -137,9 +163,10 @@ adoption so SessionStart and configuration loading occur. Existing sessions
 must use the commands explicitly until restarted. Check the actual clients;
 cloud-owned sessions are outside this local hook workflow.
 
-Create the `review-loop` label once in GitHub. The runner adds it to enrolled
-PRs. Publication uses the owner's normal `gh` authentication. Model credentials
-never go to GitHub. No admin rights or background service on macOS are needed.
+Create the `review-loop` and `review-exempt` labels once in GitHub. The runner
+adds exactly one according to the selected path. Publication uses the owner's
+normal `gh` authentication. Model credentials never go to GitHub. No admin
+rights or background service on macOS are needed.
 
 ## GitHub gate and watchdog
 
@@ -149,6 +176,11 @@ or executing PR code. It validates the latest `tradejournal/review-receipt`
 from the repository owner's login, the exact head/base, provider identity and
 bounded pass count (three automatic passes, plus individually authorized
 extensions recorded by the owner).
+It also accepts a current base-bound `exempt` receipt only when the PR visibly
+has the `review-exempt` label. The receipt says whether the choice was the
+user's explicit request or the narrow docs-only automatic decision and carries
+an audit-friendly reason slug. CI stays required; this exempts only the model
+review requirement.
 The owner publishes only `tradejournal/review-receipt`. The validator alone
 publishes `tradejournal/independent-review`, prefixed `verified`; readiness
 checks that exact validated receipt. It replaces old owner-published gate
