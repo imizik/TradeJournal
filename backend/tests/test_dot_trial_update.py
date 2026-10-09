@@ -328,3 +328,20 @@ def test_installed_inactive_cloud_entrance_is_not_activated_by_update(update_fix
     updater.update(backend, frontend, "a" * 40)
     assert ("systemctl", "stop", *updater.CLOUD_UNITS) in calls
     assert not any(call[1] == "start" and updater.CLOUD_SOCKET in call for call in calls)
+
+
+def test_market_permission_is_explicit_and_restored_on_failed_start(update_fixture, monkeypatch):
+    _, config, backend, frontend, _ = update_fixture
+    monkeypatch.setattr(updater, "ready", lambda: None)
+    updater.update(backend, frontend, "a" * 40)
+    assert "TJ_MARKET_DECISION_WRITES" not in (config / "trial-runtime.env").read_text()
+    attempts = []
+    def ready():
+        attempts.append(True)
+        if len(attempts) == 1:
+            assert "TJ_MARKET_DECISION_WRITES=true" in (config / "trial-runtime.env").read_text()
+            raise RuntimeError("market flag startup failed")
+    monkeypatch.setattr(updater, "ready", ready)
+    with pytest.raises(RuntimeError, match="market flag startup failed"):
+        updater.update(backend, frontend, "b" * 40, enable_market_decisions=True)
+    assert "TJ_MARKET_DECISION_WRITES" not in (config / "trial-runtime.env").read_text()

@@ -9,7 +9,9 @@ export default function FrozenSampleChart({ context }: { context: DecisionContex
   const [interval, setInterval] = useState<"1m" | "15m">("1m");
   let window;
   try {
-    if (context.provider !== "sample_fixture" || context.packet.sample_data !== true) throw new Error("A frozen sample packet is required.");
+    const sample = context.provider === "sample_fixture" && context.packet.sample_data === true;
+    const market = ["alpaca_iex", "alpaca_sip"].includes(context.provider) && context.packet.market_pilot === true && context.packet.sample_data === false;
+    if (!sample && !market) throw new Error("An approved frozen sample or market packet is required.");
     window = frozenWindow(context.packet.recent_minute_bars, context.captured_at);
   } catch (error) {
     return <section aria-label={`${context.symbol} frozen evidence chart`} className="min-w-0 rounded border p-3"><h4 className="font-semibold">Frozen evidence chart</h4><p role="status">Chart unavailable: {error instanceof Error ? error.message : "Invalid frozen data."} Inspect the original packet.</p></section>;
@@ -48,7 +50,7 @@ export default function FrozenSampleChart({ context }: { context: DecisionContex
   return <section aria-label={`${context.symbol} frozen evidence chart`} className="min-w-0 space-y-3 rounded border p-3 text-sm" data-context-id={context.context_id} data-evidence-sha256={context.context_sha256}>
     <div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-semibold">Frozen evidence chart</h4><div className="flex gap-2" aria-label={`${context.symbol} frozen interval`}>{(["1m", "15m"] as const).map(value => <button type="button" key={value} aria-pressed={interval === value} onClick={() => setInterval(value)} className="rounded border px-2 py-1">{value}</button>)}</div></div>
     <p>{minutes.length} completed frozen minutes · USD/share · volume in shares · Eastern time.</p>
-    <p className="text-xs text-muted-foreground">Cutoff <time dateTime={context.captured_at}>{new Date(context.captured_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</time>. Invented evidence only; no live feed or replay continuation.</p>
+    <p className="text-xs text-muted-foreground">Cutoff <time dateTime={context.captured_at}>{new Date(context.captured_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</time>. {context.packet.market_pilot ? "Real frozen market evidence; no live refresh or execution." : "Invented evidence only; no live feed or replay continuation."}</p>
     <svg viewBox="0 0 400 300" role="img" aria-label={`${context.symbol} frozen ${interval} price and volume`} className="block w-full" data-testid="frozen-candles">
       <title>{context.symbol} frozen candles, packet VWAP, fixed levels and volume</title>
       {[low, (low + high) / 2, high].map((p, i) => <g key={i}><line x1="55" x2="365" y1={y(p)} y2={y(p)} stroke="currentColor" opacity=".12" /><text x="4" y={y(p) + 4} fontSize="13" fill="currentColor">{p.toFixed(2)}</text></g>)}

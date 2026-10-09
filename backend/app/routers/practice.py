@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, practice, access, sample_practice, sample_replay
+from app.engine import decisions, practice, access, sample_practice, sample_replay, market_practice
 from app.engine.job_runtime import submit_job
 from app.models import PracticeOpportunity, PracticeRun
 
@@ -75,6 +75,18 @@ def prepare(body: Preparation, db: Session = Depends(get_session)):
 
 
 def inspector_view(request, db, run, *, details=True):
+    if market_practice.recognized(run):
+        who = getattr(request.state, "access", None)
+        restricted = access.permitted_runs(request) is not None
+        if restricted and not market_practice.visible_to(run, who.identifier):
+            raise HTTPException(404, "Market session not found")
+        try:
+            return market_practice.view(db, run, who.identifier if restricted else None,
+                who.grants.get("symbols", []) if restricted else market_practice.SYMBOLS, details=details)
+        except decisions.DecisionError as exc:
+            raise HTTPException(409, str(exc)) from exc
+    if access.market_writer(request):
+        raise HTTPException(404, "Market session not found")
     if access.decision_writer(request) or (access.permitted_runs(request) is not None and
             (run.session_key.startswith(sample_replay.PREFIX) or run.policy_version == decisions.REPLAY_POLICY_VERSION)):
         try:
@@ -100,9 +112,14 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
     if access.decision_writer(request):
         query = query.where(PracticeRun.policy_version.in_([decisions.SAMPLE_POLICY_VERSION, decisions.REPLAY_POLICY_VERSION]),
             PracticeRun.session_key.startswith(sample_practice.PREFIX))
+    if access.market_writer(request):
+        query = query.where(PracticeRun.policy_version == decisions.MARKET_POLICY_VERSION,
+            PracticeRun.session_key.startswith(market_practice.PREFIX))
     if day:
         query = query.where(PracticeRun.day == day)
-    return {"runs": [inspector_view(request, db, r, details=False) for r in db.exec(query).all()]}
+    visible = [r for r in db.exec(query).all() if allowed is None or not market_practice.recognized(r)
+        or market_practice.visible_to(r, request.state.access.identifier)]
+    return {"runs": [inspector_view(request, db, r, details=False) for r in visible]}
 
 
 @router.get("/runs/{run_id}")
@@ -125,16 +142,25 @@ def choice(opp_id: uuid.UUID, body: Choice, db: Session = Depends(get_session)):
 
 @router.post("/opportunities/{opp_id}/agent-choice", status_code=201)
 def agent_choice(opp_id: uuid.UUID, body: Choice, request: Request, response: Response, db: Session = Depends(get_session)):
-    if not access.decision_writer(request):
-        raise HTTPException(403, "Sample decision writer required")
+    market = access.market_writer(request)
+    if not access.decision_writer(request) and not market:
+        raise HTTPException(403, "Scoped decision writer required")
+    if market:
+        try:
+            run, created = market_practice.submit(db, request, opp_id, body.model_dump())
+        except decisions.DecisionError as exc:
+            raise HTTPException(409 if "operation_id" in str(exc) else 422, str(exc)) from exc
+        response.status_code = 201 if created else 200
+        return inspector_view(request, db, run)
     opp = opp_or_404(db, opp_id)
     if str(opp.run_id) not in access.permitted_runs(request) or opp.symbol not in request.state.access.grants["symbols"]:
         raise HTTPException(404, "Opportunity not found")
     run = run_or_404(db, opp.run_id)
-    if not sample_practice.eligible(run):
+    service = sample_practice
+    if not service.eligible(run):
         raise HTTPException(404, "Sample run not found")
     try:
-        _, created = sample_practice.choose(db, run, opp, request.state.access.identifier, body.model_dump())
+        _, created = service.choose(db, run, opp, request.state.access.identifier, body.model_dump())
     except decisions.DecisionError as exc:
         raise HTTPException(409 if "operation_id" in str(exc) else 422, str(exc)) from exc
     response.status_code = 201 if created else 200

@@ -32,6 +32,12 @@ SAMPLE_POLICY_HASH = hashlib.sha256(json.dumps(SAMPLE_POLICY_SPEC, sort_keys=Tru
 REPLAY_POLICY_VERSION = "practice-sample-replay-long-15m-v1"
 REPLAY_POLICY_SPEC = {**SAMPLE_POLICY_SPEC, "version": REPLAY_POLICY_VERSION, "execution": "separate_sample_replay_only"}
 REPLAY_POLICY_HASH = hashlib.sha256(json.dumps(REPLAY_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+MARKET_POLICY_VERSION = "practice-market-decision-only-v1"
+MARKET_POLICY_SPEC = {**POLICY_SPEC, "version": MARKET_POLICY_VERSION,
+    "symbols": ["MU", "NBIS"], "source": "frozen_alpaca_raw", "execution": "disabled",
+    "decision_window_seconds": 3600, "latest_bar_max_age_seconds": 300,
+    "plan_fact_max_age_seconds": 7200}
+MARKET_POLICY_HASH = hashlib.sha256(json.dumps(MARKET_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class DecisionError(ValueError):
@@ -65,13 +71,18 @@ def saved_context(db: Session, operation_id: str, symbol: str) -> tuple[Decision
     return item, json.loads(item.data_json)
 
 
-def freeze_context(db: Session, operation_id: str, symbol: str, packet: dict) -> tuple[DecisionContext, dict]:
+def freeze_context(db: Session, operation_id: str, symbol: str, packet: dict, *, captured_at: datetime | None = None,
+                   commit: bool = True) -> tuple[DecisionContext, dict]:
     if not isinstance(operation_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", operation_id):
         raise DecisionError("context operation_id must be 1–128 safe characters")
     symbol = symbol.strip().upper()
     if packet.get("symbol", "").upper() != symbol:
         raise DecisionError("context packet symbol does not match request")
     captured = datetime.now(timezone.utc).replace(tzinfo=None)
+    if captured_at is not None:
+        captured = _utc(captured_at, "capture time")
+        if captured > datetime.now(timezone.utc).replace(tzinfo=None):
+            raise DecisionError("capture time cannot be in the future")
     source = str(packet.get("data_source") or "unknown")
     verified_source = source in {"alpaca_iex", "alpaca_sip"}
     facts = []
@@ -109,7 +120,10 @@ def freeze_context(db: Session, operation_id: str, symbol: str, packet: dict) ->
                            data_json=data_json, context_sha256=_hash(data_json))
     db.add(item)
     try:
-        db.commit()
+        if commit:
+            db.commit()
+        else:
+            db.flush()
     except IntegrityError:
         db.rollback()
         previous = saved_context(db, operation_id, symbol)
@@ -265,10 +279,14 @@ def row(record: DecisionRecord) -> dict:
 
 
 def create(db: Session, request: dict, *, routine: bool = False, commit: bool = True, expected_day: date | None = None,
-           sample: bool = False, receipt_deadline: datetime | None = None, sample_replay: bool = False) -> tuple[DecisionRecord, bool]:
+           sample: bool = False, receipt_deadline: datetime | None = None, sample_replay: bool = False,
+           market_pilot: bool = False) -> tuple[DecisionRecord, bool]:
+    if market_pilot and (sample or sample_replay or not routine):
+        raise DecisionError("Market pilot requires its separate routine service")
     if sample_replay and not sample:
         raise DecisionError("Replay decisions require explicit sample validation")
-    policy_version, policy_hash = ((REPLAY_POLICY_VERSION, REPLAY_POLICY_HASH) if sample_replay else
+    policy_version, policy_hash = ((MARKET_POLICY_VERSION, MARKET_POLICY_HASH) if market_pilot else
+        (REPLAY_POLICY_VERSION, REPLAY_POLICY_HASH) if sample_replay else
         (SAMPLE_POLICY_VERSION, SAMPLE_POLICY_HASH) if sample else (POLICY_VERSION, POLICY_HASH))
     if not routine:
         if str(request.get("opportunity_id", "")).startswith("a3:") or request.get("actor") == "agent:a3":
@@ -308,6 +326,9 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
         raise DecisionError("Sample exercise deadline has passed; existing records remain readable")
     cutoff = context.captured_at
     evidence = json.loads(context.data_json)
+    if market_pilot and (evidence.get("packet", {}).get("market_pilot") is not True
+            or evidence.get("packet", {}).get("sample_data") is not False):
+        raise DecisionError("Market pilot requires its frozen real-market packet")
     if sample and (context.provider != "sample_fixture" or evidence.get("packet", {}).get("sample_data") is not True):
         raise DecisionError("Sample decisions require explicitly simulated server evidence")
     if sample_replay and evidence.get("packet", {}).get("replay_exercise") is not True:

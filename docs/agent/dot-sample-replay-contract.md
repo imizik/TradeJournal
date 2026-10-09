@@ -93,7 +93,7 @@ forward cohort, automatic WAIT monitor or evidence of trading edge.
 ## Operations
 
 Use the existing guarded updater with the exact reviewed source commit and
-`--enable-sample-replay`. Its selected source archive now has eleven files;
+`--enable-sample-replay`. Use the current updater’s exact selected source set;
 Linux dependencies, credentials and data remain outside the archive. Rollback
 restores the prior code/assets and all permission flags. Then run the guarded
 seed command with `--replay`, which defaults to a new `trader-jo-replay` identity
@@ -173,3 +173,5 @@ level labels sit outside the candle area; candle tooltips and the quarter table
 show supplied numeric VWAP (or unavailable), with the table using the last
 observed minute, not an interval average. Intermediate clock labels aid exact
 readings. No price/volume reduction, decisions, outcomes or permissions change.
+
+The selected next increment is the [real-market decision handoff](dot-market-decision-contract.md). It preserves these sample records and replay rules; its separate schema cannot start sample replay or P0 monitoring.

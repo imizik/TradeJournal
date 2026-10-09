@@ -10,7 +10,7 @@ import PracticePaperPlan, { PaperBadge } from "@/components/PracticePaperPlan";
 const PAPER_FETCH_LIMIT = 10;
 const ET = "America/New_York";
 
-export function DecisionCard({ record, focused, withPaper }: { record: DecisionRecord; focused: boolean; withPaper: boolean }) {
+export function DecisionCard({ record, focused, withPaper, idPrefix = "" }: { record: DecisionRecord; focused: boolean; withPaper: boolean; idPrefix?: string }) {
   const ref = useRef<HTMLDetailsElement>(null);
   const [paper, setPaper] = useState<PaperState | null>(null);
   useEffect(() => {
@@ -19,9 +19,11 @@ export function DecisionCard({ record, focused, withPaper }: { record: DecisionR
     ref.current.scrollIntoView?.({ block: "start" });
   }, [focused]);
   const plan = record.plan as { trigger_level?: number; stop?: number; target?: number; target_source?: { source?: string } };
-  const sample = (record.evidence.packet as { sample_data?: boolean } | undefined)?.sample_data === true;
+  const packet = record.evidence.packet as { sample_data?: boolean; market_pilot?: boolean } | undefined;
+  const sample = packet?.sample_data === true;
+  const market = record.policy_version === "practice-market-decision-only-v1" || packet?.market_pilot === true;
   return (
-    <details ref={ref} id={`decision-${record.id}`} data-decision-id={record.id} className="rounded-lg border bg-card p-4">
+    <details ref={ref} id={`${idPrefix}decision-${record.id}`} data-decision-id={record.id} className="rounded-lg border bg-card p-4">
       <summary className="cursor-pointer list-none">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="font-semibold">{record.symbol} · {record.decision.toUpperCase()}</span>
@@ -31,7 +33,7 @@ export function DecisionCard({ record, focused, withPaper }: { record: DecisionR
         {record.decision === "take" && <p className="mt-2 text-sm">Trigger {plan.trigger_level ?? "—"} · Stop {plan.stop ?? "—"} · Target {plan.target ?? "—"} ({plan.target_source?.source ?? "source unavailable"})</p>}
       </summary>
       <div className="mt-4 border-t pt-3 text-xs">
-        {record.decision === "take" && withPaper && !sample && <PracticePaperPlan recordId={record.id} onState={setPaper} />}
+        {record.decision === "take" && withPaper && !sample && !market && <PracticePaperPlan recordId={record.id} onState={setPaper} />}
         <dl className="mt-3 grid gap-2 sm:grid-cols-2">
           <div><dt className="text-muted-foreground">Opportunity</dt><dd className="break-all">{record.opportunity_id}</dd></div>
           {record.rationale && <div><dt className="text-muted-foreground">Rationale</dt><dd className="whitespace-pre-wrap">{record.rationale}</dd></div>}
@@ -43,7 +45,7 @@ export function DecisionCard({ record, focused, withPaper }: { record: DecisionR
         </dl>
         <pre className="mt-3 max-h-64 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.evidence, null, 2)}</pre>
         {record.decision === "take" && <pre className="mt-2 max-h-64 overflow-auto rounded bg-muted p-3 whitespace-pre-wrap">{JSON.stringify(record.plan, null, 2)}</pre>}
-        <a href={`/charts?symbol=${encodeURIComponent(record.symbol)}`} className="mt-3 inline-block text-primary underline">Open {record.symbol} in Charts</a>
+        {!market && <a href={`/charts?symbol=${encodeURIComponent(record.symbol)}`} className="mt-3 inline-block text-primary underline">Open {record.symbol} in Charts</a>}
       </div>
     </details>
   );
@@ -54,7 +56,7 @@ export default function PracticeDecisions({ records, focusId }: { records: Decis
   const paperIds = new Set(records.filter((r) => r.decision === "take").slice(0, PAPER_FETCH_LIMIT).map((r) => r.id));
   if (focusId && records.some((r) => r.id === focusId && r.decision === "take")) paperIds.add(focusId);
   return (
-    <section className="space-y-3">
+    <section className="space-y-3" data-testid="practice-decisions">
       <div>
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Practice decisions</h2>
         <p className="mt-1 text-xs text-muted-foreground">Frozen choices and evidence. Practice only; a TAKE is a paper plan once you arm it, never a real order.</p>

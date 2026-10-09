@@ -144,7 +144,7 @@ class FixtureMarket:
             request = Request(scope)
             from app.engine import access
             sample_choice = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
-                and request.url.path.endswith("/agent-choice") and access.decision_writer(request))
+                and request.url.path.endswith("/agent-choice") and (access.decision_writer(request) or access.market_writer(request)))
             sample_replay = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
                 and request.url.path.endswith("/sample-replay") and access.replay_writer(request))
             # Even the private trial owner may only mutate authentication.
@@ -178,5 +178,6 @@ def build_app(root=ROOT):
         raise RuntimeError("Dot trial authentication middleware order changed")
     app.user_middleware.insert(1, Middleware(FixtureMarket))
     app.state.sample_replay_isolated = True
+    app.state.market_decisions_isolated = True
     app.state.cloud_mcp_sample_only = True
     return app
