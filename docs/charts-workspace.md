@@ -577,9 +577,12 @@ cd backend
   source only when it is SIP; the status strip names Tradier). Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier and page
   back through the symbol's whole daily history (see Daily and weekly depth).
-- When today has no intraday bars (before 04:00, weekends, holidays), each
-  intraday panel opens on the latest completed SIP sessions instead of an
-  empty chart.
+- When today has no intraday bars (before 04:00, weekends, holidays), or fewer
+  than a main chart opens on (110: early premarket, or any 1h chart), each such
+  intraday panel loads the latest completed SIP sessions at once instead of
+  waiting for a pan. A chart always opens at its usual width (110 candles on the
+  main chart, 65 on a smaller one) even before they arrive, so a few premarket
+  candles never open stretched across the whole chart.
 - On a New York date rollover, the refresh removes the completed Tradier day
   and requests its SIP replacement for the displayed intraday panels without
   waiting for a pan. A pending or failed replacement is disclosed as history

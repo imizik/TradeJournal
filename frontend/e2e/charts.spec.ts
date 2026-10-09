@@ -819,6 +819,38 @@ test("New York midnight replaces the completed Tradier day with SIP without wait
   await expect(page.getByLabel("main candle values")).toContainText("SIP");
 });
 
+test("a chart that opens on a few premarket candles takes its usual zoom when the history arrives", async ({ page }) => {
+  await registerCharts(page);
+  const older = sixMonthBars(1);
+  const base = Math.floor(Date.now() / 1000);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    const data = currentFixture(route.request().url(), base);
+    // 04:18 New York: today has four 5m candles so far.
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][])
+      if (intradayOnly(interval)) panel.bars = panel.bars.slice(-4).map((bar) => ({ ...bar, source: "tradier" }));
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", async (route) => {
+    await held;
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const pageBars = older.filter((bar) => bar.time < before).slice(-1200);
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"), before,
+      limit: 1200, bars: pageBars, markers: [], older_cursor: pageBars[0]?.time ?? null, exhausted: false, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "4");
+  release();
+  await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(1000);
+  const width = async (id: string) => { const range = await logicalRange(page, id); return range ? Math.round(range.to - range.from) : 0; };
+  // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one.
+  await expect.poll(() => width("main")).toBe(114);
+  await expect.poll(() => width("Panel 2")).toBe(69);
+});
+
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
   await registerCharts(page);
   await page.addInitScript(() => {

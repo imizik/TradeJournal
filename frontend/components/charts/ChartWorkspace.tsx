@@ -23,7 +23,7 @@ import type { SplitDrag } from "./Splitter";
 import SymbolPalette from "./SymbolPalette";
 import SymbolInfo from "./SymbolInfo";
 import ToolbarMenu from "./ToolbarMenu";
-import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, optionsQuery, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, MarketDay, OptionsLayer, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
@@ -517,13 +517,14 @@ export default function ChartWorkspace() {
         panels: { ...state.panels, [key]: { ...state.panels[key], loading: false } } }));
     }
   }, [feedFor, currentOlder, session]);
-  // Before 04:00, on weekends and on holidays today has no intraday bars yet:
-  // open on the latest completed sessions instead of an empty chart.
+  // Before 04:00, on weekends and on holidays today has no intraday bars yet, and early in the
+  // day (or on a 1h chart) it has fewer than a chart shows: open on the latest completed
+  // sessions too, instead of an empty or nearly empty chart.
   useEffect(() => {
     if (!data) return;
     for (const slot of slots) {
       const tail = (slot.symbol === data.symbol ? data : data.extras?.[slot.symbol])?.panels[slot.interval];
-      if (!intradayInterval(slot.interval) || !tail || tail.bars.length || currentOlder[frameKey(slot)]) continue;
+      if (!intradayInterval(slot.interval) || !tail || tail.bars.length >= OPENING_BARS || currentOlder[frameKey(slot)]) continue;
       void loadOlder(slot, data.checked_at);
     }
   }, [data, slots, currentOlder, loadOlder]);
