@@ -34,7 +34,7 @@ class SampleMCP(FastMCP):
 
     def streamable_http_app(self):
         app = super().streamable_http_app()
-        # Discovery advertises both scopes; profile-only clients remain valid.
+        # Discovery advertises configured scopes; profile-only clients remain valid.
         scopes = [SCOPE, PRACTICE_SCOPE, *([WRITE_SCOPE] if self.choice_enabled else [])]
         metadata = create_protected_resource_routes(resource_url=self.settings.auth.resource_server_url,
             authorization_servers=[self.settings.auth.issuer_url], scopes_supported=scopes)

@@ -77,4 +77,10 @@ source/config, and restart API/frontends/bridges together. Previously saved
 choices remain readable through the existing D1 projection after write
 permission is revoked. No production enablement is selected here.
 
-Implementation and all D2 acceptance evidence are pending.
+Signed-token MCP/backend fixtures exercise own TAKE/WAIT/SKIP persistence,
+concurrent and cross-entrance retries, lost-response receipt recovery, current
+write revocation, other-actor isolation, hidden replay and bounded-input/receipt
+refusals. The disposable native smoke additionally exercises the actual Unix
+bridge and restart recovery. Observed local/native check and review results
+belong to the implementing PR's verification record. Live D2 activation,
+new-scope OAuth consent and actual Dot save/UI/restart acceptance remain pending.
