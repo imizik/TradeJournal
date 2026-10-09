@@ -29,6 +29,9 @@ SAMPLE_POLICY_VERSION = "practice-sample-long-15m-v1"
 SAMPLE_POLICY_SPEC = {**POLICY_SPEC, "version": SAMPLE_POLICY_VERSION,
                       "source": "sample_fixture", "execution": "disabled"}
 SAMPLE_POLICY_HASH = hashlib.sha256(json.dumps(SAMPLE_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+REPLAY_POLICY_VERSION = "practice-sample-replay-long-15m-v1"
+REPLAY_POLICY_SPEC = {**SAMPLE_POLICY_SPEC, "version": REPLAY_POLICY_VERSION, "execution": "separate_sample_replay_only"}
+REPLAY_POLICY_HASH = hashlib.sha256(json.dumps(REPLAY_POLICY_SPEC, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 class DecisionError(ValueError):
@@ -262,7 +265,11 @@ def row(record: DecisionRecord) -> dict:
 
 
 def create(db: Session, request: dict, *, routine: bool = False, commit: bool = True, expected_day: date | None = None,
-           sample: bool = False, receipt_deadline: datetime | None = None) -> tuple[DecisionRecord, bool]:
+           sample: bool = False, receipt_deadline: datetime | None = None, sample_replay: bool = False) -> tuple[DecisionRecord, bool]:
+    if sample_replay and not sample:
+        raise DecisionError("Replay decisions require explicit sample validation")
+    policy_version, policy_hash = ((REPLAY_POLICY_VERSION, REPLAY_POLICY_HASH) if sample_replay else
+        (SAMPLE_POLICY_VERSION, SAMPLE_POLICY_HASH) if sample else (POLICY_VERSION, POLICY_HASH))
     if not routine:
         if str(request.get("opportunity_id", "")).startswith("a3:") or request.get("actor") == "agent:a3":
             raise DecisionError("A3 ownership requires the routine choice service")
@@ -282,7 +289,7 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
     if isinstance(operation_id, str):
         existing = db.exec(select(DecisionRecord).where(DecisionRecord.operation_id == operation_id)).first()
         if existing:
-            if existing.policy_version != (SAMPLE_POLICY_VERSION if sample else POLICY_VERSION):
+            if existing.policy_version != policy_version:
                 raise DecisionError("operation_id already exists under a different policy")
             expected = _hash(_canonical({"request": request, "context_sha256": existing.evidence_sha256}))
             if existing.record_sha256 != expected:
@@ -303,6 +310,8 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
     evidence = json.loads(context.data_json)
     if sample and (context.provider != "sample_fixture" or evidence.get("packet", {}).get("sample_data") is not True):
         raise DecisionError("Sample decisions require explicitly simulated server evidence")
+    if sample_replay and evidence.get("packet", {}).get("replay_exercise") is not True:
+        raise DecisionError("Replay decisions require a fresh replay exercise")
     if decision == "take":
         if expected_day is not None and now.replace(tzinfo=timezone.utc).astimezone(ET).date() != expected_day:
             raise DecisionError("TAKE must be committed on its run's market session date")
@@ -317,8 +326,7 @@ def create(db: Session, request: dict, *, routine: bool = False, commit: bool = 
     item = DecisionRecord(operation_id=operation_id, opportunity_id=opportunity_id,
                           actor=actor, decision=decision, symbol=symbol, context_id=context.id,
                           received_at=now, input_cutoff=cutoff,
-                          policy_version=SAMPLE_POLICY_VERSION if sample else POLICY_VERSION,
-                          policy_hash=SAMPLE_POLICY_HASH if sample else POLICY_HASH,
+                          policy_version=policy_version, policy_hash=policy_hash,
                           evidence_json=context.data_json, evidence_sha256=context.context_sha256,
                           decision_json=_canonical(detail), record_sha256=record_sha)
     db.add(item)

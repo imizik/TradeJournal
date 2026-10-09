@@ -16,9 +16,11 @@ def main():
     if os.geteuid() != 0:
         raise SystemExit("Run as root on the approved sample trial")
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--identifier", default="trader-jo-decisions")
+    parser.add_argument("--identifier")
     parser.add_argument("--rotate", action="store_true")
+    parser.add_argument("--replay", action="store_true", help="Prepare the separate sample paper replay")
     args = parser.parse_args()
+    args.identifier = args.identifier or ("trader-jo-replay" if args.replay else "trader-jo-decisions")
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", args.identifier) or args.identifier == "owner":
         raise ValueError("Choose a separate sample assistant ID")
     sys.path.insert(0, str(RUNTIME / "backend"))
@@ -35,15 +37,17 @@ def main():
     os.environ.update(values)
     from sqlmodel import Session
     from app.database import engine
-    from app.engine import access, sample_practice
+    from app.engine import access, sample_practice, sample_replay
     from app.models import AccessPrincipal
     from datetime import timedelta
     with Session(engine) as db:
         previous = db.get(AccessPrincipal, args.identifier)
         if previous and not args.rotate:
             raise ValueError("Assistant already exists; explicit --rotate is required")
-        run = sample_practice.prepare(db)
+        run = sample_replay.prepare(db) if args.replay else sample_practice.prepare(db)
         grants = {"symbols": ["MU", "NBIS"], "run_ids": [str(run.id)], "journal_read": False, "decision_write": True}
+        if args.replay:
+            grants["sample_replay"] = True
         access.grant_valid(grants)
         if previous:
             key = secrets.token_urlsafe(32)

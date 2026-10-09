@@ -19,7 +19,9 @@ def build_app():
     app = trial.build_app(root=ROOT)
     from sqlmodel import Session
     from app.database import engine
-    from app.engine import sample_practice
+    from app.engine import sample_practice, sample_replay, access
     with Session(engine) as db:
         sample_practice.prepare(db)
+        if access.sample_replays_enabled():
+            sample_replay.prepare(db)
     return app

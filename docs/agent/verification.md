@@ -544,3 +544,11 @@ A local fixture browser is not the Dot's cloud browser. Real secure sign-in,
 HTTPS, Tailscale ACLs, native process isolation, live provider data and laptop-
 off operation require the separately approved sample-data trial. No internet
 entry is enabled by running these tests or merging this implementation.
+
+The sample browser suite also exercises an assigned TAKE replay through actual
+authentication and its own scoped start button: double click/retry, frozen receipt
+preservation, readable per-share base/stress outcomes, reload/reopen and a delayed
+pre-start response. Backend sample replay tests cover real concurrent SQLite
+requests and interruption rollback; Postgres advisory-lock parity is CI-only.
+Native namespace/process/credential preservation and actual Dot use remain
+separate observations.

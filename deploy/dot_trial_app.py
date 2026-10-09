@@ -145,12 +145,15 @@ class FixtureMarket:
             from app.engine import access
             sample_choice = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
                 and request.url.path.endswith("/agent-choice") and access.decision_writer(request))
+            sample_replay = (request.method == "POST" and request.url.path.startswith("/practice/opportunities/")
+                and request.url.path.endswith("/sample-replay") and access.replay_writer(request))
             # Even the private trial owner may only mutate authentication.
             # Keep imports, journal edits, jobs and future writes out of this
             # sample installation for its entire lifetime, not just startup.
             if (request.method not in {"GET", "HEAD", "OPTIONS"}
                     and not request.url.path.startswith("/access/")
                     and not sample_choice
+                    and not sample_replay
                     and (request.method, request.url.path) != ("POST", "/quotes/positions")):
                 return await JSONResponse({"detail": "Sample trial data is read-only"}, 403)(scope, receive, send)
             if request.method == "GET" or (request.method == "POST" and request.url.path == "/quotes/positions"):
@@ -172,4 +175,5 @@ def build_app(root=ROOT):
     if not app.user_middleware or app.user_middleware[0].cls is not AccessMiddleware:
         raise RuntimeError("Dot trial authentication middleware order changed")
     app.user_middleware.insert(1, Middleware(FixtureMarket))
+    app.state.sample_replay_isolated = True
     return app

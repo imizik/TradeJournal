@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, practice, access, sample_practice
+from app.engine import decisions, practice, access, sample_practice, sample_replay
 from app.engine.job_runtime import submit_job
 from app.models import PracticeOpportunity, PracticeRun
 
@@ -75,7 +75,8 @@ def prepare(body: Preparation, db: Session = Depends(get_session)):
 
 
 def inspector_view(request, db, run, *, details=True):
-    if access.decision_writer(request):
+    if access.decision_writer(request) or (access.permitted_runs(request) is not None and
+            (run.session_key.startswith(sample_replay.PREFIX) or run.policy_version == decisions.REPLAY_POLICY_VERSION)):
         try:
             return sample_practice.view(db, run, request.state.access.identifier,
                 request.state.access.grants["symbols"], details=details)
@@ -97,8 +98,7 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
     if allowed is not None:
         query = query.where(PracticeRun.id.in_([uuid.UUID(value) for value in allowed]))
     if access.decision_writer(request):
-        query = query.where(PracticeRun.policy_version == decisions.SAMPLE_POLICY_VERSION,
-            PracticeRun.policy_hash == decisions.SAMPLE_POLICY_HASH,
+        query = query.where(PracticeRun.policy_version.in_([decisions.SAMPLE_POLICY_VERSION, decisions.REPLAY_POLICY_VERSION]),
             PracticeRun.session_key.startswith(sample_practice.PREFIX))
     if day:
         query = query.where(PracticeRun.day == day)
@@ -137,6 +137,22 @@ def agent_choice(opp_id: uuid.UUID, body: Choice, request: Request, response: Re
         _, created = sample_practice.choose(db, run, opp, request.state.access.identifier, body.model_dump())
     except decisions.DecisionError as exc:
         raise HTTPException(409 if "operation_id" in str(exc) else 422, str(exc)) from exc
+    response.status_code = 201 if created else 200
+    return inspector_view(request, db, run)
+
+
+@router.post("/opportunities/{opp_id}/sample-replay", status_code=201)
+def start_sample_replay(opp_id: uuid.UUID, body: Strict, request: Request, response: Response, db: Session = Depends(get_session)):
+    if not access.replay_writer(request):
+        raise HTTPException(403, "Scoped sample replay writer required")
+    try:
+        run, created = sample_replay.start(db, opp_id, request.state.access)
+    except PermissionError as exc:
+        raise HTTPException(403, str(exc)) from exc
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except (decisions.DecisionError, ValueError, KeyError) as exc:
+        raise HTTPException(422, str(exc) if isinstance(exc, decisions.DecisionError) else "Invalid sealed replay") from exc
     response.status_code = 201 if created else 200
     return inspector_view(request, db, run)
 

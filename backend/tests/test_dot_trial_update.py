@@ -215,3 +215,24 @@ def test_readiness_requires_both_backend_proxies_and_api_health(monkeypatch, bro
         updater.ready()
         assert len(probes) == 4
         assert any(command[0] == 'nsenter' for command in commands)
+
+
+def test_replay_enablement_is_explicit_and_rolls_back_with_failure(update_fixture, monkeypatch):
+    _, config, backend, frontend, _ = update_fixture
+    attempts = []
+    def ready():
+        attempts.append(True)
+        if len(attempts) == 1:
+            assert 'TJ_SAMPLE_REPLAY_ENABLED=true' in (config / 'trial-runtime.env').read_text()
+            raise RuntimeError('sample replay startup failed')
+    monkeypatch.setattr(updater, 'ready', ready)
+    with pytest.raises(RuntimeError):
+        updater.update(backend, frontend, 'a' * 40, enable_sample_replay=True)
+    assert 'TJ_SAMPLE_REPLAY_ENABLED' not in (config / 'trial-runtime.env').read_text()
+
+
+def test_existing_update_does_not_enable_replay_implicitly(update_fixture, monkeypatch):
+    _, config, backend, frontend, _ = update_fixture
+    monkeypatch.setattr(updater, 'ready', lambda: None)
+    updater.update(backend, frontend, 'a' * 40)
+    assert 'TJ_SAMPLE_REPLAY_ENABLED' not in (config / 'trial-runtime.env').read_text()

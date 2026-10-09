@@ -172,3 +172,10 @@ Thesis evidence monitoring and operational diagnosis follow the
 [agentic expansion](../agentic-trading-roadmap.md#17-dots-follow-through-expansion-proposed).
 Preserve A1–A3 scope; do not build a general workflow engine or publish the
 private API to make the integration convenient.
+
+## Selected sample replay increment (2026-10-09)
+
+Isaac selected [Jo’s own sample paper replay](dot-sample-replay-contract.md) after
+reporting the original MU/NBIS WAIT save/reload/reopen acceptance. A new scoped
+login may start its own TAKE replay on a separate frozen exercise. This adds no
+live exposure, P0 universe change, active WAIT monitor, model calls or schedule.
