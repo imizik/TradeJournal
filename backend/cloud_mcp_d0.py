@@ -263,16 +263,23 @@ async def check_issuer(config: Config, *, http_transport=None):
         if (parsed.scheme, parsed.netloc) != (issuer.scheme, issuer.netloc):
             raise ValueError("Issuer endpoints must use the selected origin")
     checks = {"code_challenge_methods_supported": "S256", "grant_types_supported": "authorization_code",
-        "response_types_supported": "code", "scopes_supported": SCOPE}
+        "response_types_supported": "code"}
     if any(not isinstance(metadata.get(key), list) or expected not in metadata[key] for key, expected in checks.items()):
-        raise ValueError("Issuer must advertise authorization code, PKCE S256 and the synthetic scope")
+        raise ValueError("Issuer must advertise authorization code and PKCE S256")
+    # Provider-wide discovery need not enumerate resource-specific API scopes.
+    # This preflight never grants access: the signed token must still carry SCOPE
+    # at every authenticated discovery/tool request, enforced by the SDK.
+    scopes = metadata.get("scopes_supported", [])
+    if not isinstance(scopes, list) or any(not isinstance(scope, str) for scope in scopes):
+        raise ValueError("Invalid advertised scope metadata")
     if "refresh_token" not in metadata["grant_types_supported"]:
         raise ValueError("D0 requires a refresh-capable connection")
     methods = metadata.get("token_endpoint_auth_methods_supported", ["client_secret_basic"])
     if not isinstance(methods, list) or not set(methods) & {"none", "client_secret_basic", "client_secret_post"}:
         raise ValueError("Configure a supported predefined OAuth client")
     return {"metadata": "valid", "mode": "synthetic_only", "pkce": "S256",
-        "refresh": "advertised", "login_observed": False}
+        "refresh": "advertised", "synthetic_scope_advertised": SCOPE in scopes,
+        "scope_enforcement": "access_token", "login_observed": False}
 
 
 class JWKSVerifier:

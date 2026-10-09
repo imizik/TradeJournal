@@ -238,6 +238,37 @@ def test_invalid_token_claims_are_rejected(
     assert PROFILE_ID not in response.text
 
 
+def test_supported_auth0_discovery_does_not_authorize_tokens_without_api_scope(
+    config_path: Path, signing_key: rsa.RSAPrivateKey
+) -> None:
+    recorded = json.loads((Path(__file__).parent / "fixtures/auth0-d0-discovery-2026-10-09.json").read_text())
+    metadata = recorded["metadata"]
+    assert "d0:profile" not in metadata["scopes_supported"]
+    _write_config(config_path, issuer_url=metadata["issuer"], jwks_url=metadata["jwks_uri"])
+
+    def respond(request):
+        if request.url.path == "/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json=metadata)
+        assert str(request.url) == metadata["jwks_uri"]
+        return httpx.Response(200, json=_jwks(signing_key.public_key()))
+
+    transport = httpx.MockTransport(respond)
+    preflight = asyncio.run(cloud_mcp_d0.check_issuer(cloud_mcp_d0.read_config(config_path), http_transport=transport))
+    assert preflight["metadata"] == "valid" and preflight["login_observed"] is False
+    server = create_server(config_path, http_transport=transport)
+    with TestClient(server.streamable_http_app()) as client:
+        for scopes in ("", "openid profile offline_access", "journal:read"):
+            token = _token(signing_key, issuer=metadata["issuer"], scope=scopes)
+            for method, params in (("tools/list", {}), ("tools/call", {"name": "get_profile", "arguments": {}})):
+                denied = client.post(RESOURCE, headers={"Accept": "application/json", "Authorization": f"Bearer {token}"},
+                    json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+                assert denied.status_code == 403
+                assert PROFILE_ID not in denied.text
+        allowed = _request(client, "tools/call", {"name": "get_profile", "arguments": {}},
+            _token(signing_key, issuer=metadata["issuer"], scope="d0:profile offline_access"))
+        assert PROFILE_ID in json.dumps(allowed)
+
+
 def test_bad_signature_and_unknown_key_are_rejected(
     config_path: Path, signing_key: rsa.RSAPrivateKey
 ) -> None:
