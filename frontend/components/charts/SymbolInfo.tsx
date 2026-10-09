@@ -83,12 +83,13 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     </button>
     {view.expanded && <div id={`${id}-content`}>
       {onSelectSymbol && <SymbolInfoPeers symbol={symbol} onSelect={onSelectSymbol} />}
-      <div role="tablist" aria-label="Symbol info tabs" className="flex border-y border-slate-700/40">
+      {/* Names never squeeze into each other: a narrow dock wraps the tabs onto a second row. */}
+      <div role="tablist" aria-label="Symbol info tabs" className="flex flex-wrap border-y border-slate-700/40">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {
             const next = event.key === "ArrowRight" ? (index + 1) % TABS.length : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
             if (next != null) { event.preventDefault(); event.stopPropagation(); select(TABS[next]); document.getElementById(`${id}-${TABS[next]}`)?.focus(); }
-          }} className={`min-h-11 min-w-0 flex-1 px-1 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
+          }} className={`min-h-11 flex-auto whitespace-nowrap px-2 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>

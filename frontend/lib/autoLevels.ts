@@ -23,6 +23,8 @@ export const NEAREST = 3;
 const LINE = "#8b97ab";
 const HOVER = "#c9d3e2";
 const HIGHLIGHT = "#7dd3fc";
+/** Behind a tag: the chart's own background, so the name reads over candles. */
+const TAG_BACKGROUND = "#10151e";
 /** An option zone's tint, by its most telling member. */
 function tint(zone: AutoZone): string {
   const kinds = new Set(zone.members.map((member) => member.kind));
@@ -82,10 +84,29 @@ export function nearestZones(zones: AutoZone[], at: number | undefined, count = 
   return [...below.reverse(), ...zones.filter((zone) => zone.low <= at && at <= zone.high), ...above];
 }
 
-/** A chart label: three member names at most, then how many more ("PDH + ONH + 660 +2"). */
-export function shortLabel(label: string): string {
-  const parts = label.split(" + ");
-  return parts.length <= 3 ? label : `${parts.slice(0, 3).join(" + ")} +${parts.length - 3}`;
+/** Which member names a zone on the chart: option landmarks, then the expected move, prior day and week, session ranges, swings, round numbers, ranked strikes. */
+const LABEL_ORDER = [
+  ["call_wall", "put_wall", "max_pain", "gamma_flip", "call_volume_wall", "put_volume_wall"],
+  ["expected_move_high", "expected_move_low"],
+  ["prior_day_high", "prior_day_low", "prior_day_close", "prior_week_high", "prior_week_low"],
+  ["premarket_high", "premarket_low", "overnight_high", "overnight_low"],
+  ["opening_range_5m_high", "opening_range_5m_low", "opening_range_15m_high", "opening_range_15m_low"],
+  ["swing_high", "swing_low"],
+  ["round"],
+  ["options_oi", "options_volume", "options_gamma"],
+];
+const labelRank = (kind: string) => { const rank = LABEL_ORDER.findIndex((kinds) => kinds.includes(kind)); return rank < 0 ? LABEL_ORDER.length : rank; };
+
+/**
+ * A zone's tag on the chart: its most telling member's name and how many more
+ * the zone holds ("Max pain +2", "PDH +1"). A round number reads "Round 223"
+ * so the count never looks like a price. The card lists every member.
+ */
+export function chartLabel(zone: AutoZone): string {
+  if (!zone.members.length) return zone.label;
+  const top = zone.members.reduce((best, member) => labelRank(member.kind) < labelRank(best.kind) ? member : best);
+  const name = top.kind === "round" ? `Round ${top.label}` : top.label;
+  return zone.members.length > 1 ? `${name} +${zone.members.length - 1}` : name;
 }
 
 export const KIND_NAMES: Record<string, string> = {
@@ -131,10 +152,15 @@ export const spanName = (zone: AutoZone) => zone.low === zone.high ? price(zone.
 
 type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 type Placed = { zone: AutoZone; top: number; bottom: number };
+/** A tag's height and the gap kept between two tags, in CSS pixels. */
+const TAG_HEIGHT = 14;
+const TAG_GAP = 2;
 
 export class AutoLevelLayer implements ISeriesPrimitive<Time> {
   private zones: AutoZone[] = [];
   private labels = false;
+  private at: number | undefined;
+  private drawnTags: { text: string; top: number; bottom: number }[] = [];
   private hovered: string | null = null;
   private placed: Placed[] = [];
   private highlight: { price: number; y: number | null } | null = null;
@@ -153,10 +179,11 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
     this.requestUpdate = null;
   }
 
-  /** What to draw. `labels` names each line (the main chart). */
-  set(zones: AutoZone[], labels: boolean) {
+  /** What to draw. `labels` names each zone (the main chart); `at`, the latest price, decides which tag wins when two would overlap. */
+  set(zones: AutoZone[], labels: boolean, at?: number) {
     this.zones = zones;
     this.labels = labels;
+    this.at = at;
     this.update();
   }
 
@@ -176,6 +203,9 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
 
   /** Ids of the zones drawn, lowest first; browser tests read it. */
   shown(): string[] { return this.zones.map((zone) => zone.id); }
+
+  /** The tags last drawn, their text and their top and bottom in CSS pixels; browser tests read it. */
+  tags(): { text: string; top: number; bottom: number }[] { return this.drawnTags; }
 
   /** Where a zone's middle is drawn, in pixels from the top of the pane, or null when it is off the scale. */
   y(id: string): number | null {
@@ -209,6 +239,42 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
     this.requestUpdate?.();
   }
 
+  /**
+   * Each zone's name on a solid tag just above its upper edge, at the left: the
+   * user's own levels label theirs at the right. Tags never overlap: the zone
+   * whose card is open wins, then the zones nearest the price; a tag that would
+   * cover another is left out, and its zone still has its card on hover.
+   */
+  private drawTags(context: CanvasRenderingContext2D, height: number, h: number, v: number) {
+    const at = this.at;
+    const distance = ({ zone }: Placed) => at === undefined ? 0 : zone.low > at ? zone.low - at : zone.high < at ? at - zone.high : 0;
+    const order = [...this.placed].sort((a, b) => Number(b.zone.id === this.hovered) - Number(a.zone.id === this.hovered) || distance(a) - distance(b));
+    const taken: [number, number][] = [];
+    this.drawnTags = [];
+    context.font = `${Math.round(10 * v)}px ${FONT}`;
+    context.textAlign = "left";
+    context.textBaseline = "middle";
+    for (const placed of order) {
+      const bottom = placed.top - 1;
+      const top = bottom - TAG_HEIGHT;
+      if (top < 0 || bottom * v > height) continue; // a tag cut by the pane's edge would read as a different name
+      if (taken.some(([a, b]) => top < b + TAG_GAP && bottom > a - TAG_GAP)) continue;
+      taken.push([top, bottom]);
+      const text = chartLabel(placed.zone);
+      this.drawnTags.push({ text, top, bottom });
+      const hovered = placed.zone.id === this.hovered;
+      const [x, width] = [Math.round(4 * h), Math.ceil(context.measureText(text).width + 8 * h)];
+      context.globalAlpha = 0.9;
+      context.fillStyle = TAG_BACKGROUND;
+      context.beginPath();
+      context.roundRect(x, Math.round(top * v), width, Math.round(TAG_HEIGHT * v), Math.round(3 * h));
+      context.fill();
+      context.globalAlpha = 1;
+      context.fillStyle = hovered ? HOVER : tint(placed.zone);
+      context.fillText(text, x + Math.round(4 * h), Math.round((top + TAG_HEIGHT / 2) * v));
+    }
+  }
+
   private draw(target: Target) {
     target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
       context.save();
@@ -236,15 +302,9 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
         }
         context.stroke();
         context.setLineDash([]);
-        // Labels sit at the left: the user's own levels label theirs at the right.
-        if (this.labels) {
-          context.font = `${Math.round(9 * v)}px ${FONT}`;
-          context.fillStyle = color;
-          context.textAlign = "left";
-          context.textBaseline = "bottom";
-          context.fillText(shortLabel(zone.label), Math.round(6 * h), upper - Math.round(2 * v));
-        }
       }
+      if (this.labels) this.drawTags(context, bitmapSize.height, h, v);
+      else this.drawnTags = [];
       const marked = this.highlight;
       if (marked && marked.y !== null) {
         const row = Math.round(marked.y * v) + 0.5;
