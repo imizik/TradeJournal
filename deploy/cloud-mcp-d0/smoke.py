@@ -129,7 +129,9 @@ print("Unprivileged public-key publisher cannot read profile grants")
     (key_dropin / "smoke.conf").write_text(f"[Service]\nExecStartPre={ROOT}/backend/.venv/bin/python {publisher_check}\n")
     timer_dropin = Path("/etc/systemd/system", KEY_TIMER + ".d")
     timer_dropin.mkdir()
-    (timer_dropin / "smoke.conf").write_text("[Timer]\nOnBootSec=\nOnBootSec=1s\nOnUnitActiveSec=\nOnUnitActiveSec=8s\nAccuracySec=1ms\nRandomizedDelaySec=0\n")
+    # An empty timer directive resets every earlier trigger, regardless of
+    # directive name. Clear once, then add both startup and recurring triggers.
+    (timer_dropin / "smoke.conf").write_text("[Timer]\nOnBootSec=\nOnBootSec=1s\nOnUnitActiveSec=8s\nAccuracySec=1ms\nRandomizedDelaySec=0\n")
 
     tls = ROOT / "tls"
     tls.mkdir(mode=0o755)
@@ -324,30 +326,12 @@ def main():
             # generic errors. Never dump serving/proxy logs or bearer values.
             sys.stderr.write(result.stderr.decode())
             for command in (
-                ["systemctl", "show", KEY_TIMER, "--property=ActiveState,Result,NextElapseUSecRealtime,LastTriggerUSec"],
+                ["systemctl", "show", KEY_TIMER, "--property=ActiveState,Result,TimersMonotonic,LastTriggerUSec"],
                 ["systemctl", "show", KEY_SERVICE, "--property=ActiveState,Result,ExecMainStatus"],
                 ["journalctl", "--unit=" + KEY_SERVICE, "--no-pager", "--no-hostname", "-n", "40"],
             ):
                 diagnostic = subprocess.run(command, check=False, capture_output=True)
                 sys.stderr.write(diagnostic.stdout.decode())
-            # Diagnose a failed publisher in the same sandbox, using only the
-            # anonymous local fixture. The shipped CLI deliberately suppresses
-            # exception values; this failed smoke must still identify its cause.
-            subprocess.run(["systemctl", "stop", KEY_TIMER, KEY_SERVICE], check=False, capture_output=True)
-            helper = ROOT / "diagnose_publisher.py"
-            helper.write_text(f'''import asyncio, sys
-from pathlib import Path
-sys.path.insert(0, "{ROOT}/backend")
-from cloud_mcp_d0_refresh import publish
-asyncio.run(publish(Path("{CONFIG}/refresh.json")))
-''')
-            Path("/etc/systemd/system", KEY_SERVICE + ".d", "diagnostic.conf").write_text(
-                f"[Service]\nExecStart=\nExecStart={ROOT}/backend/.venv/bin/python {helper}\n")
-            subprocess.run(["systemctl", "daemon-reload"], check=False, capture_output=True)
-            subprocess.run(["systemctl", "start", KEY_SERVICE], check=False, capture_output=True)
-            diagnostic = subprocess.run(["journalctl", "--unit=" + KEY_SERVICE,
-                "--no-pager", "--no-hostname", "-n", "80"], check=False, capture_output=True)
-            sys.stderr.write(diagnostic.stdout.decode())
             raise SystemExit(result.returncode)
         sys.stdout.write(result.stdout.decode())
     finally:
