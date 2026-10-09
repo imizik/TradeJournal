@@ -1,6 +1,7 @@
 import uuid
 import json
 from datetime import date, datetime
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -27,6 +28,9 @@ class DailyReviewResponse(BaseModel):
 class DailyReviewIndexItem(BaseModel):
     day: str
     trade_count: int
+    # Realized P&L of the trades that closed (or expired) that day, by the same
+    # rule as the dashboard's today_pnl; null when none closed with a recorded P&L.
+    closed_pnl: float | None = None
     saved: bool
     generated_at: datetime | None = None
     source_data_stale: bool = False
@@ -36,12 +40,16 @@ class DailyReviewIndexItem(BaseModel):
 async def list_daily_reviews(session: Session = Depends(get_session)):
     trades = session.exec(select(Trade)).all()
     trade_ids_by_day: dict[date, set[uuid.UUID]] = {}
+    closed_pnl_by_day: dict[date, Decimal] = {}
     for trade in trades:
         for value in (trade.opened_at, trade.closed_at):
             if not value:
                 continue
             trade_day = value.date()
             trade_ids_by_day.setdefault(trade_day, set()).add(trade.id)
+        if trade.status != "open" and trade.closed_at and trade.realized_pnl is not None:
+            close_day = trade.closed_at.date()
+            closed_pnl_by_day[close_day] = closed_pnl_by_day.get(close_day, Decimal(0)) + Decimal(str(trade.realized_pnl))
 
     records = session.exec(select(DailyReviewRecord)).all()
     records_by_day = {record.day: record for record in records}
@@ -50,6 +58,7 @@ async def list_daily_reviews(session: Session = Depends(get_session)):
         {
             "day": review_day.isoformat(),
             "trade_count": len(trade_ids_by_day[review_day]),
+            "closed_pnl": float(round(closed_pnl_by_day[review_day], 2)) if review_day in closed_pnl_by_day else None,
             "saved": review_day in records_by_day,
             "generated_at": records_by_day[review_day].updated_at if review_day in records_by_day else None,
             "source_data_stale": bool(json.loads(records_by_day[review_day].review_json).get("source_data_stale")) if review_day in records_by_day else False,
