@@ -30,7 +30,7 @@ request end before retrieval and capture time after retrieval. News, daily
 history and options are outside this packet. The importer preserves capture
 and observation times; import does not make old bars fresh.
 
-Capture publishes a root-owned 0600 `market-handoff-YYYY-MM-DD.json` atomically,
+Capture publishes a root-owned 0600 `/etc/tradejournal-dot-trial/market-handoff-YYYY-MM-DD.json` atomically,
 without credentials. Repeating capture retains the original file/cutoff without
 provider calls. `deploy/dot_market_import.py` checks its location/permissions,
 size, strict field whitelist, symbols, timestamps, calendar, source, ordering,
@@ -55,7 +55,7 @@ isolated factory state. Normal production `app.main` refuses this writer even
 with flags set. The browser can only read that run and its own records and POST
 to its opportunity's `agent-choice`; ordinary market routes, journal, human or
 other-agent records, context preparation, generic writes, reveal, jobs, arming
-and replay are denied. CSRF, budgets, expiry and revocation remain enforced.
+and replay are denied. All restricted readers, including a stale read-only grant, must match the frozen assigned actor; generic decision projections enforce the same boundary. Grant creation/reset validates market policy and actor assignment. CSRF, budgets, expiry and revocation remain enforced.
 Submission serializes and rechecks the current session/grants against resets
 and revocation, before saving. Actor, context, opportunity and retry IDs are
 server-owned. One choice per opportunity is immutable; exact retry retrieves

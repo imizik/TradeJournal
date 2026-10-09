@@ -112,6 +112,7 @@ def create(body: Assistant, db: Session = Depends(get_session)):
 def reset(identifier: str, body: Reset, db: Session = Depends(get_session)):
     access.grant_valid(body.grants.model_dump())
     access._serialized(db)
+    access.grant_targets_valid(db, identifier, body.grants.model_dump())
     row = db.get(AccessPrincipal, identifier)
     if not row or row.id == access.OWNER:
         raise HTTPException(404, "Assistant not found")

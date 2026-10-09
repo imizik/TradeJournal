@@ -366,6 +366,7 @@ def create_assistant(db, identifier, grants):
     if not re.fullmatch(r"[a-z][a-z0-9_-]{2,63}", identifier) or identifier == OWNER:
         raise HTTPException(422, "Invalid assistant ID")
     grant_valid(grants)
+    grant_targets_valid(db, identifier, grants)
     if db.get(AccessPrincipal, identifier):
         raise HTTPException(409, "Assistant ID already exists")
     key = secrets.token_urlsafe(32)
@@ -374,6 +375,21 @@ def create_assistant(db, identifier, grants):
     audit(db, OWNER, "assistant_create", "accepted", identifier)
     db.commit()
     return key
+
+
+def grant_targets_valid(db, identifier, grants):
+    """The new market dataset is bound to one frozen actor, including read grants."""
+    import uuid
+    from app.engine import market_practice
+    from app.models import PracticeRun
+    for value in grants["run_ids"]:
+        run = db.get(PracticeRun, uuid.UUID(value))
+        if run and market_practice.recognized(run):
+            if (not market_practice.eligible(run) or not market_practice.visible_to(run, identifier)
+                    or grants.get("decision_write") or grants.get("sample_replay")):
+                raise HTTPException(403, "Market session is outside this frozen assignment")
+        elif grants.get("market_decision_write"):
+            raise HTTPException(403, "Market writer requires its assigned real-market session")
 
 
 def assistant_row(principal):
@@ -396,12 +412,21 @@ def permitted_record_ids(request, db):
     if allowed is None:
         return None
     import uuid
-    from app.models import PracticeOpportunity, DecisionRecord
-    opps = db.exec(select(PracticeOpportunity.id).where(PracticeOpportunity.run_id.in_([uuid.UUID(value) for value in allowed]))).all()
+    from app.models import PracticeOpportunity, PracticeRun, DecisionRecord
+    from app.engine import market_practice
+    who = request.state.access
+    selected = db.exec(select(PracticeRun).where(PracticeRun.id.in_([uuid.UUID(value) for value in allowed]))).all()
+    visible_ids = [run.id for run in selected if not market_practice.recognized(run) or market_practice.visible_to(run, who.identifier)]
+    market_opps = set(db.exec(select(PracticeOpportunity.id).where(PracticeOpportunity.run_id.in_(
+        [run.id for run in selected if market_practice.recognized(run)]))).all())
+    opps = db.exec(select(PracticeOpportunity.id).where(PracticeOpportunity.run_id.in_(visible_ids))).all()
     query = select(DecisionRecord.id).where(DecisionRecord.opportunity_id.in_([f"a3:{value}" for value in opps]))
     if request.state.access.grants.get("decision_write") or request.state.access.grants.get("market_decision_write"):
         query = query.where(DecisionRecord.actor == "agent:" + request.state.access.identifier,
             DecisionRecord.symbol.in_(request.state.access.grants.get("symbols", [])))
+    if market_opps:
+        query = query.where((~DecisionRecord.opportunity_id.in_([f"a3:{value}" for value in market_opps]))
+            | (DecisionRecord.actor == "agent:" + who.identifier))
     return frozenset(db.exec(query).all())
 
 

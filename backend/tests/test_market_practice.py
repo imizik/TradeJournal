@@ -517,3 +517,49 @@ def test_reusing_old_identity_does_not_poison_a_future_session(market):
         with pytest.raises(decisions.DecisionError, match="Existing identity"):
             market_practice.prepare(db, other, identifier="market-writer")
         assert len(db.exec(select(PracticeRun)).all()) == before
+
+
+def test_unassigned_readers_cannot_read_market_runs_or_any_decision_projection(market):
+    own = choose(market).json()["opportunities"][0]["choice"]
+    # New grants refuse before exposing either a real writer or a read-only alias.
+    for extra in ({"market_decision_write": True}, {"market_decision_write": False}):
+        body = {"identifier": "unassigned", "grants": {**market.grants, **extra}}
+        assert market.owner.post("/access/assistants", json=body).status_code == 403
+    # Simulate a stale pre-existing administrative grant to prove projections
+    # enforce assignment independently of grant creation validation.
+    from app.models import AccessPrincipal
+
+    # Reset the fixture account normally, then plant a stale administrative grant.
+    reset = market.owner.post(
+        "/access/assistants/dot/reset",
+        json={
+            "grants": {"symbols": ["MU", "NBIS"], "run_ids": [], "journal_read": False}
+        },
+    )
+    assert reset.status_code == 200
+    market.key = reset.json()["key"]
+    assert signin(market, identifier="dot").status_code == 200
+    with Session(market.engine) as db:
+        other = db.get(AccessPrincipal, "dot")
+        other.grants_json = json.dumps(
+            {
+                "symbols": ["MU", "NBIS"],
+                "run_ids": [str(market.run.id)],
+                "journal_read": False,
+            }
+        )
+        db.add(other)
+        db.commit()
+    assert market.public.get(f"/practice/runs/{market.run.id}").status_code == 404
+    assert market.public.get("/practice/runs").json() == {"runs": []}
+    assert market.public.get("/decisions").json() == {"decisions": []}
+    assert market.public.get("/decisions/" + own["id"]).status_code == 404
+    assert (
+        market.owner.post(
+            "/access/assistants/dot/reset", json={"grants": market.grants}
+        ).status_code
+        == 403
+    )
+    with Session(market.engine) as db:
+        with pytest.raises(decisions.DecisionError, match="Market session not found"):
+            market_practice.view(db, market.run, "dot", ["MU"])

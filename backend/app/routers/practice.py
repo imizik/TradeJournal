@@ -75,9 +75,11 @@ def prepare(body: Preparation, db: Session = Depends(get_session)):
 
 
 def inspector_view(request, db, run, *, details=True):
-    if market_practice.eligible(run):
+    if market_practice.recognized(run):
         who = getattr(request.state, "access", None)
         restricted = access.permitted_runs(request) is not None
+        if restricted and not market_practice.visible_to(run, who.identifier):
+            raise HTTPException(404, "Market session not found")
         try:
             return market_practice.view(db, run, who.identifier if restricted else None,
                 who.grants.get("symbols", []) if restricted else market_practice.SYMBOLS, details=details)
@@ -115,7 +117,9 @@ def runs(request: Request, day: date | None = None, db: Session = Depends(get_se
             PracticeRun.session_key.startswith(market_practice.PREFIX))
     if day:
         query = query.where(PracticeRun.day == day)
-    return {"runs": [inspector_view(request, db, r, details=False) for r in db.exec(query).all()]}
+    visible = [r for r in db.exec(query).all() if allowed is None or not market_practice.recognized(r)
+        or market_practice.visible_to(r, request.state.access.identifier)]
+    return {"runs": [inspector_view(request, db, r, details=False) for r in visible]}
 
 
 @router.get("/runs/{run_id}")

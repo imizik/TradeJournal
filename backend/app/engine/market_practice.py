@@ -20,6 +20,19 @@ def eligible(run):
         and (run.policy_version, run.policy_hash) == (decisions.MARKET_POLICY_VERSION, decisions.MARKET_POLICY_HASH))
 
 
+def recognized(run):
+    return run.session_key.startswith(PREFIX) or run.policy_version == decisions.MARKET_POLICY_VERSION
+
+
+def visible_to(run, identifier):
+    if identifier is None:
+        return True  # only the private owner/service projection passes None
+    try:
+        return metadata(run).get("assigned_agent") == "agent:" + identifier
+    except (ValueError, KeyError, IndexError, TypeError):
+        return False
+
+
 def validate_bundle(bundle):
     """Whitelist a credential-free market handoff; never import arbitrary packet fields."""
     if (not isinstance(bundle, dict) or set(bundle) != {"version", "captured_at", "day", "calendar", "packets"}
@@ -166,7 +179,7 @@ def checked_context(context):
 
 
 def view(db, run, identifier, symbols, *, details=True):
-    if not eligible(run):
+    if not eligible(run) or not visible_to(run, identifier):
         raise decisions.DecisionError("Market session not found")
     result = {"id": str(run.id), "day": run.day.isoformat(), "sample_data": False, "market_data": True,
         "policy_version": run.policy_version, "policy_hash": run.policy_hash,
