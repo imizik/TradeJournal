@@ -327,6 +327,12 @@ def test_claude_final_json_is_validated_without_structured_output_tool(tmp_path,
     assert reviewer.validate_result(reviewer.parse_claude_result(text), tmp_path) == value
 
 
+def test_claude_final_json_is_recovered_from_explanatory_prose_and_fence(tmp_path):
+    value = {"verdict": "clean", "summary": "No defects found", "findings": []}
+    text = "I checked the change.\n\n```json\n" + json.dumps(value) + "\n```"
+    assert reviewer.validate_result(reviewer.parse_claude_result(text), tmp_path) == value
+
+
 @pytest.mark.parametrize("text", [
     'prefix {"verdict":"clean","summary":"fine","findings":[]}',
     '{"verdict":"clean","summary":"fine</parameter><parameter name=\\"findings\\">[]"}',
@@ -580,6 +586,20 @@ def test_readiness_failures_bound_continuations_without_destroying_clean_review(
     assert state(repo)["phase"] == "ready"
     assert len(state(repo)["passes"]) == 1
     assert "publication_attention" not in state(repo)
+
+
+def test_exempt_readiness_failure_preserves_the_exemption(repo):
+    a = args()
+    a.mode = "explicit"
+    a.reason = "User requested review skip"
+    reviewer.exempt(repo, a)
+    payload = {"session_id": "owner-session", "hook_event_name": "Stop"}
+    reviewer.hook(repo, args(), payload)
+    reviewer.hook(repo, args(), payload)
+    result = reviewer.hook(repo, args(), payload)
+    assert "remains exempt" in result["reason"]
+    assert state(repo)["phase"] == "exempt"
+    assert state(repo)["publication_attention"] is True
 
 
 def test_each_explicit_extension_preserves_history_and_grants_only_one_pass(repo, cli, monkeypatch):

@@ -282,8 +282,14 @@ def validate_result(result, snapshot):
 def parse_claude_result(text):
     if not isinstance(text, str):
         raise ReviewError("Claude did not return a final JSON review")
-    fenced = re.fullmatch(r"\s*```(?:json)?\s*\n(.*?)\n```\s*", text, re.DOTALL)
-    return json.loads(fenced[1] if fenced else text)
+    candidates = [text]
+    candidates.extend(re.findall(r"```(?:json)?\s*\n(.*?)\n```", text, re.DOTALL))
+    for candidate in reversed(candidates):
+        try:
+            return json.loads(candidate)
+        except ValueError:
+            pass
+    raise ReviewError("Claude did not return a final JSON review")
 
 
 def progress_summary(path, started):
@@ -670,8 +676,9 @@ def hook(root, args, payload):
             state.update(phase="error", error="Review process disappeared before recording completion")
         if state["phase"] == "ready" and matches(state, ident):
             return {}
-        if state.get("publication_attention") and state["phase"] == "clean" and matches(state, ident):
-            return {"systemMessage": "Independent review is clean but readiness is blocked. Report the blocker. Retry publish/finish when it clears; no new review is needed for unchanged head/base."}
+        if state.get("publication_attention") and state["phase"] in {"clean", "exempt"} and matches(state, ident):
+            outcome = "clean" if state["phase"] == "clean" else "exempt"
+            return {"systemMessage": f"Independent review is {outcome} but readiness is blocked. Report the blocker. Retry publish/finish when it clears; no new review is needed for unchanged head/base."}
         if state["phase"] in TERMINAL:
             # One continuation makes the failure visible; never trap the owner
             # in an endless stop-hook loop trying to repair login/quota.
@@ -684,12 +691,13 @@ def hook(root, args, payload):
         state["nudges"] = state.get("nudges", 0) + 1 if state.get("nudge_key") == key else 1
         state["nudge_key"] = key
         if state["nudges"] >= 3:
-            if state["phase"] == "clean" and matches(state, ident):
+            if state["phase"] in {"clean", "exempt"} and matches(state, ident):
                 # Bound stalled delivery continuations without destroying the
                 # review result or forcing another model call to recover.
                 state["publication_attention"] = True
                 save(path, state)
-                return {"decision": "block", "reason": "Independent review remains clean, but publication/readiness stalled. Report the blocker and stop. Retry publish/finish once it clears; preserve the clean receipt."}
+                outcome = "clean" if state["phase"] == "clean" else "exempt"
+                return {"decision": "block", "reason": f"Independent review remains {outcome}, but publication/readiness stalled. Report the blocker and stop. Retry publish/finish once it clears; preserve the receipt."}
             state.update(phase="attention", error="Owner stopped repeatedly without advancing the review")
             save(path, state)
             return {"decision": "block", "reason": "Review stopped after three unchanged continuations. Report the blocker and unresolved findings; do not claim ready."}
@@ -746,7 +754,7 @@ def main():
                 elif args.command == "retry":
                     path, state = owner_state(root, args.owner, args.session)
                     if state["phase"] != "error" or len(state["passes"]) >= pass_limit(state):
-                        raise ReviewError("Retry only recovers a failed pass with remaining budget; human authorization is required")
+                        raise ReviewError("Retry only recovers a failed pass with remaining budget; it never resets the pass budget")
                     state.update(phase="needs_review", nudges=0, terminal_reported=False)
                     state.pop("error", None)
                     state.setdefault("retries", []).append(time.time())

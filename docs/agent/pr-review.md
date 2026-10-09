@@ -130,8 +130,9 @@ include the exact committed head, current base and diff ancestor; dirty work,
 new commits or a changed base invalidate clean/ready results. Refresh
 `origin/main` before review and reconcile it when the remote base changes.
 
-Use `status` to inspect state. After the user explicitly authorizes recovery,
-`retry` can recover an error with remaining budget; it never resets passes.
+Use `status` to inspect state. `retry` can recover an operational error with
+remaining budget; it never resets passes. Do not retry a quota or login failure
+until that prerequisite is resolved.
 For a replacement session, `takeover --previous-session OLD --session NEW`
 preserves all passes and findings and requires the previous owner/provider.
 It requires human authorization. Exhaustion or a correctness disagreement is
