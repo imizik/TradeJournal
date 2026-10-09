@@ -97,12 +97,32 @@ const TABS = [
   { href: "/trades", label: "Trades", icon: FileText },
 ];
 
-/** A dot on the More tab while sync is not live, so a stalled import is noticed without opening the menu. */
-function MenuSyncDot() {
+/** Sync needs attention: delayed or stopped (a scheduled-only setup is normal and says nothing). */
+const syncTrouble = (health: GmailHealth | null) => !!health && (health.status === "degraded" || health.status === "down");
+
+/**
+ * The More tab: opens the menu, and for the owner carries a dot (and says so to
+ * a screen reader) while sync needs attention. Only the owner reads sync health:
+ * an assistant session never calls the journal's endpoints.
+ */
+function MoreTab({ open, onOpen, owner }: { open: boolean; onOpen: () => void; owner: boolean }) {
+  return owner ? <OwnerMoreTab open={open} onOpen={onOpen} /> : <MoreButton open={open} onOpen={onOpen} trouble={null} />;
+}
+
+function OwnerMoreTab({ open, onOpen }: { open: boolean; onOpen: () => void }) {
   const health = useGmailHealth();
-  if (!health || health.status === "live") return null;
-  const { label, dot } = SYNC_STATUS[health.status];
-  return <span title={label} className={cn("absolute right-[calc(50%-14px)] top-2 h-2 w-2 rounded-full", dot)}><span className="sr-only">{label}</span></span>;
+  return <MoreButton open={open} onOpen={onOpen} trouble={syncTrouble(health) ? SYNC_STATUS[health!.status] : null} />;
+}
+
+function MoreButton({ open, onOpen, trouble }: { open: boolean; onOpen: () => void; trouble: { label: string; dot: string } | null }) {
+  return (
+    <button onClick={onOpen} aria-label={trouble ? `Open menu, ${trouble.label.toLowerCase()}` : "Open menu"} aria-expanded={open}
+      className="relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground">
+      <Menu className="h-5 w-5" aria-hidden />
+      More
+      {trouble && <span aria-hidden className={cn("absolute right-[calc(50%-14px)] top-2 h-2 w-2 rounded-full", trouble.dot)} />}
+    </button>
+  );
 }
 
 function NavLinks({ pathname, onNavigate, rail = false }: { pathname: string; onNavigate?: () => void; rail?: boolean }) {
@@ -148,7 +168,8 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
   const anyRunning = useAnyJobRunning(owner);
   const access = useAppAccess();
   const enabled = access.enabled;
-  const journalOn = access.owner || !!access.grants.journal_read;
+  // The layout passes journal access (owner, or an assistant granted the journal).
+  const journalOn = journal;
   // On the charts page the sidebar is a rail of icons unless this device asked for the full one.
   const chartsRoute = fullScreenRoute(pathname);
   const [wide, setWide] = useState(false);
@@ -208,7 +229,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
 
       {/* Phone: the pages used most are one tap away at the bottom; More opens the full menu. */}
       <nav aria-label="Main tabs" className="fixed inset-x-0 bottom-0 z-40 flex border-t bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden">
-        {TABS.filter(({ href }) => shownHref(href, owner, enabled, journalOn)).map(({ href, label, icon: Icon }) => {
+        {TABS.filter(({ href }) => shownHref(href, access.owner, enabled, journalOn)).map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== "/" && pathname.startsWith(href));
           return (
             <Link key={href} href={href} aria-current={active ? "page" : undefined}
@@ -218,12 +239,7 @@ export function Nav({ owner = true, journal = true }: { owner?: boolean; journal
             </Link>
           );
         })}
-        <button onClick={() => setMenuOpen(true)} aria-label="Open menu" aria-expanded={menuOpen}
-          className="relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px] font-medium text-muted-foreground hover:text-foreground">
-          <Menu className="h-5 w-5" />
-          More
-          {owner && <MenuSyncDot />}
-        </button>
+        <MoreTab open={menuOpen} onOpen={() => setMenuOpen(true)} owner={owner} />
       </nav>
 
       {/* Desktop: on the charts page, a rail of icons that gives the charts the width */}
