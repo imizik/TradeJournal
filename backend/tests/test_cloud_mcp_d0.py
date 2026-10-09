@@ -369,6 +369,7 @@ def test_slow_chunks_cannot_renew_the_complete_body_deadline(monkeypatch):
         await asyncio.wait_for(middleware({"type": "http", "method": "POST", "headers": []}, receive, send), timeout=1)
         assert chunks >= 2
         assert sent[0]["status"] == 408
+        assert (b"connection", b"close") in sent[0]["headers"]
 
     anyio.run(exercise)
 

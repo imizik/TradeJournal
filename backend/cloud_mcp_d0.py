@@ -291,7 +291,10 @@ class RequestLimits:
             try:
                 body = await asyncio.wait_for(read_body(), timeout=BODY_READ_TIMEOUT)
             except asyncio.TimeoutError:
-                return await JSONResponse({"error": "Request timed out"}, status_code=408)(scope, receive, send)
+                # Uvicorn counts open connections in its concurrency limit;
+                # stop incomplete uploads rather than leaving them on keepalive.
+                return await JSONResponse({"error": "Request timed out"}, status_code=408,
+                    headers={"Connection": "close"})(scope, receive, send)
             if body is None:
                 return
             if len(body) > MAX_BYTES:

@@ -37,7 +37,8 @@ or environment proxy inheritance. Successful and failed lookups cache for
 60 seconds; new signing keys may be unavailable for that period. Tokens never
 choose a key URL. Input bodies are bounded at 64 KiB, headers at 16 KiB, and
 the complete body upload has one ten-second deadline, and the CLI limits HTTP
-concurrency to 16. Requests do not log bearer tokens or
+concurrency to 16. Timed-out uploads close their HTTP connection to release
+the concurrency slot. Requests do not log bearer tokens or
 issuer responses. The listener always binds to `127.0.0.1`.
 
 Application-profile revocation is immediate for subsequent requests, including
