@@ -153,7 +153,7 @@ LLY, GS and CAT were excluded by the conservative history policy. There were
 selected events. These are exploratory population counts, not independent
 samples, outcome results, profitability or proof of an edge.
 
-The final instrumented pass observed 28.82 s for immutable source preparation,
+An instrumented pass under concurrent host load observed 28.82 s for immutable source preparation,
 5.14 s for shared features/quality preparation, and 2.22 s for the first feature
 grid/query. Twenty warm queries had median 100.9 ms and maximum 523.9 ms;
 peak RSS was 341,344,256 bytes (325.5 MiB). Earlier lighter-load passes measured
@@ -163,6 +163,13 @@ warm-preview budgets are **not proved met** by this pass; preserve this as an
 R2/R3 performance gate, not a delivered latency promise. Completed analysis and
 API/UI feedback remain unmeasured. Full correctness/verification evidence is
 recorded in the PR.
+
+A retest on the final source observed 19.47 s for the snapshot, 3.11 s for
+feature/quality preparation and 1.62 s for the first grid/query (24.20 s total).
+Twenty warm queries had median 31.3 ms, interpolated sample p95 about 63.0 ms
+and maximum 149.0 ms, with 355,991,552 bytes (339.5 MiB) peak RSS. This quieter
+pass supports feasibility; it does not erase the load-sensitive budget miss or
+prove API/UI response times.
 No paid request, protected-period read or journal/Factory record write was used.
 
 ## Frozen R2 specification — implementation not selected
