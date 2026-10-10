@@ -22,8 +22,9 @@ inferring them from API prices.
 ## Who does what
 
 **Work directly by default.** A medium, single-area change where the lead
-already has context is cheaper and faster built by the lead, with one fresh
-`reviewer` at the end, than handed to a worker that starts cold.
+already has context is cheaper and faster built by the lead, with the review
+its tier requires at the end (usually one fresh `reviewer`), than handed to a
+worker that starts cold.
 
 **Consider delegating to `engineer` only when at least one of these holds,**
 and then only when the expected benefit outweighs the brief, the worker's cold
@@ -57,8 +58,9 @@ start and integrating its result:
 - Never resume a worker with a large history just for small review fixes; the
   lead applies those directly. Resuming is for substantive work the worker has
   not finished, such as an answered escalation.
-- The fresh `reviewer` subagent stays as it is; independent review is worth
-  its cost whether the work was delegated or done directly.
+- Independent review per [pr-review.md](pr-review.md) stays as it is,
+  including the fresh `reviewer` subagent; it is worth its cost whether the
+  work was delegated or done directly.
 
 Do not explore before delegating so as to write a perfect spec. If
 `feature-map.md`, the roadmap item and `domain-rules.md` constrain the task,
