@@ -458,7 +458,7 @@ test("market pilot saves source-linked own decisions and privately reviews them 
 test("historical Eastern expiry rejects invalid or ambiguous wall clocks", () => {
   expect(historicalExpiryInstant("2026-10-07 16:00")).toBe("2026-10-07T20:00:00.000Z");
   expect(historicalExpiryInstant("2026-01-07T16:00")).toBe("2026-01-07T21:00:00.000Z");
-  for (const value of ["", "2026-02-30 16:00", "2026-03-08 02:30", "2026-11-01 01:30", "10/7/2026 16:00", "2026-10-07 24:00"]) {
+  for (const value of ["", "2026-02-30 16:00", "2026-03-08 02:30", "2026-11-01 01:30", "10/7/2026 16:00", "2026-10-07 24:00", "0026-10-07 16:00", "0206-10-07 16:00", "0999-10-07 16:00", "9999-12-31 23:59", "0000-01-01 16:00"]) {
     expect(historicalExpiryInstant(value),value).toBeNull();
   }
 });
@@ -501,6 +501,9 @@ for (const [timezoneId, suffix] of [["America/Los_Angeles", "la"], ["America/New
       await expect(save).toBeDisabled();
       await expiry.fill("2026-02-30 16:00");
       await expect(mu.locator("form time[datetime]")).toHaveCount(0);
+      await expect(save).toBeDisabled();
+      await expiry.fill("0026-10-07 16:00");
+      await expect(mu.getByLabel("MU reason")).toHaveValue("Wait until the chosen first-session close, not the second-session default.");
       await expect(save).toBeDisabled();
       await expiry.fill(`${run.day} 16:00`);
       const preview = mu.locator("form time[datetime]").first();

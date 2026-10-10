@@ -12,12 +12,15 @@ export function historicalExpiryInstant(value: string): string | null {
   const nominal = Date.parse(`${wall}:00Z`);
   if (!Number.isFinite(nominal) || new Date(nominal).toISOString().slice(0, 16) !== wall) return null;
   // Sample both sides of a transition to find every possible UTC offset.
-  const offsets = new Set([-24, 0, 24].map(hours => {
+  const offsets = new Set<number>();
+  for (const hours of [-24, 0, 24]) {
     const sample = nominal + hours * 3_600_000;
     const local = eastern.format(new Date(sample)).replace(" ", "T");
-    return Date.parse(`${local}:00Z`) - sample;
-  }));
+    const offset = Date.parse(`${local}:00Z`) - sample;
+    if (!Number.isFinite(offset)) return null;
+    offsets.add(offset);
+  }
   const matches = [...offsets].map(offset => nominal - offset)
-    .filter(at => eastern.format(new Date(at)).replace(" ", "T") === wall);
+    .filter(at => Number.isFinite(at) && eastern.format(new Date(at)).replace(" ", "T") === wall);
   return matches.length === 1 ? new Date(matches[0]).toISOString() : null;
 }
