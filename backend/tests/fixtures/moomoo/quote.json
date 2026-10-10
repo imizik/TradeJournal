@@ -1,0 +1,5 @@
+{
+  "fixture_note": "Invented offline data; not an observed moomoo response.",
+  "ret_code": 0,
+  "data": {"quote_list": [{"code": "US.NVDA", "last_price": 180.02, "volume": 1000, "data_time": 1791637200000}]}
+}
