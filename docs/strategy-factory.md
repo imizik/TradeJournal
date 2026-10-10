@@ -100,8 +100,8 @@ Every Sunday at 10:00 (New York time on this Mac) launchd runs
 1. Merge `origin/main` into `factory/ledger`, so new families and fixes
    arrive by themselves.
 2. `prepare`: fetch the week's SIP minute bars.
-3. `week`: write the brief, ask the idea model for up to three candidates,
-   check them, judge the ones that pass the checks, and write
+3. `week`: write the brief, have the idea model answer it with up to three
+   candidates, check them, judge the ones that pass the checks, and write
    `research/reports/<date>.md`. The brief holds the rules below, the catalog
    of families, settings and features, every idea in the ledger with its
    results, discovery-period evidence (average R by side, time of day, exit,
@@ -116,11 +116,34 @@ Every Sunday at 10:00 (New York time on this Mac) launchd runs
    and pushed first (marked incomplete), since those candidates count toward
    the bar; a checkout with uncommitted or untracked files does not start.
 
-The idea model is Claude Opus 5 (`FACTORY_MODEL` overrides it) through the
-Anthropic API key in `backend/.env`, with adaptive thinking and a JSON answer:
-each idea's title, hypothesis, what it builds on and changes, and whether it
-came from the evidence; its lessons; and building blocks it wants. A week
-costs well under a dollar. The model never runs anything: `factory_brief.review`
+The idea model is Claude Code headless (`claude -p`) on the Claude plan, never
+on API credits: Opus (`FACTORY_CLAUDE_MODEL` overrides it) at high effort, with
+no tools, reading the brief on standard input and answering in its JSON format
+(`--json-schema`, the same `IDEAS_SCHEMA` the API used): each idea's title,
+hypothesis, what it builds on and changes, and whether it came from the
+evidence; its lessons; and building blocks it wants. The script saves the brief,
+Claude's output and the answer in `backend/data/factory/claude/<time>/`, then
+judges the answer through `week --answer`, so the report's footer reads
+"Idea model: claude-opus-… through claude -p on the Claude plan … no API
+call". `FACTORY_CLAUDE_BUDGET_USD` (10) and `FACTORY_CLAUDE_TIME_LIMIT`
+(1800 seconds) bound the call; an error, no answer or an answer outside the
+format stops the week before anything is judged.
+
+The run uses the plan token from `claude setup-token`, `CLAUDE_CODE_OAUTH_TOKEN`
+in `backend/.env`, exactly as the [docs drift pass](agent/architecture.md#processes)
+does: the token goes in as an environment prefix, never an argument; the API
+keys, key file descriptors, auth token, base URL, socket and `CLAUDE_CODE_USE_*` provider switches
+that would outrank or receive it are removed for the call; and before
+anything else, `claude auth status` must report `oauth_token`/`firstParty`
+with no `apiKeySource` (a managed `apiKeyHelper` or a saved key would bill the
+API while still reporting the token).
+A missing token or any other sign-in stops the run, and the phone hears why.
+It never falls back to the API key. Asking the Anthropic API directly (Claude
+Opus 5, `FACTORY_MODEL`, adaptive thinking) remains only behind an explicit
+`--use-api`, which bills API credits; `week` with none of `--dry-run`,
+`--answer` or `--use-api` is refused.
+
+The model never runs anything: `factory_brief.review`
 refuses a proposal that picks its own tickers, changes the costs, has more
 than two filters, repeats anything in the ledger or this week's batch, or
 does not fit the budget, and the report lists every refusal with its reason.
@@ -144,7 +167,8 @@ does not fit the budget, and the report lists every refusal with its reason.
 
 ```bash
 cd /Users/user/TradeJournal-factory
-bash scripts/factory_week.sh                                  # run the week now, asking the API
+bash scripts/factory_week.sh                                  # run the week now, claude -p on the plan
+bash scripts/factory_week.sh --use-api                        # the same, asking the API on credits instead
 backend/.venv/bin/python backend/scripts/strategy_factory.py week --dry-run   # print the brief only
 launchctl bootout gui/$(id -u)/com.tradejournal.strategy-factory             # pause the schedule
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.tradejournal.strategy-factory.plist  # resume
@@ -152,7 +176,9 @@ tail -f ~/Library/Logs/tradejournal-strategy-factory.log
 ```
 
 The Mac has to be awake for launchd to start the run; one missed while it
-slept runs at the next wake. The run needs `ANTHROPIC_API_KEY`, the Alpaca
+slept runs at the next wake. The run needs Claude Code (`claude` on the
+`PATH`, else `~/.local/node/bin/claude`; `FACTORY_CLAUDE` overrides it),
+`CLAUDE_CODE_OAUTH_TOKEN`, the Alpaca
 keys and `FACTORY_NTFY_URL` (with `FACTORY_NTFY_TOKEN` when the topic has one)
 in the main checkout's `backend/.env`, which the factory checkout links to,
 as it links `backend/.venv` and `backend/data/alpaca_cache`.
@@ -160,16 +186,16 @@ as it links `backend/.venv` and `backend/data/alpaca_cache`.
 ### By hand, with Claude Code as the idea model
 
 Typing `/factory-week` in a Claude Code session runs a week now, with that
-session answering the brief instead of the API, so it runs on the Claude plan
-rather than the API key (`.claude/skills/factory-week/SKILL.md`). The
+session answering the brief instead of `claude -p`
+(`.claude/skills/factory-week/SKILL.md`). The
 session drives the same script in the factory checkout, in two steps:
 
 ```bash
 bash scripts/factory_week.sh --brief /tmp/brief.md            # merge main, fetch bars, write the brief, stop
-bash scripts/factory_week.sh --answer /tmp/answer.json --answer-by "Claude Opus 5.5"   # judge, record, push, notify
+bash scripts/factory_week.sh --answer /tmp/answer.json --answer-by "Claude Opus 5.5 in a Claude Code session"   # judge, record, push, notify
 ```
 
-`--answer` is held to the same JSON format the API is (`answer_problem`), and
+`--answer` is held to the same JSON format (`answer_problem`), and
 its ideas go through the same review and the same gates. The session must
 propose from the brief alone: reading the ledger, the reports or the trade
 files first would let results the brief withholds (exam numbers) shape the
