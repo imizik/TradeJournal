@@ -81,6 +81,8 @@ jobs:
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-d0/smoke.py
       - name: Exercise sample MCP reads across the real Unix namespace bridge
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-d1/smoke.py
+      - name: Exercise isolated journal coach with invented approved export
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-journal/smoke.py
       - name: Save verified release
         uses: actions/upload-artifact@v4
         with:
