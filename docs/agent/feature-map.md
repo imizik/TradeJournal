@@ -311,3 +311,19 @@ Code: `backend/cloud_mcp_d1.py`, `backend/cloud_mcp_d1_common.py`, backend
 existing restricted sample projection. Proof: `backend/tests/test_cloud_mcp_d1.py`
 and `deploy/cloud-mcp-d1/smoke.py` on disposable Ubuntu; live OAuth/tool/UI evidence
 is a separate gate. Normal releases keep the templates disabled.
+
+## Manual advisor/shadow fixture
+
+The owner-only panel on Today is shown only for an operator-created invented
+assignment. `backend/app/engine/advisor_shadow.py` owns the allowlisted packet,
+immutable manual assignment/receipt and assistance boundary;
+`backend/advisor_shadow_demo.py` is its separate loopback-only three-operation
+shadow gateway. `backend/scripts/advisor_shadow_demo.py` creates a fresh migrated
+SQLite fixture or revokes it. Owner advisor export/answer routes live in
+`backend/app/routers/advisor_shadow.py`; `frontend/components/AdvisorShadowPanel.tsx`
+displays the exact packet, explicit question/plan, manually supplied answer and
+resolved fact citations. Existing Practice controls retain paired choice/reveal
+and paper review. Checks are `backend/tests/test_advisor_shadow.py`,
+`backend/tests/test_advisor_shadow_cli.py`, the owner-route refusals in
+`backend/tests/test_browser_access.py` and `frontend/e2e/advisor-shadow.spec.ts`.
+See the [contract and activation boundaries](advisor-shadow-contract.md).
