@@ -1,0 +1,25 @@
+{
+  "fixture_note": "Invented offline data. Not evidence of account permissions or a live price.",
+  "ret_code": 0,
+  "data": [{
+    "code": "US.NVDA",
+    "books": [
+      {
+        "exchange": "NASDAQ", "bid_flag": 1, "ask_flag": 1,
+        "exchange_data_time_ms": 1791637200000,
+        "server_send_to_client_time_ms": 1791637200020,
+        "order_volume_precision": 0,
+        "bid_list": [{"price": 180.01, "volume": 200, "order_count": 3}, {"price": 180, "volume": 300, "order_count": 0}],
+        "ask_list": [{"price": 180.02, "volume": 100, "order_count": 1}, {"price": 180.03, "volume": 500, "order_count": 2}]
+      },
+      {
+        "exchange": "ARCA", "bid_flag": 1, "ask_flag": 0,
+        "exchange_data_time_ms": 1791637200000,
+        "server_send_to_client_time_ms": 1791637200020,
+        "order_volume_precision": 2,
+        "bid_list": [{"price": 180, "volume": 12345, "order_count": 0}],
+        "ask_list": []
+      }
+    ]
+  }]
+}
