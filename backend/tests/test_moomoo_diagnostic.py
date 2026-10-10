@@ -2,7 +2,9 @@
 
 import base64
 import copy
+import getpass
 import hashlib
+import io
 import json
 from pathlib import Path
 
@@ -190,6 +192,23 @@ def test_stops_after_refusal_without_retries(key, status):
     assert "DO-NOT-ECHO" not in json.dumps(result)
 
 
+@pytest.mark.parametrize("status", [401, 403, 429])
+def test_server_time_refusal_stops_all_signed_requests(key, status):
+    seen = []
+
+    def serve(request):
+        seen.append(request)
+        return httpx.Response(status, text="DO-NOT-ECHO", headers={"Retry-After": "60"})
+
+    with httpx.Client(transport=httpx.MockTransport(serve)) as client:
+        result = probe.probe(client, "offline-test-id", key)
+    assert client.is_closed
+    assert len(seen) == 1
+    assert result["clock"]["http_status"] == status
+    assert "quote" not in result and "order_book" not in result
+    assert "DO-NOT-ECHO" not in json.dumps(result)
+
+
 def test_credentials_require_private_owned_regular_files(tmp_path):
     tmp_path.chmod(0o700)
     path = tmp_path / "credential"
@@ -217,6 +236,21 @@ def test_configure_hidden_input_does_not_echo_or_overwrite(tmp_path, key, monkey
     assert "offline-test-id" not in capsys.readouterr().out
     with pytest.raises(FileExistsError):
         probe.configure()
+
+
+def test_configure_refuses_getpass_echo_fallback_before_reading(tmp_path, key, monkeypatch):
+    tmp_path.chmod(0o700)
+    private = tmp_path / "phase1-ed25519.pem"
+    private.write_bytes(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    private.chmod(0o600)
+    input_stream = io.StringIO("offline-test-id\n")
+    monkeypatch.setattr(probe, "KEY_DIR", tmp_path)
+    monkeypatch.setattr(probe, "getpass", getpass.fallback_getpass)
+    monkeypatch.setattr("sys.stdin", input_stream)
+    with pytest.raises(probe.DiagnosticError, match="Hidden terminal input is unavailable"):
+        probe.configure()
+    assert input_stream.tell() == 0
+    assert not (tmp_path / "appkey").exists()
 
 
 def test_stream_option_is_explicitly_blocked_without_loading_credentials(monkeypatch, capsys):

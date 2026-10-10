@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import base64
 from datetime import datetime, timezone
-from getpass import getpass
+from getpass import GetPassWarning, getpass
 import hashlib
 import json
 import math
@@ -23,6 +23,7 @@ import re
 import secrets
 import stat
 import time
+import warnings
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -60,7 +61,12 @@ def secure_read(path: Path) -> bytes:
 def configure() -> None:
     # Directory and signing key are created separately during account setup.
     secure_read(KEY_DIR / "phase1-ed25519.pem")
-    value = getpass("moomoo AppKey (hidden): ").strip()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", GetPassWarning)
+        try:
+            value = getpass("moomoo AppKey (hidden): ").strip()
+        except GetPassWarning:
+            raise DiagnosticError("Hidden terminal input is unavailable; AppKey was not read or saved.") from None
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value):
         raise DiagnosticError("AppKey format is invalid; nothing saved.")
     fd = os.open(KEY_DIR / "appkey", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -218,6 +224,11 @@ def probe(client: httpx.Client, appkey: str, key: Ed25519PrivateKey) -> dict:
         response = client.get(HOST + TIME_PATH)
         elapsed = (time.perf_counter() - start_mono) * 1000
         received = time.time_ns() / 1e6
+        if response.status_code in (401, 403, 429):
+            report["clock"] = {"http_status": response.status_code, "status": "http_error",
+                               "observed_rate_headers": numeric_headers(response.headers)}
+            report["remaining_request"] = "skipped after server-time authentication, permission or rate refusal"
+            return report
         server = response.json().get("server_time_ms") if response.status_code == 200 else None
         if isinstance(server, str) and re.fullmatch(r"[0-9]{1,14}", server):
             server = int(server)
