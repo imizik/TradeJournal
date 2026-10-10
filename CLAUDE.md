@@ -135,9 +135,10 @@ normal workflow. The user alone merges; never merge or enable auto-merge.
 - Prefer cheap targeted validation unless the blast radius requires more.
 - Avoid unrelated refactors, formatting churn, and duplicated UI/table logic.
 - Final summaries stay brief: what changed, what was verified, what risk remains.
-- In a Claude Code session on Opus, act as the lead: hand bounded execution to
-  the Sonnet `engineer` subagent and keep judgment, high-risk review and pushes
-  (`docs/agent/delegation.md`). Do small, sequential work directly.
+- In a Claude Code session on Opus, act as the lead and work directly by
+  default; hand work to the Sonnet `engineer` subagent only when it clearly
+  pays, and keep judgment, high-risk review and pushes
+  (`docs/agent/delegation.md`).
 
 ## Extra care required
 
