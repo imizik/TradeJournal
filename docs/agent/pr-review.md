@@ -16,7 +16,7 @@ every tier.
 |---|---|---|
 | 0 | Explanatory, non-agent documentation: no instructions, contracts, configuration, runnable examples or behavior | Owner may skip, with a reason in the PR |
 | 1 | Everything not in tier 0 or 2, including UI, tests, refactors and other agent instructions | One fresh general reviewer |
-| 2 | Code, data, tests, workflows or instructions that change the behavior or checks of money correctness (financial math, FIFO, fills/dedupe, account identity, Gmail parsing, reconciliation), destructive or real-data mutation, authentication/permissions/security, migrations or deployment; or any change to CI, branch protection, or the verification or review policy, profiles or tooling (`pr-review.md`, `verification.md`, `.claude/agents/`, `.codex/agents/`, CLAUDE.md's review and verification sections, `scripts/verify.sh`, `scripts/review_carry.sh`, the test database pin) | A strong general reviewer plus a focused reviewer on the highest-risk failure mode; the owner reads the risky hunks |
+| 2 | Code, data, tests, workflows or instructions that change or could change the behavior or checks of money correctness (financial math, FIFO, fills/dedupe, account identity, Gmail parsing, reconciliation), destructive or real-data mutation, authentication/permissions/security, migrations or deployment, including refactors meant to preserve behavior; or any change to CI, branch protection, agent permission settings, or the verification or review policy, profiles or tooling (including `pr-review.md`, `verification.md`, `.claude/agents/`, `.codex/agents/`, CLAUDE.md's review and verification sections, documents that restate them, `scripts/verify.sh`, `scripts/review_carry.sh` and the test database pin) | A strong general reviewer plus a focused reviewer on the highest-risk failure mode; the owner reads the risky hunks |
 
 Breadth outside these areas is not tier 2 by itself. If unsure whether a change
 reaches a tier-2 area, choose tier 2. When two failure modes are comparably
@@ -112,8 +112,8 @@ incomplete; never fall back to a weaker model.
 7. **Publish.** Push and open or update the PR within the user's authorization;
    a draft says review is incomplete. Every required check must pass on the
    exact pushed head. Any other failing check also blocks ready unless it is
-   report-only, such as Screenshots; record why. If a check fails or cannot be
-   observed, stop with a blocker. Re-fetch head, base and checks before
+   report-only, such as Screenshots; record why. If a blocking check fails, or
+   any required check cannot be observed, stop with a blocker. Re-fetch head, base and checks before
    declaring ready; a stale result is not evidence. Never merge or enable
    auto-merge.
 

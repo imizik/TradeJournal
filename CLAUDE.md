@@ -95,10 +95,11 @@ Follow the [native pre-PR review workflow](docs/agent/pr-review.md) before
 publishing ready work. The owner classifies the full diff, invokes a fresh
 reviewer in the same client, receives its findings directly, repairs valid
 issues and obtains review of the final candidate. Most changes get one
-reviewer. A change in a tier-2 area of the guide's table (money correctness,
-destructive or real-data changes, auth/permissions/security, migrations,
-deployment, or CI, branch protection, or the verification or review policy and
-tooling) gets a stronger general reviewer and a focused reviewer. Use the
+reviewer. A change that could alter a tier-2 area of the guide's table (money
+correctness, destructive or real-data changes, auth/permissions/security,
+migrations, deployment, or CI, branch protection, or the verification or review
+policy and tooling), including a refactor meant to preserve behavior, gets a
+stronger general reviewer and a focused reviewer. Use the
 explicit model profiles in the guide, not the default implementation worker.
 Reviewers do not invoke reviewers themselves.
 
