@@ -10,7 +10,8 @@ or a GitHub-enforced model-review status.
 ## Choose the review depth
 
 Judge the consequences of the whole diff, including renames, not line count.
-A link or index entry neither raises nor lowers a document's tier.
+Linking or indexing a document, even from CLAUDE.md, neither raises nor lowers
+its tier; an index row that adds an instruction is judged as one.
 State the tier and reason before starting review. The user may explicitly
 request a skip; record that decision without calling the change reviewed.
 Never hide known findings behind a skip. CI remains required in every tier.
@@ -95,13 +96,15 @@ and [Claude subagents](https://code.claude.com/docs/en/sub-agents).
    draft. Another round needs the user's authorization.
 6. Before publishing ready, ensure review still covers the full current diff.
    A new feature commit needs re-review within the same budget. Integrating
-   the target branch keeps a clean review, spending no round, only when after a
-   fetch `scripts/review_carry.sh <reviewed-base> <reviewed-head>` reports
-   `identical`, the owner inspects its incoming files and records why none
-   changes what the feature depends on or assumes, and step 7 passes on the new
-   head. Record the script output. When in doubt, re-review. Push and
-   open/update the PR only within the user's publishing authorization. A draft
-   for early visibility is fine, but must clearly say review is incomplete.
+   the target branch keeps a clean review, spending no round, only when, after
+   a fetch, `scripts/review_carry.sh <reviewed-base> <reviewed-head> origin/main
+   <pr-head>` reports `identical` for the exact head step 7 checks; the owner
+   inspects its incoming files and records why none changes what the feature
+   or its checks rely on; and step 7 passes on that head. Record the script
+   output. Every later catch-up, including GitHub's Update branch, needs the
+   check again. When in doubt, re-review. Push and open/update the PR only
+   within the user's publishing authorization. A draft for early visibility is
+   fine, but must clearly say review is incomplete.
 7. Wait for CI on the exact pushed head. Check every required context and any
    other failing PR check. CI repairs are code changes: verify and re-review
    them within the remaining budget. Re-fetch the PR head/base and required

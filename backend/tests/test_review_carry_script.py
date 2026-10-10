@@ -35,8 +35,8 @@ def commit(repo: Path, message: str) -> str:
     return git(repo, "rev-parse", "HEAD")
 
 
-def carry(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["bash", str(SCRIPT), *args], cwd=repo, capture_output=True, text=True)
+def carry(repo: Path, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(["bash", str(SCRIPT), *args], cwd=cwd or repo, capture_output=True, text=True)
 
 
 SHARED = "".join(f"line {n}\n" for n in range(1, 31))
@@ -90,6 +90,8 @@ def test_defaults_compare_against_origin_main_and_head(repo: Path) -> None:
     advance_main(repo, "docs/guide.md", "guide, revised\n")
     integrate(repo)
     git(repo, "update-ref", "refs/remotes/origin/main", "main")
+    # A local branch spelled origin/main would win a plain ref lookup.
+    git(repo, "branch", "origin/main", base)
 
     result = carry(repo, base, head)
 
@@ -138,15 +140,42 @@ def test_a_merge_that_alters_main_side_files_changes_the_patch(repo: Path) -> No
     assert "result: changed" in result.stdout
 
 
-def test_an_unintegrated_branch_reports_that_head_lacks_base(repo: Path) -> None:
+def test_an_unintegrated_branch_is_refused(repo: Path) -> None:
     base, head = reviewed(repo)
-    advance_main(repo, "docs/guide.md", "guide, revised\n")
+    advance_main(repo, "backend/shared.py", SHARED.replace("line 29\n", "line twenty-nine\n"))
 
     result = carry(repo, base, head, "main", "HEAD")
 
-    assert result.returncode == 0
+    assert result.returncode == 1
     assert "head contains base: no" in result.stdout
-    assert "incoming files since review: 0" in result.stdout
+    assert "result: not integrated" in result.stdout
+
+
+def test_catching_up_to_an_older_main_is_refused(repo: Path) -> None:
+    base, head = reviewed(repo)
+    advance_main(repo, "docs/guide.md", "guide, revised\n")
+    integrate(repo)
+    advance_main(repo, "backend/app.py", "def run():\n    return 3\n")
+
+    result = carry(repo, base, head, "main", "HEAD")
+
+    assert result.returncode == 1
+    assert "result: not integrated" in result.stdout
+
+
+def test_diff_relative_config_cannot_hide_paths(repo: Path) -> None:
+    write(repo, "backend/shared.py", SHARED.replace("line 2\n", "line two\n"))
+    commit(repo, "feature also edits shared")
+    base, head = reviewed(repo)
+    advance_main(repo, "backend/shared.py", SHARED.replace("line 29\n", "line twenty-nine\n"))
+    integrate(repo)
+    git(repo, "config", "diff.relative", "true")
+
+    result = carry(repo, base, head, "main", "HEAD", cwd=repo / "docs")
+
+    assert result.returncode == 1
+    assert "result: changed" in result.stdout
+    assert "  backend/shared.py" in result.stdout
 
 
 def test_a_rewritten_target_branch_needs_re_review(repo: Path) -> None:
