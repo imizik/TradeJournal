@@ -72,6 +72,12 @@ esac
 exit 3
 """
 
+# env(1) passes through, keeping its arguments: anything there is visible to ps.
+STUB_ENV = """#!/bin/bash
+printf '%s\\n' "$@" >> "$STUB_LOG/env.args"
+exec /usr/bin/env "$@"
+"""
+
 STUB_CURL = """#!/bin/bash
 printf '%s\\n' "$*" >> "$STUB_LOG/curl.log"
 [ -z "${STUB_CURL_FAIL:-}" ]
@@ -92,7 +98,7 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
     stubs, log = tmp_path / "stubs", tmp_path / "log"
     stubs.mkdir()
     log.mkdir()
-    for name, text in (("claude", STUB_CLAUDE), ("gh", STUB_GH), ("curl", STUB_CURL)):
+    for name, text in (("claude", STUB_CLAUDE), ("gh", STUB_GH), ("curl", STUB_CURL), ("env", STUB_ENV)):
         (stubs / name).write_text(text)
         (stubs / name).chmod(0o755)
     settings = tmp_path / "backend.env"
@@ -189,6 +195,10 @@ def test_a_due_pass_is_pushed_and_opened_for_review(checkout):
     assert "--bare" not in args
     plan_only = "token=test-token\nkey=\nbearer=\nbase=\nprovider=\n"
     assert logged(env, "auth.env") == plan_only and logged(env, "claude.env") == plan_only
+    # Both reach Claude through env(1), and the token is never one of its arguments.
+    env_args = logged(env, "env.args")
+    assert env_args.count("claude\n") == 2 and "-u\nANTHROPIC_API_KEY\n" in env_args
+    assert "test-token" not in env_args
     assert not [a for a in args if a.startswith("Bash(") and not a.startswith(("Bash(git log", "Bash(git diff", "Bash(git show"))]
     gh = logged(env, "gh.log")
     assert "gh pr create --base main --head " + branch in gh

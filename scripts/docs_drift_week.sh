@@ -165,15 +165,16 @@ main() {
   [ -n "$token" ] || fail "no CLAUDE_CODE_OAUTH_TOKEN in $ENV_FILE (run \`claude setup-token\` and add it there)"
   # The plan token and nothing that outranks it: an auth token, an API key or a
   # cloud provider would bill instead, and another base URL or socket would
-  # receive it (the sign-in check below cannot see a socket).
+  # receive it (the sign-in check below cannot see a socket). The token itself
+  # goes in as a prefix assignment at each call, never as an argument: ps and
+  # exec auditing would show an argument.
   local plan_env=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_UNIX_SOCKET
     -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_USE_GATEWAY
-    -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE
-    CLAUDE_CODE_OAUTH_TOKEN="$token")
+    -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE)
   # Whatever else could still win (a managed apiKeyHelper, say), Claude Code
   # names the sign-in it would use; anything but the plan token stops the run.
   local signin
-  signin="$("${plan_env[@]}" claude auth status --json 2> /dev/null | "$PYTHON" -c '
+  signin="$(CLAUDE_CODE_OAUTH_TOKEN="$token" "${plan_env[@]}" claude auth status --json 2> /dev/null | "$PYTHON" -c '
 import json, sys
 try:
     status = json.load(sys.stdin)
@@ -198,7 +199,8 @@ For this run:
 - When the pass is done, set docs/agent/last-reconciled.json to {\"commit\": \"$START\", \"date\": \"$(date +%F)\", \"note\": \"<one line: what this pass covered>\"}. If nothing needed changing, still move the marker; that is a good outcome.
 - Your final message becomes the pull request's description, in Markdown, for a trader who does not read code: what you checked, what you changed and why, anything you deliberately left alone, and that prose accuracy is not machine-verifiable (each claim was re-read against the code it describes). No preamble."
   # --bare is left off because it never reads the plan token.
-  "${plan_env[@]}" claude -p "$prompt" --restricted --strict-mcp-config --model "${DOCS_DRIFT_MODEL:-opus}" \
+  CLAUDE_CODE_OAUTH_TOKEN="$token" "${plan_env[@]}" claude -p "$prompt" --restricted --strict-mcp-config \
+    --model "${DOCS_DRIFT_MODEL:-opus}" \
     --tools "Read,Grep,Glob,Edit,Bash" \
     --allowedTools "Read" "Grep" "Glob" "Edit(docs/**)" "Edit(README.md)" "Edit(AGENTS.md)" "Edit(CLAUDE.md)" \
       "Bash(git log *)" "Bash(git diff *)" "Bash(git show *)" \
