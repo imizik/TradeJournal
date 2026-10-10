@@ -44,6 +44,10 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 # hypothetical. Helpers that mean to migrate a named database override both.
 os.environ["MIGRATION_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 
+# The manual-fill recovery file is normally backend/data/manual_fills.json.
+# Tests that start the real app or call POST /fills must use scratch state too.
+os.environ["TJ_MANUAL_FILLS_BACKUP"] = str(Path(_TEST_DB_DIR) / "manual_fills.json")
+
 # TestClient lifespans must not dispatch jobs left by another test. Individual
 # worker tests execute jobs explicitly and use isolated lock directories.
 os.environ["JOB_EXECUTION_MODE"] = "external"
@@ -113,6 +117,7 @@ def _isolate_gmail_state(tmp_path, monkeypatch):
     from app.engine.job_runtime import shutdown_requested
 
     state = tmp_path / "gmail-state"
+    monkeypatch.setenv("TJ_MANUAL_FILLS_BACKUP", str(tmp_path / "manual_fills.json"))
     for name, filename in (
         ("CREDENTIALS_FILE", "credentials.json"),
         ("TOKEN_FILE", "token.json"),

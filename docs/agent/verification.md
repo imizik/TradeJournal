@@ -177,7 +177,11 @@ How a run works:
 
 1. `backend/scripts/seed_dev_data.py` builds a throwaway database
    (`backend/data/e2e_seed.db`) from fixed fills.
-2. The backend starts against it on port 8099, the frontend is rebuilt and
+2. Each ordinary, authenticated and sample Playwright configuration assigns
+   a fresh temporary `TJ_MANUAL_FILLS_BACKUP` path to the seeding and server
+   processes. Startup restore and `POST /fills` therefore avoid the
+   developer's default `backend/data/manual_fills.json`. The backend starts
+   against its fixture on port 8099, the frontend is rebuilt and
    started on 3099. Dedicated ports so a dev session on 8080/3000 is untouched.
 3. Tests assert that seeded values reach the DOM.
 

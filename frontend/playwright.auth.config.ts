@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 const root = path.resolve(__dirname, "..");
 const python = existsSync(`${root}/backend/.venv/bin/python`) ? `${root}/backend/.venv/bin/python` : "python3";
@@ -11,6 +12,7 @@ const api = `http://127.0.0.1:${backend}`;
 const ownerOrigin = `http://127.0.0.1:${owner}`;
 const assistantOrigin = `http://127.0.0.1:${assistant}`;
 const db = `sqlite:///${root}/backend/data/auth_e2e.db`;
+const manualFillsBackup = `${mkdtempSync(path.join(os.tmpdir(), "tj-auth-manual-fills-"))}/manual_fills.json`;
 const common = { TJ_ACCESS_ALLOW_LOCAL_HTTP: "true", TJ_OWNER_GATEWAY_KEY: "o".repeat(43), TJ_ASSISTANT_GATEWAY_KEY: "p".repeat(43), TJ_OWNER_ORIGIN: ownerOrigin, TJ_ASSISTANT_ORIGIN: assistantOrigin };
 export default defineConfig({
   outputDir: "./auth-test-results",
@@ -19,7 +21,7 @@ export default defineConfig({
   use: { baseURL: assistantOrigin, trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: [
     { command: `"${python}" scripts/seed_dev_data.py --database-url "${db}" && "${python}" -m uvicorn app.main:app --host 127.0.0.1 --port ${backend}`, cwd: `${root}/backend`, url: `${api}/health`, reuseExistingServer: false, timeout: 120000,
-      env: { ...common, DATABASE_URL: db, TJ_ACCESS_ENABLED: "true", TJ_ACCESS_SAMPLE_DATA: "true", JOB_EXECUTION_MODE: "external", JOB_LOCK_DIR: `${root}/backend/data/auth_job_locks`, GMAIL_WATCH_AUTOSTART: "false", GMAIL_LISTENER_ENABLED: "false", WEBULL_LISTENER_AUTOSTART: "false", LEVEL_ALERTS_AUTOSTART: "false", PRACTICE_AGENT_ENABLED: "false", PRACTICE_SCHEDULE_ENABLED: "false", TRADIER_API_KEY: "", ALPACA_API_KEY: "", ALPACA_API_SECRET: "", CAPTURE_TRANSCRIBER: "off" } },
+      env: { ...common, DATABASE_URL: db, TJ_MANUAL_FILLS_BACKUP: manualFillsBackup, TJ_ACCESS_ENABLED: "true", TJ_ACCESS_SAMPLE_DATA: "true", JOB_EXECUTION_MODE: "external", JOB_LOCK_DIR: `${root}/backend/data/auth_job_locks`, GMAIL_WATCH_AUTOSTART: "false", GMAIL_LISTENER_ENABLED: "false", WEBULL_LISTENER_AUTOSTART: "false", LEVEL_ALERTS_AUTOSTART: "false", PRACTICE_AGENT_ENABLED: "false", PRACTICE_SCHEDULE_ENABLED: "false", TRADIER_API_KEY: "", ALPACA_API_KEY: "", ALPACA_API_SECRET: "", CAPTURE_TRANSCRIBER: "off" } },
     { command: "npm run start", cwd: __dirname, url: `${ownerOrigin}/api/backend/health`, reuseExistingServer: false, timeout: 180000,
       env: { API_INTERNAL_URL: api, API_PROXY_TARGET: api, NEXT_PUBLIC_API_URL: "/api/backend", PORT: String(owner), TJ_ACCESS_PROFILE: "owner", TJ_GATEWAY_KEY: common.TJ_OWNER_GATEWAY_KEY, TJ_WEB_ORIGIN: ownerOrigin, TJ_ACCESS_ALLOW_LOCAL_HTTP: "true" } },
     { command: "npm run start", cwd: __dirname, url: `${assistantOrigin}/login`, reuseExistingServer: false, timeout: 180000,
