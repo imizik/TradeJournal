@@ -21,8 +21,8 @@ have landed since `docs/agent/last-reconciled.json` (in CI, on pull requests
 only; it never blocks a release from `main`), and its failure message
 carries the commit range to reconcile. Use that range as `<since>` below; if
 you arrived some other way, the marker file still says where to start. Every
-Saturday `scripts/docs_drift_week.sh` runs this pass unattended once 20 code
-commits have landed, and opens a pull request with the result.
+Saturday a Claude Code routine in the cloud runs this pass unattended once 20
+code commits have landed, and opens a pull request with the result.
 
 ## The method
 

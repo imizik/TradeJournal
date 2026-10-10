@@ -193,21 +193,16 @@ reason, and ruff lints them without importing them.
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
   and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
   judgement half is `.claude/skills/docs-drift/SKILL.md`. It runs unattended
-  every Saturday: launchd on the development Mac starts
-  `scripts/docs_drift_week.sh` in `/Users/user/TradeJournal-docs`, a checkout
-  kept at `main`. From 20 code commits on, the script has Claude run the pass
-  headless on the Claude plan, with the `claude setup-token` token as
-  `CLAUDE_CODE_OAUTH_TOKEN` in the main checkout's `backend/.env` and a $20
-  usage cap. It never bills API credits: the API key, auth token, base URL,
-  socket and provider switches that would outrank or receive the token are
-  removed for the run, and it stops before Claude starts unless the token is
-  there and `claude auth status` reports it as the sign-in. (It billed the API key until
-  2026-10-10, when one pass spent about $14.)
-  Claude may edit only documentation, and anything needing permission is
-  refused rather than waiting for a person. The script then checks the
-  changes and the marker, runs the docs tests, pushes `docs/drift-<date>` and
-  opens a pull request. The phone hears about the pull request, one still
-  waiting for review, or a failure. Proof: `tests/test_docs_drift_script.py`.
+  every Saturday as a Claude Code routine in Anthropic's cloud ("Weekly docs
+  drift pass" at claude.ai/code/routines), on the Claude plan rather than API
+  credits, so it needs no token, no Mac and no launchd job. From 20 code
+  commits on, and only when no earlier `claude/docs-drift-*` pull request is
+  still open, it runs the pass on a fresh clone of `main`, edits only
+  documentation, moves the marker, runs the docs tests and opens a pull
+  request on `claude/docs-drift-<date>`. It never merges. Its instructions
+  live in the routine, not the repository; each run's log is on its routine
+  page. (Until 2026-10-10 a launchd script on the development Mac ran it
+  with `claude -p`.)
   The desktop scheduled task that ran it before stalled on a permission prompt
   on its first run (2026-09-26) and is disabled.
 
