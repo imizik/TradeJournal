@@ -18,8 +18,8 @@
 #
 # Claude runs headless on the Claude plan, never on API credits: the token from
 # `claude setup-token` is CLAUDE_CODE_OAUTH_TOKEN in DOCS_DRIFT_ENV_FILE (the
-# main checkout's backend/.env), every credential or provider switch that would
-# outrank it is removed for the run, and the run stops unless Claude Code itself
+# main checkout's backend/.env), the credentials, endpoints and provider switches
+# that would outrank or receive it are removed for the run, and the run stops unless Claude Code itself
 # reports the plan token as its sign-in. It may read anything, edit only files under docs/,
 # README.md, AGENTS.md and CLAUDE.md, and run only git log, diff and show;
 # everything else is refused without asking, so the run cannot stall waiting
@@ -164,9 +164,11 @@ main() {
   token="$(setting CLAUDE_CODE_OAUTH_TOKEN)"
   [ -n "$token" ] || fail "no CLAUDE_CODE_OAUTH_TOKEN in $ENV_FILE (run \`claude setup-token\` and add it there)"
   # The plan token and nothing that outranks it: an auth token, an API key or a
-  # cloud provider would bill instead, and another base URL would receive it.
-  local plan_env=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL
-    -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY
+  # cloud provider would bill instead, and another base URL or socket would
+  # receive it (the sign-in check below cannot see a socket).
+  local plan_env=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_UNIX_SOCKET
+    -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_USE_GATEWAY
+    -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE
     CLAUDE_CODE_OAUTH_TOKEN="$token")
   # Whatever else could still win (a managed apiKeyHelper, say), Claude Code
   # names the sign-in it would use; anything but the plan token stops the run.

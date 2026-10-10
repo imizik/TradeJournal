@@ -26,13 +26,18 @@ pytestmark = pytest.mark.skipif(not shutil.which("git") or not shutil.which("bas
 STUB_CLAUDE = """#!/bin/bash
 seen() {
   printf '%s\\n' "token=${CLAUDE_CODE_OAUTH_TOKEN:-}" "key=${ANTHROPIC_API_KEY:-}" "bearer=${ANTHROPIC_AUTH_TOKEN:-}" \\
-    "base=${ANTHROPIC_BASE_URL:-}" "provider=${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_VERTEX:-}${CLAUDE_CODE_USE_FOUNDRY:-}"
+    "base=${ANTHROPIC_BASE_URL:-}${ANTHROPIC_UNIX_SOCKET:-}" "provider=$(providers)"
+}
+providers() {
+  printf '%s' "${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_VERTEX:-}${CLAUDE_CODE_USE_FOUNDRY:-}" \\
+    "${CLAUDE_CODE_USE_GATEWAY:-}${CLAUDE_CODE_USE_ANTHROPIC_AWS:-}${CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD:-}" \\
+    "${CLAUDE_CODE_USE_MANTLE:-}"
 }
 if [ "$1 $2" = "auth status" ]; then
   seen > "$STUB_LOG/auth.env"
   # Claude Code's precedence, or STUB_AUTH for a sign-in the script cannot strip (a managed apiKeyHelper).
   if [ -n "${STUB_AUTH:-}" ]; then method="$STUB_AUTH"; provider=firstParty
-  elif [ -n "${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_VERTEX:-}${CLAUDE_CODE_USE_FOUNDRY:-}" ]; then
+  elif [ -n "$(providers)" ]; then
     method=third_party; provider=bedrock
   elif [ -n "${ANTHROPIC_AUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ]; then method=api_key; provider=firstParty
   elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then method=oauth_token; provider=firstParty
@@ -101,7 +106,8 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
            "PATH": f"{stubs}:/usr/bin:/bin", "STUB_LOG": str(log), "DOCS_DRIFT_ENV_FILE": str(settings),
            # What the scheduler's environment may carry: each would outrank the plan token or receive it.
            "ANTHROPIC_API_KEY": "env-key", "ANTHROPIC_AUTH_TOKEN": "env-bearer",
-           "ANTHROPIC_BASE_URL": "https://gateway.example", "CLAUDE_CODE_USE_BEDROCK": "1",
+           "ANTHROPIC_BASE_URL": "https://gateway.example", "ANTHROPIC_UNIX_SOCKET": "/tmp/gateway.sock",
+           "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_MANTLE": "1",
            "DOCS_DRIFT_LOG_DIR": str(log), "DOCS_DRIFT_MIN_COMMITS": "4",  # exactly the commits below
            "DOCS_DRIFT_CHECK": f'echo checked >> "{log}/check.log"'}
     remote, work = tmp_path / "remote.git", tmp_path / "work"

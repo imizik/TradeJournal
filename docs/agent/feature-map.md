@@ -198,10 +198,10 @@ reason, and ruff lints them without importing them.
   kept at `main`. From 20 code commits on, the script has Claude run the pass
   headless on the Claude plan, with the `claude setup-token` token as
   `CLAUDE_CODE_OAUTH_TOKEN` in the main checkout's `backend/.env` and a $20
-  usage cap. It never bills API credits: every API key, auth token, base URL
-  and cloud-provider switch that would outrank the token is removed for the
-  run, and it stops before Claude starts unless the token is there and
-  `claude auth status` reports it as the sign-in. (It billed the API key until
+  usage cap. It never bills API credits: the API key, auth token, base URL,
+  socket and provider switches that would outrank or receive the token are
+  removed for the run, and it stops before Claude starts unless the token is
+  there and `claude auth status` reports it as the sign-in. (It billed the API key until
   2026-10-10, when one pass spent about $14.)
   Claude may edit only documentation, and anything needing permission is
   refused rather than waiting for a person. The script then checks the
