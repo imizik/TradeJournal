@@ -1,5 +1,6 @@
 import { defineConfig } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 const root = path.resolve(__dirname, "..");
 const python = existsSync(`${root}/backend/.venv/bin/python`) ? `${root}/backend/.venv/bin/python` : "python3";
@@ -12,6 +13,7 @@ const ownerOrigin = `http://127.0.0.1:${owner}`;
 const assistantOrigin = `http://127.0.0.1:${assistant}`;
 const state = `${root}/backend/data/sample_browser_trial`;
 const db = `sqlite:///${state}/data/trial.db`;
+const manualFillsBackup = `${mkdtempSync(path.join(os.tmpdir(), "tj-sample-manual-fills-"))}/manual_fills.json`;
 const common = { TJ_ACCESS_ALLOW_LOCAL_HTTP: "true", TJ_OWNER_GATEWAY_KEY: "o".repeat(43), TJ_ASSISTANT_GATEWAY_KEY: "p".repeat(43), TJ_OWNER_ORIGIN: ownerOrigin, TJ_ASSISTANT_ORIGIN: assistantOrigin };
 export default defineConfig({
   outputDir: "./sample-test-results", testDir: "./e2e", testMatch: "sample-decision.auth.ts", workers: 1, retries: 0,
@@ -19,7 +21,7 @@ export default defineConfig({
   use: { baseURL: assistantOrigin, trace: "retain-on-failure", screenshot: "only-on-failure" },
   webServer: [
     { command: `mkdir -p "${state}/data" && touch "${state}/.sample-installation" && "${python}" scripts/seed_dev_data.py --database-url "${db}" && "${python}" -m uvicorn scripts.sample_trial_browser:build_app --factory --host 127.0.0.1 --port ${backend}`, cwd: `${root}/backend`, url: `${api}/health`, reuseExistingServer: false, timeout: 120000,
-      env: { ...common, DATABASE_URL: db, MIGRATION_DATABASE_URL: db, TJ_ACCESS_ENABLED: "true", TJ_ACCESS_SAMPLE_DATA: "true", TJ_DOT_TRIAL_ENABLED: "true", TJ_SAMPLE_DECISION_WRITES: "true", TJ_SAMPLE_REPLAY_ENABLED: "true", TJ_MARKET_DECISION_WRITES: "true", TJ_HISTORICAL_REPLAY_ENABLED: "true", JOB_EXECUTION_MODE: "external", JOB_LOCK_DIR: `${state}/job_locks`, GMAIL_WATCH_AUTOSTART: "false", GMAIL_LISTENER_ENABLED: "false", WEBULL_LISTENER_AUTOSTART: "false", LEVEL_ALERTS_AUTOSTART: "false", PRACTICE_AGENT_ENABLED: "false", PRACTICE_SCHEDULE_ENABLED: "false", TRADIER_API_KEY: "", ALPACA_API_KEY: "", ALPACA_API_SECRET: "", POLYGON_API_KEY: "", OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", WEBULL_USERNAME: "", WEBULL_PASSWORD: "", NTFY_URL: "", CAPTURE_TRANSCRIBER: "off" } },
+      env: { ...common, DATABASE_URL: db, MIGRATION_DATABASE_URL: db, TJ_MANUAL_FILLS_BACKUP: manualFillsBackup, TJ_ACCESS_ENABLED: "true", TJ_ACCESS_SAMPLE_DATA: "true", TJ_DOT_TRIAL_ENABLED: "true", TJ_SAMPLE_DECISION_WRITES: "true", TJ_SAMPLE_REPLAY_ENABLED: "true", TJ_MARKET_DECISION_WRITES: "true", TJ_HISTORICAL_REPLAY_ENABLED: "true", JOB_EXECUTION_MODE: "external", JOB_LOCK_DIR: `${state}/job_locks`, GMAIL_WATCH_AUTOSTART: "false", GMAIL_LISTENER_ENABLED: "false", WEBULL_LISTENER_AUTOSTART: "false", LEVEL_ALERTS_AUTOSTART: "false", PRACTICE_AGENT_ENABLED: "false", PRACTICE_SCHEDULE_ENABLED: "false", TRADIER_API_KEY: "", ALPACA_API_KEY: "", ALPACA_API_SECRET: "", POLYGON_API_KEY: "", OPENAI_API_KEY: "", ANTHROPIC_API_KEY: "", WEBULL_USERNAME: "", WEBULL_PASSWORD: "", NTFY_URL: "", CAPTURE_TRANSCRIBER: "off" } },
     { command: "npm run start", cwd: __dirname, url: `${ownerOrigin}/api/backend/health`, reuseExistingServer: false, timeout: 180000,
       env: { API_INTERNAL_URL: api, API_PROXY_TARGET: api, NEXT_PUBLIC_API_URL: "/api/backend", PORT: String(owner), TJ_ACCESS_PROFILE: "owner", TJ_GATEWAY_KEY: common.TJ_OWNER_GATEWAY_KEY, TJ_WEB_ORIGIN: ownerOrigin, TJ_ACCESS_ALLOW_LOCAL_HTTP: "true" } },
     { command: "npm run start", cwd: __dirname, url: `${assistantOrigin}/login`, reuseExistingServer: false, timeout: 180000,

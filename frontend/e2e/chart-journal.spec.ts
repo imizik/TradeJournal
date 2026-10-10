@@ -230,8 +230,10 @@ const newYorkWall = (at: Date) => new Intl.DateTimeFormat("sv-SE", { timeZone: "
 
 /**
  * A fill written straight into the scratch e2e database (or removed again), then trades rebuilt, as an import would.
- * Not `POST /fills`: that also rewrites `backend/data/manual_fills.json`, the checkout's real
- * manual-fill backup. The `seed:` key is the seeder's own, so the next run clears it.
+ * This helper keeps direct database mutations scoped to the scratch e2e
+ * database. Browser server processes also receive a disposable manual-fill
+ * backup path, so API behavior can be tested without using developer state.
+ * The `seed:` key is the seeder's own, so the next run clears it.
  */
 function journalScript(lines: string[], args: Record<string, string>) {
   const backend = path.resolve(__dirname, "../../backend");

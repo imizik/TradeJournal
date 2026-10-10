@@ -44,6 +44,10 @@ os.environ["DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 # hypothetical. Helpers that mean to migrate a named database override both.
 os.environ["MIGRATION_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 
+# The manual-fill recovery file is normally backend/data/manual_fills.json.
+# Tests that start the real app or call POST /fills must use scratch state too.
+os.environ["TJ_MANUAL_FILLS_BACKUP"] = str(Path(_TEST_DB_DIR) / "manual_fills.json")
+
 # TestClient lifespans must not dispatch jobs left by another test. Individual
 # worker tests execute jobs explicitly and use isolated lock directories.
 os.environ["JOB_EXECUTION_MODE"] = "external"
@@ -101,6 +105,12 @@ def _migrate_test_database() -> None:
 
 
 _migrate_test_database()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_manual_fills_backup(tmp_path, monkeypatch):
+    """Manual-fill persistence defaults to a developer-owned data file."""
+    monkeypatch.setenv("TJ_MANUAL_FILLS_BACKUP", str(tmp_path / "manual_fills.json"))
 
 
 @pytest.fixture(autouse=True)

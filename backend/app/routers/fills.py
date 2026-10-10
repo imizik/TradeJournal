@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 import uuid
 from datetime import date, datetime, timedelta
@@ -26,6 +27,11 @@ from app.environment import require_destructive_confirmation
 from app.models import Account, DailyReviewRecord, FILL_LIGHT, Fill, FillOut, Trade, TradeFill, TradeTag, TradePathMetrics
 
 MANUAL_FILLS_BACKUP = Path(__file__).parent.parent.parent / "data" / "manual_fills.json"
+
+
+def _manual_fills_backup_path() -> Path:
+    """Return the configured backup path, preserving the production default."""
+    return Path(os.environ.get("TJ_MANUAL_FILLS_BACKUP", str(MANUAL_FILLS_BACKUP)))
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +75,7 @@ def _clear_derived_trade_data(session: Session) -> None:
 
 
 def backup_manual_fills(session: Session) -> None:
-    """Serialize all manual fills to data/manual_fills.json for crash/delete recovery."""
+    """Serialize all manual fills to the configured backup for recovery."""
     fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.raw_email_id.like("manual:%"))).all()
     data = [
         {
@@ -92,9 +98,10 @@ def backup_manual_fills(session: Session) -> None:
         }
         for f in fills
     ]
-    MANUAL_FILLS_BACKUP.parent.mkdir(parents=True, exist_ok=True)
-    MANUAL_FILLS_BACKUP.write_text(json.dumps(data, indent=2))
-    log.info("Backed up %d manual fill(s) to %s", len(data), MANUAL_FILLS_BACKUP)
+    backup_path = _manual_fills_backup_path()
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path.write_text(json.dumps(data, indent=2))
+    log.info("Backed up %d manual fill(s) to %s", len(data), backup_path)
 
 
 def restore_manual_fills_from_backup(session: Session) -> int:
@@ -103,12 +110,13 @@ def restore_manual_fills_from_backup(session: Session) -> int:
     Called on startup (covers deleted-DB scenario) and after resync-all as a
     safety net. Returns the number of fills restored.
     """
-    if not MANUAL_FILLS_BACKUP.exists():
+    backup_path = _manual_fills_backup_path()
+    if not backup_path.exists():
         return 0
     try:
-        data = json.loads(MANUAL_FILLS_BACKUP.read_text())
+        data = json.loads(backup_path.read_text())
     except Exception:
-        log.warning("Could not read manual fills backup at %s", MANUAL_FILLS_BACKUP)
+        log.warning("Could not read manual fills backup at %s", backup_path)
         return 0
 
     existing_ids = set(
