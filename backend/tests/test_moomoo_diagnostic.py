@@ -1,6 +1,7 @@
 """Offline only: public RFC 8032 test key, invented quotes, mock HTTP."""
 
 import base64
+import asyncio
 import copy
 import getpass
 import hashlib
@@ -172,7 +173,7 @@ def test_bounded_three_request_flow_signing_redaction_and_close(key, quote, dept
     assert client.is_closed
     assert len(seen) == 3
     assert result["quote"]["status"] == result["order_book"]["status"] == "success"
-    assert result["websocket"]["status"] == "blocked"
+    assert result["websocket"]["status"] == "not_requested"
     assert "offline-test-id" not in json.dumps(result)
 
 
@@ -253,8 +254,139 @@ def test_configure_refuses_getpass_echo_fallback_before_reading(tmp_path, key, m
     assert not (tmp_path / "appkey").exists()
 
 
-def test_stream_option_is_explicitly_blocked_without_loading_credentials(monkeypatch, capsys):
-    monkeypatch.setattr("sys.argv", ["probe", "--stream-seconds", "30"])
-    monkeypatch.setattr(probe, "secure_read", lambda path: pytest.fail("must not read credentials"))
-    assert probe.main() == 2
-    assert json.loads(capsys.readouterr().out)["websocket"]["status"] == "blocked"
+def test_websocket_signature_four_fields_no_trailing_newline(key):
+    vector = json.loads((FIXTURES / "ws_signature.json").read_text())
+    frame = probe.websocket_auth("offline-test-id", key, vector["timestamp_ms"], vector["nonce"])
+    expected = vector["payload"].encode("utf-8")
+    key.public_key().verify(base64.b64decode(frame["data"]["authorization"], validate=True), expected)
+    assert frame["data"]["authorization"] == vector["signature_base64"]
+    assert frame["data"]["auth_type"] == "appkey"
+    assert probe.signing_payload(1782357937000, "POST", "ws/auth", "", b"") != expected
+
+
+class FakeSocket:
+    def __init__(self, auth_fail=False, subscribe_fail=None, uncorrelated=False, silence=False, envelope=False, unsubscribe_fail=False):
+        self.queue = asyncio.Queue()
+        self.sent = []
+        self.close_code = None
+        self.auth_fail = auth_fail
+        self.subscribe_fail = subscribe_fail
+        self.uncorrelated = uncorrelated
+        self.silence = silence
+        self.envelope = envelope
+        self.unsubscribe_fail = unsubscribe_fail
+
+    async def send(self, raw):
+        frame = json.loads(raw)
+        self.sent.append(frame)
+        if frame["action"] == "auth":
+            message = {"id": frame["id"], "code": -1, "message": "DO-NOT-ECHO"} if self.auth_fail else {
+                "id": frame["id"], "session_id": "DO-NOT-ECHO", "server_time": NOW * 1000}
+        else:
+            failed = self.subscribe_fail == frame["id"] or (self.unsubscribe_fail and frame["action"] == "unsubscribe")
+            message = {"id": frame["id"], "code": 4 if failed else 0, "message": "DO-NOT-ECHO"}
+            if self.envelope:
+                message = {"ret_code": 0, "data": message}
+        if self.uncorrelated:
+            message.pop("id")
+        if not self.silence:
+            await self.queue.put(json.dumps(message))
+
+    async def recv(self):
+        return await self.queue.get()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        self.close_code = 1000
+
+
+@pytest.mark.parametrize("envelope", [False, True])
+def test_websocket_auth_subscribe_no_messages_unsubscribe_close(key, envelope):
+    socket = FakeSocket(envelope=envelope)
+
+    def connector(url, **kwargs):
+        assert url == "wss://webapi-quote.moomoo.com/ws"
+        assert kwargs["proxy"] is None
+        assert kwargs["max_size"] == 1024 * 1024
+        assert kwargs["ping_interval"] == 20
+        return socket
+
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, connector))
+    assert result["authentication"]["status"] == "success"
+    assert all(result["subscriptions"][kind]["status"] == "success" for kind in probe.STREAM_TYPES)
+    assert [frame["action"] for frame in socket.sent] == ["auth", "subscribe", "subscribe", "subscribe", "unsubscribe"]
+    assert result["unsubscribe"]["status"] == "success"
+    assert result["closed"]
+    assert result["message_counts"] == {"QUOTE": 0, "ORDER_BOOK": 0, "TICKER": 0}
+    assert "offline-test-id" not in json.dumps(result) and "DO-NOT-ECHO" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("uncorrelated", [False, True])
+def test_websocket_auth_failure_never_subscribes_and_redacts(key, uncorrelated):
+    socket = FakeSocket(auth_fail=True, uncorrelated=uncorrelated)
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, lambda *a, **k: socket))
+    assert [frame["action"] for frame in socket.sent] == ["auth"]
+    assert result["closed"]
+    assert result["authentication"]["status"] != "success"
+    assert "DO-NOT-ECHO" not in json.dumps(result)
+
+
+def test_websocket_auth_timeout_closes_without_subscribing(key):
+    socket = FakeSocket(silence=True)
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, lambda *a, **k: socket))
+    assert len(socket.sent) == 1
+    assert result["status"] == "failed_or_timed_out"
+    assert result["closed"]
+
+
+def test_websocket_subscriptions_have_separate_acks_and_release_attempted_types(key):
+    socket = FakeSocket(subscribe_fail="sub-order_book")
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, lambda *a, **k: socket))
+    assert result["subscriptions"]["quote"]["status"] == "success"
+    assert result["subscriptions"]["order_book"]["code"] == 4
+    assert result["subscriptions"]["ticker"]["status"] == "success"
+    assert all(socket.sent[-1][kind] == ["US.NVDA"] for kind in probe.STREAM_TYPES)
+    assert result["unsubscribe"]["status"] == "success" and result["closed"]
+
+
+def test_websocket_failed_unsubscribe_still_closes(key):
+    socket = FakeSocket(envelope=True, unsubscribe_fail=True)
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, lambda *a, **k: socket))
+    assert result["unsubscribe"]["status"] == "failed"
+    assert result["closed"]
+
+
+def test_streaming_push_fixture_summaries_and_missing_fields(depth):
+    data = depth["data"][0]
+    book = probe.push_summary({"type": "ORDER_BOOK", "symbol": "US.NVDA", "data": data}, NOW, 0)
+    assert book["books"][0]["bid_levels"] == 2
+    assert book["books"][0]["exchange"] == "NASDAQ"
+    assert book["books"][0]["bid_valid_entries"] == 2
+    assert book["books"][0]["bid_distinct_prices"] == 2
+    quote = probe.push_summary({"type": "QUOTE", "symbol": "US.NVDA", "data": {"last_price": 1, "data_time_ms": NOW}}, NOW, 0)
+    assert quote["freshness"]["estimated_age_ms"] == 0
+    tick = probe.push_summary({"type": "TICKER", "symbol": "US.NVDA", "data": {"ticker_list": [{"time_ms": NOW, "price": 1, "mpid": "DO-NOT-ECHO"}]}}, NOW, 0)
+    assert tick["tick_count"] == 1
+    assert "DO-NOT-ECHO" not in json.dumps(tick)
+    assert probe.push_summary({"type": "UNKNOWN", "symbol": "US.NVDA", "data": {}}, NOW, 0) is None
+
+
+def test_streaming_optional_lists_zero_prices_and_duplicate_prices():
+    message = {"type": "ORDER_BOOK", "symbol": "US.NVDA", "data": {
+        "bid_list": [{"price": 1, "volume": 1, "mpid": "ARCA"}, {"price": 1, "volume": 2, "mpid": "NITE"}, {"price": 0, "volume": 0}],
+        "ask_list": None}}
+    book = probe.push_summary(message, NOW, 0)["books"][0]
+    assert book["bid_levels"] == 3
+    assert book["bid_valid_entries"] == 2
+    assert book["bid_distinct_prices"] == 1
+    assert book["bid_mpids"] == ["ARCA", "NITE"]
+    assert book["ask_levels"] is None
+    assert not book["ask_list_available"]
+
+
+@pytest.mark.parametrize("seconds", [0, 61, 600])
+def test_stream_core_cannot_outlive_refresh_requirement(key, seconds):
+    with pytest.raises(probe.DiagnosticError):
+        asyncio.run(probe.stream_probe("offline-test-id", key, seconds))

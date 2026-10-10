@@ -2,13 +2,15 @@
 
 ## Scope and status
 
-Observed on **2026-10-10, 16:32–16:33 America/New_York**, with US markets
+Observed on **2026-10-10, 16:32–16:48 America/New_York**, with US markets
 closed. This is a manually invoked diagnostic, not a provider adapter. It has
 no FastAPI registration, database access, background task, trading call or
 brokerage-account query. Tradier/Alpaca feeds and deployment are unchanged.
 There were two bounded trials, each with one server-time call, one signed
-US.NVDA quote request and one signed US.NVDA order-book request. No streaming,
-continuous collection, subscription purchase or quota-exhaustion test occurred.
+US.NVDA quote request and one signed US.NVDA order-book request. Four bounded
+WebSocket trials followed: two stopped on acknowledgment-envelope mismatch,
+then two completed 30-second probes with exact wrapped-ID correlation.
+No continuous collection, subscription purchase or quota-exhaustion test occurred.
 Live prices are not stored in this repository; test fixtures are invented.
 
 | Test | Observed result |
@@ -20,7 +22,11 @@ Live prices are not stored in this repository; test fixtures are invented.
 | Book freshness | Both `exchange_data_time_ms=0`; exchange age and provider processing delay cannot be measured |
 | REST quote round trip | 348.907 ms first trial; 341.138 ms second trial |
 | REST book round trip | 319.375 ms first trial; 330.896 ms second trial |
-| WebSocket | Not attempted: official AppKey signing payload unresolved |
+| WebSocket authentication | Succeeded with the official Chinese four-field signature |
+| Separate stream subscriptions | quote, order_book and ticker each acknowledged `code=0` |
+| Final 30s delivery | 1 QUOTE, 4 ORDER_BOOK, 0 TICKER messages; some book messages omitted both lists |
+| Streaming depth | One complete observed book had 60 valid entries and 60 distinct prices per side; sampled MPIDs and collected MPID set were ARCA, with no book-level exchange identifier |
+| Unsubscribe and close | Exact-ID unsubscribe acknowledged `code=0`; closed; final elapsed 30.075s |
 | Quota/rate-limit response headers | No numeric allowance headers observed |
 
 These are snapshot counts, not a measured entitlement ceiling. The two-book
@@ -28,6 +34,10 @@ shape is consistent with US LV3 in the [direct order-book reference], but no
 explicit tier metadata was returned. ARCA multi-level access is established;
 NASDAQ TotalView depth is not established by an empty NASDAQ book. Neither
 the book identifiers nor the quote proves consolidated depth or SIP/NBBO.
+Streaming establishes 60 distinct prices per side in one observed ARCA-MPID
+book; its shape differs from the REST snapshot. The REST book's 6/20 counts
+must not be treated as a streaming limit. MPIDs identify reported participants;
+do not infer coverage of other venues or a named license from them alone.
 Moomoo's LV3 naming does not establish an order-by-order Level 3 event feed:
 the documented response aggregates price levels.
 
@@ -72,6 +82,15 @@ alone. This is not an exchange-to-client latency measurement. Freshness at
 the exchange remains unavailable. Quote age was about 24 hours 33 minutes,
 consistent with Friday's closing timestamp during Saturday testing.
 
+The final streaming quote had `data_time_ms=1791579600046`, Friday 17:00 ET,
+about 23h48m old. The first complete streaming book had
+`data_time_ms=1791665244414`, received locally at `1791665264351`, estimated
+timestamp age 19,955.821 ms. A later book message with no bid/ask lists had
+timestamp age 202.821 ms. This measures provider-reported message timestamp
+age, not verified exchange freshness or liquidity change. The prior successful
+30s trial observed two complete books with timestamp ages 4,273.290 and
+174.290 ms. Market-hours delivery and clock/freshness behavior still need proof.
+
 ## Commands
 
 From the repository's `backend` directory, using a Python environment with the
@@ -83,7 +102,7 @@ python -m scripts.moomoo_diagnostic
 python -m pytest tests/test_moomoo_diagnostic.py -q
 ```
 
-`--configure` prompts through `getpass`, writes exclusively outside Git, and
+`--configure` prompts through `getpass`, refuses echo fallback, writes exclusively outside Git, and
 refuses overwrites. The probe rejects insecure/symlinked credential files,
 does not inherit proxies or follow redirects, sends no retries, and closes
 its HTTP client. It prints only allowlisted fields and at most two samples
@@ -92,42 +111,64 @@ headers. HTTP 401/403/429 and timestamp refusal stop subsequent requests.
 Exit 0 means both REST schemas succeeded, not that streaming or permissions
 were fully established.
 
-For a future market-hours **snapshot** test, invoke the same manual command.
-To track the requested streaming proof, this command currently exits 2 and
-reports the signing blocker without reading credentials or opening a socket:
+For a future market-hours snapshot test, invoke the same manual command.
+For a bounded streaming test:
 
 ```bash
 python -m scripts.moomoo_diagnostic --stream-seconds 30
 ```
 
-There is deliberately no executable streaming implementation to bypass that
-blocker. Once official signing rules are supplied, implement a bounded 30s
-trial with auth acknowledgment, quote/order_book/ticker subscription results,
-message counts, exchange timestamps, quota metadata if exposed, unsubscribe
-acknowledgment and connection close. That is a Phase 1 follow-up, not permission
-to build an adapter. A market-open trial is needed to verify NASDAQ levels and
-data freshness; Saturday silence would not prove a subscription failure.
+The [official Chinese auth reference] and traditional-Chinese version supply
+the detail omitted by the current [English auth reference]:
+
+```text
+{timestamp_ms}\n{nonce}\nWEBSOCKET\nws/auth
+```
+
+These are four UTF-8 fields, no trailing newline, signed directly with Ed25519
+and Base64 encoded. The REST body hash and method/path format are not reused.
+The English auth frame and [subscription reference] are otherwise followed.
+The actual gateway wraps control acknowledgments as
+`{"ret_code":0,"data":{"id":"sub-quote","code":0,"message":""}}`.
+The diagnostic checks the exact ID inside that envelope, not merely outer
+success. It subscribes to each type separately, preserving distinct results.
+Failed/unknown auth never subscribes, and no retries or alternate signatures
+are attempted. Unknown controls are summarized without copying arbitrary
+provider strings or session identifiers.
+
+The probe uses protocol ping/pong, no custom JSON heartbeat, and a capture
+duration of 1–60 seconds with bounded cleanup. It cannot be used as a
+long-lived collector. This is below the documented ten-minute auth-refresh
+limit; the recommended five-minute refresh cycle is unnecessary here. A
+future long-lived implementation must generate a fresh timestamp/nonce and
+signature for refresh on that cycle; extending this diagnostic is not
+authorization for background collection.
+
+A market-open trial is still needed to verify NASDAQ levels, ticker delivery
+and freshness. Saturday ticker silence is not a subscription failure. A book
+message omitting lists is recorded as unavailable, not interpreted as an empty
+book deletion or blindly merged as a delta. Full-snapshot/delta semantics
+remain a vendor clarification before production integration.
 
 ## Permissions and restrictions
 
 | Question | Verified or unresolved |
 | --- | --- |
-| Actual accessible depth | ARCA 6 bid / 20 ask in both trials; NASDAQ empty. No `num` supplied, so the gateway was asked for the permission-based default maximum. Available liquidity can be less than the limit. |
+| Actual accessible depth | REST ARCA 6 bid / 20 ask, NASDAQ empty; streaming book 60 distinct valid prices per side with ARCA MPIDs. REST `num` omitted to request the permission-based default maximum. Available liquidity can be less than the limit. |
 | Nasdaq TotalView / ArcaBook | Exchange labels establish venue books, not named-product licensing. The [legacy quota reference] links US LV3 to Nasdaq Basic + TotalView + NYSE ArcaBook, including a promotion and Arca non-professional evaluation. It does not prove this direct-AppKey account's current rights. |
 | Consolidated vs top-of-book | Multi-level ARCA observed; no consolidated-depth evidence. Quote completeness and NBBO unverified. |
-| Concurrent subscriptions/connections | Unknown. The [direct push quotas] explicitly avoid fixed numbers and count at account level, generally by symbol + type. Other devices may consume quota. No load/exhaustion probe performed. |
+| Concurrent subscriptions/connections | One connection and all three US.NVDA types accepted concurrently. Maximum unknown. The [direct push quotas] avoid fixed numbers and count at account level, generally by symbol + type. Other devices may consume quota. No load/exhaustion probe performed. |
 | REST and control-message limits | Unknown numeric limits. [Direct REST limits] explain batching/backoff, not fixed rates; no numeric rate headers returned here. Legacy OpenD quotas must not be transferred to this API. |
 | Available book fields | Observed exchange, flags, price, volume, order_count, precision and server-dispatch timestamps. Sampled order_count=0 does not prove zero resting orders; the docs say unavailable counts may be 0. Volumes are raw; physical size is volume / 10^precision. |
-| Extra streaming fields | [Push schema] documents optional mpid and batched ticker sequence/time fields. No actual availability established without streaming. |
+| Extra streaming fields | Stream books actually returned price, volume, nonzero order_count and ARCA mpid. Precision/book-level exchange omitted. Ticker sequence/time availability remains unobserved because no ticker messages arrived. |
 | Historical Level 2 | No historical-depth endpoint found in the current direct reference. Historical K-lines are not historical books. Vendor confirmation is still needed. |
 | Recording live depth for private ML | **Permission not established.** [Moomoo terms] limit market-data use and redistribution, incorporate provider conditions, and allow additional broker agreements. They do not explicitly authorize this proposed retention/non-display ML workflow. Obtain written clarification for the applicable account/API/exchange terms before enabling recording. |
 
 Useful questions for moomoo support or the developer dashboard:
 
-1. What exact method, path, query, body hash, nonce inclusion and byte encoding
-   form the AppKey quote-WebSocket signing payload? Ask for an official Python
-   example/test vector for initial auth and refresh at
-   `wss://webapi-quote.moomoo.com/ws`.
+1. Can the English auth docs include the Chinese four-field signature? Confirm
+   the gateway acknowledgment envelope and whether ORDER_BOOK messages that
+   omit lists are partial updates; clarify timestamp/venue/volume semantics.
 2. What US **direct API** quote tier and named products are active for this
    AppKey? Does that include TotalView and ArcaBook, and what is the maximum
    price-level count per venue? Is an evaluation/activation still required?
@@ -143,7 +184,7 @@ No messages were sent to moomoo. No paid services were enabled.
 ## Future integration recommendation (approval required)
 
 Use moomoo initially as an optional depth source alongside the established
-chart feeds, after completing the streaming and licensing proof. A future
+chart feeds, after completing market-hours freshness and licensing proof. A future
 low-level client would follow `backend/app/engine/tradier.py` and
 `backend/app/engine/alpaca.py` conventions: bounded reads, provider errors,
 explicit timestamps and provenance. Keep credentials local to the backend.
@@ -190,3 +231,6 @@ No adapter, chart UI or collection pipeline is included in Phase 1.
 [Push schema]: https://open.moomoo.com/api/quote/push/data-format
 [legacy quota reference]: https://openapi.moomoo.com/moomoo-api-doc/en/intro/authority.html
 [Moomoo terms]: https://www.moomoo.com/terms
+[official Chinese auth reference]: https://open.moomoo.com/zh-cn/api/quote/push/auth
+[English auth reference]: https://open.moomoo.com/api/quote/push/auth
+[subscription reference]: https://open.moomoo.com/api/quote/push/subscribe
