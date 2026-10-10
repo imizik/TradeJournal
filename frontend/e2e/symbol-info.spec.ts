@@ -6,11 +6,12 @@ import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, 
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
+// The news markers (T3.5) are off here so these tests count the tabs' own reads; e2e/news-markers.spec.ts covers the markers.
 test.beforeEach(async ({ context, page }) => {
   await context.addInitScript(({ key, settings }) => {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));
-  }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"] } });
-  await fakeChartSettings(context, { revision: 1, data: { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"] } });
+  }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"], newsHidden: true } });
+  await fakeChartSettings(context, { revision: 1, data: { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"], newsHidden: true } });
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const query = new URL(route.request().url()).searchParams;
     const symbol = query.get("symbol");

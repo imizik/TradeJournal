@@ -92,13 +92,39 @@ on hover), headline, publisher, a "+N tickers" chip, the summary on expand and
 the link out. **Focused** (default on) hides articles that tag more than three
 symbols. Polygon's per-ticker sentiment, when present, is labelled as Polygon's
 opinion. New headlines wait behind an "N new" button. The tab reads again each
-minute only while it is open and the page is visible. Polygon shares the free
-plan's 5 calls a minute with fill enrichment, so it is read only for this tab,
+minute only while it is open (or the chart's news layer is on, below) and the
+page is visible. Polygon shares the free plan's 5 calls a minute with fill
+enrichment, so it is read only for this tab and the news layer,
 through the enricher's limiter, never retried, and a 429 or failure serves the
 cached copy with its age and mutes Polygon for five minutes (Alpaca news likewise
 reads once on a 2.5 s budget with no retry and mutes itself for five minutes); each source's state
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
+
+**News markers** (T3.5) put the same Focused headlines on the main chart: a small
+square above the candle that holds an article's publish time, labelled "N" for
+one article or "N3" for three. The **News markers** group of the Layers panel
+(and the chart menu's layer list) hides them; it is on by default and saved with
+the other layers (a `newsHidden` settings field of its own, for the same reason
+as `autoLevelsHidden`). While the layer is on the chart reads the news endpoint
+for the main symbol after the symbol settles and then each minute while the page
+is visible; the News tab uses the same read when it is also open, so the two
+never ask twice, and no read happens with the layer off and the tab closed. Only
+the main symbol's main chart draws them, and only Focused articles (roundups of
+more than three tagged symbols are never marked). An article sits on the candle
+whose time bucket holds its publish time; one published when the market is
+closed (overnight, a weekend, a holiday, outside the displayed session) sits on
+the next candle, because a 1D or 1W candle is a regular session, 09:30 to 16:00
+New York; after the last candle it sits on the last one, before the first
+loaded candle it has no marker, and one inside a hole in the loaded history
+(more than 5 days intraday, 10 for 1D, 21 for 1W) has none. Several articles on
+one candle are one marker. Hover (a mouse) lists up to five headlines, newest
+first, then "+N more", with the candle's date and time; a click opens the dock
+on the News tab with that candle's articles highlighted for a few seconds. On a
+phone a tap pins the headlines in a popover whose **Read in News** button opens
+the Watchlist sheet on the News tab. Markers stack with fill arrows and earnings
+dates without covering them, and a level or drawing under the pointer still wins
+a click. Historical chart mode shows only the articles whose candles are loaded.
 
 A **Peers** strip (T3.4) sits above the tabs whenever the panel is expanded:
 Polygon's related companies for the active symbol as chips, each with today's
@@ -139,7 +165,7 @@ email) in the server's `backend.env`; the tab says so when SEC refuses.
 Overview is a placeholder for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
 on this device. Only an expanded Overview, You, News, Events, Forecast or Financials tab
-fetches, once after the ticker settles for 300 ms; old requests are cancelled.
+fetches, once after the ticker settles for 300 ms; old requests are cancelled. The News tab's read is the one the chart's news markers share.
 Overview shows price, change, day range and a 52-week range from the chart's
 existing quote, so it does not make a second quote request; the company name
 comes from that quote too, because Tradier's fundamentals carry none. Three
@@ -404,7 +430,7 @@ cd backend
   at** and **Copy price** for the price under the pointer (to the cent; the
   magnet applies, as it does to a placed level), **Reset chart scale** for that
   chart alone, and **Layers**: show or hide My levels, Drawings, Auto levels,
-  My fills and each study on every chart, plus a **Show** for each of the symbol's items
+  News markers, My fills and each study on every chart, plus a **Show** for each of the symbol's items
   hidden one by one. On a price scale, a time scale or the RSI pane there is no
   price, so only the reset and Layers appear. On a level or drawing it selects
   the item and offers its label (a level's name, a note's text) and color
