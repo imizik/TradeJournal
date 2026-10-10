@@ -75,8 +75,10 @@ first is started by launchd on the development Mac):
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
-  Alpaca, the Anthropic API and ntfy, and writes only to that branch, which
-  is never merged (`docs/strategy-factory.md`).
+  Alpaca and ntfy, has Claude (`claude -p`, no tools) answer the week's brief
+  on the Claude plan token, never API credits, and writes only to that
+  branch, which is never merged (`docs/strategy-factory.md`). The direct
+  Anthropic API call remains only behind an explicit `--use-api`.
 - The weekly documentation drift pass, a Claude Code routine in Anthropic's
   cloud on the Claude plan (claude.ai/code/routines, "Weekly docs drift
   pass"), started every Saturday from a fresh clone of `main`. Once 20 code
