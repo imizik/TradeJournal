@@ -29,17 +29,20 @@ guard below that refuses a database holding fills.
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+import secrets
+import sys
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlmodel import Session, SQLModel, select
 
-from app.models import Account, Fill
+from app.models import Account, Fill, Trade
 from app.engine.email_parser import ParsedFill
 from app.routers.fills import _import_fills_from_gmail
 
@@ -427,3 +430,112 @@ def test_concurrent_sample_replay_is_atomic_on_postgres(migrated, monkeypatch):
     from tests.test_sample_replay import check_concurrent_replay_store
 
     check_concurrent_replay_store(migrated, monkeypatch)
+
+
+def test_journal_coach_export_requires_and_observes_database_read_only_role(migrated):
+    """Exercise the real exporter, PostgreSQL grants and writer refusal."""
+    sys.path.insert(0, str(BACKEND_DIR / "scripts"))
+    from export_journal_coach import ExportError, export_snapshot  # noqa: E402
+    from journal_coach_snapshot import summary  # noqa: E402
+
+    suffix = secrets.token_hex(5)
+    reader = f"jc_reader_{suffix}"
+    writer = f"jc_writer_{suffix}"
+    member = f"jc_member_{suffix}"
+    group = f"jc_group_{suffix}"
+    names = (reader, writer, member, group)
+    password_by_role = {name: secrets.token_hex(24) for name in names if name != group}
+    role_created: set[str] = set()
+    et_close = datetime.now(ZoneInfo("America/New_York")).replace(
+        tzinfo=None, minute=0, second=0, microsecond=0
+    )
+    et_open = et_close - timedelta(hours=1)
+    with Session(migrated) as session:
+        account_a = Account(name=f"Coach A {suffix}", type="individual", last4=str(1000 + secrets.randbelow(8999)))
+        account_b = Account(name=f"Coach B {suffix}", type="individual", last4=str(1000 + secrets.randbelow(8999)))
+        session.add_all([account_a, account_b])
+        session.flush()
+        session.add_all([
+            Trade(account_id=account_a.id, ticker="COACH", instrument_type="stock", contracts=Decimal("2.500000"),
+                  avg_entry_premium=Decimal("10.000000"), total_premium_paid=Decimal("25.000000"),
+                  realized_pnl=Decimal("-25.250000"), opened_at=et_open, closed_at=et_close, status="closed"),
+            Trade(account_id=account_b.id, ticker="OTHER", instrument_type="stock", contracts=Decimal("1.000000"),
+                  avg_entry_premium=Decimal("10.000000"), total_premium_paid=Decimal("10.000000"),
+                  realized_pnl=None, opened_at=et_open, closed_at=et_close, status="expired"),
+        ])
+        session.commit()
+        selected_account_id = account_a.id
+
+    # Identifiers and passwords are random lowercase hex with fixed prefixes;
+    # keep utility SQL literal-safe while using the disposable test URL only.
+    try:
+        with migrated.begin() as connection:
+            for role in (reader, writer, member):
+                password = password_by_role[role]
+                connection.exec_driver_sql(
+                    f"CREATE ROLE {role} LOGIN PASSWORD '{password}' "
+                    "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS"
+                )
+            connection.exec_driver_sql(f"CREATE ROLE {group} NOLOGIN")
+            for role in (reader, writer, member):
+                connection.exec_driver_sql(f"GRANT USAGE ON SCHEMA public TO {role}")
+                connection.exec_driver_sql(f"GRANT SELECT ON TABLE public.trade TO {role}")
+            connection.exec_driver_sql(f"GRANT UPDATE (ticker) ON TABLE public.trade TO {writer}")
+            connection.exec_driver_sql(f"GRANT UPDATE ON TABLE public.trade TO {group}")
+            connection.exec_driver_sql(f"GRANT {group} TO {member}")
+        role_created.update(names)
+
+        base_url = make_url(TEST_DATABASE_URL)
+
+        def url_for(role: str) -> str:
+            return base_url.set(username=role, password=password_by_role[role]).render_as_string(hide_password=False)
+
+        snapshot = export_snapshot(url_for(reader), [selected_account_id], et_close.date(), et_close.date())
+        assert len(snapshot.trades) == 1
+        assert snapshot.trades[0].ticker == "COACH"
+        assert snapshot.trades[0].quantity == "2.500000"
+        assert snapshot.trades[0].realized_pnl == "-25.250000"
+        assert snapshot.trades[0].status == "closed"
+        assert snapshot.sample_data is False
+        assert snapshot.source == "approved_journal_export"
+        assert summary(snapshot)["realized_pnl_total"] == "-25.250000"
+        assert set(snapshot.trades[0].model_dump()) == {
+            "id", "ticker", "instrument_type", "quantity", "realized_pnl", "status", "opened_at", "closed_at"
+        }
+
+        for role in (writer, member):
+            with pytest.raises(ExportError):
+                export_snapshot(url_for(role), [selected_account_id], et_close.date(), et_close.date())
+
+        # The migration login owns public.trade, so the exporter must refuse
+        # this currently privileged connection before reading any rows.
+        with pytest.raises(ExportError):
+            export_snapshot(TEST_DATABASE_URL, [selected_account_id], et_close.date(), et_close.date())
+
+        readonly_engine = create_engine(url_for(reader), connect_args={"connect_timeout": 10})
+        try:
+            with readonly_engine.connect() as connection:
+                transaction = connection.begin()
+                with pytest.raises(DBAPIError) as denied:
+                    connection.execute(text("UPDATE public.trade SET status = status WHERE false"))
+                assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+                transaction.rollback()
+        finally:
+            readonly_engine.dispose()
+    finally:
+        with migrated.begin() as connection:
+            if member in role_created and group in role_created:
+                connection.exec_driver_sql(f"REVOKE {group} FROM {member}")
+            for role in (reader, writer, member):
+                if role in role_created:
+                    if role == writer:
+                        connection.exec_driver_sql(f"REVOKE UPDATE (ticker) ON TABLE public.trade FROM {writer}")
+                    connection.exec_driver_sql(f"REVOKE ALL PRIVILEGES ON TABLE public.trade FROM {role}")
+                    connection.exec_driver_sql(f"REVOKE ALL PRIVILEGES ON SCHEMA public FROM {role}")
+            if group in role_created:
+                connection.exec_driver_sql(f"REVOKE UPDATE ON TABLE public.trade FROM {group}")
+                connection.exec_driver_sql(f"REVOKE ALL PRIVILEGES ON TABLE public.trade FROM {group}")
+                connection.exec_driver_sql(f"DROP ROLE {group}")
+            for role in (reader, writer, member):
+                if role in role_created:
+                    connection.exec_driver_sql(f"DROP ROLE {role}")
