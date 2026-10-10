@@ -75,11 +75,11 @@ live GitHub polling run only after a merge.
 
 Native subagent review is a separate layer, not proof that runtime behavior
 works. The [pre-PR review workflow](pr-review.md) sends findings directly to the
-active owner, requires final-diff coverage, and bounds repair rounds. Missing or
+active owner, requires review to cover the final head, and bounds repair rounds. Missing or
 partial results never pass. CI remains required even when the narrow docs-only
 policy or an explicit user instruction skips model review. The former CLI
-runner, hooks and receipt gate are retired; see the guide for protection and
-hosted-review setting migration. Native review is instruction-driven, while
+runner, hooks and receipt gate are retired; the guide notes what remains of
+them. Native review is instruction-driven, while
 GitHub enforces CI. Neither resumes an ended local owning session automatically.
 
 If another checkout owns the default browser-test ports, set
