@@ -44,7 +44,16 @@ def test_export_and_public_key_publishers_have_distinct_minimum_access():
     assert "ReadWritePaths" not in serving
     for text in (exporter,keys):
         assert "NoNewPrivileges=true" in text and "ProtectSystem=strict" in text
+        assert "Requires=tradejournal-journal-network.service" in text
         assert "CapabilityBoundingSet=\n" in text and "EnvironmentFile" not in text
     for name in ("tradejournal-journal-export.timer","tradejournal-journal-real-keys.timer"):
         text = (units / name).read_text()
         assert "OnUnitActiveSec=15min" in text and "OnBootSec=30s" in text
+
+
+def test_network_policy_unit_owns_only_its_table_and_has_no_ip_socket_family():
+    text = (ROOT / "deploy/cloud-mcp-journal/tradejournal-journal-network.service").read_text()
+    assert "ExecStop=/usr/sbin/nft delete table inet tj_journal_publishers" in text
+    assert "CapabilityBoundingSet=CAP_NET_ADMIN" in text
+    assert "RestrictAddressFamilies=AF_NETLINK AF_UNIX" in text
+    assert "flush ruleset" not in text.lower().replace("# never flush the host ruleset.", "")

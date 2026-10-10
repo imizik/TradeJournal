@@ -104,8 +104,15 @@ and Eastern date bound and narrows the previous source-table grant. The ninth
 column is account filtering only and never appears in the export. Do not give the
 export role ownership, membership, base-table SELECT or write access.
 
-The manually installed export service permits localhost database access and writes
-only its publication directory. The serving process keeps its offline AF_UNIX-only
+The manually installed export service permits only the local database endpoint
+and writes only its publication directory. A separate nftables unit affects only
+the two dedicated publisher UIDs: export connects only to localhost TCP 5432;
+keys use the exact DNS servers on port 53 and public HTTPS on port 443, with
+private/loopback/link-local/Tailscale and host addresses denied except DNS.
+Both publishers require this policy unit to start successfully. Native negative
+controls must prove private API/frontend access fails, independently of filesystem
+or SQL restrictions. Existing host firewall tables are never flushed or replaced.
+The serving process keeps its offline AF_UNIX-only
 namespace, no database credential and no writable mounts. A separate public-key
 publisher uses the existing bounded HTTPS refresh code and cannot read the scope,
 database credential or publication. Both optional timers run every 15 minutes
@@ -118,7 +125,8 @@ and packaging, verify a fresh production restore point, and retain rollback file
 Observe the installed timer, fresh Jo summary/all pages, scoped exclusions and
 restart/revocation/expiry behavior. A stopped publisher must eventually refuse
 stale data. Distinguish these observations from local/disposable CI checks. Stop
-both new timers and active oneshots to cancel maintenance; restore the prior
+both new timers and active oneshots to cancel maintenance; remove only the new
+UID-specific firewall table when publishers are stopped, and restore the prior
 disabled/fixed grant/runtime as needed while preserving receipts/exports privately.
 This adds no recurring Jo task, provider/model job, live order, application trade
 write or coaching-note writer.

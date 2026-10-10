@@ -1,7 +1,8 @@
 [Unit]
 Description=Refresh only public OAuth keys for the real journal coach
 Wants=network-online.target
-After=network-online.target
+Requires=tradejournal-journal-network.service
+After=network-online.target tradejournal-journal-network.service
 
 [Service]
 Type=oneshot

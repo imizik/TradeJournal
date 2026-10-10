@@ -1,6 +1,7 @@
 [Unit]
 Description=Publish the explicitly approved rolling read-only journal export
-After=postgresql.service
+Requires=tradejournal-journal-network.service
+After=postgresql.service tradejournal-journal-network.service
 
 [Service]
 Type=oneshot

@@ -774,7 +774,15 @@ async function deepHistoryStub(page: Page, months = 6) {
     refreshes++;
     const data = currentFixture(route.request().url(), base);
     const main = data.panels["5m"];
-    if (main) main.bars = main.bars.map((bar) => ({ ...bar, source: "tradier" }));
+    if (main) {
+      // This fixture tests user-driven scroll-back. A 100-bar tail also requests
+      // history when the initial viewport opens, racing the startup assertion.
+      // Seed the normal 240-bar window; short-tail auto-fill is tested separately.
+      const seed = fixture(route.request().url()).panels["5m"]!.bars;
+      main.bars = seed.map((bar, index) => ({ ...bar, source: "tradier",
+        time: base + 30 - 300 * (seed.length - index),
+        end_time: base + 30 - 300 * (seed.length - index - 1) }));
+    }
     return route.fulfill({ json: data });
   });
   await page.route("**/api/backend/charts/history?**", (route) => {
@@ -881,9 +889,10 @@ test("5m scroll-back crosses six months without moving the viewport during pages
   });
   const state = await deepHistoryStub(page);
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   // A range change within 60 ms of a data reset reads as programmatic and loads nothing.
   await page.waitForTimeout(120);
+  expect(state.requests()).toBe(0);
   let reached = false;
   for (let index = 0; index < 15; index++) {
     const count = state.requests();
@@ -891,7 +900,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
     await page.waitForTimeout(180); // Lightweight Charts publishes its visible time range on the next frame.
     if ((await visibleRange(page, "main"))!.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
     await expect.poll(() => state.requests()).toBeGreaterThan(count);
-    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100 + index * 1000);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(240 + index * 1000);
     const range = (await visibleRange(page, "main"))!;
     const logical = (await logicalRange(page, "main"))!;
     expect(logical.to - logical.from).toBeCloseTo(50, 2);
@@ -974,7 +983,7 @@ test("history retention stays under 12,000, refills a newer gap, and returns to 
   await registerCharts(page);
   const state = await deepHistoryStub(page, 9);
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   let previous = 0;
   let previousReset = await resets(page);
   for (let index = 0; index < 25; index++) {
@@ -1004,7 +1013,7 @@ test.describe("phone deep history", () => {
     await registerCharts(page);
     const state = await deepHistoryStub(page);
     await page.goto("/charts");
-    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
     await page.getByTestId("canvas-main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
     const box = (await page.getByTestId("canvas-main").boundingBox())!;
@@ -1017,7 +1026,7 @@ test.describe("phone deep history", () => {
     }
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect.poll(() => state.requests()).toBeGreaterThan(0);
-    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(240);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: test.info().outputPath("deep-history-phone.png"), fullPage: true });
   });
@@ -3475,7 +3484,7 @@ test("a click on a drawing older than the loaded candles loads pages back to it"
     color: "#67d5eb", width: 2, drawn_on: "2026-07-01", extendLeft: false, extendRight: false };
   await fakeChartSettings(context, { revision: 1, data: { drawings: { MRVL: [old] } } });
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   await page.getByRole("button", { name: "Layers", exact: true }).click();
   await layerGroup(page, "Drawings").getByRole("button", { name: /^Go to Trend line/ }).click();
   // Two pages of 1,200 candles reach it; the view then centres on it, and it is selected.

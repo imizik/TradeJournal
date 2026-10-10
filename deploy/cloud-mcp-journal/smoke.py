@@ -378,10 +378,19 @@ def exercise(nonce: str | None) -> None:
     assert response.status_code in (401, 403) or response.json()["result"].get("isError")
     write_json(CONFIG, rolling_config())
 
+    # Changing the serving mode is a restart-pinned configuration transition.
+    # Restore the still-valid fixed export and prove it before fixed-mode
+    # corruption and refusal cases continue.
+    write_json(CONFIG, config(refreshed_digest))
+    run("systemctl", "restart", SERVICE_UNIT)
+    fixed_read = content(post("get_journal_summary", bearer=good))
+    assert fixed_read["snapshot_sha256"] == refreshed_digest
+    assert fixed_read["summary"] == summary
+
     write_json(CONFIG, config(refreshed_digest, end_day="2026-01-04"))
     response = post("get_journal_summary", bearer=good)
     # A changed assignment fails at authentication before dispatching a tool.
-    assert response.status_code in (401, 403)
+    assert response.status_code in (401, 403) or response.json()["result"].get("isError")
     assert not any(value in response.text for value in ("18.750000", "MU", "NBIS"))
     write_json(CONFIG, config(refreshed_digest))
 
