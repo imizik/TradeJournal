@@ -1396,7 +1396,10 @@ async function mockStreams(page: Page) {
       constructor(url: string) {
         target.__streams.push(new URL(url, location.href).searchParams.get("symbols") ?? "");
         MockEventSource.current = this;
-        queueMicrotask(() => this.emit("status", { state: "connected" }));
+        queueMicrotask(() => {
+          this.emit("status", { state: "connecting" });
+          this.emit("status", { state: "connected" });
+        });
       }
       addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
       emit(type: string, value: unknown) { if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }

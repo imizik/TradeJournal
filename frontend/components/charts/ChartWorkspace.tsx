@@ -735,9 +735,12 @@ export default function ChartWorkspace() {
         try {
           const message = JSON.parse((event as MessageEvent).data);
           const connected = message.state === "connected";
-          status(connected ? "connected" : "fallback");
+          status(connected ? "connected" : message.state === "connecting" ? "connecting" : "fallback");
           if (message.resync === true || (connected && recovering)) refreshNow.current();
-          recovering = !connected;
+          // Initial subscription sends connecting then connected; it is not a
+          // recovery and must not add a second workspace/provider read.
+          if (connected) recovering = false;
+          else if (message.state === "fallback" || message.resync === true) recovering = true;
         }
         catch { status("fallback"); }
       });
