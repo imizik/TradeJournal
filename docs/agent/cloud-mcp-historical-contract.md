@@ -25,7 +25,9 @@ activated by merging.
 Writes additionally require OAuth `practice:write`, strict
 `decision_writes=true` and `TJ_CLOUD_MCP_DECISION_WRITES=true`. Recheck current
 principal version, expiry, enabled state, grants and configuration after body
-reception under the browser writer/revocation serialization boundary.
+reception under the browser writer/revocation serialization boundary. Reload
+the frozen assignment, opportunity and context under that same boundary, then
+repeat evidence integrity and response/fact bounds before committing.
 
 ## Tools and evidence
 

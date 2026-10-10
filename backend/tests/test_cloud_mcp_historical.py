@@ -254,3 +254,33 @@ def test_missing_minutes_and_original_clocks_survive_exact_projection(linked):
     assert packet['simulated_as_of'] == original['simulated_as_of']
     assert packet['retrieved_at'] == original['captured_at']
     assert linked.backend.get(run_path(linked)).status_code == 404
+
+
+@pytest.mark.parametrize("change", ["context", "assignment", "deleted_opportunity"])
+def test_frozen_resource_changed_during_body_is_refused(linked, change):
+    from app.routers import cloud_choices
+    from app.models import PracticeOpportunity
+    original = cloud_choices._parse_choice
+    def corrupt(raw):
+        with Session(linked.h.b.engine) as db:
+            opp = db.get(PracticeOpportunity, linked.h.ids['MU'])
+            if change == 'context':
+                context = db.get(DecisionContext, opp.context_id)
+                context.data_json += ' '
+                db.add(context)
+            elif change == 'deleted_opportunity':
+                db.delete(opp)
+            else:
+                from app.models import PracticeRun
+                run = db.get(PracticeRun, linked.h.run_id)
+                metadata = json.loads(run.brief_json)
+                metadata[0]['assigned_agent'] = 'agent:another-assistant'
+                run.brief_json = json.dumps(metadata)
+                db.add(run)
+            db.commit()
+        return original(raw)
+    linked.h.b.patch.setattr(cloud_choices, '_parse_choice', corrupt)
+    response = linked.backend.post(path(linked), json=payload(linked))
+    assert response.status_code in {404, 422}, response.text
+    with Session(linked.h.b.engine) as db:
+        assert not db.exec(select(DecisionRecord)).all()

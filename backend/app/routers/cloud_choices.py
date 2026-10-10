@@ -207,9 +207,11 @@ def _save_choice(db: Session, request: Request, who, run: PracticeRun, opportuni
                  payload: PracticeChoice):
     try:
         if historical_mode():
+            opportunity_id = str(opportunity.id)
             # Serialize with browser saves/revocation and recheck after body reception.
             with access._LOCK:
                 access._serialized(db)
+                db.expire_all()
                 principal = db.get(AccessPrincipal, who.identifier, populate_existing=True)
                 linked = cloud_practice_access.verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", "")).active_config()
                 profile = next((p for p in linked.profiles if p.principal_id == who.identifier), None) if linked else None
@@ -219,7 +221,9 @@ def _save_choice(db: Session, request: Request, who, run: PracticeRun, opportuni
                         or principal.credential_expires_at is None or principal.credential_expires_at <= access.now()
                         or json.loads(principal.grants_json) != who.grants):
                     _bad(403, "Historical permission changed before saving")
-                require_choice_write(request)
+                who, run, opportunity, _context, evidence = _write_preflight(
+                    request, db, opportunity_id)
+                _bound_selected_facts(evidence, payload)
                 return historical_replay.choose(db, run, opportunity, str(who.identifier), payload.model_dump())
         return sample_practice.choose(db, run, opportunity, str(who.identifier), payload.model_dump())
     except decisions.DecisionError as exc:
