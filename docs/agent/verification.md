@@ -475,8 +475,9 @@ Be honest about this when reporting work:
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
   proved only by a real weekly run. The documentation drift routine runs in
   Anthropic's cloud and has no test here; whether its pass is any good is
-  judged in review of the pull request it opens. `scripts/review_carry.sh`, which lets a clean
-  review survive integrating main, is tested against a throwaway repository
+  judged in review of the pull request it opens.
+  `scripts/review_carry.sh`, which lets a clean review survive integrating
+  main, is tested against a throwaway repository
   (`test_review_carry_script.py`). It proves only that the feature's own patch
   is unchanged; whether main's incoming changes alter what the feature relies
   on is the owner's recorded judgment plus current-head CI.

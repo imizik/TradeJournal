@@ -202,9 +202,8 @@ reason, and ruff lints them without importing them.
   request on `claude/docs-drift-<date>`. It never merges. Its instructions
   live in the routine, not the repository; each run's log is on its routine
   page. (Until 2026-10-10 a launchd script on the development Mac ran it
-  with `claude -p`.)
-  The desktop scheduled task that ran it before stalled on a permission prompt
-  on its first run (2026-09-26) and is disabled.
+  with `claude -p`; before that, a desktop scheduled task stalled on a
+  permission prompt on its first run, 2026-09-26.)
 
 ## Reference documents
 
