@@ -231,18 +231,20 @@ def test_missing_minutes_and_original_clocks_survive_exact_projection(linked):
     removed = {bar['t'] for bar in before[3:6]}
     original['packets']['NBIS']['recent_minute_bars'] = [bar for bar in bars if bar['t'] not in removed]
     with Session(linked.h.b.engine) as db:
-        run = historical_replay.prepare(db, original, identifier='history-test', proof=True)
-        principal = db.get(AccessPrincipal, 'history-test')
-        grants = json.loads(principal.grants_json)
-        grants['run_ids'] = [str(run.id)]
-        principal.grants_json = json.dumps(grants)
-        db.add(principal)
-        db.commit()
+        run = historical_replay.prepare(db, original, identifier='history-gaps', proof=True)
         new_id = run.id
+    grants = {**linked.h.grants, 'run_ids': [str(new_id)]}
+    made = linked.h.b.owner.post('/access/assistants', json={'identifier': 'history-gaps', 'grants': grants})
+    assert made.status_code == 201, made.text
+    from tests.test_browser_access import signin
+    assert signin(linked.h.b, identifier='history-gaps', key=made.json()['key']).status_code == 200
+    config = json.loads(linked.config.read_text())
+    config['profiles'][0]['principal_id'] = 'history-gaps'
+    linked.config.write_text(json.dumps(config))
+    cloud_practice_access.verifier.cache_clear()
     response = linked.backend.get(f'/cloud-mcp/practice/runs/{new_id}')
     assert response.status_code == 200, response.text
     browser = linked.h.b.public.get(f'/practice/runs/{new_id}')
-    # The old browser session's grants are refreshed by its own request identity.
     assert browser.status_code == 200, browser.text
     assert response.json()['run'] == browser.json()
     nbis = next(o for o in response.json()['run']['opportunities'] if o['symbol'] == 'NBIS')
