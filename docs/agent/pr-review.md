@@ -10,6 +10,7 @@ or a GitHub-enforced model-review status.
 ## Choose the review depth
 
 Judge the consequences of the whole diff, including renames, not line count.
+A link or index entry neither raises nor lowers a document's tier.
 State the tier and reason before starting review. The user may explicitly
 request a skip; record that decision without calling the change reviewed.
 Never hide known findings behind a skip. CI remains required in every tier.
@@ -22,7 +23,9 @@ Never hide known findings behind a skip. CI remains required in every tier.
 
 When in doubt choose the higher tier. Tier 2 needs explicit acceptance evidence:
 name the critical invariants, test failure/recovery paths, and check the relevant
-integration boundaries. A financial change needs numerical edge cases; a
+integration boundaries. For a new or changed service, worker or deployment path,
+the reviewer brief lists how it starts, stops, is replaced and rolled back, and
+what permissions it holds. A financial change needs numerical edge cases; a
 migration needs upgrade/rollback evidence where supported; a security change
 needs refusal/negative cases. Read the domain and verification guides for the
 actual checks. Two approving models cannot replace missing evidence.
@@ -61,10 +64,11 @@ and [Claude subagents](https://code.claude.com/docs/en/sub-agents).
 ## Owner sequence
 
 1. Finish implementation, required deterministic checks and relevant manual
-   acceptance evidence. Fetch the target branch and integrate changes that
-   affect the work. Commit locally to freeze the candidate: record exact base
-   and head SHAs and require a clean tracked worktree. Include all intended
-   files; untracked source is not part of a commit review.
+   acceptance evidence. Note the commit each ran on; rerun any whose covered
+   code or dependencies changed since. Fetch the target branch and integrate
+   changes that affect the work. Commit locally to freeze the candidate: record
+   exact base and head SHAs and require a clean tracked worktree. Include all
+   intended files; untracked source is not part of a commit review.
 2. Send each reviewer the task requirements, acceptance criteria, repository
    path, exact base/head, tier and its scope. Point to this guide and relevant
    domain contracts. Describe requirements neutrally; do not supply the author's
@@ -76,6 +80,7 @@ and [Claude subagents](https://code.claude.com/docs/en/sub-agents).
    partial report or missing verdict is not a clean review. If the session ends
    or the Mac sleeps, resume and inspect the existing task before starting more.
 4. Validate findings against code and requirements. Fix actionable defects,
+   look for the same mistake elsewhere in the diff and the paths it touches,
    run affected checks and commit the fixes. Explain rejected findings with
    evidence in the review record. Re-review the final candidate with the same
    reviewer; supply the new SHA and previous findings. The reviewer must assess
@@ -89,11 +94,14 @@ and [Claude subagents](https://code.claude.com/docs/en/sub-agents).
    actionable findings remain after the budget, report them and keep any PR
    draft. Another round needs the user's authorization.
 6. Before publishing ready, ensure review still covers the full current diff.
-   A new head invalidates the previous clean result; re-review within the same
-   budget. A changed base requires inspection and re-review if it changes the
-   diff or integration assumptions. Push and open/update the PR only within the
-   user's publishing authorization. A draft for early visibility is fine, but
-   must clearly say review is incomplete.
+   A new feature commit needs re-review within the same budget. Integrating
+   the target branch keeps a clean review, spending no round, only when after a
+   fetch `scripts/review_carry.sh <reviewed-base> <reviewed-head>` reports
+   `identical`, the owner inspects its incoming files and records why none
+   changes what the feature depends on or assumes, and step 7 passes on the new
+   head. Record the script output. When in doubt, re-review. Push and
+   open/update the PR only within the user's publishing authorization. A draft
+   for early visibility is fine, but must clearly say review is incomplete.
 7. Wait for CI on the exact pushed head. Check every required context and any
    other failing PR check. CI repairs are code changes: verify and re-review
    them within the remaining budget. Re-fetch the PR head/base and required
@@ -134,9 +142,10 @@ and resolved findings plus the required verification let the owner report ready.
 ## What the user sees
 
 In the PR description record tier/reason (or explicit skip), actual reviewer
-models/effort and task IDs, rounds used, reviewed base/head, findings and their
-resolution, and the checks observed. Include enough of the findings to read the
-outcome in GitHub; a local task ID alone is not a usable review report. Report
+models/effort and task IDs, rounds used, reviewed base/head, any carried-review
+script output, findings and their resolution, and the checks observed with the
+commit each ran on. Include enough of the findings to read the outcome in
+GitHub; a local task ID alone is not a usable review report. Report
 unfinished evidence separately. The final chat links the PR and says ready or
 blocked. Reviews are visible in the native subagent activity and summarized in
 the PR, rather than posted as a second provider's GitHub review comments.
