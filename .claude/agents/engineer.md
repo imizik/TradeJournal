@@ -26,9 +26,12 @@ back only what the lead needs.
 3. Implement the smallest change that meets the contract. Follow the
    surrounding code's patterns; find one existing example and copy its shape.
 4. Prove it. Run `bash scripts/setup.sh` first in a fresh clone. Use
-   `bash scripts/verify.sh --fast` while iterating, and the full
-   `bash scripts/verify.sh` (or the narrowest mode that covers every layer you
-   touched, such as `--backend`, `--frontend` or `--e2e`) before reporting.
+   `bash scripts/verify.sh --fast` while iterating. Run the checks assigned by
+   the lead; if none were assigned, run the full `bash scripts/verify.sh`.
+   A scoped assignment may use `--backend`, `--frontend` or `--e2e`, but report
+   remaining required checks explicitly. Follow verification.md's
+   "Verification ownership" section when reporting or reusing evidence; the
+   lead remains responsible for final verification.
    Fix your own failures. Never skip, weaken or delete a test to get green.
 5. Commit on the current branch if the brief says to. Never push, open or
    merge a pull request, or rewrite history; the lead does that.

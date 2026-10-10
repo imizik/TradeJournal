@@ -76,6 +76,12 @@ change lands somewhere the suite does not cover — any frontend rendering, any
 live external integration — say so explicitly and describe what you did verify
 instead. `docs/agent/verification.md` lists the gaps honestly; use it.
 
+The owner assigns checks to workers and ensures the full required verification
+is complete before reporting success. A worker's narrower checks do not replace
+that final obligation. Reuse evidence under
+[verification ownership](docs/agent/verification.md#verification-ownership);
+do not rerun a check merely because another agent ran it.
+
 CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
 the local verification script does not run those checks.
 
@@ -87,7 +93,9 @@ every check fails on missing tools rather than on the change.
 package pass on the merge commit, the VPS installs it by itself within about
 10 minutes. On weekdays between 09:25 and 16:15 New York time it waits for the
 close unless the PR carries the `deploy-now` label. Schema changes wait for a
-person. A PR is ready to merge only when it is ready to go live; see
+person unless `AUTODEPLOY_AUTO_MIGRATE=true`; when enabled, the deployer verifies
+a fresh backup before migrating, and a backup or migration failure stops the
+release. A PR is ready to merge only when it is ready to go live; see
 [automatic deployment](deploy/README.md#automatic-deployment).
 
 ## Independent review and completion

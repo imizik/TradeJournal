@@ -19,8 +19,8 @@ test.describe("fixture", () => {
   test("seeded backend holds exactly the expected dataset", async ({ request }) => {
     // Runs first so contamination surfaces as one clear failure here rather
     // than as several confusing assertion failures across the page tests.
-    // The usual cause is manual fills being restored from
-    // backend/data/manual_fills.json into the e2e database on startup.
+    // Startup restore uses this invocation's disposable backup path; a mismatch
+    // therefore points to fixture contamination within this run.
     const stats = await (await request.get(`${API}/stats`)).json();
 
     expect(

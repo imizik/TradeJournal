@@ -89,8 +89,12 @@ patterns that can create N+1 calls.
 - Worthless expiration subtracts remaining long-option cost basis but credits
   remaining short-option premium. Previously realized partial closes retain
   their result in both cases.
-- Manual fills are backed up to `backend/data/manual_fills.json` and restored
-  on startup and after a destructive resync.
+- Manual fills default to `backend/data/manual_fills.json` and are restored on
+  startup and after a destructive resync. `TJ_MANUAL_FILLS_BACKUP` explicitly
+  overrides that path for isolated tests; backup and restore use the same
+  configured path. Pytest and each Playwright browser configuration provide a
+  disposable location so startup restore and `POST /fills` cannot consume or
+  replace the developer's backup.
 - The FIFO sort key is
   `(executed_at, opens-before-closes, str(fill.id))`. Opens must sort before
   closes at equal timestamps, or a close is orphaned and its entry lots get
