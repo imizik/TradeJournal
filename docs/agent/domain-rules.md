@@ -519,3 +519,13 @@ and missing cost provenance remain explicit. The shared regular-session
 underlying benchmark requires complete minute and no-split coverage, never
 substitutes actor paper fills or actual journal P&L. See
 [the complete A3 contract](a3-implementation-contract.md).
+
+The [manual advisor/shadow fixture](advisor-shadow-contract.md) exclusively
+occupies the existing A3 agent slot in a disposable demo database. It shares
+the full-batch validator, retains an exact neutral projection and submission,
+and exposes no provider/model or arm operation. Its capability is local-only,
+expiring/revocable and checked under the SQLite writer lock after body reception.
+Fixture prices cannot support a P0 TAKE. Advisor export before all five human
+commitments durably marks the run assisted; manual inference provenance always
+remains independence-unverified. Advisor text/grant digests never enter the
+shadow packet, own receipt or ordinary Practice configuration projection.
