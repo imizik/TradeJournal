@@ -113,6 +113,11 @@ it does not establish US options access, complete historical coverage or rights
 to retain live depth. Trading and brokerage-account endpoints are outside this
 research.
 
+The separately selected [historical/options diagnostic](moomoo-history-options-diagnostic.md)
+on 2026-10-10 established access to one recently expired NVDA option and found
+matching option OHLCV inputs after a diagnostic timestamp shift. It recommended
+keeping current metric sources; broader endpoint evaluation remains future work.
+
 | Candidate data | Potential journal or research use | Comparison question |
 |---|---|---|
 | Stock and option historical candles | MFE/MAE, giveback, exit efficiency and post-exit paths | Are minute paths more complete and accurate than the current sources, including expired US options? |
