@@ -181,13 +181,14 @@ def test_role_audit_refuses_privileged_or_writable_roles():
         def first(self): return self.row
 
     class Connection:
-        def __init__(self, role=(False, False, False, False), membership=None, create=None, owned=None, writable=None):
+        def __init__(self, role=(False, False, False, False), membership=None, database_create=False, create=None, owned=None, writable=None):
             self.role, self.membership = role, membership
             self.create, self.owned, self.writable = create, owned, writable
+            self.database_create = database_create
             self.calls = 0
         def execute(self, query):
             self.calls += 1
-            return [Result(self.role), Result(self.membership), Result(self.create), Result(self.owned), Result(self.writable)][self.calls - 1]
+            return [Result(self.role), Result(self.membership), Result(scalar=self.database_create), Result(self.create), Result(self.owned), Result(self.writable)][self.calls - 1]
 
     restricted = (False, False, False, False)
     for connection in [
@@ -196,6 +197,7 @@ def test_role_audit_refuses_privileged_or_writable_roles():
         Connection((False, False, True, False)),
         Connection((False, False, False, True)),
         Connection(restricted, membership=("writer_role",)),
+        Connection(restricted, database_create=True),
         Connection(restricted, create=("public",)),
         Connection(restricted, owned=("public",)),
         Connection(restricted, writable=("trade",)),

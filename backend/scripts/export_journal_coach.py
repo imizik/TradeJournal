@@ -55,6 +55,11 @@ def _validate_role(connection) -> None:
     """)).first()
     if membership:
         raise ExportError("database role has role memberships")
+    database_create = connection.execute(text(
+        "SELECT has_database_privilege(current_user, current_database(), 'CREATE')"
+    )).scalar_one()
+    if database_create:
+        raise ExportError("database role can create schemas")
     schema_create = connection.execute(text("""
         SELECT n.nspname
         FROM pg_namespace AS n

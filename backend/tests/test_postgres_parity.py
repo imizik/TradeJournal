@@ -451,8 +451,11 @@ def test_journal_coach_export_requires_and_observes_database_read_only_role(migr
     )
     et_open = et_close - timedelta(hours=1)
     with Session(migrated) as session:
-        account_a = Account(name=f"Coach A {suffix}", type="individual", last4=str(1000 + secrets.randbelow(8999)))
-        account_b = Account(name=f"Coach B {suffix}", type="individual", last4=str(1000 + secrets.randbelow(8999)))
+        used_suffixes = set(session.exec(select(Account.last4)).all())
+        available = [str(value) for value in range(1000, 10000) if str(value) not in used_suffixes]
+        assert len(available) >= 2
+        account_a = Account(name=f"Coach A {suffix}", type="individual", last4=available[0])
+        account_b = Account(name=f"Coach B {suffix}", type="individual", last4=available[1])
         session.add_all([account_a, account_b])
         session.flush()
         session.add_all([
@@ -486,6 +489,8 @@ def test_journal_coach_export_requires_and_observes_database_read_only_role(migr
         role_created.update(names)
 
         base_url = make_url(TEST_DATABASE_URL)
+        db_name = base_url.database
+        assert db_name
 
         def url_for(role: str) -> str:
             return base_url.set(username=role, password=password_by_role[role]).render_as_string(hide_password=False)
@@ -502,6 +507,16 @@ def test_journal_coach_export_requires_and_observes_database_read_only_role(migr
         assert set(snapshot.trades[0].model_dump()) == {
             "id", "ticker", "instrument_type", "quantity", "realized_pnl", "status", "opened_at", "closed_at"
         }
+
+        with migrated.begin() as connection:
+            quoted_database = connection.dialect.identifier_preparer.quote(db_name)
+            connection.exec_driver_sql(f"GRANT CREATE ON DATABASE {quoted_database} TO {reader}")
+        try:
+            with pytest.raises(ExportError, match="create schemas"):
+                export_snapshot(url_for(reader), [selected_account_id], et_close.date(), et_close.date())
+        finally:
+            with migrated.begin() as connection:
+                connection.exec_driver_sql(f"REVOKE CREATE ON DATABASE {quoted_database} FROM {reader}")
 
         for role in (writer, member):
             with pytest.raises(ExportError):
