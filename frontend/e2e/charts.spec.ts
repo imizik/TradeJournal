@@ -2908,9 +2908,16 @@ test("a drawing made before a recorded split moves with the candles, and a drag 
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "zone");
   // Drawn at a tenth of its saved prices, as the candles are; the saved record is untouched.
-  const corners = (await anchorsOf(page, "main", "old-zone"))!;
-  expect(Math.abs(corners[0]!.y - await levelY(page, "main", 250))).toBeLessThan(1);
-  expect(Math.abs(corners[1]!.y - await levelY(page, "main", 256))).toBeLessThan(1);
+  // Sample anchors and expected prices together: autoscale can change between
+  // separate browser evaluations while the chart finishes laying out.
+  const { corners, expectedY } = await page.evaluate(() => {
+    const probe = window as unknown as { __tjDrawings: LayerProbe; __tjCharts: PaneRegistry };
+    const candles = probe.__tjCharts.get("main")!.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    return { corners: probe.__tjDrawings.get("main")!.anchors("old-zone")!, expectedY: [250, 256].map((price) => candles.priceToCoordinate(price)) };
+  });
+  expect(expectedY.every((y) => y !== null)).toBe(true);
+  expect(Math.abs(corners[0]!.y - expectedY[0]!)).toBeLessThan(1);
+  expect(Math.abs(corners[1]!.y - expectedY[1]!)).toBeLessThan(1);
   expect(drawingsOf(server)[0]).toEqual(zone);
   const inside = { x: (corners[0]!.x + corners[1]!.x) / 2, y: (corners[0]!.y + corners[1]!.y) / 2 };
   await dragChart(page, "main", inside, { x: inside.x, y: inside.y - 20 });
