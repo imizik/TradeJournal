@@ -36,6 +36,8 @@ test("cloud-style login, restricted SSR/UI, mutation denial, and owner revocatio
   const assistantSession = await (await page.request.get("/api/access/me")).json();
   const forbidden = await page.request.post("/api/backend/fills", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: {} });
   expect(forbidden.status()).toBe(403);
+  expect((await page.request.get("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001")).status()).toBe(403);
+  expect((await page.request.post("/api/backend/advisor-shadow/runs/00000000-0000-0000-0000-000000000001/advisor-packet", { headers: { Origin: publicOrigin, "x-tj-csrf": assistantSession.csrf }, data: { question: "forged", user_plan: "forged" } })).status()).toBe(403);
   const forbiddenPage = await page.request.get("/access");
   expect(forbiddenPage.status()).toBe(403);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();

@@ -4,6 +4,8 @@ import io
 import json
 from pathlib import Path
 import shutil
+import subprocess
+import sys
 import tarfile
 
 import pytest
@@ -11,6 +13,8 @@ import pytest
 spec = importlib.util.spec_from_file_location("dot_trial_update", Path(__file__).resolve().parents[2] / "deploy/dot_trial_update.py")
 updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
+ABSENT_BEFORE_UPDATE = {"backend/app/engine/sample_practice.py", "deploy/dot_trial_seed.py",
+                       "backend/app/engine/advisor_shadow.py", "backend/app/routers/advisor_shadow.py"}
 
 
 def archive(path, values):
@@ -31,9 +35,10 @@ def test_frontend_archives_cannot_escape_or_replace_linux_dependencies(tmp_path,
     assert not (tmp_path / "outside").exists()
 
 
-def test_backend_archive_requires_exact_selected_source_set(tmp_path):
+@pytest.mark.parametrize("name", ["backend/.env", "backend/advisor_shadow_demo.py", "backend/scripts/advisor_shadow_demo.py"])
+def test_backend_archive_requires_exact_selected_source_set(tmp_path, name):
     path = tmp_path / "bad.tar"
-    archive(path, {"backend/.env": "no secrets allowed"})
+    archive(path, {name: "outside the selected app dependency bundle"})
     with pytest.raises(ValueError, match="selected update scope"):
         updater.extract(path, tmp_path / "unpacked", backend=True)
 
@@ -63,7 +68,7 @@ def update_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr(updater, "CONFIG", config)
     monkeypatch.setattr(updater, "UNIT_DIR", tmp_path / "units")
     monkeypatch.setattr(updater, "check_target", lambda: None)
-    for name in updater.SOURCE_FILES - {"backend/app/engine/sample_practice.py", "deploy/dot_trial_seed.py"}:
+    for name in updater.SOURCE_FILES - ABSENT_BEFORE_UPDATE:
         path = runtime / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# old source\n")
@@ -94,7 +99,8 @@ def test_readiness_failure_restores_sources_assets_and_permissions(update_fixtur
     assert (runtime / "frontend/server.js").read_text() == "old server"
     assert (runtime / "frontend/.next/old.js").read_text() == "old frontend"
     assert (runtime / "frontend/node_modules/native").read_text() == "verified Linux dependency"
-    assert not (runtime / "backend/app/engine/sample_practice.py").exists()
+    assert all(not (runtime / name).exists() for name in ABSENT_BEFORE_UPDATE)
+    assert (runtime / "backend/app/engine/practice.py").read_text() == "# old source\n"
     assert "TJ_SAMPLE_DECISION_WRITES=false" in (config / "trial-runtime.env").read_text()
     assert [call[1] for call in calls] == ["stop", "start", "stop", "start"]
     snapshots = list(runtime.parent.glob("sample-update-*/backup/backend/app/engine/access.py"))
@@ -361,3 +367,42 @@ def test_market_permission_is_explicit_and_restored_on_failed_start(update_fixtu
     with pytest.raises(RuntimeError, match="market flag startup failed"):
         updater.update(backend, frontend, "b" * 40, enable_market_decisions=True)
     assert "TJ_MARKET_DECISION_WRITES" not in (config / "trial-runtime.env").read_text()
+
+
+@pytest.mark.parametrize("omitted", [None, "backend/app/engine/advisor_shadow.py",
+    "backend/app/routers/advisor_shadow.py", "backend/app/engine/practice.py"])
+def test_selected_overlay_restores_actual_main_import_dependencies(tmp_path, omitted):
+    """A prior installation lacks new modules/helper; the overlay must supply them.
+
+    Each omitted dependency is a planted bad bundle. Importing actual source in
+    a fresh process catches omissions that compiling individual files cannot.
+    No lifespan, database operation, provider or service is started.
+    """
+    root = Path(__file__).resolve().parents[2]
+    runtime = tmp_path / "runtime"
+    backend = runtime / "backend"
+    shutil.copytree(root / "backend/app", backend / "app", ignore=shutil.ignore_patterns("__pycache__"))
+    for path in (root / "backend").glob("*.py"):
+        shutil.copy2(path, backend / path.name)
+    for name in ("backend/app/engine/advisor_shadow.py", "backend/app/routers/advisor_shadow.py"):
+        (runtime / name).unlink()
+    practice = backend / "app/engine/practice.py"
+    practice.write_text(practice.read_text().replace("def commit_agent_choices(", "def previous_batch_helper("))
+    for name in updater.SOURCE_FILES - ({omitted} if omitted else set()):
+        destination = runtime / name
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        source = root / ("deploy/dot_trial_app.py" if name == "backend/dot_trial_app.py" else name)
+        shutil.copy2(source, destination)
+    result = subprocess.run([sys.executable, "-c", """
+from pathlib import Path
+import app.main
+from app.engine import advisor_shadow, practice
+from app.routers import advisor_shadow as routes
+assert callable(getattr(practice, 'commit_agent_choices', None))
+assert Path(advisor_shadow.__file__).resolve().is_relative_to(Path.cwd())
+assert Path(routes.__file__).resolve().is_relative_to(Path.cwd())
+"""], cwd=backend, env={"PYTHONPATH": str(backend), "PYTHON_DOTENV_DISABLED": "1",
+        "DATABASE_URL": f"sqlite:///{tmp_path / 'import-only.db'}", "MIGRATION_DATABASE_URL": f"sqlite:///{tmp_path / 'import-only.db'}"},
+        capture_output=True, text=True, timeout=30)
+    assert (result.returncode == 0) is (omitted is None), result.stderr
+    assert not (tmp_path / "import-only.db").exists()

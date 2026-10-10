@@ -18,6 +18,7 @@ UNIT_DIR = Path("/etc/systemd/system")
 CLOUD_SOCKET = "tradejournal-d1-reads.socket"
 CLOUD_UNITS = (CLOUD_SOCKET, "tradejournal-d1-reads.service")
 SOURCE_FILES = frozenset({"backend/app/engine/decisions.py", "backend/app/engine/access.py",
+    "backend/app/engine/practice.py", "backend/app/engine/advisor_shadow.py", "backend/app/routers/advisor_shadow.py",
     "backend/app/engine/paper.py", "backend/app/engine/sample_replay.py",
     "backend/app/engine/sample_practice.py", "backend/app/routers/practice.py", "backend/app/routers/access.py",
     "backend/app/access_manifest.py", "backend/app/access_middleware.py", "backend/app/main.py",
