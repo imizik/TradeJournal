@@ -27,6 +27,22 @@ a private temporary directory; successful runs remove them.
 On Windows, run these through Git Bash or WSL. `startdev.ps1` remains the
 native PowerShell launcher for the app itself.
 
+## Verification ownership
+
+The owner assigns checks and remains responsible for the full verification
+required by `CLAUDE.md` and the feature's acceptance criteria. Workers may run
+focused checks for their assigned scope; they report the tested revision,
+any uncommitted changes, command, environment and result. Their report must
+identify which required checks remain for the owner to complete.
+
+Reuse a passing result when the tested code, dependencies, configuration and
+relevant environment are unchanged. Record the tested revision and why later
+changes do not affect the check; if that cannot be established, rerun it.
+Neither an agent handoff nor a new SHA alone invalidates local evidence.
+Required CI still passes on the exact final pushed head, and the
+[review coverage rules](pr-review.md#owner-sequence), including proof-pending
+and catch-up requirements, remain unchanged.
+
 ## What each check covers
 
 | Check | Command | Catches |
