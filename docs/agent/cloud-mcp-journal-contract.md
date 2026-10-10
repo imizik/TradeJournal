@@ -106,6 +106,10 @@ rows. It exercises the actual socket/service, scope and data denials, bounded
 pagination, revocation, refresh and restart. Sandbox checks execute inside that
 same unit context and must prove production markers are inaccessible, fixture
 files cannot be written, IPv4/IPv6 creation is denied and Unix sockets work.
+Outside-sandbox controls first prove the same UID can create IP sockets, read
+the harmless production-path marker and write a dedicated harmless probe.
+Removing `InaccessiblePaths` or `ProtectSystem` separately must make its probe
+fail; ordinary file permissions cannot substitute for these policy checks.
 Stopping both units must prevent socket activation. This establishes installed
 fixture isolation on disposable Ubuntu, not live HTTPS, Auth0 consent, VPS
 installation or actual Jo access.

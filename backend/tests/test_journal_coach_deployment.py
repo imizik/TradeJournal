@@ -106,6 +106,24 @@ def test_staging_source_symlink_refusal_leaves_destination_absent(tmp_path: Path
     assert not destination.exists()
 
 
+def test_staging_rejects_regular_sources_beneath_symlinked_backend_directory(tmp_path: Path) -> None:
+    source = tmp_path / "repo"
+    outside = tmp_path / "outside-backend"
+    source.mkdir()
+    outside.mkdir()
+    (source / "deploy/cloud-mcp-journal").mkdir(parents=True)
+    for name in stage.RUNTIME_FILES:
+        (outside / name).write_bytes((ROOT / "backend" / name).read_bytes())
+    for name in stage.UNITS:
+        (source / "deploy/cloud-mcp-journal" / name).write_text("fixture unit", encoding="utf-8")
+    (source / "backend").symlink_to(outside, target_is_directory=True)
+
+    destination = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="regular reviewed source files"):
+        stage_fixture(destination, source=source)
+    assert not destination.exists()
+
+
 def test_journal_units_keep_service_read_only_and_unix_only() -> None:
     service = (ROOT / "deploy/cloud-mcp-journal/tradejournal-journal-coach.service").read_text()
     socket_unit = (ROOT / "deploy/cloud-mcp-journal/tradejournal-journal-coach.socket").read_text()

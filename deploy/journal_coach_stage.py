@@ -37,10 +37,13 @@ def stage(destination, *, issuer_url, resource_url, client_id, subject, profile_
         raise ValueError("Use a new exact absolute staging directory")
     if not destination.parent.is_dir() or destination.parent.resolve() != destination.parent:
         raise ValueError("Staging parent must exist without symlinks")
-    source = Path(source).resolve()
+    source = Path(source)
+    if not source.is_absolute() or ".." in source.parts:
+        raise ValueError("Use an exact absolute reviewed source directory")
     sources = {f"runtime/backend/{name}": source / "backend" / name for name in RUNTIME_FILES}
     sources.update({f"units/{name}": source / "deploy/cloud-mcp-journal" / name for name in UNITS})
-    if any(p.is_symlink() or not p.is_file() for p in sources.values()):
+    if any(not p.is_file() or any(part.is_symlink() for part in (p, *p.parents))
+            for p in sources.values()):
         raise ValueError("Require regular reviewed source files")
     payload = (fixture_snapshot().model_dump_json(indent=2) + "\n").encode()
     config = JournalConfig.model_validate_json(json.dumps({

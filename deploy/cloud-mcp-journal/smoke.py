@@ -33,6 +33,7 @@ STATE = Path("/var/lib/tradejournal-journal")
 RUNDIR = Path("/run/tradejournal-journal-coach")
 APPROVED = STATE / "approved.json"
 JWKS = STATE / "jwks.json"
+WRITE_PROBE = STATE / "sandbox-write-probe.bin"
 UNIT_DIR = Path("/etc/systemd/system")
 SOCKET_UNIT = "tradejournal-journal-coach.socket"
 SERVICE_UNIT = "tradejournal-journal-coach.service"
@@ -45,7 +46,7 @@ SUBJECT = "journal-smoke-subject"
 PROFILE_ID = "d0_11111111-1111-4111-8111-111111111111"
 SCOPES = "d0:profile journal:read"
 OWNER_MARKER = BACKEND / ".native-smoke-ownership"
-PRODUCTION_MARKER_DIR = Path("/etc/tradejournal")
+PRODUCTION_MARKER_DIR = Path("/opt/tradejournal")
 PRODUCTION_MARKER = PRODUCTION_MARKER_DIR / f".journal-coach-smoke-{os.getpid()}"
 
 
@@ -71,6 +72,10 @@ def preflight() -> None:
     existing = [str(path) for path in paths if path.exists() or path.is_symlink()]
     if existing:
         raise RuntimeError("refusing pre-existing journal smoke paths: " + ", ".join(existing))
+    if PRODUCTION_MARKER_DIR.is_symlink() or (
+        PRODUCTION_MARKER_DIR.exists() and not PRODUCTION_MARKER_DIR.is_dir()
+    ):
+        raise RuntimeError("production-path read control must be a real directory")
     if occupied_account():
         raise RuntimeError(f"refusing pre-existing {ACCOUNT} user or group")
     # A unit may already be loaded from another unit search path or be active.
@@ -106,6 +111,9 @@ def prepare() -> None:
     run("chmod", "0750", INSTALL, RUNTIME, CONFIG_DIR, STATE)
     run("chown", f"root:{ACCOUNT}", BACKEND)
     run("chmod", "0750", BACKEND)
+    WRITE_PROBE.write_bytes(b"sandbox write probe\n")
+    WRITE_PROBE.chmod(0o660)
+    run("chown", f"root:{ACCOUNT}", WRITE_PROBE)
 
     for name in ("cloud_mcp_d0.py", "cloud_mcp_journal.py", "journal_coach_snapshot.py"):
         shutil.copy2(REPO / "backend" / name, BACKEND / name)
@@ -212,7 +220,7 @@ def exercise(nonce: str | None) -> None:
     def post(name: str, arguments: dict | None = None, *, bearer: str | None = None,
              method: str = "tools/call") -> httpx.Response:
         with httpx.Client(transport=httpx.HTTPTransport(uds="/run/tradejournal-journal-coach/mcp.sock"),
-                          base_url="http://journal.example.test", timeout=10) as client:
+                          base_url="http://journal.example.test", timeout=10, trust_env=False) as client:
             params = {"name": name, "arguments": arguments or {}} if method == "tools/call" else {}
             return client.post("/mcp", headers={"Accept": "application/json, text/event-stream",
                               "MCP-Protocol-Version": "2025-03-26",
@@ -321,7 +329,7 @@ def sandbox_check(marker: Path) -> None:
         try:
             sock = socket.socket(family, socket.SOCK_STREAM)
         except OSError as exc:
-            if exc.errno not in (errno.EPERM, errno.EACCES):
+            if exc.errno not in (errno.EPERM, errno.EACCES, errno.EAFNOSUPPORT):
                 raise AssertionError(f"unexpected {family} socket refusal: {exc}") from exc
             continue
         sock.close()
@@ -335,6 +343,14 @@ def sandbox_check(marker: Path) -> None:
                 raise AssertionError(f"unexpected write refusal for {path}: {exc}") from exc
             continue
         raise AssertionError(f"service sandbox can write {path}")
+    try:
+        with WRITE_PROBE.open("ab") as output:
+            output.write(b"sandbox-write-must-fail\n")
+    except OSError as exc:
+        if exc.errno not in (errno.EROFS, errno.EACCES, errno.EPERM):
+            raise AssertionError(f"unexpected write-probe refusal: {exc}") from exc
+    else:
+        raise AssertionError("service sandbox can write its DAC-permitted probe")
     try:
         marker.read_bytes()
     except OSError as exc:
@@ -365,6 +381,54 @@ def stop_and_cleanup() -> None:
     run("groupdel", ACCOUNT, check=False)
 
 
+def active_main_pid() -> int:
+    return int(run("systemctl", "show", "--property=MainPID", "--value", SERVICE_UNIT).stdout.strip())
+
+
+def expect_policy_failure(expected_message: str) -> None:
+    result = run("systemctl", "start", SERVICE_UNIT, check=False)
+    if result.returncode == 0:
+        raise AssertionError(f"service started after removing a required policy: {expected_message}")
+    logs = run("journalctl", "-u", SERVICE_UNIT, "--since", "5 minutes ago", "--no-pager", "-o", "cat",
+               check=False)
+    if expected_message.encode() not in logs.stdout + logs.stderr:
+        raise AssertionError(f"service failed without the expected policy probe: {expected_message}")
+    if run("systemctl", "is-active", "--quiet", SERVICE_UNIT, check=False).returncode == 0:
+        raise AssertionError("service stayed active after a sandbox policy probe failed")
+
+
+def exercise_policy_removals(dropin: Path) -> None:
+    """Prove the marker and DAC-permitted write probes detect lost policy."""
+    regression = dropin / "policy-test.conf"
+    run("systemctl", "stop", SERVICE_UNIT)
+    regression.write_text("[Service]\nRestart=no\nInaccessiblePaths=\n", encoding="utf-8")
+    run("systemctl", "daemon-reload")
+    run("systemctl", "reset-failed", SERVICE_UNIT, check=False)
+    expect_policy_failure("service sandbox can read production-path marker")
+
+    regression.unlink()
+    run("systemctl", "daemon-reload")
+    run("systemctl", "reset-failed", SERVICE_UNIT, check=False)
+    run("systemctl", "start", SERVICE_UNIT)
+    if active_main_pid() <= 0:
+        raise AssertionError("service did not return to its hardened template")
+    print("PASS: removing InaccessiblePaths lets the positive marker control detect lost isolation")
+
+    run("systemctl", "stop", SERVICE_UNIT)
+    regression.write_text("[Service]\nRestart=no\nProtectSystem=false\n", encoding="utf-8")
+    run("systemctl", "daemon-reload")
+    run("systemctl", "reset-failed", SERVICE_UNIT, check=False)
+    expect_policy_failure("service sandbox can write its DAC-permitted probe")
+
+    regression.unlink()
+    run("systemctl", "daemon-reload")
+    run("systemctl", "reset-failed", SERVICE_UNIT, check=False)
+    run("systemctl", "start", SERVICE_UNIT)
+    if active_main_pid() <= 0:
+        raise AssertionError("service did not restart after restoring its hardened template")
+    print("PASS: removing ProtectSystem lets the DAC-permitted write control detect lost isolation")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--exercise", action="store_true", help=argparse.SUPPRESS)
@@ -387,13 +451,25 @@ def main() -> None:
         OWNER_MARKER.chmod(0o600)
         # Probe one unpredictable production-path marker using exclusive create;
         # remove only the marker and directory created by this invocation.
-        PRODUCTION_MARKER_DIR.mkdir(mode=0o700, exist_ok=True)
-        fd = os.open(PRODUCTION_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        PRODUCTION_MARKER_DIR.mkdir(mode=0o755, exist_ok=True)
+        if production_dir_created:
+            PRODUCTION_MARKER_DIR.chmod(0o755)
+        fd = os.open(PRODUCTION_MARKER, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         with os.fdopen(fd, "wb") as marker:
             marker.write(b"disposable journal sandbox marker")
         check = BACKEND / "assert_sandbox.py"
-        check.write_text(f'''import errno, os, socket
+        check.write_text(f'''import errno, os, socket, sys
 from pathlib import Path
+if sys.argv[1:] == ["--host-control"]:
+    assert os.geteuid() != 0, "positive control must use the service identity"
+    for family in (socket.AF_INET, socket.AF_INET6):
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.close()
+    Path("{PRODUCTION_MARKER}").read_bytes()
+    with Path("{WRITE_PROBE}").open("ab") as output:
+        output.write(b"unsandboxed-positive-control\\n")
+    print("unsandboxed socket, marker-read and write-probe controls passed")
+    raise SystemExit(0)
 assert os.geteuid() != 0, "service sandbox ran as root"
 left, right = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
 left.close()
@@ -402,7 +478,7 @@ for family in (socket.AF_INET, socket.AF_INET6):
     try:
         sock = socket.socket(family, socket.SOCK_STREAM)
     except OSError as exc:
-        assert exc.errno in (errno.EPERM, errno.EACCES), str(exc)
+        assert exc.errno in (errno.EPERM, errno.EACCES, errno.EAFNOSUPPORT), str(exc)
     else:
         sock.close()
         raise AssertionError(f"service sandbox permits {{family}} socket creation")
@@ -414,6 +490,13 @@ for path in (Path("{CONFIG}"), Path("{APPROVED}"), Path("{JWKS}")):
         assert exc.errno in (errno.EROFS, errno.EACCES, errno.EPERM), str(exc)
     else:
         raise AssertionError(f"service sandbox can write {{path}}")
+try:
+    with Path("{WRITE_PROBE}").open("ab") as output:
+        output.write(b"sandbox-write-must-fail\\n")
+except OSError as exc:
+    assert exc.errno in (errno.EROFS, errno.EACCES, errno.EPERM), str(exc)
+else:
+    raise AssertionError("service sandbox can write its DAC-permitted probe")
 try:
     Path("{PRODUCTION_MARKER}").read_bytes()
 except OSError as exc:
@@ -428,8 +511,10 @@ print("service sandbox denies IP sockets, config/state writes and production-pat
         dropin.mkdir()
         (dropin / "smoke.conf").write_text(f"[Service]\nExecStartPre={VENV}/bin/python {check}\n")
         run("systemctl", "daemon-reload")
+        run("runuser", "-u", ACCOUNT, "--", VENV / "bin/python", check, "--host-control")
+        print("PASS: unsandboxed coach identity can create IPv4/IPv6 sockets, read marker and write probe")
         run(VENV / "bin/python", __file__, "--exercise", "--nonce", nonce)
-        main_pid = int(run("systemctl", "show", "--property=MainPID", "--value", SERVICE_UNIT).stdout.strip())
+        main_pid = active_main_pid()
         if main_pid <= 0:
             raise AssertionError("journal coach service has no active process")
         service_netns = Path(f"/proc/{main_pid}/ns/net").stat().st_ino
@@ -441,6 +526,7 @@ print("service sandbox denies IP sockets, config/state writes and production-pat
         ).stdout.decode().strip()
         if address_families != "AF_UNIX":
             raise AssertionError(f"unexpected service address families: {address_families}")
+        exercise_policy_removals(dropin)
         # The listener must be socket activated and stop with its socket.
         run("systemctl", "stop", SOCKET_UNIT)
         run("systemctl", "stop", SERVICE_UNIT)
