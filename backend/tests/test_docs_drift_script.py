@@ -25,6 +25,8 @@ pytestmark = pytest.mark.skipif(not shutil.which("git") or not shutil.which("bas
 
 STUB_CLAUDE = """#!/bin/bash
 printf '%s\\n' "$@" > "$STUB_LOG/claude.args"
+printf '%s\\n' "token=${CLAUDE_CODE_OAUTH_TOKEN:-}" "key=${ANTHROPIC_API_KEY:-}" "bearer=${ANTHROPIC_AUTH_TOKEN:-}" \\
+  > "$STUB_LOG/claude.env"
 mode="${STUB_CLAUDE:-good}"
 echo "A corrected sentence." >> docs/guide.md
 [ "$mode" = code ] && echo "x = 2" >> app.py
@@ -73,12 +75,16 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
         (stubs / name).write_text(text)
         (stubs / name).chmod(0o755)
     settings = tmp_path / "backend.env"
-    settings.write_text("ANTHROPIC_API_KEY=test-key  # a comment the key must not include\n"
+    # The real file also holds the app's API key, which the pass must never use.
+    settings.write_text("CLAUDE_CODE_OAUTH_TOKEN=test-token  # a comment the token must not include\n"
+                        "ANTHROPIC_API_KEY=file-key\n"
                         "FACTORY_NTFY_URL=https://ntfy.example/topic\n")
     env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull,
            "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.com",
            "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.com",
            "PATH": f"{stubs}:/usr/bin:/bin", "STUB_LOG": str(log), "DOCS_DRIFT_ENV_FILE": str(settings),
+           # Keys the scheduler's environment may carry; either would outrank the plan token.
+           "ANTHROPIC_API_KEY": "env-key", "ANTHROPIC_AUTH_TOKEN": "env-bearer",
            "DOCS_DRIFT_LOG_DIR": str(log), "DOCS_DRIFT_MIN_COMMITS": "4",  # exactly the commits below
            "DOCS_DRIFT_CHECK": f'echo checked >> "{log}/check.log"'}
     remote, work = tmp_path / "remote.git", tmp_path / "work"
@@ -153,9 +159,12 @@ def test_a_due_pass_is_pushed_and_opened_for_review(checkout):
     assert git(work, env, "log", "-1", "--format=%s", f"origin/{branch}").startswith("Documentation drift pass through ")
     # Claude ran headless and locked down: docs edits and read-only git, nothing that could wait for a person.
     args = logged(env, "claude.args").splitlines()
-    for expected in ("-p", "--bare", "--restricted", "--permission-prompts", "none", "--permission-mode", "dontAsk",
-                     "Edit(docs/**)", "Bash(git log *)", "--max-budget-usd"):
+    for expected in ("-p", "--restricted", "--strict-mcp-config", "--permission-prompts", "none",
+                     "--permission-mode", "dontAsk", "Edit(docs/**)", "Bash(git log *)", "--max-budget-usd"):
         assert expected in args
+    # On the Claude plan, never API credits: --bare would ignore the plan token, and no API key reaches Claude.
+    assert "--bare" not in args
+    assert logged(env, "claude.env") == "token=test-token\nkey=\nbearer=\n"
     assert not [a for a in args if a.startswith("Bash(") and not a.startswith(("Bash(git log", "Bash(git diff", "Bash(git show"))]
     gh = logged(env, "gh.log")
     assert "gh pr create --base main --head " + branch in gh
@@ -180,6 +189,18 @@ def test_a_bad_pass_is_refused_and_nothing_is_pushed(checkout, mode, reason):
     assert "pr create" not in logged(env, "gh.log")
     assert "Docs drift pass failed" in logged(env, "curl.log")
     assert list(Path(env["STUB_LOG"]).glob("tradejournal-docs-drift-*.diff"))  # the edits are kept to look at
+    assert_tidy(work, env)
+
+
+def test_no_plan_token_stops_the_run_before_claude(checkout, tmp_path):
+    work, env = checkout
+    settings = tmp_path / "key-only.env"
+    settings.write_text("ANTHROPIC_API_KEY=file-key\nFACTORY_NTFY_URL=https://ntfy.example/topic\n")
+    result = run(work, env, DOCS_DRIFT_ENV_FILE=str(settings))
+    assert result.returncode == 1 and "no CLAUDE_CODE_OAUTH_TOKEN" in result.stderr
+    assert logged(env, "claude.args") == ""
+    assert remote_branches(work, env) == ["main"]
+    assert "Docs drift pass failed" in logged(env, "curl.log")
     assert_tidy(work, env)
 
 
