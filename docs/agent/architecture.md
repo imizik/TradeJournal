@@ -75,8 +75,10 @@ development Mac and neither touching a database:
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
-  Alpaca, the Anthropic API and ntfy, and writes only to that branch, which
-  is never merged (`docs/strategy-factory.md`).
+  Alpaca and ntfy, has Claude (`claude -p`, no tools) answer the week's brief
+  on the Claude plan token, never API credits, and writes only to that
+  branch, which is never merged (`docs/strategy-factory.md`). The direct
+  Anthropic API call remains only behind an explicit `--use-api`.
 - The weekly documentation drift pass (`scripts/docs_drift_week.sh`, in a
   checkout kept at `main`). Once 20 code commits have landed since the docs
   were reconciled, Claude runs the `docs-drift` skill headless, allowed to

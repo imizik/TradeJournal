@@ -10,21 +10,25 @@ exam on the locked holdout) and appends the result to `research/ledger.jsonl`.
 `week` is the weekly loop: the idea model proposes up to three candidates from
 a brief (`app/engine/factory_brief.py`), they are judged, and the week's
 report goes to `research/reports/`; `notify` sends its summary to the phone.
-The idea model is Claude through the API, or, with `--answer`, a Claude Code
-session that answered the brief `--dry-run` wrote (`/factory-week`).
+The idea model answers the brief `--dry-run` wrote, and `--answer` judges that
+answer: `scripts/factory_week.sh` has `claude -p` on the Claude plan write it
+every week, or a Claude Code session does by hand (`/factory-week`). Only
+`--use-api` asks Claude through the Anthropic API instead, on API credits.
 See docs/strategy-factory.md.
 
 The live ledger is on branch factory/ledger, in the factory checkout
 (`scripts/factory_week.sh` runs there weekly); `run` and `week` refuse to write
 the default ledger from any other branch. Bars are Alpaca SIP minute bars from
 the local cache: `prepare` fills it and needs the Alpaca key, `week` calls
-Claude and needs the Anthropic key (not with `--answer`), `notify` needs
+Claude through the API only with `--use-api`, which needs the Anthropic key, `notify` needs
 FACTORY_NTFY_URL, and `run` and `ledger` never touch the network.
 
 Usage:
     python scripts/strategy_factory.py prepare
     python scripts/strategy_factory.py run ../research/specs/recovery_swing_v0.1.json
-    python scripts/strategy_factory.py week [--dry-run [--brief-out FILE]] [--answer FILE] [--budget N]
+    python scripts/strategy_factory.py week --dry-run [--brief-out FILE] [--schema-out FILE] [--budget N]
+    python scripts/strategy_factory.py week --answer FILE [--answer-by NAME] [--budget N]
+    python scripts/strategy_factory.py week --use-api [--budget N]
     python scripts/strategy_factory.py notify
     python scripts/strategy_factory.py ledger
 """
@@ -317,7 +321,8 @@ Proposer = Callable[[str, str], tuple[dict[str, Any], str]]
 
 
 def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
-    """Ask the idea model for this week's candidates; returns its answer and a usage note."""
+    """Ask the idea model for this week's candidates through the Anthropic API,
+    on API credits (`week --use-api` only); returns its answer and a usage note."""
     import anthropic
 
     model = os.environ.get("FACTORY_MODEL", IDEA_MODEL)
@@ -355,8 +360,9 @@ def claude_proposer(system: str, text: str) -> tuple[dict[str, Any], str]:
 
 
 def answer_file(path: Path, author: str) -> Proposer:
-    """The idea model's answer from a file a Claude Code session wrote after
-    reading the brief (`/factory-week`), instead of one asked for through the API."""
+    """The idea model's answer from a file written after reading the brief, by
+    `claude -p` on the Claude plan (scripts/factory_week.sh) or a Claude Code
+    session (`/factory-week`), instead of one asked for through the API."""
 
     def propose(system: str, text: str) -> tuple[dict[str, Any], str]:
         try:
@@ -366,7 +372,7 @@ def answer_file(path: Path, author: str) -> Proposer:
         problem = answer_problem(answer)
         if problem:
             raise SystemExit(f"The answer in {path} does not fit the format: {problem}. Nothing was run.")
-        return answer, f"{author} in a Claude Code session, no API call"
+        return answer, f"{author}, no API call"
 
     return propose
 
@@ -462,6 +468,8 @@ def command_week(args: argparse.Namespace, store: BarStore, progress: Callable[[
         if args.brief_out is not None:
             args.brief_out.write_text(SYSTEM_PROMPT + "\n\n" + text)
             print(f"The brief for up to {budget} candidates is in {args.brief_out}.")
+            if args.schema_out is not None:
+                args.schema_out.write_text(json.dumps(IDEAS_SCHEMA) + "\n")
         else:
             print(SYSTEM_PROMPT + "\n\n" + text)
         return 0
@@ -626,13 +634,16 @@ def main(
     run.add_argument("spec", type=Path)
     run.add_argument("--rerun", action="store_true", help="run a spec that is already in the ledger again")
     run.add_argument("--no-exam", action="store_true", help="stop after confirmation, holdout untouched")
-    week = sub.add_parser("week", help="the weekly loop: propose, judge, report (asks Claude through the API "
-                                       "unless given --answer)")
+    week = sub.add_parser("week", help="the weekly loop: brief, then judge and report an answer to it")
     week.add_argument("--dry-run", action="store_true", help="print the brief the idea model would get, and stop")
     week.add_argument("--brief-out", type=Path, help="with --dry-run, write the brief to this file instead")
-    week.add_argument("--answer", type=Path, help="the idea model's answer as JSON, written by a Claude Code "
-                                                  "session from the brief (/factory-week); no API call")
-    week.add_argument("--answer-by", default="Claude", help="who wrote --answer, for the report")
+    week.add_argument("--schema-out", type=Path, help="with --brief-out, also write the answer's JSON schema here")
+    week.add_argument("--answer", type=Path, help="the idea model's answer to the brief as JSON, written by "
+                                                  "claude -p or a Claude Code session; no API call")
+    week.add_argument("--answer-by", default="Claude in a Claude Code session",
+                      help="who wrote --answer, for the report")
+    week.add_argument("--use-api", action="store_true", help="ask Claude through the Anthropic API instead, "
+                                                             "on API credits")
     week.add_argument("--budget", type=_at_least_one, help="candidates this run may add, in place of what is left "
                                                             "of this week's three (a run you ask for)")
     notify = sub.add_parser("notify", help="send the latest weekly summary to the phone (needs FACTORY_NTFY_URL)")
@@ -642,9 +653,17 @@ def main(
     prepare.add_argument("--tickers", nargs="+", default=[*CORE_UNIVERSE, MARKET])
     prepare.add_argument("--through", type=date.fromisoformat)
     args = parser.parse_args(argv)
+    if args.command == "week":
+        ways = [flag for flag, given in (("--dry-run", args.dry_run), ("--answer", args.answer is not None),
+                                         ("--use-api", args.use_api)) if given]
+        if len(ways) != 1:
+            parser.error("week needs exactly one of --dry-run, --answer FILE or --use-api "
+                         f"(given: {' '.join(ways) or 'none'})")
+        if args.schema_out is not None and args.brief_out is None:
+            parser.error("--schema-out goes with --dry-run --brief-out")
 
     os.environ["ALPACA_DATA_FEED"] = args.feed
-    asks_the_api = proposer is None and not getattr(args, "dry_run", False) and getattr(args, "answer", None) is None
+    asks_the_api = proposer is None and getattr(args, "use_api", False)
     real_run = {"prepare": True, "week": asks_the_api, "notify": sender is None}.get(args.command, False)
     if real_run:
         # Keys and the ntfy topic live in backend/.env. Tests inject a proposer
@@ -664,7 +683,7 @@ def main(
         return command_notify(args, sender or publish)
     store = BarStore((source_factory or AlpacaCache)(), args.out, progress)
     if args.command == "week":
-        chosen = proposer or (answer_file(args.answer, args.answer_by) if args.answer else claude_proposer)
+        chosen = proposer or (claude_proposer if args.use_api else answer_file(args.answer, args.answer_by))
         return command_week(args, store, progress, chosen)
     return command_run(args, store, progress)
 
