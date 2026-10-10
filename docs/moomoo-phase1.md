@@ -243,8 +243,13 @@ authorization under `docs/agent/pr-review.md`.
 The first full verification attempts encountered sandbox socket-bind failures
 and an external dependency-symlink build restriction. All 27 offline socket
 tests passed outside the sandbox, and locked frontend dependencies were
-installed locally for the final full verification. Full verification results
-are reported separately from these focused checks. No ready-to-publish or
+installed locally for the final full verification. `bash scripts/verify.sh`
+then passed every local check: 2,171 backend tests (35 skipped), lint, import
+boundaries, frontend type/lint/build, and 225 browser tests (200 general,
+5 authenticated, 20 sample-decision). That run began on `0ea7ece`; the later
+redirect correction was separately validated by the 50 diagnostic tests and
+5-second live trial, reusing the unaffected application checks. No CI ran.
+No ready-to-publish or
 production-acceptance claim is made. The branch is local; automatic approval
 review rejected publishing it to the remote. No PR was created.
 
