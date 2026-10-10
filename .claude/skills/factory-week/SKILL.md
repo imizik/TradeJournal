@@ -1,6 +1,6 @@
 ---
 name: factory-week
-description: Run the strategy factory's weekly idea loop now, by hand, with this session as the idea model instead of the Anthropic API (so it runs on the user's Claude plan). Use when the user asks to run the factory, do a factory run now, or get new strategy ideas judged.
+description: Run the strategy factory's weekly idea loop now, by hand, with this session as the idea model instead of the scheduled run's `claude -p` (both on the user's Claude plan). Use when the user asks to run the factory, do a factory run now, or get new strategy ideas judged.
 ---
 
 # A factory week, with you as the idea model
