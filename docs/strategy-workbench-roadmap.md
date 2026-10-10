@@ -1,6 +1,6 @@
 # Strategy Workbench: Research Studio roadmap
 
-**Status: planning only, revised 2026-10-10.** No Studio feature is implemented
+**Status: R0 selected and probed 2026-10-10; R1–R4 remain unselected.** No Studio feature is implemented
 by this plan. The existing filename is retained so links remain stable.
 The product-aware review at `4c42018` supersedes the strategy-form-first
 proposal of 2026-10-07 as recorded below. Implementation requires selection
@@ -31,9 +31,10 @@ or first-release requirements. The Studio does not establish profitability.
 
 ## Sequencing and ownership
 
-The [swing roadmap](swing-strategy-roadmap.md)'s S1–S2 retain their documented
-implementation priority. This planning update does not select Studio ahead
-of them or change another board's active item. That order is a product
+The user selected **R0 only** on 2026-10-10 ahead of further S1–S2 work.
+[Audit and bounded R1 contract](agent/research-studio-r0.md) record the results.
+S1–S2 otherwise retain their priority; this does not select R1 or change another
+board's active item. That order is a product
 priority, **not a technical dependency**: an independent event lab needs
 neither a swing family nor the practice loop. If repeated one-off research
 questions justify earlier Studio work, explicitly select R0 and record the
@@ -282,7 +283,8 @@ are established. Fetch occurrence chart windows lazily from the same manifest.
 
 ## Small delivery phases
 
-All phases below are **planned, not started**. V1 is complete only after R4.
+R0 probes are complete with documented evidence limits; R1–R4 are **planned,
+not started**. V1 is complete only after R4.
 Each phase is separately selected and reviewed, with one bounded result; the
 plan does not authorize implementing the entire sequence at once.
 
@@ -327,12 +329,13 @@ None is marked complete by this planning PR.
 
 ## Decisions still open
 
-- Whether to select R0 before S1–S2: retain current priority unless explicitly changed.
-- The approved cache host and measured performance envelope: resolve in R0.
+- R0 alone was selected before further S1–S2 work; R1 requires a separate selection.
+- Approved cache host and component measurements are recorded in the
+  [R0 report](agent/research-studio-r0.md); end-to-end performance is still unproved.
 - Concrete uncertainty parameters and data-quality eligibility policy: settle
   in the bounded R1 contract, then prove in R2 before displaying results.
 - Whether a saved event merits Factory promotion and how that promotion uses
   the weekly budget: decide only when the later handoff slice is selected.
 
-The next planning decision is not which advanced capability to add. It is
-whether the bounded first-release contract is ready for R0 to be selected.
+The next planning decision is whether to select the bounded R1 contract,
+accepting the measured coverage limitations. R0 does not authorize R1.
