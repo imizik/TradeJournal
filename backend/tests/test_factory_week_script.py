@@ -50,22 +50,31 @@ exit 3
 
 ANSWER = {"ideas": [], "lessons": "Nothing new.", "wanted": []}
 
-# Claude Code: `auth status` names the sign-in by its precedence (STUB_AUTH for
-# one the script cannot strip, a managed apiKeyHelper); `-p` answers the brief.
+# Claude Code: `auth status` names the sign-in by its precedence; a key the
+# script cannot strip (STUB_KEY_SOURCE, a managed apiKeyHelper) leaves the method
+# at oauth_token and shows only as apiKeySource, as the real CLI reports it.
+# `-p` answers the brief.
 STUB_CLAUDE = """#!/bin/bash
 seen() {
   printf '%s\\n' "token=${CLAUDE_CODE_OAUTH_TOKEN:-}" "key=${ANTHROPIC_API_KEY:-}" "bearer=${ANTHROPIC_AUTH_TOKEN:-}" \\
-    "base=${ANTHROPIC_BASE_URL:-}${ANTHROPIC_UNIX_SOCKET:-}" "provider=${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_MANTLE:-}"
+    "base=${ANTHROPIC_BASE_URL:-}${ANTHROPIC_UNIX_SOCKET:-}" "provider=$(providers)" \\
+    "fd=${CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR:-}${CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR:-}"
+}
+providers() {
+  printf '%s' "${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_VERTEX:-}${CLAUDE_CODE_USE_FOUNDRY:-}" \\
+    "${CLAUDE_CODE_USE_GATEWAY:-}${CLAUDE_CODE_USE_ANTHROPIC_AWS:-}${CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD:-}" \\
+    "${CLAUDE_CODE_USE_MANTLE:-}"
 }
 if [ "$1 $2" = "auth status" ]; then
   seen > "$STUB_LOG/auth.env"
-  if [ -n "${STUB_AUTH:-}" ]; then method="$STUB_AUTH"; provider=firstParty
-  elif [ -n "${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_MANTLE:-}" ]; then method=third_party; provider=bedrock
+  if [ -n "$(providers)" ]; then method=third_party; provider=bedrock
   elif [ -n "${ANTHROPIC_AUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ]; then method=api_key; provider=firstParty
   elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then method=oauth_token; provider=firstParty
   else echo '{"loggedIn": false, "authMethod": "none"}'; exit 1
   fi
-  printf '{"loggedIn": true, "authMethod": "%s", "apiProvider": "%s"}\\n' "$method" "$provider"
+  key=""
+  [ -n "${STUB_KEY_SOURCE:-}" ] && key=", \\"apiKeySource\\": \\"$STUB_KEY_SOURCE\\""
+  printf '{"loggedIn": true, "authMethod": "%s", "apiProvider": "%s"%s}\\n' "$method" "$provider" "$key"
   exit 0
 fi
 printf '%s\\n' "$@" > "$STUB_LOG/claude.args"
@@ -116,7 +125,9 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
            # What launchd's environment may carry: each would outrank the plan token or receive it.
            "ANTHROPIC_API_KEY": "env-key", "ANTHROPIC_AUTH_TOKEN": "env-bearer",
            "ANTHROPIC_BASE_URL": "https://gateway.example", "ANTHROPIC_UNIX_SOCKET": "/tmp/gateway.sock",
-           "CLAUDE_CODE_USE_BEDROCK": "1", "CLAUDE_CODE_USE_MANTLE": "1"}
+           "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR": "3", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR": "4",
+           **{f"CLAUDE_CODE_USE_{name}": "1" for name in
+              ("BEDROCK", "VERTEX", "FOUNDRY", "GATEWAY", "ANTHROPIC_AWS", "ANTHROPIC_GOOGLE_CLOUD", "MANTLE")}}
     remote, work = tmp_path / "remote.git", tmp_path / "work"
     git(tmp_path, env, "init", "-q", "--bare", "-b", "main", str(remote))
     git(tmp_path, env, "init", "-q", "-b", "main", str(work))
@@ -187,7 +198,7 @@ def test_a_week_is_answered_on_the_claude_plan_judged_pushed_and_announced(check
         assert expected in args
     # On the Claude plan, never API credits: --bare would ignore the plan token, and no key reaches Claude.
     assert "--bare" not in args
-    plan_only = "token=test-token\nkey=\nbearer=\nbase=\nprovider=\n"
+    plan_only = "token=test-token\nkey=\nbearer=\nbase=\nprovider=\nfd=\n"
     assert logged(env, "auth.env") == plan_only and logged(env, "claude.env") == plan_only
     # Both reach Claude through env(1), and the token is never one of its arguments.
     env_args = logged(env, "env.args")
@@ -210,10 +221,10 @@ def test_no_plan_token_stops_the_run_before_anything_happens(checkout, tmp_path)
 
 def test_a_sign_in_other_than_the_plan_stops_the_run(checkout):
     work, env = checkout
-    result = run(work, env, STUB_AUTH="api_key_helper")
+    result = run(work, env, STUB_KEY_SOURCE="apiKeyHelper")
     assert result.returncode == 1
-    assert calls(work) == ["notify --failure Claude would not sign in with the plan token "
-                           "(claude auth status: api_key_helper/firstParty); the run did not start"]
+    assert calls(work) == ["notify --failure Claude would not sign in with the plan token (claude auth status: "
+                           "oauth_token/firstParty with an API key from apiKeyHelper); the run did not start"]
     assert logged(env, "claude.args") == "" and pushed(work, env) == ["seed"]
 
 

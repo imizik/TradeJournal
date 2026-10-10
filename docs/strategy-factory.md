@@ -132,9 +132,11 @@ format stops the week before anything is judged.
 The run uses the plan token from `claude setup-token`, `CLAUDE_CODE_OAUTH_TOKEN`
 in `backend/.env`, exactly as the [docs drift pass](agent/architecture.md#processes)
 does: the token goes in as an environment prefix, never an argument; the API
-keys, auth token, base URL, socket and `CLAUDE_CODE_USE_*` provider switches
+keys, key file descriptors, auth token, base URL, socket and `CLAUDE_CODE_USE_*` provider switches
 that would outrank or receive it are removed for the call; and before
-anything else, `claude auth status` must report `oauth_token`/`firstParty`.
+anything else, `claude auth status` must report `oauth_token`/`firstParty`
+with no `apiKeySource` (a managed `apiKeyHelper` or a saved key would bill the
+API while still reporting the token).
 A missing token or any other sign-in stops the run, and the phone hears why.
 It never falls back to the API key. Asking the Anthropic API directly (Claude
 Opus 5, `FACTORY_MODEL`, adaptive thinking) remains only behind an explicit

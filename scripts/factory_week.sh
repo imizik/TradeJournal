@@ -92,7 +92,8 @@ setting() {
 # auditing would show an argument. Same as scripts/docs_drift_week.sh.
 PLAN_ENV=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_UNIX_SOCKET
   -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_USE_GATEWAY
-  -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE)
+  -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE
+  -u CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR -u CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR)
 TOKEN=""
 # launchd's PATH is short; Claude Code's own installer puts it in ~/.local/node/bin on this Mac.
 CLAUDE="${FACTORY_CLAUDE:-$(command -v claude || echo "$HOME/.local/node/bin/claude")}"
@@ -131,17 +132,23 @@ if [ -n "$ON_PLAN" ]; then
   [ -x "$CLAUDE" ] || fail "Claude Code is not installed at $CLAUDE (set FACTORY_CLAUDE); the run did not start"
   TOKEN="$(setting CLAUDE_CODE_OAUTH_TOKEN)"
   [ -n "$TOKEN" ] || fail "no CLAUDE_CODE_OAUTH_TOKEN in $ENV_FILE (run \`claude setup-token\` and add it there); the run did not start"
-  # Whatever else could still win (a managed apiKeyHelper, say), Claude Code
-  # names the sign-in it would use; anything but the plan token stops the run.
+  # Whatever else could still win, Claude Code names the sign-in it would use;
+  # anything but the plan token stops the run. A key it holds besides the token
+  # (a managed apiKeyHelper, a saved key) leaves the method at oauth_token and
+  # shows only as apiKeySource, yet a helper switches the plan off, so any
+  # apiKeySource stops the run too.
   signin="$(CLAUDE_CODE_OAUTH_TOKEN="$TOKEN" "${PLAN_ENV[@]}" "$CLAUDE" auth status --json 2> /dev/null | "$PYTHON" -c '
 import json, sys
 try:
     status = json.load(sys.stdin)
 except ValueError:
     status = {}
+if not isinstance(status, dict):
+    status = {}
 method, provider = status.get("authMethod"), status.get("apiProvider", "firstParty")
-print(f"{method}/{provider}")
-sys.exit(0 if method == "oauth_token" and provider == "firstParty" else 1)')" \
+key = status.get("apiKeySource")
+print(f"{method}/{provider}" + (f" with an API key from {key}" if key else ""))
+sys.exit(0 if method == "oauth_token" and provider == "firstParty" and not key else 1)')" \
     || fail "Claude would not sign in with the plan token (claude auth status: $signin); the run did not start"
 fi
 
