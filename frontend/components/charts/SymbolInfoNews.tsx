@@ -6,7 +6,7 @@ import { useClock } from "@/lib/chartStore";
 import { ago, listedNews, newYorkTime, readAt } from "@/lib/symbolInfo";
 import type { NewsArticle, SymbolNews } from "@/lib/symbolInfo";
 
-const LIT_MS = 6000;
+export const LIT_MS = 6000;
 const TONE = { positive: "text-emerald-300", negative: "text-rose-300", neutral: "text-slate-300" };
 
 function Article({ article, symbol, minute, lit, first }: { article: NewsArticle; symbol: string; minute: number; lit: boolean; first: boolean }) {

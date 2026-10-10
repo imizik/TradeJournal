@@ -283,6 +283,21 @@ test("a marker click is one-shot: coming back to the Watchlist tab shows the tab
   expect(await page.evaluate(() => localStorage.getItem("tradejournal.charts.symbol-info.tab.v1"))).not.toBe("News");
 });
 
+test("leaving the News tab ends the highlight: coming back to News shows nothing lit", async ({ page, context }) => {
+  await seed(context);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
+  const point = await hoverMarker(page, EDT("10-06T10:05:00"));
+  await page.mouse.click(point.x, point.y);
+  await expect(panel(page).locator("li[data-news-lit]")).toHaveCount(2);
+  await panel(page).getByRole("tab", { name: "Events", exact: true }).click();
+  await panel(page).getByRole("tab", { name: "News", exact: true }).click();
+  await expect(panel(page).locator("li", { hasText: "Analyst lifts target" })).toBeVisible();
+  // Well inside the 6 s highlight window, so this proves the switch ended it, not the timer.
+  await expect(panel(page).locator("li[data-news-lit]")).toHaveCount(0, { timeout: 1000 });
+});
+
 test("with the News tab open the tab and the markers share one read, then one each minute", async ({ page, context }) => {
   await seed(context, {}, "News");
   const reads = await stub(page);

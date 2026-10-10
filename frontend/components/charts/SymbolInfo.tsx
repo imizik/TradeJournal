@@ -11,7 +11,7 @@ import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoFinancials from "./SymbolInfoFinancials";
 import SymbolInfoForecast from "./SymbolInfoForecast";
-import SymbolInfoNews from "./SymbolInfoNews";
+import SymbolInfoNews, { LIT_MS } from "./SymbolInfoNews";
 import SymbolInfoPeers from "./SymbolInfoPeers";
 import SymbolInfoShort from "./SymbolInfoShort";
 import SymbolInfoYou from "./SymbolInfoYou";
@@ -62,6 +62,12 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     onFocusHandled?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one click (a new `n`) is handled once
   }, [focusN]);
+  // The highlight is for this click only: a later return to News (tab, symbol or collapse) shows it unlit.
+  useEffect(() => {
+    if (!lit) return;
+    const timer = setTimeout(() => setLit((now) => now?.n === lit.n ? null : now), LIT_MS);
+    return () => clearTimeout(timer);
+  }, [lit]);
 
   useEffect(() => {
     const tab = view.tab;
@@ -86,6 +92,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   }, [symbol, view.ready, view.expanded, view.tab, retry, journal]);
 
   function select(tab: Tab) {
+    setLit(null);
     setView((current) => ({ ...current, tab }));
     try { localStorage.setItem(TAB_KEY, tab); } catch { /* keep working without storage */ }
   }
