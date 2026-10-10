@@ -96,9 +96,9 @@ board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
    acceptance evidence carry the handoff; a model change is not a reason to
    redesign the epic. Stop after the selected item, not after the whole board.
 8. Before starting, check the item in [Delegation readiness](#delegation-readiness).
-   A `worker` item goes to a Sonnet worker with the item ID as its contract;
-   a `lead` item needs the named decision made first
-   ([delegation](agent/delegation.md)).
+   A `worker` item can be built by the lead directly, or by a Sonnet worker
+   with the item ID as its contract when delegating pays; a `lead` item needs
+   the named decision made first ([delegation](agent/delegation.md)).
 
 ## Status board
 
