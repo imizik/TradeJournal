@@ -5,7 +5,8 @@ happened, review the decision, and choose one concrete improvement to practice.
 Success means a useful routine with trustworthy evidence and little manual
 work. Shipping a feature does not establish a trading edge or improved returns.
 
-**Planning date:** 2026-10-04; Dots capability direction added 2026-10-08. This document records future direction from the
+**Planning date:** 2026-10-04; Dots capability direction added 2026-10-08;
+moomoo metric-source evaluation added 2026-10-10. This document records future direction from the
 product discussion. No new feature is implemented by this document, and no
 production data was audited to write it.
 
@@ -60,7 +61,7 @@ structured reflection and prospective experiments:
 ## Future milestones
 
 Order is a recommendation for when this track is activated, not a deadline.
-D0 is preparatory research and can be selected independently; it is not a
+D0 and M0 are preparatory research and can be selected independently; neither is a
 prerequisite for basic reflection. C3.4/C3.5 capture is built, with its human
 walkthrough gates still recorded on the Charts board. The
 [agentic trading proposal](agentic-trading-roadmap.md) recommends a separate
@@ -70,6 +71,7 @@ the milestone statuses here.
 | ID | Deliverable | Depends on | Status |
 |---|---|---|---|
 | D0 | Read-only data audit and broad personal-pattern analysis | Existing journal data; explicit selection of the analysis task | future research |
+| M0 | Explore moomoo market-data endpoints and evaluate selective metric-source replacement | Phase 1 diagnostic; separately approved bounded comparisons with existing sources | future research; no integration authorized |
 | J1 | Short post-trade reflection and review bookmarks | Existing trade detail; durable user-record design | future; recommended first product slice |
 | J2 | Weekly review with one commitment and a follow-up | J1; existing Daily Review and Analytics | future |
 | J3 | Personal setup playbook with winning and losing examples | J1; C3.4 for pre-trade template selection | future |
@@ -99,6 +101,51 @@ thresholds are display policies, not proof of an edge.
 
 The result may be that no pattern is ready to productize. Save promising
 questions for J5; a research result does not authorize a smart overlay.
+
+### M0 — Evaluate moomoo data for better trade metrics
+
+The proposed research covers the direct API's market-data endpoint catalog,
+including documented capabilities that this account cannot access. Its result
+would be an endpoint-to-metric map with tested availability, entitlements,
+history coverage, units, timestamps, rate/subscription limits and permitted
+uses. The [Phase 1 diagnostic](moomoo-phase1.md) establishes stock connectivity;
+it does not establish US options access, complete historical coverage or rights
+to retain live depth. Trading and brokerage-account endpoints are outside this
+research.
+
+| Candidate data | Potential journal or research use | Comparison question |
+|---|---|---|
+| Stock and option historical candles | MFE/MAE, giveback, exit efficiency and post-exit paths | Are minute paths more complete and accurate than the current sources, including expired US options? |
+| Option chains, quotes and contract metadata | Contract matching, spread/liquidity context and option valuations | Are bid/ask timestamps, sizes, multipliers and adjusted contracts reliable for the intended calculation? |
+| Option IV, Greeks, volatility history and open interest | IV crush, Greek attribution, volatility context and OI changes | Are units, model assumptions, historical as-of coverage and update cadence suitable, compared with existing data and local calculations? |
+| Trades, order books and related reference/context endpoints | Execution context, liquidity/imbalance research and later Workbench datasets | What venue coverage, freshness, historical availability and recording rights are actually supported? |
+
+Evaluation would use bounded, read-only samples across active and expired
+contracts, liquid and illiquid symbols, regular and extended sessions, and
+corporate-action cases. Side-by-side results would keep the existing inputs and
+calculations as a baseline, with independent reference calculations and
+explicit missing/stale-data cases. More fields or deeper books alone would not
+establish a better metric. Bar highs/lows and quote-based liquidation estimates
+would retain their different meanings and execution limitations.
+
+Selective replacement of an existing metric's data source or calculation is a
+possible outcome, after demonstrated improvements in correctness, relevant
+coverage or freshness without unacceptable reliability, cost or licensing
+trade-offs. A recommendation would name each affected metric, its before/after
+results, unresolved discrepancies, fallback and rollback behavior. It could
+also recommend keeping the current source or using moomoo only to fill verified
+gaps.
+
+Any later approved recomputation would be versioned and traceable to its inputs,
+source times and calculation version, preserving prior results for comparison.
+Current vendor Greeks would not overwrite historical `*_at_fill` values;
+historical replacement would require matching as-of evidence. Authoritative
+fills and realized P&L remain governed by the existing accounting rules.
+
+This is a future research item, not an extension of Phase 1. It authorizes no
+provider adapter, metric overwrite/backfill, chart-feed change, paid entitlement,
+background collector or raw depth retention. Production replacement and a
+historical Workbench pipeline remain separately selected implementation slices.
 
 ### J1 — Record a reflection in under 30 seconds
 
