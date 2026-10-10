@@ -288,7 +288,8 @@ is verifiable rather than hopeful.
   this same limiter but off the enrichment path: it only reserves a slot
   (never waits more than two seconds, never retries), caches 15 minutes under
   `backend/data/symbol_info/v1/polygon/`, and a 429 there calls `note_refusal`
-  like any other, so it also slows enrichment. Keep it behind the News tab.
+  like any other, so it also slows enrichment. Keep it behind the News tab and the
+  chart's news layer (T3.5), which share one read per symbol.
 - The Short tab (T3.1) reads three more Polygon endpoints (`/stocks/v1/short-interest`,
   `/stocks/v1/short-volume`, `/v3/reference/tickers/{t}`) the same way, cached one
   day per symbol, only when that tab asks.

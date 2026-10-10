@@ -349,6 +349,8 @@ export type ChartSettings = {
   optionsLayer: OptionsLayer;
   /** The range bands (C2.7): expected-move levels and VWAP ±1σ/±2σ, off until shown; a field of its own like `autoLevelsHidden`. */
   rangeBandsHidden: boolean;
+  /** The main chart's news markers (T3.5) hidden; on by default, and a field of its own like `autoLevelsHidden`. */
+  newsHidden: boolean;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -395,7 +397,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
@@ -446,6 +448,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       autoLevelsHidden: value.autoLevelsHidden === true,
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
       rangeBandsHidden: value.rangeBandsHidden !== false,
+      newsHidden: value.newsHidden === true,
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",

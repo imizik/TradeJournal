@@ -3,14 +3,15 @@
 import { useAppAccess } from "@/components/AccessProvider";
 import { useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolNews, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
+import { fetchSymbolEvents, fetchSymbolFinancials, fetchSymbolForecast, fetchSymbolJournal, fetchSymbolOverview, fetchSymbolShort } from "@/lib/symbolInfo";
+import { useSymbolNews } from "@/lib/newsFeed";
 import type { SymbolEvents, SymbolFinancials, SymbolForecast, SymbolJournal, SymbolNews, SymbolOverview, SymbolShort } from "@/lib/symbolInfo";
 import type { ChartQuote } from "@/lib/charts";
 import SymbolInfoOverview from "./SymbolInfoOverview";
 import SymbolInfoEvents from "./SymbolInfoEvents";
 import SymbolInfoFinancials from "./SymbolInfoFinancials";
 import SymbolInfoForecast from "./SymbolInfoForecast";
-import SymbolInfoNews from "./SymbolInfoNews";
+import SymbolInfoNews, { LIT_MS } from "./SymbolInfoNews";
 import SymbolInfoPeers from "./SymbolInfoPeers";
 import SymbolInfoShort from "./SymbolInfoShort";
 import SymbolInfoYou from "./SymbolInfoYou";
@@ -18,11 +19,11 @@ import SymbolInfoYou from "./SymbolInfoYou";
 const TABS = ["Overview", "News", "Events", "Forecast", "Financials", "Short", "You"] as const;
 type Tab = typeof TABS[number];
 const TAB_KEY = "tradejournal.charts.symbol-info.tab.v1";
-/** The tabs built so far: one request each, for the open tab only. The Forecast tab needs the price. Forecast and News read again each minute while open and visible. */
+/** The tabs built so far: one request each, for the open tab only. The Forecast tab needs the price. Forecast reads again each minute while open and visible. News is read through `useSymbolNews`, shared with the chart's news markers (T3.5). */
 const BUILT = {
   Overview: { load: fetchSymbolOverview, name: "overview", title: "Overview" },
   You: { load: fetchSymbolJournal, name: "journal", title: "Journal" },
-  News: { load: fetchSymbolNews, name: "news", title: "News" },
+  News: { load: async () => null, name: "news", title: "News" }, // read by useSymbolNews, never by the generic loop below
   Events: { load: fetchSymbolEvents, name: "events", title: "Events" },
   Forecast: { load: fetchSymbolForecast, name: "forecast", title: "Forecast" },
   Financials: { load: fetchSymbolFinancials, name: "financials", title: "Financials" },
@@ -32,7 +33,9 @@ const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
 const REFRESH_MS = 60_000;
 
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
-export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void }) {
+/** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
+export type NewsFocus = { symbol: string; ids: string[]; n: number };
+export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -41,17 +44,34 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   const [view, setView] = useState<{ ready: boolean; expanded: boolean; tab: Tab }>({ ready: false, expanded: false, tab: "You" });
   const [result, setResult] = useState<{ key: string; data?: unknown; error?: string } | null>(null);
   const [retry, setRetry] = useState(0);
+  // A news marker was clicked (T3.5): show the News tab, expanded, whatever was open before. A panel that mounts with the click keeps it.
+  const focused = useRef(false);
+  const [lit, setLit] = useState<NewsFocus | null>(null);
 
   useEffect(() => {
     let tab: Tab = "You";
     try { const saved = localStorage.getItem(TAB_KEY); if (TABS.includes(saved as Tab)) tab = saved as Tab; } catch { /* device storage is optional */ }
     const expanded = window.matchMedia("(min-width: 1024px)").matches;
-    queueMicrotask(() => setView({ ready: true, expanded, tab }));
+    queueMicrotask(() => setView((current) => focused.current ? { ...current, ready: true } : { ready: true, expanded, tab }));
   }, []);
+  const focusN = focus?.symbol === symbol ? focus.n : 0;
+  useEffect(() => {
+    if (!focusN) return;
+    focused.current = true;
+    queueMicrotask(() => { setView((current) => ({ ...current, expanded: true, tab: "News" })); setLit(focus ?? null); });
+    onFocusHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one click (a new `n`) is handled once
+  }, [focusN]);
+  // The highlight is for this click only: a later return to News (tab, symbol or collapse) shows it unlit.
+  useEffect(() => {
+    if (!lit) return;
+    const timer = setTimeout(() => setLit((now) => now?.n === lit.n ? null : now), LIT_MS);
+    return () => clearTimeout(timer);
+  }, [lit]);
 
   useEffect(() => {
     const tab = view.tab;
-    if (!view.ready || !view.expanded || !built(tab) || (tab === "You" && !journal)) return;
+    if (!view.ready || !view.expanded || !built(tab) || tab === "News" || (tab === "You" && !journal)) return;
     const controller = new AbortController();
     let active = true;
     let waiting: ReturnType<typeof setTimeout> | undefined;
@@ -67,16 +87,19 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
       });
     };
     const timer = setTimeout(() => { setResult(null); run(false); }, 300);
-    const again = tab === "Forecast" || tab === "News" ? setInterval(() => { if (!document.hidden) run(true); }, REFRESH_MS) : undefined;
+    const again = tab === "Forecast" ? setInterval(() => { if (!document.hidden) run(true); }, REFRESH_MS) : undefined;
     return () => { active = false; clearTimeout(timer); clearTimeout(waiting); clearInterval(again); controller.abort(); };
   }, [symbol, view.ready, view.expanded, view.tab, retry, journal]);
 
   function select(tab: Tab) {
+    setLit(null);
     setView((current) => ({ ...current, tab }));
     try { localStorage.setItem(TAB_KEY, tab); } catch { /* keep working without storage */ }
   }
 
-  const shown = result?.key === `${view.tab}|${symbol}` ? result : null;
+  const news = useSymbolNews(symbol, view.ready && view.expanded && view.tab === "News");
+  const shown = view.tab === "News" ? (news.data ? { key: `News|${symbol}`, data: news.data } : news.error ? { key: `News|${symbol}`, error: news.error } : null)
+    : result?.key === `${view.tab}|${symbol}` ? result : null;
   return <section aria-label="Symbol info" className="min-w-0 overflow-hidden rounded-lg border border-slate-700/50 bg-[#141b25]">
     <button aria-expanded={view.expanded} aria-controls={`${id}-content`} onClick={() => setView((current) => ({ ...current, expanded: !current.expanded }))} className="flex min-h-11 w-full items-center justify-between px-3 py-3 text-xs font-medium text-slate-200 lg:min-h-0">
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -96,10 +119,10 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
             : view.tab === "Short" ? <SymbolInfoShort data={shown.data as SymbolShort} />
-            : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} />
+            : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} focus={lit?.symbol === symbol ? lit : null} />
             : view.tab === "Financials" ? <SymbolInfoFinancials data={shown.data as SymbolFinancials} />
             : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
-          : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
+          : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => view.tab === "News" ? news.retry() : setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>
           : <p role="status" className="text-xs text-slate-500">Loading {BUILT[view.tab].name}…</p>}
       </div>
     </div>}

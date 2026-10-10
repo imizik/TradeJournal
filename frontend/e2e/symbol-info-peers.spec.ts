@@ -4,11 +4,12 @@ import { DEFAULT_SETTINGS, STORAGE_KEY } from "../lib/charts";
 import type { SymbolPeers } from "../lib/symbolInfo";
 
 // T3.4. Only market candles/quotes/settings and the peers endpoint are stubbed.
+// The news markers (T3.5) are off here so these tests count the tabs' own reads; e2e/news-markers.spec.ts covers the markers.
 test.beforeEach(async ({ context, page }) => {
   await context.addInitScript(({ key, settings }) => {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));
-  }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "SPY"] } });
-  await fakeChartSettings(context, { revision: 1, data: { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "SPY"] } });
+  }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "SPY"], newsHidden: true } });
+  await fakeChartSettings(context, { revision: 1, data: { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "SPY"], newsHidden: true } });
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const query = new URL(route.request().url()).searchParams;
     const symbol = query.get("symbol");
