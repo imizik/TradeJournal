@@ -3,7 +3,9 @@
 import base64
 import copy
 import json
+import logging
 from pathlib import Path
+import threading
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import httpx
@@ -99,6 +101,78 @@ def test_oversized_response_and_request_budget():
     r.count = probe.MAX_REQUESTS
     assert r.read("budget", "moomoo", "GET", probe.HOST + probe.TIME_PATH) is None
     assert r.records["budget"]["status"] == "diagnostic_budget_exhausted"
+    r.client.close()
+
+
+def test_slow_small_chunks_stop_without_buffering_and_close(monkeypatch):
+    clock = [0.0]
+    class Trickle(httpx.SyncByteStream):
+        consumed = 0
+        closed = False
+        def __iter__(self):
+            for _ in range(1000):
+                clock[0] += 14
+                self.consumed += 1
+                yield b"x" * 1024
+        def close(self):
+            self.closed = True
+    stream = Trickle()
+    monkeypatch.setattr(probe.time, "monotonic", lambda: clock[0])
+    r = reader(lambda request: httpx.Response(200, stream=stream))
+    r.last_request = -10
+    assert r.read("trickle", "moomoo", "GET", probe.HOST + probe.TIME_PATH) is None
+    assert r.records["trickle"]["status"] == "response_deadline_exceeded"
+    assert stream.consumed == 2  # formerly 64 chunks / 896 simulated seconds
+    assert stream.closed
+    r.client.close()
+
+
+def test_hard_deadline_interrupts_header_trickle_and_restores_timer(monkeypatch):
+    if not hasattr(probe.signal, "setitimer"):
+        pytest.skip("Unix deadline CLI")
+    previous = probe.signal.getsignal(probe.signal.SIGALRM)
+    monkeypatch.setattr(probe, "REQUEST_SECONDS", 0.01)
+    def handler(request):
+        assert max(request.extensions["timeout"].values()) <= 0.01
+        threading.Event().wait(0.2)  # in-memory header wait, no socket/service
+        return httpx.Response(200, json={})
+    r = reader(handler)
+    started = probe.time.perf_counter()
+    assert r.read("headers", "moomoo", "GET", probe.HOST + probe.TIME_PATH) is None
+    assert probe.time.perf_counter() - started < 0.15
+    assert r.records["headers"]["status"] == "response_deadline_exceeded"
+    assert probe.signal.getitimer(probe.signal.ITIMER_REAL) == (0.0, 0.0)
+    assert probe.signal.getsignal(probe.signal.SIGALRM) == previous
+    r.client.close()
+
+
+def test_existing_debug_child_logger_cannot_emit_reflected_header(caplog):
+    caplog.set_level(logging.DEBUG)
+    child = logging.getLogger("httpcore.http11")
+    old_level = child.level
+    child.setLevel(logging.DEBUG)
+    old_disable = logging.root.manager.disable
+    try:
+        def handler(request):
+            child.debug("receive_response_headers.complete %s", {"x-reflection": "fixture-secret"})
+            logging.getLogger("httpcore.future_child").debug("fixture-secret")
+            return httpx.Response(200, json={}, headers={"x-reflection": "fixture-secret"})
+        r = reader(handler)
+        assert r.read("quiet", "moomoo", "GET", probe.HOST + probe.TIME_PATH) == {}
+        assert "fixture-secret" not in caplog.text
+        assert "fixture-secret" not in json.dumps(r.records)
+        assert logging.root.manager.disable == old_disable
+        child.debug("control-after-probe")
+        assert "control-after-probe" in caplog.text
+        r.client.close()
+    finally:
+        child.setLevel(old_level)
+
+
+def test_unexpected_compression_is_refused_before_decoding():
+    r = reader(lambda request: httpx.Response(200, stream=httpx.ByteStream(b"not-gzip"), headers={"content-encoding": "gzip"}))
+    assert r.read("encoding", "moomoo", "GET", probe.HOST + probe.TIME_PATH) is None
+    assert r.records["encoding"]["status"] == "unexpected_content_encoding"
     r.client.close()
 
 

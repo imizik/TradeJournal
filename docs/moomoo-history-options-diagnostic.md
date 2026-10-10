@@ -29,10 +29,15 @@ loads unrelated configuration into the environment. No new setup is required
 when the existing provider credentials remain available.
 
 The run allows at most 18 requests, starts at most one request per second, has
-15-second HTTP timeouts, and refuses responses above 2 MiB or beyond the
-elapsed response budget. It never follows redirects, uses inherited proxies,
+15-second hard request deadlines spanning headers/body parsing, and refuses
+responses above 2 MiB or beyond the elapsed response budget. This Unix
+main-thread CLI refuses unsupported environments or an existing process alarm;
+it restores the signal handler/timer after each request. It requests identity
+encoding and refuses unexpected compression. It never follows redirects, uses inherited proxies,
 retries, follows provider-supplied URLs/cursors, or paginates indefinitely.
-Only fixed market-data hosts/methods/paths can receive credentials. Signature
+Only fixed market-data hosts/methods/paths can receive credentials. Python
+logging is disabled for network operations and restored afterward, including
+descendant HTTP loggers and inherited DEBUG handlers. Signature
 construction reuses the verified five-field REST payload, signing the final
 wire query/body. Raw responses stay in memory; stdout contains aggregate
 comparisons and small numeric samples. Exit 1 reports configuration/request
@@ -56,10 +61,17 @@ requests returned HTTP 200; all signed moomoo requests returned `ret_code=0`.
 It finished in 14.227 seconds. Two later baseline reads compared the screener
 contracts, and one final moomoo read explicitly requested documented bid/ask,
 size, OI and multiplier fields. Across the bounded investigation there were
-50 market-data/time requests, including the initial unsuccessful symbol/date
+65 market-data/time requests, including the initial unsuccessful symbol/date
 trial and two chain-resolution requests. No streaming or ongoing collection
 was started. Private temporary files contain only bounded sanitized reports,
 not raw bar or depth histories; live responses are not committed as fixtures.
+
+After security-review repairs, a final bounded guard verification at
+**18:23:23 ET** completed all 15 requests successfully in 14.413 seconds with
+hard deadlines, identity encoding and logging suppression. It reproduced the
+386/390 option-history matches and 390 stock/Polygon matches under the same
+unverified timestamp hypothesis. This was a single foreground run, not a
+background collector.
 
 | Test | Actual result |
 |---|---|
@@ -133,7 +145,8 @@ availability and private live-depth recording rights remain unresolved.
 
 Offline tests use invented bars, mocked HTTP and the public RFC 8032 key.
 Coverage includes frozen GET signatures, destination and redirect refusal,
-authentication/permission/rate failures, byte/request budgets, precision,
+authentication/permission/rate failures, hard header/body deadlines and slow
+trickles, inherited DEBUG logging, byte/request budgets, precision,
 missing/duplicate/malformed bars, session boundaries, the separate timestamp
 hypothesis, bounded OCC mapping, configured comparisons and secret-reflection
 refusal. Repository verification and native review evidence are recorded in

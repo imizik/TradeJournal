@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import date, datetime, time as day_time, timedelta, timezone
 from decimal import Decimal
 import json
@@ -18,7 +18,9 @@ import os
 from pathlib import Path
 import re
 import secrets
+import signal
 from statistics import median
+import threading
 import time
 from zoneinfo import ZoneInfo
 
@@ -56,6 +58,46 @@ ALLOWED.update(("moomoo", "GET", "webapi.moomoo.com", f"/api/v1.0/quote/{s}/hist
 ALLOWED.update(("moomoo", "GET", "webapi.moomoo.com", f"/api/v1.0/quote/{s}/option-volatility") for s in (ACTIVE, EXPIRED))
 MAX_BYTES = 2 * 1024 * 1024
 MAX_REQUESTS = 18
+REQUEST_SECONDS = 15
+
+
+class ResponseDeadline(Exception):
+    """Fixed-message deadline exception; no transport or credential details."""
+
+
+@contextmanager
+def quiet_logging():
+    # Ancestor .disabled flags do not suppress descendant logger propagation.
+    # This standalone probe uses only sanitized stdout, including on failures.
+    previous = logging.root.manager.disable
+    logging.disable(max(previous, logging.CRITICAL))
+    try:
+        yield
+    finally:
+        logging.disable(previous)
+
+
+@contextmanager
+def response_deadline(seconds: float):
+    """Hard wall deadline across headers/body reads on this Unix CLI.
+
+    Refuse an unsupported/reentrant environment instead of silently losing
+    the bound. This is deliberately not reusable FastAPI connection code.
+    """
+    if not hasattr(signal, "setitimer") or threading.current_thread() is not threading.main_thread():
+        raise DiagnosticError("The bounded probe requires a Unix main-thread CLI.")
+    if signal.getitimer(signal.ITIMER_REAL) != (0.0, 0.0):
+        raise DiagnosticError("An existing process timer prevents a safe diagnostic deadline.")
+    previous = signal.getsignal(signal.SIGALRM)
+    def expire(signum, frame):
+        raise ResponseDeadline()
+    signal.signal(signal.SIGALRM, expire)
+    signal.setitimer(signal.ITIMER_REAL, max(0.001, seconds))
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
 
 
 def check_destination(provider: str, request: httpx.Request, day: date) -> None:
@@ -97,6 +139,7 @@ class Reader:
             return None
         request = self.client.build_request(method, url, params=params, headers=headers, data=form,
                                             content=json.dumps(body, separators=(",", ":")).encode() if body is not None else None)
+        request.headers["Accept-Encoding"] = "identity"
         check_destination(provider, request, self.day)
         if provider == "moomoo" and request.url.path != TIME_PATH:
             sign_history(request, self.appkey, self.key, int(time.time() * 1000 + self.offset), self.day)
@@ -108,20 +151,31 @@ class Reader:
         start = time.perf_counter()
         record = self.records[label] = {"status": "unavailable"}
         try:
-            with closing(self.client.send(request, stream=True, follow_redirects=False)) as response:
-                record.update(http_status=response.status_code, rate_headers=numeric_headers(response.headers))
-                if response.status_code in (401, 403, 429):
-                    self.blocked.add(provider)
-                if response.status_code != 200:
-                    record["status"] = "http_error"
-                    return None
-                chunks = bytearray()
-                for chunk in response.iter_bytes(chunk_size=65536):
-                    if len(chunks) + len(chunk) > MAX_BYTES or time.monotonic() - self.started > 180:
-                        record["status"] = "response_budget_exceeded"
+            seconds = min(REQUEST_SECONDS, 180 - (time.monotonic() - self.started))
+            deadline = time.monotonic() + seconds
+            request.extensions["timeout"] = {k: seconds for k in ("connect", "read", "write", "pool")}
+            with quiet_logging(), response_deadline(seconds):
+                with closing(self.client.send(request, stream=True, follow_redirects=False)) as response:
+                    record.update(http_status=response.status_code, rate_headers=numeric_headers(response.headers))
+                    if response.status_code in (401, 403, 429):
+                        self.blocked.add(provider)
+                    if response.status_code != 200:
+                        record["status"] = "http_error"
                         return None
-                    chunks.extend(chunk)
-            payload = json.loads(chunks)
+                    if response.headers.get("content-encoding", "identity").lower() != "identity":
+                        record["status"] = "unexpected_content_encoding"
+                        return None
+                    chunks = bytearray()
+                    # No 64 KiB accumulator delaying the elapsed-time guard.
+                    for chunk in response.iter_bytes():
+                        if time.monotonic() >= deadline:
+                            record["status"] = "response_deadline_exceeded"
+                            return None
+                        if len(chunks) + len(chunk) > MAX_BYTES:
+                            record["status"] = "response_budget_exceeded"
+                            return None
+                        chunks.extend(chunk)
+                payload = json.loads(chunks)
             if not isinstance(payload, dict):
                 record["status"] = "malformed_response"
                 return None
@@ -138,6 +192,9 @@ class Reader:
                     return None
             record["status"] = "success"
             return payload
+        except ResponseDeadline:
+            record["status"] = "response_deadline_exceeded"
+            return None
         except (httpx.HTTPError, ValueError, OSError):
             record["status"] = "transport_or_json_error"
             return None
@@ -427,8 +484,6 @@ def main() -> int:
     # The fixed contracts must both exist during the chosen historical session.
     if not date(2026, 10, 5) <= args.day <= DEFAULT_DAY or args.day.weekday() >= 5:
         parser.error("--day must be a weekday from 2026-10-05 through 2026-10-09 for the fixed contracts.")
-    for name in ("httpx", "httpcore"):
-        logging.getLogger(name).disabled = True
     try:
         appkey = secure_read(KEY_DIR / "appkey").decode("ascii").strip()
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", appkey):
@@ -436,7 +491,7 @@ def main() -> int:
         key = serialization.load_pem_private_key(secure_read(KEY_DIR / "phase1-ed25519.pem"), password=None)
         if not isinstance(key, Ed25519PrivateKey):
             raise DiagnosticError("An Ed25519 key is required.")
-        with httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
+        with quiet_logging(), httpx.Client(timeout=15, follow_redirects=False, trust_env=False) as client:
             report = run(Reader(client, args.day, appkey, key), settings(args.baseline_env))
         print(json.dumps(report, indent=2, allow_nan=False))
         return 0 if report["status"] == "completed" else 1
