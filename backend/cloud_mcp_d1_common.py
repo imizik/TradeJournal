@@ -26,6 +26,7 @@ class LinkedProfile(ProfileGrant):
 
 class SampleReadConfig(Config):
     sample_only: Literal[True]
+    exercise_kind: Literal["synthetic", "historical"] = "synthetic"
     decision_writes: bool = Field(default=False, strict=True)
     profiles: list[LinkedProfile] = Field(min_length=1, max_length=1)
     backend_socket: str = "/run/tradejournal-d1/reads.sock"
@@ -65,7 +66,8 @@ class SampleReadVerifier(JWKSVerifier):
 
     def active_config(self):
         current = super().active_config()
-        if current is None or current.backend_socket != self.config.backend_socket:
+        if current is None or (current.backend_socket != self.config.backend_socket
+                or current.exercise_kind != self.config.exercise_kind):
             return None
         def bindings(config):
             return [(p.subject, p.id, p.principal_id, p.principal_version) for p in config.profiles]

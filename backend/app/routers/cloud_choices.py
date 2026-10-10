@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import json
 import math
+import os
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -10,9 +11,9 @@ from starlette.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, sample_practice
-from app.engine.cloud_practice_access import require_choice_write, require_sample
-from app.models import DecisionContext, DecisionRecord, PracticeOpportunity, PracticeRun
+from app.engine import cloud_practice_access, decisions, sample_practice, historical_replay, access
+from app.engine.cloud_practice_access import require_choice_write, require_sample, historical_mode, require_historical
+from app.models import AccessPrincipal, DecisionContext, DecisionRecord, PracticeOpportunity, PracticeRun
 from cloud_mcp_d1_common import MAX_RESPONSE_BYTES
 from cloud_mcp_d2_common import MAX_CHOICE_BYTES, PracticeChoice
 
@@ -62,12 +63,23 @@ def _opportunity(request: Request, db: Session, raw_id: str):
     if opportunity is None or opportunity.run_id != assigned_run_id:
         _bad(404, "Sample opportunity not found")
     run = db.get(PracticeRun, assigned_run_id)
-    if run is None or not sample_practice.eligible(run):
+    if run is None or not (historical_replay.eligible(run) if historical_mode() else sample_practice.eligible(run)):
         _bad(404, "Sample opportunity not found")
     symbols = who.grants.get("symbols", [])
     if opportunity.symbol not in symbols or opportunity.context_id is None:
         _bad(404, "Sample opportunity not found")
     context = db.get(DecisionContext, opportunity.context_id)
+    if historical_mode():
+        require_historical(request)
+        try:
+            if not historical_replay.market_practice.visible_to(run, who.identifier):
+                raise ValueError()
+            evidence = historical_replay.checked_context(context)
+            if context.symbol != opportunity.symbol:
+                raise ValueError()
+        except (decisions.DecisionError, ValueError, TypeError, KeyError, AttributeError):
+            _bad(404, "Historical opportunity not found")
+        return who, run, opportunity, context, evidence
     if context is None or context.provider != "sample_fixture" or context.symbol != opportunity.symbol:
         _bad(404, "Sample opportunity not found")
     try:
@@ -86,9 +98,11 @@ def _opportunity(request: Request, db: Session, raw_id: str):
 
 
 def _response(run: PracticeRun, opportunity: PracticeOpportunity, choice: DecisionRecord | None):
+    historical = historical_mode()
     result = {
-        "schema_version": SCHEMA_VERSION,
-        "sample_data": True,
+        "schema_version": "historical-demo-choice-v1" if historical else SCHEMA_VERSION,
+        "sample_data": not historical,
+        **({"historical_replay": True, "demo_only": True} if historical else {}),
         "read_at": datetime.now(timezone.utc).isoformat(),
         "time_zone": "America/New_York",
         "ui_path": f"/daily/{run.day.isoformat()}",
@@ -189,9 +203,28 @@ def _bound_selected_facts(evidence: dict, payload: PracticeChoice):
             _bad(422, "Selected sample evidence exceeds its size limit")
 
 
-def _save_choice(db: Session, who, run: PracticeRun, opportunity: PracticeOpportunity,
+def _save_choice(db: Session, request: Request, who, run: PracticeRun, opportunity: PracticeOpportunity,
                  payload: PracticeChoice):
     try:
+        if historical_mode():
+            opportunity_id = str(opportunity.id)
+            # Serialize with browser saves/revocation and recheck after body reception.
+            with access._LOCK:
+                access._serialized(db)
+                db.expire_all()
+                principal = db.get(AccessPrincipal, who.identifier, populate_existing=True)
+                linked = cloud_practice_access.verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", "")).active_config()
+                profile = next((p for p in linked.profiles if p.principal_id == who.identifier), None) if linked else None
+                if (principal is None or profile is None or not profile.enabled or not principal.enabled
+                        or getattr(request.state, "cloud_mcp_token_expiry", 0) <= datetime.now(timezone.utc).timestamp()
+                        or principal.version != profile.principal_version
+                        or principal.credential_expires_at is None or principal.credential_expires_at <= access.now()
+                        or json.loads(principal.grants_json) != who.grants):
+                    _bad(403, "Historical permission changed before saving")
+                who, run, opportunity, _context, evidence = _write_preflight(
+                    request, db, opportunity_id)
+                _bound_selected_facts(evidence, payload)
+                return historical_replay.choose(db, run, opportunity, str(who.identifier), payload.model_dump())
         return sample_practice.choose(db, run, opportunity, str(who.identifier), payload.model_dump())
     except decisions.DecisionError as exc:
         message = str(exc)
@@ -214,7 +247,7 @@ async def post_choice(opportunity_id: str, request: Request, response: Response,
     payload = _parse_choice(raw)
     _bound_selected_facts(evidence, payload)
     choice, created = await run_in_threadpool(
-        _save_choice, db, who, run, opportunity, payload)
+        _save_choice, db, request, who, run, opportunity, payload)
     result = _response(run, opportunity, choice)
     result["created"] = created
     response.status_code = 201 if created else 200
