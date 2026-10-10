@@ -40,17 +40,35 @@ def initialize():
         verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
 
 
+def historical_mode():
+    check = verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
+    config = check.active_config()
+    if config is None:
+        raise HTTPException(503, "Practice connector is unavailable")
+    return config.exercise_kind == "historical"
+
+
+def require_historical(request):
+    require_sample(request)
+    if (os.environ.get("TJ_CLOUD_MCP_HISTORICAL_ENABLED") != "true"
+            or not access.historical_writer(request)):
+        raise HTTPException(403, "Historical demo connector is unavailable")
+
+
 def require_choice_write(request):
     require_sample(request)
-    if not all(os.environ.get(name) == "true" for name in
-            ("TJ_SAMPLE_DECISION_WRITES", "TJ_CLOUD_MCP_DECISION_WRITES")):
+    historical = historical_mode()
+    if historical:
+        require_historical(request)
+    if (os.environ.get("TJ_CLOUD_MCP_DECISION_WRITES") != "true"
+            or (not historical and os.environ.get("TJ_SAMPLE_DECISION_WRITES") != "true")):
         raise HTTPException(503, "Sample choice writes are unavailable")
     check = verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
     config = check.active_config()
     if config is None or config.decision_writes is not True:
         raise HTTPException(503, "Sample choice writes are unavailable")
     who = getattr(request.state, "access", None)
-    if (who is None or who.owner or who.service or who.grants.get("decision_write") is not True
+    if (who is None or who.owner or who.service or (not historical and who.grants.get("decision_write") is not True)
             or WRITE_SCOPE not in getattr(request.state, "cloud_mcp_scopes", ())):
         raise HTTPException(403, "Sample choice write permission required")
 
@@ -100,7 +118,12 @@ def identify(request, *, write=False):
         db.commit()
         identity = access.Identity(row.id, "assistant", grants=grants)
         request.state.cloud_mcp_scopes = frozenset(verified.scopes)
+        request.state.cloud_mcp_token_expiry = verified.expires_at
         request.state.access = identity
+        if config.exercise_kind == "historical":
+            require_historical(request)
+        elif grants.get("historical_replay") or grants.get("market_decision_write"):
+            raise HTTPException(403, "Synthetic exercise grant required")
         if write:
             require_choice_write(request)
         return identity

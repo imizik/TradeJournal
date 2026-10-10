@@ -281,6 +281,54 @@ def exercise(run_id, day):
     assert cloud_reads_state()[1] is False
     restore_cloud_reads(cloud_active)
     assert ready().get("isError") is not True
+    # Historical mode uses a distinct frozen identity/run and the same Unix bridge.
+    from app.engine import access, historical_replay
+    from scripts.historical_trial_fixture import bundle
+    with Session(engine) as db:
+        synthetic_receipts = [r.model_dump(mode="json") for r in db.exec(select(DecisionRecord)).all()]
+        historical = historical_replay.prepare(db, bundle(), identifier="native-history", proof=True)
+        run_id, day = str(historical.id), historical.day.isoformat()
+        db.add(AccessPrincipal(id="native-history", key_hash="unusable-fixture-key", enabled=True,
+            version=1, credential_expires_at=access.now() + timedelta(hours=1), grants_json=json.dumps({
+                "symbols": ["MU", "NBIS"], "run_ids": [run_id], "journal_read": False,
+                "market_decision_write": True, "historical_replay": True})))
+        db.commit()
+        frozen = [r.model_dump(mode="json") for r in db.exec(select(DecisionContext)).all()]
+        events = [r.model_dump(mode="json") for r in db.exec(select(DecisionEvent)).all()]
+    env_path = CONFIG / "trial-runtime.env"
+    write(env_path, env_path.read_text() + "TJ_CLOUD_MCP_HISTORICAL_ENABLED=true\n"
+        "TJ_MARKET_DECISION_WRITES=true\nTJ_HISTORICAL_REPLAY_ENABLED=true\n", group="tj-dot-trial")
+    config["exercise_kind"] = "historical"
+    config["profiles"][0]["principal_id"] = "native-history"
+    write(LINK / "config.json", json.dumps(config))
+    run("systemctl", "restart", API, MCP)
+    assigned = content(ready())["run"]
+    assert assigned["sample_data"] is False and assigned["historical_replay"] is True
+    assert all(o["replay"] is None for o in assigned["opportunities"])
+    assert "nonce" not in json.dumps(assigned) and "continuation" not in json.dumps(assigned)
+    opportunity_id = assigned["opportunities"][0]["id"]
+    arguments = {"opportunity_id": opportunity_id, "decision": "skip", "rationale": "Historical Unix fixture"}
+    saved_history = content(call("record_practice_choice", arguments, bearer=write_token))
+    assert saved_history["schema_version"] == "historical-demo-choice-v1" and saved_history["created"]
+    assert saved_history["sample_data"] is False and saved_history["demo_only"] is True
+    again = content(call("record_practice_choice", arguments, bearer=write_token))
+    assert again["created"] is False and again["choice"] == saved_history["choice"]
+    run("systemctl", "restart", API, MCP)
+    ready()
+    assert content(call("get_practice_choice", {"opportunity_id": opportunity_id}))["choice"] == saved_history["choice"]
+    with Session(engine) as db:
+        records = [r.model_dump(mode="json") for r in db.exec(select(DecisionRecord)).all()]
+        assert len(records) == len(synthetic_receipts) + 1
+        assert all(r in records for r in synthetic_receipts)
+        assert frozen == [r.model_dump(mode="json") for r in db.exec(select(DecisionContext)).all()]
+        assert events == [r.model_dump(mode="json") for r in db.exec(select(DecisionEvent)).all()]
+        principal = db.get(AccessPrincipal, "native-history")
+        principal.enabled = False
+        db.add(principal)
+        db.commit()
+    assert call("get_practice_run", {"run_id": run_id})["isError"] is True
+    assert call("record_practice_choice", arguments, bearer=write_token)["isError"] is True
+    print("Historical MCP passed: actual Unix bridge, distinct assigned identity, frozen reads, immutable save/retry/restart, revocation and synthetic receipt preservation")
     from dot_trial_control import stop_cloud_reads
     stop_cloud_reads()
     run("systemctl", "stop", API)

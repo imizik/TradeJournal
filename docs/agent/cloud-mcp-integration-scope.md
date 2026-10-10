@@ -300,3 +300,6 @@ data, and permission/cost limits. These are D0 investigation outputs, not
 reasons to build a broad connector first. The original scoping document enabled
 none of these. The subsequent approved D0 trial enabled only synthetic access;
 domain tools, production grants and follow-through subscriptions remain proposed.
+
+The selected next demo increment is [historical MCP choices](cloud-mcp-historical-contract.md):
+one frozen historical assignment, shared browser receipts, and no MCP replay.

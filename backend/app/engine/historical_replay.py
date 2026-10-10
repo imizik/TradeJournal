@@ -191,7 +191,7 @@ def take_unavailable(context, run):
         SimpleNamespace(day=run.day, deadline=decisions._utc(evidence["packet"]["plan_expiry_max"], "session end")), now=cutoff)
 
 
-def view(db, run, identifier, symbols, *, details=True):
+def view(db, run, identifier, symbols, *, details=True, include_replay=True):
     if not eligible(run) or not market_practice.visible_to(run, identifier):
         raise decisions.DecisionError("Historical session is outside this frozen assignment")
     assigned = market_practice.metadata(run)["assigned_agent"]
@@ -210,7 +210,7 @@ def view(db, run, identifier, symbols, *, details=True):
                 DecisionRecord.actor == assigned)).first()
             result["opportunities"].append({"id": str(opp.id), "symbol": opp.symbol,
                 "context": decisions.context_row(ctx, evidence), "choice": decisions.row(choice) if choice else None,
-                "take_unavailable": take_unavailable(ctx, run), "replay": replay_view(db, choice) if choice else None})
+                "take_unavailable": take_unavailable(ctx, run), "replay": replay_view(db, choice) if choice and include_replay else None})
     return result
 
 
