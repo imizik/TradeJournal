@@ -94,8 +94,10 @@ For a practice proof:
   fields only when present. Known continuation makes this an operational proof,
   not an independent recommendation or evidence of trading edge.
 - Reload/reopen, then perform only the approved service restart. Compare fresh
-  receipts before/after. Confirm MCP still withholds continuation and replay
-  results after the browser replay, as required by the historical contract.
+  receipts before/after. For historical practice, confirm MCP still withholds
+  continuation and replay results after browser replay. For synthetic practice,
+  follow D1: keep continuation hidden before start, then compare MCP
+  own-replay receipts with the browser after the actor starts replay.
 
 For journal acceptance, follow the journal contract's exact catalog, exclusions,
 pagination, expiry and revocation tests. Preserve unknown P&L as missing. If the
