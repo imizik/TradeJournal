@@ -773,15 +773,17 @@ async function deepHistoryStub(page: Page, months = 6) {
   await page.route("**/api/backend/charts/workspace?**", (route) => {
     refreshes++;
     const data = currentFixture(route.request().url(), base);
-    const main = data.panels["5m"];
-    if (main) {
-      // This fixture tests user-driven scroll-back. A 100-bar tail also requests
-      // history when the initial viewport opens, racing the startup assertion.
-      // Seed the normal 240-bar window; short-tail auto-fill is tested separately.
-      const seed = fixture(route.request().url()).panels["5m"]!.bars;
-      main.bars = seed.map((bar, index) => ({ ...bar, source: "tradier",
-        time: base + 30 - 300 * (seed.length - index),
-        end_time: base + 30 - 300 * (seed.length - index - 1) }));
+    const seeds = fixture(route.request().url()).panels;
+    // This fixture tests user-driven scroll-back. Every panel needs its normal
+    // 240-bar window: even a secondary chart's 65-bar opening range starts
+    // inside the history threshold when its tail contains only 100 candles.
+    // Short-tail auto-fill is tested separately.
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][]) {
+      const seed = seeds[interval]!.bars;
+      const step = STEP[interval];
+      panel.bars = seed.map((bar, index) => ({ ...bar, source: "tradier",
+        time: base + 30 - step * (seed.length - index),
+        end_time: base + 30 - step * (seed.length - index - 1) }));
     }
     return route.fulfill({ json: data });
   });
