@@ -30,4 +30,5 @@ def build_app():
         if access.historical_replays_enabled():
             from scripts import historical_trial_fixture
             historical_trial_fixture.prepare(db)
+            historical_trial_fixture.prepare_expiry_cases(db)
     return app

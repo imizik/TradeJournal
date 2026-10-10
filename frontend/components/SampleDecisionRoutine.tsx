@@ -6,11 +6,11 @@ import { DecisionCard } from "@/components/PracticeDecisions";
 import { useAppAccess } from "@/components/AccessProvider";
 import FrozenSampleChart from "@/components/FrozenSampleChart";
 import SampleReplayPanel, { type SampleReplay } from "@/components/SampleReplayPanel";
+import { historicalExpiryInstant } from "@/lib/historicalExpiry";
 
 type Opportunity = { id: string; symbol: string; context: DecisionContext; choice: DecisionRecord | null; take_unavailable?: string | null; replay?: SampleReplay | null };
 type Run = { id: string; day: string; sample_data: boolean; market_data?: boolean; historical_replay?: boolean; operational_proof?: boolean; policy_version: string; deadline: string; replay_exercise?: boolean; opportunities: Opportunity[] };
 const stamp = (value: string) => `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York" })} ET`;
-const localInput = (value: string) => { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); };
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(apiUrl(path), { cache: "no-store", method: body === undefined ? "GET" : "POST",
@@ -75,16 +75,20 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
   const [rationale, setRationale] = useState("");
   const [condition, setCondition] = useState("");
   const [expiry, setExpiry] = useState(() => {
-    const historicalMaximum = typeof opp.context.packet.plan_expiry_max === "string" ? opp.context.packet.plan_expiry_max : null;
-    if (historical && historicalMaximum) return localInput(historicalMaximum);
+    if (historical) return "";
     const ends = new Date(run.deadline);
     return new Date(ends.getTime() - ends.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   });
   const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   const expiryDate = new Date(expiry);
-  const expiryInstant = Number.isFinite(expiryDate.getTime()) ? expiryDate.toISOString() : null;
+  const expiryInstant = historical ? historicalExpiryInstant(expiry)
+    : Number.isFinite(expiryDate.getTime()) ? expiryDate.toISOString() : null;
   const historicalMaximum = typeof opp.context.packet.plan_expiry_max === "string" ? opp.context.packet.plan_expiry_max : null;
-  const expiryWithinHistoricalWindow = !historical || Boolean(expiryInstant && historicalMaximum && Date.parse(expiryInstant) <= Date.parse(historicalMaximum));
+  const historicalCutoff = typeof opp.context.packet.simulated_as_of === "string" ? opp.context.packet.simulated_as_of : null;
+  const expiryWithinHistoricalWindow = !historical || Boolean(expiryInstant && historicalMaximum && historicalCutoff
+    && Date.parse(expiryInstant) > Date.parse(historicalCutoff) && Date.parse(expiryInstant) <= Date.parse(historicalMaximum));
+  const expiryRequired = decision === "wait" || (market && decision === "take");
+  const [expiryConfirmed, setExpiryConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [reopened, setReopened] = useState(false);
@@ -99,10 +103,14 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
     max_holding_sessions: 2, freshness_limit_seconds: 7200, cost_model: {version: "p0-cost-v1", slippage_bps: 1, slippage_per_share: .01}
   } as Record<string, unknown> : (opp.context.packet.sample_plan ?? {}) as Record<string, unknown>;
   async function save(event: React.FormEvent) {
-    event.preventDefault(); setBusy(true); setError("");
+    event.preventDefault();
+    if (historical && expiryRequired && (!expiryWithinHistoricalWindow || !expiryConfirmed)) {
+      setError("Choose and confirm the historical expiry before saving."); return;
+    }
+    setBusy(true); setError("");
     try {
       const body = { decision, rationale, ...(decision === "take" ? { plan } : {}),
-        ...(decision === "wait" ? { wait_condition: condition, wait_expiry: new Date(expiry).toISOString() } : {}) };
+        ...(decision === "wait" ? { wait_condition: condition, wait_expiry: expiryInstant } : {}) };
       onSaved(await request<Run>(`/practice/opportunities/${encodeURIComponent(opp.id)}/agent-choice`, body));
     } catch (err) { setError(err instanceof Error ? err.message : "The decision was not saved. Reload before retrying if completion is uncertain."); }
     finally { setBusy(false); }
@@ -133,7 +141,7 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
     {(historical || run.replay_exercise) && <p className="text-sm text-muted-foreground">{historical ? "Historical continuation stays sealed until you start your saved TAKE. WAIT/SKIP create no replay or paper entry." : <>{String(opp.context.packet.replay_notice)} The hidden continuation is revealed only after you start a saved TAKE. WAIT/SKIP produce no paper entry.</>}</p>}
     <div className="grid min-w-0 gap-4 xl:grid-cols-2"><FrozenSampleChart context={opp.context} /><div className="min-w-0 space-y-4">
     {opp.choice ? <><p role="status">Saved decision {opp.choice.id}{reopened ? " · original record reopened" : ""}.</p><button type="button" disabled={busy} onClick={() => void reopen()} className="rounded border px-3 py-2">Reopen saved {opp.symbol} decision</button><DecisionCard record={opp.choice} focused={historical && reopened} openToken={historical ? decisionOpenToken : undefined} withPaper={false} idPrefix="routine-" /></> : market && (owner || !canWrite) ? <p>Jo has not saved a decision for this opportunity. This login can inspect the session only.</p> : <form onSubmit={save} className="grid gap-3 text-sm">
-      <label className="grid gap-1">{opp.symbol} choice<select value={decision} onChange={event => setDecision(event.target.value as typeof decision)} className="rounded border bg-background p-2"><option value="take" disabled={market && Boolean(opp.take_unavailable)}>TAKE · {historical ? "historical paper plan" : market ? "unarmed real-data draft" : "simulated draft"}</option><option value="wait">WAIT</option><option value="skip">SKIP</option></select></label>
+      <label className="grid gap-1">{opp.symbol} choice<select value={decision} onChange={event => { setDecision(event.target.value as typeof decision); setExpiryConfirmed(false); }} className="rounded border bg-background p-2"><option value="take" disabled={market && Boolean(opp.take_unavailable)}>TAKE · {historical ? "historical paper plan" : market ? "unarmed real-data draft" : "simulated draft"}</option><option value="wait">WAIT</option><option value="skip">SKIP</option></select></label>
       <label className="grid gap-1">{opp.symbol} reason<textarea required maxLength={2000} value={rationale} onChange={event => setRationale(event.target.value)} className="rounded border bg-background p-2" rows={3} /></label>
       {decision === "take" && !market && <p>Saving TAKE uses the frozen sample plan above, including its entry guard, expiry and sample cost assumptions. It cannot be armed.</p>}
       {market && decision === "take" && <>
@@ -141,8 +149,14 @@ function SampleOpportunity({ opportunity: opp, run, onSaved }: { opportunity: Op
         <label className="grid gap-1">{opp.symbol} maximum reference entry price<input required type="number" min="0" step="any" value={guardMax} onChange={event => setGuardMax(event.target.value)} className="rounded border bg-background p-2" /></label>
         <p>The reference entry starts at the selected trigger. Stop must be below trigger; target must be above the maximum entry. Saving commits a conditional long plan, not an entry or monitoring request.</p>
       </>}
-      {(decision === "wait" || (market && decision === "take")) && <>{decision === "wait" && <label className="grid gap-1">{opp.symbol} wait condition<input required maxLength={500} value={condition} onChange={event => setCondition(event.target.value)} className="rounded border bg-background p-2" /></label>}<label className="grid gap-1">{opp.symbol} {decision === "wait" ? "waiting" : "plan"} ends ({historical ? `historical clock · browser time zone ${browserTimeZone}` : browserTimeZone})<input required type="datetime-local" max={historicalMaximum ? localInput(historicalMaximum) : undefined} value={expiry} onChange={event => setExpiry(event.target.value)} aria-describedby={`${opp.id}-expiry-preview`} className="rounded border bg-background p-2" /></label><p id={`${opp.id}-expiry-preview`} className="text-muted-foreground">{expiryInstant ? <>Will save as <time dateTime={expiryInstant}>{stamp(expiryInstant)}</time>. {historical ? <>Plan expiry maximum {historicalMaximum ? stamp(historicalMaximum) : "unavailable"}; real decision deadline {stamp(run.deadline)}.</> : "Daily Review shows Eastern time."}</> : "Choose an expiry to preview its Eastern time."}</p></>}
-      <button disabled={busy || !canWrite || (market && decision === "take" && Boolean(opp.take_unavailable)) || ((decision === "wait" || decision === "take") && !expiryWithinHistoricalWindow)} className="w-fit rounded bg-primary px-4 py-2 text-primary-foreground">Save {opp.symbol} decision</button>
+      {expiryRequired && <>
+        {decision === "wait" && <label className="grid gap-1">{opp.symbol} wait condition<input required maxLength={500} value={condition} onChange={event => { setCondition(event.target.value); setExpiryConfirmed(false); }} className="rounded border bg-background p-2" /></label>}
+        <label className="grid gap-1">{opp.symbol} {decision === "wait" ? "waiting" : "plan"} ends ({historical ? "historical clock · Eastern time" : browserTimeZone})<input required type={historical ? "text" : "datetime-local"} placeholder={historical ? "YYYY-MM-DD HH:mm" : undefined} value={expiry} onChange={event => { setExpiry(event.target.value); setExpiryConfirmed(false); }} aria-invalid={historical && Boolean(expiry) && !expiryWithinHistoricalWindow} aria-describedby={`${opp.id}-expiry-preview`} className="rounded border bg-background p-2" /></label>
+        <p id={`${opp.id}-expiry-preview`} className="text-muted-foreground">{expiryInstant ? <>Will save as <time dateTime={expiryInstant}>{stamp(expiryInstant)}</time>. {historical ? <>UTC: <code>{expiryInstant}</code>. Plan expiry maximum {historicalMaximum ? stamp(historicalMaximum) : "unavailable"}; real decision deadline {stamp(run.deadline)}.</> : "Daily Review shows Eastern time."}</> : historical ? "Enter YYYY-MM-DD HH:mm in Eastern time. Choose a valid, unambiguous date and time." : "Choose an expiry to preview its Eastern time."}</p>
+        {historical && expiryInstant && !expiryWithinHistoricalWindow && <p role="alert">Expiry must be after the historical cutoff {historicalCutoff ? stamp(historicalCutoff) : "unavailable"} and no later than {historicalMaximum ? stamp(historicalMaximum) : "unavailable"}.</p>}
+        {historical && expiryWithinHistoricalWindow && <label className="flex items-start gap-2"><input required type="checkbox" checked={expiryConfirmed} onChange={event => setExpiryConfirmed(event.target.checked)} />Confirm {opp.symbol} expiry matches my condition or plan: {stamp(expiryInstant!)}.</label>}
+      </>}
+      <button disabled={busy || !canWrite || (market && decision === "take" && Boolean(opp.take_unavailable)) || (expiryRequired && (!expiryWithinHistoricalWindow || (historical && !expiryConfirmed)))} className="w-fit rounded bg-primary px-4 py-2 text-primary-foreground">Save {opp.symbol} decision</button>
     </form>}
     {(historical ? opp.choice?.decision === "take" : run.replay_exercise && Boolean(opp.choice)) && opp.choice && <SampleReplayPanel symbol={opp.symbol} decision={opp.choice.decision} value={opp.replay ?? null} busy={busy} canStart={historical ? Boolean(!owner && canWrite && historical_replay_enabled) : Boolean(grants.sample_replay && sample_replay_enabled)} reopened={replayReopened} historical={historical} onStart={() => void replay(true)} onReopen={() => void replay(false)} />}
     {error && <p role="alert" className="text-red-500">{error}</p>}
