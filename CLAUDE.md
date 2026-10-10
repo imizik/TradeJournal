@@ -94,10 +94,11 @@ person. A PR is ready to merge only when it is ready to go live; see
 Follow the [native pre-PR review workflow](docs/agent/pr-review.md) before
 publishing ready work. The owner classifies the full diff, invokes a fresh
 reviewer in the same client, receives its findings directly, repairs valid
-issues and obtains review of the final candidate. Normal changes get one
-reviewer; consequential changes get a stronger general reviewer and a separate
-focused reviewer. Use the explicit model profiles in the guide, not the default
-implementation worker. Reviewers do not invoke reviewers themselves.
+issues and obtains review of the final candidate. Most changes get one
+reviewer; a change with a named high-risk failure mode (money, real data,
+security, deployment, or loosened checks) gets a stronger general reviewer and
+a focused reviewer. Use the explicit model profiles in the guide, not the
+default implementation worker. Reviewers do not invoke reviewers themselves.
 
 The agent may skip only genuinely explanatory, non-agent documentation, with
 a reason in the PR. Other changes require review unless the user explicitly

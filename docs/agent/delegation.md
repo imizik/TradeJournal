@@ -89,10 +89,10 @@ behavior, spending, production data.
 ## Review tiers
 
 Use the shared [native pre-PR review policy](pr-review.md) as the only tier table.
-Normal changes use a fresh Sonnet `reviewer`. Consequential changes use an Opus
-`risk-reviewer` plus a separate focused invocation; the lead reads the risky
-hunks and verifies acceptance evidence. The owner fixes findings and re-reviews
-the final diff before publishing ready work. Small UI, test or refactor diffs
+Most changes use a fresh Sonnet `reviewer`. A change with a named tier-2 failure
+mode uses an Opus `risk-reviewer` plus a focused invocation; the lead reads the
+risky hunks and verifies acceptance evidence. The owner fixes findings and gets
+them rechecked before publishing ready work. Small UI, test or refactor diffs
 are not automatically exempt. CI remains required; the user alone merges.
 
 ## Recording it
