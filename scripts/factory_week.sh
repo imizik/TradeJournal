@@ -89,7 +89,7 @@ setting() {
 # cloud provider would bill instead, and another base URL or socket would
 # receive it (the sign-in check cannot see a socket). The token itself goes in
 # as a prefix assignment at each call, never as an argument: ps and exec
-# auditing would show an argument. Same as scripts/docs_drift_week.sh.
+# auditing would show an argument.
 PLAN_ENV=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_UNIX_SOCKET
   -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_USE_GATEWAY
   -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE
