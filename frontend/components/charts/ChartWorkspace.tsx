@@ -28,6 +28,7 @@ import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, c
 import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, MarketDay, OptionsLayer, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
+import { receiveChartTick, startSymbolTiming, useQuoteTiming } from "@/lib/chartPerformance";
 import { useChartSettings } from "@/lib/chartSync";
 import { alertText, createAlert, rearmAlert, removeAlert } from "@/lib/alerts";
 import type { AlertCondition, AlertMark, AlertsPayload, AlertSource, LevelAlert } from "@/lib/alerts";
@@ -124,6 +125,7 @@ const NO_ENTRY: Entry = { typed: "", invalid: false };
 const latestTrade = (ticks: ChartStreamTick[], symbol: string) => ticks.findLast((tick) => tick.symbol === symbol);
 function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: ChartQuote; candle?: ChartBar; market?: MarketDay }) {
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
+  useQuoteTiming(tick);
   const shown = shownPrice({ tick, quote, candle, scope: live });
   // A premarket or after-hours price is measured from that session's own reference and says
   // which session it is; after hours the regular close stands beside it, as the watchlist shows it.
@@ -145,6 +147,7 @@ function LiveQuote({ live, quote, candle, market }: { live: LiveFeed; quote?: Ch
 
 function WatchlistQuote({ live, quote, market, paused }: { live: LiveFeed; quote?: ChartQuote; market?: MarketDay; paused: boolean }) {
   const tick = useStream(live, (ticks) => latestTrade(ticks, live.symbol));
+  useQuoteTiming(tick);
   const connected = useStream(live, (_, state) => state.key === live.key && state.status === "connected");
   const now = useClock((stamp) => stamp);
   const tickIsNewest = !!tick && now >= tick.at && tick.at >= (quote?.trade_time ?? 0);
@@ -327,9 +330,10 @@ export default function ChartWorkspace() {
   const rangesOn = !settings.rangeBandsHidden;
   const autoParam = !(optionsOn || rangesOn) || !settings.autoLevelsHidden;
   const requestKey = `${symbol}|${session}|${intervalKey}|${extrasKey}|${watchlistKey}|${optionsKey ?? ""}|${rangesOn}|${autoParam}`;
-  // Keep chart-panel stream identity independent of watchlist edits: changing
-  // the streamed union must not invalidate a panel's current live tick slice.
-  const streamKey = `${symbolsKey}|${session}`;
+  // Market trades survive symbol/session/layout changes; each consumer selects
+  // its symbol and session. Reconnect only when the subscribed union changes.
+  const streamKey = "market";
+  const subscriptionKey = [...new Set([...symbolsKey.split(","), ...watchlistKey.split(",").filter(Boolean)])].sort().join(",");
   const data = response?.key === requestKey ? response.data : null;
   // Candles depend only on the symbol and session. While a request for a new
   // symbol, layout or watchlist loads, a panel keeps the newest response that
@@ -343,6 +347,7 @@ export default function ChartWorkspace() {
   // (watchlist quotes, market hours, notes).
   const latest = response?.data;
   const sampleChart = latest?.sample_data === true;
+  const streamReady = !!latest;
   const requestFailed = error?.key === requestKey;
   const currentOlder = useMemo(() => older.key === session ? older.panels : {}, [older, session]);
   const hasData = !!current;
@@ -422,7 +427,7 @@ export default function ChartWorkspace() {
   }).map((alert) => alert.id));
   // Which side an alert waits on: the newest streamed trade, else the newest candle, else the quote.
   const referenceFor = (name: string): number | null => {
-    const state = stream.get();
+    const state = stream.get(name);
     const tick = state.key === streamKey ? state.ticks.findLast((row) => row.symbol === name) : undefined;
     const slot = slots.find((row) => row.symbol === name);
     return tick?.price ?? (slot && panels.get(frameKey(slot))?.bars.at(-1)?.close) ?? latest?.quotes.find((quote) => quote.symbol === name)?.last ?? null;
@@ -660,6 +665,7 @@ export default function ChartWorkspace() {
     if (!ready) return;
     let alive = true;
     let busy = false;
+    let recoveryPending = false;
     let controller: AbortController | null = null;
     const extras = Object.fromEntries(extrasKey.split(",").filter(Boolean).map((part) => {
       const [name, frames] = part.split(":");
@@ -691,10 +697,13 @@ export default function ChartWorkspace() {
         if (alive && !controller.signal.aborted) setError({ key: requestKey, message: err instanceof Error ? err.message : "Unable to refresh charts." });
       } finally {
         busy = false;
-        if (alive) { inFlight.current = false; setLoading(false); }
+        if (alive) {
+          inFlight.current = false; setLoading(false);
+          if (recoveryPending) { recoveryPending = false; void load(); }
+        }
       }
     };
-    refreshNow.current = () => { void load(); };
+    refreshNow.current = () => { if (busy) recoveryPending = true; else void load(); };
     if (!paused || lastRequest.current !== requestKey) void load();
     else setLoading(false);
     lastRequest.current = requestKey;
@@ -704,29 +713,42 @@ export default function ChartWorkspace() {
     return () => { alive = false; controller?.abort(); inFlight.current = false; if (timer) window.clearInterval(timer); window.clearTimeout(soon); document.removeEventListener("visibilitychange", onVisible); };
   }, [ready, symbol, session, intervalKey, extrasKey, watchlistKey, framesKey, requestKey, paused, optionsKey, rangesOn, autoParam]);
 
+  useEffect(() => {
+    stream.onGap(() => refreshNow.current());
+    return () => stream.dispose();
+  }, [stream]);
+
   // One stream for every symbol on screen; each chart applies only its own symbol's trades.
   useEffect(() => {
-    if (!ready || !hasData || paused || sampleChart) return;
+    if (!ready || !streamReady || paused || sampleChart) return;
     let alive = true;
     let source: EventSource | null = null;
-    const symbols = [...new Set([...symbolsKey.split(","), ...watchlistKey.split(",").filter(Boolean)])];
+    let recovering = false;
+    const symbols = subscriptionKey.split(",");
+    stream.retain(symbols);
     const status = (value: "connecting" | "connected" | "fallback") => { if (alive) stream.status(streamKey, value); };
     const connect = () => {
       if (document.hidden || source) return;
       status("connecting");
       source = new EventSource(chartStreamUrl(symbols));
       source.addEventListener("status", (event) => {
-        try { status(JSON.parse((event as MessageEvent).data).state === "connected" ? "connected" : "fallback"); }
+        try {
+          const message = JSON.parse((event as MessageEvent).data);
+          const connected = message.state === "connected";
+          status(connected ? "connected" : "fallback");
+          if (message.resync === true || (connected && recovering)) refreshNow.current();
+          recovering = !connected;
+        }
         catch { status("fallback"); }
       });
       source.addEventListener("tick", (event) => {
         try {
           const tick = parseChartTick(JSON.parse((event as MessageEvent).data));
           if (!alive || !tick || !symbols.includes(tick.symbol)) return;
-          stream.tick(streamKey, tick);
+          stream.tick(streamKey, receiveChartTick(tick));
         } catch { /* A malformed event cannot replace the last good REST snapshot. */ }
       });
-      source.onerror = () => status("fallback");
+      source.onerror = () => { recovering = true; status("fallback"); };
     };
     const visibility = () => {
       if (document.hidden) { source?.close(); source = null; status("fallback"); }
@@ -734,12 +756,13 @@ export default function ChartWorkspace() {
     };
     connect();
     document.addEventListener("visibilitychange", visibility);
-    return () => { alive = false; source?.close(); document.removeEventListener("visibilitychange", visibility); };
-  }, [ready, hasData, paused, sampleChart, symbolsKey, watchlistKey, streamKey, stream]);
+    return () => { alive = false; source?.close(); stream.flush(); document.removeEventListener("visibilitychange", visibility); };
+  }, [ready, streamReady, paused, sampleChart, subscriptionKey, streamKey, stream]);
 
   const setIntervalAt = (index: number, value: Interval) => setSettings((s) => ({ ...s, intervals: s.intervals.map((v, i) => i === index ? value : v) }));
   // Intervals are workspace settings, not per-symbol, so they carry over.
   const chooseSymbol = (symbol: string) => {
+    if (settings.symbol !== symbol) startSymbolTiming(symbol);
     setSettings((s) => s.symbol === symbol ? s : ({ ...s, symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== symbol)].slice(0, 8) }));
     setTool(null); setSelection(null); setMenu(null); setSymbolInput(""); setSymbolError(""); setLevelPrice(""); setPalette(null); setStrike(null);
   };
@@ -1464,7 +1487,7 @@ export default function ChartWorkspace() {
     if (slot.symbol !== target) return none(`The main chart showed ${slot.symbol}, not ${target}, when the plan was saved.`);
     const bars = panels.get(frameKey(slot))?.bars ?? [];
     if (!bars.length) return none(`The main chart had no ${target} candles loaded when the plan was saved.`);
-    const state = stream.get();
+    const state = stream.get(target);
     const tick = state.key === streamKey ? latestTrade(state.ticks, target) : undefined;
     const shown = shownPrice({ tick, quote: selected, candle: latestCandle, scope: live });
     const now = Date.now() / 1000;
