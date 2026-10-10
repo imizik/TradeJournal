@@ -812,3 +812,16 @@ cannot become replay plans. No live provider, watcher, model, timer, broker or
 notification is enabled. New flags/code/assets roll back together if the isolated
 runtime fails readiness. Future continuations are hidden until each actor starts
 its own TAKE; stored sample outcomes never write journal fills or P0 events.
+
+
+### Historical demo connector mode
+
+The existing D1/D2 standalone source set also supports one explicitly linked
+historical assistant; see [the contract](../docs/agent/cloud-mcp-historical-contract.md).
+Keep `sample_only=true`, set `exercise_kind="historical"` in the private config,
+and opt in with `TJ_CLOUD_MCP_HISTORICAL_ENABLED=true` in the isolated API only.
+The existing historical factory/writer flags and current own-run grants remain
+required. Restart the verifiers together after any mode or identity change.
+Do not repoint the synthetic account, change production configuration or copy
+provider/model credentials. Historical replay is available only in the browser.
+Activation and real Jo/restart acceptance remain a separate manual demo step.
