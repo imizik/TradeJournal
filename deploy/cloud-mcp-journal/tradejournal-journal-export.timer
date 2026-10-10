@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh the approved journal export every 15 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Unit=tradejournal-journal-export.service
+
+[Install]
+WantedBy=timers.target

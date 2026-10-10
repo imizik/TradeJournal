@@ -133,15 +133,25 @@ def load_snapshot(
     now: datetime | None = None,
 ) -> Snapshot:
     """Read, hash, validate and freshness-check a bounded snapshot file."""
-    if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
-        raise ValueError("expected_sha256 must be a SHA-256 hex digest")
-    if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or max_age_seconds < 0:
-        raise ValueError("max_age_seconds must be a nonnegative integer")
     try:
         with Path(path).open("rb") as stream:
             raw = stream.read(MAX_SNAPSHOT_BYTES + 1)
     except OSError as exc:
         raise ValueError("snapshot could not be read") from exc
+    return load_snapshot_bytes(raw, expected_sha256, max_age_seconds=max_age_seconds, now=now)
+
+
+def load_snapshot_bytes(
+    raw: bytes,
+    expected_sha256: str,
+    max_age_seconds: int = 3600,
+    now: datetime | None = None,
+) -> Snapshot:
+    """Apply the same bounds, integrity and freshness checks to safely read bytes."""
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", expected_sha256):
+        raise ValueError("expected_sha256 must be a SHA-256 hex digest")
+    if isinstance(max_age_seconds, bool) or not isinstance(max_age_seconds, int) or max_age_seconds < 0:
+        raise ValueError("max_age_seconds must be a nonnegative integer")
     if len(raw) > MAX_SNAPSHOT_BYTES:
         raise ValueError("snapshot exceeds the 1 MiB limit")
     if hashlib.sha256(raw).hexdigest().lower() != expected_sha256.lower():

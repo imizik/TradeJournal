@@ -13,7 +13,8 @@ sys.path.insert(0, str(SOURCE / "backend"))
 from cloud_mcp_journal import JournalConfig  # noqa: E402
 from journal_coach_snapshot import Snapshot  # noqa: E402
 
-RUNTIME_FILES = ("cloud_mcp_d0.py", "cloud_mcp_journal.py", "journal_coach_snapshot.py")
+RUNTIME_FILES = ("cloud_mcp_d0.py", "cloud_mcp_journal.py", "journal_coach_snapshot.py",
+                 "journal_coach_publication.py")
 UNITS = ("tradejournal-journal-coach.service", "tradejournal-journal-coach.socket")
 
 

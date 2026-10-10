@@ -1,0 +1,30 @@
+[Unit]
+Description=Refresh only public OAuth keys for the real journal coach
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tj-journal-real-keys
+Group=tj-journal-real
+WorkingDirectory=/opt/tradejournal-journal-real/runtime/backend
+ExecStart=/opt/tradejournal-journal-real/runtime/backend/.venv/bin/python /opt/tradejournal-journal-real/runtime/backend/cloud_mcp_d0_refresh.py --config /etc/tradejournal-journal-real/refresh-keys.json
+TimeoutStartSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ReadWritePaths=/var/lib/tradejournal-journal-real/public-keys
+InaccessiblePaths=-/etc/tradejournal-journal-real/config.json -/etc/tradejournal-journal-real/export-refresh.json -/etc/tradejournal-journal-real/export-database-url -/var/lib/tradejournal-journal-real/publication -/etc/tradejournal -/etc/tradejournal-d0 -/etc/tradejournal-d1 -/etc/tradejournal-journal -/opt/tradejournal -/opt/tradejournal-journal -/var/lib/tradejournal -/var/lib/tradejournal-journal -/var/backups/tradejournal -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=16
+MemoryMax=256M
+CPUQuota=50%
+
+# Separate public-key publisher; no OAuth profile grants or database credentials.
