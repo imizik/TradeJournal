@@ -13,6 +13,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 import httpx
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import InvalidStatus
+from websockets.http11 import Response
 
 from scripts import moomoo_diagnostic as probe
 
@@ -390,3 +393,24 @@ def test_streaming_optional_lists_zero_prices_and_duplicate_prices():
 def test_stream_core_cannot_outlive_refresh_requirement(key, seconds):
     with pytest.raises(probe.DiagnosticError):
         asyncio.run(probe.stream_probe("offline-test-id", key, seconds))
+
+
+@pytest.mark.parametrize("status", [300, 301, 302, 303, 307, 308])
+def test_websocket_handshake_redirect_refused_before_auth(key, status):
+    exc = InvalidStatus(Response(status, "Redirect", Headers({"Location": "wss://outside-allowlist.example/ws"})))
+    client = probe.NoRedirectConnect(probe.WS_URL, proxy=None)
+    assert client.process_redirect(exc) is exc
+    assert client.uri == probe.WS_URL
+
+    class RefusedHandshake:
+        async def __aenter__(self):
+            raise client.process_redirect(exc)
+
+        async def __aexit__(self, *args):
+            pytest.fail("handshake did not establish a connection")
+
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, lambda *a, **k: RefusedHandshake()))
+    assert result["authentication"]["status"] == "unconfirmed"
+    assert all(result["subscriptions"][kind]["status"] == "not_attempted" for kind in probe.STREAM_TYPES)
+    assert "offline-test-id" not in json.dumps(result)
+    assert "outside-allowlist" not in json.dumps(result)

@@ -2,7 +2,7 @@
 
 ## Scope and status
 
-Observed on **2026-10-10, 16:32–16:48 America/New_York**, with US markets
+Observed on **2026-10-10, 16:32–16:53 America/New_York**, with US markets
 closed. This is a manually invoked diagnostic, not a provider adapter. It has
 no FastAPI registration, database access, background task, trading call or
 brokerage-account query. Tradier/Alpaca feeds and deployment are unchanged.
@@ -10,6 +10,9 @@ There were two bounded trials, each with one server-time call, one signed
 US.NVDA quote request and one signed US.NVDA order-book request. Four bounded
 WebSocket trials followed: two stopped on acknowledgment-envelope mismatch,
 then two completed 30-second probes with exact wrapped-ID correlation.
+After review found the library's default redirect behavior, a final 5-second
+probe confirmed the redirect-refusing connection factory still authenticated,
+acknowledged all subscriptions/unsubscribe and closed (5.147s elapsed).
 No continuous collection, subscription purchase or quota-exhaustion test occurred.
 Live prices are not stored in this repository; test fixtures are invented.
 
@@ -223,6 +226,27 @@ Potential approved follow-ups:
    research data separate from journal fills and paper activity.
 
 No adapter, chart UI or collection pipeline is included in Phase 1.
+
+## Validation and review limits
+
+The final diagnostic has 50 passing offline tests, including frozen WebSocket
+signature bytes, authentication failures/timeouts, wrapped and per-type
+acknowledgments, unsubscribe failures, absent lists and redirect refusal.
+Together with documentation links, 119 tests pass. Changed-file lint passes.
+Independent reviews identified and the owner fixed unsafe getpass fallback,
+continuation after server-time refusals, and WebSocket handshake redirects.
+The redirect guard's live 5-second trial succeeded without changing the
+signing format. Final independent re-review of that guard remains pending:
+three review rounds have been used, and additional rounds require explicit
+authorization under `docs/agent/pr-review.md`.
+
+The first full verification attempts encountered sandbox socket-bind failures
+and an external dependency-symlink build restriction. All 27 offline socket
+tests passed outside the sandbox, and locked frontend dependencies were
+installed locally for the final full verification. Full verification results
+are reported separately from these focused checks. No ready-to-publish or
+production-acceptance claim is made. The branch is local; automatic approval
+review rejected publishing it to the remote. No PR was created.
 
 [getting-started reference]: https://open.moomoo.com/api/overview/getting-started
 [direct order-book reference]: https://open.moomoo.com/api/quote/realtime/order-book

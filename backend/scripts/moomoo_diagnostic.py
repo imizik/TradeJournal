@@ -43,6 +43,13 @@ WS_URL = "wss://webapi-quote.moomoo.com/ws"
 STREAM_TYPES = ("quote", "order_book", "ticker")
 
 
+class NoRedirectConnect(connect):
+    """Refuse handshake redirects before any signed auth can be sent."""
+
+    def process_redirect(self, exc: Exception) -> Exception:
+        return exc
+
+
 class DiagnosticError(Exception):
     """Only fixed, credential-free messages may reach this exception."""
 
@@ -361,7 +368,7 @@ def push_summary(message: dict, received_ms: int, offset_ms: float | None) -> di
     return result
 
 
-async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=connect) -> dict:
+async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect) -> dict:
     # No reusable long-lived connection: the hard cap is well below the
     # documented ten-minute auth refresh limit (recommended cycle five minutes).
     if not 1 <= seconds <= 60:
