@@ -223,30 +223,64 @@ test("markers sit on the right candle on 1m and 1D; hover lists the headlines, c
 test("the News layer toggle hides the markers and stops the reads; the setting is saved with the other layers", async ({ page, context }) => {
   const server = await seed(context);
   const reads = await stub(page);
+  await page.clock.install({ time: new Date(NEWS_NOW) });
   await page.goto("/charts");
+  await page.clock.runFor(400);
   await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
+  expect(reads).toHaveLength(1);
   await page.getByRole("button", { name: "Layers", exact: true }).click();
   const group = page.getByRole("region", { name: "Layers" }).getByRole("group", { name: "News markers" });
   await group.getByRole("button", { name: "Hide News markers" }).click();
   await expect(canvas(page)).toHaveAttribute("data-news", "");
+  await page.clock.runFor(1000);
   await expect.poll(() => server.data?.newsHidden).toBe(true);
   await expect(page.getByRole("tooltip", { name: "News headlines" })).toHaveCount(0);
-  const before = reads.length;
-  await page.waitForTimeout(700);
-  expect(reads).toHaveLength(before);
+  await page.clock.runFor(180_000); // three poll periods with the layer off
+  expect(reads).toHaveLength(1);
   await group.getByRole("button", { name: "Show News markers" }).click();
+  await page.clock.runFor(400);
   await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
+  await page.clock.runFor(1000);
   await expect.poll(() => server.data?.newsHidden).toBe(false);
+  expect(reads).toHaveLength(2);
 });
 
 test("a layer that starts hidden reads no news, and the chart's menu lists it", async ({ page, context }) => {
   await seed(context, { newsHidden: true });
   const reads = await stub(page);
+  await page.clock.install({ time: new Date(NEWS_NOW) });
   await page.goto("/charts");
   await expect(canvas(page)).toHaveAttribute("data-bars", /\d+/);
   await expect(canvas(page)).toHaveAttribute("data-news", "");
-  await page.waitForTimeout(700);
+  await page.clock.runFor(120_000);
   expect(reads).toHaveLength(0);
+  // The chart menu's Layers list carries the toggle, unchecked.
+  const box = (await canvas(page).boundingBox())!;
+  await page.mouse.click(box.x + 140, box.y + 40, { button: "right" });
+  await page.getByRole("dialog", { name: "Chart menu" }).getByRole("menuitem", { name: /^Layers/ }).click();
+  const toggle = page.getByRole("dialog", { name: "Chart menu" }).getByRole("menuitemcheckbox", { name: "News markers" });
+  await expect(toggle).toHaveAttribute("aria-checked", "false");
+  await toggle.click();
+  await page.clock.runFor(400);
+  await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
+  expect(reads).toHaveLength(1);
+});
+
+test("a marker click is one-shot: coming back to the Watchlist tab shows the tab chosen before, with nothing lit", async ({ page, context }) => {
+  await seed(context);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
+  await expect(panel(page).getByRole("tab", { name: "You", exact: true })).toHaveAttribute("aria-selected", "true");
+  const point = await hoverMarker(page, EDT("10-06T10:05:00"));
+  await page.mouse.click(point.x, point.y);
+  await expect(panel(page).locator("li[data-news-lit]")).toHaveCount(2);
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(panel(page)).toHaveCount(0);
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await expect(panel(page).getByRole("tab", { name: "You", exact: true })).toHaveAttribute("aria-selected", "true");
+  await expect(panel(page).locator("li[data-news-lit]")).toHaveCount(0);
+  expect(await page.evaluate(() => localStorage.getItem("tradejournal.charts.symbol-info.tab.v1"))).not.toBe("News");
 });
 
 test("with the News tab open the tab and the markers share one read, then one each minute", async ({ page, context }) => {
@@ -298,7 +332,11 @@ test.describe("on a phone", () => {
   test("a tap shows the headlines and Read in News opens the sheet on the News tab", async ({ page, context }) => {
     await seed(context);
     const reads = await stub(page);
+    let polls = 0;
+    page.on("request", (request) => { if (request.url().includes("/charts/workspace?")) polls++; });
+    await page.clock.install({ time: new Date(NEWS_NOW) });
     await page.goto("/charts");
+    await page.clock.runFor(400);
     await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
     const top = await onPage(page, EDT("10-06T10:05:00"), 102);
     let popover = page.getByRole("dialog", { name: "News headlines" });
@@ -308,6 +346,11 @@ test.describe("on a phone", () => {
     }
     await expect(popover).toContainText("Analyst lifts target");
     await expect(popover).toContainText("Nvidia ships a chip");
+    // A workspace poll rebuilds the fill list; the pinned popover stays open through it.
+    const seen = polls;
+    await page.clock.runFor(16_000);
+    await expect.poll(() => polls).toBeGreaterThan(seen);
+    await expect(popover).toBeVisible();
     popover = page.getByRole("dialog", { name: "News headlines" });
     await popover.getByRole("button", { name: "Read in News" }).tap();
     const sheet = page.getByRole("dialog", { name: "Watchlist", exact: true });

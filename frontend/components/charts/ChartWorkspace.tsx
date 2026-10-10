@@ -916,7 +916,8 @@ export default function ChartWorkspace() {
   const newsMarkers = useMemo(() => newsFeed.data ? { symbol: settings.symbol, articles: newsFeed.data.articles } : null, [newsFeed.data, settings.symbol]);
   // A click on a marker opens the dock's symbol info on the News tab and lights that candle's articles; a phone's sheet opens for it.
   const [newsFocus, setNewsFocus] = useState<NewsFocus | null>(null);
-  const openNews = (ids: string[]) => { setNewsFocus((now) => ({ symbol: settings.symbol, ids, n: (now?.n ?? 0) + 1 })); showDock("watchlist"); };
+  const newsClicks = useRef(0);
+  const openNews = (ids: string[]) => { setNewsFocus({ symbol: settings.symbol, ids, n: ++newsClicks.current }); showDock("watchlist"); };
   /** A strike chosen on the ladder: marked on its symbol's charts and brought onto the main chart's price scale; chosen again, unmarked. */
   const chooseStrike = (value: number) => {
     if (strike?.symbol === symbol && strike.price === value) { setStrike(null); return; }
@@ -1420,7 +1421,7 @@ export default function ChartWorkspace() {
       })}
       {!settings.watchlist.length && <p className="px-3 pb-4 text-xs text-slate-500">Look up a ticker, then use + to add it.</p>}
     </section>
-    <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} />
+    <SymbolInfo symbol={settings.symbol} price={() => referenceFor(settings.symbol)} quote={latest?.quotes.find((quote) => quote.symbol === settings.symbol)} quoteFetchedAt={latest?.fetched_at.quotes ?? null} onSelectSymbol={(peer) => { chooseSymbol(peer); if (narrow) setSheet(false); }} focus={newsFocus} onFocusHandled={() => setNewsFocus(null)} />
     <section className="border-t border-slate-700/40 p-3" aria-label="Saved price levels">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">{settings.symbol} levels</h2>
         {settings.hiddenGroups.levels ? <button onClick={() => showGroup("levels")} title="Levels are hidden on every chart" className={`inline-flex items-center gap-1 rounded px-1 text-[10px] text-amber-300 hover:bg-slate-800 ${narrow ? "min-h-11" : ""}`}><EyeOff size={11} />Hidden · Show</button>

@@ -33,9 +33,9 @@ const built = (tab: Tab): tab is keyof typeof BUILT => tab in BUILT;
 const REFRESH_MS = 60_000;
 
 /** `price` reads the chart's latest price for the symbol when a tab needs it (the Forecast tab's straddle). */
-/** `focus` (a click on a news marker) opens the News tab and lights the listed articles; a newer `n` does it again. */
+/** `focus` (a click on a news marker) opens the News tab and lights the listed articles once: the panel keeps its own copy and calls `onFocusHandled`, so a later remount replays nothing. */
 export type NewsFocus = { symbol: string; ids: string[]; n: number };
-export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol, focus }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null }) {
+export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSelectSymbol, focus, onFocusHandled }: { symbol: string; price?(): number | null; quote?: ChartQuote | null; quoteFetchedAt?: number | null; onSelectSymbol?(symbol: string): void; focus?: NewsFocus | null; onFocusHandled?(): void }) {
   const { owner, grants } = useAppAccess();
   const journal = owner || !!grants.journal_read;
   const id = useId();
@@ -46,6 +46,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   const [retry, setRetry] = useState(0);
   // A news marker was clicked (T3.5): show the News tab, expanded, whatever was open before. A panel that mounts with the click keeps it.
   const focused = useRef(false);
+  const [lit, setLit] = useState<NewsFocus | null>(null);
 
   useEffect(() => {
     let tab: Tab = "You";
@@ -57,8 +58,9 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   useEffect(() => {
     if (!focusN) return;
     focused.current = true;
-    queueMicrotask(() => setView((current) => ({ ...current, expanded: true, tab: "News" })));
-    try { localStorage.setItem(TAB_KEY, "News"); } catch { /* device storage is optional */ }
+    queueMicrotask(() => { setView((current) => ({ ...current, expanded: true, tab: "News" })); setLit(focus ?? null); });
+    onFocusHandled?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one click (a new `n`) is handled once
   }, [focusN]);
 
   useEffect(() => {
@@ -110,7 +112,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />
             : view.tab === "Short" ? <SymbolInfoShort data={shown.data as SymbolShort} />
-            : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} focus={focus?.symbol === symbol ? focus : null} />
+            : view.tab === "News" ? <SymbolInfoNews key={symbol} data={shown.data as SymbolNews} focus={lit?.symbol === symbol ? lit : null} />
             : view.tab === "Financials" ? <SymbolInfoFinancials data={shown.data as SymbolFinancials} />
             : <SymbolInfoForecast data={shown.data as SymbolForecast} />)
           : shown?.error ? <div role="alert" className="text-xs text-amber-300"><p>{shown.error}</p><button onClick={() => view.tab === "News" ? news.retry() : setRetry((value) => value + 1)} className="mt-2 min-h-11 rounded border border-slate-700 px-3 py-2 lg:min-h-0">Retry {BUILT[view.tab].name}</button></div>

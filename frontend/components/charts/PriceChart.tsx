@@ -846,12 +846,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     fillMarks.current = new Map(indicators.fills ? (markers ?? []).map((m) => [m.id, { label: m.label, time: m.time }]) : []);
     newsById.current = new Map(newsRef.current.map((m) => [m.id, m]));
     setFillTip(null);
-    setNewsOpen(null);
     if (container.current) {
       container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
       container.current.dataset.news = newsRef.current.map((m) => `${m.time}:${m.articles.length}`).join(",");
     }
   }, [markers, earningsKey, newsKey, pending, indicators.fills, main]);
+  // A popover closes when its markers change, not when a poll rebuilds the fill list under it.
+  useEffect(() => { queueMicrotask(() => setNewsOpen(null)); }, [newsKey, pending]);
 
   useEffect(() => {
     const current = bundle.current;
