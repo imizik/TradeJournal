@@ -108,6 +108,12 @@ _migrate_test_database()
 
 
 @pytest.fixture(autouse=True)
+def _isolate_manual_fills_backup(tmp_path, monkeypatch):
+    """Manual-fill persistence defaults to a developer-owned data file."""
+    monkeypatch.setenv("TJ_MANUAL_FILLS_BACKUP", str(tmp_path / "manual_fills.json"))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_gmail_state(tmp_path, monkeypatch):
     """Gmail sidecar files default to backend/data, the developer's real state.
 
@@ -117,7 +123,6 @@ def _isolate_gmail_state(tmp_path, monkeypatch):
     from app.engine.job_runtime import shutdown_requested
 
     state = tmp_path / "gmail-state"
-    monkeypatch.setenv("TJ_MANUAL_FILLS_BACKUP", str(tmp_path / "manual_fills.json"))
     for name, filename in (
         ("CREDENTIALS_FILE", "credentials.json"),
         ("TOKEN_FILE", "token.json"),
