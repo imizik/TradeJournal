@@ -491,7 +491,8 @@ test("News polls each minute only while the tab is open and the page is visible,
   expect(reads).toHaveLength(2);
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); });
   await page.clock.runFor(60_000);
-  expect(reads).toHaveLength(3);
+  // The read leaves when the timer fires; wait for it to reach the stub rather than racing it.
+  await expect.poll(() => reads.length).toBe(3);
   // Leaving the tab stops it too.
   await info.getByRole("tab", { name: "You", exact: true }).click();
   await page.clock.runFor(180_000);
