@@ -236,9 +236,10 @@ Together with documentation links, 119 tests pass. Changed-file lint passes.
 Independent reviews identified and the owner fixed unsafe getpass fallback,
 continuation after server-time refusals, and WebSocket handshake redirects.
 The redirect guard's live 5-second trial succeeded without changing the
-signing format. Final independent re-review of that guard remains pending:
-three review rounds have been used, and additional rounds require explicit
-authorization under `docs/agent/pr-review.md`.
+signing format. After three review rounds, the owner explicitly authorized
+one additional security-review round and publication of the Phase 1 PR.
+Final review and CI results are recorded in the PR; they remain separate from
+market-hours data acceptance and permission/license confirmation.
 
 The first full verification attempts encountered sandbox socket-bind failures
 and an external dependency-symlink build restriction. All 27 offline socket
@@ -248,10 +249,12 @@ then passed every local check: 2,171 backend tests (35 skipped), lint, import
 boundaries, frontend type/lint/build, and 225 browser tests (200 general,
 5 authenticated, 20 sample-decision). That run began on `0ea7ece`; the later
 redirect correction was separately validated by the 50 diagnostic tests and
-5-second live trial, reusing the unaffected application checks. No CI ran.
-No ready-to-publish or
-production-acceptance claim is made. The branch is local; automatic approval
-review rejected publishing it to the remote. No PR was created.
+5-second live trial, reusing the unaffected application checks. CI is tracked
+separately in the PR.
+No production-acceptance claim is made. Automatic approval review initially
+rejected remote publication; the owner subsequently explicitly authorized
+push and PR creation after security review. Merging and deployment remain
+outside Phase 1.
 
 [getting-started reference]: https://open.moomoo.com/api/overview/getting-started
 [direct order-book reference]: https://open.moomoo.com/api/quote/realtime/order-book
