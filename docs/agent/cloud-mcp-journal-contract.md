@@ -72,13 +72,69 @@ Before real activation: select the exact accounts/dates/fields with Isaac,
 review native packaging and database-role permissions, refresh and verify the
 production restore point, separately approve real-data transmission and OAuth
 registration/consent, then prove actual Jo reads, data exclusions, revocation,
-expiry, restart and no-write/no-network boundaries. Manual export is the only
-refresh mechanism in this slice; no scheduling or background subscription exists.
+expiry, restart and no-write/no-network boundaries. The original fixed-window
+slice uses manual export only. Continuous publication below is a separately
+approved increment; installing a plugin alone enables none of its timers.
+
+## Opt-in continuous read-only publication
+
+The rolling mode retains the same two tools, eight trade fields, 500-row/1-MiB
+bounds, exact recorded P&L and one-hour refusal. Set `publication_file` and a
+strict `rolling_days` count (1–31), instead of fixed `snapshot_file`, digest and
+dates. These modes are exclusive. The serving process pins the publication path,
+day count, identity and data class until restart. Each read requires the exact
+current inclusive Eastern date window; immediately after Eastern midnight, the
+prior window refuses until the next successful publication.
+
+`backend/journal_coach_publication.py` installs immutable content-addressed files
+and atomically replaces a small strict digest pointer. It checks schema, size,
+hash and freshness, rejects symlinks/nonregular files, and retains current plus
+two previous generations. Publication changes during a read refuse. Pagination
+restarts when response digests differ. Failed refresh leaves the last good pointer
+and its original timestamp intact; normal expiry still applies.
+
+`backend/journal_coach_refresh.py` is a separate finite publisher, not an MCP
+tool or application startup path. Its private scope selects exactly one account
+and rolling day count. Its database credential comes through a systemd credential
+file, never the MCP environment. Scoped export requires only the nine source
+columns on `public.journal_coach_export_trade`, no base-table or other user-relation
+reads, and the existing non-owner/read-only role checks. The no-clobber view from
+`deploy/journal_coach_scope.py` enforces the approved account, closed/expired status
+and Eastern date bound and narrows the previous source-table grant. The ninth
+column is account filtering only and never appears in the export. Do not give the
+export role ownership, membership, base-table SELECT or write access.
+
+The manually installed export service permits only the local database endpoint
+and writes only its publication directory. A separate nftables unit affects only
+the two dedicated publisher UIDs: export connects only to localhost TCP 5432;
+keys use the exact DNS servers on port 53 and public HTTPS on port 443, with
+private/loopback/link-local/Tailscale and host addresses denied except DNS.
+Both publishers require this policy unit to start successfully. Native negative
+controls must prove private API/frontend access fails, independently of filesystem
+or SQL restrictions. Existing host firewall tables are never flushed or replaced.
+The serving process keeps its offline AF_UNIX-only
+namespace, no database credential and no writable mounts. A separate public-key
+publisher uses the existing bounded HTTPS refresh code and cannot read the scope,
+database credential or publication. Both optional timers run every 15 minutes
+after startup; ordinary app deployment does not enable them. Key maintenance does
+not extend OAuth consent/refresh-token lifetimes; selected Auth0 policy may still
+require reauthentication.
+
+Before activation, approve ongoing account/date/field sharing, review the role/view
+and packaging, verify a fresh production restore point, and retain rollback files.
+Observe the installed timer, fresh Jo summary/all pages, scoped exclusions and
+restart/revocation/expiry behavior. A stopped publisher must eventually refuse
+stale data. Distinguish these observations from local/disposable CI checks. Stop
+both new timers and active oneshots to cancel maintenance; remove only the new
+UID-specific firewall table when publishers are stopped, and restore the prior
+disabled/fixed grant/runtime as needed while preserving receipts/exports privately.
+This adds no recurring Jo task, provider/model job, live order, application trade
+write or coaching-note writer.
 
 ## Fixture setup packaging
 
 `deploy/journal_coach_stage.py` prepares a new private directory containing the
-three standalone runtime modules, journal socket/service templates, a disabled
+standalone runtime modules, journal socket/service templates, a disabled
 configuration, an invented two-trade export and file digests. It accepts only
 issuer/resource/client/subject/profile bindings, never an account selection,
 database URL or real export. Both the configuration and profile are disabled;

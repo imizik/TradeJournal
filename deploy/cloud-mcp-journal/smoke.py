@@ -18,7 +18,7 @@ import socket
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -32,6 +32,7 @@ CONFIG = CONFIG_DIR / "config.json"
 STATE = Path("/var/lib/tradejournal-journal")
 RUNDIR = Path("/run/tradejournal-journal-coach")
 APPROVED = STATE / "approved.json"
+PUBLICATION = STATE / "published.json"
 JWKS = STATE / "jwks.json"
 WRITE_PROBE = STATE / "sandbox-write-probe.bin"
 UNIT_DIR = Path("/etc/systemd/system")
@@ -73,7 +74,7 @@ def preflight() -> None:
         raise RuntimeError("journal smoke must run as root on disposable CI")
     if os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("TJ_DISPOSABLE_RUNNER") != "1":
         raise RuntimeError("journal smoke requires the explicitly disposable GitHub runner")
-    paths = (INSTALL, RUNTIME, CONFIG_DIR, CONFIG, STATE, APPROVED, JWKS, RUNDIR, PRODUCTION_MARKER,
+    paths = (INSTALL, RUNTIME, CONFIG_DIR, CONFIG, STATE, APPROVED, PUBLICATION, JWKS, RUNDIR, PRODUCTION_MARKER,
              UNIT_DIR / SOCKET_UNIT, UNIT_DIR / SERVICE_UNIT,
              UNIT_DIR / f"{SOCKET_UNIT}.d", UNIT_DIR / f"{SERVICE_UNIT}.d")
     existing = [str(path) for path in paths if path.exists() or path.is_symlink()]
@@ -106,6 +107,10 @@ def write_json(path: Path, value: dict) -> None:
     temporary.replace(path)
 
 
+def stat_mode(path: Path) -> int:
+    return path.stat(follow_symlinks=False).st_mode & 0o777
+
+
 def prepare() -> None:
     run("groupadd", "--system", ACCOUNT)
     run("useradd", "--system", "--no-create-home", "--shell", "/usr/sbin/nologin", "--gid", ACCOUNT, ACCOUNT)
@@ -122,7 +127,8 @@ def prepare() -> None:
     WRITE_PROBE.chmod(0o660)
     run("chown", f"root:{ACCOUNT}", WRITE_PROBE)
 
-    for name in ("cloud_mcp_d0.py", "cloud_mcp_journal.py", "journal_coach_snapshot.py"):
+    for name in ("cloud_mcp_d0.py", "cloud_mcp_journal.py", "journal_coach_snapshot.py",
+                 "journal_coach_publication.py"):
         shutil.copy2(REPO / "backend" / name, BACKEND / name)
     run(sys.executable, "-m", "venv", VENV)
     run(VENV / "bin/python", "-m", "pip", "install", "--disable-pip-version-check",
@@ -182,7 +188,7 @@ def assert_owned_fixture(nonce: str | None) -> None:
         raise RuntimeError("journal fixture ownership marker did not match")
     if not all(path.is_dir() for path in (INSTALL, RUNTIME, BACKEND, CONFIG_DIR, STATE)):
         raise RuntimeError("journal fixture directories are not the smoke-owned installation")
-    if any(path.exists() for path in (CONFIG, APPROVED, JWKS)):
+    if any(path.exists() for path in (CONFIG, APPROVED, PUBLICATION, JWKS)):
         raise RuntimeError("refusing pre-existing journal fixture files")
 
 
@@ -205,6 +211,9 @@ def exercise(nonce: str | None) -> None:
     APPROVED.chmod(0o640)
     run("chown", f"root:{ACCOUNT}", APPROVED)
     write_json(CONFIG, config(hashlib.sha256(raw).hexdigest()))
+    # Existing readable pointer target lets the systemd pre-start probe verify
+    # its read-only mount before the fixed-to-rolling switch happens.
+    write_json(PUBLICATION, {"snapshot_sha256": "a" * 64})
 
     # Start only after every file loaded by the service exists and is synthetic.
     run("systemctl", "enable", "--now", SOCKET_UNIT)
@@ -278,10 +287,110 @@ def exercise(nonce: str | None) -> None:
     assert refresh_read["generated_at"] == refreshed["generated_at"]
     refreshed_digest = hashlib.sha256(raw_refresh).hexdigest()
 
+    # Switch this already-installed service once from its fixed fixture to a
+    # root-published rolling pointer. The publication directory is private
+    # state; the service identity can read it but its sandbox cannot write it.
+    sys.path.insert(0, str(BACKEND))
+    from journal_coach_publication import publish_snapshot, rolling_window
+    from journal_coach_snapshot import Snapshot
+
+    def rolling_snapshot(*, generated_at: datetime | None = None, pnl: str = "3.250000") -> Snapshot:
+        stamp = generated_at or datetime.now(timezone.utc)
+        start_day, end_day = rolling_window(stamp, 30)
+        opened = datetime.combine(end_day, datetime.min.time()).replace(hour=9, minute=30)
+        closed = opened.replace(hour=10)
+        row = {"id": "10000000-0000-4000-8000-000000000001", "ticker": "MU",
+               "instrument_type": "stock", "quantity": "1.000000", "realized_pnl": pnl,
+               "status": "closed", "opened_at": opened.isoformat(), "closed_at": closed.isoformat()}
+        data = {"schema_version": "journal-coach-snapshot-v1", "generated_at": stamp.isoformat(),
+                "start_day": start_day.isoformat(), "end_day": end_day.isoformat(),
+                "source": "approved_journal_export", "sample_data": True, "trades": [row]}
+        return Snapshot.model_validate_json(json.dumps(data, separators=(",", ":")))
+
+    def publish_rolling(snapshot: Snapshot) -> str:
+        result = publish_snapshot(snapshot, PUBLICATION)
+        for path in (PUBLICATION, STATE / result["snapshot_file"]):
+            run("chown", f"root:{ACCOUNT}", path)
+        return str(result["snapshot_sha256"])
+
+    rolling_anchor = datetime.now(timezone.utc) - timedelta(seconds=5)
+    initial_rolling = rolling_snapshot(generated_at=rolling_anchor)
+    rolling_digest = publish_rolling(initial_rolling)
+
+    def rolling_config(days: int = 30) -> dict:
+        value = config("")
+        for key in ("snapshot_file", "snapshot_sha256", "start_day", "end_day"):
+            value.pop(key)
+        value["publication_file"] = str(PUBLICATION)
+        value["rolling_days"] = days
+        return value
+
+    write_json(CONFIG, rolling_config())
+    run("systemctl", "restart", SERVICE_UNIT)
+    rolling_read = content(post("get_journal_summary", bearer=good))
+    rolling_start, rolling_end = rolling_window(datetime.now(timezone.utc), 30)
+    assert rolling_read["snapshot_sha256"] == rolling_digest
+    assert rolling_read["start_day"] == rolling_start.isoformat()
+    assert rolling_read["end_day"] == rolling_end.isoformat()
+    assert rolling_read["summary"]["trade_count"] == 1
+    assert stat_mode(PUBLICATION) == stat_mode(STATE / f"snapshot-{rolling_digest}.json") == 0o640
+
+    # New pointer contents become visible to the live process without restart.
+    newer = rolling_snapshot(generated_at=rolling_anchor + timedelta(seconds=1), pnl="4.500000")
+    newer_digest = publish_rolling(newer)
+    assert newer_digest != rolling_digest
+    changed_read = content(post("get_journal_summary", bearer=good))
+    assert changed_read["snapshot_sha256"] == newer_digest
+    assert changed_read["summary"]["realized_pnl_total"] == "4.500000"
+
+    # The publication API refuses stale input before adding a content file.
+    stale_snapshot = rolling_snapshot(generated_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
+    before_files = set(STATE.glob("snapshot-*.json"))
+    try:
+        publish_snapshot(stale_snapshot, PUBLICATION)
+    except ValueError as exc:
+        assert "stale" in str(exc)
+    else:
+        raise AssertionError("rolling publisher accepted stale generated data")
+    assert set(STATE.glob("snapshot-*.json")) == before_files
+    assert content(post("get_journal_summary", bearer=good))["snapshot_sha256"] == newer_digest
+
+    # Inject a stale, hash-correct owned fixture pointer to prove serving still
+    # fails closed if old data bypasses the publisher.
+    stale_raw = stale_snapshot.model_dump_json().encode()
+    stale_digest = hashlib.sha256(stale_raw).hexdigest()
+    stale_path = STATE / f"snapshot-{stale_digest}.json"
+    stale_path.write_bytes(stale_raw)
+    stale_path.chmod(0o640)
+    run("chown", f"root:{ACCOUNT}", stale_path)
+    write_json(PUBLICATION, {"snapshot_sha256": stale_digest})
+    response = post("get_journal_summary", bearer=good)
+    assert response.json()["result"].get("isError")
+    # Restore a valid rolling publication before changing the pinned day count.
+    newer_digest = publish_rolling(newer)
+    assert content(post("get_journal_summary", bearer=good))["snapshot_sha256"] == newer_digest
+
+    # OAuth scope and configured rolling-window changes both deny the old grant.
+    response = post("get_journal_summary", bearer=token(scope="d0:profile"))
+    assert response.status_code in (401, 403) or response.json()["result"].get("isError")
+    write_json(CONFIG, rolling_config(29))
+    response = post("get_journal_summary", bearer=good)
+    assert response.status_code in (401, 403) or response.json()["result"].get("isError")
+    write_json(CONFIG, rolling_config())
+
+    # Changing the serving mode is a restart-pinned configuration transition.
+    # Restore the still-valid fixed export and prove it before fixed-mode
+    # corruption and refusal cases continue.
+    write_json(CONFIG, config(refreshed_digest))
+    run("systemctl", "restart", SERVICE_UNIT)
+    fixed_read = content(post("get_journal_summary", bearer=good))
+    assert fixed_read["snapshot_sha256"] == refreshed_digest
+    assert fixed_read["summary"] == summary
+
     write_json(CONFIG, config(refreshed_digest, end_day="2026-01-04"))
     response = post("get_journal_summary", bearer=good)
     # A changed assignment fails at authentication before dispatching a tool.
-    assert response.status_code in (401, 403)
+    assert response.status_code in (401, 403) or response.json()["result"].get("isError")
     assert not any(value in response.text for value in ("18.750000", "MU", "NBIS"))
     write_json(CONFIG, config(refreshed_digest))
 
@@ -343,7 +452,7 @@ def sandbox_check(marker: Path) -> None:
             continue
         sock.close()
         raise AssertionError(f"service sandbox permits {family} socket creation")
-    for path in (CONFIG, APPROVED, JWKS):
+    for path in (CONFIG, APPROVED, PUBLICATION, JWKS):
         try:
             with path.open("ab"):
                 pass
@@ -491,7 +600,7 @@ for family in (socket.AF_INET, socket.AF_INET6):
     else:
         sock.close()
         raise AssertionError(f"service sandbox permits {{family}} socket creation")
-for path in (Path("{CONFIG}"), Path("{APPROVED}"), Path("{JWKS}")):
+for path in (Path("{CONFIG}"), Path("{APPROVED}"), Path("{PUBLICATION}"), Path("{JWKS}")):
     try:
         with path.open("ab"):
             pass

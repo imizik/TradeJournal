@@ -1,0 +1,35 @@
+[Unit]
+Description=Publish the explicitly approved rolling read-only journal export
+Requires=tradejournal-journal-network.service
+After=postgresql.service tradejournal-journal-network.service
+
+[Service]
+Type=oneshot
+User=tj-journal-export
+Group=tj-journal-real
+WorkingDirectory=/opt/tradejournal-journal-real/runtime/backend
+LoadCredential=scope.json:/etc/tradejournal-journal-real/export-refresh.json
+LoadCredential=database-url:/etc/tradejournal-journal-real/export-database-url
+ExecStart=/opt/tradejournal-journal-real/runtime/backend/.venv/bin/python /opt/tradejournal-journal-real/runtime/backend/scripts/export_journal_coach.py --config %d/scope.json --database-url-file %d/database-url
+TimeoutStartSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ReadWritePaths=/var/lib/tradejournal-journal-real/publication
+InaccessiblePaths=-/etc/tradejournal-journal-real/config.json -/etc/tradejournal-journal-real/refresh-keys.json -/var/lib/tradejournal-journal-real/public-keys -/etc/tradejournal -/etc/tradejournal-d0 -/etc/tradejournal-d1 -/etc/tradejournal-journal -/opt/tradejournal -/opt/tradejournal-journal -/var/lib/tradejournal -/var/lib/tradejournal-journal -/var/backups/tradejournal -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_INET
+IPAddressDeny=any
+IPAddressAllow=localhost
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=16
+MemoryMax=256M
+CPUQuota=50%
+
+# Manual installation/activation only. Credentials never enter the MCP process.
+# The dedicated DB role can select only the approved security-barrier view.

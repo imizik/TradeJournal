@@ -773,8 +773,18 @@ async function deepHistoryStub(page: Page, months = 6) {
   await page.route("**/api/backend/charts/workspace?**", (route) => {
     refreshes++;
     const data = currentFixture(route.request().url(), base);
-    const main = data.panels["5m"];
-    if (main) main.bars = main.bars.map((bar) => ({ ...bar, source: "tradier" }));
+    const seeds = fixture(route.request().url()).panels;
+    // This fixture tests user-driven scroll-back. Every panel needs its normal
+    // 240-bar window: even a secondary chart's 65-bar opening range starts
+    // inside the history threshold when its tail contains only 100 candles.
+    // Short-tail auto-fill is tested separately.
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][]) {
+      const seed = seeds[interval]!.bars;
+      const step = STEP[interval];
+      panel.bars = seed.map((bar, index) => ({ ...bar, source: "tradier",
+        time: base + 30 - step * (seed.length - index),
+        end_time: base + 30 - step * (seed.length - index - 1) }));
+    }
     return route.fulfill({ json: data });
   });
   await page.route("**/api/backend/charts/history?**", (route) => {
@@ -881,9 +891,10 @@ test("5m scroll-back crosses six months without moving the viewport during pages
   });
   const state = await deepHistoryStub(page);
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   // A range change within 60 ms of a data reset reads as programmatic and loads nothing.
   await page.waitForTimeout(120);
+  expect(state.requests()).toBe(0);
   let reached = false;
   for (let index = 0; index < 15; index++) {
     const count = state.requests();
@@ -891,7 +902,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
     await page.waitForTimeout(180); // Lightweight Charts publishes its visible time range on the next frame.
     if ((await visibleRange(page, "main"))!.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
     await expect.poll(() => state.requests()).toBeGreaterThan(count);
-    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100 + index * 1000);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(240 + index * 1000);
     const range = (await visibleRange(page, "main"))!;
     const logical = (await logicalRange(page, "main"))!;
     expect(logical.to - logical.from).toBeCloseTo(50, 2);
@@ -974,7 +985,7 @@ test("history retention stays under 12,000, refills a newer gap, and returns to 
   await registerCharts(page);
   const state = await deepHistoryStub(page, 9);
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   let previous = 0;
   let previousReset = await resets(page);
   for (let index = 0; index < 25; index++) {
@@ -1004,7 +1015,7 @@ test.describe("phone deep history", () => {
     await registerCharts(page);
     const state = await deepHistoryStub(page);
     await page.goto("/charts");
-    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
     await page.getByTestId("canvas-main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
     const box = (await page.getByTestId("canvas-main").boundingBox())!;
@@ -1017,7 +1028,7 @@ test.describe("phone deep history", () => {
     }
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect.poll(() => state.requests()).toBeGreaterThan(0);
-    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(240);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: test.info().outputPath("deep-history-phone.png"), fullPage: true });
   });
@@ -3475,7 +3486,7 @@ test("a click on a drawing older than the loaded candles loads pages back to it"
     color: "#67d5eb", width: 2, drawn_on: "2026-07-01", extendLeft: false, extendRight: false };
   await fakeChartSettings(context, { revision: 1, data: { drawings: { MRVL: [old] } } });
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   await page.getByRole("button", { name: "Layers", exact: true }).click();
   await layerGroup(page, "Drawings").getByRole("button", { name: /^Go to Trend line/ }).click();
   // Two pages of 1,200 candles reach it; the view then centres on it, and it is selected.
@@ -5747,14 +5758,19 @@ test.describe("voice plans", () => {
     const mic = sheet.getByRole("button", { name: "Record voice plan" });
     await mic.dispatchEvent("pointerdown", { button: 0, pointerId: 7, isPrimary: true });
     await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
-    await page.waitForTimeout(600);
+    // As in the hold/release test, give the real fake-mic encoder enough audio
+    // to exceed the server's unchanged 1,000-byte usable-recording minimum.
+    await page.waitForTimeout(1500);
     await sheet.getByRole("button", { name: "Recording: release to save" }).dispatchEvent("pointercancel", { pointerId: 7 });
     await expect(sheet.getByRole("status").filter({ hasText: "press was interrupted" })).toBeVisible();
     const before = (await savedCaptures(request)).length;
     await sheet.getByRole("button", { name: "Save recording" }).click();
     await expect(sheet).toHaveCount(0);
     expect((await savedCaptures(request)).length).toBe(before + 1);
-    expect((await savedCaptures(request))[0].side).toBe("buy_puts");
+    const row = (await savedCaptures(request))[0];
+    expect(row.side).toBe("buy_puts");
+    expect(row.audio?.bytes).toBeGreaterThanOrEqual(1000);
+    expect(row.audio?.ms).toBeGreaterThan(1000);
   });
 
   test("the 30-second limit stops the clip and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {

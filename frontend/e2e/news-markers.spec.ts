@@ -127,6 +127,9 @@ function barsFor(interval: string): ChartBar[] {
 
 const settingsData = { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "SPY"], intervals: ["1m", "5m", "15m", "1h", "1D"] };
 async function seed(context: BrowserContext, extra: Record<string, unknown> = {}, tab?: string) {
+  // News interactions use their own fixture; saved plans from earlier tests
+  // must not move the plot while its screen coordinates are being measured.
+  await context.route("**/api/backend/charts/captures?**", (route) => route.fulfill({ json: { captures: [] } }));
   await context.addInitScript(({ key, settings, tab }) => {
     (window as typeof window & { __tjCharts?: Map<string, unknown> }).__tjCharts = new Map();
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));

@@ -46,6 +46,7 @@ def test_stage_creates_disabled_invented_bundle_with_verified_snapshot(tmp_path:
         "runtime/backend/cloud_mcp_d0.py",
         "runtime/backend/cloud_mcp_journal.py",
         "runtime/backend/journal_coach_snapshot.py",
+        "runtime/backend/journal_coach_publication.py",
         "units/tradejournal-journal-coach.service",
         "units/tradejournal-journal-coach.socket",
         "state/approved.json",
