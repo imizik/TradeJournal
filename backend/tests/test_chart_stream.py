@@ -153,7 +153,7 @@ def test_stream_route_accepts_chart_symbols_and_full_watchlist(monkeypatch):
         assert client.get("/charts/stream?symbol=MRVL").status_code == 503
 
 
-def test_stream_aggregates_one_second_of_prices_without_crossing_symbols(monkeypatch):
+def test_stream_aggregates_one_batch_of_prices_without_crossing_symbols(monkeypatch):
     market = chart_stream.ChartMarketStream()
     mrvl, spy = asyncio.Queue(), asyncio.Queue()
     market._clients = {1: (frozenset({"MRVL"}), mrvl), 2: (frozenset({"SPY"}), spy)}
@@ -172,3 +172,81 @@ def test_stream_aggregates_one_second_of_prices_without_crossing_symbols(monkeyp
     result = mrvl.get_nowait()
     assert (result["open"], result["high"], result["low"], result["price"]) == (264.9, 265.1, 264.8, 264.8)
     assert spy.get_nowait()["price"] == 764.2
+
+
+def test_slow_client_merges_extremes_and_keeps_minute_boundaries():
+    market = chart_stream.ChartMarketStream()
+    queue = asyncio.Queue(maxsize=3)
+    market._clients = {1: (frozenset({"MRVL"}), queue)}
+    def tick(price, at):
+        return chart_stream.trade_event(event(price, at=at), now=at)
+    for price, at in [(100, MARKET_TIME), (120, MARKET_TIME + 1), (80, MARKET_TIME + 2),
+                      (105, MARKET_TIME + 3), (110, MARKET_TIME + 60)]:
+        market._publish(tick(price, at))
+    received = [queue.get_nowait() for _ in range(queue.qsize())]
+    first = received[0]
+    assert (first["open"], first["high"], first["low"], first["price"]) == (100, 120, 80, 105)
+    assert received[-1]["minute"] == MARKET_TIME + 60
+    assert not any(item.get("resync") for item in received)
+
+
+def test_slow_client_distinct_bucket_overflow_reports_loss_until_consumed():
+    market = chart_stream.ChartMarketStream()
+    queue = asyncio.Queue(maxsize=3)
+    market._clients = {1: (frozenset({"MRVL"}), queue)}
+    for minute in range(8):
+        at = MARKET_TIME + minute * 60
+        market._publish(chart_stream.trade_event(event(100 + minute, at=at), now=at))
+    market._publish({"type": "status", "state": "connected"})
+    received = [queue.get_nowait() for _ in range(queue.qsize())]
+    assert received[0] == {"type": "status", "state": "fallback", "resync": True}
+    assert len(received) <= 3
+    assert received[-1]["price"] == 107
+
+
+def test_quarter_second_relay_flushes_without_another_trade_and_alerts_see_every_trade(monkeypatch):
+    class Socket:
+        def __init__(self):
+            self.incoming = asyncio.Queue()
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *_):
+            return None
+        async def send(self, _):
+            pass
+        async def recv(self):
+            return await self.incoming.get()
+    class Alerts:
+        def __init__(self):
+            self.prices = []
+        def symbols(self):
+            return set()
+        def on_tick(self, tick):
+            self.prices.append(tick["price"])
+    async def scenario():
+        socket = Socket()
+        market = chart_stream.ChartMarketStream(clock=lambda: MARKET_TIME + .2)
+        alerts = Alerts()
+        market.attach(alerts)
+        async def session():
+            return "wss://test", "session"
+        monkeypatch.setattr(market, "_session", session)
+        monkeypatch.setattr(chart_stream, "connect", lambda *args, **kw: socket)
+        original = chart_stream.trade_event
+        monkeypatch.setattr(chart_stream, "trade_event", lambda row, **kw: original(row, now=MARKET_TIME, **kw))
+        _, queue = market.subscribe("MRVL")
+        await socket.incoming.put("\n".join(json.dumps(event(price, at=MARKET_TIME + i * .01))
+                                                 for i, price in enumerate([100, 120, 80, 105])))
+        started = asyncio.get_running_loop().time()
+        while True:
+            item = await asyncio.wait_for(queue.get(), timeout=.7)
+            if item["type"] == "tick":
+                break
+        assert asyncio.get_running_loop().time() - started < .7  # old 1s relay fails
+        assert alerts.prices == [100, 120, 80, 105]
+        assert (item["open"], item["high"], item["low"], item["price"]) == (100, 120, 80, 105)
+        assert item["received_at"] == MARKET_TIME + .2
+        assert 0 <= item["relay_ms"] < 700
+        assert "_received_mono" not in item
+        await market.stop()
+    asyncio.run(scenario())

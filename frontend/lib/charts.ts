@@ -193,6 +193,9 @@ export type ChartData = SymbolPanels & {
 export type ChartStreamTick = {
   type: "tick"; symbol: string; at: number; price: number; open: number; high: number; low: number;
   minute: number; session: "pre" | "regular" | "post";
+  received_at?: number; provider_ms?: number; relay_ms?: number; sent_at?: number;
+  /** Browser-local monotonic receipt, never supplied by the backend. */
+  receivedMono?: number;
   buckets: Partial<Record<Interval, { time: number; end_time: number; extended: boolean }>>;
 };
 /**

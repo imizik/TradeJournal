@@ -7,6 +7,7 @@ import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Tim
 import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
 import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings } from "@/lib/symbolInfo";
+import { chartCommitted } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
@@ -742,7 +743,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
       for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
-      return;
+      return chartCommitted(symbol, live.store.get(symbol).ticks.at(-1), main);
     }
     resets.current += 1;
     if (container.current) container.current.dataset.resets = String(resets.current);
@@ -770,7 +771,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     } else if (logical && movedTo >= 0) current.chart.timeScale().setVisibleLogicalRange({ from: logical.from + moved, to: logical.to + moved });
     else if (bars.length && range) current.chart.timeScale().setVisibleRange(range);
     retryJump.current();
-  }, [panel, pending, dataKey, symbol, interval, main]);
+    if (bars.length) return chartCommitted(symbol, undefined, main);
+  }, [panel, pending, dataKey, symbol, interval, main, live.store]);
 
   useEffect(() => {
     const current = bundle.current;
