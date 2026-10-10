@@ -1,9 +1,9 @@
 # Research Studio R0: evidence and bounded R1 contract
 
 **Selected by the user on 2026-10-10; probes completed on the Mac.** This
-selection advances R0 ahead of additional S1–S2 work only. R1–R4 remain
-unselected. No Studio route, event engine, worker, schema or Factory adapter
-is implemented. This is the evidence slice of the
+selection advances R0 ahead of additional S1–S2 work only. R1 was subsequently selected; see the [current R1 contract](research-studio-r1.md).
+R2–R4 remain unselected. R0 introduced no Studio route, event engine, worker,
+schema or Factory adapter. This is the evidence slice of the
 [revised roadmap](../strategy-workbench-roadmap.md#small-delivery-phases).
 
 ## Finding
@@ -168,7 +168,7 @@ occurred. Screenshot inspected. This proves static foundation feasibility,
 not React integration, live-store isolation or human usefulness. `PriceChart`
 imports `useClock`/`useLivePanel`; reusing it intact is not proposed.
 
-## Bounded R1 contract — unselected
+## Bounded R1 contract — selected
 
 1. **Read boundary and manifest.** Extract a small pure source adapter, not
    `BarStore` or a general quant store. Fixed discovery and June warm-up bounds

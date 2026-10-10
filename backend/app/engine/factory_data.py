@@ -324,6 +324,13 @@ class FeatureContext:
         self.rvol = _time_of_day_rvol(series)
 
     def at(self, i: int, side: int, stop: float) -> dict[str, float]:
+        values = self.decision_at(i, side)
+        values["risk"] = _ratio(abs(self.series.close[i] - stop), self.chart_atr[i])
+        # Preserve the historical Factory mapping order as well as its values.
+        return {name: values[name] for name in FEATURES}
+
+    def decision_at(self, i: int, side: int = 1) -> dict[str, float]:
+        """Decision features without a strategy stop or the execution-only risk."""
         s = self.series
         d = self.daily
         session = s.session[i]
@@ -342,7 +349,6 @@ class FeatureContext:
             "rel_strength": NA,
             "spy_trend": NA,
             "spy_day": NA,
-            "risk": _ratio(abs(close - stop), self.chart_atr[i]),
             "vwap_distance": side * _ratio(close - self.vwap[i], self.chart_atr[i]),
             "vol_ratio": _ratio(prior(d.atr_week, session), prior(d.atr_month, session)),
             "spy_vol": NA,

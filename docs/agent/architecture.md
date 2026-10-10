@@ -23,6 +23,14 @@ role are preserved pending an explicit operator decision.
 The import-boundary tests now protect pure engine modules from reaching the
 network or database engine.
 
+Research Studio R1 is a separate discovery-only, stop-free event path.
+`research_studio_data` reads only an explicit approved SIP root and a fixed
+bounded session roster into immutable in-memory snapshots. `research_studio`
+uses shared Factory features plus availability masks to select first-per-session
+observations; its CLI preview has no provider, DB, ledger, outcome or UI path.
+Both modules are protected by the pure import graph. See the
+[R1 contract](research-studio-r1.md).
+
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.
 `app.engine.metric_reference` is checked as pure too: Decimal event ledgers and
