@@ -53,7 +53,7 @@ after them, clearly labelled.
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | done ([PR #155](https://github.com/imizik/TradeJournal/pull/155)) |
 | T3.3 | Ownership and insider activity | 3 Depth | built ([PR #158](https://github.com/imizik/TradeJournal/pull/158)); insiders from Yahoo, unofficial |
 | T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | done ([PR #154](https://github.com/imizik/TradeJournal/pull/154)) |
-| T3.5 | News markers on the chart | 3 Depth | done (PR pending) |
+| T3.5 | News markers on the chart | 3 Depth | done ([PR #202](https://github.com/imizik/TradeJournal/pull/202)) |
 | T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
 | T3.7 | Economic calendar from FRED release dates | 3 Depth | todo, not built (needs a free FRED key) |
 
