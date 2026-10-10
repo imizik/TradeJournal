@@ -242,11 +242,11 @@ These are future pass conditions, not shipped promises.
 
 ## Reproduction and remaining evidence
 
-Temporary evidence directory: `/tmp/research-studio-r0/`. `audit.py` and
-`audit.json`/`manifest.json` hold source coverage/preparation/query timings;
-`extra.py`/`extra.json` hold exact endpoint coverage and synthetic numerical
-proxy; `quality.py`/`quality.json` hold strict daily-window sensitivity;
-`chart.cjs`/`chart.json`/`chart.png` hold the browser fixture. Python probes
+Temporary evidence directory: `/tmp/research-studio-r0/`. `/tmp/research-studio-r0/audit.py` and
+`/tmp/research-studio-r0/audit.json`/`/tmp/research-studio-r0/manifest.json` hold source coverage/preparation/query timings;
+`/tmp/research-studio-r0/extra.py`/`/tmp/research-studio-r0/extra.json` hold exact endpoint coverage and synthetic numerical
+proxy; `/tmp/research-studio-r0/quality.py`/`/tmp/research-studio-r0/quality.json` hold strict daily-window sensitivity;
+`/tmp/research-studio-r0/chart.cjs`/`/tmp/research-studio-r0/chart.json`/`/tmp/research-studio-r0/chart.png` hold the browser fixture. Python probes
 used the existing Mac venv with bytecode writes disabled; the proxy used
 `OPENBLAS_NUM_THREADS=1`. Chart fixture used installed Playwright/Chromium.
 Artifacts are temporary and are not a permanent research dataset or ledger.
