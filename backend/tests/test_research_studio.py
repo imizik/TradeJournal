@@ -533,3 +533,77 @@ def test_approved_root_identity_survives_ancestor_symlink_replacement(tmp_path, 
     monkeypatch.setattr(research_studio_data, "_decode", decode)
     with pytest.raises(ValueError, match="root directory changed"):
         source.snapshot(("MU",), through=DAY)
+
+
+def test_cli_pins_source_before_definition_read(tmp_path, monkeypatch, capsys):
+    from scripts import research_studio as cli
+    parent = tmp_path.resolve() / "approved"
+    root = parent / "sip"
+    root.mkdir(parents=True)
+    foreign = tmp_path.resolve() / "foreign"
+    (foreign / "sip").mkdir(parents=True)
+    write_day(foreign / "sip", "MU", WARMUP_START, [{"forbidden": True}])
+    definition = tmp_path.resolve() / "question.json"
+    definition.write_text(json.dumps({"version": 1, "universe": ["MU"],
+                                      "start": str(DAY), "end": str(DAY),
+                                      "predicates": [{"feature": "minutes", "minimum": 0}]}))
+    original_read = cli.read_definition
+    def read(path):
+        payload = original_read(path)
+        parent.rename(parent.with_name("old-approved"))
+        parent.symlink_to(foreign, target_is_directory=True)
+        return payload
+    opened = []
+    original_open = os.open
+    def open_file(path, *args, **kwargs):
+        opened.append(str(path))
+        return original_open(path, *args, **kwargs)
+    # Reader checks capability membership against the patched function as well.
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {open_file})
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(cli, "read_definition", read)
+    monkeypatch.setattr(sys, "argv", ["research_studio", "--cache-root", str(root), "--definition", str(definition)])
+    with pytest.raises(SystemExit) as raised:
+        cli.main()
+    assert raised.value.code == 2
+    assert "approved root directory changed" in capsys.readouterr().err
+    assert "MU" not in opened  # refusal before even opening a foreign symbol directory
+    assert not any(p.endswith("2023-06-01.json") for p in opened)
+
+
+@pytest.mark.parametrize("replacement", ["ancestor", "file"])
+def test_cli_definition_replacement_refuses_before_protected_open(tmp_path, monkeypatch, replacement, capsys):
+    from scripts import research_studio as cli
+    root = tmp_path.resolve() / "sip"
+    root.mkdir()
+    protected = write_day(root, "MU", date(2024, 10, 1), [{"forbidden": True}])
+    external = tmp_path.resolve() / "external"
+    external.mkdir()
+    definition = external / protected.name
+    definition.write_text('{"version":1}')
+    original_resolve = Path.resolve
+    def resolve(path, *args, **kwargs):
+        resolved = original_resolve(path, *args, **kwargs)
+        if path == definition:
+            if replacement == "ancestor":
+                external.rename(external.with_name("old-external"))
+                external.symlink_to(protected.parent, target_is_directory=True)
+            else:
+                definition.unlink()
+                definition.symlink_to(protected)
+        return resolved
+    opened = []
+    original_open = os.open
+    def open_file(path, *args, **kwargs):
+        fd = original_open(path, *args, **kwargs)
+        opened.append(os.fstat(fd).st_ino)
+        return fd
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {open_file})
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(sys, "argv", ["research_studio", "--cache-root", str(root), "--definition", str(definition)])
+    with pytest.raises(SystemExit) as raised:
+        cli.main()
+    assert raised.value.code == 2
+    assert "invalid event definition" not in capsys.readouterr().err
+    assert protected.stat().st_ino not in opened  # no successful protected-file open

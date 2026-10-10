@@ -66,12 +66,16 @@ can resolve to that approved Mac directory. Below that root, POSIX directory
 file descriptors and `O_NOFOLLOW` reject both symbol-directory and file symlink
 escapes, including replacement during traversal. The opened root must also
 retain its approved device/inode identity, rejecting an ancestor-directory
-replacement before any payload read. The CLI pins its initially resolved root.
+replacement before any payload read. The CLI constructs and pins one reader
+before opening configuration, then retains that reader through snapshot loading.
 Non-regular files and files
 over 8 MiB fail closed. No file or directory in the source is written.
 
 Definition JSON must be outside the approved source cache; the CLI rejects a
-cache payload supplied as configuration before reading it.
+cache payload supplied as configuration before reading it. Resolved configuration
+paths are opened through no-follow directory descriptors, so an ancestor or file
+replaced by a cache symlink cannot bypass that check. Configuration must be a
+regular file of at most 1 MiB; descriptors close on success and refusal.
 
 Snapshot preparation is temporary **in memory**: the exact selected bytes are
 hashed and parsed in the same read, then kept as frozen five-minute bars and
