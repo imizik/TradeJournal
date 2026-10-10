@@ -280,7 +280,9 @@ def exercise(nonce: str | None) -> None:
 
     write_json(CONFIG, config(refreshed_digest, end_day="2026-01-04"))
     response = post("get_journal_summary", bearer=good)
-    assert response.json()["result"].get("isError")
+    # A changed assignment fails at authentication before dispatching a tool.
+    assert response.status_code in (401, 403)
+    assert not any(value in response.text for value in ("18.750000", "MU", "NBIS"))
     write_json(CONFIG, config(refreshed_digest))
 
     # Digest mismatch, stale data, unknown fields and changed pinned scope fail closed.
