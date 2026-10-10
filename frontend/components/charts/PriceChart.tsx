@@ -6,7 +6,9 @@ import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp
 import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Timer } from "lucide-react";
 import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
 import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
-import type { Earnings } from "@/lib/symbolInfo";
+import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
+import { newsLabel, newsMarks, newsTip } from "@/lib/newsMarkers";
+import type { NewsMark } from "@/lib/newsMarkers";
 import { chartCommitted } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
@@ -98,6 +100,8 @@ const SECOND_TEXT: Partial<Record<Tool, string>> = { trend: "Click the second po
 /** A finger held this long without moving opens the chart menu (C1.3); moving further than `HOLD_SLOP` first is a pan or a crosshair scrub. */
 const LONG_PRESS = 500;
 const HOLD_SLOP = 10;
+/** How far above its candle's high a news marker (and the stack under it) can sit, for a tap to count as on it. */
+const NEWS_REACH = 56;
 /** A jump to an item drawn before the loaded candles (C1.4) loads at most this many older pages, and gives up after this long. */
 const JUMP_PAGES = 20;
 const JUMP_MS = 20_000;
@@ -131,7 +135,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
@@ -147,6 +151,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   rvol?: RvolBaseline | null;
   /** This symbol's earnings (C2.5): markers on report dates, and the header badge. */
   earnings?: Earnings | null;
+  /** The main chart's news markers (T3.5): the symbol's articles, or null while the layer is off. Only Focused articles are marked. */
+  news?: { symbol: string; articles: NewsArticle[] } | null;
+  /** A click on a news marker (a tap's popover button on touch): the ids of the articles on that candle. */
+  onNews?(ids: string[]): void;
   /** This symbol's level alerts (C5.1), on the chart's basis: a bell at each price. */
   alerts?: AlertMark[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
@@ -205,10 +213,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted: !!history?.exhausted });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted: !!history?.exhausted });
   // The fill arrows drawn, by fill id, for hover summaries and clicks (C3.1).
   const fillMarks = useRef(new Map<string, { label: string; time: number }>());
   const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number; width: number } | null>(null);
+  // The news markers drawn, by marker id, for hover headlines and clicks (T3.5). A tap on a phone pins the popover, which opens the News tab from its button.
+  const newsRef = useRef<NewsMark[]>([]);
+  const newsById = useRef(new Map<string, NewsMark>());
+  const [newsOpen, setNewsOpen] = useState<{ mark: NewsMark; x: number; y: number; width: number; height: number; pinned: boolean } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
@@ -230,7 +242,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
   const exhausted = !!history?.exhausted;
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted]);
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -323,6 +335,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // A fill arrow under the pointer: its one-line summary (C3.1).
       const fill = at && typeof event.hoveredObjectId === "string" ? fillMarks.current.get(event.hoveredObjectId) : undefined;
       setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y, width: element.clientWidth }) : null);
+      // A news marker under the pointer: its headlines (T3.5). A popover a tap pinned stays until the next tap.
+      const story = at && typeof event.hoveredObjectId === "string" ? newsById.current.get(event.hoveredObjectId) : undefined;
+      setNewsOpen((open) => open?.pinned ? open : story ? (open?.mark === story ? open : { mark: story, x: at!.x, y: at!.y, width: element.clientWidth, height: element.clientHeight, pinned: false }) : null);
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -540,11 +555,24 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("contextmenu", onContextMenu, true);
     const unpin = () => { pinnedLive.current = false; };
     for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
+    const newsAt = (x: number, y: number, slop: number) => {
+      let best: { mark: NewsMark; dx: number } | undefined;
+      for (const mark of newsRef.current) {
+        const bar = barAt(barsRef.current, mark.time);
+        const left = chart.timeScale().timeToCoordinate(mark.time as UTCTimestamp);
+        const top = bar ? candles.priceToCoordinate(bar.high) : null;
+        if (left === null || top === null) continue;
+        const dx = Math.abs(left - x);
+        if (dx > slop || y < top - NEWS_REACH || y > top + 6) continue;
+        if (!best || dx < best.dx) best = { mark, dx };
+      }
+      return best?.mark;
+    };
     chart.subscribeClick((event) => {
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
       if (performance.now() < tapsOffUntil) return; // the lift after a long press
-      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); return; }
+      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); setNewsOpen(null); return; }
       const touch = performance.now() - lastTouch < 1000;
       const slop = touch ? TOUCH_SLOP : MOUSE_SLOP;
       const hit = layer.hit(event.point.x, event.point.y, slop)?.id ?? null;
@@ -554,6 +582,16 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         now.onFill(event.hoveredObjectId);
         return;
       }
+      // A news marker (T3.5): a click opens the articles in the News tab; a tap shows their headlines first.
+      // The library reports no hovered marker for a tap, so a touch finds the marker by where it is drawn: above its candle.
+      const story = hit ? undefined : typeof event.hoveredObjectId === "string" ? newsById.current.get(event.hoveredObjectId) : touch ? newsAt(event.point.x, event.point.y, slop) : undefined;
+      if (story) {
+        now.onSelect?.(null); tapCard(null, 0); setFillTip(null);
+        if (touch) setNewsOpen({ mark: story, x: event.point.x, y: event.point.y, width: element.clientWidth, height: element.clientHeight, pinned: true });
+        else { setNewsOpen(null); now.onNews?.(story.articles.map((article) => article.id)); }
+        return;
+      }
+      setNewsOpen(null);
       now.onSelect?.(hit);
       tapCard(hit ? null : autoLayer.hit(event.point.y, slop), event.point.y);
     });
@@ -790,6 +828,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const markers = panel?.markers;
   // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
   const earningsKey = useMemo(() => JSON.stringify(earningsMarks(panel?.bars ?? [], earnings, interval)), [panel?.bars, earnings, interval]);
+  // News markers (T3.5): the main chart's Focused articles, each on the candle that holds its time. A tick that leaves them on the same candles changes nothing.
+  const newsList = main && news && news.symbol === symbol ? news.articles : null;
+  const marked = useMemo(() => newsList ? newsMarks(panel?.bars ?? [], newsList, interval) : [], [panel?.bars, newsList, interval]);
+  const newsKey = marked.map((mark) => `${mark.time}:${mark.articles.map((article) => article.id).join(",")}`).join("|");
+  useEffect(() => { newsRef.current = marked; });
   useEffect(() => {
     if (pending) return;
     const reports = (JSON.parse(earningsKey) as EarningsMark[]).map((m) => ({ time: m.time as UTCTimestamp, position: "belowBar" as const,
@@ -797,11 +840,19 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const fills = indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
       position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
       color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : [];
-    bundle.current?.markers.setMarkers([...fills, ...reports].sort((a, b) => a.time - b.time));
+    const stories = newsRef.current.map((m) => ({ time: m.time as UTCTimestamp, position: "aboveBar" as const, shape: "square" as const,
+      size: 0.8, color: "#cbd5e1", text: newsLabel(m), id: m.id }));
+    bundle.current?.markers.setMarkers([...fills, ...reports, ...stories].sort((a, b) => a.time - b.time));
     fillMarks.current = new Map(indicators.fills ? (markers ?? []).map((m) => [m.id, { label: m.label, time: m.time }]) : []);
+    newsById.current = new Map(newsRef.current.map((m) => [m.id, m]));
     setFillTip(null);
-    if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
-  }, [markers, earningsKey, pending, indicators.fills, main]);
+    if (container.current) {
+      container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
+      container.current.dataset.news = newsRef.current.map((m) => `${m.time}:${m.articles.length}`).join(",");
+    }
+  }, [markers, earningsKey, newsKey, pending, indicators.fills, main]);
+  // A popover closes when its markers change, not when a poll rebuilds the fill list under it.
+  useEffect(() => { queueMicrotask(() => setNewsOpen(null)); }, [newsKey, pending]);
 
   useEffect(() => {
     const current = bundle.current;
@@ -924,6 +975,16 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         {fillTip && !pending && <div role="tooltip" aria-label="Fill summary" className="pointer-events-none absolute z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg"
           style={{ left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - 30) }}>
           {fillTip.label} · {etTime(fillTip.time, true)} {intradayInterval(interval) ? `${etTime(fillTip.time)} ET candle` : ""}{onFill ? " · click for the trade" : ""}</div>}
+        {newsOpen && !pending && <div role={newsOpen.pinned ? "dialog" : "tooltip"} aria-label="News headlines" data-news-tip={newsOpen.mark.time}
+          className={`absolute z-10 w-64 max-w-[calc(100%-1rem)] space-y-1 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1.5 text-[11px] text-slate-200 shadow-lg ${newsOpen.pinned ? "" : "pointer-events-none"}`}
+          style={{ left: Math.max(4, Math.min(newsOpen.x + 10, newsOpen.width - 264)), top: Math.max(4, Math.min(newsOpen.y + 14, newsOpen.height - 40 - newsTip(newsOpen.mark).lines.length * 34)) }}>
+          <p className="text-[10px] text-slate-400">{etTime(newsOpen.mark.time, true)}{intradayInterval(interval) ? ` ${etTime(newsOpen.mark.time)} ET candle` : " session"} · {newsOpen.mark.articles.length} {newsOpen.mark.articles.length === 1 ? "headline" : "headlines"}</p>
+          <ul className="space-y-1">{newsTip(newsOpen.mark).lines.map((line, index) => <li key={index} className="line-clamp-2">{line}</li>)}</ul>
+          {newsTip(newsOpen.mark).more > 0 && <p className="text-[10px] text-slate-400">+{newsTip(newsOpen.mark).more} more</p>}
+          {newsOpen.pinned ? <div className="flex gap-2 pt-1">
+            {onNews && <button onClick={() => { const ids = newsOpen.mark.articles.map((article) => article.id); setNewsOpen(null); onNews(ids); }} className="min-h-11 flex-1 rounded border border-sky-400/50 px-2 text-sky-300">Read in News</button>}
+            <button onClick={() => setNewsOpen(null)} className="min-h-11 rounded border border-slate-700 px-3 text-slate-300">Close</button></div>
+            : onNews && <p className="text-[10px] text-sky-300">Click to read in News</p>}</div>}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>

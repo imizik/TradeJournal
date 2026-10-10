@@ -12,7 +12,7 @@ export type LayerItem = { id: string; symbol: string; name: string; detail: stri
 export type ItemGroup = "levels" | "drawings";
 export type LayerGroup =
   | { key: ItemGroup; name: string; noun: string; hidden: boolean; items: LayerItem[] }
-  | { key: "journal" | "auto" | "ranges"; name: string; hidden: boolean; note: string }
+  | { key: "journal" | "auto" | "ranges" | "news"; name: string; hidden: boolean; note: string }
   | { key: "options"; name: string; hidden: boolean; note: string; filters: OptionsLayer }
   | { key: "indicators"; name: string; hidden: boolean; studies: { key: string; label: string; on: boolean }[] };
 

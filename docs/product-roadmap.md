@@ -20,7 +20,7 @@ plans retain their implementation scope and execution order:
 | [Symbol info roadmap](symbol-info-roadmap.md) | News, events, company information and options-implied context beside the chart |
 | [Engineering roadmap](agent/roadmap.md) | Verification, environment isolation and operational foundations |
 | [Swing strategy roadmap](swing-strategy-roadmap.md) | Swing research in the strategy factory, the after-close practice loop, the setups board and confluence scan |
-| [Strategy Workbench roadmap](strategy-workbench-roadmap.md) | A later interactive page over the factory's discovery data |
+| [Strategy Workbench roadmap](strategy-workbench-roadmap.md) | Event-first Research Studio: connected chart, conditions and analysis on discovery data; later Factory handoff |
 | [Agentic practice proposal](agentic-trading-roadmap.md) | Alternative morning human/agent decision loop, immutable plans and intraday paper review; select against the swing practice loop before implementation |
 | [Pre-trade advisor roadmap](advisor-roadmap.md) | Future on-the-spot Go/Wait/Pass check on the user's idea, attached to captures and graded; separate from the shadow |
 | This document | Structured reflection, weekly improvement, personal playbooks, planned risk and prospective experiments |

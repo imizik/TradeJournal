@@ -1,18 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 import { useClock } from "@/lib/chartStore";
 import { ago, listedNews, newYorkTime, readAt } from "@/lib/symbolInfo";
 import type { NewsArticle, SymbolNews } from "@/lib/symbolInfo";
 
+export const LIT_MS = 6000;
 const TONE = { positive: "text-emerald-300", negative: "text-rose-300", neutral: "text-slate-300" };
 
-function Article({ article, symbol, minute }: { article: NewsArticle; symbol: string; minute: number }) {
+function Article({ article, symbol, minute, lit, first }: { article: NewsArticle; symbol: string; minute: number; lit: boolean; first: boolean }) {
   const [open, setOpen] = useState(false);
+  const row = useRef<HTMLLIElement>(null);
+  // A news marker's click brings its articles into view (T3.5); the first one is scrolled to.
+  useEffect(() => { if (lit && first) row.current?.scrollIntoView?.({ block: "nearest" }); }, [lit, first]);
   const mine = article.sentiment.find((s) => s.ticker === symbol);
   const more = article.tickers.length - 1;
-  return <li className="space-y-1 py-2">
+  return <li ref={row} data-news-lit={lit || undefined} className={`space-y-1 py-2 ${lit ? "-mx-1 rounded bg-sky-400/10 px-1 ring-1 ring-sky-400/60" : ""}`}>
     <div className="flex items-start justify-between gap-2">
       <a href={article.url} target="_blank" rel="noopener noreferrer" className="min-w-0 text-slate-100 hover:text-sky-300">{article.headline}</a>
       <button aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} summary: ${article.headline}`} onClick={() => setOpen(!open)} className="flex min-h-11 min-w-11 shrink-0 items-center justify-center text-slate-500 hover:text-slate-200 lg:min-h-0 lg:min-w-0">
@@ -34,14 +38,28 @@ function Article({ article, symbol, minute }: { article: NewsArticle; symbol: st
 }
 
 /** The News tab (T1.2). The parent re-reads each minute while it is open; new headlines wait behind "N new" instead of shifting the list. */
-export default function SymbolInfoNews({ data }: { data: SymbolNews }) {
+export default function SymbolInfoNews({ data, focus = null }: { data: SymbolNews; focus?: { ids: string[]; n: number } | null }) {
   const [focused, setFocused] = useState(true);
   const [shown, setShown] = useState(data.articles); // what the list displays; replaced only on "N new" (the parent keys this by symbol)
   const minute = useClock((now) => Math.floor(now / 60));
+  // The articles a clicked news marker named stay lit for a few seconds. One that the list froze out behind "N new" is let in first.
+  const [lit, setLit] = useState<{ n: number; ids: Set<string> } | null>(null);
+  useEffect(() => {
+    if (!focus) return;
+    const ids = new Set(focus.ids);
+    queueMicrotask(() => {
+      setShown((rows) => focus.ids.every((id) => rows.some((a) => a.id === id)) ? rows : data.articles);
+      setLit({ n: focus.n, ids });
+    });
+    const timer = setTimeout(() => setLit((now) => now?.n === focus.n ? null : now), LIT_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- a click (a new `n`) lights; a poll that only changes `data` must not
+  }, [focus?.n]);
   const current = listedNews(data.articles, focused);
   const shownIds = new Set(shown.map((a) => a.id));
   const fresh = current.filter((a) => !shownIds.has(a.id)).length;
   const rows = listedNews(shown, focused);
+  const firstLit = lit ? rows.find((row) => lit.ids.has(row.id))?.id : undefined;
   const hidden = data.articles.filter((a) => a.roundup).length;
   const reading = data.sources.filter((s) => s.state !== "ok");
   const bothDown = data.sources.every((s) => s.state === "failed" || s.state === "not_configured");
@@ -52,7 +70,7 @@ export default function SymbolInfoNews({ data }: { data: SymbolNews }) {
       </label>
       {fresh > 0 && <button onClick={() => setShown(data.articles)} className="min-h-11 rounded border border-sky-400/50 px-3 py-2 text-sky-300 lg:min-h-0">{fresh} new</button>}
     </div>
-    {rows.length > 0 ? <ul className="divide-y divide-slate-700/40">{rows.map((a) => <Article key={a.id} article={a} symbol={data.symbol} minute={minute} />)}</ul>
+    {rows.length > 0 ? <ul className="divide-y divide-slate-700/40">{rows.map((a) => <Article key={a.id} article={a} symbol={data.symbol} minute={minute} lit={!!lit?.ids.has(a.id)} first={a.id === firstLit} />)}</ul>
       : data.articles.length > 0 ? <p className="text-slate-500">No focused headlines. {hidden} roundup {hidden === 1 ? "article is" : "articles are"} hidden; turn Focused off to read {hidden === 1 ? "it" : "them"}.</p>
       : bothDown ? null : <p className="text-slate-500">No news in the last {data.days} days.</p>}
     {reading.map((s) => <p key={s.provider} role="status" className="text-[10px] text-amber-300">

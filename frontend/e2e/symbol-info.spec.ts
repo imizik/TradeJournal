@@ -6,11 +6,12 @@ import type { Earnings, NewsArticle, NewsSource, SymbolEvents, ReactionSummary, 
 
 // Only market candles/quotes/settings are stubbed. Journal values below come
 // through the real private endpoint from scripts/seed_dev_data.py.
+// The news markers (T3.5) are off here so these tests count the tabs' own reads; e2e/news-markers.spec.ts covers the markers.
 test.beforeEach(async ({ context, page }) => {
   await context.addInitScript(({ key, settings }) => {
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));
-  }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"] } });
-  await fakeChartSettings(context, { revision: 1, data: { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"] } });
+  }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"], newsHidden: true } });
+  await fakeChartSettings(context, { revision: 1, data: { symbol: "NVDA", watchlist: ["NVDA", "AAPL", "TSLA", "SPY", "AMD"], newsHidden: true } });
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const query = new URL(route.request().url()).searchParams;
     const symbol = query.get("symbol");
@@ -490,7 +491,8 @@ test("News polls each minute only while the tab is open and the page is visible,
   expect(reads).toHaveLength(2);
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); });
   await page.clock.runFor(60_000);
-  expect(reads).toHaveLength(3);
+  // The read leaves when the timer fires; wait for it to reach the stub rather than racing it.
+  await expect.poll(() => reads.length).toBe(3);
   // Leaving the tab stops it too.
   await info.getByRole("tab", { name: "You", exact: true }).click();
   await page.clock.runFor(180_000);
