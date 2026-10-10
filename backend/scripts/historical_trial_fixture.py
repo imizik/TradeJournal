@@ -44,3 +44,9 @@ def prepare(db):
         if historical_replay.eligible(run) and historical_replay.market_practice.visible_to(run, IDENTIFIER):
             return run
     return historical_replay.prepare(db, bundle(), identifier=IDENTIFIER, proof=True)
+
+
+def prepare_expiry_cases(db):
+    for zone in ("la", "ny", "utc"):
+        historical_replay.prepare(db, bundle(),
+            identifier=IDENTIFIER.replace("historical-browser-", "historical-expiry-") + "-" + zone, proof=True)

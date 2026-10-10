@@ -19,6 +19,14 @@ cutoff only in the separate historical policy. Live-market freshness rules
 remain unchanged. Provider history may contain subsequent corrections; this
 does not prove what the provider actually published at the historical cutoff.
 
+Historical expiry entry uses explicit `YYYY-MM-DD HH:mm` Eastern wall time,
+independent of the browser timezone. WAIT and TAKE have no default expiry:
+the writer enters a valid date after the cutoff and no later than the historical
+maximum, then confirms its ET/UTC preview matches the condition or plan.
+Changing the expiry or condition clears confirmation. Invalid dates and DST
+gaps/folds are refused rather than shifted. Existing immutable records, including
+Jo's October 7 condition saved with an October 8 expiry, are not rewritten.
+
 The new schema is `practice-historical-replay-long-15m-v1`; the execution
 contract is `historical-paper-replay-v2`. It supports MU/NBIS long shares,
 source-linked trigger/stop/target, regular-session complete 15-minute close

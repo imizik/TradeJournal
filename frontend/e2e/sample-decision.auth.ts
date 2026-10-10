@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type Page } from "@playwright/test";
 import { frozenWindow } from "../lib/frozen-evidence";
+import { historicalExpiryInstant } from "../lib/historicalExpiry";
 const ownerOrigin = `http://127.0.0.1:${process.env.SAMPLE_OWNER_PORT ?? 3141}`;
 const assistantOrigin = `http://127.0.0.1:${process.env.SAMPLE_ASSISTANT_PORT ?? 3142}`;
 
@@ -338,6 +339,7 @@ test("unusable frozen bars show an explicit unavailable chart without replacing 
   await page.getByRole("button",{name:"Reload saved practice"}).click();
   await expect(page.getByText(/Chart unavailable: Invalid frozen price or volume/)).toBeVisible();
   await expect(page.getByText("Inspect frozen packet and rules").first()).toBeVisible();
+  await page.unrouteAll({behavior:"wait"});
 });
 
 
@@ -453,6 +455,92 @@ test("market pilot saves source-linked own decisions and privately reviews them 
   await owner.close();
 });
 
+test("historical Eastern expiry rejects invalid or ambiguous wall clocks", () => {
+  expect(historicalExpiryInstant("2026-10-07 16:00")).toBe("2026-10-07T20:00:00.000Z");
+  expect(historicalExpiryInstant("2026-01-07T16:00")).toBe("2026-01-07T21:00:00.000Z");
+  for (const value of ["", "2026-02-30 16:00", "2026-03-08 02:30", "2026-11-01 01:30", "10/7/2026 16:00", "2026-10-07 24:00"]) {
+    expect(historicalExpiryInstant(value),value).toBeNull();
+  }
+});
+
+for (const [timezoneId, suffix] of [["America/Los_Angeles", "la"], ["America/New_York", "ny"], ["UTC", "utc"]]) {
+  test(`historical expiry keeps the chosen Eastern date in ${timezoneId}`, async ({browser}) => {
+    const owner = await browser.newContext({baseURL:ownerOrigin});
+    const context = await browser.newContext({baseURL:assistantOrigin, timezoneId});
+    try {
+      const auth = await (await owner.request.get("/api/access/me")).json();
+      const runs = (await (await owner.request.get("/api/backend/practice/runs")).json()).runs;
+      const run = runs.find((r:{assigned_agent?:string})=>r.assigned_agent?.startsWith("agent:historical-expiry-") && r.assigned_agent.endsWith(`-${suffix}`));
+      expect(run).toBeTruthy();
+      const identity = run.assigned_agent.replace("agent:", "");
+      const created = await owner.request.post("/api/access/assistants", {headers:{Origin:ownerOrigin,"x-tj-csrf":auth.csrf},data:{identifier:identity,grants:{symbols:["MU","NBIS"],run_ids:[run.id],journal_read:false,market_decision_write:true,historical_replay:true}}});
+      expect(created.status()).toBe(201);
+      const page = await context.newPage();
+      await page.goto("/login");
+      await page.getByLabel("Assistant ID").fill(identity);
+      await page.getByLabel("Access key").fill((await created.json()).key);
+      await page.getByRole("button",{name:"Sign in",exact:true}).click();
+      await expect(page.getByText("Historical market replay trial",{exact:true})).toBeVisible();
+      await page.goto(`/daily/${run.day}?practice_run=${run.id}`);
+      const mu = page.getByRole("article",{name:"MU historical opportunity"});
+      await mu.getByLabel("MU choice").selectOption("wait");
+      const expiry = mu.getByLabel(/MU waiting ends/);
+      await expect(expiry).toHaveValue("");
+      await expect(expiry).toHaveAccessibleName("MU waiting ends (historical clock · Eastern time)");
+      await mu.getByLabel("MU reason").fill("Wait until the chosen first-session close, not the second-session default.");
+      await mu.getByLabel("MU wait condition").fill(`Reassess before ${run.day} at 4 PM ET.`);
+      const save = mu.getByRole("button",{name:"Save MU decision",exact:true});
+      await expect(save).toBeDisabled();
+      const intended = new Date(`${run.day}T20:00:00Z`);
+      const cutoff = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities[0].context.packet.simulated_as_of;
+      // Derive 16:00 ET for this fixture's actual season, independent of browser timezone.
+      const eastern = new Intl.DateTimeFormat("sv-SE",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"});
+      if (eastern.format(intended).slice(-5)!=="16:00") intended.setUTCHours(21);
+      await expiry.fill(`${run.day} 13:45`);
+      await expect(mu.getByRole("alert")).toContainText("Expiry must be after the historical cutoff");
+      await expect(save).toBeDisabled();
+      await expiry.fill("2026-02-30 16:00");
+      await expect(mu.locator("form time[datetime]")).toHaveCount(0);
+      await expect(save).toBeDisabled();
+      await expiry.fill(`${run.day} 16:00`);
+      const preview = mu.locator("form time[datetime]").first();
+      await expect(preview).toHaveAttribute("datetime",intended.toISOString());
+      await expect(mu.getByText(intended.toISOString(),{exact:true})).toBeVisible();
+      await expect(save).toBeDisabled();
+      const confirm = mu.getByRole("checkbox",{name:/Confirm MU expiry/});
+      await confirm.check();
+      await expect(save).toBeEnabled();
+      await mu.getByLabel("MU wait condition").fill(`Updated condition before ${run.day} at 4 PM ET.`);
+      await expect(confirm).not.toBeChecked();
+      await expect(save).toBeDisabled();
+      await confirm.check();
+      await expiry.fill(`${run.day} 15:59`);
+      await expect(confirm).not.toBeChecked();
+      await expect(save).toBeDisabled();
+      await expiry.fill(`${run.day} 16:00`);
+      await confirm.check();
+      if (timezoneId === "America/Los_Angeles") {
+        await page.setViewportSize({width:390,height:844});
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
+        await mu.screenshot({path:test.info().outputPath("historical-eastern-expiry-phone.png")});
+      }
+      await save.click();
+      await expect(mu.getByRole("button",{name:"Reopen saved MU decision"})).toBeVisible();
+      const saved = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((o:{symbol:string})=>o.symbol==="MU").choice;
+      expect(new Date(saved.wait_expiry).toISOString()).toBe(intended.toISOString());
+      expect(new Date(saved.input_cutoff).toISOString()).toBe(new Date(cutoff).toISOString());
+      await page.reload();
+      await mu.getByRole("button",{name:"Reopen saved MU decision"}).click();
+      const reopened = await (await page.request.get(`/api/backend/decisions/${saved.id}`)).json();
+      expect(reopened).toEqual(saved);
+      await expect(mu.getByText(`${intended.toLocaleString("en-US",{timeZone:"America/New_York"})} ET`,{exact:true})).toBeVisible();
+    } finally {
+      await context.close().catch(()=>{});
+      await owner.close().catch(()=>{});
+    }
+  });
+}
+
 test("historical replay preserves source clocks and continuation isolation for its assigned writer", async ({page,browser}) => {
   const errors: string[] = [];
   const forbidden: string[] = [];
@@ -509,7 +597,10 @@ test("historical replay preserves source clocks and continuation isolation for i
   await mu.getByLabel("MU target source fact").selectOption("minute:0:h");
   await mu.getByLabel("MU maximum reference entry price").fill("110.5");
   const expiry = mu.getByLabel(/MU plan ends/);
-  await expect(expiry).toHaveAttribute("max",await expiry.inputValue());
+  await expect(expiry).toHaveValue("");
+  const maxWall = new Intl.DateTimeFormat("sv-SE",{timeZone:"America/New_York",year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).format(new Date(muData.context.packet.plan_expiry_max));
+  await expiry.fill(maxWall);
+  await mu.getByRole("checkbox",{name:/Confirm MU expiry/}).check();
   await mu.getByRole("button",{name:"Save MU decision",exact:true}).click();
   await expect(mu.getByRole("button",{name:"Start MU historical replay",exact:true})).toBeEnabled();
   const saved = (await (await page.request.get(`/api/backend/practice/runs/${run.id}`)).json()).opportunities.find((item:{symbol:string})=>item.symbol==="MU");
@@ -521,6 +612,8 @@ test("historical replay preserves source clocks and continuation isolation for i
   await nbis.getByLabel("NBIS choice").selectOption("wait");
   await nbis.getByLabel("NBIS reason").fill("Wait for another source-linked condition.");
   await nbis.getByLabel("NBIS wait condition").fill("Reassess after the next verified session.");
+  await nbis.getByLabel(/NBIS waiting ends/).fill(maxWall);
+  await nbis.getByRole("checkbox",{name:/Confirm NBIS expiry/}).check();
   await nbis.getByRole("button",{name:"Save NBIS decision",exact:true}).click();
   await expect(nbis.getByRole("region",{name:"NBIS historical paper replay"})).toHaveCount(0);
   await expect(nbis.getByRole("button",{name:"Start NBIS historical replay"})).toHaveCount(0);
