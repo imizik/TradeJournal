@@ -75,6 +75,50 @@ registration/consent, then prove actual Jo reads, data exclusions, revocation,
 expiry, restart and no-write/no-network boundaries. Manual export is the only
 refresh mechanism in this slice; no scheduling or background subscription exists.
 
+## Fixture setup packaging
+
+`deploy/journal_coach_stage.py` prepares a new private directory containing the
+three standalone runtime modules, journal socket/service templates, a disabled
+configuration, an invented two-trade export and file digests. It accepts only
+issuer/resource/client/subject/profile bindings, never an account selection,
+database URL or real export. Both the configuration and profile are disabled;
+`sample_data=true` is fixed. It does not create an OS user, install units, build
+dependencies, publish HTTPS, generate keys, register OAuth or start a service.
+Refuse existing destinations and symlinked staging parents. Stage only from
+the reviewed source; compare its recorded file digests before installation.
+Fixture snapshots expire after one hour and must be freshly staged for a later
+test; expiry is never weakened to keep a stale installation working.
+
+The manual templates under `deploy/cloud-mcp-journal/` use a separate
+`tj-journal-coach` OS identity, independent runtime under
+`/opt/tradejournal-journal/runtime`, configuration under
+`/etc/tradejournal-journal` and approved export/public keys under
+`/var/lib/tradejournal-journal`. The socket is accessible only to the coach and
+Caddy group. The service receives no environment file, uses read-only mounts,
+blocks production and demo runtime/configuration/data paths, has a private
+network namespace and permits AF_UNIX only. Install no writable paths. Future
+manual installation grants this identity read access to its dedicated files,
+without reusing production/demo credentials or broadening their memberships.
+
+The deployment CI smoke is root- and disposable-runner-gated, refuses existing
+journal users/units/directories, and uses generated local signatures and invented
+rows. It exercises the actual socket/service, scope and data denials, bounded
+pagination, revocation, refresh and restart. Sandbox checks execute inside that
+same unit context and must prove production markers are inaccessible, fixture
+files cannot be written, IPv4/IPv6 creation is denied and Unix sockets work.
+Stopping both units must prevent socket activation. This establishes installed
+fixture isolation on disposable Ubuntu, not live HTTPS, Auth0 consent, VPS
+installation or actual Jo access.
+
+On the VPS, staging is the next reversible preparation step. Creating the OS
+identity, installing/starting units, publishing a new HTTPS route and registering
+or extending OAuth access require a concrete separately approved activation.
+Keep the existing historical demo connector intact throughout setup. Before
+real-data access, the earlier account/date/field, export-role, backup and
+transmission gates still apply. Stop and remove only the new dedicated units to
+roll back activation; preserve approved exports and receipts privately rather
+than rewriting journal or demo rows.
+
 ## Acceptance
 
 Fixture tests cover strict projection, exact sums and missing values, bounded

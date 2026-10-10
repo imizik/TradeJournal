@@ -1,0 +1,33 @@
+[Unit]
+Description=Read-only approved journal export for ChatGPT coaching (manual activation)
+Requires=tradejournal-journal-coach.socket
+After=tradejournal-journal-coach.socket
+
+[Service]
+Type=simple
+User=tj-journal-coach
+Group=tj-journal-coach
+WorkingDirectory=/opt/tradejournal-journal/runtime/backend
+ExecStart=/opt/tradejournal-journal/runtime/backend/.venv/bin/python /opt/tradejournal-journal/runtime/backend/cloud_mcp_journal.py --config /etc/tradejournal-journal/config.json
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateNetwork=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=-/etc/tradejournal -/etc/tradejournal-dot-trial -/etc/tradejournal-d0 -/etc/tradejournal-d1 -/var/lib/tradejournal -/var/lib/tradejournal-dot-trial -/var/backups/tradejournal -/opt/tradejournal -/opt/tradejournal-dot-trial -/opt/tradejournal-d0 -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_UNIX
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=32
+MemoryMax=256M
+CPUQuota=50%
+
+# No EnvironmentFile, database connection, model credentials or writable mounts.
+# The operator grants this OS identity read access only to the approved export,
+# public verification keys and dedicated configuration. No install/start hook.
