@@ -1134,8 +1134,9 @@ the system watches while he works and retains an outcome worth reviewing.
 
 **Local implementation (2026-10-08):** the manual daily routine, frozen common
 opportunities, immutable choice/reveal service, deterministic review and
-benchmark, bounded disabled adapter and opt-in timer are implemented on the
-owned A3 branch. The [implementation contract](agent/a3-implementation-contract.md)
+benchmark, bounded disabled adapter and opt-in timer are present in the
+repository. The selected [manual advisor/shadow fixture](agent/advisor-shadow-contract.md)
+adds a no-inference manual assignment to the existing agent slot. The [implementation contract](agent/a3-implementation-contract.md)
 records the exact semantics. Deployment, paid/scheduled enablement, CI and the
 three observed human-timed sessions remain separate gates; A3 is not fully accepted.
 
