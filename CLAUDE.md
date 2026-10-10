@@ -48,7 +48,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 | `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
 | `docs/swing-strategy-roadmap.md` | Swing families (1–16 sessions) in the factory, the after-close practice loop (signal, phone, Take/Skip, shadow trade), the setups board and confluence scan, macro/news/earnings as-of rules, stages from research to live |
-| `docs/strategy-workbench-roadmap.md` | A later interactive page over the factory: explore on discovery data only, the exploration log, freezing candidates |
+| `docs/strategy-workbench-roadmap.md` | Research Studio plan: connected event exploration on discovery data, exposure history, bounded phases and later Factory handoff |
 
 Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
