@@ -514,3 +514,22 @@ def test_prepared_grid_reuses_only_matching_input_shape_and_reselects_first_even
     both = replace(tight, predicates=tight.predicates + (Predicate("move_15m_atr", maximum=-1),))
     assert obs.preview(both)["event_count"] == 0
     assert len(calls) == 4  # a new feature needs its own quality masks
+
+
+def test_approved_root_identity_survives_ancestor_symlink_replacement(tmp_path, monkeypatch):
+    parent = tmp_path / "approved"
+    root = parent / "sip"
+    root.mkdir(parents=True)
+    source = DiscoveryCache(root)
+    foreign = tmp_path / "foreign"
+    foreign_root = foreign / "sip"
+    foreign_root.mkdir(parents=True)
+    write_day(foreign_root, "MU", WARMUP_START, [{"forbidden": True}])
+    parent.rename(tmp_path / "old-approved")
+    parent.symlink_to(foreign, target_is_directory=True)
+    from app.engine import research_studio_data
+    def decode(*args):
+        pytest.fail("foreign payload was read")
+    monkeypatch.setattr(research_studio_data, "_decode", decode)
+    with pytest.raises(ValueError, match="root directory changed"):
+        source.snapshot(("MU",), through=DAY)

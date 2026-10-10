@@ -64,7 +64,10 @@ selected by a symbol/date/cursor request.
 The operator approves the root. The existing factory checkout's root symlink
 can resolve to that approved Mac directory. Below that root, POSIX directory
 file descriptors and `O_NOFOLLOW` reject both symbol-directory and file symlink
-escapes, including replacement during traversal. Non-regular files and files
+escapes, including replacement during traversal. The opened root must also
+retain its approved device/inode identity, rejecting an ancestor-directory
+replacement before any payload read. The CLI pins its initially resolved root.
+Non-regular files and files
 over 8 MiB fail closed. No file or directory in the source is written.
 
 Definition JSON must be outside the approved source cache; the CLI rejects a

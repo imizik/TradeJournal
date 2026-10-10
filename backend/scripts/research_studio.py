@@ -26,7 +26,7 @@ def main() -> None:
         if definition_path.is_relative_to(root):
             raise ValueError("definition input must be outside the source cache")
         definition = parse_definition(json.loads(definition_path.read_bytes()))
-        snapshot = DiscoveryCache(args.cache_root).snapshot(definition.universe, through=definition.end)
+        snapshot = DiscoveryCache(root).snapshot(definition.universe, through=definition.end)
         preview = Observations(snapshot).preview(definition)
         print(json.dumps(preview, indent=2, allow_nan=False))
     except (OSError, ValueError, TypeError, KeyError) as exc:

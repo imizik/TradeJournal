@@ -84,6 +84,8 @@ class DiscoveryCache:
             raise ValueError("approved root must be the SIP minute-cache directory")
         if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
             raise ValueError("cache reader requires POSIX no-follow directory descriptors")
+        approved = self.root.stat()
+        self._root_identity = (approved.st_dev, approved.st_ino)
 
     def _read(self, symbol: str, day: date) -> bytes | None:
         validate_symbol(symbol, market=True)
@@ -92,6 +94,9 @@ class DiscoveryCache:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_fd = os.open(self.root, flags)
         try:
+            opened = os.fstat(root_fd)
+            if (opened.st_dev, opened.st_ino) != self._root_identity:
+                raise ValueError("approved root directory changed; create a new reader")
             try:
                 symbol_fd = os.open(symbol, flags, dir_fd=root_fd)
             except FileNotFoundError:
