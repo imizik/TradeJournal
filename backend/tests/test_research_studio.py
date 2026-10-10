@@ -607,3 +607,31 @@ def test_cli_definition_replacement_refuses_before_protected_open(tmp_path, monk
     assert raised.value.code == 2
     assert "invalid event definition" not in capsys.readouterr().err
     assert protected.stat().st_ino not in opened  # no successful protected-file open
+
+
+def test_constructor_replacement_refuses_before_foreign_symbol_open(tmp_path, monkeypatch):
+    parent = tmp_path.resolve() / "approved"
+    root = parent / "sip"
+    root.mkdir(parents=True)
+    foreign = tmp_path.resolve() / "foreign"
+    (foreign / "sip").mkdir(parents=True)
+    write_day(foreign / "sip", "MU", WARMUP_START, [])
+    original_resolve = Path.resolve
+    def resolve(path, *args, **kwargs):
+        resolved = original_resolve(path, *args, **kwargs)
+        if path == root:
+            parent.rename(parent.with_name("old-approved"))
+            parent.symlink_to(foreign, target_is_directory=True)
+        return resolved
+    opened = []
+    original_open = os.open
+    def open_file(path, *args, **kwargs):
+        fd = original_open(path, *args, **kwargs)
+        opened.append(str(path))
+        return fd
+    monkeypatch.setattr(os, "supports_dir_fd", os.supports_dir_fd | {open_file})
+    monkeypatch.setattr(os, "open", open_file)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    with pytest.raises(OSError):
+        DiscoveryCache(root).snapshot(("MU",), through=DAY)
+    assert "MU" not in opened

@@ -68,6 +68,9 @@ escapes, including replacement during traversal. The opened root must also
 retain its approved device/inode identity, rejecting an ancestor-directory
 replacement before any payload read. The CLI constructs and pins one reader
 before opening configuration, then retains that reader through snapshot loading.
+Initial root identity is bound with no-follow traversal of the resolved absolute
+directory path and `fstat`, so replacement between resolution and binding also
+refuses before source access.
 Non-regular files and files
 over 8 MiB fail closed. No file or directory in the source is written.
 
@@ -168,10 +171,10 @@ R2/R3 performance gate, not a delivered latency promise. Completed analysis and
 API/UI feedback remain unmeasured. Full correctness/verification evidence is
 recorded in the PR.
 
-A retest on the final source observed 19.47 s for the snapshot, 3.11 s for
-feature/quality preparation and 1.62 s for the first grid/query (24.20 s total).
-Twenty warm queries had median 31.3 ms, interpolated sample p95 about 63.0 ms
-and maximum 149.0 ms, with 355,991,552 bytes (339.5 MiB) peak RSS. This quieter
+A retest after the startup-boundary repairs observed 14.84 s for the snapshot,
+1.92 s for feature/quality preparation and 1.06 s for the first grid/query
+(17.82 s total). Twenty warm queries had median 25.4 ms, interpolated sample p95
+about 30.6 ms and maximum 113.1 ms, with 355,942,400 bytes (339.5 MiB) peak RSS. This quieter
 pass supports feasibility; it does not erase the load-sensitive budget miss or
 prove API/UI response times.
 No paid request, protected-period read or journal/Factory record write was used.

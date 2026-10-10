@@ -80,12 +80,23 @@ class DiscoveryCache:
 
     def __init__(self, approved_root: Path):
         self.root = Path(approved_root).resolve(strict=True)
-        if self.root.name != "sip" or not self.root.is_dir():
+        if self.root.name != "sip":
             raise ValueError("approved root must be the SIP minute-cache directory")
         if not hasattr(os, "O_NOFOLLOW") or os.open not in os.supports_dir_fd:
             raise ValueError("cache reader requires POSIX no-follow directory descriptors")
-        approved = self.root.stat()
-        self._root_identity = (approved.st_dev, approved.st_ino)
+        # Resolution allows the operator's existing cache alias. Binding must
+        # not follow an ancestor replaced after that resolution.
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        directory = os.open(self.root.anchor, flags)
+        try:
+            for part in self.root.parts[1:]:
+                child = os.open(part, flags, dir_fd=directory)
+                os.close(directory)
+                directory = child
+            approved = os.fstat(directory)
+            self._root_identity = (approved.st_dev, approved.st_ino)
+        finally:
+            os.close(directory)
 
     def _read(self, symbol: str, day: date) -> bytes | None:
         validate_symbol(symbol, market=True)
