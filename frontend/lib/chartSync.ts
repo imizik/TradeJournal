@@ -2,7 +2,7 @@ import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetStateAction } from "react";
 import { apiUrl } from "@/lib/api";
-import { DEFAULT_SETTINGS, LAYER_GROUPS, MAX_KEPT_LAYOUTS, STORAGE_KEY, cleanLayoutProportions, cleanOptionsLayer, cleanProportions, layoutKeys, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
+import { DEFAULT_SETTINGS, LAYER_GROUPS, MAX_KEPT_LAYOUTS, STORAGE_KEY, cleanLayoutProportions, cleanOptionsLayer, cleanPanelStudies, cleanProportions, layoutKeys, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
 import type { ChartSettings, Indicators } from "@/lib/charts";
 import { cleanDrawings, cleanToolStyles, DRAWING_KINDS, MAX_DRAWINGS } from "@/lib/drawings";
 
@@ -29,7 +29,7 @@ const json = (value: unknown) => JSON.stringify(value);
 
 /** The shared part of the settings in a canonical key order, so equal settings compare equal. */
 export function shared(settings: ChartSettings): SharedSettings {
-  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, hiddenGroups, studiesHidden, autoLevelsHidden, optionsLayer, rangeBandsHidden, newsHidden, linkRange, smallSize, immersiveWatchlist, layouts, proportions, layoutProportions } = settings;
+  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, hiddenGroups, studiesHidden, autoLevelsHidden, optionsLayer, rangeBandsHidden, newsHidden, panelStudies, linkRange, smallSize, immersiveWatchlist, layouts, proportions, layoutProportions } = settings;
   const kept = layouts.map(({ id, name, ...arrangement }) => ({ id, name, ...layoutKeys(arrangement) }));
   const sizes = cleanLayoutProportions(layoutProportions, kept);
   return { intervals, panelSymbols, watchlist, session, layout, indicators, linkRange, smallSize, immersiveWatchlist,
@@ -45,7 +45,9 @@ export function shared(settings: ChartSettings): SharedSettings {
     // Likewise for C2.7's range bands.
     rangeBandsHidden,
     // And for T3.5's news markers.
-    newsHidden };
+    newsHidden,
+    // And for each smaller chart's own studies.
+    panelStudies: cleanPanelStudies(panelStudies) };
 }
 const same = (a: SharedSettings, b: SharedSettings) => json(a) === json(b);
 const fromServer = (data: unknown) => shared(sanitizeSettings(data ?? {}));
@@ -82,7 +84,7 @@ function mergeKeys<T>(base: Record<string, T>, mine: Record<string, T>, theirs: 
  */
 export function rebase(base: SharedSettings, mine: SharedSettings, theirs: SharedSettings): SharedSettings {
   const out: SharedSettings = { ...theirs, indicators: { ...theirs.indicators } };
-  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "autoLevelsHidden", "optionsLayer", "rangeBandsHidden", "newsHidden", "proportions"] as const;
+  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "autoLevelsHidden", "optionsLayer", "rangeBandsHidden", "newsHidden", "panelStudies", "proportions"] as const;
   for (const key of scalars) if (json(mine[key]) !== json(base[key])) Object.assign(out, { [key]: mine[key] });
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];

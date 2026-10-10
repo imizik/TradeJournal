@@ -241,6 +241,26 @@ export const STUDIES = ["ema9", "ema20", "ema50", "ema200", "vwap", "volume", "r
 /** What the charts draw: with the Indicators group hidden every study is off, and each one's own setting is kept for when it shows again. */
 export const shownIndicators = (indicators: Indicators, groupHidden: boolean): Indicators =>
   groupHidden ? { ...indicators, ...Object.fromEntries(STUDIES.map((key) => [key, false])) } : indicators;
+export type Study = typeof STUDIES[number];
+export const INDICATOR_NAMES: Record<keyof Indicators, string> = { ema9: "EMA 9", ema20: "EMA 20", ema50: "EMA 50", ema200: "EMA 200", vwap: "RTH VWAP", volume: "Volume", rsi: "RSI 14", fills: "My fills" };
+/** A smaller chart's own studies, chosen from its header; null follows the workspace's. */
+export type PanelStudies = Record<Study, boolean>;
+/**
+ * A smaller chart narrower or shorter than this, in CSS pixels with its header,
+ * is compact: it opens on fewer candles, draws automatic levels as ticks at its
+ * right edge, and, while it follows the workspace's studies, leaves out the
+ * slower averages, volume and RSI. A maximized or main chart never is.
+ */
+export const COMPACT_PANEL = { width: 360, height: 260 } as const;
+/** What a compact chart that follows the workspace's studies draws: EMA 9 and VWAP as set, nothing else. */
+export const slimIndicators = (indicators: Indicators): Indicators => ({ ...indicators, ema20: false, ema50: false, ema200: false, volume: false, rsi: false });
+const NO_PANEL_STUDIES: (PanelStudies | null)[] = [null, null, null, null, null];
+/** Per-panel studies from outside this code, aligned with `intervals`; the main panel always follows. */
+export function cleanPanelStudies(value: unknown): (PanelStudies | null)[] {
+  if (!Array.isArray(value) || value.length !== 5) return NO_PANEL_STUDIES;
+  return value.map((row, index) => index && row && typeof row === "object" && !Array.isArray(row)
+    ? Object.fromEntries(STUDIES.map((key) => [key, (row as Record<string, unknown>)[key] === true])) as PanelStudies : null);
+}
 export type SmallChartSize = "compact" | "normal" | "tall";
 /**
  * How a wide screen shares the chart grid (C7.4): the smaller row's share of
@@ -351,6 +371,8 @@ export type ChartSettings = {
   rangeBandsHidden: boolean;
   /** The main chart's news markers (T3.5) hidden; on by default, and a field of its own like `autoLevelsHidden`. */
   newsHidden: boolean;
+  /** Each smaller chart's own studies, aligned with `intervals`; null follows the workspace's (slimmed while compact). A field of its own like `newsHidden`. */
+  panelStudies: (PanelStudies | null)[];
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -397,7 +419,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
@@ -449,6 +471,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
       rangeBandsHidden: value.rangeBandsHidden !== false,
       newsHidden: value.newsHidden === true,
+      panelStudies: cleanPanelStudies(value.panelStudies),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
@@ -860,6 +883,8 @@ export const countdown = (seconds: number) => {
 /** Candles a chart opens on: the main chart, and each smaller panel. */
 export const OPENING_BARS = 110;
 export const PANEL_OPENING_BARS = 65;
+/** A compact smaller chart (`COMPACT_PANEL`) opens closer in. */
+export const COMPACT_OPENING_BARS = 40;
 export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" | "append" | "reset" {
   if (!prev.length || !next.length) return prev.length === next.length ? "same" : "reset";
   const appended = next.length === prev.length + 1;

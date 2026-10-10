@@ -869,9 +869,10 @@ test("a chart that opens on a few premarket candles takes its usual zoom when th
   release();
   await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(1000);
   const width = async (id: string) => { const range = await logicalRange(page, id); return range ? Math.round(range.to - range.from) : 0; };
-  // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one.
+  // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one, 40 on a compact one (as here).
   await expect.poll(() => width("main")).toBe(114);
-  await expect.poll(() => width("Panel 2")).toBe(69);
+  await expect(page.locator("section", { has: page.getByTestId("canvas-Panel 2") })).toHaveAttribute("data-compact", "true");
+  await expect.poll(() => width("Panel 2")).toBe(44);
 });
 
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
@@ -2160,7 +2161,7 @@ async function moveAway(page: Page, id: string, range: { from: number; to: numbe
 }
 const autoScaled = (page: Page, id: string) => page.evaluate((id) => {
   const chart = (window as unknown as { __tjCharts: ScaleRegistry }).__tjCharts.get(id)!;
-  return [0, 1].map((pane) => chart.priceScale("right", pane).options().autoScale);
+  return chart.panes().map((_, pane) => chart.priceScale("right", pane).options().autoScale);
 }, id);
 const roundedRange = async (page: Page, id: string) => { const range = await logicalRange(page, id); return range && { from: Math.round(range.from), to: Math.round(range.to) }; };
 
@@ -2370,7 +2371,7 @@ test("Alt+R resets every chart's scales and End returns every chart to its lates
   await expect.poll(() => roundedRange(page, "main")).toEqual(opened.main);
   await expect.poll(() => roundedRange(page, "Panel 2")).toEqual(opened.panel);
   expect(await autoScaled(page, "main")).toEqual([true, true]);
-  expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
+  expect(await autoScaled(page, "Panel 2")).toEqual([true]); // compact here: no RSI pane
 
   // With linked time ranges, each chart still goes to its own latest candle.
   await page.getByRole("button", { name: "Link time ranges" }).click();
@@ -3078,7 +3079,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
   expect(await autoScaled(page, "main")).toEqual([true, true]);
   expect(await roundedRange(page, "Panel 2")).toEqual({ from: 150, to: 170 });
-  expect(await autoScaled(page, "Panel 2")).toEqual([false, false]);
+  expect(await autoScaled(page, "Panel 2")).toEqual([false]); // compact here: no RSI pane
 
   // On the price scale there is no price to add or copy; the rest of the menu is there.
   await rightClick(page, "main", { x: (await plotWidth(page)) + 20, y: EMPTY.y });
@@ -4617,11 +4618,17 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
 
   // A daily chart draws the same levels; how price met them is read on intraday charts.
   const daily = (await drawn(page, "Panel 4").boundingBox())!;
-  await page.mouse.move(daily.x + 100, daily.y + await autoY(page, "Panel 4", AUTO_ZONES[4].id));
+  // That chart is compact here: a hover names the level on one line, and a click opens its card.
+  const onlyY = daily.y + await autoY(page, "Panel 4", AUTO_ZONES[4].id);
+  // Left of the fill arrow, which a click would open instead.
+  await page.mouse.move(daily.x + 30, onlyY);
+  await expect(page.getByRole("tooltip", { name: "Level", exact: true })).toContainText("ONH");
+  await page.mouse.click(daily.x + 30, onlyY);
   const onDaily = page.getByRole("tooltip", { name: "ONH level card" });
   await expect(onDaily).toContainText("How price met it today is read on intraday charts.");
   await expect(onDaily).toContainText("calculated · SIP minute");
-  await page.mouse.move(daily.x + 100, daily.y + 5);
+  await onDaily.getByRole("button", { name: "Close level card" }).click();
+  await expect(onDaily).toHaveCount(0);
 
   // The Layers panel lists what is missing and hides the group on all five charts, through a reload.
   await page.getByRole("button", { name: "Layers", exact: true }).click();
@@ -5934,4 +5941,41 @@ test("watchlist stays live during a slow symbol switch and bursts preserve candl
   const count = requests;
   await page.evaluate(() => (window as unknown as StreamWindow).__emit("status", { state: "fallback", resync: true }));
   await expect.poll(() => requests).toBe(count + 1);
+});
+
+test("a small chart goes compact, and each smaller chart can choose its own studies", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await stub(page);
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/charts");
+  const small = page.getByRole("region", { name: "MRVL 15m chart" });
+  await expect(small).toHaveAttribute("data-compact", "true");
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" })).not.toHaveAttribute("data-compact");
+  // Compact and following the workspace: no RSI pane, no volume or slower averages, and it opens closer in.
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(1);
+  await expect.poll(() => paneCount(page, "main")).toBe(2);
+  await expect.poll(async () => { const range = await logicalRange(page, "Panel 2"); return range ? Math.round(range.to - range.from) : 0; }).toBe(44);
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-compact", "true");
+
+  // Its own studies: RSI on for this chart only, saved with the workspace.
+  await small.getByRole("button", { name: "Panel 2 studies" }).click();
+  const menu = page.getByRole("group", { name: "Panel 2 studies" });
+  await expect(menu.getByRole("button", { name: /^Automatic/ })).toHaveAttribute("aria-pressed", "true");
+  await menu.getByRole("button", { name: "RSI 14" }).click();
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(2);
+  await expect.poll(() => paneCount(page, "Panel 3")).toBe(1);
+  await expect.poll(() => (server.data?.panelStudies as unknown[] | undefined)?.[1]).toEqual({ ema9: true, ema20: false, ema50: false, ema200: false, vwap: true, volume: false, rsi: true });
+  await page.keyboard.press("Escape");
+  // Back to automatic.
+  await small.getByRole("button", { name: "Panel 2 studies" }).click();
+  await menu.getByRole("button", { name: /^Automatic/ }).click();
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(1);
+  await expect.poll(() => (server.data?.panelStudies as unknown[] | undefined)?.[1]).toBeNull();
+  await page.keyboard.press("Escape");
+
+  // Maximized it is no longer small: the workspace's studies in full.
+  await small.getByRole("button", { name: "Maximize 15m chart" }).click();
+  await expect(small).toHaveAttribute("data-compact", "false");
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(2);
 });

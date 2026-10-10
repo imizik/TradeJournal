@@ -155,10 +155,13 @@ type Placed = { zone: AutoZone; top: number; bottom: number };
 /** A tag's height and the gap kept between two tags, in CSS pixels. */
 const TAG_HEIGHT = 14;
 const TAG_GAP = 2;
+/** A compact chart's level mark at its right edge, in CSS pixels. */
+const TICK_WIDTH = 10;
 
 export class AutoLevelLayer implements ISeriesPrimitive<Time> {
   private zones: AutoZone[] = [];
   private labels = false;
+  private ticks = false;
   private at: number | undefined;
   private drawnTags: { text: string; top: number; bottom: number }[] = [];
   private hovered: string | null = null;
@@ -179,10 +182,14 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
     this.requestUpdate = null;
   }
 
-  /** What to draw. `labels` names each zone (the main chart); `at`, the latest price, decides which tag wins when two would overlap. */
-  set(zones: AutoZone[], labels: boolean, at?: number) {
+  /**
+   * What to draw. `labels` names each zone (the main chart); `at`, the latest price, decides which tag wins when two would overlap.
+   * `ticks` (a compact chart) marks each zone at the right edge only, so its candles stay clear; the zone's card still opens across the chart.
+   */
+  set(zones: AutoZone[], labels: boolean, at?: number, ticks = false) {
     this.zones = zones;
     this.labels = labels;
+    this.ticks = ticks;
     this.at = at;
     this.update();
   }
@@ -285,6 +292,15 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
         const base = tint(zone);
         const color = hovered ? HOVER : base;
         const band = lower - upper >= 3 * v;
+        if (this.ticks && !hovered) {
+          // A short solid mark against the price scale: the band's height when it has one.
+          const x = bitmapSize.width - Math.round(TICK_WIDTH * h);
+          context.globalAlpha = 0.85;
+          context.fillStyle = base;
+          if (band) context.fillRect(x, upper, bitmapSize.width - x, lower - upper);
+          else context.fillRect(x, Math.round((upper + lower) / 2) - Math.max(1, Math.floor(v)), bitmapSize.width - x, Math.max(2, 2 * Math.floor(v)));
+          continue;
+        }
         if (band) {
           context.globalAlpha = hovered ? 0.2 : 0.1;
           context.fillStyle = base;
