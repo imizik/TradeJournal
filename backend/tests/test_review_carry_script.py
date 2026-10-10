@@ -97,6 +97,10 @@ def test_defaults_compare_against_origin_main_and_head(repo: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "result: identical" in result.stdout
+    ambiguous = carry(repo, base, head, "origin/main", "HEAD")
+    assert ambiguous.returncode == 2
+    assert "ambiguous ref: origin/main" in ambiguous.stderr
+    assert carry(repo, base, head, "refs/remotes/origin/main", "HEAD").returncode == 0
 
 
 def test_main_touching_a_feature_file_elsewhere_changes_the_patch(repo: Path) -> None:

@@ -97,8 +97,9 @@ and [Claude subagents](https://code.claude.com/docs/en/sub-agents).
 6. Before publishing ready, ensure review still covers the full current diff.
    A new feature commit needs re-review within the same budget. Integrating
    the target branch keeps a clean review, spending no round, only when, after
-   a fetch, `scripts/review_carry.sh <reviewed-base> <reviewed-head> origin/main
-   <pr-head>` reports `identical` for the exact head step 7 checks; the owner
+   a fetch, `scripts/review_carry.sh <reviewed-base> <reviewed-head>
+   refs/remotes/origin/main <pr-head-sha>`, given the SHAs from the reviewers'
+   clean reports, reports `identical` for the exact head step 7 checks; the owner
    inspects its incoming files and records why none changes what the feature
    or its checks rely on; and step 7 passes on that head. Record the script
    output. Every later catch-up, including GitHub's Update branch, needs the

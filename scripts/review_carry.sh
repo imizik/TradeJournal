@@ -27,7 +27,17 @@ if [[ $# -ne 2 && $# -ne 4 ]]; then
   exit 2
 fi
 
+# A name such as origin/main that is both a local branch and a remote-tracking
+# ref resolves to the local branch without a warning here, so refuse it.
 commit() {
+  local ref matches=0
+  for ref in "refs/$1" "refs/tags/$1" "refs/heads/$1" "refs/remotes/$1"; do
+    git show-ref --verify --quiet "$ref" && matches=$((matches + 1))
+  done
+  if [[ $matches -gt 1 ]]; then
+    echo "ambiguous ref: $1 (pass a full ref such as refs/remotes/$1, or a SHA)" >&2
+    exit 2
+  fi
   git rev-parse --verify --quiet "$1^{commit}" || { echo "not a commit: $1" >&2; exit 2; }
 }
 
