@@ -514,8 +514,12 @@ cd backend
   stays closed while it is open. Layouts make no provider calls
   beyond the workspace request the new intervals and symbols need.
 - One private API-owned Tradier WebSocket market stream serves all visible chart
-  tabs. Valid trade prices are batched to at most one event per second and sent
-  to each tab through private server-sent events. Symbol changes update that
+  tabs. Valid trade prices are coalesced per symbol and minute every 250 ms and sent
+  to each tab through private server-sent events. Each batch preserves open,
+  high, low and last; alerts see each validated trade before this batching.
+  A slow client’s bounded queue merges identical minute buckets; if distinct
+  buckets exceed capacity it reports a recovery gap rather than silently
+  discarding extremes. The browser requests a REST recovery snapshot. Symbol changes update that
   single upstream subscription. It carries up to three chart symbols plus the
   30-symbol watchlist, so watchlist prices update without per-symbol streams or
   extra REST polling. A watchlist tick is shown as live for at most 45 seconds;
@@ -536,8 +540,11 @@ cd backend
   move the selected intraday candles between refreshes; volume and studies may
   lag by up to one refresh. Daily and weekly candles stay on REST history.
 - Streamed trades and the one-second clock stay out of the workspace's React
-  state. `frontend/lib/chartStore.ts` holds the stream for the current
-  request, and each chart applies the new trades to its own panel
+  state. `frontend/lib/chartStore.ts` holds per-symbol minute buckets across
+  symbol switches and batches notifications to one browser frame. Watchlist
+  updates continue while new candles load; changes to the subscription union
+  reconnect without clearing retained symbols. Only the affected symbol’s
+  subscribers receive a tick notification, and each chart applies trades to its own panel
   (`applyTicks` in `lib/charts.ts`). A trade re-renders only the charts whose
   candles it moved, plus the quote. The countdowns, the status dot and the
   price age read a shared one-second clock themselves, so a second passing
@@ -1326,7 +1333,7 @@ again from the current price.
   Trendlines, rectangles and notes take no alert.
 - **When it fires.** *Touches*: a trade at the level or beyond it.
   *Crosses*: a trade beyond it by any amount. Both are judged on each trade
-  the stream validates, before the browser's one-second coalescing. *Closes
+  the stream validates, before the 250 ms display coalescing. *Closes
   beyond*: a candle of the chosen interval, closing after the alert was made,
   closes beyond the level. A candle is judged 30 seconds after it closes, on
   the close Tradier's 1-minute bars then hold; a later correction is not
@@ -1903,3 +1910,34 @@ runtime, raw tick tape, fibonacci or other geometry tools, replay, volume profil
 or server-side chart alerts. The existing
 TradingView-to-Signals loop still runs separately. Keep TradingView while
 comparing the required indicators and sessions side by side.
+
+
+### Live delivery measurements
+
+Enable local diagnostics in the browser console with
+`localStorage.setItem("tj:chart-performance", "1")`, then reload `/charts`.
+`window.__tjChartPerformance.summary()` reports count, p50, p95 and last sample
+for a bounded 120-sample window per metric. Remove the localStorage key and
+reload to disable. Nothing is uploaded and diagnostics make no provider calls.
+
+- `provider_to_backend_estimate`: latest provider timestamp to backend receipt;
+  includes provider delay and host clock skew.
+- `backend_relay`: monotonic backend wait from the first trade in a batch to
+  relay publication. A slow-client queue adds time after this measurement.
+- `backend_to_browser_estimate`: first backend receipt in a merged batch to
+  browser receipt; includes batching, queueing, transport and clock skew.
+- `sse_to_browser_estimate`: SSE serialization to browser receipt, also subject
+  to host clock skew. Negative estimates are retained so skew is visible.
+- `quote_receipt_to_paint_opportunity` / `candle_receipt_to_paint_opportunity`:
+  browser-local monotonic receipt through a committed update and two animation
+  frames. These provide a paint opportunity, not a pixel-level paint timestamp.
+- `symbol_to_usable_chart`: symbol selection to the main chart’s first committed
+  nonempty candles plus two animation frames. This PR adds no recent-symbol cache.
+
+Compare 250 ms against 100 ms during a desktop and phone market session before
+changing the default again. Check symbol switches, reconnect recovery, slow
+clients and intraday candle extremes. Fixture tests do not establish live
+Tradier latency or complete G0 market-session acceptance. REST budgets and
+cadences are unchanged; recovery gaps may request an exceptional refresh through
+that same budgeted cache. Connection pooling, recent-symbol caching, progressive
+loading and live studies remain separate work.

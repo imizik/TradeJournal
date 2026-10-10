@@ -716,10 +716,12 @@ test("a tick re-renders only the charts whose candles moved, and the clock re-re
 
   // The fixture's newest candles end at 10:32:45 in every interval (5m main, 15m, 1h, 1D, 1m).
   const end = TUESDAY_1032 + 30;
-  const send = (at: number, value: number, nextMinute = false) => page.evaluate((tick) => (window as RenderWindow).__chartTick!(tick), {
+  const send = async (at: number, value: number, nextMinute = false) => { await page.evaluate((tick) => (window as RenderWindow).__chartTick!(tick), {
     type: "tick", symbol: "MRVL", at, minute: Math.floor(at / 60) * 60, session: "regular", price: value, open: value, high: value, low: value,
     buckets: Object.fromEntries((["1m", "3m", "5m", "15m", "30m", "1h", "4h"] as const).map((interval) => [interval,
       nextMinute && interval === "1m" ? { time: end, end_time: end + 60, extended: false } : { time: end - STEP[interval], end_time: end, extended: false }])) });
+    await page.clock.runFor(32); // deliver the frame-batched store notification
+  };
   const intraday = ["main", "Panel 2", "Panel 3", "Panel 5"];
 
   // A new price moves every intraday candle; the daily chart is untouched.
@@ -1394,7 +1396,10 @@ async function mockStreams(page: Page) {
       constructor(url: string) {
         target.__streams.push(new URL(url, location.href).searchParams.get("symbols") ?? "");
         MockEventSource.current = this;
-        queueMicrotask(() => this.emit("status", { state: "connected" }));
+        queueMicrotask(() => {
+          this.emit("status", { state: "connecting" });
+          this.emit("status", { state: "connected" });
+        });
       }
       addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
       emit(type: string, value: unknown) { if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
@@ -1483,7 +1488,7 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await trade(page, "SPY", 705);
   await expect(values(page, "Panel 3")).toContainText("C 702.50");
   await page.getByRole("button", { name: "Resume chart updates" }).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(3);
+  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(2);
   await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
   await trade(page, "SPY", 706.5);
   await expect(values(page, "Panel 3")).toContainText("C 706.50");
@@ -4083,7 +4088,7 @@ test("maximize and restore each chart: the same instances, view, selection and s
   await page.getByRole("button", { name: "Chart MRVL", exact: true }).click();
   await expect(page.getByRole("region", { name: "MRVL 5m chart" })).toBeVisible();
   expect(await sameCharts(page)).toBe(true);
-  expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams + 2); // two symbol switches, nothing else
+  expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams); // both symbols already belong to the subscribed watchlist
   // Maximizing and restoring fetched nothing: only the two symbol and two interval switches, and the regular refresh.
   await expect.poll(() => requests.length - before).toBeGreaterThanOrEqual(4);
   expect(requests.length - before - 4).toBeLessThanOrEqual(Math.floor((Date.now() - started) / 15_000));
@@ -5855,4 +5860,55 @@ test("transcript states: transcribing, then ready; a failure keeps the recording
   await strip.getByRole("button", { name: "Retry transcript" }).click();
   await expect(strip.getByRole("status")).toHaveText("Recording saved — transcribing");
   expect(posts.filter((post) => post === "transcribe")).toHaveLength(1);
+});
+
+test("watchlist stays live during a slow symbol switch and bursts preserve candle extremes", async ({ page }) => {
+  await mockStreams(page);
+  await page.addInitScript(() => localStorage.setItem("tj:chart-performance", "1"));
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => { release = resolve; });
+  let requests = 0;
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    requests++;
+    if (new URL(route.request().url()).searchParams.get("symbol") === "NVDA") await delayed;
+    await route.fulfill({ json: fixture(route.request().url()) });
+  });
+  await page.goto("/charts");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("262.66");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
+  const before = await page.evaluate(() => (window as unknown as StreamWindow).__streams.length);
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await expect(page.getByText(/Loading NVDA/).first()).toBeVisible();
+  const at = Date.now() / 1000 - .2;
+  await page.evaluate((at) => {
+    const target = window as unknown as StreamWindow;
+    for (const price of [275, 290, 260, 280]) target.__emit("tick", { type: "tick", symbol: "NVDA", at,
+      minute: Math.floor(at / 60) * 60, session: "post", price, open: price, high: price, low: price, buckets: {} });
+  }, at);
+  await expect(page.locator("[data-watch-row]").filter({ hasText: "NVDA" })).toContainText("280.00");
+  expect(await page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBe(before);
+  expect(requests).toBe(2); // one workspace request for the switch, no new polling
+  // Recovery while a request is busy is queued, never overlapped or forgotten.
+  await page.evaluate(() => {
+    for (let i = 0; i < 3; i++) (window as unknown as StreamWindow).__emit("status", { state: "fallback", resync: true });
+  });
+  expect(requests).toBe(2);
+  release();
+  await expect.poll(() => requests).toBe(3);
+  await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending");
+  const stamp = Date.now() / 1000 + 1;
+  await page.evaluate((at) => {
+    const target = window as unknown as StreamWindow;
+    const widths = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400 };
+    const buckets = Object.fromEntries(Object.entries(widths).map(([frame, width]) => [frame, { time: Math.floor(at / width) * width, end_time: (Math.floor(at / width) + 1) * width, extended: true }]));
+    for (const price of [275, 290, 260, 280]) target.__emit("tick", { type: "tick", symbol: "NVDA", at, minute: Math.floor(at / 60) * 60,
+      session: "post", price, open: price, high: price, low: price, buckets });
+  }, stamp);
+  await expect(page.getByLabel("main candle values")).toContainText("H 290.00");
+  await expect(page.getByLabel("main candle values")).toContainText("L 260.00");
+  await expect(page.getByLabel("main candle values")).toContainText("C 280.00");
+  await expect.poll(() => page.evaluate(() => Object.keys(window.__tjChartPerformance?.summary() ?? {}))).toEqual(expect.arrayContaining(["symbol_to_usable_chart", "candle_receipt_to_paint_opportunity", "quote_receipt_to_paint_opportunity"]));
+  const count = requests;
+  await page.evaluate(() => (window as unknown as StreamWindow).__emit("status", { state: "fallback", resync: true }));
+  await expect.poll(() => requests).toBe(count + 1);
 });
