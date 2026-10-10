@@ -79,15 +79,17 @@ function mergeKeys<T>(base: Record<string, T>, mine: Record<string, T>, theirs: 
  * layouts merge item by item (a layout or a drawing is one item: saved, changed
  * or deleted whole, so hiding or locking one is a change to it), and a saved
  * layout's proportions with it, by its id; indicators, tool styles and hidden
- * groups merge key by key; any other setting this device changed keeps this
+ * groups merge key by key, and each panel's studies panel by panel; any other setting this device changed keeps this
  * device's value (the grid's proportions are one value).
  */
 export function rebase(base: SharedSettings, mine: SharedSettings, theirs: SharedSettings): SharedSettings {
   const out: SharedSettings = { ...theirs, indicators: { ...theirs.indicators } };
-  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "autoLevelsHidden", "optionsLayer", "rangeBandsHidden", "newsHidden", "panelStudies", "proportions"] as const;
+  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "autoLevelsHidden", "optionsLayer", "rangeBandsHidden", "newsHidden", "proportions"] as const;
   for (const key of scalars) if (json(mine[key]) !== json(base[key])) Object.assign(out, { [key]: mine[key] });
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];
+  // Each panel's studies on their own: two devices changing different panels both keep their change.
+  out.panelStudies = theirs.panelStudies.map((own, i) => json(mine.panelStudies[i]) !== json(base.panelStudies[i]) ? mine.panelStudies[i] : own);
   out.hiddenGroups = { ...theirs.hiddenGroups };
   for (const group of LAYER_GROUPS) if (mine.hiddenGroups[group] !== base.hiddenGroups[group]) out.hiddenGroups[group] = mine.hiddenGroups[group];
   out.toolStyles = { ...theirs.toolStyles };

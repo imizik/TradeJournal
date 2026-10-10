@@ -2142,7 +2142,7 @@ test.describe("phone daily history", () => {
 // ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----
 
 type ScaleRegistry = Map<string, { priceScale(id: string, pane?: number): { applyOptions(o: { autoScale: boolean }): void; options(): { autoScale: boolean } };
-  timeScale(): { setVisibleLogicalRange(r: { from: number; to: number }): void } }>;
+  timeScale(): { setVisibleLogicalRange(r: { from: number; to: number }): void }; panes(): unknown[] }>;
 const mainInterval = (page: Page) => page.getByLabel("Main interval", { exact: true });
 const intervalEntry = (page: Page) => page.getByRole("status", { name: "Interval entry" });
 const chartedSymbol = (page: Page) => page.getByLabel("Chart symbol");
@@ -5978,4 +5978,8 @@ test("a small chart goes compact, and each smaller chart can choose its own stud
   await small.getByRole("button", { name: "Maximize 15m chart" }).click();
   await expect(small).toHaveAttribute("data-compact", "false");
   await expect.poll(() => paneCount(page, "Panel 2")).toBe(2);
+  // Its reset opens on a smaller chart's usual 65 candles, and resets the RSI pane's scale too.
+  await small.getByRole("button", { name: "Latest candles Panel 2" }).click();
+  await expect.poll(async () => { const range = await logicalRange(page, "Panel 2"); return range ? Math.round(range.to - range.from) : 0; }).toBe(69);
+  expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
 });

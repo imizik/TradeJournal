@@ -48,12 +48,12 @@ export default function ToolbarMenu({ label, title, className, panelClassName = 
       setOpen(false);
       if (inside(document.activeElement)) trigger.current?.focus();
     };
-    // A floating panel stays beside its button only while the window keeps its size.
-    const shut = () => setOpen(false);
+    // A floating panel stays beside its button only while nothing under it scrolls or resizes.
+    const shut = (event: Event) => { if (!inside(event.target as Node)) setOpen(false); };
     window.addEventListener("pointerdown", away, true);
     window.addEventListener("keydown", onKey, true);
-    if (floating) window.addEventListener("resize", shut);
-    return () => { window.removeEventListener("pointerdown", away, true); window.removeEventListener("keydown", onKey, true); window.removeEventListener("resize", shut); };
+    if (floating) { window.addEventListener("resize", shut); window.addEventListener("scroll", shut, true); }
+    return () => { window.removeEventListener("pointerdown", away, true); window.removeEventListener("keydown", onKey, true); window.removeEventListener("resize", shut); window.removeEventListener("scroll", shut, true); };
   }, [open, floating]);
   const body = open && <div ref={panel} id={id} role="group" aria-label={label} style={floating ? spot : undefined}
     className={`${floating ? "fixed z-[70] overflow-y-auto" : `absolute z-[60] ${above ? "bottom-full mb-1" : "top-full mt-1"} ${align === "right" ? "right-0" : "left-0"}`} rounded-lg border border-slate-600 bg-[#121924] p-2 shadow-2xl ${panelClassName}`}>{content(() => setOpen(false))}</div>;
