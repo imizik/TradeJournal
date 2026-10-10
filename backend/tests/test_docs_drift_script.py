@@ -24,9 +24,25 @@ SCRIPT = REPO / "scripts" / "docs_drift_week.sh"
 pytestmark = pytest.mark.skipif(not shutil.which("git") or not shutil.which("bash"), reason="needs git and bash")
 
 STUB_CLAUDE = """#!/bin/bash
+seen() {
+  printf '%s\\n' "token=${CLAUDE_CODE_OAUTH_TOKEN:-}" "key=${ANTHROPIC_API_KEY:-}" "bearer=${ANTHROPIC_AUTH_TOKEN:-}" \\
+    "base=${ANTHROPIC_BASE_URL:-}" "provider=${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_VERTEX:-}${CLAUDE_CODE_USE_FOUNDRY:-}"
+}
+if [ "$1 $2" = "auth status" ]; then
+  seen > "$STUB_LOG/auth.env"
+  # Claude Code's precedence, or STUB_AUTH for a sign-in the script cannot strip (a managed apiKeyHelper).
+  if [ -n "${STUB_AUTH:-}" ]; then method="$STUB_AUTH"; provider=firstParty
+  elif [ -n "${CLAUDE_CODE_USE_BEDROCK:-}${CLAUDE_CODE_USE_VERTEX:-}${CLAUDE_CODE_USE_FOUNDRY:-}" ]; then
+    method=third_party; provider=bedrock
+  elif [ -n "${ANTHROPIC_AUTH_TOKEN:-}${ANTHROPIC_API_KEY:-}" ]; then method=api_key; provider=firstParty
+  elif [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then method=oauth_token; provider=firstParty
+  else echo '{"loggedIn": false, "authMethod": "none"}'; exit 1
+  fi
+  printf '{"loggedIn": true, "authMethod": "%s", "apiProvider": "%s"}\\n' "$method" "$provider"
+  exit 0
+fi
 printf '%s\\n' "$@" > "$STUB_LOG/claude.args"
-printf '%s\\n' "token=${CLAUDE_CODE_OAUTH_TOKEN:-}" "key=${ANTHROPIC_API_KEY:-}" "bearer=${ANTHROPIC_AUTH_TOKEN:-}" \\
-  > "$STUB_LOG/claude.env"
+seen > "$STUB_LOG/claude.env"
 mode="${STUB_CLAUDE:-good}"
 echo "A corrected sentence." >> docs/guide.md
 [ "$mode" = code ] && echo "x = 2" >> app.py
@@ -83,8 +99,9 @@ def checkout(tmp_path: Path) -> tuple[Path, dict]:
            "GIT_AUTHOR_NAME": "test", "GIT_AUTHOR_EMAIL": "test@example.com",
            "GIT_COMMITTER_NAME": "test", "GIT_COMMITTER_EMAIL": "test@example.com",
            "PATH": f"{stubs}:/usr/bin:/bin", "STUB_LOG": str(log), "DOCS_DRIFT_ENV_FILE": str(settings),
-           # Keys the scheduler's environment may carry; either would outrank the plan token.
+           # What the scheduler's environment may carry: each would outrank the plan token or receive it.
            "ANTHROPIC_API_KEY": "env-key", "ANTHROPIC_AUTH_TOKEN": "env-bearer",
+           "ANTHROPIC_BASE_URL": "https://gateway.example", "CLAUDE_CODE_USE_BEDROCK": "1",
            "DOCS_DRIFT_LOG_DIR": str(log), "DOCS_DRIFT_MIN_COMMITS": "4",  # exactly the commits below
            "DOCS_DRIFT_CHECK": f'echo checked >> "{log}/check.log"'}
     remote, work = tmp_path / "remote.git", tmp_path / "work"
@@ -164,7 +181,8 @@ def test_a_due_pass_is_pushed_and_opened_for_review(checkout):
         assert expected in args
     # On the Claude plan, never API credits: --bare would ignore the plan token, and no API key reaches Claude.
     assert "--bare" not in args
-    assert logged(env, "claude.env") == "token=test-token\nkey=\nbearer=\n"
+    plan_only = "token=test-token\nkey=\nbearer=\nbase=\nprovider=\n"
+    assert logged(env, "auth.env") == plan_only and logged(env, "claude.env") == plan_only
     assert not [a for a in args if a.startswith("Bash(") and not a.startswith(("Bash(git log", "Bash(git diff", "Bash(git show"))]
     gh = logged(env, "gh.log")
     assert "gh pr create --base main --head " + branch in gh
@@ -198,6 +216,17 @@ def test_no_plan_token_stops_the_run_before_claude(checkout, tmp_path):
     settings.write_text("ANTHROPIC_API_KEY=file-key\nFACTORY_NTFY_URL=https://ntfy.example/topic\n")
     result = run(work, env, DOCS_DRIFT_ENV_FILE=str(settings))
     assert result.returncode == 1 and "no CLAUDE_CODE_OAUTH_TOKEN" in result.stderr
+    assert logged(env, "claude.args") == ""
+    assert remote_branches(work, env) == ["main"]
+    assert "Docs drift pass failed" in logged(env, "curl.log")
+    assert_tidy(work, env)
+
+
+def test_a_sign_in_other_than_the_plan_stops_the_run_before_the_pass(checkout):
+    work, env = checkout
+    result = run(work, env, STUB_AUTH="api_key_helper")
+    assert result.returncode == 1
+    assert "would not sign in with the plan token (claude auth status: api_key_helper/firstParty)" in result.stderr
     assert logged(env, "claude.args") == ""
     assert remote_branches(work, env) == ["main"]
     assert "Docs drift pass failed" in logged(env, "curl.log")

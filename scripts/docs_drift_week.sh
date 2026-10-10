@@ -18,8 +18,9 @@
 #
 # Claude runs headless on the Claude plan, never on API credits: the token from
 # `claude setup-token` is CLAUDE_CODE_OAUTH_TOKEN in DOCS_DRIFT_ENV_FILE (the
-# main checkout's backend/.env), and any Anthropic API key in the environment is
-# removed for the run. It may read anything, edit only files under docs/,
+# main checkout's backend/.env), every credential or provider switch that would
+# outrank it is removed for the run, and the run stops unless Claude Code itself
+# reports the plan token as its sign-in. It may read anything, edit only files under docs/,
 # README.md, AGENTS.md and CLAUDE.md, and run only git log, diff and show;
 # everything else is refused without asking, so the run cannot stall waiting
 # for a person. This script commits, pushes and opens the pull request. It
@@ -162,6 +163,24 @@ main() {
   local token
   token="$(setting CLAUDE_CODE_OAUTH_TOKEN)"
   [ -n "$token" ] || fail "no CLAUDE_CODE_OAUTH_TOKEN in $ENV_FILE (run \`claude setup-token\` and add it there)"
+  # The plan token and nothing that outranks it: an auth token, an API key or a
+  # cloud provider would bill instead, and another base URL would receive it.
+  local plan_env=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL
+    -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY
+    CLAUDE_CODE_OAUTH_TOKEN="$token")
+  # Whatever else could still win (a managed apiKeyHelper, say), Claude Code
+  # names the sign-in it would use; anything but the plan token stops the run.
+  local signin
+  signin="$("${plan_env[@]}" claude auth status --json 2> /dev/null | "$PYTHON" -c '
+import json, sys
+try:
+    status = json.load(sys.stdin)
+except ValueError:
+    status = {}
+method, provider = status.get("authMethod"), status.get("apiProvider", "firstParty")
+print(f"{method}/{provider}")
+sys.exit(0 if method == "oauth_token" and provider == "firstParty" else 1)')" \
+    || fail "Claude would not sign in with the plan token (claude auth status: $signin); the pass did not start"
 
   git checkout -q -b "$branch" || fail "could not create the branch $branch"
   STARTED=1
@@ -176,10 +195,8 @@ For this run:
 - Of the shell you have git log, git diff and git show; read files with your own tools.
 - When the pass is done, set docs/agent/last-reconciled.json to {\"commit\": \"$START\", \"date\": \"$(date +%F)\", \"note\": \"<one line: what this pass covered>\"}. If nothing needed changing, still move the marker; that is a good outcome.
 - Your final message becomes the pull request's description, in Markdown, for a trader who does not read code: what you checked, what you changed and why, anything you deliberately left alone, and that prose accuracy is not machine-verifiable (each claim was re-read against the code it describes). No preamble."
-  # An API key or auth token outranks the plan token, so neither reaches Claude;
   # --bare is left off because it never reads the plan token.
-  env -u ANTHROPIC_API_KEY -u ANTHROPIC_AUTH_TOKEN CLAUDE_CODE_OAUTH_TOKEN="$token" \
-    claude -p "$prompt" --restricted --strict-mcp-config --model "${DOCS_DRIFT_MODEL:-opus}" \
+  "${plan_env[@]}" claude -p "$prompt" --restricted --strict-mcp-config --model "${DOCS_DRIFT_MODEL:-opus}" \
     --tools "Read,Grep,Glob,Edit,Bash" \
     --allowedTools "Read" "Grep" "Glob" "Edit(docs/**)" "Edit(README.md)" "Edit(AGENTS.md)" "Edit(CLAUDE.md)" \
       "Bash(git log *)" "Bash(git diff *)" "Bash(git show *)" \
