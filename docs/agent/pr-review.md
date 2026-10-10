@@ -7,7 +7,7 @@ an instruction-driven workflow, not a GitHub gate.
 
 ## Choose the review depth
 
-State the tier and why before review, judging what the whole diff touches, not
+State the tier and why before review, judging what the whole diff changes, not
 its size. Linking or indexing a document, even from CLAUDE.md, does not change
 its tier; an index row that adds an instruction is judged as one. CI runs in
 every tier.
@@ -15,14 +15,15 @@ every tier.
 | Tier | Change | Review |
 |---|---|---|
 | 0 | Explanatory, non-agent documentation: no instructions, contracts, configuration, runnable examples or behavior | Owner may skip, with a reason in the PR |
-| 1 | Everything not in tier 0 or 2, including UI, tests, refactors and agent instructions outside the tier-2 areas | One fresh general reviewer |
-| 2 | Code, data, tests, workflows or instructions touching money correctness (financial math, FIFO, fills/dedupe, account identity, Gmail parsing, reconciliation), destructive or real-data mutation, authentication/permissions/security, migrations or deployment; or any change to CI, branch protection, verification or review tooling | A strong general reviewer plus a focused reviewer on the highest-risk failure mode; the owner reads the risky hunks |
+| 1 | Everything not in tier 0 or 2, including UI, tests, refactors and other agent instructions | One fresh general reviewer |
+| 2 | Code, data, tests, workflows or instructions that change the behavior or checks of money correctness (financial math, FIFO, fills/dedupe, account identity, Gmail parsing, reconciliation), destructive or real-data mutation, authentication/permissions/security, migrations or deployment; or any change to CI, branch protection, or the verification or review policy, profiles or tooling (`pr-review.md`, `verification.md`, `.claude/agents/`, `.codex/agents/`, CLAUDE.md's review and verification sections, `scripts/verify.sh`, `scripts/review_carry.sh`, the test database pin) | A strong general reviewer plus a focused reviewer on the highest-risk failure mode; the owner reads the risky hunks |
 
-Breadth outside these areas is not tier 2 by itself. If unsure whether the diff
-touches a tier-2 area, choose tier 2. When two failure modes are comparably
+Breadth outside these areas is not tier 2 by itself. If unsure whether a change
+reaches a tier-2 area, choose tier 2. When two failure modes are comparably
 risky, add a focused reviewer for each or split the change. Re-classify the
-whole diff after every new commit. A skip the user requests is recorded as a
-skip, never as review, and never hides known findings.
+whole diff after every new commit; if the tier rises, the newly required
+reviewers review the whole diff, which spends a round. A skip the user requests
+is recorded as a skip, never as review, and never hides known findings.
 
 Tier 2 needs evidence for its failure mode: invariants, failure and recovery
 paths, integration boundaries; numerical edge cases for money, upgrade/rollback
@@ -64,52 +65,57 @@ incomplete; never fall back to a weaker model.
    ten, interrupt and report incomplete. A timeout, quota error, lost task,
    partial report or missing verdict is never clean. After an interruption,
    inspect the existing task before starting another.
-4. **Fix.** Validate each finding and reject one only with evidence; a finding
-   the reviewer marked non-blocking may be declined with a reason. Fix defects,
-   look for the same mistake elsewhere, rerun affected checks and commit.
+4. **Fix.** Validate each finding. Only a finding the reviewer marked
+   non-blocking may be declined with a reason. To reject a blocking finding,
+   send the evidence to the reviewer that raised it as a recheck; if it still
+   holds, the user decides. Fix defects, look for the same mistake elsewhere,
+   rerun affected checks and commit.
    - **Editorial** means comments or prose only, with no change in meaning, in
      its own commit. Code, tests, configuration, schemas, workflows, strings
-     that code or users act on, and any agent instruction, permission rule,
-     calculation definition or acceptance requirement are never editorial,
-     even in Markdown. An editorial commit ships without a recheck; list its
-     SHA.
+     that code or users act on, comments or docstrings a tool reads (lint, type,
+     coverage or format directives, shebangs, doctests), and any agent
+     instruction, permission rule, calculation definition or acceptance
+     requirement are never editorial, even in Markdown. An editorial commit
+     ships without a recheck; list its SHA.
    - Every other change since the last reviewed head (a fix, a feature commit
      or a CI repair) is rechecked by the general reviewer, covering that range
      and the paths it affects. In tier 2 the focused reviewer also rechecks
      when the change touches its failure mode.
-5. **Rounds.** A round is one dispatch of the reviewers a step needs: both
-   tier-2 reviewers for a first review, the rechecking reviewers after a
-   change. Allow at most **three**; a timeout or quota failure still spends the
-   round, while closing a pending proof or a valid carry spends none. Record
-   the count, task IDs and SHAs, and never reset them after an interruption,
-   narrowing or splitting. If findings or incomplete reviews remain after
-   three, keep the PR draft, explain why the change is not converging and
-   propose narrowing or splitting it; any further round, including on a split
-   change, needs the user's authorization.
-6. **Cover the final head.** Review covers the final head when every commit
-   after the last reviewed head is a listed editorial commit or a merge kept
-   by a valid carry.
+5. **Rounds.** A round is one dispatch of the reviewers a step needs: all
+   required reviewers for a first review or a tier rise, the rechecking
+   reviewers after a change or a rejection. Allow at most **three**; a timeout
+   or quota failure still spends the round, while closing a pending proof or a
+   valid carry spends none. Record the count, task IDs and SHAs, and never
+   reset them after an interruption, narrowing or splitting. If findings or
+   incomplete reviews remain after three, keep the PR draft, explain why the
+   change is not converging and propose narrowing or splitting it; any further
+   round, including on a split change, needs the user's authorization.
+6. **Cover the final head.** The last reviewed head is the latest head the
+   general reviewer reviewed; a focused reviewer's coverage holds for its
+   failure mode as of the latest change that touched it.
    - A `clean, proof pending` verdict names each missing check by its exact
-     command and pass condition. The owner closes it, without more review, only
-     by running those unmodified commands on the reviewed head or a head carried
-     from it, and recording the SHA and output. Any added or changed file,
-     including tests and fixtures, needs a recheck. A failure is a finding; a
-     pass only on retry is not proof.
+     command or manual procedure and its pass condition. The owner closes it,
+     without more review, only by running those unchanged commands or
+     procedures on the reviewed head or a head carried from it, and recording
+     the SHA and output or observation. Any added or changed file, including
+     tests and fixtures, needs a recheck. A failure is a finding; a pass only
+     on retry is not proof.
    - Integrating the target branch keeps a clean review only if, after a fetch,
      `scripts/review_carry.sh <reviewed-base> <reviewed-head>
-     refs/remotes/origin/main <pr-head-sha>`, given the last reviewed SHAs,
-     says `identical` for the head CI checks; the owner records why none of its
-     incoming files changes what the feature or its checks rely on; and CI
-     passes on that head. An editorial commit after the reviewed head makes the
-     script report `changed`, so that integration needs a recheck. Rerun the
-     script on every later catch-up, including GitHub's Update branch. When in
-     doubt, recheck.
+     refs/remotes/origin/main <pr-head-sha>`, given the last reviewed head and
+     the target-branch commit it was based on, says `identical` for the head CI
+     checks; the owner records why none of its incoming files changes what the
+     feature or its checks rely on; and CI passes on that head. An editorial
+     commit after the reviewed head makes the script report `changed`, so that
+     integration needs a recheck. Rerun the script on every later catch-up,
+     including GitHub's Update branch. When in doubt, recheck.
 7. **Publish.** Push and open or update the PR within the user's authorization;
    a draft says review is incomplete. Every required check must pass on the
-   exact pushed head, and any other failing check must be explained; if a check
-   fails or cannot be observed, stop with a blocker. Re-fetch head, base and
-   checks before declaring ready; a stale result is not evidence. Never merge or
-   enable auto-merge.
+   exact pushed head. Any other failing check also blocks ready unless it is
+   report-only, such as Screenshots; record why. If a check fails or cannot be
+   observed, stop with a blocker. Re-fetch head, base and checks before
+   declaring ready; a stale result is not evidence. Never merge or enable
+   auto-merge.
 
 Keep a checkpoint of the review record that survives compaction or handoff; if
 it is lost, report incomplete rather than starting over.
@@ -126,35 +132,37 @@ instructions.
 Prioritize reproducible correctness, security, data loss, regressions and
 missing critical tests. Trace the affected flow end to end, including startup,
 shutdown, replacement and rollback where they apply. Every finding needs a
-file/line and a concrete failure scenario, and says whether it blocks; style is
-never blocking, and findings are never manufactured. A general review covers
-the whole diff, a recheck the range since the last reviewed head and the paths
-it affects, a focused review its failure mode. Return:
+file/line, a concrete failure scenario and whether it blocks: a defect in
+correctness, security, data, a requirement or a needed test blocks; only an
+optional improvement does not, and style never blocks. Never manufacture
+findings. A general review covers the whole diff, a recheck the range since the
+last reviewed head and the paths it affects, a focused review its failure mode.
+Return:
 
 ```text
 Reviewed: base SHA -> head SHA; scope
 Verdict: clean | clean, proof pending | findings | incomplete
 Findings: severity, blocking or not, path:line, failure scenario, evidence, suggested correction
-Proof pending: each check's exact command and pass condition (only with that verdict)
+Proof pending: each check's exact command or procedure and pass condition (only with that verdict)
 Coverage/limits: checks inspected or run; evidence still missing
 ```
 
 Return `clean` when only non-blocking suggestions remain, and list them.
 `clean, proof pending` means no blocking findings and only named checks not yet
 run on this code; `incomplete` means the review could not finish. Ready needs
-each required reviewer's latest verdict clean, or clean with its proof closed;
-every blocking finding fixed and rechecked or rejected with evidence; only
-listed editorial commits after the last reviewed head; and every required check
-passing on the final head.
+each required reviewer's latest verdict clean, or clean with its proof closed,
+apart from any finding the user explicitly decided; only listed editorial
+commits and merges kept by a valid carry after the last reviewed head; and
+every required check passing on the final head.
 
 ## The PR record
 
 Keep the review section short: tier and why (or the user's skip); reviewer
 models, effort and any substitution; rounds, the last reviewed base/head and any
-carry output; material findings and their fixes, editorial commits by SHA, and
-rejections with reasons; checks and CI with their commits; pending proof closed
-and limits still open. More is optional. The final chat links the PR and says
-ready or blocked.
+carry output; material findings and their fixes, editorial commits by SHA,
+rejections with the reviewer's response, and any user decision; checks and CI
+with their commits; pending proof closed and limits still open. More is
+optional. The final chat links the PR and says ready or blocked.
 
 ## Retired workflow
 
