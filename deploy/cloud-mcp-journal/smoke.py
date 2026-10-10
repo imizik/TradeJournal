@@ -51,7 +51,7 @@ PRODUCTION_MARKER = PRODUCTION_MARKER_DIR / f".journal-coach-smoke-{os.getpid()}
 
 
 def run(*args: object, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run([str(arg) for arg in args], capture_output=True)
+    result = subprocess.run([str(arg) for arg in args], check=False, capture_output=True)
     if check and result.returncode:
         # Disposable fixtures contain no real credentials or journal records.
         # Preserve the failing child diagnostic before cleanup removes its state.
