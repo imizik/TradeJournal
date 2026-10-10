@@ -17,6 +17,7 @@ from bisect import bisect_left
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
+from math import isfinite
 import threading
 
 from app.engine.chart_adjust import BASIS, adjust_daily, apply_splits, describe, suspect_gaps
@@ -36,6 +37,8 @@ class DailyEntry:
     basis: str
     info: dict
     bars: list[dict]  # adjusted, completed days only (through yesterday)
+    fetched_at: int
+    conflicts: set[date] = field(default_factory=set)
     states: dict[str, str] = field(default_factory=dict)
 
 
@@ -62,6 +65,26 @@ def history_rows(payload: dict) -> list[dict]:
     return [row for row in days if isinstance(row, dict)]
 
 
+def conflicting_days(rows: list[dict]) -> set[date]:
+    """Dates with duplicate daily rows whose OHLCV values disagree."""
+    seen: dict[date, tuple[float, ...]] = {}
+    conflicts: set[date] = set()
+    for row in rows:
+        try:
+            day = date.fromisoformat(str(row["date"]))
+            values = tuple(float(row[key]) for key in ("open", "high", "low", "close", "volume"))
+            o, h, low, c, v = values
+            if not all(isfinite(value) for value in values) or min(o, h, low, c) <= 0 or v < 0 or h < max(o, c, low) or low > min(o, c):
+                continue  # normalize_bars rejects these rows, so they cannot conflict with a valid one
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if day in seen and seen[day] != values:
+            conflicts.add(day)
+        else:
+            seen[day] = values
+    return conflicts
+
+
 class ChartDaily:
     def __init__(self, feed):
         self.feed = feed
@@ -81,16 +104,17 @@ class ChartDaily:
             if saved and saved.day == today and saved.basis == basis:
                 self._entries.move_to_end(symbol)
                 return saved
-            data, _, _ = self.feed.read("/v1/markets/history", {
+            data, fetched_at, _ = self.feed.read("/v1/markets/history", {
                 "symbol": symbol, "interval": "daily", "start": SERIES_START,
                 "end": (today - timedelta(days=1)).isoformat(),
             }, 0, keep=False)
             rows = history_rows(data)
+            conflicts = conflicting_days(rows)
             bars = normalize_bars(rows, daily=True)
             if rows and not bars:
                 raise ChartFeedError("Tradier returned unusable daily history.")
             bars, states = adjust_daily(bars, info["splits"])
-            made = DailyEntry(today, basis, info, bars, states)
+            made = DailyEntry(today, basis, info, bars, int(fetched_at), conflicts, states)
             if bars:  # a symbol with no bars is retried, not remembered
                 self._entries[symbol] = made
                 self._entries.move_to_end(symbol)

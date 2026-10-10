@@ -5,6 +5,11 @@ import { api, Fill, FillMarketContext, Trade, TradePathMetrics } from "@/lib/api
 import AlpacaContextSection from "@/components/AlpacaContextSection";
 import TradePathSection from "@/components/TradePathSection";
 import AuditPanel from "@/components/AuditPanel";
+import Link from "next/link";
+import { ChartCandlestick } from "lucide-react";
+import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
+import { fetchTradePlans, type Capture } from "@/lib/captures";
+import PlanSummary from "@/components/charts/PlanSummary";
 
 function pnlColor(val: number | null | undefined) {
   if (val == null) return "text-muted-foreground";
@@ -49,6 +54,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
   const [pathMetrics, setPathMetrics] = useState<TradePathMetrics | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState<string | null>(null);
+  // Pre-trade plans linked to this trade (Charts C3.6); null while loading or unreadable.
+  const [plans, setPlans] = useState<Capture[] | null>(null);
 
   useEffect(() => {
     Promise.all([api.trade(id), api.tradeFills(id)])
@@ -63,6 +70,9 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         }
         api.tradePathMetrics(id)
           .then(setPathMetrics)
+          .catch(() => {});
+        fetchTradePlans(id)
+          .then((data) => setPlans(data.captures))
           .catch(() => {});
       })
       .catch(() => {
@@ -110,6 +120,8 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColor}`}>
           {trade.status}
         </span>
+        {newYorkSeconds(trade.opened_at) !== null && <Link href={chartLink({ symbol: trade.ticker, from: newYorkSeconds(trade.opened_at)!, to: newYorkSeconds(trade.closed_at) ?? newYorkSeconds(trade.opened_at), trade: trade.id })}
+          className="ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted"><ChartCandlestick size={13} />Open on chart</Link>}
       </div>
 
       <div className="rounded-lg border bg-card p-5">
@@ -137,6 +149,11 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       </div>
+
+      {plans && plans.length > 0 && <section aria-label="Pre-trade plan" className="rounded-lg border bg-card p-5">
+        <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pre-trade plan</h2>
+        <div className="space-y-3">{plans.map((capture) => <PlanSummary key={capture.id} capture={capture} />)}</div>
+      </section>}
 
       <div className="rounded-lg border bg-card p-5">
         <div className="mb-3 flex items-center justify-between gap-3">

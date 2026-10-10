@@ -1,8 +1,8 @@
 """
 Cohort report, in R, for Isaac Market Map Strategy Tester exports.
 
-Reads TradingView "List of trades" CSVs exported from
-`docs/pine/isaac_market_map.pine`, pairs entry and exit rows, reads the `sl1`
+Reads TradingView "List of trades" CSVs exported from historical
+TradingView Strategy Tester exports, pairs entry and exit rows, reads the `sl1`
 metadata on both, and prints results grouped by ticker, setup, side, grade,
 window, exit reason, entry time, relative strength (alone and by side) and
 quarter. R is net PnL

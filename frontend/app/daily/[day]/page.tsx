@@ -1,5 +1,8 @@
+import { requireAccess } from "@/lib/accessServer";
 import DailyAiPanel from "@/components/DailyAiPanel";
-import { api, Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
+import PracticeRoutine from "@/components/PracticeRoutine";
+import { api } from "@/lib/serverApi";
+import type { Account, Fill, FillMarketContext, PositionQuote, Trade } from "@/lib/api";
 
 type TradeWithFills = {
   trade: Trade;
@@ -145,6 +148,8 @@ function buildFillChips(fill: Fill) {
 }
 
 export default async function DailyReviewDayPage({ params }: { params: Promise<{ day: string }> }) {
+  const access = await requireAccess();
+  if (!access.owner && !access.grants.journal_read) return <PracticeRoutine day={(await params).day} />;
   const { day } = await params;
   const [trades, accounts] = await Promise.all([api.trades(), api.accounts()]);
   const accountMap = Object.fromEntries(accounts.map((account: Account) => [account.id, account]));
@@ -313,6 +318,8 @@ export default async function DailyReviewDayPage({ params }: { params: Promise<{
         <StatCard label="Opened Only" value={String(openedOnlyTrades.length)} />
         <StatCard label="Closed From Prior" value={String(closedOnlyTrades.length)} />
       </div>
+
+      <PracticeRoutine day={selectedDay} />
 
       <DailyAiPanel
         tradeCount={selectedTrades.length}

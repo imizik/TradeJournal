@@ -24,15 +24,16 @@ ROOT = Path("/opt/tradejournal")
 STATE = Path("/var/lib/tradejournal")
 CONFIG = Path("/etc/tradejournal")
 UNITS = Path("/etc/systemd/system")
-SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail")]]
-AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-options-snapshot", "tradejournal-alerts"]
+SERVICES = ["tradejournal-api", "tradejournal-frontend", *[f"tradejournal-worker@{lane}" for lane in ("sync", "polygon", "webull", "gmail", "capture", "practice")]]
+AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tradejournal-gmail-sync", "tradejournal-sync-pipeline", "tradejournal-options-snapshot", "tradejournal-rvol-history", "tradejournal-alerts"]
 # Its timer pauses with the others during an operation. Its service is never
 # stopped from here: that service is what runs the controller unattended.
 AUTODEPLOY = "tradejournal-autodeploy"
 TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
-OPTIONAL_UNITS = [*[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
-INGRESS_SERVICE = "tradejournal-ingress"
-OPTIONAL_UNITS.append(f"{INGRESS_SERVICE}.service")
+PRACTICE_UNITS = ["tradejournal-practice.service", "tradejournal-practice.timer"]
+OPTIONAL_UNITS = ["tradejournal-assistant.service", *PRACTICE_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
+# Retired units stay listed until upgrades have removed their installed copies.
+RETIRED_SERVICES = ["tradejournal-ingress"]
 # The alert check keeps running through a deployment, so a release that fails
 # to come back up still reaches the phone.
 ALERT_UNITS = {"tradejournal-alerts.timer", "tradejournal-alerts.service"}
@@ -121,11 +122,6 @@ def install(archive: Path, digest: str) -> Path:
         except KeyError:
             run("useradd", "--system", "--user-group", "--home-dir", STATE, "--shell", "/usr/sbin/nologin", "tradejournal")
             account = pwd.getpwnam("tradejournal")
-        if (destination / "deploy/systemd" / f"{INGRESS_SERVICE}.service").is_file():
-            try:
-                pwd.getpwnam("tradejournal-ingress")
-            except KeyError:
-                run("useradd", "--system", "--user-group", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "tradejournal-ingress")
         for directory in (STATE, STATE / "data", STATE / "oauth", STATE / "job-locks", STATE / "frontend-cache", STATE / "frontend-cache" / destination.name):
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chown(directory, account.pw_uid, account.pw_gid)
@@ -142,7 +138,7 @@ def install(archive: Path, digest: str) -> Path:
         run("/usr/bin/python3.12", "-m", "venv", backend / ".venv")
         run(backend / ".venv/bin/python", "-m", "pip", "install", "--no-index", "--find-links", destination / "wheels", "trade-journal-backend==0.1.0")
         CONFIG.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for filename in ("backend.env", "migration.env", "tradingview.env"):
+        for filename in ("backend.env", "migration.env"):
             target = CONFIG / filename
             example = destination / "deploy" / f"{filename}.example"
             if not target.exists() and example.is_file():
@@ -169,7 +165,7 @@ def install_units(release: Path) -> None:
         for pattern in ("*.service", "*.timer")
         for unit in (release / "deploy/systemd").glob(pattern)
     }
-    for name in OPTIONAL_UNITS:
+    for name in OPTIONAL_UNITS + [f"{service}.service" for service in RETIRED_SERVICES]:
         target = UNITS / name
         if name not in bundled and target.exists():
             subprocess.run(["systemctl", "disable", "--now", name], check=False)
@@ -182,7 +178,7 @@ def install_units(release: Path) -> None:
 
 def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
-    for service in [INGRESS_SERVICE, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    for service in ["tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
@@ -192,11 +188,21 @@ def stop_services() -> None:
         run("systemctl", "stop", service)
 
 
+def _monitor_headers():
+    path = CONFIG / "access-monitor.env"
+    if not path.exists():
+        return {}
+    for line in path.read_text().splitlines():
+        if line.startswith("TJ_SERVICE_KEY="):
+            return {"x-tj-service": line.split("=", 1)[1].strip()}
+    raise ValueError("Monitor credential is not configured")
+
+
 def health(release: Path, confirmation: str, timeout: float = 60) -> None:
     deadline = time.monotonic() + timeout
     while True:
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8080/health", timeout=3) as response:
+            with urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:8080/health", headers=_monitor_headers()), timeout=3) as response:
                 backend = json.load(response)
             with urllib.request.urlopen("http://127.0.0.1:3000/deployment.json", timeout=3) as response:
                 frontend = json.load(response)
@@ -218,32 +224,7 @@ def health(release: Path, confirmation: str, timeout: float = 60) -> None:
             time.sleep(1)
 
 
-def ingress_enabled(release: Path) -> bool:
-    helper = release / "deploy/ingress.py"
-    if not helper.is_file():
-        return False  # Rollback to a release predating ingress support.
-    result = subprocess.run([str(release / "backend/.venv/bin/python"), str(helper)], capture_output=True, text=True, check=False)
-    if result.returncode:
-        raise RuntimeError(result.stderr.strip() or "Ingress preflight failed")
-    return json.loads(result.stdout)["enabled"]
-
-
-def ingress_health(timeout: float = 30) -> None:
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            with urllib.request.urlopen("http://127.0.0.1:8090/health", timeout=3) as response:
-                if json.load(response) != {"status": "ready"}:
-                    raise ValueError("Ingress is not ready")
-            return
-        except (OSError, ValueError):
-            if time.monotonic() >= deadline:
-                raise RuntimeError("TradingView ingress readiness did not pass") from None
-            time.sleep(1)
-
-
 def start_services(release: Path, confirmation: str) -> None:
-    enabled = ingress_enabled(release)
     install_units(release)
     run("systemctl", "enable", *SERVICES)
     run("systemctl", "start", *SERVICES[:2])
@@ -251,22 +232,21 @@ def start_services(release: Path, confirmation: str) -> None:
     run("systemctl", "start", *SERVICES[2:])
     time.sleep(2)
     run("systemctl", "is-active", *SERVICES)
-    if enabled:
-        run("systemctl", "enable", "--now", INGRESS_SERVICE)
-        ingress_health()
-        run("systemctl", "is-active", INGRESS_SERVICE)
-    elif (release / "deploy/systemd" / f"{INGRESS_SERVICE}.service").is_file():
-        run("systemctl", "disable", "--now", INGRESS_SERVICE)
     available_timers = [timer for timer in TIMERS if (release / "deploy/systemd" / timer).is_file()]
     if available_timers:
         run("systemctl", "enable", "--now", *available_timers)
         run("systemctl", "is-active", *available_timers)
+    # An explicitly enabled opt-in timer survives release restarts. Never enable it here.
+    practice_timer = "tradejournal-practice.timer"
+    if (release / "deploy/systemd" / practice_timer).is_file():
+        enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", practice_timer], check=False)
+        if enabled.returncode == 0:
+            run("systemctl", "start", practice_timer)
 
 
 def activate(release: Path, confirmation: str) -> None:
     # A schema-incompatible rollback refuses BEFORE disturbing healthy services.
     database(release, "check", confirmation)
-    ingress_enabled(release)
     previous = current()
     stop_services()
     atomic_link(release, ROOT / "current")
@@ -347,8 +327,6 @@ def main() -> None:
         elif args.action == "status":
             print(f"Current: {current()}\nPrevious: {current('previous')}")
             run("systemctl", "--no-pager", "status", *SERVICES)
-            if (UNITS / f"{INGRESS_SERVICE}.service").is_file():
-                subprocess.run(["systemctl", "--no-pager", "status", INGRESS_SERVICE], check=False)
         else:
             release = release_path(args.release_id)
             if args.action == "identity":

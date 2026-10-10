@@ -40,6 +40,36 @@ with capture-adherence tracking. They are planned after G0 and before options
 analytics; they do not change the order of the items before G0. See [the capture specification](#pre-trade-capture-contract-c34c36).
 These rows describe future work, not implemented recording or broker controls.
 
+**Out-of-order update (2026-10-04):** at the user's request, the options
+analytics C4.2, C4.4 and C4.5 were built before G0, C5.2 and Phase 3, in one
+PR ([PR #128](https://github.com/imizik/TradeJournal/pull/128)) together with symbol info T2.1 (the implied move reads the same option
+chains). This sets aside decision 7's "gamma tools follow the gate" for these
+three items only; G0 still precedes replay and the pre-trade capture work, and
+the board's `next` is unchanged (C5.2, once C5.1 reaches the phone). C4.6,
+open-interest change from the recorded snapshots, was added as a new row
+rather than built.
+
+**Out-of-order update (2026-10-04, pre-trade capture):** at the user's
+request, C3.4 and C3.5 were built together in one PR, before G0 and before
+C3.1–C3.3. C3.6 stays `todo`: it needs C3.1's trade card. The board's `next`
+is unchanged. The speech-to-text provider is Whisper run on the server
+(faster-whisper): no new paid plan, and audio never leaves the app. See
+[Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35).
+
+**Range bands and max pain (2026-10-05):** at the user's request, two new
+rows were added and built ahead of the board's `next`, in one branch: C2.7
+(expected-move bands from the at-the-money straddle, plus VWAP ±1σ/±2σ) and
+C4.7 (max pain in the options layer, labelled *inferred*). They came from the
+user asking which levels traders use to see where price is likely to range.
+The board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
+
+**Journal on the chart (2026-10-05):** at the user's request, the rest of
+Phase 3 was built ahead of G0. C3.1–C3.3 came first, in one PR
+([PR #132](https://github.com/imizik/TradeJournal/pull/132)): the trade card,
+position lines and historical mode share one read-only journal API. C3.6 came
+next, in its own PR, because it adds a migration and needs C3.1's card. The
+board's `next` is unchanged (C5.2, once C5.1 reaches the phone).
+
 ## How to work from this file
 
 1. Take the first item in the [status board](#status-board) whose status is
@@ -65,6 +95,10 @@ These rows describe future work, not implemented recording or broker controls.
 7. Use the same requirements with any implementing model. Scope, fixtures and
    acceptance evidence carry the handoff; a model change is not a reason to
    redesign the epic. Stop after the selected item, not after the whole board.
+8. Before starting, check the item in [Delegation readiness](#delegation-readiness).
+   A `worker` item goes to a Sonnet worker with the item ID as its contract;
+   a `lead` item needs the named decision made first
+   ([delegation](agent/delegation.md)).
 
 ## Status board
 
@@ -91,22 +125,26 @@ These rows describe future work, not implemented recording or broker controls.
 | C2.1 | Level engine: automatic session and structure levels (backend, pure) | 2 Levels | done ([PR #121](https://github.com/imizik/TradeJournal/pull/121)) |
 | C2.2 | Confluence: merge nearby levels into one labeled zone | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
 | C2.3 | Levels layer on the chart with hover card and test history | 2 Levels | done ([PR #122](https://github.com/imizik/TradeJournal/pull/122)) |
-| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | next |
-| C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | todo |
-| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | todo |
-| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | todo |
-| C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | todo |
-| C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | todo |
-| C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | todo |
+| C2.4 | Time-of-day relative volume on the volume pane and legend | 2 Levels | done ([PR #123](https://github.com/imizik/TradeJournal/pull/123)) |
+| C2.5 | Earnings markers and an "earnings in N days" badge | 2 Levels | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with symbol info T1.4) |
+| C5.1 | Level alerts delivered to the phone, drawn on the chart | 5 Alerts | done ([PR #126](https://github.com/imizik/TradeJournal/pull/126); user observed live alert on phone 2026-10-06) |
+| C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request, with symbol info T2.1) |
+| C4.4 | Options levels layer with filters | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
+| C4.5 | Strike ladder side panel | 4 Options on the chart | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128); built before G0 at the user's request) |
+| C5.2 | Retire the TradingView alert loop once in-house alerts reach the phone | 5 Alerts | built locally; fresh-deployment verification pending |
+| C3.3 | Historical chart mode: open any past trade on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132), with C3.1 and C3.2) |
+| C3.1 | Trade card: click a fill arrow for the trade, its P&L, MFE/MAE and entry context | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
+| C3.2 | Position lines: average entry, exits and open P&L on the chart | 3 Journal on the chart | done ([PR #132](https://github.com/imizik/TradeJournal/pull/132)) |
 | G0 | Daily chart replacement acceptance: real market session, desktop and phone | Gate | todo |
-| C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | todo |
-| C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | todo |
-| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | todo |
-| C4.2 | Positioning engine: OI, volume, walls, gamma concentration | 4 Options on the chart | todo |
-| C4.4 | Options levels layer with filters | 4 Options on the chart | todo |
-| C4.5 | Strike ladder side panel | 4 Options on the chart | todo |
+| C3.4 | Pre-trade capture: five-second template path and frozen chart context | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.5, before G0 at the user's request); done once a human walkthrough times the five-second path |
+| C3.5 | Voice capture: save the recording, transcribe asynchronously | 3 Journal on the chart | built ([PR #131](https://github.com/imizik/TradeJournal/pull/131), with C3.4); done once a real desktop and phone recording are checked on the private origin |
+| C3.6 | Link captures to entries; show missed captures and adherence | 3 Journal on the chart | done ([PR #133](https://github.com/imizik/TradeJournal/pull/133)) |
+| C4.6 | Open-interest change by strike from the recorded snapshots, in the ladder and the strike card | 4 Options on the chart | done ([PR #138](https://github.com/imizik/TradeJournal/pull/138); ahead of C5.2 at the user's request) |
 | C6.1 | Replay: hide the future, step, play | 6 Review | todo |
 | C6.2 | Trade / no-trade drills compared with the actual trade | 6 Review | todo |
+| C2.6 | Relative volume on older sessions, from each session's own baseline | 2 Levels | todo |
+| C2.7 | Range bands: today's and Friday's expected move from the straddle, and VWAP ±1σ/±2σ, one Layers switch | 2 Levels | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
+| C4.7 | Max pain in the options levels layer, labelled inferred | 4 Options on the chart | done ([PR #130](https://github.com/imizik/TradeJournal/pull/130), ahead of `next` at the user's request) |
 
 Why this order: history, correct sessions and smooth updates come first; then
 shared state and SPY/QQQ/name layouts. Record options snapshots early because
@@ -130,6 +168,27 @@ C3.4 reuses C0.4's persistence patterns and C7.3's chart shell; C3.5 needs C3.4;
 C3.6 needs C3.4/C3.5 and C3.1's trade-card surface. These are three separate
 implementation slices, in that order, not permission to implement all three
 when asked for one.
+C2.6 needs C2.4; each history page's sessions need their own 20-session baselines.
+C4.6 needs C4.3's snapshots and C4.5's ladder. C2.7 needs C2.3's zones and
+T2.1's straddle; C4.7 needs C4.4's layer.
+
+## Delegation readiness
+
+Open items only. **worker**: the item's Done-when, the rules below and
+[the feature map](agent/feature-map.md) are a complete contract, so a worker can
+build it from the item ID. **lead**: a named decision has to be made first,
+by the lead or the user; after it, execution can still go to a worker. Escalate
+if is on top of the worker's default escalation conditions.
+
+| ID | Readiness | Escalate if / decision first |
+|---|---|---|
+| C4.6 | worker | the stored snapshots cannot tell "not recorded" from "unavailable" for a session; anything needs a migration |
+| C2.6 | worker | older sessions' baselines need provider requests or storage beyond what the `rvol_history` job keeps |
+| C3.6 | lead | the link's data model and migration: anchoring on account plus source dedupe key, and how links survive rebuild and `resync-all`. UI, tests and the adherence counts are worker work once that is settled. Tier 2 review |
+| C5.2 | lead | removes the only internet-reachable process and its deploy units; the lead approves the removal list and reviews `deploy/` hunks. Waits on C5.1's live phone check |
+| C6.1 | lead | where the replay time cutoff is enforced (server, client, or both) so levels, earnings and options snapshots cannot leak the future |
+| C6.2 | lead | product behavior the user decides: what Wait records, what is compared, how drills are stored |
+| G0 | user | human acceptance in a real session; no code to delegate |
 
 ## Ground truth this plan rests on
 
@@ -239,7 +298,7 @@ must not be treated as established capability.
 | Open interest history | Current only; OCC publishes once overnight | — | — | **Record our own** (C4.3); it cannot be backfilled |
 | Option minute history | `timesales` on an OCC symbol returned `series: null` | Option bars (already used by `trade_path.py`) | — | Alpaca, when ever needed |
 | Option trades stream | Streams OCC symbols per docs; whether trade events carry bid/ask is *unverified* | Indicative | — | Later (flow is out of scope) |
-| Earnings dates | `/beta/markets/fundamentals/calendars` returns NVDA earnings events; accuracy of upcoming dates *unverified* | — | — | Tradier (C2.5) |
+| Earnings dates | `/beta/markets/fundamentals/calendars`: dates only, each *Confirmed* or *Estimated*. Checked 2026-10-04: CVNA's confirmed Oct 28 matched Carvana's announcement; TSLA's estimated Oct 22 was a day off the Oct 21 Tesla announced that day | — | — | Tradier (C2.5, done) |
 | Macro events (CPI, FOMC, NFP) | — | — | — | None; a hand-kept yearly file if ever wanted |
 | News | — | Benzinga, already in `news.py` | — | Alpaca ([symbol info panel](symbol-info-roadmap.md)) |
 | Futures, Level 2, footprint | — | — | — | **Not available** |
@@ -264,7 +323,7 @@ proposing a new provider.
 | Price adjustment consistency | Reliable multi-year indicators, drawings and cross-interval comparison across splits | Define and test one explicit display basis; keep raw cache provenance | C0.6 |
 | Daily/weekly depth beyond the current request | Multi-year daily/weekly navigation | Page existing historical daily data; do not aggregate extended minutes into daily bars | C0.7 |
 | SPX index history and live compatibility | Claiming index-chart replacement | Probe index support separately; disclose unsupported coverage | Separate scope decision before including SPX in G0 |
-| Upcoming earnings accuracy | Earnings markers | Tradier corporate calendar, checked against company announcements | C2.5 |
+| Upcoming earnings accuracy | Earnings markers | Tradier's corporate calendar with its status shown: confirmed dates matched the company; estimates can be a day off, so they read *est.* | C2.5 (done) |
 | Macro events (CPI, FOMC, NFP) | Event markers | A small hand-kept yearly file | Later |
 | Streamed option trades with bid/ask | Options flow | A regular-hours probe of the existing Tradier stream | Later |
 | Futures (NQ, ES), footprint, depth of book | Nothing the user needs | Not needed: no futures are traded or watched | Not building |
@@ -517,7 +576,7 @@ C2.2 and C2.3 shipped together in one PR at the user's request. The premarket ra
 session's postmarket plus this premarket, from the calendar. Round numbers step
 by 1 or 5 × 10^k near 1% of price; swings are two-session daily pivots over 60
 sessions. For C2.2, each level carries `bar_time`, the bar that set it: the
-independent-source rule counts levels that share a bar once. Its `evidence`
+shared-origin rule counts levels that share a bar once. Its `evidence`
 says observed, calculated or inferred. A level the bars cannot support is
 absent with a reason, never taken from an older session.
 
@@ -525,13 +584,13 @@ absent with a reason, never taken from an older session.
 threshold is a fraction of ATR, not a fixed price, so it scales from SPY to
 CVNA. The zone is labeled by its members ("PDH + 21,500 + OR15 high") and spans
 the members' actual prices, never more precise than they are. The score is the
-count of **independent** sources, so two levels derived from the same bar count
-once. *Done when:* unit tests cover merging, non-merging and the
-independent-source rule.
+count of distinct origins, so two levels derived from the same bar count
+once; the card counts landmarks without claiming statistical independence.
+*Done when:* unit tests cover bounded merging, non-merging and shared origins.
 As built ([Automatic levels](charts-workspace.md#automatic-levels-c21)): the
-threshold is a tenth of the daily ATR(14), the same band C2.3 tests with.
-Merging is single-linkage by price, so a run of close levels merges whole and
-the zone spans exactly its members. Without an ATR only same-price levels merge.
+threshold is a tenth of prior daily ATR(14), capping the **total** zone span.
+Nearest-pair complete-link clustering prevents neighbour chains from expanding
+a zone beyond that cap. Without an ATR only same-price levels merge.
 
 **C2.3 Levels layer.** Auto levels appear as thin labeled lines, and confluence
 zones as shaded bands, behind candles and dimmer than the user's own levels. Only
@@ -539,13 +598,15 @@ the nearest few above and below price show by default. Hovering shows the level
 card: type, source, when it formed, and how price has **interacted** with it
 today:
 
-- *untested*
-- *tested*: price came within the tolerance band and moved away
-- *broken*: a close beyond the band
-- *reclaimed*: broken, then a close back through
+- *untested*: no completed interaction
+- *approached*: visited only the outer proximity buffer
+- *touched/tested*: entered the visible zone, then optionally left above/below
+- *broken*: a close across the visible zone, with direction
+- *reclaimed*: a return to the original side, with direction
 
-Each event is defined on closed bars of the panel's interval with the same
-tolerance band, and the definitions are written in `docs/charts-workspace.md`.
+Each event is defined on closed bars of the panel's interval, confirmed at
+candle end, after the current combination's latest confirmation. Proximity
+does not count as contact; the definitions are in `docs/charts-workspace.md`.
 *Done when:* a browser test hovers a level and reads its card, and unit tests pin
 each interaction event on fixture bars.
 As built ([Implemented behavior](charts-workspace.md#implemented-behavior)): the
@@ -567,6 +628,22 @@ bars are shaded by relative volume, and the legend reads "RVol 2.6× for 10:17".
 Until the baseline exists, say so rather than guessing. *Done when:* the
 calculation matches `compute_rvol_time_adjusted()` on the same inputs, and the
 chart labels which sessions the baseline covers.
+As built ([Relative volume](charts-workspace.md#relative-volume-c24)):
+`backend/app/engine/chart_rvol.py` is pure, and every 1m, 5m and 1h candle's
+RVol equals `compute_rvol_time_adjusted` for a fill at the candle's end on the
+same bars. What runs nightly is the storing, not the arithmetic: the
+`rvol_history` job (06:00 and 08:40 New York on weekdays) stores the 20 SIP
+sessions before today for each watchlist name, and the workspace builds the
+390-number baseline from those files, read once per process, so it costs no
+provider request and is on today's split basis. Any charted symbol whose
+sessions are stored gets one, not only watchlist names. Only today's
+regular-session candles have RVol; older sessions keep plain volume colors
+(C2.6). A live probe found that Alpaca answers a day without minutes (SPX, or
+CRWV before it listed) with `"bars": null`, which C0.0 called malformed; it now
+reads "no minute bars" and is still not stored, and the job notes such names
+instead of failing. The main chart's study row reads "RVol 2.6× for 10:17 AM" and names the
+sessions; a smaller chart shows "RVol 2.6×" in place of its volume, because
+its row beside the countdown has no room for both.
 
 **C2.5 Earnings.** Earnings dates from Tradier's corporate calendar, cached
 daily per watchlist symbol. The chart shows a marker on the date and a badge
@@ -577,6 +654,39 @@ source. The data adapter is built as T1.4 of the
 duplicate rows and the missing time of day; C2.5 draws the markers from it.
 *Done when:* markers render from a fixture, and an unknown date shows
 nothing rather than a guess.
+As built ([Earnings](charts-workspace.md#earnings-c25)), in one PR with T1.4 at
+the user's request: every chart marks each report date it has a candle for with
+a violet **E** below the candle. A daily or weekly candle holds the date; on an
+intraday chart the date's first candle does, since the time of day is unknown.
+The main chart's header shows the badge from 14 days before the report through
+the day itself; a smaller chart holding its own symbol shows a short one on its
+canvas. Estimated dates read *est.* (*E?* on a marker). The workspace response
+carries each symbol's earnings from the cache only; stale symbols, the
+watchlist's included, refresh on a background thread in one batched call, so a
+chart never waits for them. Upcoming dates were checked against company
+announcements on 2026-10-04 (see Data this plan can rely on).
+
+**C2.7 Range bands.** One Layers switch, off until shown, for "where is price
+likely to range today": the expected move drawn on the chart, and VWAP bands.
+The expected move is the at-the-money straddle's mid (T2.1) for the nearest
+expiration (0DTE on SPY and QQQ) and the nearest Friday, drawn above and below
+the price at the moment it was priced. It is priced once a session, five
+minutes after the regular open so the quotes have settled, and then fixed for
+the day, so the lines do not slide with price; a straddle captured later (the
+first look at a symbol, a restart) says when it was priced. The bands join the
+automatic levels' zones (so an alert can be made from one) and every one draws
+while the switch is on. VWAP ±1σ and ±2σ use the session's volume-weighted
+standard deviation of the same minute prices VWAP uses. A band is what the
+options market charged for a move either way, not a forecast of where price
+will stay; the card says so. *Done when:* the capture rule (not before 09:35,
+not from a chain read before then, once per session, a wide market retried),
+the standard deviation by hand, and the workspace route have backend tests,
+and a browser test toggles the switch, reads the levels, the VWAP bands and a
+card, and hides them again through a reload.
+As built ([Range bands](charts-workspace.md#range-bands-c27)): the capture is
+kept in memory (a deploy waits for the close, so a restart mid-session is
+rare and discloses itself through the priced time). Before 09:35, on a closed
+day, or while a chain loads, the Layers panel says why nothing is drawn.
 
 ### Phase 3 — The journal on the chart
 
@@ -604,6 +714,14 @@ Candles come from the deep-history store (C0.0). A banner shows the date with a
 "Back to live" button.
 *Done when:* a trade from months ago opens with its arrows on the right candles,
 and no Alpaca IEX (single-venue) bars ever mix into consolidated candles.
+
+As built (C3.1–C3.3 in one change; [Journal on the chart](charts-workspace.md#journal-on-the-chart-c31c33)):
+the card opens from a fill arrow, or from the link of a trade or fill page,
+which also loads the trade's history page into every chart of its symbol. An
+option's open P&L needs a mark, which the card reads only when asked. A gap
+between a trade's page and today now fills from the side in view rather than
+always from today's side. Real trades and fills on the private origin have not
+been opened yet; the browser tests use stubbed candles and one seeded trade.
 
 #### Pre-trade capture contract (C3.4–C3.6)
 
@@ -659,7 +777,7 @@ scoring, inferred rationale or experiment tracker is part of these items.
   Repeated taps, requests and retries must not duplicate a capture or job.
 - Audio and images live in private durable storage outside release directories,
   with database metadata and inclusion in backup/restore. Access uses the
-  existing private application boundary, never the public TradingView ingress
+  existing private application boundary
   or public artifact URLs. Bound file sizes and validate uploads. Archiving a
   capture does not erase the historical adherence record.
 
@@ -709,6 +827,12 @@ Do not treat a saved plan as an actual position until journal evidence exists.
   corrections are tested. Existing chart hotkeys, drawings and settings remain
   intact. No source fills, P&L or enrichment rows are modified.
 
+As built ([Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35)):
+**Plan trade** sits in the toolbar (on a phone, in the main chart's own bar), and
+Alt+P opens it. Setup (the gear in the sheet) holds the default account and up
+to three templates. The strip sits between the toolbar and the charts. The
+human five-second walkthrough has not been run yet.
+
 **C3.5 Voice capture and transcription (planned).** The same sheet offers a
 clearly labeled microphone action alongside templates. Retain explicit account,
 ticker and instrument/side selection; a template is optional for voice.
@@ -754,6 +878,13 @@ restart, retry dedupe and later transcript correction. Audio acknowledged
 before an entry remains pre-entry evidence when its transcript arrives later;
 audio only uploaded after entry remains late/unverified regardless of when
 recording started. Backup/restore preserves playable attachments and metadata.
+
+As built ([Pre-trade capture](charts-workspace.md#pre-trade-capture-c34-c35)):
+the provider is Whisper `base.en` run on the server through faster-whisper,
+in a fifth worker lane, `capture`. A live transcription of a spoken clip
+through the save route and the real engine was checked on the Mac. A real
+microphone on the desktop and the phone has not been checked yet; the browser
+tests use Chromium's fake microphone.
 
 **C3.6 Execution links and capture adherence (planned).** Surface the saved
 intent beside its linked trade in C3.1 and trade detail, with the original
@@ -807,6 +938,13 @@ introduces a fixture fill, confirms a suggested link, then reads the preserved
 intent and correctly labeled adherence. A late reflection cannot become a
 pre-entry plan through editing or linking.
 
+As built ([Plans linked to trades](charts-workspace.md#plans-linked-to-trades-c36)):
+links are stored as the first entry fill's account and `raw_email_id`, and
+timing is judged against that entry's New York minute. Trades whose entry has a
+date but no time are the excluded ones. Short stock never matches, because the
+journal reconstructs no short stock trades. The coverage count starts when the
+user starts it, with the accounts they choose.
+
 ### Phase 4 — Options positioning on the chart
 
 **C4.1 Chain adapter (done in PR #104).** A Tradier adapter (for example
@@ -845,6 +983,15 @@ call and put OI, call and put volume, put/call ratios and volume/OI. Then:
 
 *Done when:* formulas are unit-tested against hand-computed fixtures, and the
 assumptions are written in `docs/charts-workspace.md`.
+As built ([Options positioning](charts-workspace.md#options-positioning-c42)):
+`backend/app/engine/options_positioning.py` is pure. Gamma uses a zero rate and
+dividend, calendar time to 16:00 New York (the calendar's close on an early
+close, 09:30 for AM-settled SPX), and the provider's mid IV (its smoothed IV
+when the mid is missing). One positioning reads one root: SPX's chart reads
+SPXW, and adjusted roots are counted as left out. Signed gamma takes dealers
+long calls and short puts. The flip is searched within 5% of the price, each
+strike's IV and the time held, and only for SPY, QQQ and SPX. Hand-worked
+fixtures pin gamma, dollar gamma and a flip with a closed-form crossing.
 
 **C4.3 Recorder (done in PR #105).** Each trading session after the calendar's open, snapshot OI and volume per
 strike for SPY, QQQ and SPX, plus the underlyings of open positions and the
@@ -884,11 +1031,46 @@ seconds, plus SPY and QQQ 0DTE. It reuses the confluence engine, so a wall at
 PDH becomes one zone. *Done when:* the layer respects every filter in a browser
 test, and its request count stays inside the 30-per-minute budget in a backend
 test.
+As built ([Options levels](charts-workspace.md#options-levels-c44)): off by
+default; Layers → Options levels shows it, with its measure (open interest,
+volume or gamma), scope (0DTE or the nearest expiration, the nearest one's
+week, or 45 days), strikes each side (1–5, default 3) and signed gamma. The
+workspace request carries the choice; strikes join the automatic levels
+before confluence on the backend, from the option chain cache only, and
+refresh in the background (`backend/app/engine/options_feed.py`). Walls and
+the flip always draw; the nearest strikes each side follow the filter. A
+panel holding its own symbol reads only its nearest expiration. The feed
+takes at most 24 of the 30 option reads a minute; an hour's simulated polling
+with the ladder and the Forecast tab open peaks at 19 and settles near 8.
 
 **C4.5 Strike ladder.** A side panel, collapsible and off by default, centered
 on spot: put OI and volume to the left of each strike, calls to the right, and
 gamma as a bar. Clicking a strike highlights it on the chart. *Done when:* it
 renders from a fixture on desktop and as a bottom sheet on a phone.
+As built ([Strike ladder](charts-workspace.md#strike-ladder-c45)): a third
+dock tab, 25 strikes each side of the chart's price over the options layer's
+scope, refreshed each minute while visible; a click marks the strike on that
+symbol's charts and brings it onto the main chart's price scale.
+
+**C4.6 Open-interest change.** The recorder (C4.3) has kept each session's
+open interest by strike since 2026-10-01. Show each strike's change since the
+previous recorded session in the ladder and the strike card, labelled with
+both sessions' dates; a session marked unavailable leaves the change
+unavailable, never measured against an older one. A strike absent from the
+prior snapshot has an unavailable change; absence does not establish zero OI.
+*Done when:* a fixture with a missed session and a new strike proves both, and
+the change reads from the stored rows with no provider request.
+
+**C4.7 Max pain.** The strike of the scope's nearest expiration where its open
+contracts would pay their holders least at expiry, drawn by the options layer
+beside the walls and always shown while it is on. It is arithmetic on open
+interest, but the idea that price drifts to it is folklore, so it is
+*inferred* and its card says it is a reference, not a target. *Done when:* a
+hand-worked fixture pins the strike, roots stay apart, a tie takes the lower
+strike, no open interest gives none, and a browser test reads the line and
+its card.
+As built ([Options levels](charts-workspace.md#options-levels-c44)): orange,
+with the expiration it was computed for on its card.
 
 ### Phase 5 — Alerts on the chart
 
@@ -914,15 +1096,31 @@ when it is created. Open-interest walls hold still through a session, but a
 volume wall can move to another strike, and a level moving under an alert
 confuses more than it helps: when the wall moves, the chart says so and the
 alert stays where it was. A wall alert is a level alert and claims no edge.
+As built ([Level alerts](charts-workspace.md#level-alerts-c51)): the menu on a
+saved level, a horizontal ray or an automatic level offers *touches*,
+*crosses* and *closes beyond* on that chart's interval (5m from a daily
+chart). An automatic zone's alert watches its edge nearest the price. An alert
+keeps its own price, so dragging the level does not move it. The monitor runs
+in the API process: touches and crosses are judged on every validated trade
+the one stream carries, and 1-minute bars stand in for minutes the stream did
+not cover. Closes beyond is judged on candles 30 seconds after they close.
+Each firing is one `level_alert_event` row (unique per alert and arming), and
+delivery is an at-least-once outbox on that row. Limits: 20 active alerts on
+5 symbols. Alerts count the chart's session setting when made (regular or
+extended). Trendlines, rectangles and notes take no alert. **Live check observed:** the user saw an in-house level alert arrive on the phone
+on 2026-10-06. C5.1 is complete; fixture coverage remains separate from this
+manual delivery evidence.
 
 **C5.2 Retire the TradingView alert loop** (decided 2026-10-02). Alerts move
 into the app, and Pine stops being a path for anything. Once C5.1 has
-delivered a live alert to the phone, remove the TradingView webhook ingress
-(port 8090, the only internet-reachable process): its service and deploy unit,
-the webhook-only router and the Pine file. Mark the `v=1` contract retired and
-bring `docs/agent/` up to date in the same PR. Stored `tradingview_alert` rows
-and the Signals pages that read them stay, read-only; deleting the rows and
-dropping the ingress database role wait for the user. *Done when:* a fresh
+delivered a live alert to the phone, remove the former TradingView webhook ingress
+(port 8090): its service and deploy unit,
+the webhook-only router and Pine alert source. Disable the old analysis worker
+so stored `tradingview_alert` rows
+and the Signals pages that read them stay read-only; preserve rows, table and
+legacy credentials. Deleting rows or dropping the ingress database role waits
+for the user. Mark the `v=1` contract retired and update agent documentation.
+*Done when:* a fresh
 deployment starts no ingress service, nothing listens on 8090, the Signals
 pages still render stored rows, and the import-boundary and deploy checks pass
 without the ingress.
@@ -1127,8 +1325,7 @@ follow-up item and leave the gate open.
   remains an explicit coverage question unless its separate data paths were
   verified. Advanced options estimates and replay are not prerequisites.
 - State the remaining TradingView dependency: this epic does not port the Pine
-  scripts or replace the existing TradingView-to-Signals alert loop. Passing G0
-  does not by itself justify canceling a subscription used for that separate loop.
+  alert loop; G0 remains a separate chart-workflow gate.
 
 ## Later (not this epic)
 
@@ -1172,7 +1369,7 @@ Worth doing once the phases above have shipped, in roughly this order:
 
 ## Decisions
 
-Settled with the user on 2026-09-30, and items 8–10 on 2026-10-02. Do not
+Settled with the user on 2026-09-30, items 8–10 on 2026-10-02, and 11 on 2026-10-04. Do not
 reopen them without the user.
 
 1. **Drawings (Phase 1) come before automatic levels (Phase 2).** Every later
@@ -1202,3 +1399,7 @@ reopen them without the user.
     a TradingView-like use of the available screen while Claude works on C1.2.
     C7.3/C7.4 are future `todo` items after C1.4; they do not change C1.2 or
     start its implementation. The compact shell precedes resizable geometry.
+11. **Options analytics before G0 (2026-10-04).** At the user's request, C4.2,
+    C4.4 and C4.5 were built ahead of G0, C5.2 and Phase 3, with symbol info
+    T2.1 in the same PR. The rest of decision 7 stands: replay and pre-trade
+    capture still follow G0.

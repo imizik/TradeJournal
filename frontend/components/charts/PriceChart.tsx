@@ -3,14 +3,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
-import { Expand, Link2, LocateFixed, Maximize2, Minimize2, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, barAt, barChange, barClock, countdown, etTime, gapSeconds, intradayInterval, price, staleCandles } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink } from "@/lib/charts";
+import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Timer } from "lucide-react";
+import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import type { Earnings } from "@/lib/symbolInfo";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
-import { AutoLevelLayer, nearestZones } from "@/lib/autoLevels";
+import { AutoLevelLayer, isOption, isRange, shownZones } from "@/lib/autoLevels";
+import { AlertLayer } from "@/lib/alerts";
+import { SessionShade } from "@/lib/sessionShade";
+import type { AlertMark } from "@/lib/alerts";
+import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
+import { positionLineTitle, type ChartPosition } from "@/lib/chartJournal";
 import SelectionBar from "./SelectionBar";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
@@ -24,6 +30,8 @@ const tickFormats = {
 type Overlay = keyof typeof COLORS;
 const MIN_BAR_SPACING = 2;
 const NO_DRAWINGS: Drawing[] = [];
+const NO_ALERTS: AlertMark[] = [];
+const NO_POSITIONS: (ChartPosition & { pnl?: number | null })[] = [];
 const CLOCK_TEXT = { paused: "Paused", delayed: "Delayed data", stale: "Stale data", closed: "Market closed", waiting: "Waiting for bars" };
 // Whitespace alone still joins line segments in Lightweight Charts. Hide the
 // outgoing segment at the session boundary. RTH timestamps always lie within
@@ -35,10 +43,27 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
   const gapAfter = name === "vwap" && next && (next.vwap === null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
   return { time: b.time as UTCTimestamp, value: b[name] as number, ...(gapAfter ? { color: "transparent" } : {}) };
 }
+/** The range bands' VWAP bands (C2.7): VWAP plus and minus one and two of the session's standard deviations. */
+const VWAP_BANDS = [2, 1, -1, -2] as const;
+type VwapBand = typeof VWAP_BANDS[number];
+function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
+  const b = bars[index];
+  if (b.vwap === null || b.vwap_sd == null) return { time: b.time as UTCTimestamp };
+  const next = bars[index + 1];
+  const gapAfter = next && (next.vwap === null || next.vwap_sd == null || Math.floor(next.time / 86400) !== Math.floor(b.time / 86400));
+  return { time: b.time as UTCTimestamp, value: b.vwap + k * b.vwap_sd, ...(gapAfter ? { color: "transparent" } : {}) };
+}
 const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close });
-const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? "#2bc9a43d" : "#ee617a3d" });
-const shadePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: 1, color: b.extended ? "#6b84bd10" : "transparent" });
+// Up or down by the candle, brighter with its relative volume (C2.4).
+const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: (b.close >= b.open ? "#2bc9a4" : "#ee617a") + volumeAlpha(b.rvol) });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
+/**
+ * The opening zoom: the latest candles at a fixed width. Fewer candles than that
+ * (today's first premarket minutes, before the history pages arrive) sit at the
+ * right with room to their left, so the history fills in at this zoom instead of
+ * stretching the first few candles across the chart.
+ */
+const openingRange = (bars: number, main: boolean) => ({ from: bars - (main ? OPENING_BARS : PANEL_OPENING_BARS), to: bars + 4 });
 /**
  * Reset: the latest candles at the opening zoom, every pane's price scale back
  * to automatic (dragging an axis turns it off). Realtime: the latest candle at
@@ -48,7 +73,7 @@ function moveView(chart: IChartApi, bars: number, main: boolean, command: ChartC
   const scale = chart.timeScale();
   if (command === "reset") {
     chart.panes().forEach((_, pane) => chart.priceScale("right", pane).applyOptions({ autoScale: true }));
-    scale.setVisibleLogicalRange({ from: Math.max(0, bars - (main ? 110 : 65)), to: bars + 4 });
+    scale.setVisibleLogicalRange(openingRange(bars, main));
     return;
   }
   const range = scale.getVisibleLogicalRange();
@@ -89,7 +114,8 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
     const clock = barClock({ now, interval, bars, ...rest, stale: failed || staleCandles(now, fetched) });
     return clock?.state === "live" ? clock.remaining : clock?.state ?? null;
   });
-  if (value === null) return null;
+  // Closed reads the same on every chart: the main chart says it once.
+  if (value === null || (!main && value === "closed")) return null;
   const live = typeof value === "number";
   return <span role="timer" aria-label={`${label} next bar`} title={live ? "Time until this candle closes" : undefined}
     className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-0.5 font-mono text-[10px] ${main ? "mr-1" : "ml-auto"} ${live ? "bg-sky-400/10 text-sky-300" : value === "closed" || value === "paused" ? "bg-slate-800 text-slate-400" : "bg-amber-400/10 text-amber-300"}`}>
@@ -98,18 +124,30 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
-  shade: ISeriesApi<"Histogram">; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer;
+  shade: SessionShade; rsi?: ISeriesApi<"Line">;
+  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
   /** This symbol's automatic levels (C2.3), null while hidden, and this chart's interactions with them. */
   autoLevels?: AutoLevels | null; levelEvents?: Record<string, LevelInteraction>;
+  /** With the options layer on (C4.4), how many option zones each side of the price draw besides the walls; null while it is off. */
+  optionsNearest?: number | null;
+  /** The range bands (C2.7): every expected-move level of `autoLevels`, and the VWAP ±1σ/±2σ bands. */
+  rangeBands?: boolean;
+  /** A strike chosen on the ladder (C4.5), drawn as a solid line. */
+  highlight?: number | null;
+  /** This symbol's relative-volume baseline for today (C2.4), null on a day without a session. */
+  rvol?: RvolBaseline | null;
+  /** This symbol's earnings (C2.5): markers on report dates, and the header badge. */
+  earnings?: Earnings | null;
+  /** This symbol's level alerts (C5.1), on the chart's basis: a bell at each price. */
+  alerts?: AlertMark[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
   follows?: boolean; onPickSymbol?(): void;
   /** Set while this panel's next candles load ("Loading NVDA…"): the previous frame stays drawn, dimmed, until they arrive. */
@@ -149,6 +187,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   history?: { loading: boolean; exhausted: boolean; warmup: string; issue: string | null; calendarNote?: string | null; adjustmentNote?: string | null; historyStart?: string | null };
   onNeedHistory?(before?: number): void; onRetryHistory?(): void; onVisibleRange?(range: { from: number; to: number }): void;
   onInterval(interval: Interval): void; onFocus?(): void; onMaximize?(): void;
+  /** Plan trade (C3.4) in the main chart's own bar, where a phone's toolbar has no room left. */
+  onPlan?(): void;
+  /** Open trades on this symbol (C3.2), on the chart's basis: a line where `line` is set. */
+  positions?: (ChartPosition & { pnl?: number | null })[];
+  /** A click on a fill arrow (C3.1): its fill id. */
+  onFill?(id: string): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const bundle = useRef<Bundle | null>(null);
@@ -160,15 +204,23 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted: !!history?.exhausted });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted: !!history?.exhausted });
+  // The fill arrows drawn, by fill id, for hover summaries and clicks (C3.1).
+  const fillMarks = useRef(new Map<string, { label: string; time: number }>());
+  const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number; width: number } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
   const placing = useRef<{ kind: DrawingKind; first: Anchor } | null>(null);
   const [second, setSecond] = useState(false);
   const initial = useRef(true);
+  // After Reset or Latest, candles that arrive keep the latest in view until the user moves the chart:
+  // the range asked for applies on the chart's next frame, so a read before then is the old one.
+  const pinnedLive = useRef(false);
   const [hover, setHover] = useState<ChartBar | null>(null);
   const [card, setCard] = useState<Card | null>(null);
+  // A new frame dismisses cards until the next pointer input, while its crosshair readout still updates.
+  const cardHoverEnabled = useRef(false);
   // `rest` is the REST snapshot plus older history; streamed trades are applied
   // here, per panel, so a tick re-renders only the charts whose candles moved.
   const panel = useLivePanel(live, interval, rest);
@@ -177,7 +229,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
   const exhausted = !!history?.exhausted;
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, exhausted]);
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -188,31 +240,37 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const chart = createChart(element, {
       autoSize: true,
       layout: { background: { type: ColorType.Solid, color: "#10151e" }, textColor: "#8593a9", fontSize: 10,
-        attributionLogo: true, panes: { separatorColor: "#27303d", separatorHoverColor: "#46576b" } },
+        // The status strip credits the library on every layout; one logo, on the main chart, is enough.
+        attributionLogo: main, panes: { separatorColor: "#27303d", separatorHoverColor: "#46576b" } },
       grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
-      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 } },
+      // entireTextOnly: a price cut off at a pane's edge is left out rather than printed against the next pane's.
+      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 }, entireTextOnly: true },
       timeScale: { borderColor: "#263141", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
           return kind <= TickMarkType.DayOfMonth ? tickFormats[kind as keyof typeof tickFormats].format(time * 1000) : etTime(time);
         } },
     });
-    const shade = chart.addSeries(HistogramSeries, { priceScaleId: "sessions", priceLineVisible: false, lastValueVisible: false,
-      autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }) });
-    shade.priceScale().applyOptions({ scaleMargins: { top: 0, bottom: 0 } });
     const candles = chart.addSeries(CandlestickSeries, { upColor: "#2bc9a4", downColor: "#ee617a", wickUpColor: "#2bc9a4", wickDownColor: "#ee617a", borderVisible: false });
     const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
     const lines = {} as Bundle["lines"];
     for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    const bands = {} as Bundle["bands"];
+    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: Math.abs(k) === 1 ? "#f5e6a170" : "#f5e6a145", lineWidth: 1,
+      lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     const markers = createSeriesMarkers(candles, []);
+    const shade = new SessionShade(() => barsRef.current);
+    candles.attachPrimitive(shade);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
     const layer = new DrawingLayer(timeline);
     candles.attachPrimitive(layer);
     const autoLayer = new AutoLevelLayer();
     candles.attachPrimitive(autoLayer);
-    bundle.current = { chart, candles, volume, shade, lines, markers, layer, auto: autoLayer, frame: "" };
+    const bells = new AlertLayer();
+    candles.attachPrimitive(bells);
+    bundle.current = { chart, candles, volume, shade, lines, bands, markers, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
@@ -232,8 +290,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         : { id: "placing", kind, points, label: kind === "note" ? "Note" : "", color: style?.color ?? "#9cc2ff", width: style?.width ?? 1 });
     };
     let syncing = false;
+    let ownsPointer = false;
+    const releasePointer = () => { ownsPointer = false; };
+    element.addEventListener("pointerleave", releasePointer);
     const stopLink = link.listen((time, source) => {
       if (source === id || syncing) return;
+      ownsPointer = false;
       syncing = true;
       const bar = time === null ? undefined : barAt(barsRef.current, time);
       if (bar) chart.setCrosshairPosition(bar.close, bar.time as UTCTimestamp, candles);
@@ -242,11 +304,24 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       syncing = false;
     });
     chart.subscribeCrosshairMove((event) => {
+      // Redraws report source-less positions for both local and linked crosshairs. The chart
+      // owning the pointer must refresh its readout and card; followers must not open cards.
       if (syncing) return;
+      if (event.sourceEvent) { ownsPointer = !!event.point; cardHoverEnabled.current = ownsPointer; }
+      else if (event.point && !ownsPointer) return;
+      if (!event.point) ownsPointer = false; // leaving the plot for an axis also releases it
+      if (event.point && !event.sourceEvent) {
+        // The redraw event arrives before primitives paint their new coordinates.
+        layer.updateAllViews();
+        autoLayer.updateAllViews();
+      }
       const time = typeof event.time === "number" ? event.time : null;
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
-      const at = event.point && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
+      const at = event.point && cardHoverEnabled.current && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
+      // A fill arrow under the pointer: its one-line summary (C3.1).
+      const fill = at && typeof event.hoveredObjectId === "string" ? fillMarks.current.get(event.hoveredObjectId) : undefined;
+      setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y, width: element.clientWidth }) : null);
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -384,8 +459,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const at = local(clientX, clientY);
       const plot = onPlot(at.x, at.y);
       const hit = plot && !now.tool ? layer.hit(at.x, at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
+      // An automatic level under the pointer, when no level or drawing of the user's is (C5.1 alerts on it).
+      const auto = plot && !hit && !now.tool ? autoLayer.hit(at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
       const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
-      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, reset: () => { quiet(); moveView(chart, barsRef.current.length, main, "reset"); } });
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, main, "reset"); } });
     };
     // A finger held still: its own timer, since browsers differ on whether a
     // long press fires `contextmenu` (Android does, iOS does not; whichever
@@ -460,6 +537,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("touchend", onTouchEnd, true);
     element.addEventListener("touchcancel", onTouchEnd, true);
     element.addEventListener("contextmenu", onContextMenu, true);
+    const unpin = () => { pinnedLive.current = false; };
+    for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
     chart.subscribeClick((event) => {
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
@@ -468,11 +547,18 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const touch = performance.now() - lastTouch < 1000;
       const slop = touch ? TOUCH_SLOP : MOUSE_SLOP;
       const hit = layer.hit(event.point.x, event.point.y, slop)?.id ?? null;
+      // A fill arrow opens its trade's card (C3.1); the user's own levels and drawings win where they overlap.
+      if (!hit && typeof event.hoveredObjectId === "string" && fillMarks.current.has(event.hoveredObjectId) && now.onFill) {
+        now.onSelect?.(null); tapCard(null, 0); setFillTip(null);
+        now.onFill(event.hoveredObjectId);
+        return;
+      }
       now.onSelect?.(hit);
       tapCard(hit ? null : autoLayer.hit(event.point.y, slop), event.point.y);
     });
     const stopRange = rangeLink.listen(id, (range) => {
       if (!linking.current || !barsRef.current.length) return;
+      pinnedLive.current = false;
       const step = INTERVAL_SECONDS[actions.current.interval];
       // Sync by time. A coarser chart keeps a readable minimum of candles
       // around the same moment instead of collapsing to one bar.
@@ -507,9 +593,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         if (range.from < 100) actions.current.onNeedHistory?.();
         const bars = barsRef.current;
         for (let i = Math.max(0, Math.floor(range.from) - 100); i < Math.min(bars.length - 1, Math.ceil(range.to) + 100); i++) {
-          if (bars[i + 1].time - bars[i].time > gapSeconds(actions.current.interval) && !requestedGaps.current.has(bars[i + 1].time)) {
-            requestedGaps.current.add(bars[i + 1].time);
-            actions.current.onNeedHistory?.(bars[i + 1].time);
+          if (bars[i + 1].time - bars[i].time <= gapSeconds(actions.current.interval)) continue;
+          // A gap whose older side is in view (a past trade's day, C3.3) fills from that side, one
+          // page's span at a time, toward the present; otherwise from its newer side, as before.
+          const step = INTERVAL_SECONDS[actions.current.interval];
+          const before = i >= Math.floor(range.from) - 1
+            ? Math.min(bars[i + 1].time, bars[i].end_time + Math.max(gapSeconds(actions.current.interval), 1200 * step)) : bars[i + 1].time;
+          if (!requestedGaps.current.has(before)) {
+            requestedGaps.current.add(before);
+            actions.current.onNeedHistory?.(before);
             break;
           }
         }
@@ -520,6 +612,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const stopCommands = commands.listen((command) => {
       if (!barsRef.current.length) return;
       quiet();
+      pinnedLive.current = true;
       moveView(chart, barsRef.current.length, main, command);
     });
     // A jump from the layers panel (C1.4): centre the item's moments at the
@@ -567,18 +660,22 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     retryJump.current = tryJump;
     const stopJumps = commands.listenJump((target) => {
       if (target.panel !== id) return;
+      pinnedLive.current = false;
       jump = { target, pages: 0, until: performance.now() + JUMP_MS, frame: bundle.current?.frame ?? "" };
       tryJump();
     });
+    const stopSnapshot = commands.provideSnapshot(id, () => barsRef.current.length ? chart.takeScreenshot() : null);
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
     return () => {
-      stopLink(); stopRange(); stopCommands(); stopJumps(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
+      stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
+      element.removeEventListener("pointerleave", releasePointer);
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
-      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); chart.remove(); bundle.current = null; barsRef.current = [];
+      for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
+      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]);
 
@@ -589,6 +686,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (current.rsi) { current.chart.removeSeries(current.rsi); current.rsi = undefined; return; }
     const rsi = current.chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
+    // Keep 100 and 0 clear of the divider, so they never sit against the price pane's bottom label.
+    rsi.priceScale().applyOptions({ scaleMargins: { top: 0.24, bottom: 0.18 } });
     rsi.createPriceLine({ price: 70, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
     rsi.createPriceLine({ price: 30, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
     current.chart.panes()[1].setHeight(main ? 85 : 60);
@@ -610,6 +709,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // While the next candles load, the previous frame stays drawn under the label.
     if (!current || pending) return;
     const bars = panel?.bars ?? [];
+    if (drawnKey.current !== dataKey) { cardHoverEnabled.current = false; setCard(null); }
     const frame = `${symbol}|${interval}`;
     if (current.frame !== frame) {
       current.frame = frame;
@@ -632,11 +732,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // Latest-bar path: series.update keeps zoom, scroll and crosshair, and
       // follows the live edge only when the user is already looking at it.
       const last = bars.length - 1;
-      if (change === "append") for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+      if (change === "append") {
+        for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+        for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last - 1, k));
+      }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
-      current.shade.update(shadePoint(bars[last]));
+      current.shade.update();
       for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
+      for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
       return;
     }
@@ -644,7 +748,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) container.current.dataset.resets = String(resets.current);
     const range = current.chart.timeScale().getVisibleRange();
     const logical = current.chart.timeScale().getVisibleLogicalRange();
-    const following = !logical || logical.to >= (current.candles.data().length - 3);
+    const following = pinnedLive.current || !logical || logical.to >= (current.candles.data().length - 3);
     const anchorIndex = logical ? Math.max(0, Math.min(prior.length - 1, Math.ceil(logical.from))) : 0;
     const anchorTime = prior[anchorIndex]?.time;
     const movedTo = anchorTime === undefined ? -1 : bars.findIndex((b) => b.time === anchorTime);
@@ -652,11 +756,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     quiet();
     current.candles.setData(bars.map(candlePoint));
     current.volume.setData(bars.map(volumePoint));
-    current.shade.setData(bars.map(shadePoint));
+    current.shade.update();
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
+    for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
+    if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && (initial.current || !prior.length)) {
-      current.chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, bars.length - (main ? 110 : 65)), to: bars.length + 4 });
+      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, main));
       initial.current = false;
     } else if (bars.length && following && logical) {
       const width = logical.to - logical.from;
@@ -672,14 +778,28 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     current.volume.applyOptions({ visible: indicators.volume });
     for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
   }, [indicators]);
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current) return;
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ visible: rangeBands });
+    if (container.current) container.current.dataset.vwapBandsShown = rangeBands ? "true" : "false";
+  }, [rangeBands]);
 
   const markers = panel?.markers;
+  // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
+  const earningsKey = useMemo(() => JSON.stringify(earningsMarks(panel?.bars ?? [], earnings, interval)), [panel?.bars, earnings, interval]);
   useEffect(() => {
     if (pending) return;
-    bundle.current?.markers.setMarkers(indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
+    const reports = (JSON.parse(earningsKey) as EarningsMark[]).map((m) => ({ time: m.time as UTCTimestamp, position: "belowBar" as const,
+      shape: "circle" as const, color: m.estimated ? "#a78bfa99" : "#a78bfa", text: m.estimated ? "E?" : "E", id: `earnings:${m.date}` }));
+    const fills = indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
       position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
-      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : []);
-  }, [markers, pending, indicators.fills, main]);
+      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : [];
+    bundle.current?.markers.setMarkers([...fills, ...reports].sort((a, b) => a.time - b.time));
+    fillMarks.current = new Map(indicators.fills ? (markers ?? []).map((m) => [m.id, { label: m.label, time: m.time }]) : []);
+    setFillTip(null);
+    if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
+  }, [markers, earningsKey, pending, indicators.fills, main]);
 
   useEffect(() => {
     const current = bundle.current;
@@ -690,16 +810,41 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       container.current.dataset.drawings = drawings.map((drawing) => drawing.kind).join(",");
     }
   }, [levels, drawings, pending, main, selected]);
-  // Automatic levels: the nearest few above and below the latest price, moving with it.
+  useEffect(() => {
+    if (pending) return; // the next symbol's alerts wait for its candles
+    bundle.current?.bells.set(alerts);
+    if (container.current) container.current.dataset.alerts = alerts.map((mark) => `${mark.price.toFixed(2)}:${mark.fired ? "fired" : "active"}`).join(",");
+  }, [alerts, pending]);
+  // Open positions (C3.2): a stock's average cost, solid; an option's underlying at entry, dashed. Never a premium.
+  useEffect(() => {
+    const current = bundle.current;
+    if (!current || pending) return;
+    const drawn = positions.filter((position) => position.line !== null && Number.isFinite(position.line));
+    const lines = drawn.map((position) => current.candles.createPriceLine({ id: `position:${position.trade_id}`, price: position.line!,
+      color: position.instrument === "stock" ? "#a3e635" : "#c4b5fd", lineWidth: 1, lineStyle: position.instrument === "stock" ? LineStyle.Solid : LineStyle.Dashed,
+      axisLabelVisible: true, title: main ? positionLineTitle(position) : "" }));
+    if (container.current) container.current.dataset.positions = drawn.map((position) => `${position.instrument}:${position.line!.toFixed(2)}`).join(",");
+    return () => { for (const line of lines) current.candles.removePriceLine(line); };
+  }, [positions, pending, main]);
+  // Automatic levels: the nearest few above and below the latest price, moving with it, and option strikes with the layer on.
   const lastClose = panel?.bars.at(-1)?.close;
-  const zones = useMemo(() => nearestZones(autoLevels?.zones ?? [], lastClose), [autoLevels, lastClose]);
+  const zones = useMemo(() => shownZones(autoLevels?.zones ?? [], lastClose, optionsNearest, rangeBands), [autoLevels, lastClose, optionsNearest, rangeBands]);
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
-    current.auto.set(zones, main);
-    if (container.current) container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
-  }, [zones, pending, main]);
-  const cardZone = card && !pending ? autoLevels?.zones.find((zone) => zone.id === card.id) : undefined;
+    current.auto.set(zones, main, lastClose);
+    setCard((open) => open && !zones.some((zone) => zone.id === open.id) ? null : open);
+    if (container.current) {
+      container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
+      container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
+      container.current.dataset.rangeLevels = zones.filter((zone) => zone.members.some(isRange)).map((zone) => zone.label).join(",");
+    }
+  }, [zones, pending, main, lastClose]);
+  useEffect(() => {
+    bundle.current?.auto.setHighlight(pending ? null : highlight);
+    if (container.current) container.current.dataset.highlight = highlight === null || pending ? "" : String(highlight);
+  }, [highlight, pending]);
+  const cardZone = card && !pending ? zones.find((zone) => zone.id === card.id) : undefined;
   useEffect(() => { bundle.current?.auto.setHovered(cardZone?.id ?? null); }, [cardZone]);
   // Arming, switching or dropping a tool forgets a half-placed drawing.
   useEffect(() => {
@@ -711,6 +856,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   }, [tool]);
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
+  // Relative volume (C2.4) beside a regular-session candle of today: its value, or why it has none.
+  const showRvol = indicators.volume && intradayInterval(interval);
+  // The main chart's study row says it in full. A smaller chart's row is already tight beside its
+  // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
+  const volumeText = bar ? Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume) : "";
+  const rvolValue = showRvol && bar && bar.rvol !== undefined && !bar.extended ? (typeof bar.rvol === "number"
+    ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
+      RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
+    : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
   const chosenLevel = selected ? levels.find((level) => level.id === selected) : undefined;
   const chosenDrawing = selected ? drawings.find((drawing) => drawing.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
@@ -731,28 +885,43 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
             {INTERVALS.map((i) => <option key={i}>{i}</option>)}
           </select>
           {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
+          {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
+            className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
-          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) moveView(bundle.current.chart, barsRef.current.length, main, "reset"); }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, main, "reset"); } }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
           {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded p-1.5 hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
         </div>
       </div>
       <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
-        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && <span>Vol {bar.volumePending ? "pending" : Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume)}</span>}<span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span></> : <span>No candles in this window</span>}
+        {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
+          {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
       </div>
-      {main && <div className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
+      {main && <div aria-label={`${id} study values`} className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
         {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
         {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
+        {rvolValue}
+        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
+          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
       </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
-        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
+        <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
+        {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
         {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
-          style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)` } : { top: Math.round(card.y) + 12 }} onClose={() => setCard(null)} />}
+          // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
+          style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
+            : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
+        {fillTip && !pending && <div role="tooltip" aria-label="Fill summary" className="pointer-events-none absolute z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg"
+          style={{ left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - 30) }}>
+          {fillTip.label} · {etTime(fillTip.time, true)} {intradayInterval(interval) ? `${etTime(fillTip.time)} ET candle` : ""}{onFill ? " · click for the trade" : ""}</div>}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>

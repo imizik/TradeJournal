@@ -8,11 +8,13 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    ForeignKey,
     Index,
     Numeric,
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     text,
 )
 from sqlalchemy.orm import defer
@@ -218,6 +220,78 @@ class ResearchWorkspace(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class DecisionRecord(SQLModel, table=True):
+    """Immutable Practice decision and the exact evidence saved with it."""
+
+    __tablename__ = "decision_record"
+    __table_args__ = (UniqueConstraint("operation_id", name="uq_decision_record_operation_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: str = Field(index=True)
+    opportunity_id: str = Field(index=True)
+    actor: str = Field(index=True)  # human | agent:<stable identity>
+    decision: str  # take | wait | skip
+    symbol: str = Field(index=True)
+    context_id: uuid.UUID = Field(foreign_key="decision_context.id", index=True)
+    received_at: datetime = Field(index=True)  # UTC, set by the server
+    input_cutoff: datetime  # UTC
+    policy_version: str
+    policy_hash: str
+    evidence_json: str = Field(sa_column=Column(Text, nullable=False))
+    evidence_sha256: str
+    decision_json: str = Field(sa_column=Column(Text, nullable=False))
+    record_sha256: str
+
+
+class DecisionContext(SQLModel, table=True):
+    """Durable, server-generated market packet frozen before a choice."""
+
+    __tablename__ = "decision_context"
+    __table_args__ = (UniqueConstraint("operation_id", name="uq_decision_context_operation_id"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    operation_id: str = Field(index=True)
+    symbol: str = Field(index=True)
+    captured_at: datetime = Field(index=True)
+    provider: str
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    context_sha256: str
+
+
+class DecisionEvent(SQLModel, table=True):
+    """One append-only Practice paper event for a decision record (A2).
+
+    ``data_json`` is the economic fact the reducer (``engine/paper_execution.py``)
+    returned and is never rewritten; the unique (record, key) pair keeps a retry,
+    a restart or a second pass from recording it twice. The delivery columns are
+    the phone outbox, operational metadata only: sending or failing to send never
+    changes the event."""
+
+    __tablename__ = "decision_event"
+    __table_args__ = (
+        UniqueConstraint("record_id", "key", name="uq_decision_event_key"),
+        UniqueConstraint("record_id", "seq", name="uq_decision_event_seq"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    record_id: uuid.UUID = Field(foreign_key="decision_record.id", index=True)
+    seq: int
+    key: str
+    event_type: str
+    effective_at: datetime  # UTC: when the market condition or bar happened
+    recorded_at: datetime  # UTC: when this server stored it
+    exec_version: str
+    source: str  # where the bars came from, e.g. tradier_timesales_1min
+    reconstructed: bool = False  # judged well after it happened, e.g. after a restart
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
+    delivery: str = Field(default="none", index=True)  # none | pending | sending | sent | expired
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
 class ChartSettingsRecord(SQLModel, table=True):
     """The Charts workspace every browser shares: levels, watchlist, intervals,
     indicators and layout, as one JSON document the frontend validates. The
@@ -271,6 +345,191 @@ class OptionSnapshotDay(SQLModel, table=True):
     recorded: int = 0
     note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class LevelAlert(SQLModel, table=True):
+    """A price alert on the chart (Charts C5.1): one level of one symbol, made
+    from a saved level, a horizontal ray or an automatic level, judged by
+    ``engine/level_alert_monitor.py`` whether or not a chart is open.
+    ``price`` is on the chart's split-adjusted basis as of ``created_on`` (New
+    York) and moves with later splits, as a saved level does. ``direction`` is
+    the move that fires it, fixed when it is armed. It fires once per arming;
+    re-arming bumps ``generation``. ``checked_through`` is the end (epoch
+    seconds) of the newest candle the 1-minute sweep has judged."""
+
+    __tablename__ = "level_alert"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    symbol: str = Field(index=True)
+    price: float
+    created_on: date
+    condition: str  # touches | crosses | closes_beyond
+    interval: Optional[str] = None  # closes_beyond only: 1m ... 4h
+    session: str  # regular | extended: which trades and candles count
+    direction: str  # up | down
+    source_kind: str  # level | drawing | auto
+    source_id: Optional[str] = None
+    label: str = ""
+    state: str = Field(default="active", index=True)  # active | fired
+    generation: int = 1
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    armed_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    checked_through: Optional[int] = Field(default=None, sa_column=Column(BigInteger, nullable=True))
+    fired_at: Optional[datetime] = None  # UTC
+
+
+class LevelAlertEvent(SQLModel, table=True):
+    """One firing of a level alert, written once: the unique (alert, generation)
+    pair is what keeps a reconnect, a restart or a second detector from
+    recording it twice. Delivery to the phone is an outbox on the same row,
+    retried until sent, and is at-least-once: a crash between ntfy accepting
+    the message and this row saying so sends it again."""
+
+    __tablename__ = "level_alert_event"
+    __table_args__ = (
+        UniqueConstraint("alert_id", "generation", name="uq_level_alert_event_firing"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    alert_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("level_alert.id", ondelete="CASCADE"), nullable=False, index=True))
+    generation: int
+    level: float  # the alert's price on the basis of the day it fired
+    price: float  # the trade, the bar's extreme, or the candle's close
+    source: str  # stream | minute_bars | closed_bar
+    event_at: datetime  # UTC: the trade, the minute, or the candle's close
+    bar_time: Optional[int] = Field(default=None, sa_column=Column(BigInteger, nullable=True))  # epoch start of the candle or minute, when a bar fired it
+    detected_at: datetime = Field(default_factory=datetime.utcnow)
+    delivery: str = Field(default="pending", index=True)  # pending | sending | sent | expired
+    attempts: int = 0
+    next_attempt_at: Optional[datetime] = None
+    claimed_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    last_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
+class CaptureTemplate(SQLModel, table=True):
+    """A favorite pre-trade template (Charts C3.4): the user's setup label and
+    their own invalidation/exit wording. Editing bumps ``revision``; a capture
+    keeps its own copy of the wording, so an edit never changes an old plan.
+    Removing one archives it."""
+
+    __tablename__ = "capture_template"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    position: int = 0
+    setup_label: str
+    wording: str = Field(sa_column=Column(Text, nullable=False))
+    revision: int = 1
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    archived_at: Optional[datetime] = None
+
+
+class CaptureProfile(SQLModel, table=True):
+    """The one-time capture setup (Charts C3.4): one row, ``id`` 1."""
+
+    __tablename__ = "capture_profile"
+
+    id: int = Field(default=1, primary_key=True)
+    default_account_id: Optional[uuid.UUID] = None
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    # Capture adherence (C3.6): counted for trades entered from this moment (UTC), in these accounts (a JSON list of ids).
+    tracking_since: Optional[datetime] = None
+    tracking_accounts: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+
+
+class TradeCapture(SQLModel, table=True):
+    """Intent recorded before a trade (Charts C3.4, C3.5): the user's own
+    record, never a field on a rebuildable trade. What was submitted is never
+    edited afterwards; corrections and reflections are ``TradeCaptureNote``
+    rows. ``received_at`` (UTC) is when the server durably held the complete
+    intent: the template or text, or the whole audio file. ``client_captured_at``
+    is the browser's clock, kept for late uploads and never trusted as proof.
+    Audio and the chart image are files in private storage
+    (``engine/captures.py``); these rows hold their metadata."""
+
+    __tablename__ = "trade_capture"
+    __table_args__ = (
+        UniqueConstraint("client_id", name="uq_trade_capture_client_id"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    client_id: str  # idempotency key from the browser: a retry never makes a second capture
+    received_at: datetime = Field(index=True)  # UTC
+    client_captured_at: Optional[datetime] = None  # UTC, unverified
+    account_id: uuid.UUID = Field(index=True)
+    account_label: str  # as the account was named when captured
+    underlying: str = Field(index=True)
+    side: str  # buy_calls | buy_puts | buy_stock | short_stock | sell_calls | sell_puts
+    instrument: str  # option | stock
+    mode: str  # template | discretionary | voice
+    template_id: Optional[uuid.UUID] = None
+    template_revision: Optional[int] = None
+    setup_label: Optional[str] = None  # copied from the template when captured
+    wording: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    # Optional exact contract and sizing; absence is never filled in by a guess.
+    strike: Optional[float] = None
+    expiration: Optional[date] = None
+    quantity: Optional[float] = None
+    context_state: str  # captured | unavailable
+    context_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    image_state: str  # pending | saved | unavailable
+    image_type: Optional[str] = None
+    image_bytes: Optional[int] = None
+    image_note: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    image_received_at: Optional[datetime] = None
+    audio_type: Optional[str] = None
+    audio_bytes: Optional[int] = None
+    audio_ms: Optional[int] = None
+    audio_sha256: Optional[str] = None
+    transcript_status: Optional[str] = None  # pending | transcribing | ready | failed | not_configured
+    transcript_text: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    transcript_provider: Optional[str] = None
+    transcript_error: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    transcribed_at: Optional[datetime] = None
+    transcript_job_id: Optional[uuid.UUID] = None
+    not_taken_at: Optional[datetime] = None  # "Did not take trade"
+
+
+class CaptureLink(SQLModel, table=True):
+    """A capture linked to the trade it was for (Charts C3.6), anchored in the
+    source identity of that trade's first entry fill (account plus the fill's
+    dedupe key), never in the trade id alone: trades are rebuilt. The trade is
+    resolved through that fill's link on every read; a fill that disappears
+    leaves the link unresolved, never pointing at another trade. Links are
+    append-only history: unlinking stamps ``unlinked_at`` and a new link is a
+    new row. Linking never changes the capture or its time."""
+
+    __tablename__ = "capture_link"
+    # One active link per plan and per anchor fill, held by the database, so two devices linking at once cannot both win.
+    __table_args__ = (
+        Index("uq_capture_link_active_capture", "capture_id", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+        Index("uq_capture_link_active_source", "account_id", "source_key", unique=True,
+              sqlite_where=text("unlinked_at IS NULL"), postgresql_where=text("unlinked_at IS NULL")),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    capture_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=False, index=True))
+    account_id: uuid.UUID
+    source_key: str = Field(index=True)  # Fill.raw_email_id of the trade's first entry when linked
+    method: str  # suggested | manual
+    linked_at: datetime = Field(default_factory=datetime.utcnow)  # UTC
+    unlinked_at: Optional[datetime] = None  # UTC
+
+
+class TradeCaptureNote(SQLModel, table=True):
+    """Something added to a capture later, never replacing it: a transcript
+    correction or a reflection. Always shown as written after the capture."""
+
+    __tablename__ = "trade_capture_note"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    capture_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("trade_capture.id"), nullable=False, index=True))
+    kind: str  # transcript_correction | note
+    text: str = Field(sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class StrategyDefinition(SQLModel, table=True):
@@ -942,6 +1201,48 @@ class TradingViewAlert(SQLModel, table=True):
     )
 
 
+class AccessPrincipal(SQLModel, table=True):
+    __tablename__ = "access_principal"
+    id: str = Field(primary_key=True)
+    key_hash: Optional[str] = None
+    enabled: bool = True
+    version: int = 1
+    grants_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    credential_expires_at: Optional[datetime] = None
+
+
+class AccessSession(SQLModel, table=True):
+    __tablename__ = "access_session"
+    digest: str = Field(primary_key=True)
+    principal_id: Optional[str] = Field(default=None, foreign_key="access_principal.id")
+    version: int = 0
+    audience: str
+    csrf: str
+    created_at: datetime = Field(default_factory=utc_now_naive)
+    last_seen_at: datetime = Field(default_factory=utc_now_naive)
+    expires_at: datetime
+
+
+class AccessLoginLimit(SQLModel, table=True):
+    __tablename__ = "access_login_limit"
+    id: str = Field(primary_key=True)
+    attempts: int = 0
+    window_at: datetime = Field(default_factory=utc_now_naive)
+    blocked_until: Optional[datetime] = None
+
+
+class AccessAudit(SQLModel, table=True):
+    __tablename__ = "access_audit"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    principal_id: Optional[str] = None
+    operation: str
+    resource: Optional[str] = None
+    outcome: str
+    request_id: str
+    created_at: datetime = Field(default_factory=utc_now_naive, index=True)
+
+
 # Loader options for bulk Fill queries: skip the legacy raw-email payload
 # columns (write-only history; nothing reads them back). Keeps multi-KB email
 # bodies per row off the wire — metered egress on hosted Postgres. Every
@@ -977,3 +1278,59 @@ TRADINGVIEW_ALERT_LIGHT = (
     defer(TradingViewAlert.assessment_json),
     defer(TradingViewAlert.analysis_error),
 )
+
+
+class PracticeRun(SQLModel, table=True):
+    """A3 session identity; revisions never replace the canonical cohort."""
+    __tablename__ = "practice_run"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    session_key: str = Field(unique=True)
+    day: date = Field(index=True)
+    revision: int = 0
+    parent_id: Optional[uuid.UUID] = Field(default=None, foreign_key="practice_run.id")
+    job_id: uuid.UUID = Field(foreign_key="job_run.id")
+    mode: str
+    comparison: str
+    status: str = "queued"
+    result: Optional[str] = None
+    late: bool = False
+    deadline: datetime
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+    policy_version: str
+    policy_hash: str
+    calendar_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    brief_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    timings_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    error: Optional[str] = None
+
+
+class PracticeOpportunity(SQLModel, table=True):
+    __tablename__ = "practice_opportunity"
+    __table_args__ = (UniqueConstraint("run_id", "symbol", name="uq_practice_opportunity_symbol"),)
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    run_id: uuid.UUID = Field(foreign_key="practice_run.id", index=True)
+    symbol: str
+    context_id: Optional[uuid.UUID] = Field(default=None, foreign_key="decision_context.id")
+    revealed_at: Optional[datetime] = None
+    benchmark_json: str = Field(default="{}", sa_column=Column(Text, nullable=False))
+    feedback_json: str = Field(default='{"rating":"unrated","phone_received":null}', sa_column=Column(Text, nullable=False))
+
+
+class PracticeAgentCall(SQLModel, table=True):
+    """One reserved paid attempt per ET day, including uncertain completions."""
+    __tablename__ = "practice_agent_call"
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    day: date = Field(unique=True)
+    run_id: uuid.UUID = Field(foreign_key="practice_run.id", unique=True)
+    status: str = "reserved"
+    model: str
+    prompt_version: str
+    payload_json: str = Field(sa_column=Column(Text, nullable=False))
+    output_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    config_json: str = Field(sa_column=Column(Text, nullable=False))
+    usage_json: Optional[str] = None
+    cost_usd: Optional[float] = None
+    started_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: Optional[datetime] = None
+    error: Optional[str] = None

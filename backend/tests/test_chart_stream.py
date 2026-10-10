@@ -135,7 +135,7 @@ def test_tabs_following_several_symbols_share_one_upstream_subscription(monkeypa
     assert [other_tab.get_nowait()["symbol"] for _ in range(other_tab.qsize())] == ["QQQ"]
 
 
-def test_stream_route_accepts_up_to_three_symbols(monkeypatch):
+def test_stream_route_accepts_chart_symbols_and_full_watchlist(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from app.routers import charts
@@ -144,9 +144,11 @@ def test_stream_route_accepts_up_to_three_symbols(monkeypatch):
     app.include_router(charts.router, prefix="/charts")
     monkeypatch.setattr(charts.tradier, "TRADIER_API_KEY", "")
     with TestClient(app) as client:
-        for query in ("symbols=MRVL,SPY,QQQ,IWM", "symbols=", "symbol=MRVL&symbols=../x"):
+        for query in ("symbols=", "symbol=MRVL&symbols=../x"):
             assert client.get(f"/charts/stream?{query}").status_code == 422
-        # Valid symbol sets get as far as the provider check.
+        assert client.get("/charts/stream?symbols=" + ",".join(f"S{i}" for i in range(34))).status_code == 422
+        # Three chart symbols plus all 30 watchlist symbols share this route.
+        assert client.get("/charts/stream?symbols=" + ",".join(f"S{i}" for i in range(33))).status_code == 503
         assert client.get("/charts/stream?symbols=MRVL,SPY,QQQ").status_code == 503
         assert client.get("/charts/stream?symbol=MRVL").status_code == 503
 

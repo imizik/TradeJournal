@@ -1,0 +1,32 @@
+[Unit]
+Description=Refresh only public OAuth verification keys for the synthetic MCP trial
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=tradejournal-d0-keys
+Group=tradejournal-d0
+WorkingDirectory=/opt/tradejournal-d0/backend
+ExecStart=/opt/tradejournal-d0/backend/.venv/bin/python /opt/tradejournal-d0/backend/cloud_mcp_d0_refresh.py --config /etc/tradejournal-d0/refresh.json
+StateDirectory=tradejournal-d0-keys
+StateDirectoryMode=0750
+UMask=0027
+TimeoutStartSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=-/etc/tradejournal-d0/config.json -/etc/tradejournal-d1 -/etc/tradejournal -/var/lib/tradejournal -/var/backups/tradejournal -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=16
+MemoryMax=256M
+CPUQuota=50%
+
+# No EnvironmentFile or credentials. Only this separate UID can publish keys;
+# the offline serving UID has group read access and cannot modify snapshots.

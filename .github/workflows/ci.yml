@@ -16,6 +16,36 @@ permissions:
   contents: read
 
 jobs:
+  # Documentation and contributor-guide edits cannot affect the built app.
+  # Keep the cheap backend gate for docs links/freshness, but avoid starting
+  # two disposable application environments for a non-runtime diff. Pushes to
+  # main and manual runs always retain the entire release gate.
+  changes:
+    name: Changed runtime scope
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.scope.outputs.runtime }}
+      frontend: ${{ steps.scope.outputs.frontend }}
+    steps:
+      # The pull-request merge commit and its base parent are all the scope
+      # check reads; pushes and manual runs need no checkout at all.
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+
+      - name: Classify pull-request scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            printf '%s\n' runtime=true frontend=true >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bash scripts/ci_scope.sh | tee -a "$GITHUB_OUTPUT"
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
@@ -47,7 +77,7 @@ jobs:
       # version live in pyproject.toml, so this run matches verify.sh locally.
       - name: Lint
         working-directory: backend
-        run: ruff check . && ruff check --config pyproject.toml ../deploy
+        run: ruff check . && ruff check --config pyproject.toml ../deploy ../scripts
 
       # The static import graph: what the public ingress may reach, that the
       # private app never imports the ingress side, and which engine modules
@@ -109,9 +139,19 @@ jobs:
         run: npm run build
 
   e2e:
-    name: Browser
+    name: Browser shard (${{ matrix.shard }})
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: "1/2"
+            artifact: one
+          - shard: "2/2"
+            artifact: two
     steps:
       - uses: actions/checkout@v4
 
@@ -139,6 +179,14 @@ jobs:
         working-directory: frontend
         run: npm ci --no-audit --no-fund
 
+      # Reuse Playwright's Chromium download across runs. The lockfile fixes
+      # the Playwright version and therefore the matching browser revision.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install browser
         working-directory: frontend
         run: npx playwright install --with-deps chromium
@@ -149,14 +197,27 @@ jobs:
       # pass on a component that is broken at runtime.
       - name: Browser smoke tests
         working-directory: frontend
-        run: npm run e2e
+        run: npm run e2e -- --shard=${{ matrix.shard }}
+
+      - name: Authenticated browser boundaries
+        if: matrix.shard == '1/2'
+        working-directory: frontend
+        run: npx playwright test --config playwright.auth.config.ts
+
+      - name: Sample decision browser boundaries
+        if: matrix.shard == '1/2'
+        working-directory: frontend
+        run: npx playwright test --config playwright.sample.config.ts
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
-          path: frontend/test-results/
+          name: playwright-report-${{ matrix.artifact }}
+          path: |
+            frontend/test-results/
+            frontend/auth-test-results/
+            frontend/sample-test-results/
           retention-days: 7
 
       # A pull request's pictures, for the Screenshots job to post. It never
@@ -166,21 +227,47 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: screenshots
+          name: screenshots-${{ matrix.artifact }}
           path: frontend/test-results/**/*.png
           if-no-files-found: ignore
           retention-days: 7
 
+  # Keep one stable required-check name even though the expensive work is
+  # divided across runners. Docs-only changes complete this no-op gate; a
+  # failed classifier, failed shard or cancelled shard fails it closed.
+  browser:
+    name: Browser
+    needs: [changes, e2e]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every browser shard
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime }}
+          SHARDS_RESULT: ${{ needs.e2e.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$RUNTIME_CHANGED" != true ]; then
+            echo "Documentation-only pull request; browser shards are not needed."
+            exit 0
+          fi
+          test "$SHARDS_RESULT" = success
+
   screenshots:
     name: Screenshots
-    needs: e2e
+    needs: [changes, e2e]
     # Same-repository pull requests only: a fork's token cannot write the
     # comment, and nothing here should hold write access over a fork's code.
     # Report-only, and absent from pushes to main, so it never gates a release.
+    # Pictures are only worth a look when the pull request changes what the
+    # app shows, so backend-only pull requests get no comment.
     if: >-
       always() &&
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
+      needs.changes.outputs.frontend == 'true' &&
       (needs.e2e.result == 'success' || needs.e2e.result == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -198,34 +285,22 @@ jobs:
       # Unique per run, so GitHub's image cache never shows an older picture.
       STORE_DIR: pr/${{ github.event.pull_request.number }}/${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      # Pictures are only worth a look when the pull request changes what the
-      # app shows, so backend-only pull requests get no comment.
-      - name: Check for screen changes
-        id: scope
-        run: |
-          set -euo pipefail
-          FILES=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq '.[].filename')
-          if grep -q '^frontend/' <<< "$FILES"; then
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "No frontend files changed; nothing to post."
-          fi
-
       - uses: actions/checkout@v4
-        if: steps.scope.outputs.frontend == 'true' && needs.e2e.result == 'success'
+        if: needs.e2e.result == 'success'
 
       - name: Download this run's screenshots
-        if: steps.scope.outputs.frontend == 'true' && needs.e2e.result == 'success'
+        if: needs.e2e.result == 'success'
         continue-on-error: true
         uses: actions/download-artifact@v4
         with:
-          name: screenshots
+          pattern: screenshots-*
           path: ${{ runner.temp }}/pictures
+          merge-multiple: true
 
       # A failure here leaves no comment.md, and the next step says so on the
       # pull request instead of failing it.
       - name: Build the comment
-        if: steps.scope.outputs.frontend == 'true' && needs.e2e.result == 'success'
+        if: needs.e2e.result == 'success'
         continue-on-error: true
         run: |
           node frontend/scripts/screenshot-gallery.mjs \
@@ -240,7 +315,7 @@ jobs:
       # pull request's folder is replaced by its newest run and removed once
       # the pull request is closed.
       - name: Publish images and comment
-        if: ${{ !cancelled() && steps.scope.outputs.frontend == 'true' }}
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
           REPORT="$RUNNER_TEMP/screenshot-report"
@@ -249,7 +324,7 @@ jobs:
             cp "$REPORT/comment.md" "$BODY"
           elif [ "$E2E_RESULT" = "failure" ]; then
             printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \
-              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report\` download: [test run]($RUN_URL)." \
+              "Browser tests failed on ${HEAD_SHA:0:7}, so there are no pictures to show. Failure pictures are in the run's \`playwright-report-one\` and \`playwright-report-two\` downloads, one per browser shard: [test run]($RUN_URL)." \
               > "$BODY"
           else
             printf '%s\n' "<!-- ci-screenshots -->" "### Screenshots" "" \

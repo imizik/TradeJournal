@@ -10,6 +10,50 @@ patterns that can create N+1 calls.
 
 ## Fills and trades
 
+### Practice decision records (A1)
+
+- `decision_record` is separate from account fills, FIFO trades, Strategy Lab
+  runs and factory ledgers. Creating a decision never creates journal activity.
+- A record is immutable. Retrying its operation ID with identical content
+  returns the original; changed content conflicts. Corrections require a new
+  operation and record.
+- `decision_context` is an immutable server-generated market packet. A
+  `DecisionRecord` references one context and copies its exact evidence hash;
+  later packets cannot rewrite it. The packet has a source completeness limit:
+  only completed minute-bar price facts are eligible for a TAKE reference.
+- A decision record itself stays `practice_draft_unarmed`. Paper state lives
+  only in `decision_event` (A2): `POST /decisions/{id}/arm` checks a TAKE
+  against the complete `shadow-isaac-p0-v1` policy in `app/engine/paper.py`
+  and stores its hash on the `armed` event. Never infer an execution from a
+  record without events.
+
+- The approved browser sample exercise uses `practice-sample-long-15m-v1`,
+  `sample_fixture` facts and `simulated_raw` basis. Sample records stay unarmed,
+  and A2 refuses their distinct schema. Its internal sample validation cannot
+  relax the ordinary raw Alpaca requirement or imply P0 eligibility.
+
+- The separately selected `practice-sample-replay-long-15m-v1` record schema
+  uses a salted, precommitted invented continuation and relative sample clock.
+  Only the guarded sample factory admits its scoped replay start. Atomic sample
+  events use `sample_replay_` types and no notification delivery; the live P0
+  watcher ignores them. Outcome snapshots and original decisions stay immutable.
+  P0 rejects sample schemas before any existing-event retry. See the
+  [sample replay contract](dot-sample-replay-contract.md).
+
+### Practice paper events (A2)
+
+- `decision_event` is append-only; the unique (record, key) and (record, seq)
+  pairs keep retries and restarts from recording an economic event twice. A
+  position is always `paper_execution.fold` of its events, never a stored row.
+- The rules (trigger, next-minute fill, guard, stop-first, two-session time
+  exit, `p0-cost-v1`) are the pure `app/engine/paper_execution.py`; the level
+  alert monitor's loop runs `PaperWatcher` on Tradier's consolidated minutes.
+- A trigger detected more than `MAX_DETECTION_DELAY` (300 s) after its bar
+  closed is `missed_trigger`, never a backdated entry. A missing minute or a
+  split during the hold makes the outcome `unresolved`, never filled forward.
+- Paper events never write fills, trades, accounts or the factory ledger.
+  Delivery columns are an outbox; sending never changes the event.
+
 - `fill` is the source layer. `trade` and `tradefill` are derived and are safe
   to wipe and rebuild.
 - `contracts` is the quantity field for **both** stocks and options.
@@ -194,6 +238,14 @@ is verifiable rather than hopeful.
   use the open cost basis at each sampled minute. Underlying exit efficiency
   and first-order greeks attribution are left null for scale-ins/outs rather
   than applying the maximum position to every move.
+- Option position-path money and exposure arithmetic use Decimal values.
+  Capture ratios and time to a positive peak stay null if the peak rounds to
+  zero at the persisted six-decimal dollar precision. Genuine representable
+  positive peaks are retained. Completed-minute VWAP and day-range position
+  use Decimal arithmetic and half-even rounding (four and two places,
+  respectively), so binary-float residues cannot change rounding ties.
+  These corrections are identified by `position-path-v3` and
+  `entry-context-v3`; older stored rows remain stale until recomputed.
 - The audit is read-only against existing cache files and independent reference
   math. Missing evidence cannot pass; old versions stay stale even if values
   match. Same-cache agreement is not broker/source verification.
@@ -228,6 +280,14 @@ is verifiable rather than hopeful.
   `POLYGON_CALLS_PER_MINUTE` is a **ceiling**, not a target; leave it unset
   unless you mean to stay below what the plan allows. Never pin it to a
   free-tier number in `.env.example` — that silently caps every paid key.
+- The symbol info News tab also reads Polygon (`/v2/reference/news`), through
+  this same limiter but off the enrichment path: it only reserves a slot
+  (never waits more than two seconds, never retries), caches 15 minutes under
+  `backend/data/symbol_info/v1/polygon/`, and a 429 there calls `note_refusal`
+  like any other, so it also slows enrichment. Keep it behind the News tab.
+- The Short tab (T3.1) reads three more Polygon endpoints (`/stocks/v1/short-interest`,
+  `/stocks/v1/short-volume`, `/v3/reference/tickers/{t}`) the same way, cached one
+  day per symbol, only when that tab asks.
 - Cache markers: empty Polygon responses are cached as
   `{"_empty_cached_at": ts}` (1 year for finalized history); an empty bar
   window is retried weekly. Delete the file to force a retry.
@@ -345,9 +405,18 @@ is verifiable rather than hopeful.
   opening ranges and the prior day from the fill-context functions in
   `indicators.py`, so the chart and stored fill context agree on the same
   bars; do not re-derive them in chart code. A level whose bars are missing is
-  absent with a reason, never taken from an older session. Zones and
-  interactions use one band, a tenth of the daily ATR; nothing on the chart
-  calls a level a signal.
+  absent with a reason, never taken from an older session. Missing trading
+  sessions anywhere in the daily tail suppress swings and ATR. A tenth of
+  prior daily ATR caps a zone's total width and defines proximity; contact and
+  closes across use the visible bounds. Current-combination history begins at
+  its latest confirmation; any moving member disables fixed history. Event
+  timestamps are candle closes and labels state direction, not strength.
+  Landmark counts do not claim independent evidence or a signal.
+- Chart relative volume (`chart_rvol.py`, pure) is fill context's
+  `compute_rvol_time_adjusted` evaluated at every minute, and a test holds
+  them equal on the same bars; change both or neither. The baseline needs all
+  20 calendar sessions before today stored on disk: until then there is none,
+  never one over fewer sessions. Only today's regular-session candles have RVol.
 - The chart settings document belongs to the frontend, but a save never drops
   a top-level field it leaves out (`PUT /charts/settings` keeps the stored
   value). A tab still running an older build cannot erase a field a newer build
@@ -359,39 +428,58 @@ is verifiable rather than hopeful.
   split) and indicators are computed over it whole, so pages are slices.
 - Charts pass `feed=sip` explicitly on every Alpaca request and never change
   `ALPACA_DATA_FEED`; IEX bars never reach a chart.
+- Level alerts (`level_alerts.py` pure, `level_alert_monitor.py`) fire once per
+  arming, and the unique (alert, generation) event row is the only
+  deduplication: never add a second detector that records without it. Phone
+  delivery is a separate at-least-once outbox on that row. An alert keeps its
+  own price on the chart's basis as of `created_on`, moved by later splits
+  like a saved level, and never follows a level the user drags. An alert
+  message states what price did, never a signal.
 - Option snapshots (`options_recorder.py`) are taken only for the session in
   progress, between 15 minutes after the regular close and 20:00 New York, and
   never rewritten. Open interest history cannot be fetched later: a missed
   session is marked `unavailable`, and a later capture is never filed under an
   earlier date. SPX and SPXW contracts stay apart by root.
+- Option positioning (`options_positioning.py`, pure) reads one root at a
+  time and labels every number: open interest and volume observed, walls,
+  ranks and gamma calculated (Black-Scholes at the chart's price, never the
+  provider's hourly greek), max pain inferred (payout weights must be complete;
+  price attraction is unvalidated), signed gamma and the flip assumed and off unless
+  asked for. A missing input leaves a value unavailable, never zero or a
+  contract size of 100. Interactive option reads (`options_feed.py`) never
+  wait for a budget slot and take at most 24 of the 30 a minute; only the
+  nightly recorder waits.
+- The range bands' expected move (C2.7) is the at-the-money straddle priced
+  once a session, no earlier than five minutes after the open, from a chain
+  read after that time and around a live price (today's newest minute, never a
+  daily close, no older than two minutes), with all four option bid/ask event
+  times known and no older than a minute, then fixed for the day. Missing,
+  stale or future option event times cannot become a captured band. It is a price the options market
+  charged for a move either way, never presented as where price will stay.
+- On the chart (C3.1–C3.2), an option fill's price is the premium per contract
+  and is never drawn on the price axis or called an underlying price. An
+  option position's line is the underlying observed at its first entry, or
+  nothing. A stock position's line is the first-in-first-out cost of the
+  shares still open.
+- A pre-trade plan's link to a trade (C3.6, `backend/app/engine/capture_links.py`) is anchored
+  in the first entry fill's source identity (account plus `raw_email_id`) and
+  resolved through `tradefill` on every read. A missing fill leaves it
+  unresolved, never pointing at another trade. Links are suggested, never
+  confirmed automatically. Timing compares the server's UTC receipt with the
+  entry's New York minute: only intent received before that minute counts as
+  pre-entry.
 
-## TradingView live alerts
+## Retired TradingView alert records
 
-- Wire `v` is the immutable wire-schema version and is distinct from Pine
-  `indicator_version`.
-- `parse_alert_v1()` and its golden fixtures are **frozen** while v1 data
-  exists. Changed fields, meaning, canonical identity, timestamp semantics or
-  acceptance rules require a new wire version. Never reparse stored v1 payloads
-  with a future "current" parser.
-- `alert_id` is the sole idempotency key. Equal semantic hashes are retries even
-  when raw bytes differ; the same id with a different semantic hash is a
-  collision and must never overwrite first evidence.
-- `persist_alert()` commits or rolls back the session it is given — pass a clean
-  request-scoped session with no unrelated pending writes.
-- Analysis claims commit **before** market-data calls, and `analysis_attempts`
-  is a fencing token: a stale worker must never overwrite a newer attempt.
-  Generic scorer/code failures are terminal, not retried.
-- Keep analysis network calls outside database transactions.
-- Query-token auth is required by TradingView but leaks through access logs.
-  Keep ingress/proxy/tunnel request-target logging disabled or redacted, and
-  rotate the token if exposed.
-- The ingress process may import only `app.tradingview_ingress`,
-  `app.tradingview_database`, `app.routers.tradingview_webhook`,
-  `app.engine.tradingview`, `app.engine.tradingview_alerts` and `app.models`,
-  through any chain. `backend/tests/test_import_boundaries.py` enforces this;
-  a new import on that path is an architecture change, not a convenience.
-- Future schema work uses expand → version-pinned idempotent backfill →
-  constraint migration.
+- The `v=1` webhook contract and parser are historical. C5.2 removed the public
+  receiver and Pine alert source; do not restore a write route as part of chart
+  alert work.
+- Existing `tradingview_alert` rows and the Signals list/detail pages remain.
+  The API exposes GET routes only, and the old analysis autostart worker is no
+  longer started, so stored rows do not change during ordinary app operation.
+- Preserve the table, Alembic revision, payloads and analysis fields. Deleting
+  rows, dropping the table, removing the legacy `tj_ingress` role, or deleting
+  saved credentials requires a separate user decision.
 
 ## Database access patterns
 
@@ -404,3 +492,25 @@ is verifiable rather than hopeful.
 - `GET /fills` takes `limit` (default 2000) and `offset`.
 - On SQLite, avoid long write transactions in historical jobs, or `job_run`
   progress updates hit "database is locked".
+
+## Daily Practice routine (A3)
+
+`practice_run`, `practice_opportunity` and `practice_agent_call` are separate
+from journal and factory records. One canonical ET day/P0 cohort predeclares all
+five opportunities; assisted revisions retain the original link. Server-owned
+A1 IDs enforce one immutable choice per actor/opportunity. Unobserved human or
+agent choices never become SKIP. Independent reveal requires both commitments;
+generic decision and paper routes enforce the same visibility. All five agent
+choices commit atomically with completed-call status; a failed batch retains
+its durable raw response/usage but no partial choices. New TAKEs and arm events
+must belong to the run's ET session date; retries retrieve original records. A shared
+opportunity can be armed through only one actor, even after its first plan is
+terminal; global P0 arm and active-symbol caps remain authoritative.
+
+The runner receives only allowlisted frozen market facts/policy, no human or
+journal data/tools. Its JSON cannot select actor/context ownership or arm plans.
+One reserved paid attempt per ET day includes uncertain completions; limits
+and missing cost provenance remain explicit. The shared regular-session
+underlying benchmark requires complete minute and no-split coverage, never
+substitutes actor paper fills or actual journal P&L. See
+[the complete A3 contract](a3-implementation-contract.md).

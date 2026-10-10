@@ -7,6 +7,7 @@ import json
 import re
 import time
 from typing import Any
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -21,15 +22,29 @@ from app.engine.chart_feed import ChartFeedError, chart_feed
 from app.engine.chart_history import HistoryError, chart_history
 from app.engine import tradier
 from app.engine.chart_math import ET, INTERVALS
-from app.models import ChartSettingsRecord, Fill
+from app.engine import symbol_info_tradier
+from app.engine import chart_journal, access
+from app.engine.quotes import OptionQuoteRequest, option_mark
+from app.engine.options_feed import Layer, options_feed
+from app.engine.options_history import attach_open_interest_changes
+from app.engine.options_positioning import SCOPES
+from app.routers.level_alerts import listing as alert_listing
+from app.models import FILL_LIGHT, ChartSettingsRecord, Fill, Trade
 
 router = APIRouter()
 SYMBOL = re.compile(r"^[A-Z][A-Z0-9./-]{0,14}$")
 SETTINGS = "default"
 # The main symbol plus two held by panels: each costs its own chart-feed reads.
 MAX_SYMBOLS = 3
+# The chart symbols plus the saved watchlist share the same market stream.
+MAX_STREAM_SYMBOLS = 33
 # Thirty levels on each of hundreds of symbols fit; a runaway client does not.
 SETTINGS_BYTES = 512_000
+STREAM_AUTH_INTERVAL = 15
+
+
+def stream_clock():
+    return time.monotonic()
 
 
 def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], bool]:
@@ -61,6 +76,7 @@ def _markers(db: Session, symbol: str, panels: list[dict]) -> tuple[list[dict], 
 
 @router.get("/history")
 def history(
+    request: Request,
     symbol: str = Query(..., max_length=15),
     interval: str = Query(...),
     session: str = Query(..., pattern="^(regular|extended)$"),
@@ -81,7 +97,7 @@ def history(
             raise HTTPException(503, {"code": exc.code, "message": str(exc), "retry_at": retry}) from None
         data["session"] = session
         data["markers"] = []
-        data["fills_truncated"] = _markers(db, symbol, [data])[1]
+        data["fills_truncated"] = _markers(db, symbol, [data])[1] if access.is_journal(request) else False
         return data
     try:
         data = chart_history.page(symbol, interval, session, before, limit, continuation)
@@ -89,18 +105,18 @@ def history(
         status = 422 if exc.code == "invalid_request" else 503
         raise HTTPException(status, {"code": exc.code, "message": str(exc), "retry_at": exc.retry_at}) from None
     data["markers"] = []
-    fills, truncated = _markers(db, symbol, [data])
+    fills, truncated = _markers(db, symbol, [data]) if access.is_journal(request) else ([], False)
     data["fills_truncated"] = truncated
     return data
 
 
 @router.get("/stream")
-async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=60)):
+async def stream(request: Request, symbol: str = Query("", max_length=15), symbols: str = Query("", max_length=600)):
     """Relay one private market stream to each visible chart tab as SSE, for
-    the tab's main symbol plus any symbols its panels hold (three at most)."""
+    up to three chart symbols and its 30-symbol watchlist."""
     wanted = list(dict.fromkeys(s.strip().upper() for s in f"{symbol},{symbols}".split(",") if s.strip()))
-    if not wanted or len(wanted) > MAX_SYMBOLS or any(not SYMBOL.fullmatch(s) for s in wanted):
-        raise HTTPException(422, f"Stream one to {MAX_SYMBOLS} US stock or ETF tickers.")
+    if not wanted or len(wanted) > MAX_STREAM_SYMBOLS or any(not SYMBOL.fullmatch(s) for s in wanted):
+        raise HTTPException(422, f"Stream one to {MAX_STREAM_SYMBOLS} US stock or ETF tickers.")
     if not tradier.tradier_configured():
         raise HTTPException(503, "Tradier market streaming is not configured.")
     market = request.app.state.chart_market_stream
@@ -108,7 +124,13 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
     async def events():
         client_id, queue = market.subscribe(wanted)
         try:
+            next_check = stream_clock()
             while True:
+                if access.enabled() and stream_clock() >= next_check:
+                    from starlette.concurrency import run_in_threadpool
+                    if not await run_in_threadpool(access.still_authorized, request):
+                        break
+                    next_check = stream_clock() + STREAM_AUTH_INTERVAL
                 if await request.is_disconnected():
                     break
                 try:
@@ -127,15 +149,25 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
 
 @router.get("/workspace")
 def workspace(
+    request: Request,
     symbol: str = Query("SPY", max_length=15),
     intervals: str = Query("5m,15m,1h,1D,1m", max_length=80),
     watchlist: str = Query("SPY,QQQ,MRVL,NVDA,AMD,META", max_length=500),
     session: str = Query("extended", pattern="^(regular|extended)$"),
     extras: str = Query("", max_length=120),
+    options: str = Query("", max_length=20),
+    ranges: bool = Query(False),
+    auto: bool = Query(True),
     db: Session = Depends(get_session),
 ):
     """The main symbol's panels and quotes, plus panels for up to two symbols
-    that panels hold on their own (``extras=SPY:5m.1h,QQQ:15m``)."""
+    that panels hold on their own (``extras=SPY:5m.1h,QQQ:15m``).
+
+    ``options=oi.week.0`` (measure, scope, signed) adds the options levels layer
+    (C4.4) to the automatic levels, from the option chain cache only: the main
+    symbol in that scope, a held symbol at its nearest expiration. ``ranges=1``
+    adds the expected-move range bands (C2.7) for every symbol shown. With either,
+    ``auto=0`` leaves the automatic levels out of the zones."""
     symbol = symbol.upper().strip()
     symbols = list(dict.fromkeys(s.strip().upper() for s in watchlist.split(",") if s.strip()))
     frames = list(dict.fromkeys(s.strip() for s in intervals.split(",") if s.strip()))
@@ -150,25 +182,122 @@ def workspace(
     if symbol in held or len(held) > MAX_SYMBOLS - 1 or any(not f or len(f) > 5 or any(i not in INTERVALS for i in f) for f in held.values()):
         raise HTTPException(422, f"Panels can hold up to {MAX_SYMBOLS - 1} other symbols, each with up to 5 supported intervals.")
     try:
-        data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored)
+        layer = Layer.parse(options) if options else None
+    except ValueError:
+        raise HTTPException(422, "Options levels take a measure (oi, volume or gamma), a scope (nearest, week or all) and 0 or 1.") from None
+
+    def levels_for(scope: str | None):
+        found = {}
+        if layer is not None:
+            held_layer = Layer(layer.measure, scope or layer.scope, layer.signed)
+            found["extra_levels"] = lambda name, spot: options_feed.chart(name, held_layer, spot)
+        if ranges:
+            found["range_levels"] = options_feed.ranges
+        return {**found, "auto": auto} if found else {}
+
+    def add_open_interest_changes(levels: dict | None, name: str) -> None:
+        options_data = levels.get("options") if isinstance(levels, dict) else None
+        if isinstance(options_data, dict):
+            attach_open_interest_changes(db, name, options_data.get("root", ""),
+                                         options_data.get("strikes", []), options_data.get("expirations", []))
+
+    try:
+        data = chart_feed.workspace(symbol, frames, symbols, session, calendar=chart_calendar, stored_session=chart_history.stored,
+                                    volume_profile=chart_history.volume_profile, **levels_for(None))
     except ChartFeedError as exc:
         raise HTTPException(503, {"code": exc.code, "message": str(exc)}) from None
+    add_open_interest_changes(data.get("auto_levels"), symbol)
     data["extras"] = {}
     for name, wanted in held.items():
         try:
-            other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored)
+            other = chart_feed.workspace(name, wanted, [], session, calendar=chart_calendar, quotes=False, stored_session=chart_history.stored,
+                                         volume_profile=chart_history.volume_profile, **levels_for("nearest"))
             data["extras"][name] = {**{key: other[key] for key in ("panels", "fetched_at", "intraday_as_of", "issues", "adjustment")},
-                                     "auto_levels": other.get("auto_levels")}
+                                     "auto_levels": other.get("auto_levels"), "rvol": other.get("rvol")}
+            add_open_interest_changes(data["extras"][name].get("auto_levels"), name)
         except ChartFeedError as exc:
             # A held symbol that cannot load leaves the main charts intact.
-            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None}
+            data["extras"][name] = {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [str(exc)], "adjustment": None, "auto_levels": None, "rvol": None}
+
+    # Earnings (C2.5) come from the cache only; stale symbols refresh in the background.
+    earnings = symbol_info_tradier.symbol_events.chart_earnings([symbol, *held], symbols, datetime.now(ET).date())
+    data["earnings"] = earnings[symbol]
+    for name, other in data["extras"].items():
+        other["earnings"] = earnings[name]
+
+    if not access.is_journal(request):
+        data["fills"], data["fills_truncated"], data["positions"], data["alerts"] = [], False, [], []
+        data["journal_access"] = "restricted"
+        for other in data["extras"].values():
+            other["fills_truncated"], other["positions"] = False, []
+        return data
 
     # Network calls above finish before opening any journal transaction. Select
     # only marker fields: no email bodies, lazy loads, derived P&L or mutations.
     data["fills"], data["fills_truncated"] = _markers(db, symbol, list(data["panels"].values()))
     for name, other in data["extras"].items():
         _, other["fills_truncated"] = _markers(db, name, list(other["panels"].values()))
+    # Open positions on each symbol shown (C3.2): three queries a symbol, no provider.
+    data["positions"] = chart_journal.positions(db, symbol)
+    for name, other in data["extras"].items():
+        other["positions"] = chart_journal.positions(db, name)
+    # Every level alert (C5.1), whichever symbols are on screen: the chart draws its own, the list shows all.
+    data["alerts"] = alert_listing(db)
     return data
+
+
+@router.get("/journal/fills/{fill_id}")
+def journal_fill(fill_id: uuid.UUID, db: Session = Depends(get_session)):
+    """A fill arrow's card (C3.1): the fill, and the trade it belongs to."""
+    fill = db.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id == fill_id)).first()
+    if fill is None:
+        raise HTTPException(404, "That fill is no longer in the journal.")
+    return chart_journal.fill_card(db, fill)
+
+
+@router.get("/journal/trades/{trade_id}")
+def journal_trade(trade_id: uuid.UUID, db: Session = Depends(get_session)):
+    """One trade's card, for a link that names the trade rather than a fill."""
+    trade = db.get(Trade, trade_id)
+    if trade is None:
+        raise HTTPException(404, "That trade is no longer in the journal. Trades are rebuilt from fills; open it from its fill instead.")
+    return {"fill": None, **chart_journal.trade_card(db, trade)}
+
+
+@router.get("/journal/trades/{trade_id}/mark")
+def journal_mark(trade_id: uuid.UUID, db: Session = Depends(get_session)):
+    """An open option trade's current premium and open P&L, asked for from its
+    card. One quote through the dashboard's 60-second cache; the answer says
+    when it was quoted, so an old mark is shown as old."""
+    trade = db.get(Trade, trade_id)
+    if trade is None or trade.instrument_type != "option" or trade.status != "open" or trade.expiration is None:
+        raise HTTPException(422, "Only an open option trade has a mark to read.")
+    card = chart_journal.trade_card(db, trade)
+    position = card["position"]
+    db.close()  # the quote is a network call; no journal transaction stays open across it
+    quote, quoted_at = option_mark(OptionQuoteRequest(trade.ticker, trade.expiration.isoformat(), float(trade.strike), trade.option_type or ""))
+    # Quotes are per share; journal option prices are per contract (x100).
+    mark, basis = (quote.mid, "mid") if quote.mid is not None else (quote.last_price, "last") if quote.last_price is not None else (None, None)
+    open_pnl = None
+    if mark is not None and position and position["avg_cost"] is not None:
+        sign = -1 if card["trade"]["direction"] == "short" else 1
+        open_pnl = round((mark * 100 - position["avg_cost"]) * position["open"] * sign, 2)
+    return {"mark": mark, "mark_per_contract": None if mark is None else round(mark * 100, 2), "basis": basis,
+            "bid": quote.bid, "ask": quote.ask, "last": quote.last_price,
+            "provider": quote.provider, "quoted_at": int(quoted_at) if quoted_at else None, "open_pnl": open_pnl}
+
+
+@router.get("/options/{symbol:path}/ladder")
+def options_ladder(symbol: str, scope: str = Query("week", max_length=10), signed: bool = Query(False),
+                   spot: float | None = Query(None, gt=0), db: Session = Depends(get_session)):
+    """The strike ladder (C4.5): open interest, volume and gamma by strike around ``spot``
+    (the chart's latest price), over the scope's expirations. Reads stale chains first."""
+    symbol = symbol.upper().strip()
+    if not SYMBOL.fullmatch(symbol) or scope not in SCOPES:
+        raise HTTPException(422, "Use a US stock or ETF ticker and a scope of nearest, week or all.")
+    result = options_feed.ladder(symbol, scope, signed, spot)
+    attach_open_interest_changes(db, symbol, result.get("root", ""), result.get("rows", []), result.get("expirations", []))
+    return result
 
 
 class ChartSettingsSave(BaseModel):

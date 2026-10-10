@@ -22,17 +22,45 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
 | `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory, chart price basis |
 | `docs/agent/verification.md` | How to prove a change works |
+| `docs/agent/pr-review.md` | Native pre-PR reviewers, risk/model selection, bounded repairs and CI readiness |
+| `docs/agent/codex-workflow.md` | Sol-led substantial work, bounded Luna assignments, escalation, and completion reports |
 | `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
 | `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
+| `docs/agent/delegation.md` | Claude Code on Opus: what to hand to the Sonnet `engineer` and `reviewer` subagents, the brief, escalation and review tiers |
+| `docs/product-roadmap.md` | Future trading-improvement workflow: reflections, weekly commitments, playbooks, planned risk and evidence-gated experiments; preserves active feature-roadmap priorities |
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
+| `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
+| `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
+| `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
+| `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
+| `docs/agent/cloud-mcp-integration-scope.md` | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
+| `docs/agent/cloud-mcp-d0-runbook.md` | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
+| `docs/agent/cloud-mcp-d1-contract.md` | First useful connector reads: one assigned simulated MU/NBIS run, independent backend OAuth checks, private Unix bridge and manual activation/rollback |
+| `docs/agent/cloud-mcp-d2-contract.md` | Opt-in demo choice tools: own immutable TAKE/WAIT/SKIP, retry/recovery receipts, independent write-scope checks and remaining live acceptance |
+| `docs/agent/cloud-mcp-journal-contract.md` | Separate read-only journal coach: approved closed-trade export, bounded exact statistics, offline OAuth and production activation gates |
+| `docs/agent/cloud-browser-auth-contract.md` | Browser authentication and permissions: preserve owner Tailscale access, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, Dot cloud sign-in reported; simulated decision-writing contract is the next increment |
+| `docs/agent/dot-decision-trial-contract.md` | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
+| `docs/agent/dot-sample-replay-contract.md` | Jo’s own bounded sample TAKE replay: hidden continuation, scoped start permission, isolated event ledger and acceptance gates |
+| `docs/agent/dot-market-decision-contract.md` | Jo real-market handoff: bounded private VPS capture, isolated decision-only MU/NBIS session and own-record browser permissions |
+| `docs/agent/dot-historical-replay-contract.md` | Weekend historical replay: retrospective raw bars, separate clocks, sealed continuation and own simulated paper outcomes |
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 | `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
+| `docs/swing-strategy-roadmap.md` | Swing families (1–16 sessions) in the factory, the after-close practice loop (signal, phone, Take/Skip, shadow trade), the setups board and confluence scan, macro/news/earnings as-of rules, stages from research to live |
+| `docs/strategy-workbench-roadmap.md` | A later interactive page over the factory: explore on discovery data only, the exploration log, freezing candidates |
 
 Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
 fixed in the same change.
+
+In Codex, prefer Sol as the main agent for substantial features, refactors,
+difficult debugging, and deployment changes. Sol owns scope, consequential
+decisions, integration, and final verification; delegate clear, bounded work to
+Luna when it helps. Use Luna directly for small tasks with clear requirements.
+Delegation is optional: Sol can complete a feature itself. Follow
+[`docs/agent/codex-workflow.md`](docs/agent/codex-workflow.md), including its
+fallback when a substantial task has already started on Luna.
 
 ## Verification is not optional
 
@@ -62,6 +90,31 @@ close unless the PR carries the `deploy-now` label. Schema changes wait for a
 person. A PR is ready to merge only when it is ready to go live; see
 [automatic deployment](deploy/README.md#automatic-deployment).
 
+## Independent review and completion
+
+Follow the [native pre-PR review workflow](docs/agent/pr-review.md) before
+publishing ready work. The owner classifies the full diff, invokes a fresh
+reviewer in the same client, receives its findings directly, repairs valid
+issues and obtains review of the final candidate. Most changes get one
+reviewer. A change that could alter a tier-2 area of the guide's table (money
+correctness, destructive or real-data changes, auth/permissions/security,
+migrations, deployment, or CI, branch protection, or the verification or review
+policy and tooling), including a refactor meant to preserve behavior, gets a
+stronger general reviewer and a focused reviewer. Use the
+explicit model profiles in the guide, not the default implementation worker.
+Reviewers do not invoke reviewers themselves.
+
+The agent may skip only genuinely explanatory, non-agent documentation, with
+a reason in the PR. Other changes require review unless the user explicitly
+requests a skip. CI always runs. At most three rounds are automatic; timeouts,
+quota errors, missing results and unresolved findings are incomplete, never a
+pass. Keep the owner active until review completes and current-head CI
+passes, or report a specific blocker and leave the PR draft. Do not call
+another provider's CLI or wait for GitHub comments as the normal review path.
+
+The user authorizes branch pushes, PR updates and bounded review repairs as the
+normal workflow. The user alone merges; never merge or enable auto-merge.
+
 ## Operating style
 
 - Read only what the task needs. Use these docs to orient rather than
@@ -74,6 +127,9 @@ person. A PR is ready to merge only when it is ready to go live; see
 - Prefer cheap targeted validation unless the blast radius requires more.
 - Avoid unrelated refactors, formatting churn, and duplicated UI/table logic.
 - Final summaries stay brief: what changed, what was verified, what risk remains.
+- In a Claude Code session on Opus, act as the lead: hand bounded execution to
+  the Sonnet `engineer` subagent and keep judgment, high-risk review and pushes
+  (`docs/agent/delegation.md`). Do small, sequential work directly.
 
 ## Extra care required
 
@@ -92,11 +148,10 @@ and `test_schema_migrations.py` fails on that deliberately.
 
 ## Hard constraints
 
-- Never expose or tunnel the private API (8080/8000). It has no auth. Only
-  port 8090, the TradingView ingress, is safe to tunnel — and it only runs when
-  `TRADINGVIEW_INGRESS_ENABLED=true` is set for the launcher.
-- Never put private API keys or unrestricted database credentials in
-  `backend/.env.tradingview` or the VPS `/etc/tradejournal/tradingview.env`.
+- Never expose or tunnel the production private API (8080/8000). Its default
+  profile has no auth and production remains private. A separately approved
+  isolated sample trial may publish only its authenticated assistant frontend;
+  see the cloud-browser contract for its data and namespace boundaries.
 - Never weaken the database pin in `backend/tests/conftest.py`. Without it the
   test suite writes to whatever `DATABASE_URL` resolves to, including the
   production VPS database.

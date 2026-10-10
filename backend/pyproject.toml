@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.109.0",
+    "argon2-cffi>=25.1,<26",
     "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.27.0",
     # 0.0.46 rejects the app's established naive-UTC model values at bind time.
@@ -30,7 +31,13 @@ dependencies = [
     "psycopg[binary]>=3.1.18",
     "grpcio>=1.60.0",
     "protobuf>=4.25.0",
-    "mcp>=1.2.0",
+    # D0's isolated cloud probe uses the verified Streamable HTTP/OAuth helpers.
+    "mcp==1.28.1",
+    "PyJWT[crypto]==2.13.0",
+    # Voice plans (Charts C3.5) are transcribed on this server by Whisper.
+    # faster-whisper 1.2 passes a keyword PyAV 17 removed; 16.1 is verified.
+    "faster-whisper>=1.2,<2",
+    "av>=14,<17",
 ]
 
 [project.optional-dependencies]

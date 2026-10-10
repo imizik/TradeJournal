@@ -17,8 +17,11 @@ const ROOT = path.resolve(__dirname, "..");
 const BACKEND = path.join(ROOT, "backend");
 const E2E_DB = path.join(BACKEND, "data", "e2e_seed.db");
 
-const BACKEND_PORT = 8099;
-const FRONTEND_PORT = 3099;
+const BACKEND_PORT = Number(process.env.E2E_BACKEND_PORT || 8099);
+const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT || 3099);
+if (![BACKEND_PORT, FRONTEND_PORT].every((port) => Number.isInteger(port) && port > 0 && port <= 65535) || BACKEND_PORT === FRONTEND_PORT) {
+  throw new Error("E2E_BACKEND_PORT and E2E_FRONTEND_PORT must be different valid TCP ports.");
+}
 const API_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 
 // Prefer the project venv so the servers match what scripts/setup.sh built.
@@ -35,10 +38,13 @@ const backendCommand = [
 
 export default defineConfig({
   testDir: "./e2e",
+  testIgnore: "**/*.auth.ts",
   // Pages read from one shared backend, so parallel workers would race on
-  // any test that mutates. Serial keeps failures interpretable.
+  // mutations. Each CI shard starts a separate backend, however, and
+  // fullyParallel lets Playwright distribute individual tests between those
+  // isolated runners. One worker still keeps each shard deterministic.
   workers: 1,
-  fullyParallel: false,
+  fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: process.env.CI ? [["github"], ["list"]] : [["list"]],
@@ -61,9 +67,12 @@ export default defineConfig({
         // typically do). Normally unset: CI and local machines resolve the
         // browser Playwright installed for itself.
         //   PLAYWRIGHT_CHROMIUM_PATH=/opt/pw-browsers/chromium npm run e2e
-        ...(process.env.PLAYWRIGHT_CHROMIUM_PATH
-          ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } }
-          : {}),
+        // A fake microphone (a tone) for voice plans (C3.5); it is used only
+        // where a page asks for one and a test grants the permission.
+        launchOptions: {
+          args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+          ...(process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {}),
+        },
       },
     },
   ],
@@ -89,9 +98,17 @@ export default defineConfig({
         // credentials that are deliberately absent here.
         GMAIL_WATCH_AUTOSTART: "false",
         WEBULL_LISTENER_AUTOSTART: "false",
-        TRADINGVIEW_ANALYSIS_AUTOSTART: "false",
         // Chart access tests must stay deterministic even with a local .env.
         TRADIER_API_KEY: "",
+        ALPACA_API_KEY: "",
+        ALPACA_API_SECRET: "",
+        // Voice plans (C3.5): recordings in a scratch folder, and no model
+        // download or speech engine in the browser run. Transcript states are
+        // exercised with fixtures; the engine has its own backend test.
+        CAPTURE_STORAGE_DIR: path.join(BACKEND, "data", "e2e_captures"),
+        CAPTURE_TRANSCRIBER: "off",
+        PRACTICE_AGENT_ENABLED: "false",
+        PRACTICE_SCHEDULE_ENABLED: "false",
       },
     },
     {

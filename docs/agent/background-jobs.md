@@ -21,14 +21,16 @@ network filesystems are unsupported. Never delete lock files while executors
 are running; unlinking them defeats mutual exclusion. A job from a different
 host or lock directory is left untouched for operator investigation.
 
-Four execution lanes have separate locks:
+Six execution lanes have separate locks:
 
 | Lane | Work |
 |---|---|
-| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review, confirmed resync and the after-close options snapshot |
+| `sync` | Gmail import/push, Gmail watch renewal, fill check, rebuild, pipelines, Alpaca, path metrics, requested daily review, confirmed resync, the after-close options snapshot and the morning relative-volume history |
 | `polygon` | Polygon enrichment, which can continue after a pipeline completes |
 | `webull` | The persistent Webull listener |
 | `gmail` | The persistent Gmail Pub/Sub listener, which only queues `gmail_push` and `gmail_watch_renew` work for `sync` |
+| `capture` | Transcribing a voice plan (Charts C3.5, `capture_transcribe`), so a recording never waits behind a broker sync or enrichment |
+| `practice` | Finite A3 daily preparation (`practice_prepare`), separate from import and transcription deadlines |
 
 Pipeline children execute inside the parent's sync lane. Polygon is queued
 independently, so provider pacing cannot block pipeline completion. Additional
@@ -38,7 +40,10 @@ The options snapshot paces itself to Tradier's options budget, so after the
 close it can hold the sync lane for about ten minutes (on the order of 300
 requests at 30 a minute since the factory's 18 names joined its scope); a
 Gmail push that arrives meanwhile waits for it. An interrupted snapshot keeps every expiration it
-committed, and the next run fetches only the rest.
+committed, and the next run fetches only the rest. The relative-volume
+history (06:00 and 08:40 New York) holds the lane for about a minute each
+morning; its first run, 20 sessions for each watchlist name at 30 requests a
+minute, stops after ten minutes and the next run continues.
 
 On worker startup and each idle poll:
 
@@ -84,6 +89,8 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane polygon --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane webull --recover-unowned --recover-only
    .venv/bin/python -m app.jobs.worker --lane gmail --recover-unowned --recover-only
+   .venv/bin/python -m app.jobs.worker --lane capture --recover-unowned --recover-only
+   .venv/bin/python -m app.jobs.worker --lane practice --recover-unowned --recover-only
    ```
 
 5. Run each command as a separate supervised process, from `backend/`, with
@@ -95,7 +102,15 @@ reviews may already have incurred provider charges before an interruption.
    .venv/bin/python -m app.jobs.worker --lane polygon
    .venv/bin/python -m app.jobs.worker --lane webull
    .venv/bin/python -m app.jobs.worker --lane gmail
+   .venv/bin/python -m app.jobs.worker --lane capture
+   .venv/bin/python -m app.jobs.worker --lane practice
    ```
+
+A transcription job is queued when a voice plan is saved and never retried
+by itself: after a failure or an interrupted worker, the plan shows the error
+and only the user's **Retry transcript** queues another, and a second tap
+while one waits reuses it. The capture worker keeps the Whisper model loaded
+between jobs (a few hundred MB of memory).
 
 The Webull worker consumes a listener request made by the existing Start route
 or `WEBULL_LISTENER_AUTOSTART=true` on API startup. It does not invent a
@@ -136,12 +151,18 @@ It cannot replay a completed or failed row or steal a running job. Its existing
 
 ## Remaining work and evidence
 
-Optional TradingView analysis, and Gmail watch renewal when the Gmail listener
-is disabled (`GMAIL_WATCH_AUTOSTART`, development only), are still API-owned
-background threads. TradingView already has its own database claim/recovery
+Gmail watch renewal when the Gmail listener is disabled
+(`GMAIL_WATCH_AUTOSTART`, development only), is still an API-owned background
+thread. The TradingView analysis worker was retired with C5.2; stored alert rows
+are now read-only. The level alert monitor (Charts C5.1) is an API-owned
+asyncio task beside the chart stream, not a job: its durable state is the
+`level_alert` and `level_alert_event` rows (progress, one row per firing, and
+a delivery outbox claimed by an update), so an API restart resumes it without
+a `job_run`. `LEVEL_ALERTS_AUTOSTART=false` keeps it off, as the test suite
+does. TradingView already has its own database claim/recovery
 mechanism, separate from `job_run`. Direct request-time review/import endpoints
 also remain request-time operations. The [Ubuntu deployment package](../../deploy/README.md)
-now provides systemd services for the four lanes and the private API/frontend.
+now provides systemd services for the six lanes and the private API/frontend.
 It does not alter Webull reconnection policy or move the remaining API threads
 to supervised worker lanes.
 
@@ -153,3 +174,19 @@ Alpaca, or Polygon. The separate Ubuntu deployment workflow exercises systemd
 with a packaged application and disposable Postgres; real-VPS reboot and live
 provider checks remain operator work. Those checks and Postgres-specific tests
 are separate from the local verification script.
+
+## A3 finite daily preparation
+
+`practice_prepare` uses its own `practice` lane, separate from sync and capture.
+The packaged worker handles manual requests through the normal ownership locks;
+`app.jobs.practice_schedule` is the finite optional systemd entrypoint. Its
+08:50 America/New_York timer is installed but never enabled by the release
+controller. `PRACTICE_SCHEDULE_ENABLED` defaults off. Before 08:50 a persistent
+catch-up is skipped; after the 09:00 deadline a durable late/missed record is
+created without market/model calls. The calendar determines closed sessions.
+
+Agent execution separately defaults off via `PRACTICE_AGENT_ENABLED`. One daily
+reservation survives model timeout/process death; uncertain completion is not
+retried. Interrupted jobs retain contexts and require an explicit linked
+assisted revision. Neither job failure nor disabled preparation changes the
+API-owned A2 watcher. See [the A3 contract](a3-implementation-contract.md).

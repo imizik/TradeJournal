@@ -14,8 +14,6 @@ import tarfile
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.parse
 import urllib.request
 
 import control
@@ -23,7 +21,6 @@ from build import package
 
 URL = "postgresql+psycopg://tj:tj@127.0.0.1:5432/tj_deployment"
 IDENTITY = "127.0.0.1:5432/tj_deployment"
-INGRESS_TOKEN = "ci-only-webhook-token-never-use-in-production"
 # The commit the repackaged second build claims, as a newer merge would.
 NEXT_COMMIT = "5" * 40
 
@@ -46,68 +43,6 @@ def wait_for(predicate, timeout=40):
 def digest(path):
     with path.open("rb") as handle:
         return hashlib.file_digest(handle, "sha256").hexdigest()
-
-
-def webhook(port=8090, token=INGRESS_TOKEN):
-    # Old on purpose: exercise the real durable worker without provider calls.
-    payload = {
-        "v": 1, "indicator_version": "deployment-smoke", "symbol": "AAPL",
-        "timeframe": "5", "setup": "orb_break", "side": "long", "price": 100,
-        "bar_time_ms": 1737561600000,
-        "alert_id": "v1:deployment-smoke:AAPL:5:1737561600000:orb_break:long",
-    }
-    req = urllib.request.Request(
-        f"http://localhost:{port}/tradingview/webhook?token={token}",
-        data=json.dumps(payload).encode(), headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=3) as response:
-        return json.load(response)
-
-
-def status(url):
-    try:
-        with urllib.request.urlopen(url, timeout=3) as response:
-            return response.status
-    except urllib.error.HTTPError as exc:
-        return exc.code
-
-
-def check_webhook_proxy(release):
-    # Exercise the shipped routing/logging through a real Caddy process.
-    # Local HTTP fixtures avoid public DNS/ACME calls in disposable CI.
-    with tempfile.TemporaryDirectory() as scratch:
-        config = Path(scratch) / "Caddyfile"
-        config.write_text((release / "deploy/Caddyfile.tradingview.example").read_text()
-                          .replace("https://alerts.example.com", "http://localhost:8091")
-                          .replace("http://alerts.example.com", "http://localhost:8092")
-                          .replace("203.0.113.10", "127.0.0.1"))
-        control.run("caddy", "validate", "--config", config, "--adapter", "caddyfile")
-        log = Path(scratch) / "caddy.log"
-        with log.open("w") as output:
-            process = subprocess.Popen(["caddy", "run", "--config", str(config), "--adapter", "caddyfile"], stdout=output, stderr=output)
-            try:
-                def ready():
-                    try:
-                        return status("http://localhost:8091/health") == 404
-                    except OSError:
-                        return False
-                wait_for(ready)
-                assert webhook(8091)["dup"] is True
-                for path in ("/", "/health", "/docs", "/openapi.json", "/tradingview/alerts", "/api/backend/health"):
-                    assert status(f"http://localhost:8091{path}") == 404
-                assert status("http://localhost:8092/tradingview/webhook") == 404
-                control.run("systemctl", "stop", control.INGRESS_SERVICE)
-                try:
-                    webhook(8091)
-                    raise AssertionError("Stopped ingress unexpectedly accepted a webhook")
-                except urllib.error.HTTPError as exc:
-                    assert exc.code == 502
-            finally:
-                process.terminate()
-                process.wait(timeout=10)
-                control.run("systemctl", "start", control.INGRESS_SERVICE)
-                control.ingress_health()
-        assert INGRESS_TOKEN not in log.read_text()
 
 
 class FakeGitHub(http.server.ThreadingHTTPServer):
@@ -194,43 +129,6 @@ def autodeploy_pass():
     return json.loads(state.read_text()) if state.exists() else {}
 
 
-def enable_ingress(release, cli):
-    sql = """
-        CREATE ROLE tj_ingress LOGIN PASSWORD 'ci-ingress-only';
-        GRANT USAGE ON SCHEMA public TO tj_ingress;
-        GRANT SELECT, INSERT, UPDATE ON tradingview_alert TO tj_ingress;
-    """
-    control.run("psql", "-h", "127.0.0.1", "-U", "tj", "-d", "tj_deployment", "-v", "ON_ERROR_STOP=1",
-                input=sql, text=True, env={**os.environ, "PGPASSWORD": "tj"})
-    config = control.CONFIG / "backend.env"
-    config.write_text(config.read_text().replace("TRADINGVIEW_ANALYSIS_AUTOSTART=false", "TRADINGVIEW_ANALYSIS_AUTOSTART=true")
-                      + "ALPACA_API_KEY=ci-placeholder\nALPACA_API_SECRET=ci-placeholder\n")
-    (control.CONFIG / "tradingview.env").write_text(
-        "TRADINGVIEW_INGRESS_ENABLED=true\n"
-        "TRADINGVIEW_DATABASE_URL=postgresql+psycopg://tj_ingress:ci-ingress-only@127.0.0.1:5432/tj_deployment\n"
-        f"TRADINGVIEW_WEBHOOK_TOKEN={INGRESS_TOKEN}\n"
-    )
-    cli("activate", release.name, "--confirm-database", IDENTITY)
-    control.run("systemctl", "is-enabled", control.INGRESS_SERVICE)
-    accepted = webhook()
-    assert accepted["dup"] is False
-    assert webhook()["dup"] is True
-    try:
-        webhook(token="wrong")
-        raise AssertionError("Unauthenticated webhook accepted")
-    except urllib.error.HTTPError as exc:
-        assert exc.code == 401
-    wait_for(lambda: any(row["alert_id"] == accepted["alert_id"] and row["analysis_status"] == "skipped"
-                         for row in request("/tradingview/alerts")))
-    # The public OS identity cannot read private runtime data or config.
-    for path in (control.CONFIG / "backend.env", control.STATE / "oauth", control.STATE / "data"):
-        denied = subprocess.run(["runuser", "-u", "tradejournal-ingress", "--", "test", "-r", str(path)], check=False)
-        assert denied.returncode != 0
-    check_webhook_proxy(release)
-    logs = control.run("journalctl", "--no-pager", "--unit", control.INGRESS_SERVICE, capture_output=True, text=True).stdout
-    assert INGRESS_TOKEN not in logs
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
@@ -244,7 +142,8 @@ def main():
     release = control.install(archive, digest(archive))
     (control.CONFIG / "backend.env").write_text(
         f"DATABASE_URL={URL}\nAPP_ENV=deployment-ci\nFRONTEND_PUBLIC_URL=http://127.0.0.1:3000\n"
-        "WEBULL_LISTENER_AUTOSTART=false\nGMAIL_WATCH_AUTOSTART=false\nTRADINGVIEW_ANALYSIS_AUTOSTART=false\n"
+        # A stale enabled value must not resurrect the retired worker.
+        "WEBULL_LISTENER_AUTOSTART=false\nGMAIL_WATCH_AUTOSTART=false\nTRADINGVIEW_ANALYSIS_AUTOSTART=true\n"
     )
     (control.CONFIG / "migration.env").write_text(f"MIGRATION_DATABASE_URL={URL}\n")
     # Use the shipped CLI for each operation, including its confirmation gate.
@@ -258,9 +157,12 @@ def main():
         control.run("runuser", "-u", "tradejournal", "--", release / "backend/.venv/bin/python", "scripts/seed_dev_data.py", "--database-url", URL, cwd=release / "backend", env={**os.environ, "DATABASE_URL": URL, "MIGRATION_DATABASE_URL": URL, "PYTHONDONTWRITEBYTECODE": "1"})
         cli("activate", release.name, "--confirm-database", IDENTITY)
         assert request("/stats")["total_trades"] == 6
-        assert subprocess.run(["systemctl", "is-active", "--quiet", control.INGRESS_SERVICE], check=False).returncode != 0
-        enable_ingress(release, cli)
+        assert subprocess.run(["systemctl", "is-active", "--quiet", "tradejournal-ingress"], check=False).returncode != 0
+        assert not (control.UNITS / "tradejournal-ingress.service").exists()
         control.run("systemctl", "is-enabled", *control.SERVICES, *control.TIMERS)
+        assert subprocess.run(["systemctl", "is-enabled", "--quiet", "tradejournal-practice.timer"], check=False).returncode != 0
+        control.run("systemctl", "start", "tradejournal-practice.service")
+        assert request("/practice/runs")["runs"] == []  # disabled service creates no cohort or paid call
         # A real 08:00/17:00 New York run would make the sync POSTs below
         # return 409. Enablement is what this smoke asserts.
         control.run("systemctl", "stop", "tradejournal-sync-pipeline.timer")
@@ -304,9 +206,10 @@ def main():
         capture.shutdown()
         # The backend/frontend must not acquire a wildcard listener.
         sockets = control.run("ss", "-ltnH", capture_output=True, text=True).stdout
-        for port in (3000, 8080, 8090):
+        for port in (3000, 8080):
             listeners = [line.split()[3] for line in sockets.splitlines() if line.split()[3].endswith(f":{port}")]
             assert listeners == [f"127.0.0.1:{port}"], listeners
+        assert not any(line.split()[3].endswith(":8090") for line in sockets.splitlines()), sockets
 
         def pid():
             return control.run("systemctl", "show", "tradejournal-worker@sync", "--property=MainPID", "--value", capture_output=True, text=True).stdout.strip()
@@ -358,7 +261,6 @@ def main():
                 assert control.current().name == second.name
                 assert Path("/usr/local/sbin/tradejournal-deploy").read_bytes() == (second / "deploy/control.py").read_bytes()
                 assert sentinel.read_text() == "persistent\n"
-                assert webhook()["dup"] is True
                 cli("rollback", "--confirm-database", IDENTITY)
                 assert control.current() == release
                 # The next pass must not put back the build an operator left.
@@ -369,7 +271,6 @@ def main():
                 github.shutdown()
                 (control.CONFIG / "autodeploy.env").unlink()
             assert sentinel.read_text() == "persistent\n"
-            assert webhook()["dup"] is True
             # Only two releases exist, both current or previous: nothing to remove.
             cli("prune", "--keep", "0")
             assert release.is_dir() and control.release_path(second.name).is_dir()
@@ -379,11 +280,11 @@ def main():
         control.start_services(release, IDENTITY)
         assert request("/stats")["total_trades"] == 6
         assert job_status() == "succeeded"
-        assert webhook()["dup"] is True
-        print("Native deployment smoke passed: install, migration, proxy, workers, restricted ingress, webhook dedupe, analysis, token-safe proxy logs, backup, timers, phone alerts, API restart, crash restart, unattended upgrade, rollback that stays rolled back, prune, persistent state and full restart")
+        control.run(release / "backend/.venv/bin/python", release / "deploy/auth-smoke.py")
+        print("Native deployment smoke passed: install, migration, private proxy, workers, retired ingress cleanup, no 8090 listener, backup, timers, phone alerts, API restart, crash restart, unattended upgrade, rollback that stays rolled back, prune, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)
-        subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, control.INGRESS_SERVICE, control.AUTODEPLOY]]], check=False)
+        subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, "tradejournal-ingress", control.AUTODEPLOY]]], check=False)
         control.stop_services()
 
 

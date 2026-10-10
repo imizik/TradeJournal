@@ -1,0 +1,12 @@
+[Unit]
+Description=Maintain the synthetic MCP public-key snapshot every 15 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Unit=tradejournal-d0-keys.service
+
+[Install]
+WantedBy=timers.target

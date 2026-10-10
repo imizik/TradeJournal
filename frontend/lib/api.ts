@@ -52,6 +52,57 @@ export type Health = {
   };
 };
 
+export type DecisionRecord = {
+  id: string;
+  operation_id: string;
+  opportunity_id: string;
+  actor: string;
+  decision: "take" | "wait" | "skip";
+  symbol: string;
+  received_at: string;
+  input_cutoff: string;
+  policy_version: string;
+  policy_hash: string;
+  evidence: Record<string, unknown>;
+  evidence_sha256: string;
+  plan: Record<string, unknown>;
+  rationale: string;
+  wait_condition: string | null;
+  wait_expiry: string | null;
+  record_sha256: string;
+  status: "practice_draft_unarmed";
+};
+
+export type PaperEvent = {
+  type: string; key: string; at: number; seq: number; recorded_at: number; source: string;
+  reconstructed: boolean; delivery: string | null; delivery_error: string | null;
+  [field: string]: unknown;
+};
+
+export type PaperOutcome = {
+  cost_version: string; entry_fill: number; exit_fill: number; net_per_share: number; planned_r: number;
+  entry_to_stop_exposure: number; exit_kind: string; ambiguous: boolean; gap: boolean;
+};
+
+export type PaperState = {
+  record_id: string;
+  status: "unarmed" | "armed" | "triggered" | "open" | "closed" | "expired" | "missed" | "rejected" | "unresolved";
+  policy_version: string | null;
+  events: PaperEvent[];
+  outcome: PaperOutcome | null;
+  outcome_x3: PaperOutcome | null;
+};
+
+export type DecisionContext = {
+  context_id: string;
+  symbol: string;
+  captured_at: string;
+  provider: string;
+  context_sha256: string;
+  price_facts: { name: string; value: number; source: string; formed_at: string; observed_at: string; unit: string; split_basis: string }[];
+  packet: Record<string, unknown>;
+};
+
 export type Account = {
   id: string;
   name: string;
@@ -182,6 +233,8 @@ export type DailyReviewResponse = {
 export type DailyReviewIndexItem = {
   day: string;
   trade_count: number;
+  /** Realized P&L of the trades that closed that day; null when none closed with a recorded P&L. */
+  closed_pnl?: number | null;
   saved: boolean;
   generated_at: string | null;
   source_data_stale: boolean;
@@ -570,14 +623,15 @@ export type TradingViewAlertDetail = TradingViewAlert & {
   analysis_error: string | null;
 };
 
+export function createApi(fetcher: typeof fetch = (input, init) => fetch(input, init)) {
 async function get<T>(path: string): Promise<T> {
-  const res = await fetch(apiUrl(path), { cache: "no-store" });
+  const res = await fetcher(apiUrl(path), { cache: "no-store" });
   if (!res.ok) throw await buildApiError(path, res);
   return res.json();
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+  const res = await fetcher(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -587,7 +641,7 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function put<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(apiUrl(path), {
+  const res = await fetcher(apiUrl(path), {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -615,7 +669,15 @@ async function buildApiError(path: string, res: Response): Promise<Error> {
   return new Error(`API ${path} -> ${res.status}${detail ? `: ${detail}` : ""}`);
 }
 
-export const api = {
+return {
+  practiceRuns: () => get<{ runs: { id: string; day: string }[] }>("/practice/runs"),
+  decisions: () => get<{ decisions: DecisionRecord[] }>("/decisions"),
+  decision: (id: string) => get<DecisionRecord>(`/decisions/${encodeURIComponent(id)}`),
+  paperState: (id: string) => get<PaperState>(`/decisions/${encodeURIComponent(id)}/paper`),
+  armPaperPlan: (id: string, operationId: string) => post<PaperState>(`/decisions/${encodeURIComponent(id)}/arm`, { operation_id: operationId }),
+  freezeDecisionContext: (symbol: string, operationId: string) => post<DecisionContext>(`/decisions/context/${encodeURIComponent(symbol)}`, { operation_id: operationId }),
+  createDecision: (body: { operation_id: string; opportunity_id: string; actor: string; decision: string; symbol: string; context_id: string; rationale?: string; wait_condition?: string; wait_expiry?: string; plan?: Record<string, unknown> }) =>
+    post<DecisionRecord>("/decisions", body),
   accounts: () => get<Account[]>("/accounts"),
   trades: (params?: string) => get<Trade[]>(`/trades${params ? `?${params}` : ""}`),
   trade: (id: string) => get<Trade>(`/trades/${id}`),
@@ -668,3 +730,6 @@ export const api = {
   tradingViewAlert: (alertId: string) =>
     get<TradingViewAlertDetail>(`/tradingview/alerts/${encodeURIComponent(alertId)}`),
 };
+
+}
+export const api = createApi();

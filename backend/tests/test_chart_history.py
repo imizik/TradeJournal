@@ -134,6 +134,17 @@ def test_empty_success_corruption_and_malformed_are_distinct(history, monkeypatc
     with pytest.raises(HistoryError) as malformed:
         history._session("SPY", day, Work(work.identity, day), module.time.monotonic() + 10, [0])
     assert malformed.value.code == "malformed" and not path.exists()
+    # Alpaca's answer for a day without a single minute (an index, or before a listing) is its own reason, and not stored.
+    monkeypatch.setattr(module.httpx, "get", lambda url, **kw: httpx.Response(200, json={"bars": None, "next_page_token": None, "symbol": "SPY"}, request=httpx.Request("GET", url)))
+    with pytest.raises(HistoryError) as nothing:
+        history._session("SPY", day, Work(work.identity, day), module.time.monotonic() + 10, [0])
+    assert nothing.value.code == "no_data" and str(nothing.value) == f"Alpaca has no minute bars for SPY on {day}." and not path.exists()
+    # Null bars for another symbol, or with a page still to come, is not that answer.
+    for body in ({"bars": None, "next_page_token": None, "symbol": "QQQ"}, {"bars": None, "next_page_token": "x", "symbol": "SPY"}):
+        monkeypatch.setattr(module.httpx, "get", lambda url, body=body, **kw: httpx.Response(200, json=body, request=httpx.Request("GET", url)))
+        with pytest.raises(HistoryError) as other:
+            history._session("SPY", day, Work(work.identity, day), module.time.monotonic() + 10, [0])
+        assert other.value.code == "malformed"
 
 
 def test_simultaneous_miss_coalesces_and_continuation_is_bound(history, monkeypatch):

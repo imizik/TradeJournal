@@ -13,7 +13,7 @@ import { expect, test } from "@playwright/test";
  * reconstructor still produces (backend/tests/test_seed_dev_data.py).
  */
 
-const API = "http://127.0.0.1:8099";
+const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 
 test.describe("fixture", () => {
   test("seeded backend holds exactly the expected dataset", async ({ request }) => {
@@ -40,6 +40,21 @@ test.describe("dashboard", () => {
     await page.goto("/");
 
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+
+    // Today comes first: today's P&L and the open positions sit above the all-time performance.
+    const main = page.locator("main").first();
+    const order = await main.evaluate((root) => {
+      const text = root.textContent ?? "";
+      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Shows what is still open"), performance: text.indexOf("Trading Performance") };
+    });
+    expect(order.today).toBeGreaterThanOrEqual(0);
+    expect(order.positions).toBeGreaterThanOrEqual(0);
+    expect(order.today).toBeLessThan(order.performance);
+    expect(order.positions).toBeLessThan(order.performance);
+    // Money always puts the sign before the dollar sign.
+    await expect(main).not.toContainText("$-");
+    await page.setViewportSize({ width: 1440, height: 1100 });
+    await page.screenshot({ path: test.info().outputPath("dashboard-desktop.png") });
 
     // Aggregates computed from the seeded, reconstructed closed trades.
     await expect(page.getByText("+$1,019.00").first()).toBeVisible();
@@ -86,7 +101,7 @@ test.describe("dashboard", () => {
     await fillCheck.getByRole("button", { name: "Run" }).click();
     await queued;
     await pageRefresh;
-    expect(requests.some((url) => new URL(url).port === "8099" || new URL(url).port === "8080")).toBe(false);
+    expect(requests.some((url) => new URL(url).port === new URL(API).port || new URL(url).port === "8080")).toBe(false);
   });
 });
 
@@ -104,8 +119,32 @@ test.describe("trades", () => {
     }
 
     // Values, not just presence: a table of empty rows would pass otherwise.
-    await expect(page.getByText("+$1300").first()).toBeVisible();
+    await expect(page.getByText("+$1,300").first()).toBeVisible();
     await expect(page.getByText("+$19").first()).toBeVisible();
+    // Short calendar expiries, cents on prices, hold in hours and days.
+    const table = page.getByRole("table");
+    // Seed dates move with the run date, so the check is on the form, not a fixed day.
+    await expect(table.getByRole("cell", { name: /^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/ }).first()).toBeVisible();
+    await expect(table).not.toContainText(/\d{4}-\d{2}-\d{2}/);
+    await expect(table).not.toContainText("$-");
+  });
+
+  test("the daily review calendar tints each trade day by what closed and links to its review", async ({ page }) => {
+    await page.goto("/daily");
+    await expect(page.getByRole("heading", { name: "Daily Review Calendar" })).toBeVisible();
+    const days = page.getByTestId("daily-calendar").locator('a[href^="/daily/2"]');
+    await expect(days.first()).toBeVisible();
+    // Every trade day names its trades, what closed and whether it is reviewed.
+    for (const label of await days.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label") ?? ""))) {
+      expect(label).toMatch(/^\w{3}, \w{3} \d{1,2}, \d{4}: \d+ trades?, (nothing closed|[+-]?\$[\d,]+), (reviewed|not reviewed|review needs refresh)$/);
+    }
+    expect((await days.evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))).some((label) => /[+-]\$/.test(label ?? ""))).toBe(true);
+    await expect(page.getByText("trade(s)")).toHaveCount(0);
+    // Every trade day the index lists has a cell, weekends included.
+    const listed = (await (await page.request.get("/api/backend/daily-review")).json()) as { day: string }[];
+    await expect(days).toHaveCount(listed.length);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.screenshot({ path: test.info().outputPath("daily-calendar.png") });
   });
 
   test("a trade opens its detail page with a fill timeline", async ({ page }) => {

@@ -50,8 +50,9 @@ def _scaled(bar: dict, factor: float) -> dict:
     if factor == 1.0:
         return bar
     row = {k: bar[k] / factor for k in ("open", "high", "low", "close")}
-    if bar.get("vwap") is not None:
-        row["vwap"] = bar["vwap"] / factor
+    for key in ("vwap", "vwap_sd"):
+        if bar.get(key) is not None:
+            row[key] = bar[key] / factor
     return {**bar, **row, "volume": bar["volume"] * factor}
 
 

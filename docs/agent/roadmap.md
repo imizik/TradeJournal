@@ -5,27 +5,34 @@ and the decisions worth not relitigating. A planning document, not a
 specification. The principle throughout: **raise agent autonomy only as fast
 as the verification layer earns trust.**
 
+For future trading features and the plan → trade → review → improve workflow,
+see the [product roadmap](../product-roadmap.md). This file covers the
+engineering foundation; the product roadmap preserves the active Charts and
+Symbol info priorities.
+
 ## Where we are
 
 Reproducibility, verification, environment isolation and deployment are all in
 place. What each of them proves is documented where it is enforced, not here.
 
 - **Setup and verification.** A fresh clone with no credentials can be set up,
-  verified and run, and CI runs the same checks on every pull request. What
+  verified and run. CI runs its complete release gate on runtime changes and
+  keeps the backend/docs checks for documentation-only pull requests. What
   that covers and what it does not is in [verification.md](verification.md).
 - **Rules CI enforces**, rather than documentation an agent can miss.
-  `test_import_boundaries.py` holds the public ingress to a module allowlist
-  and keeps the pure engine free of network and database imports; `ruff` covers
+  `test_import_boundaries.py` keeps pure engine modules free of network and
+  database imports; `ruff` covers
   the backend for unused and undefined names. Both run ahead of the suite.
 - **Frontend verification.** `backend/scripts/seed_dev_data.py` builds a
   deterministic dataset through the real reconstructor and `frontend/e2e/`
-  asserts its values reach the DOM. Smoke depth on purpose: filtering,
-  sorting, forms, editing and Strategy Lab are not covered, and there is no
+  asserts its values reach the DOM. Smoke depth on purpose: the Analytics
+  explorer's filters and drill-downs are covered (`analytics.spec.ts`), but
+  sorting, forms, editing and Strategy Lab are not, and there is no
   component-level unit coverage. Deepen when a regression justifies it.
 - **Environments.** `GET /health` names the database a process is on,
   `resync-all` refuses a hosted database unless the request names it, Alembic
   is the only schema authority, and three database roles separate migration,
-  application and TradingView-ingress access. See
+  application access; the legacy TradingView ingress role remains unused pending operator cleanup. See
   [environments.md](environments.md).
 - **Postgres in CI.** `test_postgres_parity.py` and
   `test_postgres_migration_paths.py` run against a `postgres:16` service
@@ -41,18 +48,21 @@ place. What each of them proves is documented where it is enforced, not here.
   branches. Generated artifacts are gitignored so branches do not fight over
   them, and `test_schema_migrations.py` fails on two Alembic heads, which is
   the main way parallel branches collide here.
+- **Bounded Codex ownership.** [The delegation workflow](codex-workflow.md)
+  assigns one Luna worker to ordinary execution and keeps Sol on decisions
+  and review where consequence warrants it. Shared surfaces have one writer;
+  separate branches alone do not prevent conflicting changes.
 
 ## Still open
 
 - **Staging.** No persistent staging host. Staging and production must not
   share a database, credentials, webhook tokens, Gmail state or
   external-integration identity (`environments.md`).
-- **Review that is required rather than advisory.** An independent reviewer
-  exists — the Codex GitHub App reviews pull requests — but `main` has no
-  branch protection, so a pull request can still merge with no review at all
-  (`verification.md`).
-- **A convention for splitting work** so two agents do not both land in
-  `reconstructor.py` in the same afternoon.
+- **Durable review follow-through.** The [native review workflow](pr-review.md)
+  returns subagent findings to the active owner before publishing ready work.
+  CI is protected on `main`; native model review is instruction-driven after
+  retiring the receipt gate. Automatically resuming a closed local session
+  would require a persistent runner; it is not shipped.
 
 ## Decided, with the reasoning worth keeping
 
@@ -79,13 +89,11 @@ paragraph. See
 [domain-rules.md](domain-rules.md#known-same-timestamp-ordering-is-arbitrary).
 
 **The app is not stateless**, and any future hosting decision inherits that.
-Startup normalizes the Roth account and restores manual fills; background
-jobs, the Gmail watch renewer and the TradingView analysis worker all expect a
-long-lived process, and the database is a durable queue rather than a task
-dispatcher (`architecture.md`). A scale-to-zero platform breaks that model.
-The public TradingView ingress is the only process that may be
-internet-reachable; the private API has no auth at all, and any host has to
-preserve that split. Cost matters more than elasticity for a single-user app.
+Startup normalizes the Roth account and restores manual fills; background jobs
+and the Gmail watch renewer expect a long-lived process, and the database is a
+durable queue rather than a task dispatcher (`architecture.md`). A
+scale-to-zero platform breaks that model. The API has no authentication and
+must remain private. Cost matters more than elasticity for a single-user app.
 
 ## Deliberately not doing
 

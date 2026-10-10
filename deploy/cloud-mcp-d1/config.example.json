@@ -1,0 +1,19 @@
+{
+  "enabled": false,
+  "synthetic_only": true,
+  "sample_only": true,
+  "decision_writes": false,
+  "issuer_url": "https://identity.example.test/",
+  "resource_url": "https://journal.example.test/mcp",
+  "jwks_url": "https://identity.example.test/.well-known/jwks.json",
+  "jwks_file": "/var/lib/tradejournal-d0-keys/jwks.json",
+  "client_id": "replace-with-existing-approved-public-client",
+  "backend_socket": "/run/tradejournal-d1/reads.sock",
+  "profiles": [{
+    "subject": "replace-with-approved-subject",
+    "id": "d0_11111111-1111-4111-8111-111111111111",
+    "enabled": false,
+    "principal_id": "replace-with-existing-sample-principal",
+    "principal_version": 1
+  }]
+}

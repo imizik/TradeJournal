@@ -27,9 +27,10 @@ from app.database import engine
 from app.models import JobRun
 
 log = logging.getLogger(__name__)
-LANES = ("sync", "polygon", "webull", "gmail")
+LANES = ("sync", "polygon", "webull", "gmail", "capture", "practice")
 # Job types that own a lane of their own; everything else runs in "sync".
-_DEDICATED_LANES = {"polygon_enrich": "polygon", "webull_listener": "webull", "gmail_listener": "gmail"}
+# Transcribing a voice capture (Charts C3.5) never waits behind a broker sync or enrichment.
+_DEDICATED_LANES = {"polygon_enrich": "polygon", "webull_listener": "webull", "gmail_listener": "gmail", "capture_transcribe": "capture", "practice_prepare": "practice"}
 _current_lane: ContextVar[str | None] = ContextVar("job_lane", default=None)
 # Set by a worker's SIGTERM handler. Open-ended listeners poll it so a
 # supervisor stop ends them cleanly instead of waiting out the kill timeout.
@@ -171,6 +172,12 @@ def _dispatch(job: JobRun) -> int:
     if job.job_type == "gmail_listener":
         from app.engine.gmail_listener import run_listener
         return run_listener(job.id)
+    if job.job_type == "practice_prepare":
+        from app.engine.practice import run_preparation_job
+        return run_preparation_job(job.id)
+    if job.job_type == "capture_transcribe":
+        from app.engine.captures import run_transcription_job
+        return run_transcription_job(job.id)
     if job.job_type in {"polygon_enrich", "alpaca_enrich", "trade_path"}:
         from app.engine.jobs import _run_job
         return _run_job(job.id)

@@ -16,6 +16,7 @@ from app.database import get_session
 from app.engine import chart_feed as feed_module
 from app.engine.chart_feed import ChartFeed, ChartFeedError
 from app.engine.chart_math import CLOCK_NOTE, ET, chart_bars, indicators, market_day, normalize_bars, session_part
+from app.engine.symbol_info_tradier import SymbolEvents
 from app.models import Account, ChartSettingsRecord, Fill
 from app.routers import charts
 
@@ -50,6 +51,20 @@ def test_vwap_is_minute_weighted_and_resets_at_regular_open():
     assert five[1]["vwap"] == one[2]["vwap"]
     assert one[3]["vwap"] is None
     assert one[4]["vwap"] == 200
+
+
+def test_vwap_standard_deviation_is_the_volume_weighted_spread_of_minute_prices():
+    # Typical prices (H + L + C) / 3 equal the close here. 09:30: 100 x 10; 09:31: 110 x 30.
+    # VWAP 107.5; variance (10 x 100^2 + 30 x 110^2) / 40 - 107.5^2 = 11,575 - 11,556.25 = 18.75.
+    raw = [minute("2026-09-28T09:00", 10, 10000), minute("2026-09-28T09:30", 100, 10),
+           minute("2026-09-28T09:31", 110, 30), minute("2026-09-28T16:01", 900, 10000)]
+    one = chart_bars(raw, [], "1m", "extended")
+    five = chart_bars(raw, [], "5m", "extended")
+    assert one[0]["vwap_sd"] is None and one[3]["vwap_sd"] is None  # none outside the regular session
+    assert one[1]["vwap_sd"] == 0
+    assert one[2]["vwap_sd"] == pytest.approx(18.75 ** 0.5)
+    assert five[1]["vwap_sd"] == one[2]["vwap_sd"]  # a resampled candle carries its last minute's
+    assert chart_bars([], [{"time": 0, "end_time": 1, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 1}], "1D", "regular")[0]["vwap_sd"] is None
 
 
 def test_wilder_rsi_matches_published_reference_sequence_and_warmup_is_null():
@@ -159,7 +174,9 @@ def provider(monkeypatch):
         elif "history" in url:
             payload = {"history": {"day": {"date": today, "open": 100, "high": 101, "low": 99, "close": 100, "volume": 100}}}
         else:
-            payload = {"quotes": {"quote": {"symbol": "SPY", "last": 100, "trade_date": 1000000}}}
+            payload = {"quotes": {"quote": {"symbol": "SPY", "type": "etf", "last": 100, "trade_date": 1000000,
+                                                "prevclose": 98, "close": 99, "high": 102, "low": 98,
+                                                "week_52_high": 120, "week_52_low": 80}}}
         return httpx.Response(status[0], json=payload, request=httpx.Request("GET", url))
 
     monkeypatch.setattr(feed_module.httpx, "get", get)
@@ -169,8 +186,12 @@ def provider(monkeypatch):
 def test_five_panels_share_history_and_poll_only_recent_data(provider):
     feed, calls, clock, _ = provider
     frames = ["1m", "5m", "15m", "1h", "1D"]
-    feed.workspace("SPY", frames, ["QQQ", "SPY"], "extended")
+    data = feed.workspace("SPY", frames, ["QQQ", "SPY"], "extended")
     assert len(calls) == 4  # today, the whole daily series (once per date), the daily tail and quotes
+    quote = data["quotes"][0]
+    assert quote["regular_close"] == 99
+    assert quote["instrument_type"] == "etf"
+    assert (quote["day_low"], quote["day_high"], quote["week_52_low"], quote["week_52_high"]) == (98, 102, 80, 120)
     feed.workspace("SPY", frames, ["SPY", "QQQ"], "regular")
     assert len(calls) == 4  # completed minutes use SIP history
     clock[0] += 16
@@ -296,7 +317,7 @@ def test_missing_key_and_denied_access_do_not_fall_back_to_other_feeds(provider,
 
 
 @pytest.fixture
-def route_client(monkeypatch):
+def route_client(monkeypatch, tmp_path):
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
     SQLModel.metadata.create_all(engine)
     with Session(engine) as db:
@@ -319,6 +340,9 @@ def route_client(monkeypatch):
         return {"panels": {"5m": {"bars": chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular"), "markers": []}}}
 
     monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    # Earnings come from the cache only; no key here, so none are read.
+    monkeypatch.setattr(charts.symbol_info_tradier, "symbol_events", SymbolEvents(root=tmp_path, spawn=lambda work: None))
+    monkeypatch.setattr(charts.symbol_info_tradier.tradier, "TRADIER_API_KEY", "")
     with TestClient(app) as client:
         yield client
     engine.dispose()
@@ -354,9 +378,10 @@ def test_history_route_identifies_window_and_returns_bounded_old_markers(route_c
 def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route_client, monkeypatch):
     calls = []
 
-    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True, stored_session=None):
+    def fake_workspace(symbol, frames, watchlist, session, calendar=None, quotes=True, stored_session=None, volume_profile=None):
         calls.append((symbol, frames, watchlist, quotes))
         assert stored_session == charts.chart_history.stored  # every symbol gets its automatic levels
+        assert volume_profile == charts.chart_history.volume_profile  # and its relative volume
         if symbol == "BAD":
             raise ChartFeedError("Tradier could not load these charts.")
         bars = chart_bars([minute("2026-09-29T09:30"), minute("2026-09-29T10:00")], [], "5m", "regular")
@@ -373,8 +398,11 @@ def test_workspace_route_loads_symbols_held_by_panels_without_their_quotes(route
     # A held symbol that fails leaves the main charts and the other held symbol intact.
     data = route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&session=regular&extras=SPY:5m,BAD:5m").json()
     assert data["panels"]["5m"]["bars"] and data["extras"]["SPY"]["panels"]["5m"]["bars"]
-    assert data["extras"]["BAD"] == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
-                                     "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "fills_truncated": False}
+    assert data["extras"].pop("BAD") | {"earnings": None} == {"panels": {}, "fetched_at": {}, "intraday_as_of": None,
+                                                         "issues": ["Tradier could not load these charts."], "adjustment": None, "auto_levels": None, "rvol": None,
+                                                         "fills_truncated": False, "earnings": None, "positions": []}
+    # Every symbol on screen carries its earnings (C2.5), even one whose candles failed.
+    assert data["earnings"]["state"] == "unavailable" and data["extras"]["SPY"]["earnings"]["source"] == "Tradier corporate calendar"
 
 
 def test_held_symbol_discloses_when_its_fill_markers_are_capped(route_client, monkeypatch):
@@ -489,3 +517,103 @@ def test_chart_settings_refuse_oversized_documents(route_client):
     response = route_client.put("/charts/settings", json={"base_revision": 0, "data": huge})
     assert response.status_code == 413 and response.json()["detail"]["code"] == "too_large"
     assert route_client.get("/charts/settings").json()["revision"] == 0
+
+
+# --- the options levels layer (C4.4) and the strike ladder (C4.5) -----------
+
+
+def test_options_levels_join_the_automatic_levels_before_they_merge():
+    from app.engine.chart_levels import Level
+    weekdays = [date(2026, 8, 3) + timedelta(days=i) for i in range(56)]
+    daily = normalize_bars([{"date": d.isoformat(), "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}
+                            for d in weekdays if d.weekday() < 5], daily=True)
+    asked = []
+
+    def options(symbol, spot):
+        asked.append((symbol, spot))
+        return [Level("call_wall", "Call wall", 101.1, "calculated", None, "tradier")], {"state": "ready"}
+
+    feed = ChartFeed()
+    found = feed._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, options, True)
+    # The latest price is the last daily close when today has no minutes yet.
+    assert asked == [("SPY", 100)]
+    # ATR 2, so a band of 0.2: the wall 0.1 above the prior day's high is one zone with it.
+    zone = next(z for z in found["zones"] if any(m["kind"] == "call_wall" for m in z["members"]))
+    assert {"call_wall", "prior_day_high"} <= {m["kind"] for m in zone["members"]}
+    assert found["options"] == {"state": "ready"} and found["auto"] is True
+    # With the automatic levels hidden, the options levels merge only among themselves.
+    alone = feed._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, options, False)
+    assert [[m["kind"] for m in z["members"]] for z in alone["zones"]] == [["call_wall"]]
+    assert alone["auto"] is False and "prior_day" not in alone["missing"]
+
+
+def test_workspace_route_asks_options_for_the_main_scope_and_the_held_nearest(route_client, monkeypatch):
+    seen, asked = [], []
+
+    def fake_workspace(symbol, frames, watchlist, session, **kwargs):
+        seen.append((symbol, kwargs.get("auto")))
+        kwargs["extra_levels"](symbol, 100.0)
+        return {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "adjustment": None, "quotes": []}
+
+    class Options:
+        def chart(self, symbol, layer, spot):
+            asked.append((symbol, layer.measure, layer.scope, layer.signed, spot))
+            return [], {}
+
+    monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    monkeypatch.setattr(charts, "options_feed", Options())
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&extras=SPY:5m&options=gamma.all.1&auto=0").status_code == 200
+    assert seen == [("MRVL", False), ("SPY", False)]
+    # Panels holding their own symbol read only its nearest expiration (SPY and QQQ 0DTE).
+    assert asked == [("MRVL", "gamma", "all", True, 100.0), ("SPY", "gamma", "nearest", True, 100.0)]
+
+
+def test_range_bands_join_the_zones_and_the_route_asks_for_them_on_every_symbol(route_client, monkeypatch):
+    from app.engine.chart_levels import Level
+    weekdays = [date(2026, 8, 3) + timedelta(days=i) for i in range(56)]
+    daily = normalize_bars([{"date": d.isoformat(), "open": 100, "high": 101, "low": 99, "close": 100, "volume": 10}
+                            for d in weekdays if d.weekday() < 5], daily=True)
+
+    def bands(symbol, spot):
+        return [Level("expected_move_high", "EM 0DTE high", 101.05, "calculated", None, "tradier", formed_at=1)], {"state": "ready"}
+
+    priced = []
+
+    def spy(symbol, spot):
+        priced.append(spot)
+        return bands(symbol, spot)
+
+    found = ChartFeed()._levels("SPY", date(2026, 9, 28), [], daily, {}, None, lambda *_: None, {}, None, True, spy)
+    # No minutes today: the bands get no price (never the last daily close), while other levels still use that close.
+    assert priced == [None]
+    zone = next(z for z in found["zones"] if any(m["kind"] == "expected_move_high" for m in z["members"]))
+    assert {"expected_move_high", "prior_day_high"} <= {m["kind"] for m in zone["members"]}
+    assert found["ranges"] == {"state": "ready"} and "options" not in found
+
+    seen = []
+
+    def fake_workspace(symbol, frames, watchlist, session, **kwargs):
+        seen.append((symbol, kwargs.get("auto"), "extra_levels" in kwargs, kwargs.get("range_levels") is not None))
+        return {"panels": {}, "fetched_at": {}, "intraday_as_of": None, "issues": [], "adjustment": None, "quotes": []}
+
+    monkeypatch.setattr(charts.chart_feed, "workspace", fake_workspace)
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&extras=SPY:5m&ranges=1&auto=0").status_code == 200
+    assert seen == [("MRVL", False, False, True), ("SPY", False, False, True)]
+    seen.clear()
+    assert route_client.get("/charts/workspace?symbol=MRVL&intervals=5m&auto=0").status_code == 200
+    assert seen == [("MRVL", None, False, False)]  # without a layer asked for, nothing to leave out
+
+
+@pytest.mark.parametrize("options", ["gamma", "oi.year.0", "delta.week.0", "oi.week.yes"])
+def test_workspace_route_refuses_a_malformed_options_layer(route_client, options):
+    assert route_client.get(f"/charts/workspace?symbol=MRVL&intervals=5m&options={options}").status_code == 422
+
+
+def test_ladder_route_checks_its_scope_and_passes_the_price(route_client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(charts, "options_feed", type("Options", (), {"ladder": lambda self, *args: calls.append(args) or {"rows": []}})())
+    assert route_client.get("/charts/options/spy/ladder?scope=all&signed=1&spot=660.5").json() == {"rows": []}
+    assert calls == [("SPY", "all", True, 660.5)]
+    assert route_client.get("/charts/options/BRK%2FB/ladder").status_code == 200  # a class share's slash
+    assert route_client.get("/charts/options/SPY/ladder?scope=month").status_code == 422
+    assert route_client.get("/charts/options/SPY/ladder?spot=-1").status_code == 422

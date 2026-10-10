@@ -1,11 +1,18 @@
-import { expect, test, type BrowserContext, type Locator, type Page } from "@playwright/test";
-import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, PriceAdjustment } from "../lib/charts";
+import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
+import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
+import type { Earnings } from "../lib/symbolInfo";
+import type { AlertsPayload, LevelAlert } from "../lib/alerts";
+import type { Capture, CaptureSetup } from "../lib/captures";
 
 // Each test starts from empty server settings of its own; tests tagged
 // @real-settings use the e2e backend's endpoint instead.
+/** No saved plans (C3.4) in a context, so no plan strip shifts the layout under test. */
+const noPlans = (context: BrowserContext) => context.route("**/api/backend/charts/captures?**", (route) => route.fulfill({ json: { captures: [] } }));
 test.beforeEach(async ({ context }, testInfo) => {
   if (!testInfo.tags.includes("@real-settings")) await fakeChartSettings(context);
+  // Saved plans (C3.4) live in the e2e database; tests that are not about them start with none, so no strip shifts their layout.
+  if (!testInfo.tags.includes("@captures")) await noPlans(context);
 });
 
 // Provider responses are deliberately stubbed: browser checks prove interaction,
@@ -49,7 +56,7 @@ function fixture(url: string): ChartData {
   return { symbol, session: query.get("session") === "regular" ? "regular" : "extended", provider: "Tradier", delayed: false,
     refresh_seconds: 15, checked_at: now, fetched_at: { intraday: now }, panels,
     quotes: symbols.map((s) => ({ symbol: s, name: `${s} test company`, last: s === "NVDA" ? 189.12 : 262.66,
-      change: 2, change_percentage: 1.5, volume: 1200000, previous_close: 260.66, trade_time: now - 2 })),
+      change: 2, change_percentage: 1.5, volume: 1200000, previous_close: 260.66, regular_close: 270, trade_time: now - 2 })),
     issues: [], adjustment: ADJUSTED, intraday_as_of: now - 60, history_note: "Synthetic chart data for browser verification.", fills: [], fills_truncated: false, extras };
 }
 
@@ -134,6 +141,49 @@ test("streamed trades move the selected price and candle, then pause freezes the
   await expect(page.getByLabel("Selected symbol quote")).not.toContainText("290.00");
 });
 
+test("watchlist rows use shared stream trades and the regular close for postmarket change", async ({ page }) => {
+  await page.clock.install();
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    class MockEventSource {
+      static current: MockEventSource | null = null;
+      listeners = new Map<string, Listener>();
+      constructor() { MockEventSource.current = this; queueMicrotask(() => this.emit("status", { state: "connected" })); }
+      addEventListener(type: string, listener: EventListener | EventListenerObject) { this.listeners.set(type, listener as Listener); }
+      emit(type: string, value: unknown) { this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
+      close() { /* no-op */ }
+    }
+    const testWindow = window as typeof window & {
+      __chartTick?: (value: unknown) => void;
+      __chartStreamReady?: () => boolean;
+    };
+    testWindow.__chartTick = (value) => MockEventSource.current?.emit("tick", value);
+    testWindow.__chartStreamReady = () => !!MockEventSource.current?.listeners.has("tick");
+    window.EventSource = MockEventSource as unknown as typeof EventSource;
+  });
+  await stub(page);
+  await page.goto("/charts");
+  const row = page.locator("[data-watch-row]").filter({ hasText: "NVDA" });
+  await expect(row).toBeVisible();
+  // The row can render before the effect opens the shared stream. Wait until
+  // its tick listener is attached so this synthetic event cannot be dropped.
+  await page.waitForFunction(() =>
+    (window as typeof window & { __chartStreamReady?: () => boolean }).__chartStreamReady?.() === true);
+  const at = Math.floor(Date.now() / 1000) - 1;
+  await page.evaluate((tick) => (window as typeof window & { __chartTick: (value: unknown) => void }).__chartTick(tick),
+    { type: "tick", symbol: "NVDA", at, minute: Math.floor(at / 60) * 60, session: "post", price: 275, open: 275, high: 275, low: 275, buckets: {} });
+  await expect(row).toContainText("275.00");
+  await expect(row).toContainText("+1.85");
+  await expect(row.locator("span[title]").first()).toHaveAttribute("title", /Live trade/);
+  await page.getByRole("button", { name: "Pause chart updates" }).click();
+  await expect(row).toContainText("275.00");
+  await expect(row.locator("span[title]").first()).toHaveAttribute("title", /Paused trade/);
+  // A trade older than 45 seconds stays shown until a newer one arrives; it keeps its change, dimmed, not a dash.
+  await page.clock.fastForward(50_000);
+  await expect(row.locator("span[title]").nth(1)).toHaveAttribute("title", /Paused trade · \d+s old · change as of this trade/);
+  await expect(row).toContainText("+1.85");
+});
+
 test("newer extended-hours candle is labeled instead of showing an older quote", async ({ page }) => {
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const data = fixture(route.request().url());
@@ -153,6 +203,36 @@ test("newer extended-hours candle is labeled instead of showing an older quote",
   await page.goto("/charts");
   await expect(page.getByLabel("Selected symbol quote")).toContainText("280.25");
   await expect(page.getByLabel("Selected symbol quote")).toContainText("Extended-hours candle");
+});
+
+test("after hours the headline names its session beside the regular close, and the watchlist dims the closing change", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const at = Date.parse("2026-09-29T21:30:00Z") / 1000; // 5:30 PM New York
+  await openAt(page, at, (url) => {
+    const data = currentFixture(url, at);
+    data.market = { date: "2026-09-29", status: "open", source: "tradier", description: null, note: null, sessions: [
+      { part: "pre", start: Date.parse("2026-09-29T08:00:00Z") / 1000, end: Date.parse("2026-09-29T13:30:00Z") / 1000 },
+      { part: "regular", start: Date.parse("2026-09-29T13:30:00Z") / 1000, end: Date.parse("2026-09-29T20:00:00Z") / 1000 },
+      { part: "post", start: Date.parse("2026-09-29T20:00:00Z") / 1000, end: Date.parse("2026-09-30T00:00:00Z") / 1000 }] };
+    for (const quote of data.quotes) Object.assign(quote, { last: 250, previous_close: 260, regular_close: 250, trade_time: Date.parse("2026-09-29T19:59:00Z") / 1000 });
+    for (const panel of Object.values(data.panels)) {
+      const bar = panel?.bars.at(-1);
+      if (bar && bar.end_time - bar.time < 86400) Object.assign(bar, { close: 252.5, high: Math.max(bar.high, 252.5), extended: true });
+    }
+    return data;
+  });
+  const quote = page.getByLabel("Selected symbol quote");
+  // The after-hours candle, measured from the regular close; the close itself, measured from the day before.
+  await expect(quote).toContainText("252.50");
+  await expect(quote).toContainText("+1.00%");
+  await expect(quote).toContainText("After hours");
+  await expect(quote).toContainText("Close 250.00 -3.85%");
+  // No trade in the last 45 seconds: the watchlist keeps the day's closing change, dimmed, instead of a dash.
+  const row = page.locator("[data-watch-row]").filter({ hasText: "MRVL" });
+  await expect(row).toContainText("250.00");
+  await expect(row).toContainText("-3.85");
+  await expect(row.locator("span[title]").nth(1)).toHaveAttribute("title", /change as of this quote/);
+  await expect(page.locator("footer[aria-label='Chart status']")).toContainText("may be forming");
 });
 
 test("refreshes once per cycle, stops while hidden or paused, and retains data on errors", async ({ page }) => {
@@ -188,7 +268,7 @@ test("refreshes once per cycle, stops while hidden or paused, and retains data o
 });
 
 test("missing credentials show setup state and never fake candles", async ({ page, request }) => {
-  const response = await request.get("http://127.0.0.1:8099/charts/workspace");
+  const response = await request.get(`http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}/charts/workspace`);
   expect(response.status()).toBe(503);
   expect((await response.json()).detail.code).toBe("not_configured");
   await page.goto("/charts");
@@ -218,12 +298,23 @@ test("slow provider responses never overlap polling requests", async ({ page }) 
   await expect.poll(() => requests).toBe(3);
 });
 
+/** A phone keeps one/five charts in the More menu. */
+async function singleChart(page: Page) {
+  await page.getByRole("button", { name: "More chart controls" }).click();
+  await page.getByRole("button", { name: "Show single chart" }).click();
+}
+/** A phone keeps the drawing tools behind the Draw button. */
+async function showDrawing(page: Page) {
+  await page.getByRole("button", { name: "Show drawing tools" }).click();
+  await expect(page.getByRole("toolbar", { name: "Drawing" })).toBeVisible();
+}
+
 test("mobile layout stays within the viewport and chart controls work", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await stub(page);
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toBeVisible();
-  await page.getByRole("button", { name: "Show single chart" }).click();
+  await singleChart(page);
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
@@ -282,6 +373,15 @@ function currentFixture(url: string, now: number, lastEnd = now + 30): ChartData
   data.fetched_at = { intraday: now };
   data.checked_at = now;
   return data;
+}
+/** Keep tests about live updates and layout independent of the local historical-data cache. */
+async function stubExhaustedHistory(page: Page) {
+  await page.route("**/api/backend/charts/history?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"),
+      before: Number(query.get("before")), limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
 }
 // 10:32:15 New York time on a Tuesday (EDT).
 const TUESDAY_1032 = Date.parse("2026-09-29T14:32:15Z") / 1000;
@@ -352,8 +452,13 @@ test("a holiday from the market calendar reads Market closed and names the closu
   await openAt(page, at, (url) => ({ ...currentFixture(url, at), market: THANKSGIVING }));
   // The clock rule alone would count down here: it is a Thursday morning with fresh bars.
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Market closed");
-  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveText("Market closed");
+  // Closed reads the same everywhere: the main chart says it once, the smaller charts not at all.
+  await expect(page.getByRole("timer", { name: "Panel 5 next bar" })).toHaveCount(0);
   await expect(page.getByLabel("Market hours")).toHaveText("Market is closed for Thanksgiving Day");
+  // With no session open, no candle is forming, and the status strip does not say one may be.
+  const status = page.locator("footer[aria-label='Chart status']");
+  await expect(status).toContainText("Last minute candle");
+  await expect(status).not.toContainText("may be forming");
 });
 
 test("an early close ends the regular session at 13:00 and the last bar's countdown respects it", async ({ page }) => {
@@ -369,8 +474,8 @@ test("an early close ends the regular session at 13:00 and the last bar's countd
   await page.clock.pauseAt(now * 1000);
   // Postmarket starts at the early close and anchors its own buckets.
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("4:55");
-  await page.getByRole("button", { name: "Extended hours on" }).click();
-  await expect(page.getByRole("button", { name: "Regular hours only" })).toBeVisible();
+  await page.getByRole("button", { name: "Extended hours", pressed: true }).click();
+  await expect(page.getByRole("button", { name: "Extended hours", pressed: false })).toBeVisible();
   await expect(page.getByRole("timer", { name: "Main next bar" })).toHaveText("Market closed");
 });
 
@@ -421,6 +526,7 @@ test("with no intraday bars today (weekend, holiday, overnight) charts open on t
 });
 
 test("streamed ticks update the latest candle in place and keep zoom; history changes reset", async ({ page }) => {
+  await stubExhaustedHistory(page);
   await registerCharts(page);
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
@@ -542,7 +648,7 @@ test("switching symbol, interval, session and RSI keeps every chart instance and
   await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending", "");
   await expect(page.getByLabel("main candle values")).toContainText("C ");
   // A new session is new candles: labeled until they arrive.
-  await page.getByRole("button", { name: "Extended hours on" }).click();
+  await page.getByRole("button", { name: "Extended hours", pressed: true }).click();
   await expect(pending("Loading regular hours…")).toHaveCount(5);
   open();
   await expect(pending("Loading regular hours…")).toHaveCount(0);
@@ -724,6 +830,38 @@ test("New York midnight replaces the completed Tradier day with SIP without wait
   await expect(page.getByLabel("main candle values")).toContainText("SIP");
 });
 
+test("a chart that opens on a few premarket candles takes its usual zoom when the history arrives", async ({ page }) => {
+  await registerCharts(page);
+  const older = sixMonthBars(1);
+  const base = Math.floor(Date.now() / 1000);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/backend/charts/workspace?**", (route) => {
+    const data = currentFixture(route.request().url(), base);
+    // 04:18 New York: today has four 5m candles so far.
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][])
+      if (intradayOnly(interval)) panel.bars = panel.bars.slice(-4).map((bar) => ({ ...bar, source: "tradier" }));
+    return route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/history?**", async (route) => {
+    await held;
+    const query = new URL(route.request().url()).searchParams;
+    const before = Number(query.get("before"));
+    const pageBars = older.filter((bar) => bar.time < before).slice(-1200);
+    return route.fulfill({ json: { symbol: query.get("symbol"), interval: query.get("interval"), session: query.get("session"), before,
+      limit: 1200, bars: pageBars, markers: [], older_cursor: pageBars[0]?.time ?? null, exhausted: false, continuation: null,
+      warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "4");
+  release();
+  await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(1000);
+  const width = async (id: string) => { const range = await logicalRange(page, id); return range ? Math.round(range.to - range.from) : 0; };
+  // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one.
+  await expect.poll(() => width("main")).toBe(114);
+  await expect.poll(() => width("Panel 2")).toBe(69);
+});
+
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
   await registerCharts(page);
   await page.addInitScript(() => {
@@ -789,6 +927,13 @@ test("older history failure retries without clearing current candles; a stale re
   let holdNext = false;
   let release: (() => void) | undefined;
   await page.route("**/api/backend/charts/history?**", async (route) => {
+    const asked = new URL(route.request().url()).searchParams;
+    // A short tail asks for history at once; only the main MRVL 5m chart's pages are under test.
+    // NVDA's own has none, so its candles can only grow from a stale MRVL page.
+    if (asked.get("symbol") !== "MRVL" || asked.get("interval") !== "5m")
+      return route.fulfill({ json: { symbol: asked.get("symbol"), interval: asked.get("interval"), session: asked.get("session"), before: Number(asked.get("before")),
+        limit: 1200, bars: [], markers: [], older_cursor: null, exhausted: true, continuation: null,
+        warmup: "ready", source: "alpaca_sip", price_basis: "split_adjusted", adjustment: ADJUSTED, fills_truncated: false, issue: null } });
     calls++;
     if (calls === 1) return route.fulfill({ status: 503, json: { detail: { message: "History unavailable" } } });
     if (holdNext) {
@@ -1072,6 +1217,7 @@ const EMPTY_SETTINGS = {
   levels: {}, drawings: {}, layouts: [], toolStyles: {}, magnet: false, linkRange: false, smallSize: "normal", immersiveWatchlist: false, proportions: null, layoutProportions: {},
   intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null], session: "extended", layout: "multi",
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"], hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
+  optionsLayer: { hidden: true, mode: "oi", scope: "week", nearest: 3, signed: false },
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
 };
 const savedLabels = (saved: SavedLevels) => (saved.data?.levels?.MRVL ?? []).map((level) => level.label);
@@ -1091,6 +1237,7 @@ test("a level saved in one browser appears in another, and a stale save is refus
 
   // A second browser (its own storage, like a phone) opens the same workspace.
   const other = await browser.newContext();
+  await noPlans(other);
   const phonePage = await other.newPage();
   await stub(phonePage);
   await phonePage.goto("/charts");
@@ -1233,6 +1380,8 @@ test("without the server, settings stay in this browser and save when it returns
 // ---- Per-panel symbols (C7.1): SPY, QQQ and the traded name side by side ----
 
 type StreamWindow = typeof window & { __streams: string[]; __emit: (type: string, value: unknown) => void };
+const expectStreamSymbols = async (page: Page, symbols: string[]) =>
+  expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1)?.split(",").sort())).toEqual([...symbols].sort());
 async function mockStreams(page: Page) {
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent) => void;
@@ -1294,7 +1443,7 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(page.getByRole("region", { name: "SPY 1h chart" })).not.toContainText("fills shown");
   expect(requests.at(-1)!.get("intervals")).toBe("5m,15m,1D");
   expect(requests.at(-1)!.get("extras")).toBe("QQQ:1m,SPY:1h");
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("MRVL,QQQ,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 
   await page.screenshot({ path: test.info().outputPath("panel-symbols.png") });
   // A fourth symbol is refused; the panel keeps following MRVL.
@@ -1312,7 +1461,7 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(page.getByLabel("Selected symbol quote")).toContainText("189.12");
   expect(await resets(page, "Panel 3")).toBe(heldResets); // SPY was never redrawn
   expect(await page.evaluate(() => { const w = window as unknown as { __tjCharts: Map<string, unknown>; __spy: unknown }; return w.__tjCharts.get("Panel 3") === w.__spy; })).toBe(true);
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 
   // One stream carries all three; each chart applies only its own symbol's trades.
   await trade(page, "SPY", 701.25);
@@ -1329,13 +1478,13 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await expect(page.getByLabel("Selected symbol quote")).toContainText("Live trade");
   await expect(page.getByText(/^Live trade \d+s ago$/)).toBeVisible();
 
-  // Pause freezes every symbol; resume reconnects the same three.
+  // Pause freezes every symbol; resume reconnects the chart symbols plus watchlist.
   await page.getByRole("button", { name: "Pause chart updates" }).click();
   await trade(page, "SPY", 705);
   await expect(values(page, "Panel 3")).toContainText("C 702.50");
   await page.getByRole("button", { name: "Resume chart updates" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(3);
-  expect(await page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,QQQ,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
   await trade(page, "SPY", 706.5);
   await expect(values(page, "Panel 3")).toContainText("C 706.50");
 
@@ -1350,12 +1499,12 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   expect(held.from).toBeLessThanOrEqual(middle);
   expect(held.to).toBeGreaterThanOrEqual(middle);
 
-  // Following again drops the symbol from requests and the stream.
+  // Following again drops the held chart symbol from extras; QQQ remains streamed as a watchlist name.
   await page.getByRole("button", { name: "Panel 5 symbol" }).click();
   await page.getByRole("dialog", { name: "Symbol for Panel 5" }).getByRole("option", { name: /Follow the main chart \(NVDA\)/ }).click();
   await expect(page.getByRole("region", { name: "NVDA 1m chart" })).toBeVisible();
   await expect.poll(() => requests.at(-1)!.get("extras")).toBe("SPY:1h");
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.at(-1))).toBe("NVDA,SPY");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
 });
 
 test("a held panel scrolls back its own symbol, and focusing it swaps it with the main chart", async ({ page, context }) => {
@@ -1560,6 +1709,7 @@ test("a layout saved in one browser is usable in another with its symbol groups"
 
   // A second browser (its own storage, like a phone) sees the saved layout and can switch to it.
   const other = await browser.newContext();
+  await noPlans(other);
   const phonePage = await other.newPage();
   await stub(phonePage);
   await phonePage.goto("/charts");
@@ -1697,7 +1847,7 @@ test.describe("phone layouts", () => {
     await stub(page);
     await page.goto("/charts");
     await expect(page.getByTestId("canvas-main")).toBeVisible();
-    await page.getByRole("button", { name: "Show single chart" }).click();
+    await singleChart(page);
     await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
     await layoutsButton(page).tap();
     let dialog = layoutsDialog(page);
@@ -1720,6 +1870,7 @@ test.describe("phone layouts", () => {
     await dialog.getByRole("button", { name: "Close layouts" }).tap();
 
     // Back to five charts, then the single-chart layout in one tap.
+    await page.getByRole("button", { name: "More chart controls" }).tap();
     await page.getByRole("button", { name: "Show five charts" }).tap();
     await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
     await layoutsButton(page).tap();
@@ -2170,6 +2321,8 @@ test("Space and Shift+Space step through the watchlist; a button reached by keyb
   await expect(chartedSymbol(page)).toHaveAttribute("placeholder", "QQQ");
   await expect(linkRanges).toHaveAttribute("aria-pressed", "true");
   await page.keyboard.press("Tab");
+  await expect(page.getByRole("button", { name: "Plan trade" })).toBeFocused();
+  await page.keyboard.press("Tab");
   const pause = page.getByRole("button", { name: "Pause chart updates" });
   await expect(pause).toBeFocused();
   await page.keyboard.press("Space");
@@ -2225,7 +2378,7 @@ test("? opens a cheat sheet listing exactly the bindings that exist; ? and Escap
   const bindings = ["1 3 5 15 30 then Enter", "Backspace", "Esc", "H", "4", "D", "W",
     "Space", "Shift + Space", "Alt + ↓ or Alt + ↑", "⌘ + K or Ctrl + K",
     "Delete or Backspace", "⌘ + Z or Ctrl + Z", "⌘ + Shift + Z or Ctrl + Shift + Z", "Esc", "Hold ⌘ or Ctrl",
-    "Alt + R", "End", "Esc", "↑ ↓ ← →", "?"];
+    "Alt + P", "Alt + R", "End", "Esc", "↑ ↓ ← →", "?"];
   expect(await sheet.locator("td[aria-label]").evaluateAll((cells) => cells.map((cell) => cell.getAttribute("aria-label")))).toEqual(bindings);
   await expect(sheet.getByRole("row")).toHaveCount(bindings.length);
   await page.screenshot({ path: test.info().outputPath("hotkey-sheet-desktop.png") });
@@ -2422,6 +2575,7 @@ test.describe("phone drawing layer", () => {
     await stub(page);
     await page.goto("/charts");
     await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await showDrawing(page); // Undo and Redo live with the drawing tools on a phone
     await addLevel(page, "Support", "256.00");
     await drawn(page, "main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
@@ -2480,6 +2634,20 @@ type SavedDrawing = { id: string; kind: string; points: { time: number; price: n
 const registerLayers = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjDrawings?: Map<string, unknown> }).__tjDrawings = new Map(); });
 const drawingsOf = (server: SettingsStore, symbol = "MRVL") => (server.data?.drawings as Record<string, SavedDrawing[]> | undefined)?.[symbol] ?? [];
 const anchorsOf = (page: Page, panel: string, id: string) => page.evaluate(([key, item]) => (window as unknown as { __tjDrawings: LayerProbe }).__tjDrawings.get(key)!.anchors(item), [panel, id] as const);
+test("levels priced out of view keep one tag at each edge, with an arrow, instead of piling up there", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await fakeChartSettings(context, { revision: 1, data: { levels: { MRVL: [
+    { id: "far", price: 420, label: "Far above" }, { id: "near", price: 400, label: "Above" }, { id: "low", price: 100, label: "Below" }, { id: "in", price: 262, label: "In view" }] } } });
+  await registerLayers(page);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-levels", "420.00,400.00,100.00,262.00");
+  const edgeTags = () => page.evaluate(() => (window as unknown as { __tjDrawings: Map<string, { edgeTags(): string[] }> }).__tjDrawings.get("main")!.edgeTags());
+  // The nearest level each side of the view; 420 waits behind 400, and 262 is in view with its plain price.
+  await expect.poll(edgeTags).toEqual(["↑400.00", "↓100.00"]);
+  await drawn(page, "main").screenshot({ path: test.info().outputPath("edge-tags.png") });
+});
+
 /** Where bar `index` and `price` are drawn on a chart's candle pane. */
 const screenAt = (page: Page, id: string, index: number, value: number) => page.evaluate(([key, at, p]) => {
   const chart = (window as unknown as { __tjCharts: CoordinateProbe }).__tjCharts.get(key as string)!;
@@ -2757,6 +2925,7 @@ test.describe("phone drawing tools", () => {
     await stub(page);
     await page.goto("/charts");
     await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await showDrawing(page);
     await drawn(page, "main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
     const box = (await drawn(page, "main").boundingBox())!;
@@ -3494,6 +3663,7 @@ test("on the charts page the journal navigation is a rail that expands and is re
 });
 
 test("dock, navigation and window resizes keep every chart, the selection, the scrolled-back view and the live stream, with no new requests", async ({ page, context }) => {
+  await stubExhaustedHistory(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   const server = await fakeChartSettings(context);
   await registerCharts(page);
@@ -3564,8 +3734,22 @@ test("dock, navigation and window resizes keep every chart, the selection, the s
   await expect(page.getByLabel("Selected symbol quote")).toContainText("281.50");
   await page.keyboard.press("Alt+r");
   await expect.poll(async () => (await roundedRange(page, "main"))?.to).toBeGreaterThanOrEqual(244); // the trade opened a newer candle
+  // Following the new live candle animates the price scale. A coordinate read
+  // during that transition can miss the level, or turn a $2 move into <3px.
+  await expect.poll(async () => {
+    const before = await levelY(page, "main", 250);
+    await page.waitForTimeout(100);
+    return Math.abs((await levelY(page, "main", 250)) - before);
+  }).toBeLessThan(0.5);
   await clickChart(page, "main", { x: 220, y: await levelY(page, "main", 250) });
-  await mouseDrag(page, "main", await levelY(page, "main", 250), await levelY(page, "main", 252));
+  await expect(drawn(page, "main")).toHaveAttribute("data-selected", pivot);
+  const [fromY, toY] = await page.evaluate(() => {
+    const candles = (window as unknown as { __tjCharts: PaneRegistry }).__tjCharts.get("main")!
+      .panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    return [candles.priceToCoordinate(250)!, candles.priceToCoordinate(252)!];
+  });
+  expect(fromY - toY).toBeGreaterThan(3); // the chart's minimum drag distance
+  await mouseDrag(page, "main", fromY, toY);
   await expect.poll(() => savedLevels(server)[0].price).toBeGreaterThan(251);
 });
 
@@ -3577,7 +3761,7 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   const toolbar = page.locator("header[aria-label='Chart toolbar']");
   expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
-  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers"]) {
+  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Plan trade", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder"]) {
     const control = name === "Chart symbol" ? page.getByLabel(name) : page.getByRole("button", { name, exact: name !== "Layouts" });
     await expect(control.first(), name).toBeInViewport();
   }
@@ -3600,8 +3784,8 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   await clickAway(page);
   await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
 
-  // Focus order: the toolbar's last control, then the tool rail, then the charts, with the dock last.
-  await page.getByRole("button", { name: "Layers", exact: true }).focus();
+  // Focus order: the toolbar's last control (the strike ladder's dock tab, C4.5), then the tool rail, then the charts, with the dock last.
+  await page.getByRole("button", { name: "Strike ladder", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(tool(page, "price level")).toBeFocused(); // Undo and Redo are disabled, so the first tool is next
   await page.getByRole("button", { name: "Magnet" }).focus();
@@ -4069,6 +4253,7 @@ test("two browsers share the chart proportions but not the dock's width, merge a
 
   // A second browser (its own storage, like another computer) opens at the same proportions and its own dock width.
   const other = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  await noPlans(other);
   const second = await other.newPage();
   await gmail(second, true);
   await stub(second);
@@ -4106,7 +4291,7 @@ test("two browsers share the chart proportions but not the dock's width, merge a
   // The older tab deletes the layout; this browser's next save lets its proportions go.
   expect((await request.put("/api/backend/charts/settings", { data: { base_revision: after.revision, data: { ...older, session: "regular", layouts: [] } } })).ok()).toBe(true);
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect(page.getByRole("button", { name: "Extended hours on" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Extended hours", pressed: false })).toBeVisible();
   await rowDivider(page).focus();
   await page.keyboard.press("ArrowDown");
   await expect.poll(async () => (await settingsNow()).data?.layoutProportions).toEqual({});
@@ -4129,6 +4314,12 @@ test.describe("phone workspace", () => {
     expect((await fit(page)).pageWidth).toBeLessThanOrEqual(390);
     const canvas = (await drawn(page, "main").boundingBox())!;
     expect(canvas.height).toBeGreaterThanOrEqual(400);
+    // No app title bar on the charts page and the drawing tools behind Draw: the chart starts high on the screen.
+    // Measured from the chart toolbar, so an app banner above it does not count; with the tools row it was about 300px.
+    const toolbarTop = (await toolbar.boundingBox())!.y;
+    expect(canvas.y - toolbarTop).toBeLessThan(270);
+    await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeHidden();
+    await page.screenshot({ path: test.info().outputPath("phone-toolbar-top.png") });
     await page.screenshot({ path: test.info().outputPath("phone-toolbar.png"), fullPage: true });
 
     // The secondary controls, the data note and the library's attribution wait in the More menu.
@@ -4225,19 +4416,138 @@ const AUTO_ZONES = [
 const NEAREST_IDS = AUTO_ZONES.slice(1, 7).map((zone) => zone.id).join(",");
 const at = (clock: string) => Date.parse(`2026-09-14T${clock}:00-04:00`) / 1000;
 const AUTO_EVENTS: Record<string, LevelInteraction> = Object.fromEntries(AUTO_ZONES.map((zone) => [zone.id, { state: "untested", events: [], at_level: false }]));
-AUTO_EVENTS[AUTO_ZONES[2].id] = { state: "broken", events: [{ event: "tested", time: at("10:05") }, { event: "broken", time: at("11:40") }], at_level: false };
+AUTO_EVENTS[AUTO_ZONES[2].id] = { state: "broken", events: [
+  { event: "approached", direction: "below", time: at("09:55"), bar_time: at("09:50") },
+  { event: "tested", direction: "below", time: at("10:05"), bar_time: at("10:00") },
+  { event: "broken", direction: "above", time: at("11:40"), bar_time: at("11:35") },
+], at_level: false, since: at("09:35"), last_close: 257.34, last_close_at: at("11:55") };
 
-async function stubAutoLevels(page: Page) {
+async function stubAutoLevels(page: Page, configure?: (data: ChartData) => void) {
   await page.route("**/api/backend/charts/workspace?**", async (route) => {
     const data = fixture(route.request().url());
-    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: { overnight: "No minute bars for 2026-09-11.", opening_range_15m: "Forms at 09:45." } };
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), session: "extended", atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: { overnight: "No minute bars for 2026-09-11.", opening_range_15m: "Forms at 09:45." } };
     for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D" && interval !== "1W") panel.level_events = AUTO_EVENTS;
+    configure?.(data);
     await route.fulfill({ json: data });
   });
 }
 type AutoProbe = Map<string, { y(id: string): number | null }>;
 const registerAutoLevels = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjAutoLevels?: Map<string, unknown> }).__tjAutoLevels = new Map(); });
 const autoY = (page: Page, panel: string, id: string) => page.evaluate(([key, zone]) => (window as unknown as { __tjAutoLevels: AutoProbe }).__tjAutoLevels.get(key)!.y(zone)!, [panel, id] as const);
+
+test("level cards stay on the chart under the pointer through linked crosshair redraws and interval changes", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-bars", "240");
+  const main = drawn(page, "main");
+  const region = page.getByRole("region", { name: "MRVL 5m chart", exact: true });
+  const box = (await main.boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  // Range changes recalculate a linked crosshair after the synchronous linking guard has ended.
+  await page.evaluate(() => {
+    type Candles = SeriesProbe & { data(): { time: number }[] };
+    type Chart = { panes(): { getSeries(): Candles[] }[]; setCrosshairPosition(price: number, time: number, series: Candles): void;
+      timeScale(): { getVisibleLogicalRange(): { from: number; to: number } | null; setVisibleLogicalRange(range: { from: number; to: number }): void } };
+    const charts = (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts;
+    const receiver = charts.get("Panel 2")!;
+    const candles = receiver.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    // The link uses this API. Put a receiver's synthetic crosshair on a zone so the bug must exhibit.
+    receiver.setCrosshairPosition(258.5, candles.data().at(-1)!.time, candles);
+    for (const chart of [...charts.values()].reverse()) {
+      const range = chart.timeScale().getVisibleLogicalRange()!;
+      chart.timeScale().setVisibleLogicalRange({ from: range.from + 0.25, to: range.to + 0.25 });
+    }
+  });
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  await expect(page.getByRole("tooltip")).toHaveCount(1);
+  // Leaving the plot for its price axis clears the hover even while inside the chart container.
+  await page.mouse.move(box.x + box.width - 20, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip")).toBeVisible();
+  await page.mouse.move(1, 1);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+  // An intentional click still pins a card, but a different timeframe starts without it.
+  await page.mouse.click(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip").getByRole("button", { name: "Close level card" })).toBeVisible();
+  await page.getByLabel("Main interval", { exact: true }).selectOption("15m");
+  await expect(page.getByRole("region", { name: "MRVL 15m chart", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
+test("redraws under a stationary pointer refresh its candle readout, linked time and level card", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-bars", "240");
+  const region = page.getByRole("region", { name: "MRVL 5m chart", exact: true });
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[4].id));
+  await expect(region.getByRole("tooltip", { name: "ONH level card" })).toBeVisible();
+  const before = await page.getByLabel("main candle values").textContent();
+  // Move the candles under a pointer that stays put; use the chart's new coordinate/time mapping.
+  const candle = await page.evaluate(async () => {
+    type Chart = import("lightweight-charts").IChartApi;
+    const chart = (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!;
+    chart.timeScale().setVisibleLogicalRange({ from: 20, to: 70 });
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    const time = chart.timeScale().coordinateToTime(300);
+    const row = chart.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!.data().find((bar) => bar.time === time)!;
+    if (typeof time !== "number" || !("close" in row)) throw new Error("Expected a candle under the stationary pointer");
+    return { time, close: row.close };
+  });
+  await expect(page.getByLabel("main candle values")).toContainText(`C ${candle.close.toFixed(2)}`);
+  await expect(page.getByLabel("main candle values")).not.toHaveText(before!);
+  const followerBars = fixturePanels(["15m"])["15m"]!.bars;
+  const follower = followerBars.find((bar) => bar.time <= candle.time && candle.time < bar.end_time) ?? followerBars.at(-1)!;
+  await expect(page.getByLabel("Panel 2 candle values")).toContainText(`C ${follower.close.toFixed(2)}`);
+  // The former zone is now off the price scale; no old card may stay at the pointer.
+  expect(await autoY(page, "main", AUTO_ZONES[4].id)).toBeLessThan(0);
+  await expect(region.getByRole("tooltip", { name: "ONH level card" })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "MRVL 15m chart", exact: true }).getByRole("tooltip")).toHaveCount(0);
+});
+
+test("a pinned level card covers the RSI resize handle and chart lines", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubAutoLevels(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // A taller RSI pane puts its separator through the card, as on the reported layout.
+  await page.evaluate(async () => {
+    type Chart = { panes(): { setHeight(height: number): void }[] };
+    (window as unknown as { __tjCharts: Map<string, Chart> }).__tjCharts.get("main")!.panes()[1].setHeight(300);
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  });
+  const canvas = drawn(page, "main");
+  const box = (await canvas.boundingBox())!;
+  await page.mouse.click(box.x + 320, box.y + await autoY(page, "main", AUTO_ZONES[2].id));
+  const card = page.getByRole("region", { name: "MRVL 5m chart", exact: true }).getByRole("tooltip");
+  await expect(card.getByRole("button", { name: "Close level card" })).toBeVisible();
+  // Find the actual library handle; sample the overlap so a z-index regression cannot pass.
+  const overlap = await canvas.evaluate((element) => {
+    const handle = [...element.querySelectorAll<HTMLElement>("*")].find((node) => node.style.zIndex === "50" && getComputedStyle(node).cursor === "row-resize")!;
+    const tooltip = element.parentElement!.querySelector('[role="tooltip"]')!;
+    const [line, card] = [handle.getBoundingClientRect(), tooltip.getBoundingClientRect()];
+    const top = Math.max(line.top, card.top), bottom = Math.min(line.bottom, card.bottom);
+    const x = card.left + 20, y = (top + bottom) / 2;
+    return { height: bottom - top, covered: tooltip.contains(document.elementFromPoint(x, y)), background: getComputedStyle(tooltip).backgroundColor };
+  });
+  expect(overlap.height).toBeGreaterThan(0);
+  expect(overlap.covered).toBe(true);
+  expect(overlap.background).toBe("rgb(20, 27, 38)");
+  await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
+  await card.getByRole("button", { name: "Close level card" }).click();
+  await expect(card).toHaveCount(0);
+});
 
 test("automatic levels draw the nearest three each side, a hover shows each one's card, and the group hides on every chart", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
@@ -4250,17 +4560,31 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-auto-levels", NEAREST_IDS);
+  // The main chart names each zone on a tag, its most telling member first and the rest counted; tags never
+  // overlap, and the smaller charts carry none.
+  const tagsOf = (panel: string) => page.evaluate((key) => (window as unknown as { __tjAutoLevels: Map<string, { tags(): { text: string; top: number; bottom: number }[] }> }).__tjAutoLevels.get(key)!.tags(), panel);
+  await expect.poll(async () => (await tagsOf("main")).map((tag) => tag.text)).toEqual(expect.arrayContaining(["PDH +1", "ONH"]));
+  const tags = (await tagsOf("main")).sort((a, b) => a.top - b.top);
+  for (let index = 1; index < tags.length; index++) expect(tags[index].top).toBeGreaterThanOrEqual(tags[index - 1].bottom);
+  expect(tags.map((tag) => tag.text).filter((text) => /^\d/.test(text))).toEqual([]); // a round number reads "Round 252", never a bare price
+  expect(await tagsOf("Panel 2")).toEqual([]);
 
   // Hovering the 254 zone on the 5m chart reads its card: members, sources, and today's tests and breaks.
   const box = (await drawn(page, "main").boundingBox())!;
   await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[2].id));
   const card = page.getByRole("tooltip", { name: "PDH + 254 level card" });
   await expect(card).toBeVisible();
-  await expect(card).toContainText("254.00–254.30 · 2 independent sources");
-  await expect(card.getByLabel("Interactions today")).toContainText("Broken");
-  await expect(card).toContainText("Tested 10:05 AM");
-  await expect(card).toContainText("Broken 11:40 AM");
-  await expect(card).toContainText("Today, on closed 5m bars, within ±0.55 (a tenth of the daily ATR).");
+  await expect(card).toContainText("254.00–254.30 · 2 landmarks");
+  await expect(card.getByLabel("Interactions today")).toContainText("Closed across zone");
+  await expect(card).toContainText("Approached; left below · confirmed 9:55 AM ET");
+  await expect(card).toContainText("Touched; left below · confirmed 10:05 AM ET");
+  await expect(card).toContainText("Closed above · confirmed 11:40 AM ET");
+  await expect(card).toContainText("Today, on closed 5m bars, including extended hours. Touches enter 254.00–254.30.");
+  await expect(card).toContainText("Nearby only: 253.45–254.85. Approaches are not touches.");
+  await expect(card).toContainText("History since 9:35 AM ET for this confirmed combination; earlier bars are excluded.");
+  await expect(card).toContainText("Last closed candle: 257.34 at 11:55 AM ET.");
+  await expect(card).not.toContainText("independent sources");
+  await expect(card).not.toContainText("Price is at it now");
   await expect(card).toContainText("PDH Prior day high254.30");
   await expect(card).toContainText("observed · Tradier daily bar · formed Sep 11, 2026 4:00 PM");
   await expect(card).toContainText("calculated · price rule");
@@ -4296,12 +4620,43 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
   expect(errors).toEqual([]);
 });
 
+test("a changing combination counts landmarks without inventing a fixed contact history", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  const combined = autoZone([AUTO_ZONES[4].members[0], autoMember("premarket_high", "PMH", 258.5, { developing: true })], 1);
+  await stubAutoLevels(page, (data) => {
+    data.auto_levels!.zones = AUTO_ZONES.map((zone) => zone.id === AUTO_ZONES[4].id ? combined : zone);
+    for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D") {
+      panel.level_events = { ...AUTO_EVENTS, [combined.id]: { state: "developing", events: [], at_level: false } };
+    }
+  });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", new RegExp(combined.id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 150, box.y + await autoY(page, "main", combined.id));
+  const card = page.getByRole("tooltip", { name: "ONH + PMH level card" });
+  await expect(card).toContainText("258.50 · 2 landmarks");
+  await expect(card).toContainText("Combination still changing");
+  await expect(card).toContainText("this combination has no fixed contact history");
+  await expect(card).not.toContainText("History since");
+  await expect(card).not.toContainText("independent");
+  await page.screenshot({ path: test.info().outputPath("zone-changing-combination.png") });
+});
+
 test.describe("phone automatic levels", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
   test("a tap opens a level's card and it stays until Close", async ({ page }) => {
     await registerCharts(page);
     await registerAutoLevels(page);
-    await stubAutoLevels(page);
+    await stubAutoLevels(page, (data) => {
+      data.auto_levels!.session = "regular";
+      for (const [interval, panel] of Object.entries(data.panels)) if (panel && interval !== "1D") {
+        panel.level_events = { ...AUTO_EVENTS, [AUTO_ZONES[4].id]: { state: "touched", events: [], at_level: true,
+          near_level: true, since: at("09:35"), last_close: 258.50, last_close_at: at("11:55") } };
+      }
+    });
     await page.goto("/charts");
     await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
     await drawn(page, "main").scrollIntoViewIfNeeded();
@@ -4310,7 +4665,11 @@ test.describe("phone automatic levels", () => {
     await page.touchscreen.tap(Math.round(box.x + 150), Math.round(box.y + await autoY(page, "main", AUTO_ZONES[4].id) + 8));
     const card = page.getByRole("tooltip", { name: "ONH level card" });
     await expect(card).toBeVisible();
-    await expect(card.getByLabel("Interactions today")).toContainText("Untested");
+    await expect(card.getByLabel("Interactions today")).toContainText("Contact observed");
+    await expect(card).toContainText("Last closed candle touched");
+    await expect(card).toContainText("Last closed candle: 258.50 at 11:55 AM ET.");
+    await expect(card).toContainText("regular hours. Touches enter 258.50.");
+    await expect(card).not.toContainText("Price is at it now");
     const close = card.getByRole("button", { name: "Close level card" });
     expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(24);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -4342,4 +4701,1158 @@ test("a card kept open by a click gives way to hovering once its level is no lon
   await expect(page.getByRole("tooltip", { name: "ONH level card" })).toHaveCount(0);
   await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", AUTO_ZONES[5].id));
   await expect(page.getByRole("tooltip", { name: "260 level card" })).toBeVisible();
+});
+
+// ---- Relative volume (C2.4): today's candles shaded by RVol, the legend's value and what the baseline covers ----
+
+// 20 sessions before 2026-09-17, across Labor Day.
+const RVOL_SESSIONS = ["2026-08-19", "2026-08-20", "2026-08-21", "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27", "2026-08-28", "2026-08-31", "2026-09-01",
+  "2026-09-02", "2026-09-03", "2026-09-04", "2026-09-08", "2026-09-09", "2026-09-10", "2026-09-11", "2026-09-14", "2026-09-15", "2026-09-16"];
+const READY: RvolBaseline = { state: "ready", day: "2026-09-17", sessions: RVOL_SESSIONS, traded: 20, missing: [], message: null };
+const BUILDING: RvolBaseline = { state: "building", day: "2026-09-17", sessions: RVOL_SESSIONS, traded: 0, missing: ["2026-09-15", "2026-09-16"],
+  message: "RVol needs the 20 sessions before today; 2 not stored yet. Watchlist names are stored each morning before the open, and any symbol's sessions as its older candles load." };
+// The 5m fixture's last six candles (2026-09-17, 09:30-09:55) are today's.
+const TODAY_RVOL = [0.3, 1, 2.6, 2, null, 1.2];
+
+async function stubRvol(page: Page, baseline: RvolBaseline) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.rvol = baseline;
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][]) {
+      if (interval === "5m") panel.bars = panel.bars.map((bar, i) => i < 234 ? bar : { ...bar, rvol: baseline.state === "ready" ? TODAY_RVOL[i - 234] : null });
+      // The 1m fixture is one session from 09:30: its 228th candle, 13:17, is in view.
+      if (interval === "1m") panel.bars = panel.bars.map((bar, i) => ({ ...bar, rvol: baseline.state === "ready" ? (i === 227 ? 2.6 : 1.1) : null }));
+    }
+    await route.fulfill({ json: data });
+  });
+}
+type VolumeProbe = Map<string, { panes(): { getSeries(): { options(): { priceScaleId?: string }; data(): readonly { color?: string }[] }[] }[] }>;
+const volumeColors = (page: Page, id: string, count: number) => page.evaluate(([key, last]) => {
+  const chart = (window as unknown as { __tjCharts: VolumeProbe }).__tjCharts.get(key as string)!;
+  const series = chart.panes()[0].getSeries().find((item) => item.options().priceScaleId === "volume")!;
+  return series.data().slice(-(last as number)).map((point) => point.color);
+}, [id, count] as const);
+const candleX = (page: Page, id: string, time: number) => page.evaluate(([key, at]) =>
+  (window as unknown as { __tjCharts: Map<string, { timeScale(): { timeToCoordinate(t: number): number | null } }> }).__tjCharts.get(key as string)!.timeScale().timeToCoordinate(at as number)!, [id, time] as const);
+
+test("relative volume shades today's volume bars and the legend reads each candle's RVol and the sessions it is measured against", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await stubRvol(page, READY);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+
+  // The main chart names the baseline's sessions, and its latest candle's RVol.
+  const studies = page.getByLabel("main study values");
+  await expect(studies.getByRole("note", { name: "Relative volume baseline" })).toHaveText("RVol vs 20 sessions Aug 19 – Sep 16");
+  await expect(studies).toContainText("RVol 1.2× for 9:55 AM");
+  // Brighter with RVol, faint below 0.5×; a candle without RVol, and every earlier session's, keeps the plain shade.
+  expect(await volumeColors(page, "main", 8)).toEqual(["#2bc9a43d", "#2bc9a43d", "#2bc9a41f", "#2bc9a43d", "#2bc9a4d9", "#2bc9a480", "#2bc9a43d", "#2bc9a43d"]);
+
+  // Hovering a candle reads its own RVol.
+  const box = (await drawn(page, "main").boundingBox())!;
+  const nineForty = FIXTURE_START + 3 * 86400 + 2 * 300;
+  await page.mouse.move(box.x + await candleX(page, "main", nineForty), box.y + box.height * 0.4);
+  await expect(studies).toContainText("RVol 2.6× for 9:40 AM");
+  await page.mouse.move(box.x + await candleX(page, "main", nineForty + 600), box.y + box.height * 0.4);
+  await expect(studies.getByText("RVol —")).toHaveAttribute("title", "Fewer than five of the baseline sessions had traded by this minute.");
+  await page.mouse.move(1, 1);
+
+  // A smaller chart's row is tight beside its countdown: RVol takes the volume's place, with the volume, candle and sessions on hover.
+  const minute = values(page, "Panel 5");
+  await expect(minute).toContainText("RVol 1.1×");
+  await expect(minute).not.toContainText("Vol 64");
+  const row = (await minute.boundingBox())!;
+  const shown = (await minute.getByText("RVol 1.1×").boundingBox())!;
+  expect(shown.x + shown.width).toBeLessThanOrEqual(row.x + row.width);
+  await expect(values(page, "Panel 2")).toContainText(/Vol [\d.]+K/); // no RVol on these 15m candles
+  const small = (await drawn(page, "Panel 5").boundingBox())!;
+  await page.mouse.move(small.x + await candleX(page, "Panel 5", FIXTURE_START + 227 * 60), small.y + small.height * 0.4);
+  await expect(minute.getByText("RVol 2.6×")).toHaveAttribute("title", /^Vol [\d.]+K\. RVol 2\.6× for 1:17\sPM\. RVol vs 20 sessions Aug 19 – Sep 16: /);
+  await expect(values(page, "Panel 4")).not.toContainText("RVol");
+  await page.screenshot({ path: test.info().outputPath("rvol-desktop.png") });
+});
+
+test("without a baseline the chart says so and shades nothing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await stubRvol(page, BUILDING);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const note = page.getByRole("note", { name: "Relative volume baseline" });
+  await expect(note).toHaveText("RVol baseline not built yet");
+  await expect(note).toHaveAttribute("title", BUILDING.message!);
+  await expect(page.getByLabel("main study values").getByText("RVol —")).toHaveAttribute("title", BUILDING.message!);
+  expect(new Set(await volumeColors(page, "main", 240))).toEqual(new Set(["#2bc9a43d"]));
+});
+
+test.describe("phone relative volume", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the main chart's RVol and its sessions wrap into view on a phone", async ({ page }) => {
+    await registerCharts(page);
+    await stubRvol(page, READY);
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    const studies = page.getByLabel("main study values");
+    for (const text of [/^RVol 1\.2× for 9:55\sAM$/, /^RVol vs 20 sessions Aug 19 – Sep 16$/]) {
+      const shown = (await studies.getByText(text).boundingBox())!;
+      expect(shown.x).toBeGreaterThanOrEqual(0);
+      expect(shown.x + shown.width).toBeLessThanOrEqual(390);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("rvol-phone.png") });
+  });
+});
+
+// ---- Earnings (C2.5): markers on report dates and the header badge, from the workspace's cached calendar ----
+
+const EARNINGS: Earnings = { state: "ready", source: "Tradier corporate calendar", fetched_at: FIXTURE_START, message: null,
+  next: { date: "2026-10-28", status: "confirmed", label: "Q3 FY2026" },
+  reports: [{ date: "2026-09-15", label: "Q2 FY2026" }, { date: "2026-06-01", label: "Q1 FY2026" }] };
+
+async function stubEarnings(page: Page, bySymbol: Record<string, Earnings>) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.earnings = bySymbol[data.symbol] ?? null;
+    for (const [name, other] of Object.entries(data.extras ?? {})) other.earnings = bySymbol[name] ?? null;
+    await route.fulfill({ json: data });
+  });
+}
+
+test("earnings dates mark the candles that hold them, intraday and daily, and an unknown date marks nothing", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await stubEarnings(page, { MRVL: EARNINGS, NVDA: { ...EARNINGS, next: null, reports: [] }, SPY: { ...EARNINGS, state: "none", next: null, reports: [] } });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Intraday, the date's first candle (09:30 New York): the report's time of day is unknown.
+  const sept15 = FIXTURE_START + 86400;
+  await expect(drawn(page, "main")).toHaveAttribute("data-earnings", `2026-09-15@${sept15}`);
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-earnings", `2026-09-15@${sept15}`);
+  // The synthetic daily candles run on past the next report, so it is marked as well; June 1 is before them.
+  await expect(drawn(page, "Panel 4")).toHaveAttribute("data-earnings", `2026-09-15@${sept15},2026-10-28@${FIXTURE_START + 44 * 86400}`);
+  // The 1m candles are one session, Sept 14: no report that day.
+  await expect(drawn(page, "Panel 5")).toHaveAttribute("data-earnings", "");
+  // Scrolled back to Sept 15 (the 79th 5m candle) for the screenshot.
+  await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 50, to: 110 }));
+  await page.screenshot({ path: test.info().outputPath("earnings-markers.png") });
+  for (const symbol of ["NVDA", "SPY"]) {
+    await page.getByRole("button", { name: `Chart ${symbol}`, exact: true }).click();
+    await expect(page.getByRole("region", { name: new RegExp(`^${symbol} 5m chart`) })).toHaveCount(1);
+    await expect(drawn(page, "main")).toHaveAttribute("data-earnings", "");
+    await expect(drawn(page, "Panel 4")).toHaveAttribute("data-earnings", "");
+  }
+  await expect(page.getByRole("note", { name: /^Earnings/ })).toHaveCount(0);
+});
+
+test("the earnings badge appears 14 days out, counts New York days and disappears after the report", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context, { revision: 1, data: { symbol: "MRVL", panelSymbols: [null, "NVDA", null, null, null] } });
+  await stubEarnings(page, { MRVL: EARNINGS, NVDA: { ...EARNINGS, next: { date: "2026-10-23", status: "estimated", label: "Q3 FY2027" } } });
+  await page.clock.install({ time: new Date("2026-10-13T16:00:00Z") });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const main = page.getByRole("region", { name: /^MRVL 5m chart/ });
+  const held = page.getByRole("region", { name: /^NVDA 15m chart/ });
+  // Fifteen days before MRVL's report: no badge. NVDA, held by a smaller chart, is ten days out.
+  await expect(main.getByRole("note", { name: /^Earnings/ })).toHaveCount(0);
+  const estimate = held.getByRole("note", { name: "Earnings in 10 d · est.", exact: true });
+  await expect(estimate).toHaveText("E 10 d?");
+  await expect(estimate).toHaveAttribute("title", "Q3 FY2027 earnings Fri, Oct 23, 2026: Tradier's estimate; the company has not confirmed it. Time of day not published. Tradier corporate calendar.");
+  await page.clock.setSystemTime(new Date("2026-10-14T16:00:00Z"));
+  const badge = main.getByRole("note", { name: "Earnings in 14 d", exact: true });
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute("title", "Q3 FY2026 earnings Wed, Oct 28, 2026: confirmed. Time of day not published. Tradier corporate calendar.");
+  await page.screenshot({ path: test.info().outputPath("earnings-badge.png") });
+  // 23:30 on the 27th in New York is still the day before, though UTC has turned.
+  await page.clock.setSystemTime(new Date("2026-10-28T03:30:00Z"));
+  await expect(main.getByRole("note", { name: "Earnings tomorrow", exact: true })).toBeVisible();
+  await page.clock.setSystemTime(new Date("2026-10-28T16:00:00Z"));
+  await expect(main.getByRole("note", { name: "Earnings today", exact: true })).toBeVisible();
+  await page.clock.setSystemTime(new Date("2026-10-29T04:30:00Z"));
+  await expect(page.getByRole("note", { name: /^Earnings/ })).toHaveCount(0);
+});
+
+test.describe("phone earnings badge", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the main chart's badge takes its short form and stays inside the header", async ({ page }) => {
+    await stubEarnings(page, { MRVL: EARNINGS });
+    await page.clock.install({ time: new Date("2026-10-23T16:00:00Z") });
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    const badge = page.getByRole("note", { name: "Earnings in 5 d", exact: true });
+    await expect(badge).toBeVisible();
+    await expect(badge.getByText("E 5 d", { exact: true })).toBeVisible();
+    const shown = (await badge.boundingBox())!;
+    expect(shown.x + shown.width).toBeLessThanOrEqual(390);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("earnings-badge-phone.png") });
+  });
+});
+
+// ---- Level alerts (C5.1): made from the chart menu, a bell at each price, listed with what reached the phone ----
+
+type AlertsServer = { payload: AlertsPayload; posts: Record<string, unknown>[]; rearms: Record<string, unknown>[]; deletes: string[] };
+/** The alert routes as the backend answers them; the backend tests judge and deliver. */
+async function stubAlerts(page: Page, phone = true): Promise<AlertsServer> {
+  const server: AlertsServer = { payload: { alerts: [], phone }, posts: [], rearms: [], deletes: [] };
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, zones: AUTO_ZONES, missing: {} };
+    data.alerts = server.payload;
+    await route.fulfill({ json: data });
+  });
+  await page.route("**/api/backend/charts/alerts**", async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const replace = (id: string, change: Partial<LevelAlert>) => server.payload.alerts.map((alert) => alert.id === id ? { ...alert, ...change } : alert);
+    if (request.method() === "DELETE") {
+      const id = path.split("/").at(-1)!;
+      server.deletes.push(id);
+      server.payload = { ...server.payload, alerts: server.payload.alerts.filter((alert) => alert.id !== id) };
+    } else if (path.endsWith("/rearm")) {
+      const body = request.postDataJSON();
+      server.rearms.push(body);
+      server.payload = { ...server.payload, alerts: replace(path.split("/").at(-2)!, { state: "active", event: null, price: body.price, direction: body.reference < body.price ? "up" : "down" }) };
+    } else {
+      const body = request.postDataJSON();
+      server.posts.push(body);
+      server.payload = { ...server.payload, alerts: [{ id: `alert-${server.posts.length}`, symbol: body.symbol, price: body.price, created_on: "2026-09-17",
+        condition: body.condition, interval: body.interval, session: body.session, direction: body.reference < body.price ? "up" : "down",
+        source_kind: body.source_kind, source_id: body.source_id, label: body.label, state: "active", armed_at: at("12:00"), event: null }, ...server.payload.alerts] };
+    }
+    await route.fulfill({ json: server.payload });
+  });
+  return server;
+}
+const alertsPanel = (page: Page) => page.getByRole("region", { name: "Price alerts" });
+
+test("a level's menu sets an alert, its bell turns gray once it fires, and the list re-arms and removes it", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  await registerCharts(page);
+  const server = await stubAlerts(page);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(alertsPanel(page)).toContainText("Right-click (long-press on a phone) a level");
+  await addLevel(page, "Breakout", "256.00");
+  const onLevel = async () => ({ x: 220, y: await levelY(page, "main", 256) });
+
+  await rightClick(page, "main", await onLevel());
+  const menu = itemMenu(page, "Level");
+  await expect(menu.getByRole("menu", { name: "Level alerts" })).toContainText("Alerts at 256.00");
+  await page.screenshot({ path: test.info().outputPath("alert-level-menu.png") });
+  await menu.getByRole("menuitem", { name: "Alert when price crosses" }).click();
+  await expect(menu).toHaveCount(0);
+  // Price is above the level, so the alert waits for a cross below; the server is told which side from the chart's latest price.
+  await expect.poll(() => server.posts.length).toBe(1);
+  expect(server.posts[0]).toMatchObject({ symbol: "MRVL", price: 256, condition: "crosses", interval: null, session: "extended", source_kind: "level", label: "Breakout" });
+  expect(server.posts[0].reference as number).toBeGreaterThan(256);
+  await expect(page.getByRole("status", { name: "Chart notice" })).toHaveText("Alert set: MRVL Crosses below 256.00");
+  // A bell on every chart of the symbol, and the list.
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:active");
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-alerts", "256.00:active");
+  await expect(alertsPanel(page).getByRole("listitem", { name: "MRVL Crosses below 256.00, active" })).toBeVisible();
+  await expect(alertsPanel(page)).toContainText("1/20 active");
+  await expect(alertsPanel(page)).toContainText("Breakout · extended hours");
+  // The level's menu lists the alert on it.
+  await rightClick(page, "main", await onLevel());
+  await expect(itemMenu(page, "Level").getByRole("menuitem", { name: "Remove Crosses below 256.00" })).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // The server judged a trade through the level and the phone has it.
+  server.payload = { ...server.payload, alerts: server.payload.alerts.map((alert) => ({ ...alert, state: "fired", event: {
+    level: 256, price: 255.98, source: "stream", event_at: at("12:01"), detected_at: at("12:01"), delivery: "sent", attempts: 1, delivered_at: at("12:01"), error: null } })) };
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:fired");
+  const fired = alertsPanel(page).getByRole("listitem", { name: "MRVL Crosses below 256.00, fired" });
+  await expect(fired).toContainText("Fired Sep 14, 2026 12:01 PM ET at 255.98 · Sent to phone 12:01 PM ET");
+  await page.screenshot({ path: test.info().outputPath("alert-fired.png") });
+  await fired.getByRole("button", { name: "Re-arm MRVL Crosses below 256.00" }).click();
+  await expect.poll(() => server.rearms.length).toBe(1);
+  expect(server.rearms[0]).toMatchObject({ price: 256 });
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:active");
+  await alertsPanel(page).getByRole("button", { name: "Remove MRVL Crosses below 256.00" }).click();
+  await expect.poll(() => server.deletes).toEqual(["alert-1"]);
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "");
+  await expect(alertsPanel(page)).toContainText("0/20 active");
+});
+
+test("an automatic level's menu sets a close-beyond alert on that chart's interval, at the zone's edge nearest the price", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  const server = await stubAlerts(page, false);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // PDH 254.30 and the round 254: price is above the zone, so its top edge.
+  const zone = AUTO_ZONES[2];
+  await rightClick(page, "main", { x: 300, y: await autoY(page, "main", zone.id) });
+  const menu = itemMenu(page, "Auto level");
+  await expect(menu).toContainText("PDH + 254");
+  await expect(menu).toContainText("Alerts at 254.30");
+  await expect(menu).toContainText("Phone alerts are not set up on this server");
+  await menu.getByRole("menuitem", { name: "Alert on a 5m close beyond" }).click();
+  await expect.poll(() => server.posts.length).toBe(1);
+  expect(server.posts[0]).toMatchObject({ symbol: "MRVL", price: 254.3, condition: "closes_beyond", interval: "5m", source_kind: "auto", source_id: zone.id, label: "PDH + 254" });
+  await expect(alertsPanel(page)).toContainText("Phone alerts are not set up on this server");
+  await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "254.30:active");
+  // A 15m chart offers its own candle.
+  await rightClick(page, "Panel 2", { x: 120, y: await autoY(page, "Panel 2", zone.id) });
+  await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Alert on a 15m close beyond" })).toBeVisible();
+  await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Remove 5m close below 254.30" })).toBeVisible();
+});
+
+test.describe("phone alerts list", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the list sits in the watchlist sheet with full-size buttons and no sideways scroll", async ({ page }) => {
+    const server = await stubAlerts(page);
+    server.payload = { phone: true, alerts: [{ id: "alert-9", symbol: "SPY", price: 581.2, created_on: "2026-09-17", condition: "touches", interval: null, session: "regular",
+      direction: "up", source_kind: "auto", source_id: "z", label: "PDH + 581", state: "fired", armed_at: at("09:40"), event: {
+        level: 581.2, price: 581.2, source: "minute_bars", event_at: at("10:03"), detected_at: at("10:12"), delivery: "pending", attempts: 2, delivered_at: null, error: "ntfy could not be reached (ConnectError)." } }] };
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+    const item = alertsPanel(page).getByRole("listitem", { name: "SPY Touches 581.20, fired" });
+    await item.scrollIntoViewIfNeeded();
+    await expect(item).toContainText("at 581.20 (1-minute bar) · Retrying phone message (2 tries)");
+    for (const button of await item.getByRole("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("alerts-phone.png") });
+  });
+});
+
+// ---- Options levels (C4.4) and the strike ladder (C4.5): stubbed chains; the backend tests compute and merge them ----
+
+// The fixture's last close is about 257.34. The backend merges strikes into the automatic levels' zones; this fixture
+// does the same within the 0.55 band, so a strike at 254.40 joins the PDH zone and one at 260 the round 260.
+const OPTION_READ = Date.parse("2026-10-05T14:31:00Z") / 1000;
+const optionMember = (kind: string, label: string, value: number, evidence: AutoLevel["evidence"] = "calculated", developing = false): AutoLevel => ({
+  kind, label, price: value, evidence, timeframe: null, source: "tradier", bar_time: null, formed_at: null, developing });
+function optionMembers(mode: string, signed: boolean): AutoLevel[] {
+  if (mode === "volume") return [optionMember("call_volume_wall", "Call vol wall", 257.5, "calculated", true), optionMember("put_volume_wall", "Put vol wall", 255, "calculated", true),
+    optionMember("options_volume", "Vol #3", 260, "calculated", true), optionMember("options_volume", "Vol #4", 252.5, "calculated", true)];
+  const walls = [optionMember("call_wall", "Call wall", 265), optionMember("put_wall", "Put wall", 250)];
+  if (mode === "gamma") return [...walls, optionMember("options_gamma", "Gamma #1", 257.5, signed ? "assumed" : "calculated", true),
+    optionMember("options_gamma", "Gamma #2", 255, signed ? "assumed" : "calculated", true), ...(signed ? [optionMember("gamma_flip", "Gamma flip", 256.2, "assumed", true)] : [])];
+  return [...walls, ...([[254.4, 3], [257.5, 4], [260, 5], [255, 6], [263, 7], [247.5, 8], [270, 9]] as const).map(([value, rank]) => optionMember("options_oi", `OI #${rank}`, value))];
+}
+function mergeZones(base: AutoZone[], members: AutoLevel[]): AutoZone[] {
+  const zones = base.map((zone) => [...zone.members]);
+  for (const member of members) {
+    const into = zones.find((group) => group.some((other) => Math.abs(other.price - member.price) < 0.55));
+    if (into) into.push(member); else zones.push([member]);
+  }
+  return zones.map((group) => autoZone([...group].sort((a, b) => b.price - a.price), new Set(group.map((m) => `${m.kind}@${m.price}`)).size)).sort((a, b) => a.low - b.low);
+}
+const optionRow = (strike: number, rank: number | null): OptionStrike => ({ strike, call_oi: 1200 + strike, put_oi: 900 + strike, call_volume: 340, put_volume: 120,
+  call_gamma: 2_400_000, put_gamma: 1_100_000, gamma: 3_500_000, rank, call_oi_rank: rank, put_oi_rank: null, call_volume_rank: null, put_volume_rank: null,
+  oi_change: { session: "2026-10-02", previous_session: "2026-10-01", status: "ready", calls: 125, puts: -45 } });
+function optionInfo(mode: string, scope: string, signed: boolean, members: AutoLevel[]): OptionsInfo {
+  return { state: "ready", message: null, symbol: "MRVL", root: "MRVL", scope: scope as OptionsInfo["scope"], source: "Tradier option chains", spot: 257.34,
+    expirations: ["2026-10-09"], scope_note: scope === "nearest" ? "Next expiration Fri Oct 9 (no 0DTE today)" : "Week of Oct 5: 1 expiration",
+    mode: mode as OptionsInfo["mode"], signed, fetched_at: OPTION_READ, last_trade_at: OPTION_READ - 30, greeks_updated_at: "2026-10-05 14:00:05",
+    excluded: {}, missing: {}, totals: { call_oi: 52000, put_oi: 61000, call_volume: 9000, put_volume: 7000, put_call_oi: 1.17, put_call_volume: 0.78, call_volume_oi: 0.17, put_volume_oi: 0.11 },
+    strikes: members.filter((m) => m.kind !== "gamma_flip").map((m) => optionRow(m.price, Number(/#(\d)/.exec(m.label)?.[1] ?? 1))),
+    flip: signed ? { price: 256.2, low: 244.47, high: 270.21, note: "Model estimate: Dealers long calls and short puts: call gamma counts positive, put gamma negative.", assumption: "Dealers long calls and short puts: call gamma counts positive, put gamma negative." } : null };
+}
+async function stubOptions(page: Page, requests: string[]) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const url = route.request().url();
+    requests.push(url);
+    const query = new URL(url).searchParams;
+    const data = fixture(url);
+    const layer = query.get("options");
+    const auto = query.get("auto") !== "0";
+    const [mode, scope, signed] = (layer ?? "oi.week.0").split(".");
+    const members = layer ? optionMembers(mode, signed === "1") : [];
+    data.auto_levels = { day: "2026-09-14", as_of: at("12:00"), atr: 5.5, band: 0.55, missing: {}, auto,
+      zones: mergeZones(auto ? AUTO_ZONES : [], members), ...(layer ? { options: optionInfo(mode, scope, signed === "1", members) } : {}) };
+    await route.fulfill({ json: data });
+  });
+}
+const OI_LEVELS = "250 + Put wall,OI #3 + PDH + 254,OI #6,OI #4,260 + OI #5,OI #7,Call wall";
+
+test("options levels draw the walls and the nearest strikes, follow every filter, merge with automatic levels and explain themselves", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubOptions(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Off until asked for: the workspace asks for no options at all.
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "");
+  expect(requests.every((url) => !new URL(url).searchParams.has("options"))).toBe(true);
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const group = layerGroup(page, "Options levels");
+  await group.getByRole("button", { name: "Show Options levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("options=oi.week.0");
+  // The walls always, and the three nearest option zones on each side; the 247.50 and 270 strikes are further out.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", OI_LEVELS);
+  await expect(group).toContainText("MRVL: Week of Oct 5: 1 expiration.");
+  await expect.poll(() => (server.data?.optionsLayer as { hidden?: boolean } | undefined)?.hidden).toBe(false);
+
+  // The nearest count is drawn from what is loaded: no request. One each side drops the 263 strike; the
+  // zones a strike shares with PDH and with 260 still draw among the nearest automatic levels.
+  const asked = requests.length;
+  await group.getByLabel("Strikes each side").selectOption("1");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "250 + Put wall,OI #3 + PDH + 254,OI #6,OI #4,260 + OI #5,Call wall");
+  expect(requests.length).toBe(asked);
+  await group.getByLabel("Strikes each side").selectOption("3");
+
+  // Hovering the zone a strike shares with the prior day's high: both members, the strike's numbers, and how old they are.
+  const box = (await drawn(page, "main").boundingBox())!;
+  const pdh = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("options_oi@254.4"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", pdh));
+  const card = page.getByRole("tooltip", { name: "OI #3 + PDH + 254 level card" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("OI #3 Open interest, ranked254.40");
+  await expect(card).toContainText("calculated · Tradier option chains");
+  const numbers = card.getByLabel("Strike 254.40");
+  await expect(numbers).toContainText("OI 1.5K (#3) · Vol 340");
+  await expect(numbers).toContainText("#3 by open interest · -1.14% from 257.34");
+  await expect(numbers).toContainText("Δ OI calls +125 · puts −45 · Oct 1, 2026 → Oct 2, 2026");
+  await expect(numbers).toContainText("$3.5M per 1% (calculated)");
+  await expect(card).toContainText("open interest is OCC's overnight figure for the prior close");
+  await expect(card).toContainText("PDH Prior day high254.30");
+  await page.screenshot({ path: test.info().outputPath("options-level-card.png") });
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // Volume mode asks for volume walls; 0DTE / nearest narrows the expirations.
+  await group.getByRole("button", { name: "Volume", exact: true }).click();
+  await expect.poll(() => requests.at(-1)).toContain("options=volume.week.0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", /Call vol wall/);
+  await group.getByRole("button", { name: "0DTE / nearest" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("options=volume.nearest.0");
+  await expect(group).toContainText("MRVL: Next expiration Fri Oct 9 (no 0DTE today).");
+  // A sign is only for gamma; signed gamma adds the flip, labelled assumed.
+  await expect(group.getByLabel("Signed gamma and flip (assumed)")).toBeDisabled();
+  await group.getByRole("button", { name: "Gamma", exact: true }).click();
+  await group.getByLabel("Signed gamma and flip (assumed)").check();
+  await expect.poll(() => requests.at(-1)).toContain("options=gamma.nearest.1");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", /Gamma flip \+ PML/);
+  const flip = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("gamma_flip"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", flip));
+  const flipCard = page.getByRole("tooltip", { name: "Gamma flip + PML level card" });
+  await expect(flipCard).toContainText("assumed · Tradier option chains · moves during the session");
+  await expect(flipCard).toContainText("Model estimate: Dealers long calls and short puts");
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // Hiding the automatic levels with options on asks for the strikes alone.
+  await layerGroup(page, "Auto levels").getByRole("button", { name: "Hide Auto levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("auto=0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "Put wall,Gamma #2,Gamma flip,Gamma #1,Call wall");
+  await expect.poll(() => server.data?.optionsLayer).toEqual({ hidden: false, mode: "gamma", scope: "nearest", nearest: 3, signed: true });
+
+  // Through a reload, then off again from the chart menu's Layers.
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-option-levels", "Put wall,Gamma #2,Gamma flip,Gamma #1,Call wall");
+  await rightClick(page, "main", EMPTY);
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Options levels" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", "");
+  await expect.poll(() => (server.data?.optionsLayer as { hidden?: boolean } | undefined)?.hidden).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// ---- Range bands (C2.7) and max pain (C4.7): stubbed bands; the backend tests capture and merge them ----
+
+const CAPTURED = Date.parse("2026-10-05T09:35:00-04:00") / 1000;
+const RANGES: RangesInfo = { state: "ready", message: null, symbol: "MRVL", root: "MRVL", source: "Tradier option chains", day: "2026-10-05", bands: [
+  { expiration: "2026-10-05", tags: ["nearest"], today: true, anchor: 257.34, move: 2.1, percent: 2.1 / 257.34, strike: 257.5, iv: 0.31, quoted_at: CAPTURED - 5, captured_at: CAPTURED },
+  { expiration: "2026-10-09", tags: ["friday"], today: false, anchor: 257.34, move: 4.6, percent: 4.6 / 257.34, strike: 257.5, iv: 0.29, quoted_at: CAPTURED - 5, captured_at: CAPTURED },
+] };
+const rangeMember = (kind: string, label: string, value: number): AutoLevel => ({
+  kind, label, price: value, evidence: "calculated", timeframe: null, source: "tradier", bar_time: null, formed_at: CAPTURED, developing: false });
+const RANGE_MEMBERS = [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_low", "EM 0DTE low", 255.24),
+  rangeMember("expected_move_high", "EM Fri high", 261.94), rangeMember("expected_move_low", "EM Fri low", 252.74)];
+const MAX_PAIN = optionMember("max_pain", "Max pain", 248.5, "inferred");
+async function stubRanges(page: Page, requests: string[], bands: RangesInfo = RANGES, members: AutoLevel[] = RANGE_MEMBERS) {
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const url = route.request().url();
+    requests.push(url);
+    const query = new URL(url).searchParams;
+    const data = fixture(url);
+    // Intraday candles carry VWAP's standard deviation; daily ones have no VWAP.
+    for (const panel of Object.values(data.panels)) for (const bar of panel?.bars ?? []) bar.vwap_sd = bar.vwap === null ? null : 0.6;
+    const layer = query.get("options");
+    const ranges = query.get("ranges") === "1";
+    const auto = query.get("auto") !== "0";
+    const options = layer ? [...optionMembers("oi", false), MAX_PAIN] : [];
+    data.auto_levels = { day: "2026-10-05", as_of: CAPTURED + 600, atr: 5.5, band: 0.55, missing: {}, auto,
+      zones: mergeZones(auto ? AUTO_ZONES : [], [...options, ...(ranges ? members : [])]),
+      ...(layer ? { options: { ...optionInfo("oi", "week", false, options), max_pain: { price: 248.5, expiration: "2026-10-09",
+        note: "The strike where this expiration's open contracts would pay their holders least at expiry. Arithmetic on open interest; that price drifts to it is folklore, so treat it as a reference, not a target." } } } : {}),
+      ...(ranges ? { ranges: bands } : {}) };
+    await route.fulfill({ json: data });
+  });
+}
+const RANGE_LEVELS = "EM Fri low,EM 0DTE low,EM 0DTE high,262 + EM Fri high";
+
+test("range bands draw today's and Friday's expected move and VWAP ±1σ/±2σ, explain themselves, and hide from the menu", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  // Off until asked for: no bands drawn and none asked for.
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  expect(requests.every((url) => !new URL(url).searchParams.has("ranges"))).toBe(true);
+
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const group = layerGroup(page, "Range bands");
+  await group.getByRole("button", { name: "Show Range bands" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("ranges=1");
+  // Every expected-move level draws on every chart, however far; Friday's high shares the round 262's zone.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", RANGE_LEVELS);
+  await expect(group).toContainText("MRVL: 0DTE ±2.10, Fri ±4.60.");
+  // VWAP bands on the intraday charts' every candle; the daily chart has no VWAP to band.
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "true");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands", "240");
+  await expect(drawn(page, "Panel 4")).toHaveAttribute("data-vwap-bands", "0");
+  await expect.poll(() => server.data?.rangeBandsHidden).toBe(false);
+
+  const box = (await drawn(page, "main").boundingBox())!;
+  const high = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id === "expected_move_high@259.44")!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", high));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high level card" });
+  await expect(card).toBeVisible();
+  await expect(card).toContainText("EM 0DTE high Expected move, upper259.44");
+  await expect(card).toContainText("calculated · Tradier option chains · priced 9:35 AM ET, fixed for the session");
+  await expect(card).toContainText("Today's (0DTE) 257.50 straddle cost 2.10 (0.82%) at 9:35 AM ET, added to 257.34, the price then; IV 31.0%.");
+  await expect(card).toContainText("a price, not a forecast of where price will stay");
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+  // Friday's high, in the round 262's zone, reads Friday's straddle and not today's.
+  const friday = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@261.94"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", friday));
+  await expect(page.getByRole("tooltip", { name: "262 + EM Fri high level card" })).toContainText("Fri, Oct 9's 257.50 straddle cost 4.60 (1.79%)");
+  await page.screenshot({ path: test.info().outputPath("range-bands.png") });
+  await page.mouse.move(box.x + EMPTY.x, box.y + EMPTY.y);
+
+  // With the automatic levels hidden, the bands still ask for themselves alone.
+  await layerGroup(page, "Auto levels").getByRole("button", { name: "Hide Auto levels" }).click();
+  await expect.poll(() => requests.at(-1)).toContain("auto=0");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
+  await expect(drawn(page, "main")).toHaveAttribute("data-auto-levels", /^expected_move_low@252.74/);
+
+  // Through a reload, then off again from the chart menu's Layers.
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM Fri low,EM 0DTE low,EM 0DTE high,EM Fri high");
+  await rightClick(page, "main", EMPTY);
+  await chartMenu(page).getByRole("menuitem", { name: /^Layers/ }).click();
+  await chartMenu(page).getByRole("menuitemcheckbox", { name: "Range bands" }).click();
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-range-levels", "");
+  await expect(drawn(page, "main")).toHaveAttribute("data-vwap-bands-shown", "false");
+  await expect.poll(() => server.data?.rangeBandsHidden).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("two expected-move levels on the same cent each show their own expiration's straddle", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context, { revision: 1, data: { rangeBandsHidden: false } });
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  // Friday's straddle centred 1.00 lower and 1.00 wider ends on today's high exactly.
+  const friday = { ...RANGES.bands[1], anchor: 256.34, move: 3.1, percent: 3.1 / 256.34, strike: 256 };
+  await stubRanges(page, [], { ...RANGES, bands: [RANGES.bands[0], friday] },
+    [rangeMember("expected_move_high", "EM 0DTE high", 259.44), rangeMember("expected_move_high", "EM Fri high", 259.44)]);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-range-levels", "EM 0DTE high + EM Fri high");
+  const box = (await drawn(page, "main").boundingBox())!;
+  const zone = (await page.evaluate(() => (window as unknown as { __tjAutoLevels: Map<string, { shown(): string[] }> }).__tjAutoLevels.get("main")!.shown()))
+    .find((id) => id.includes("expected_move_high@259.44"))!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", zone));
+  const card = page.getByRole("tooltip", { name: "EM 0DTE high + EM Fri high level card" });
+  await expect(card.getByLabel("Straddle Mon, Oct 5")).toContainText("Today's (0DTE) 257.50 straddle cost 2.10");
+  await expect(card.getByLabel("Straddle Fri, Oct 9")).toContainText("Fri, Oct 9's 256.00 straddle cost 3.10");
+});
+
+test("max pain always draws with the options levels, labelled inferred, with its expiration and a caveat", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  const requests: string[] = [];
+  await registerCharts(page);
+  await registerAutoLevels(page);
+  await stubRanges(page, requests);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await layerGroup(page, "Options levels").getByRole("button", { name: "Show Options levels" }).click();
+  // Far below the nearest strikes, and still drawn: like the walls, max pain is not ranked away.
+  for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", `Max pain,${OI_LEVELS}`);
+  const box = (await drawn(page, "main").boundingBox())!;
+  await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", "max_pain@248.5"));
+  const card = page.getByRole("tooltip", { name: "Max pain level card" });
+  await expect(card).toContainText("Max pain Max pain: least paid out at expiry248.50");
+  await expect(card).toContainText("inferred · Tradier option chains");
+  await expect(card).toContainText("Fri, Oct 9 expiration. The strike where this expiration's open contracts would pay their holders least at expiry.");
+  await expect(card).toContainText("folklore");
+});
+
+function ladder(url: string): OptionsLadder {
+  const query = new URL(url).searchParams;
+  const rows = Array.from({ length: 13 }, (_, i) => 245 + i * 2.5).map((strike) => ({ ...optionRow(strike, null),
+    ...(strike === 260 ? { oi_change: { session: "2026-10-02", previous_session: "2026-10-01", status: "unavailable" as const, calls: null, puts: null } } : {}),
+    gamma: query.get("signed") === "1" ? (strike > 256 ? 1 : -1) * (5_000_000 - Math.abs(strike - 257.5) * 300_000) : 5_000_000 - Math.abs(strike - 257.5) * 300_000 }));
+  return { ...optionInfo("gamma", query.get("scope") ?? "week", query.get("signed") === "1", []), spot: Number(query.get("spot")) || null, rows,
+    signed: query.get("signed") === "1", walls: { call_oi: 265, put_oi: 250, call_volume: 257.5, put_volume: 255 } };
+}
+
+test("the strike ladder centres on the price, marks a strike on the charts and shares the layer's scope", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const server = await fakeChartSettings(context);
+  const reads: string[] = [];
+  await stub(page);
+  await page.route("**/api/backend/charts/options/*/ladder?**", async (route) => {
+    reads.push(route.request().url());
+    await route.fulfill({ json: ladder(route.request().url()) });
+  });
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  expect(reads).toHaveLength(0); // off until opened
+  await page.getByRole("button", { name: "Strike ladder", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Strike ladder" });
+  await expect(panel.getByRole("button", { name: /^Strike / })).toHaveCount(13);
+  // The chart's latest price goes with the request and sits between the strikes around it.
+  expect(new URL(reads[0]).searchParams.get("spot")).toMatch(/^257\.3/);
+  await expect(panel.getByRole("separator", { name: /^Price 257\.3/ })).toBeVisible();
+  const order = await panel.locator("button[aria-label^='Strike '], [role='separator']").evaluateAll((nodes) => nodes.map((node) => node.getAttribute("aria-label")));
+  const at = order.findIndex((label) => label?.startsWith("Price"));
+  expect([order[at - 1], order[at + 1]]).toEqual(["Strike 255.00", "Strike 257.50"]);
+  await expect(panel.getByRole("button", { name: "Strike 265.00, call wall" })).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Strike 250.00, put wall" })).toBeVisible();
+  await expect(panel).toContainText("OI change: Oct 1, 2026 → Oct 2, 2026");
+  await expect(panel.getByRole("button", { name: "Strike 255.00" })).toContainText("Δ +125");
+  await expect(panel.getByRole("button", { name: "Strike 260.00" })).toContainText("Δ —");
+  await expect(panel).toContainText("P/C OI 1.17 · P/C vol 0.78");
+  await page.screenshot({ path: test.info().outputPath("strike-ladder.png") });
+
+  // A click marks the strike on every chart of the symbol; a second click clears it.
+  await panel.getByRole("button", { name: "Strike 260.00" }).click();
+  for (const id of ALL_PANELS) await expect(drawn(page, id)).toHaveAttribute("data-highlight", "260");
+  await expect(panel.getByRole("button", { name: "Strike 260.00" })).toHaveAttribute("aria-pressed", "true");
+  await panel.getByRole("button", { name: "Strike 260.00" }).click();
+  await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "");
+
+  // Its expirations and sign are the options layer's, saved with the workspace.
+  await panel.getByRole("button", { name: "Within 45 days" }).click();
+  await expect.poll(() => reads.at(-1)).toContain("scope=all");
+  await panel.getByLabel("Signed gamma (assumed dealer side)").check();
+  await expect.poll(() => reads.at(-1)).toContain("signed=1");
+  await expect.poll(() => server.data?.optionsLayer).toEqual({ hidden: true, mode: "oi", scope: "all", nearest: 3, signed: true });
+  // Another symbol's ladder; the mark belonged to MRVL.
+  await panel.getByRole("button", { name: "Strike 255.00" }).click();
+  await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await page.getByRole("button", { name: "Strike ladder", exact: true }).click();
+  await expect.poll(() => reads.at(-1)).toContain("/options/NVDA/ladder");
+  await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "");
+});
+
+test.describe("phone strike ladder", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  test("the ladder is a bottom sheet, and a tap marks the strike and shows the chart", async ({ page }) => {
+    await stub(page);
+    await page.route("**/api/backend/charts/options/*/ladder?**", (route) => route.fulfill({ json: ladder(route.request().url()) }));
+    await page.goto("/charts");
+    await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+    // The top row keeps room for the chart: the ladder opens from the More menu.
+    await page.getByRole("button", { name: "More chart controls" }).tap();
+    await page.getByRole("button", { name: "Strike ladder", exact: true }).tap();
+    const sheet = page.getByRole("dialog", { name: "Strike ladder" });
+    await expect(sheet.getByRole("button", { name: /^Strike / })).toHaveCount(13);
+    for (const target of await sheet.getByRole("button").all()) expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.screenshot({ path: test.info().outputPath("strike-ladder-phone.png") });
+    await sheet.getByRole("button", { name: "Strike 262.50" }).tap();
+    await expect(sheet).toHaveCount(0);
+    await expect(drawn(page, "main")).toHaveAttribute("data-highlight", "262.5");
+  });
+});
+
+// ---- Pre-trade capture (C3.4, C3.5): Plan trade, templates, Discretionary, voice, saved strip ----
+// Plans go to the real e2e backend, so they persist across browser contexts and reloads.
+const CAPTURES = "/api/backend/charts/captures";
+
+/** One template ("Reclaim") and a default account, set through the real routes; returns the setup. */
+async function captureSetup(request: APIRequestContext, templates: { setup_label: string; wording: string }[] = [{ setup_label: "Reclaim", wording: "Out on a 5m close back below the level." }]): Promise<CaptureSetup> {
+  let setup: CaptureSetup = await (await request.get(`${CAPTURES}/setup`)).json();
+  for (const row of setup.templates) setup = await (await request.delete(`${CAPTURES}/templates/${row.id}`)).json();
+  for (const row of templates) setup = await (await request.post(`${CAPTURES}/templates`, { data: row })).json();
+  return (await request.put(`${CAPTURES}/setup`, { data: { default_account_id: setup.accounts[0].id } })).json();
+}
+const savedCaptures = async (request: APIRequestContext): Promise<Capture[]> => (await (await request.get(`${CAPTURES}?limit=100`)).json()).captures;
+const planSheet = (page: Page) => page.getByRole("dialog", { name: "Plan trade" });
+
+test("Plan trade saves in four actions: open, side, template, save; the strip shows it in every browser", { tag: "@captures" }, async ({ page, browser, request }) => {
+  const setup = await captureSetup(request);
+  const before = (await savedCaptures(request)).length;
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();                       // 1. open
+  const sheet = planSheet(page);
+  await expect(sheet.getByTestId("plan-symbol")).toHaveText("MRVL");
+  await expect(sheet.getByLabel("Plan account")).toHaveValue(setup.accounts[0].id);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();                         // 2. side
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();                           // 3. template, wording visible before saving
+  await expect(sheet.getByRole("button", { name: /Reclaim/ })).toContainText("Out on a 5m close back below the level.");
+  await sheet.getByRole("button", { name: "Save plan" }).click();                         // 4. save
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByLabel("Chart notice")).toContainText("Plan saved: MRVL · Buy calls · Reclaim");
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip).toContainText("MRVL · Buy calls · Reclaim");
+  await expect(strip.getByRole("status")).toHaveText("Saved");
+  const rows = await savedCaptures(request);
+  expect(rows.length).toBe(before + 1);
+  const row = rows[0];
+  expect([row.underlying, row.side, row.mode, row.setup_label, row.wording, row.template_revision]).toEqual(["MRVL", "buy_calls", "template", "Reclaim", "Out on a 5m close back below the level.", 1]);
+  // The chart as it stood: interval, session, basis and price from what the page held; the frozen image uploaded after the save.
+  expect(row.context.state).toBe("captured");
+  if (row.context.state === "captured") {
+    expect([row.context.symbol, row.context.interval, row.context.panel, row.context.basis?.status]).toEqual(["MRVL", "5m", "main", "ok"]);
+    expect(row.context.price.value).toBeGreaterThan(0);
+    expect(row.context.last_candle?.close).toBeGreaterThan(0);
+  }
+  await expect.poll(async () => (await savedCaptures(request))[0].image.state).toBe("saved");
+  const image = await request.get(`${CAPTURES}/${row.id}/image`);
+  expect(image.headers()["content-type"]).toBe("image/jpeg");
+  // Editing the template later never changes the saved plan.
+  await request.put(`${CAPTURES}/templates/${setup.templates[0].id}`, { data: { setup_label: "Reclaim", wording: "Changed later." } });
+  expect((await savedCaptures(request))[0].wording).toBe("Out on a 5m close back below the level.");
+  // Another browser sees the same saved plan.
+  const other = await browser.newContext();
+  await fakeChartSettings(other);
+  const second = await other.newPage();
+  await stub(second);
+  await second.goto("/charts");
+  await expect(second.getByRole("region", { name: "Saved plan" })).toContainText("MRVL · Buy calls · Reclaim");
+  await second.getByRole("button", { name: "Show plan details" }).click();
+  await expect(second.getByRole("img", { name: "MRVL chart when the plan was saved" })).toBeVisible();
+  await expect(second.getByRole("region", { name: "Saved plan" })).toContainText("Reclaim (template rev 1): Out on a 5m close back below the level.");
+  await other.close();
+  // Did not take trade keeps the plan as a record; dismissing only hides the strip here.
+  await page.getByRole("button", { name: "Did not take trade" }).click();
+  await expect(strip.getByRole("status")).toHaveText("Not taken");
+  await page.getByRole("button", { name: "Dismiss saved plan" }).click();
+  await expect(strip).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toHaveCount(0);
+  expect((await savedCaptures(request))[0].not_taken_at).not.toBeNull();
+});
+
+test("Alt+P opens Plan trade only when nothing else has the keys; Enter saves and Esc closes", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  // Typing in a field: Alt+P is the field's.
+  await page.getByLabel("Chart symbol").focus();
+  await page.keyboard.press("Alt+KeyP");
+  await expect(planSheet(page)).toHaveCount(0);
+  // Another dialog open: it keeps the keys.
+  await page.getByLabel("Chart symbol").blur();
+  await page.keyboard.press("?");
+  await expect(page.getByRole("dialog", { name: "Keyboard shortcuts" })).toContainText("Plan trade");
+  await page.keyboard.press("Alt+KeyP");
+  await expect(planSheet(page)).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  // The physical key, so Option+P (π on a Mac) works; a held key opens it once.
+  await page.keyboard.down("Alt");
+  await page.keyboard.down("KeyP");
+  await page.keyboard.down("KeyP");
+  await page.keyboard.up("KeyP");
+  await page.keyboard.up("Alt");
+  await expect(planSheet(page)).toHaveCount(1);
+  // Chart hotkeys stay off while it is open.
+  await page.keyboard.press("d");
+  await expect(page.getByRole("button", { name: "1D", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await page.keyboard.press("Escape");
+  await expect(planSheet(page)).toHaveCount(0);
+  await page.keyboard.press("Alt+KeyP");
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy puts" }).click();
+  await page.keyboard.press("Enter"); // not enabled yet: no plan chosen
+  await expect(sheet).toHaveCount(1);
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await page.keyboard.press("Enter");
+  await expect(sheet).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText("MRVL · Buy puts · Discretionary");
+  // Existing chart hotkeys still work afterwards.
+  await page.keyboard.press("d");
+  await expect(page.getByRole("button", { name: "1D", exact: true })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("on a 390px phone the plan sheet is a bottom sheet; Discretionary with a note saves without templates", { tag: "@captures" }, async ({ page, request }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await captureSetup(request, []);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  // Reachable at 390px with the side panel closed.
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  const box = await sheet.boundingBox();
+  expect(box && Math.round(box.width)).toBe(390);
+  expect(box && Math.round(box.y + box.height)).toBeGreaterThan(800);
+  await expect(sheet).toContainText("No favorite templates yet");
+  for (const name of ["Buy calls", "Buy puts", "Buy stock"]) expect((await sheet.getByRole("button", { name }).boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await sheet.getByRole("button", { name: "More" }).click();
+  await sheet.getByRole("button", { name: "Short stock" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByLabel("Plan note").fill("Fading the gap into resistance");
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const row = (await savedCaptures(request))[0];
+  expect([row.side, row.instrument, row.mode, row.note, row.setup_label]).toEqual(["short_stock", "stock", "discretionary", "Fading the gap into resistance", null]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole("button", { name: "Show plan details" }).click();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText("Discretionary: no explicit plan.");
+  await page.getByRole("button", { name: "Add a later note" }).click();
+  await page.getByLabel("Later note").fill("Did not fill; price ran.");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Saved plan" })).toContainText(/Added later, .*Did not fill; price ran\./);
+  expect((await savedCaptures(request))[0].note).toBe("Fading the gap into resistance");
+});
+
+test("a symbol switch while the sheet is open never retargets the plan; a failed chart image still saves the plan", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  // The chart moves on (the sheet leaves the toolbar free on a desktop).
+  await page.getByLabel("Chart symbol").fill("NVDA");
+  await page.getByLabel("Chart symbol").press("Enter");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("189.12");
+  await expect(sheet.getByTestId("plan-symbol")).toHaveText("MRVL");
+  await expect(sheet).toContainText("The chart now shows NVDA. This plan stays on MRVL");
+  await sheet.getByRole("button", { name: "Buy stock" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  let row = (await savedCaptures(request))[0];
+  expect([row.underlying, row.context_state, row.image.state]).toEqual(["MRVL", "unavailable", "unavailable"]);
+  expect(row.context.state === "unavailable" && row.context.reason).toContain("showed NVDA, not MRVL");
+  // An explicit change is allowed before saving.
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  await sheet.getByRole("button", { name: "Change" }).click();
+  await sheet.getByLabel("Plan symbol").fill("NVDA");
+  await sheet.getByLabel("Plan symbol").press("Enter");
+  await expect(sheet.getByTestId("plan-symbol")).toHaveText("NVDA");
+  // The chart's picture cannot be made: the plan saves anyway, saying so, with the rest of the snapshot.
+  await page.evaluate(() => { HTMLCanvasElement.prototype.toBlob = function (callback: BlobCallback) { callback(null); }; });
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  row = (await savedCaptures(request))[0];
+  expect([row.underlying, row.context_state, row.image.state, row.image.note]).toEqual(["NVDA", "captured", "unavailable", "The chart image could not be made."]);
+});
+
+test("a rejected save keeps the sheet open; an unreachable server keeps the plan for Retry across a reload, saved once", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const before = (await savedCaptures(request)).length;
+  await page.route(`**${CAPTURES}`, (route) => route.request().method() === "POST" ? route.fulfill({ status: 422, json: { detail: "Choose the journal account this plan is for." } }) : route.fallback());
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toHaveText("Not saved: Choose the journal account this plan is for.");
+  await expect(sheet).toHaveCount(1);
+  expect((await savedCaptures(request)).length).toBe(before);
+  // Now the server cannot be reached at all.
+  await page.unroute(`**${CAPTURES}`);
+  let posts = 0;
+  await page.route(`**${CAPTURES}`, (route) => { if (route.request().method() !== "POST") return route.fallback(); posts++; return route.abort("connectionrefused"); });
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toContainText("Not saved yet");
+  await expect(sheet.getByRole("alert")).toContainText("kept in this browser");
+  expect(posts).toBe(1);
+  await expect(sheet.getByRole("button", { name: "Buy puts" })).toBeDisabled(); // locked to the request it holds
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("alert")).toContainText("Not saved: MRVL Buy calls");
+  // The first send reached the server after all, but its answer was lost: Retry returns that plan, never a second one.
+  const pending = await page.evaluate(() => new Promise<{ body: unknown }>((resolve) => {
+    const open = indexedDB.open("tradejournal-captures", 1);
+    open.onsuccess = () => { const all = open.result.transaction("outbox").objectStore("outbox").getAll(); all.onsuccess = () => resolve(all.result[0]); };
+  }));
+  expect((await request.post(CAPTURES, { data: pending.body })).status()).toBe(201);
+  await page.unroute(`**${CAPTURES}`);
+  await strip.getByRole("button", { name: "Retry" }).click();
+  await expect(strip.getByRole("alert")).toHaveCount(0);
+  await expect(strip).toContainText("MRVL · Buy calls · Reclaim");
+  expect((await savedCaptures(request)).length).toBe(before + 1);
+});
+
+test("a double tap on Save plan sends one request and saves one plan", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const before = (await savedCaptures(request)).length;
+  let posts = 0;
+  await page.route(`**${CAPTURES}`, async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    posts++;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return route.continue();
+  });
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).dblclick();
+  await expect(sheet).toHaveCount(0);
+  expect(posts).toBe(1);
+  expect((await savedCaptures(request)).length).toBe(before + 1);
+});
+
+test("a template edited on another device is refused, then its new wording is shown and saves", { tag: "@captures" }, async ({ page, request }) => {
+  const setup = await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await request.put(`${CAPTURES}/templates/${setup.templates[0].id}`, { data: { setup_label: "Reclaim", wording: "Out under the 9 EMA." } });
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet.getByRole("alert")).toContainText("edited on another device");
+  await expect(sheet.getByRole("button", { name: /Reclaim/ })).toContainText("Out under the 9 EMA.");
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const row = (await savedCaptures(request))[0];
+  expect([row.wording, row.template_revision]).toEqual(["Out under the 9 EMA.", 2]);
+});
+
+test("a chart image that failed to upload keeps its Retry after its plan is dismissed", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.route(`**${CAPTURES}/*/image`, (route) => route.abort("connectionrefused"));
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy puts" }).click();
+  await sheet.getByRole("button", { name: /Discretionary/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+  const id = (await savedCaptures(request))[0].id;
+  await page.getByRole("button", { name: "Dismiss saved plan" }).click();
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("alert")).toContainText("Chart image not uploaded: MRVL Buy puts plan");
+  await page.unroute(`**${CAPTURES}/*/image`);
+  await strip.getByRole("button", { name: "Retry image" }).click();
+  await expect(strip).toHaveCount(0);
+  expect((await savedCaptures(request)).find((row) => row.id === id)?.image.state).toBe("saved");
+});
+
+// The voice tests use Chromium's fake microphone (a tone, see playwright.config.ts): real MediaRecorder, real upload, real storage.
+test.describe("voice plans", () => {
+  test.use({ permissions: ["microphone"] });
+
+  test("hold to record and release saves the recording; with no speech engine it says so and plays back", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await expect(sheet).toContainText("What am I taking, why here, and what would change my mind?");
+    // Ticker, account and side stay explicit for voice; no microphone until then.
+    await sheet.getByRole("button", { name: "Record voice plan" }).click();
+    await expect(sheet.getByRole("alert")).toHaveText("Choose what you are taking first.");
+    await sheet.getByRole("button", { name: "Buy calls" }).click();
+    const mic = sheet.getByRole("button", { name: "Record voice plan" });
+    const at = (await mic.boundingBox())!;
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+    await page.mouse.down();
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
+    await page.waitForTimeout(1500);
+    await page.mouse.up();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByLabel("Chart notice")).toHaveText("Recording saved");
+    const row = (await savedCaptures(request))[0];
+    expect([row.mode, row.side, row.setup_label, row.transcript?.status]).toEqual(["voice", "buy_calls", null, "not_configured"]);
+    expect(row.audio?.type).toBe("audio/webm");
+    expect(row.audio!.ms!).toBeGreaterThan(1000);
+    const strip = page.getByRole("region", { name: "Saved plan" });
+    await expect(strip).toContainText("MRVL · Buy calls · Voice plan");
+    await strip.getByRole("button", { name: "Show plan details" }).click();
+    await expect(strip.getByLabel("Plan recording")).toBeVisible();
+    await expect(strip).toContainText("Transcription is turned off on this server. Recordings are saved and can be played back.");
+    const audio = await request.get(`${CAPTURES}/${row.id}/audio`);
+    expect(audio.headers()["content-type"]).toBe("audio/webm");
+    expect((await audio.body()).subarray(0, 4)).toEqual(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]));
+  });
+
+  test("tap to start, Stop & save; a cancelled press or a hidden tab stops and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy puts" }).click();
+    // Keyboard: the accessible tap path.
+    await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(sheet.getByRole("button", { name: "Stop & save" })).toBeEnabled();
+    await page.waitForTimeout(600);
+    // The tab is hidden: recording stops, nothing is uploaded, the clip waits for a choice.
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+    await expect(sheet.getByRole("status").filter({ hasText: "page was hidden" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Save recording" })).toBeVisible();
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); });
+    await sheet.getByRole("button", { name: "Discard" }).click();
+    await expect(sheet.getByRole("button", { name: "Record voice plan" })).toBeVisible();
+    // A press the browser cancels (a scroll took it): stopped, not saved.
+    const mic = sheet.getByRole("button", { name: "Record voice plan" });
+    await mic.dispatchEvent("pointerdown", { button: 0, pointerId: 7, isPrimary: true });
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
+    await page.waitForTimeout(600);
+    await sheet.getByRole("button", { name: "Recording: release to save" }).dispatchEvent("pointercancel", { pointerId: 7 });
+    await expect(sheet.getByRole("status").filter({ hasText: "press was interrupted" })).toBeVisible();
+    const before = (await savedCaptures(request)).length;
+    await sheet.getByRole("button", { name: "Save recording" }).click();
+    await expect(sheet).toHaveCount(0);
+    expect((await savedCaptures(request)).length).toBe(before + 1);
+    expect((await savedCaptures(request))[0].side).toBe("buy_puts");
+  });
+
+  test("the 30-second limit stops the clip and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await page.clock.install();
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy stock" }).click();
+    await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(sheet.getByRole("button", { name: "Stop & save" })).toBeEnabled();
+    await page.clock.runFor(31_000);
+    await expect(sheet.getByRole("status").filter({ hasText: "30-second limit" })).toBeVisible();
+    await expect(sheet.getByRole("button", { name: "Save recording" })).toBeVisible();
+    await sheet.getByRole("button", { name: "Discard" }).click();
+    await expect(sheet.getByRole("button", { name: "Save recording" })).toHaveCount(0);
+  });
+
+  test("a voice plan that cannot reach the server waits with its audio and saves on Retry", { tag: "@captures" }, async ({ page, request }) => {
+    await captureSetup(request);
+    await stub(page);
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.route(`**${CAPTURES}/voice`, (route) => route.abort("connectionrefused"));
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy calls" }).click();
+    await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(1200);
+    await sheet.getByRole("button", { name: "Stop & save" }).click();
+    await expect(sheet.getByRole("alert")).toContainText("Not saved yet");
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    const strip = page.getByRole("region", { name: "Saved plan" });
+    await expect(strip.getByRole("alert")).toContainText("Not saved: MRVL Buy calls (voice)");
+    await page.unroute(`**${CAPTURES}/voice`);
+    await strip.getByRole("button", { name: "Retry" }).click();
+    await expect(strip).toContainText("MRVL · Buy calls · Voice plan");
+    const row = (await savedCaptures(request))[0];
+    expect(row.audio?.bytes).toBeGreaterThan(1000);
+    // The server's receipt is what counts; the device's time is kept, unverified.
+    expect(row.client_captured_at).toBeLessThan(row.received_at);
+  });
+});
+
+test("microphone denied or unavailable leaves the click path working", { tag: "@captures" }, async ({ page, request }) => {
+  await captureSetup(request);
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException("Permission denied", "NotAllowedError"));
+  });
+  await stub(page);
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await page.getByRole("button", { name: "Plan trade" }).click();
+  const sheet = planSheet(page);
+  await sheet.getByRole("button", { name: "Buy calls" }).click();
+  await sheet.getByRole("button", { name: "Record voice plan" }).focus();
+  await page.keyboard.press("Enter");
+  await expect(sheet.getByRole("status").filter({ hasText: "Microphone access is blocked" })).toBeVisible();
+  await sheet.getByRole("button", { name: /Reclaim/ }).click();
+  await sheet.getByRole("button", { name: "Save plan" }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test("transcript states: transcribing, then ready; a failure keeps the recording and offers Retry; a correction sits beside it", { tag: "@captures" }, async ({ page }) => {
+  const base: Capture = { id: "cap-1", client_id: "client-1", received_at: Math.floor(Date.now() / 1000) - 30, client_captured_at: Math.floor(Date.now() / 1000) - 31,
+    account_id: "acct", account_label: "Roth IRA ··8267", underlying: "MRVL", side: "buy_calls", instrument: "option", mode: "voice", template_id: null, template_revision: null,
+    setup_label: null, wording: null, note: null, strike: null, expiration: null, quantity: null, context_state: "unavailable", context: { state: "unavailable", reason: "fixture" },
+    image: { state: "unavailable", note: null, bytes: null }, audio: { type: "audio/webm", ms: 4000, bytes: 30000 },
+    transcript: { status: "pending", text: null, provider: null, error: null, transcribed_at: null }, not_taken_at: null, notes: [] };
+  let current = base;
+  let lists = 0;
+  const posts: string[] = [];
+  await page.route(`**${CAPTURES}?**`, (route) => { lists++; return route.fulfill({ json: { captures: [current] } }); });
+  await page.route(`**${CAPTURES}/cap-1/**`, (route) => {
+    posts.push(new URL(route.request().url()).pathname.split("/").at(-1)!);
+    if (route.request().url().endsWith("/transcribe")) current = { ...current, transcript: { ...current.transcript!, status: "pending", error: null } };
+    if (route.request().url().endsWith("/notes")) current = { ...current, notes: [{ id: "n1", kind: "transcript_correction", text: "Out below 182.", created_at: Date.now() / 1000 }] };
+    return route.fulfill({ json: current });
+  });
+  await stub(page);
+  await page.goto("/charts");
+  const strip = page.getByRole("region", { name: "Saved plan" });
+  await expect(strip.getByRole("status")).toHaveText("Recording saved — transcribing");
+  // While a transcript is on its way the list is checked every few seconds.
+  current = { ...base, transcript: { status: "ready", text: "Taking MRVL calls on the reclaim. Out below one eighty.", provider: "Whisper base.en (on this server)", error: null, transcribed_at: Date.now() / 1000 } };
+  await expect(strip.getByRole("status")).toHaveText("Saved", { timeout: 8000 });
+  const settled = lists;
+  await strip.getByRole("button", { name: "Show plan details" }).click();
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText("Taking MRVL calls on the reclaim. Out below one eighty.");
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText("Whisper base.en (on this server)");
+  await strip.getByRole("button", { name: "Correct transcript" }).click();
+  await strip.getByLabel("Transcript correction").fill("Out below 182.");
+  await strip.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText(/Corrected later, .*Out below 182\./);
+  await expect(strip.getByLabel("Transcript", { exact: true })).toContainText("Taking MRVL calls on the reclaim. Out below one eighty.");
+  await page.waitForTimeout(3500);
+  expect(lists).toBe(settled); // no polling once nothing is pending
+  // A provider failure: the recording stays, Retry asks once.
+  current = { ...base, transcript: { status: "failed", text: null, provider: null, error: "Transcription took longer than 180 seconds and was stopped.", transcribed_at: null } };
+  await page.reload();
+  await strip.getByRole("button", { name: "Show plan details" }).click();
+  await expect(strip).toContainText("Transcription took longer than 180 seconds and was stopped. The recording is saved.");
+  await expect(strip.getByLabel("Plan recording")).toBeVisible();
+  await strip.getByRole("button", { name: "Retry transcript" }).click();
+  await expect(strip.getByRole("status")).toHaveText("Recording saved — transcribing");
+  expect(posts.filter((post) => post === "transcribe")).toHaveLength(1);
 });

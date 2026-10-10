@@ -3,13 +3,17 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, LockOpen, Trash2, X } from "lucide-react";
 import Sheet from "./Sheet";
+import { OPTIONS_NEAREST } from "@/lib/charts";
+import type { OptionsLayer, OptionsMeasure, OptionsScope } from "@/lib/charts";
+import { MEASURE_NAMES, SCOPE_NAMES } from "@/lib/optionsView";
 
 /** One level or drawing in the panel. `name` and `detail` ("Breakout", "256.00") name its buttons. */
 export type LayerItem = { id: string; symbol: string; name: string; detail: string; color: string; line: boolean; hidden: boolean; locked: boolean };
 export type ItemGroup = "levels" | "drawings";
 export type LayerGroup =
   | { key: ItemGroup; name: string; noun: string; hidden: boolean; items: LayerItem[] }
-  | { key: "journal" | "auto"; name: string; hidden: boolean; note: string }
+  | { key: "journal" | "auto" | "ranges"; name: string; hidden: boolean; note: string }
+  | { key: "options"; name: string; hidden: boolean; note: string; filters: OptionsLayer }
   | { key: "indicators"; name: string; hidden: boolean; studies: { key: string; label: string; on: boolean }[] };
 
 const COLLAPSED_KEY = "tradejournal.charts.layers.collapsed.v1";
@@ -20,15 +24,16 @@ function readCollapsed(): string[] {
 
 /**
  * The layers panel (C1.4): what the charts draw, grouped as My levels,
- * Drawings, Auto levels, Journal and Indicators. Every group hides on all five charts;
+ * Drawings, Auto levels, Options levels, Range bands, Journal and Indicators. Every group hides on all five charts;
  * levels and drawings also lock and delete as a group (one undo step) and
  * item by item, and a click on an item brings the chart to it. Groups fold
  * (remembered on this device). A tab of the side dock on a desktop (C7.3); a
  * bottom sheet with 44px targets on a phone. Auto levels (C2.3) hide as a
- * group; options join when their layer exists (C4.4).
+ * group; Options levels (C4.4) too, and carry their filters: what ranks the
+ * strikes, which expirations count, how many each side and whether gamma is signed.
  */
-export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onGroupLock, onGroupDelete, onJump, onItem, onDelete, onStudy }: {
-  groups: LayerGroup[]; sheet: boolean; onClose(): void;
+export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onGroupLock, onGroupDelete, onJump, onItem, onDelete, onStudy, onOptions }: {
+  groups: LayerGroup[]; sheet: boolean; onClose(): void; onOptions?(patch: Partial<OptionsLayer>): void;
   onGroupHidden(key: LayerGroup["key"]): void; onGroupLock(key: ItemGroup): void; onGroupDelete(key: ItemGroup): void;
   onJump(group: ItemGroup, item: LayerItem): void; onItem(item: LayerItem, patch: { hidden?: boolean; locked?: boolean }): void;
   onDelete(item: LayerItem): void; onStudy(key: string): void;
@@ -103,6 +108,7 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
             </div>;
           })}
         </div>}
+        {open && "filters" in group && <OptionFilters filters={group.filters} sheet={sheet} onChange={(patch) => onOptions?.(patch)} />}
         {open && "note" in group && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.note}</p>}
         {open && "studies" in group && <div className="pb-1">
           {group.studies.map((study) => <div key={study.key} className={`${row} pl-5 ${group.hidden ? "opacity-60" : ""}`}>
@@ -117,4 +123,28 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
 
   if (sheet) return <Sheet label="Layers" onClose={onClose}>{body}</Sheet>;
   return <section aria-label="Layers">{body}</section>;
+}
+
+/** The options layer's filters (C4.4), saved with the workspace. */
+function OptionFilters({ filters, sheet, onChange }: { filters: OptionsLayer; sheet: boolean; onChange(patch: Partial<OptionsLayer>): void }) {
+  const tall = sheet ? "min-h-11" : "min-h-6";
+  const segment = (on: boolean) => `flex-1 px-1 ${tall} ${on ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`;
+  return <div className="space-y-1.5 px-3 pb-2 pl-5 text-[10px]">
+    <div role="group" aria-label="Rank strikes by" className="flex overflow-hidden rounded border border-slate-700/70">
+      {(Object.keys(MEASURE_NAMES) as OptionsMeasure[]).map((mode) => <button key={mode} aria-pressed={filters.mode === mode} onClick={() => onChange({ mode })} className={segment(filters.mode === mode)}>{MEASURE_NAMES[mode]}</button>)}
+    </div>
+    <div role="group" aria-label="Option expirations" className="flex overflow-hidden rounded border border-slate-700/70">
+      {(Object.keys(SCOPE_NAMES) as OptionsScope[]).map((scope) => <button key={scope} aria-pressed={filters.scope === scope} onClick={() => onChange({ scope })} className={segment(filters.scope === scope)}>{SCOPE_NAMES[scope]}</button>)}
+    </div>
+    <div className={`flex items-center justify-between gap-2 text-slate-400 ${tall}`}>
+      <label htmlFor="options-nearest">Strikes each side</label>
+      <select id="options-nearest" value={filters.nearest} onChange={(event) => onChange({ nearest: Number(event.target.value) })} className={`rounded border-0 bg-slate-800 px-1.5 text-slate-200 ${tall}`}>
+        {Array.from({ length: OPTIONS_NEAREST.max - OPTIONS_NEAREST.min + 1 }, (_, i) => OPTIONS_NEAREST.min + i).map((count) => <option key={count}>{count}</option>)}
+      </select>
+    </div>
+    <label className={`flex items-center gap-2 ${filters.mode === "gamma" ? "text-slate-400" : "text-slate-600"} ${tall}`} title="Open interest does not say who holds a contract: a sign needs an assumed dealer side.">
+      <input type="checkbox" checked={filters.signed} disabled={filters.mode !== "gamma"} onChange={(event) => onChange({ signed: event.target.checked })} className="accent-amber-400" />
+      Signed gamma and flip (assumed)
+    </label>
+  </div>;
 }

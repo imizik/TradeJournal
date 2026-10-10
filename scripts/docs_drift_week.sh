@@ -16,8 +16,11 @@
 #   DOCS_DRIFT_MIN_COMMITS=1 bash scripts/docs_drift_week.sh   run the pass anyway
 #   DOCS_DRIFT_DRY_RUN=1 bash scripts/docs_drift_week.sh       no push, pull request or phone
 #
-# Claude runs headless with the Anthropic key in DOCS_DRIFT_ENV_FILE (the main
-# checkout's backend/.env). It may read anything, edit only files under docs/,
+# Claude runs headless on the Claude plan, never on API credits: the token from
+# `claude setup-token` is CLAUDE_CODE_OAUTH_TOKEN in DOCS_DRIFT_ENV_FILE (the
+# main checkout's backend/.env), the credentials, endpoints and provider switches
+# that would outrank or receive it are removed for the run, and the run stops unless Claude Code itself
+# reports the plan token as its sign-in. It may read anything, edit only files under docs/,
 # README.md, AGENTS.md and CLAUDE.md, and run only git log, diff and show;
 # everything else is refused without asking, so the run cannot stall waiting
 # for a person. This script commits, pushes and opens the pull request. It
@@ -154,12 +157,33 @@ main() {
     return 0
   fi
 
-  say "preflight: GitHub and the Anthropic key"
+  say "preflight: GitHub and the Claude plan token"
   git push -q --dry-run origin "HEAD:refs/heads/$branch" || fail "git cannot push to origin (git push --dry-run failed)"
   gh auth status > /dev/null 2>&1 || fail "gh is not logged in (gh auth status)"
-  local key
-  key="$(setting ANTHROPIC_API_KEY)"
-  [ -n "$key" ] || fail "no ANTHROPIC_API_KEY in $ENV_FILE"
+  local token
+  token="$(setting CLAUDE_CODE_OAUTH_TOKEN)"
+  [ -n "$token" ] || fail "no CLAUDE_CODE_OAUTH_TOKEN in $ENV_FILE (run \`claude setup-token\` and add it there)"
+  # The plan token and nothing that outranks it: an auth token, an API key or a
+  # cloud provider would bill instead, and another base URL or socket would
+  # receive it (the sign-in check below cannot see a socket). The token itself
+  # goes in as a prefix assignment at each call, never as an argument: ps and
+  # exec auditing would show an argument.
+  local plan_env=(env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL -u ANTHROPIC_UNIX_SOCKET
+    -u CLAUDE_CODE_USE_BEDROCK -u CLAUDE_CODE_USE_VERTEX -u CLAUDE_CODE_USE_FOUNDRY -u CLAUDE_CODE_USE_GATEWAY
+    -u CLAUDE_CODE_USE_ANTHROPIC_AWS -u CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD -u CLAUDE_CODE_USE_MANTLE)
+  # Whatever else could still win (a managed apiKeyHelper, say), Claude Code
+  # names the sign-in it would use; anything but the plan token stops the run.
+  local signin
+  signin="$(CLAUDE_CODE_OAUTH_TOKEN="$token" "${plan_env[@]}" claude auth status --json 2> /dev/null | "$PYTHON" -c '
+import json, sys
+try:
+    status = json.load(sys.stdin)
+except ValueError:
+    status = {}
+method, provider = status.get("authMethod"), status.get("apiProvider", "firstParty")
+print(f"{method}/{provider}")
+sys.exit(0 if method == "oauth_token" and provider == "firstParty" else 1)')" \
+    || fail "Claude would not sign in with the plan token (claude auth status: $signin); the pass did not start"
 
   git checkout -q -b "$branch" || fail "could not create the branch $branch"
   STARTED=1
@@ -174,7 +198,9 @@ For this run:
 - Of the shell you have git log, git diff and git show; read files with your own tools.
 - When the pass is done, set docs/agent/last-reconciled.json to {\"commit\": \"$START\", \"date\": \"$(date +%F)\", \"note\": \"<one line: what this pass covered>\"}. If nothing needed changing, still move the marker; that is a good outcome.
 - Your final message becomes the pull request's description, in Markdown, for a trader who does not read code: what you checked, what you changed and why, anything you deliberately left alone, and that prose accuracy is not machine-verifiable (each claim was re-read against the code it describes). No preamble."
-  ANTHROPIC_API_KEY="$key" claude -p "$prompt" --bare --restricted --model "${DOCS_DRIFT_MODEL:-opus}" \
+  # --bare is left off because it never reads the plan token.
+  CLAUDE_CODE_OAUTH_TOKEN="$token" "${plan_env[@]}" claude -p "$prompt" --restricted --strict-mcp-config \
+    --model "${DOCS_DRIFT_MODEL:-opus}" \
     --tools "Read,Grep,Glob,Edit,Bash" \
     --allowedTools "Read" "Grep" "Glob" "Edit(docs/**)" "Edit(README.md)" "Edit(AGENTS.md)" "Edit(CLAUDE.md)" \
       "Bash(git log *)" "Bash(git diff *)" "Bash(git show *)" \
@@ -204,7 +230,8 @@ text = (run.get("result") or "").strip()
 if run.get("is_error") or run.get("subtype") != "success" or not text:
     sys.exit(f"{run.get('subtype')}: {text[:300]}")
 print(text)
-print(f"\n_The pass took Claude {run.get('num_turns')} turns and ${run.get('total_cost_usd') or 0:.2f}._")
+print(f"\n_The pass took Claude {run.get('num_turns')} turns on the Claude plan "
+      f"(about ${run.get('total_cost_usd') or 0:.2f} at API prices)._")
 EOF
 )" || fail "Claude's pass did not finish ($(tail -1 "$result.stderr" 2> /dev/null)); see $result"
 

@@ -43,17 +43,19 @@ after them, clearly labelled.
 | ID | Item | Phase | Status |
 |---|---|---|---|
 | T1.1 | Panel shell and the **You** tab: your own trades on this underlying | 1 Core | done ([PR #115](https://github.com/imizik/TradeJournal/pull/115)) |
-| T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga) | 1 Core | next |
-| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | todo |
-| T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | todo |
-| T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | todo |
-| T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | todo |
-| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Yahoo, unofficial) | 2 Forecast | todo (needs [decision 1](#open-decisions)) |
-| T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | todo |
-| T3.2 | Financials: last eight quarters of revenue, margins and EPS | 3 Depth | todo |
-| T3.3 | Ownership and insider activity | 3 Depth | todo |
-| T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | todo |
+| T1.2 | **News** tab: latest headlines for the symbol (Alpaca / Benzinga, plus Polygon with provider-supplied sentiment) | 1 Core | done (branch `claude/roadmap-features-7kd6u6`) |
+| T1.3 | **Overview** tab: key stats and company profile (Tradier) | 1 Core | built ([PR #146](https://github.com/imizik/TradeJournal/pull/146)); the fundamentals parser was rewritten against recorded responses on 2026-10-08 after it showed nothing for every symbol |
+| T1.4 | **Events** tab and header badge: next earnings, ex-dividend, splits (Tradier) | 1 Core | done ([PR #125](https://github.com/imizik/TradeJournal/pull/125), with Charts C2.5) |
+| T2.1 | Implied move: what the options market prices for this week and for earnings | 2 Forecast | done ([PR #128](https://github.com/imizik/TradeJournal/pull/128), with Charts C4.2–C4.5, ahead of T1.2 at the user's request) |
+| T2.2 | Earnings reactions: how far the stock actually moved on past reports | 2 Forecast | in PR ([PR #150](https://github.com/imizik/TradeJournal/pull/150)) |
+| T2.3 | Analyst consensus: price targets, ratings, estimates, beat/miss (Webull primary for targets and ratings; Yahoo, unofficial, for the rest) | 2 Forecast | built ([PR #151](https://github.com/imizik/TradeJournal/pull/151)); Webull verified from the VPS |
+| T3.1 | Short interest, short volume and hard-to-borrow flag | 3 Depth | done ([PR #157](https://github.com/imizik/TradeJournal/pull/157)) |
+| T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | done ([PR #155](https://github.com/imizik/TradeJournal/pull/155)) |
+| T3.3 | Ownership and insider activity | 3 Depth | built ([PR #158](https://github.com/imizik/TradeJournal/pull/158)); insiders from Yahoo, unofficial |
+| T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | done ([PR #154](https://github.com/imizik/TradeJournal/pull/154)) |
 | T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
+| T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
+| T3.7 | Economic calendar from FRED release dates | 3 Depth | todo, not built (needs a free FRED key) |
 
 Why this order: **You** costs zero external calls, is the one tab TradingView
 cannot have, and proves the shell. News is the most-asked-for tab and the
@@ -70,13 +72,13 @@ Probed 2026-10-02 with NVDA, CVNA, AMD, LLY and SPY.
 |---|---|---|---|
 | Overview: key stats | Tradier `/v1/markets/quotes` + `/beta/markets/fundamentals/company`, `/ratios`, `/statistics` (Morningstar) | Last, change, day range, 52-week high/low; market cap, enterprise value, shares outstanding, employees, sector code, IPO date, long description; P/E, P/S, P/B, EV/EBITDA, dividend yield, payout, 36/48/60-month beta; 30/60/90-day average volume; 13F holders and % institutional. One call each, 0.3-1.3 s, comma-separated symbols batch | **Feasible now** |
 | News | Alpaca `/v1beta1/news` (Benzinga), already in `backend/app/engine/news.py` | Headline, summary, tagged symbols, source, URL, images; full text on request. Last 7 days: NVDA 115, SPY 240, LLY 28, CVNA 4 articles | **Feasible now** |
-| News, with sentiment | Polygon `/v2/reference/news` | Publisher, description, keywords, and per-ticker `insights` (positive/negative/neutral plus a reasoning sentence) | Feasible but costs the Polygon budget (below); later |
+| News, with sentiment | Polygon `/v2/reference/news` | Publisher, description, keywords, and per-ticker `insights` (positive/negative/neutral plus a reasoning sentence) | **Built in T1.2** as the News tab's second source, on its own 15-minute cache (budget below) |
 | Events / earnings | Tradier `/beta/markets/fundamentals/calendars` | Earnings results and calls by quarter, AGM, conferences, annual report, each `Confirmed` or `Estimated`. History back to 2010 (AMD) / 2017 (CVNA). NVDA next: 2026-11-19 *Estimated*; CVNA next: 2026-10-28 *Confirmed* | **Feasible now**, with the caveats below |
 | Dividends, splits | Tradier `/dividends`, `/corporate_actions`; Alpaca `/v1/corporate-actions`; Polygon `/v3/reference/dividends` | Ex, record and pay dates, amounts; split history with ratios | **Feasible now** (Tradier; Alpaca as fallback) |
 | Forecast: analyst targets, ratings, estimates | Polygon/Massive Benzinga endpoints (`/benzinga/v1/ratings`, `/consensus-ratings`, `/earnings`) | **HTTP 403**, "not entitled", needs a paid plan | Not available on current plans |
 | Forecast: same data | Yahoo via `yfinance` (already a dependency for quotes) | Price targets (NVDA mean 327.7, median 315, high 515, low 180), rating counts (NVDA 10/48/2/1/0), 984 upgrade/downgrade rows with target changes, next-quarter EPS and revenue estimates with analyst counts, EPS trend over 90 days, last four quarters beat/miss, 150 insider transactions | **Works**, unofficial and unlicensed: [decision 1](#open-decisions) |
 | Forecast, trader edition | Tradier option chains (Charts C4.1 adapter) + Tradier daily bars | ATM straddle per expiration; daily bars back to the 1990s | **Feasible now**, calculated locally (T2.1, T2.2) |
-| Financials | Polygon `/vX/reference/financials` | Quarterly income statement, balance sheet, cash flow from SEC XBRL (NVDA Q2 FY27: revenue 96.2B, diluted EPS 2.46), with filing date | Feasible; `vX` is Polygon's experimental route and the newer `/stocks/financials/v1` is 403, so it may be retired |
+| Financials | SEC EDGAR `data.sec.gov/api/xbrl/companyfacts/CIK##########.json`, ticker map `www.sec.gov/files/company_tickers.json` (probed from the VPS 2026-10-08: both 200; NVDA 4 MB in 0.47 s) | XBRL facts with period start/end, filing date and form (NVDA Q2 FY27: revenue 96.2B, diluted EPS 2.46) | **Built in T3.2.** Polygon's `/vX/reference/financials` returns 410 and sunsets 2026-10-09; its successor is 403 on our plan |
 | Short interest | Polygon `/stocks/v1/short-interest`, `/stocks/v1/short-volume`; Tradier `/v1/markets/etb` | FINRA short interest twice a month with days to cover (NVDA 294M, 2.55 days, settled 2026-09-15); daily short-volume ratio (NVDA 54.1% on 2026-10-01); the easy-to-borrow list | Feasible |
 | Ownership, insiders | Tradier `/company` (13F summary); Yahoo insider transactions; SEC EDGAR Form 4 | 13F: 6,065 holders, 69.5% held. Yahoo: Form 4 rows with insider, role, shares, value. EDGAR: *unverified*, blocked by this sandbox's network, not by SEC | 13F feasible; insiders via Yahoo or a later EDGAR probe from the VPS |
 | Peers | Polygon `/v1/related-companies` | Ten tickers (NVDA: GOOGL, AMD, MSFT, META, AMZN, TSLA, AAPL, AVGO, INTC) | Feasible |
@@ -101,13 +103,36 @@ and the item that consumes the data owns the test.
   second class (`0PDXF29G25`, IPO 1970, nearly empty) that carries its own
   beta and averages. Pick the share class matching the request's primary
   listing and ignore the rest. Do not merge fields across classes. (T1.3)
+  On 2026-10-08 the 30/60/90-day volume averages arrived only on that second
+  class (NVDA 107.9M), so the statistics read takes the class that has them.
+- **The tables are not named after the endpoints.** The company call holds
+  `share_class`, `share_class_profile` (market cap, enterprise value, shares
+  outstanding), `ownership_summary` (13F), `company_profile`,
+  `historical_asset_classification` (a numeric Morningstar sector code) and
+  `long_descriptions`; ratios are `valuation_ratios` (`p_e_ratio`,
+  `e_v_to_e_b_i_t_d_a`, `forward_dividend_yield`) and `alpha_beta`. There is
+  no company name, percentages are fractions, and an ETF's market cap reads 0.
+  The first parser guessed other names and showed nothing; parse only against
+  the recorded fixture `backend/tests/fixtures/tradier/overview_2026-10-08.json`. (T1.3)
 - **Calendars can hold two "next earnings" rows.** CVNA had Q3 results on
   2026-10-28 *Confirmed* and 2026-10-29 *Estimated*. A confirmed row wins for
-  the same fiscal quarter. (T1.4)
+  the same fiscal quarter. (T1.4) By 2026-10-04 the estimated row was gone;
+  the recorded fixture keeps it.
+- **Estimates lag announcements.** On 2026-10-04 Tradier still had TSLA's Q3
+  report as 2026-10-22 *Estimated*, a day after the 2026-10-21 Tesla announced
+  that day; CVNA's *Confirmed* 2026-10-28 matched Carvana's release. Show the
+  status every time a date is shown. (T1.4, C2.5)
 - **Sources disagree on dates.** NVDA's next report: Tradier 2026-11-19
   *Estimated*, Yahoo 2026-11-17. Show the source and status, prefer a
   confirmed date from either, and never present an estimate as a date. (T1.4,
   T2.3)
+- **Yahoo insider rows name the kind only in `Text`.** `insider_transactions`
+  leaves `Transaction` empty; `Text` starts "Sale", "Purchase", "Stock
+  Award(Grant)", "Stock Gift", "Conversion of Exercise of derivative
+  security", or is blank (recorded 2026-10-08 on 11 symbols:
+  `tests/fixtures/yahoo/insider_transactions_2026-10-08.json`). Only Sale and
+  Purchase count as selling and buying; NVDA's 500,000-share gifts are not
+  sales. (T3.3)
 - **No time of day for earnings.** Tradier's calendar has dates only (its
   `time_zone` field holds a placeholder date), so before-open versus
   after-close is unknown. Yahoo's `earnings_dates` carries a time but could not
@@ -130,7 +155,7 @@ these keys.
 |---|---|---|---|
 | Tradier (120/min per token) | Chart feed (60/min cap), options positioning (30/min), position quotes (under 10/min) | **At most 10/min** | Fundamentals cached 24 h per symbol, calendar 12 h, batched by `symbols=`. A cold symbol costs three calls (company, ratios, calendar); a warm one costs none |
 | Alpaca (free data plan) | Enrichment, reports, scalp packets | At most 2/min | News cached 60 s per symbol on the server; the browser polls once a minute only while the News tab is open and the page is visible |
-| Polygon Basic (5/min) | Fill enrichment, which paces itself from Polygon's first 429 | **At most one call per symbol per dataset per day**, never on the hot path | Disk cache; on a 429, serve the cached copy with its age and do not retry. No Polygon call in Phase 1 |
+| Polygon Basic (5/min) | Fill enrichment, which paces itself from Polygon's first 429 | **At most one call per symbol per dataset per day**, never on the hot path. **News is the one exception: one call per symbol per 15 minutes**, and only while the News tab is requested | Disk cache; on a 429 or any failure, serve the cached copy with its age and do not retry (and stay quiet for five minutes). News goes through the enricher's adaptive limiter and never waits for a slot: a slot more than two seconds out counts as busy, serves the cache and claims nothing (`reserve_within`), so enrichment is not pushed back; a nearer slot is slept before the call. No other Polygon call in Phase 1 |
 | Yahoo (`yfinance`) | Quote fallback, report gauges | One fetch per symbol per day | Disk cache; any failure shows "Yahoo unavailable" and the cached copy if one exists |
 | Anthropic | AI reviews | Zero by default | Nothing in this plan calls a model automatically |
 
@@ -182,16 +207,34 @@ the reconstructor's realized P&L as stored, and does not recompute P&L.
 symbol with no trades shows "No trades on this symbol"; the 390 px layout
 test passes.
 
-**T1.2 News.** The latest 20 Benzinga headlines for the symbol, newest first:
-time (relative, with New York time on hover), headline, source, a "+N
-tickers" chip when the article tags several symbols, summary on expand, and
-the link out. A **Focused** toggle (default on) hides articles tagging more
-than three symbols, which removes most mega-cap roundups (NVDA appears in
-many). New articles since the tab was opened show as "N new" at the top
-instead of shifting the list. Reuse `fetch_news`; add the server-side 60 s
-cache. *Done when:* a fixture with mixed tagging proves the Focused filter;
-an empty feed says "No news in the last 7 days"; polling stops when the tab
-or page is hidden (browser test with a stubbed route).
+**T1.2 News.** The newest 20 headlines for the symbol from two feeds,
+merged, newest first: Alpaca's Benzinga feed (`fetch_news(fast=True)`: one request on a
+2.5 s budget, no retry or limiter wait; a 429, timeout or failure serves the
+cached copy with its age or `failed` and goes quiet for five minutes; cached 60 s per
+symbol in memory) and Polygon's `/v2/reference/news` (cached 15 minutes per
+symbol under `backend/data/symbol_info/v1/polygon/`). Each feed has a pure
+normalizer into one shape (`provider` is `alpaca_benzinga` or `polygon`, plus
+publisher, URL, UTC time, summary, tagged symbols and optional per-ticker
+sentiment from Polygon's `insights`); the browser never sees a provider's
+shape. Two rows are one story when their canonical links (no scheme, `www.`,
+tracking query or trailing slash) or normalized headlines match; the Alpaca row
+stays and takes Polygon's sentiment. Each row shows time (relative, with New York
+time on hover), headline, publisher, a "+N tickers" chip when the article tags
+several symbols, the summary on expand, and the link out. Sentiment is
+labelled as Polygon's, never ours. A **Focused** toggle (default on) hides
+articles tagging more than three symbols, which removes most mega-cap
+roundups; the response carries the newest 20 plus the newest 20 non-roundups,
+so Focused still fills a list. New articles since the tab was opened show as
+"N new" at the top instead of shifting the list; the tab reads again each
+minute while it is open and the page is visible. Polygon is read only when the
+tab is requested, never retried, and a failure or 429 degrades only itself:
+the response lists each source as `ok`, `stale` (older copy, with its age),
+`failed` or `not_configured`, and Alpaca news still shows. An empty feed
+says "No news in the last 7 days". *Done when:* a fixture with mixed tagging
+proves the Focused flag and the merge, the caches and the Polygon 429 fallback
+are tested, and the browser tests cover the empty state, Focused and polling
+stopping when the tab or page is hidden (stubbed routes; live Alpaca and
+Polygon are not exercised).
 
 **T1.3 Overview.** Price and change, day range, a 52-week range bar, average
 volume (30-day, from fundamentals; [trap](#data-traps-the-probes-found)),
@@ -214,6 +257,17 @@ the CVNA duplicate-row fixture resolves to the confirmed date, a symbol with
 only estimated rows shows the *Estimated* label, an unknown date shows
 nothing rather than a guess, and the badge appears and disappears around the
 14-day line in a test with a fixed clock.
+As built ([Events tab](charts-workspace.md#symbol-info-panel), [chart
+earnings](charts-workspace.md#earnings-c25)): `GET /charts/symbol/{symbol}/events`
+answers from `backend/app/engine/symbol_info_tradier.py`, which reads the
+three Tradier datasets with its own budget of 10 a minute and keeps the
+normalized rows (pure normalizers in `symbol_info_events.py`) in memory and on
+disk for 12 or 24 hours. Earnings are quarterly *result* rows only (Tradier
+event types 7-10), one date per fiscal quarter. Past reports are confirmed
+dates only: an estimate whose day passed was never a report. Each symbol's
+rows come from one share class, the one with the most rows. No upcoming row
+means "Not announced"; nothing is projected from earlier quarters. Ex-dividend
+dates show the next announced one and the last; splits the last two years.
 
 ### Phase 2 — Forecast, for an options trader
 
@@ -231,6 +285,16 @@ or one-sided markets (no bid) show "market too wide" instead of a number.
 to spot, both legs quoted), the earnings expiry is chosen from T1.4's date,
 and a no-bid fixture renders the refusal.
 
+As built ([Forecast tab](charts-workspace.md#symbol-info-panel)):
+`GET /charts/symbol/{symbol}/forecast?spot=` with the chart's latest price.
+`backend/app/engine/options_implied.py` (pure) takes the strike nearest the
+price that lists both a call and a put (a tie takes the lower); a leg with no
+bid or no ask, a crossed quote, or a spread wider than its own mid shows
+"Market too wide" with the reason. The earnings row is the first expiration
+strictly after the next report, since the report's time of day is unknown.
+Chains come through the chart's option feed, 60 seconds fresh, inside its
+share of the 30-a-minute budget; the tab reads again each minute while open.
+
 **T2.2 Earnings reactions.** For the last eight reports (dates from T1.4's
 history), the gap (open versus prior close) and the full-day move (close
 versus prior close), from Tradier daily bars. Because the time of day is
@@ -241,17 +305,25 @@ current implied move from T2.1 ("Priced ±8.1 %, moved ±6.4 % on average").
 *Done when:* a fixture test covers a before-open and an after-close report,
 and the summary refuses to render with fewer than four past reports.
 
-**T2.3 Analyst consensus (Yahoo, unofficial).** Price target mean, median,
-high and low against the current price; rating distribution; the last ten
-upgrades and downgrades with target changes; next-quarter EPS and revenue
-estimates with the analyst count; the last four quarters' beat or miss;
-EPS-estimate trend over 90 days. Fetched once per symbol per day through
-`yfinance`, cached on disk, and tagged "Yahoo, unofficial" on every block.
-**Blocked on [decision 1](#open-decisions).** Before shipping, probe from the
-VPS itself (Yahoo rate-limits datacenter addresses and this sandbox could not
-reach `earnings_dates`). *Done when:* a recorded fixture renders, a Yahoo
-failure leaves the rest of the Forecast tab intact, and the probe result is
-in the PR.
+**T2.3 Analyst consensus (Webull, Yahoo).** Price target mean, median,
+high and low against the chart's price; rating distribution; next-quarter
+and current-quarter EPS and revenue estimates with the analyst count; the
+last four reports' beat or miss; the last ten upgrades and downgrades with
+target changes. `symbol_info_analysts.py` reads two providers, each cached a
+day per symbol on disk: **Webull OpenAPI** (official) is primary for targets
+and ratings (`/market-data/fundamentals/analysis/target-prices/get` and
+`.../ratings/get`), and **Yahoo via `yfinance`** (unofficial) fills those when
+Webull has none and is the only source of estimates, beat or miss and actions.
+Every block names its source and a failing provider blanks only what it alone
+supplies. Webull's docs list no request parameters or response fields; a live
+call from the VPS on 2026-10-08 (after the VPS, 15.204.255.2, was added to the
+key's IP allowlist) showed `symbol` and `category=US_STOCK` work, values come
+back as strings, ratings use `under_perform`, and `/forecast-eps/get` is a bare
+list of fiscal quarters with `actual`, `est` and `reported`. Webull leads for
+targets, ratings and beat or miss. The two disagree on rating labels for the
+same analysts (NVDA: Webull `strong_buy` 48 and `buy` 10, Yahoo 10 and 48,
+same total); Webull's matches what the Webull app shows, so it leads and
+Yahoo is the fallback. *Done when:* the tab renders these on the VPS.
 
 ### Phase 3 — Depth
 
@@ -265,12 +337,25 @@ flag when the symbol is missing from Tradier's easy-to-borrow list. Polygon
 calls cached one day. *Done when:* fixtures render, and a Polygon 429 serves
 the cached copy with its age.
 
+*Built as the **Short** tab.* Shares outstanding come from Polygon's ticker
+details (`share_class_shares_outstanding`, else `weighted_shares_outstanding`),
+one more cached call, read only when a short-interest row exists; without it
+the percentage is omitted and the tab says so. Probes on 2026-10-08: ETFs
+(SPY) have short-interest rows; an unknown ticker returns empty `results`;
+Polygon's `short_volume_ratio` is a percent and the tab recomputes it from the
+two volumes; Tradier's easy-to-borrow list was 1,520 symbols (stocks and ETFs).
+
 **T3.2 Financials.** The last eight quarters of revenue, gross margin,
-operating margin, net income and diluted EPS from Polygon's XBRL financials,
-as small bars with year-over-year growth. Cached until the next filing date.
-Isolate the `vX` route behind the adapter: if Polygon retires it, this tab
-degrades and nothing else breaks. *Done when:* the NVDA fixture renders and
-the margins are calculated, not read.
+operating margin, net income and diluted EPS from SEC EDGAR's XBRL
+companyfacts (Polygon's `vX` route is retired), as small bars with
+year-over-year growth. A quarter is a 10-Q fact of 80-105 days, not an `fp`
+(year-to-date facts share it); values come from the latest filing, fiscal
+labels from the earliest; Q4 lives only in the 10-K and shows as a gap, never
+derived; a missing field is null, never 0. Issuers that file only 20-Fs (NBIS)
+and ETFs get an explanatory state. Cached (normalized quarters only) until the
+next 10-Q is due, then re-checked daily. `SEC_USER_AGENT` must carry a contact
+or www.sec.gov answers 403. *Done when:* the NVDA fixture renders and the
+margins are calculated, not read.
 
 **T3.3 Ownership and insiders.** The 13F summary from the Tradier company
 call T1.3 already makes (holders, % held, buyers versus sellers, new and
@@ -299,11 +384,19 @@ right candle on 1m and 1D in a browser test, and a layer toggle hides them.
   last 24 h of headlines and the price move with the Anthropic API, on demand
   only, cached per symbol per hour. Belongs with the charts roadmap's "Why did
   this move?", which owns the evidence-labelling rules.
-- **Headline sentiment** from Polygon's per-ticker `insights`. It is a model's
-  opinion and costs the scarce Polygon budget; add only if headlines prove
-  hard to triage.
 - **Seasonals**: average return by month and weekday from Tradier daily
   history. Cheap to calculate, of little use for 0-7 DTE options.
+- **EDGAR news source** (T3.6): 8-K and Form 4 filings as headlines in the
+  News tab, normalized into the same shape with `provider: "edgar"`. EDGAR
+  needs a descriptive `User-Agent` and a 10-requests-a-second courtesy limit,
+  and this sandbox cannot reach it, so probe it from the VPS first. The VPS
+  probe of 2026-10-08 showed EDGAR reachable for T3.2: `data.sec.gov` companyfacts
+  and `www.sec.gov/files/company_tickers.json` both returned 200 (the latter 403
+  without a contact in the `User-Agent`, see `SEC_USER_AGENT`); the submissions
+  and Form 4 endpoints are still unprobed. Not built.
+- **Economic calendar** (T3.7): FRED `/fred/releases/dates` for CPI, jobs and
+  FOMC-adjacent releases on the Events tab or as chart markers. Needs a free
+  FRED API key. Not built.
 - **SEC filings list** (10-K, 10-Q, 8-K links) from EDGAR, after the VPS
   probe.
 - **IV rank**: needs about a year of the C4.3 daily option snapshots before it
@@ -326,12 +419,10 @@ right candle on 1m and 1D in a browser test, and a layer toggle hides them.
 
 Only the user can settle these.
 
-1. **Use Yahoo (`yfinance`) for analyst data?** It is free, it already
-   powers the default quote provider, and the probe returned everything the
-   Forecast tab needs. It is unofficial and unlicensed, Yahoo rate-limits
-   datacenter IPs, and it can break without notice. The alternative is a paid
-   analyst feed. **Recommendation: yes**, as T2.3, labelled "unofficial",
-   cached daily, after T2.1 and T2.2 so the tab is useful without it.
+1. **Use Yahoo (`yfinance`) for analyst data?** Settled 2026-10-08: yes, as
+   the fallback and the only source of estimates and analyst actions,
+   labelled "unofficial" and cached daily, with Webull primary for targets
+   and ratings. A probe from the VPS read all six Yahoo tables. No paid feed.
 2. **When does Phase 1 start relative to the Charts board?** This track
    touches the side column and new files only, so it can run beside the
    Charts items. **Recommendation:** run T1.1-T1.4 now, alongside C1.2; hold

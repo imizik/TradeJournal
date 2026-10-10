@@ -6,38 +6,22 @@ The shape of the system. For where a specific feature lives, see
 
 ## Processes
 
-Three processes run locally, and they are deliberately not one:
+Two processes run locally, and they are deliberately not one:
 
 | Process | Port | Entry point | Exposure |
 |---|---|---|---|
-| Private API | 8080 from `startdev.sh`; 8000 from a bare `uvicorn` command and `mcp_server.py`'s default | `backend/app/main.py` | localhost only, **no auth** |
-| TradingView ingress | 8090 | `backend/app/tradingview_ingress.py` | the only tunnelable port; **opt-in** |
+| Private API (legacy default; optional authenticated mode below) | 8080 from `startdev.sh`; 8000 from a bare `uvicorn` command and `mcp_server.py`'s default | `backend/app/main.py` | localhost only, **no auth** |
 | Frontend | 3000 | `frontend/` (Next 16 App Router) | localhost |
 
-The ingress is a separate FastAPI application with its own route allowlist and
-its own environment file (`backend/.env.tradingview`). It exists so a public
-webhook can reach the database without exposing the private API. Private API
-keys and unrestricted database credentials must never appear in its
-environment.
+C5.2 retired the public TradingView webhook receiver and Pine alert source.
+Stored TradingView alert records remain readable through private GET routes and
+the Signals pages. The optional analysis worker is no longer started, so these
+records are read-only. Existing ingress systemd units are stopped and removed
+by the release controller; legacy credentials and the `tj_ingress` database
+role are preserved pending an explicit operator decision.
 
-On Ubuntu, `tradejournal-ingress.service` is opt-in and runs as its own OS
-user, with `/etc/tradejournal/tradingview.env` instead of the local dotenv.
-Deployment checks its database target and effective role privileges before
-activation. The dedicated Caddy template forwards only the webhook path to
-8090; the private Tailscale/frontend/API routes stay private. See
-[production setup](../../deploy/README.md#tradingview-webhooks).
-
-That separation is enforced on the import graph, not only described here.
-`backend/tests/test_import_boundaries.py` fails if anything the ingress
-imports, through any chain, lies outside a six-module allowlist
-(`app.tradingview_ingress`, `app.tradingview_database`,
-`app.routers.tradingview_webhook`, `app.engine.tradingview`,
-`app.engine.tradingview_alerts`, `app.models`); if a private module imports
-the ingress side; or if a pure engine module — the reconstructor, the parsers,
-Strategy Lab metrics — starts reaching the network or the database engine.
-The allowlists at the top of that file are the policy. Changing them is an
-architecture change: make it deliberately, in the same commit as the import
-that needs it, and say why.
+The import-boundary tests now protect pure engine modules from reaching the
+network or database engine.
 
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.
@@ -58,21 +42,13 @@ the strategy factory's `app.engine.factory_*` modules: `factory_gates.evaluate`
 reaches bars only through the loader `scripts/strategy_factory.py` passes it,
 which is also what keeps each stage from loading data it may not see.
 
-`startdev.sh` / `startdev.ps1` launch the private backend and frontend by
-default. The ingress is opt-in:
-
-```bash
-TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh
-```
-
-When it is enabled, the launchers require a webhook token and refuse to start
-when the private `DATABASE_URL` is set but `TRADINGVIEW_DATABASE_URL` is blank
-— that split would silently point the two processes at different databases.
+`startdev.sh` / `startdev.ps1` launch the private backend and frontend only.
+Both bind to loopback.
 
 The [Ubuntu deployment package](../../deploy/README.md) instead supervises
-six services: frontend, API and the four worker lanes. It keeps the frontend
+eight services: frontend, API and the six worker lanes. It keeps the frontend
 and API on loopback; private Tailscale Serve reaches the frontend, whose
-same-origin `/api/backend` proxy carries browser requests. Server components
+same-origin `/api/backend` request handler carries browser requests. Server components
 use `API_INTERNAL_URL`; the packaged build fixes browser requests to the proxy.
 Because that frontend grants access to the private API, it must never be made
 public. Local development retains the existing direct API URL default.
@@ -87,9 +63,11 @@ two-minute check that sends phone alerts through ntfy when any of them, the API
 or real-time Gmail stops working. The
 Gmail timer rebuilds trades only when it imported new fills and never starts
 market-data enrichment; with real-time import enabled it is the safety net.
-When `/etc/tradejournal/autodeploy.env` exists, a five-minute timer installs
+When `/etc/tradejournal/autodeploy.env` exists, a three-minute timer installs
 the newest `main` build that passed every CI check. It pulls from GitHub,
-because nothing outside the tailnet can reach the server. Backup retention, prerequisites
+because nothing outside the tailnet can reach the server. Automatic schema
+migrations require an explicit server setting and a fresh verified backup.
+Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
 Two scheduled processes run off the server, both started by launchd on the
@@ -97,8 +75,10 @@ development Mac and neither touching a database:
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
-  Alpaca, the Anthropic API and ntfy, and writes only to that branch, which
-  is never merged (`docs/strategy-factory.md`).
+  Alpaca and ntfy, has Claude (`claude -p`, no tools) answer the week's brief
+  on the Claude plan token, never API credits, and writes only to that
+  branch, which is never merged (`docs/strategy-factory.md`). The direct
+  Anthropic API call remains only behind an explicit `--use-api`.
 - The weekly documentation drift pass (`scripts/docs_drift_week.sh`, in a
   checkout kept at `main`). Once 20 code commits have landed since the docs
   were reconciled, Claude runs the `docs-drift` skill headless, allowed to
@@ -128,9 +108,9 @@ safe to wipe and rebuild — rebuilding is normal, not a repair of last resort.
 Corrections happen by editing bad fills and rebuilding, not by appending
 compensating rows.
 
-## Three isolated domains
+## Isolated domains
 
-They share a database and nothing else. Do not route data between them.
+These domains share persistence infrastructure, with explicit boundaries. Do not route data between them.
 
 1. **Journal** — `account`, `fill`, `trade`, `tradefill`, `fill_market_context`,
    `trade_path_metrics`, `job_run`, `dailyreview`.
@@ -138,8 +118,13 @@ They share a database and nothing else. Do not route data between them.
    `strategy_run` → `strategy_run_trade`, plus `strategy_run_metrics` and
    `strategy_experiment`. Simulated trades never enter `fill`/`trade`/
    `tradefill`.
-3. **TradingView live alerts** — `tradingview_alert` only. Wire contract `v=1`
+3. **Retired TradingView alert records** — `tradingview_alert` only. Historical wire contract `v=1`
    is frozen in `docs/tradingview-webhook-contract-v1.md`.
+4. **Practice** — `decision_context`, `decision_record`, `decision_event`,
+   `practice_run`, `practice_opportunity`, `practice_agent_call`. Paper events
+   and shared benchmarks never enter journal fills/FIFO or factory ledgers.
+   A3 preparation uses `JobRun` infrastructure in its own lane; its timer and
+   paid adapter are disabled by default.
 
 ## Persistence
 
@@ -170,8 +155,8 @@ work. API status endpoints read `job_run`, never process-local state.
 
 `JOB_EXECUTION_MODE=embedded` (default) dispatches API-owned threads through
 the shared ownership runtime. `external` leaves committed requests for
-`python -m app.jobs.worker --lane sync`, plus separate `polygon`, `webull` and
-`gmail` workers. This is a single-host design with shared local process locks, not a
+`python -m app.jobs.worker --lane sync`, plus separate `polygon`, `webull`,
+`gmail`, `capture` and `practice` workers. This is a single-host design with shared local process locks, not a
 distributed or Cloud Run queue. API restarts do not invalidate live owners;
 dead owners become failed and require an explicit new run. See
 [background-jobs.md](background-jobs.md) for configuration, recovery and the
@@ -237,7 +222,12 @@ kept on disk per completed month. One API-owned Tradier WebSocket
 fans out valid trade prices through private `/charts/stream` SSE to visible tabs,
 each following up to three symbols (the main one and two held by panels).
 The 15-second REST refresh reconciles candles, volume and studies and remains
-the fallback when streaming is unavailable. Every chart is on one
+the fallback when streaming is unavailable. Level alerts (`level_alert`,
+`level_alert_event`) are judged in the same API process by
+`level_alert_monitor.py`, with or without a tab open. It adds alerted symbols
+to that one stream, reads 1-minute bars through the chart feed's budget for
+closed candles and stream gaps, and sends phone messages through the ntfy
+topic in `/etc/tradejournal/alerts.env`. Every chart is on one
 split-adjusted price basis: Alpaca corporate actions (one small cached file per
 symbol, refetched once per New York date) say which splits happened, and
 `chart_adjust.py` adjusts copies of bars at display time, so the raw history
@@ -250,10 +240,37 @@ top-level field a save leaves out), with a browser copy
 for when the server is unreachable. Daily option open interest and volume
 snapshots (`option_chain_snapshot`, with a per-session status in
 `option_snapshot_day`) are written only by the after-close `options_snapshot`
-sync job. See [chart boundaries](../charts-workspace.md).
+sync job. Live option chains for the chart (options levels, the strike
+ladder, the Forecast tab and the range bands' once-a-session expected-move
+captures) are kept only in the API process's memory by `options_feed.py`,
+within 24 of the options budget's 30 reads a minute; a restart reads them
+again. The morning `rvol_history` sync job writes nothing to the database:
+it stores completed SIP sessions in the chart history's disk cache, from which
+the workspace builds each symbol's relative-volume baseline. See
+[chart boundaries](../charts-workspace.md).
 
 Next 16 App Router, React 19, Tailwind. `frontend/lib/api.ts` holds the typed
 API client and defaults to `http://localhost:8080` when
 `NEXT_PUBLIC_API_URL` is unset. Table logic is shared through
 `components/DashboardTables.tsx` and `components/TradesTable.tsx` — reuse them
 rather than writing a fourth table.
+
+
+## Optional authenticated browser access
+
+The default installation remains private and unauthenticated. The
+[cloud-browser contract](cloud-browser-auth-contract.md) adds an opt-in
+backend session/capability boundary and two frontend profiles: private owner
+access through Tailscale, and a disabled restricted assistant frontend.
+The same-origin handler strips caller identity/service headers; authenticated
+server reads carry the current session, never a shared owner fallback. A
+public-profile credential can only transport assistant sessions. In secure
+mode, unknown routes/identities are denied, market-only chart responses omit
+journal data, and selected-run/record reads enforce resource grants.
+
+New authentication metadata belongs to the existing database and Alembic;
+financial records/hashes are preserved. In-process workers do not depend on
+browser sessions. The separate assistant process binds loopback port 3001,
+is not auto-enabled, and ships with no public TLS ingress. The actual Dot
+browser/HTTPS trial and live exposure approval remain separate gates. The
+legacy owner frontend and raw private API must never be published.

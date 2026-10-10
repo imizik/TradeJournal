@@ -77,6 +77,37 @@ def _headers() -> dict:
     }
 
 
+class AlpacaFastFailure(Exception):
+    """A ``fast`` read that did not succeed (429, timeout, network, 5xx). Never retried."""
+
+
+FAST_TIMEOUT_SECONDS = 2.5
+
+
+def _alpaca_get_fast(path: str, params: dict) -> dict:
+    """One request on a hard short budget for request-path callers (the News tab).
+
+    No limiter wait, no retry and no sleep: a 429, timeout, network error or
+    non-2xx raises ``AlpacaFastFailure`` at once. 403/404 return ``{}`` as in
+    ``_alpaca_get``.
+    """
+    try:
+        resp = httpx.get(f"{DATA_URL}{path}", params=params, headers=_headers(), timeout=FAST_TIMEOUT_SECONDS)
+    except httpx.HTTPError as exc:
+        raise AlpacaFastFailure(f"Alpaca could not be reached ({type(exc).__name__}).") from None
+    if resp.status_code == 429:
+        raise AlpacaFastFailure("Alpaca refused the read (429).")
+    if resp.status_code in (403, 404):
+        log.warning("Alpaca %s for %s", resp.status_code, path)
+        return {}
+    if resp.status_code >= 400:
+        raise AlpacaFastFailure(f"Alpaca could not be read ({resp.status_code}).")
+    try:
+        return resp.json()
+    except ValueError:
+        raise AlpacaFastFailure("Alpaca came back unreadable.") from None
+
+
 def _alpaca_get(path: str, params: dict) -> dict:
     url = f"{DATA_URL}{path}"
     for attempt in range(5):

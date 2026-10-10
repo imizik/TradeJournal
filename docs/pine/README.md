@@ -1,11 +1,13 @@
-# Isaac Market Map
+# Isaac Market Map research archive
 
-`isaac_market_map.pine` is Step 5 of the
-[TradingView signal loop](../tradingview-signal-loop-plan.md): one Pine v6
-`strategy()` that both backtests in TradingView's Strategy Tester and sends
-[v1 contract](../tradingview-webhook-contract-v1.md) JSON alerts to the ingress.
-**The alerts are exactly the strategy's entries**, so the rules that produce the
-backtest also produce the alerts.
+> The Pine source and TradingView webhook workflow were retired by C5.2 on
+> 2026-10-06. This page preserves historical strategy research and exported
+> comparisons. The active implementation is the Python backtester in
+> `backend/app/engine/market_map.py`; the archived v1 wire contract is not an
+> active alert path.
+
+The research below records the former Pine strategy and its TradingView Tester
+exports. It is historical evidence, not a current script or setup guide.
 
 It is built around how this account actually trades rather than around generic
 setups. Every rule below cites the evidence it comes from.
@@ -184,30 +186,10 @@ The cohort report's "Side and relative strength" group gives the second
 table's cells, "Quarter" the quarters and "Setup and side" the `orb_retest`
 row.
 
-## Set it up in TradingView
+## Retired TradingView setup
 
-1. Pine Editor → paste the file → **Add to chart** on a 2m or 5m chart.
-   Extended hours changes the signals, not just the premarket levels: EMA 9
-   and 20 run through every bar on the chart, so premarket bars move them at
-   the open. The round 1 exports were made with extended hours on. Pick one
-   setting and keep it, and give the Python backtester the same one
-   (`--extended-hours`).
-2. **Check compile first.** v1.0.0 compiled and ran in the Strategy Tester
-   (the round 1 exports below); nothing in this repository shows the v1.1.0
-   changes have been through the editor, and there is no Pine compiler in
-   CI. Fix whatever the editor flags.
-3. Open **Pine Logs**. Each entry logs its exact JSON. Check that one line
-   has `bar_time_ms` as a plain integer and the `alert_id` ends in
-   `:<setup>:<long|short>`.
-4. Strategy Tester: run it on each core ticker over the history your plan
-   gives (5m usually reaches ~60 sessions). Compare against the table above;
-   R-multiples matter more than dollars here.
-5. Alert: condition **Isaac Market Map → alert() function calls only**, webhook
-   URL `https://<ingress-host>/tradingview/webhook?token=<token>`, message
-   left blank. "Order fills" alerts are not JSON and the ingress will reject
-   them. You need one alert per chart/ticker, and webhooks need a paid plan.
-6. **Bump `Indicator version`** whenever you change a signal-affecting input.
-   Alert ids include it, and the contract requires it.
+The old Pine source was removed with C5.2. Do not configure TradingView webhook
+alerts from the historical payload examples below.
 
 ## Validate it in Strategy Lab
 
@@ -215,8 +197,8 @@ Export Strategy Tester → **List of trades** as CSV and import it on
 `/strategy-lab` with source timezone `America/New_York`. Every entry and exit
 already carries `sl1` metadata, so runs can be split by setup, grade, window,
 tier, RVOL and exit reason (`stop`, `be`, `trail`, `time`, `eod`, `target`,
-`overnight_exit`). `backend/tests/test_pine_market_map.py` imports a
-reconstructed export through the real importer.
+`overnight_exit`). The Python report tests cover stable comment fields and the
+Strategy Lab importer.
 
 ## Backtesting in Python
 
@@ -242,8 +224,8 @@ source timezone `America/New_York`. R is net PnL over the risk budget for the
 trade's size, the same definition `imm_export_cohorts.py` uses, so Python and
 Strategy Tester numbers are on one scale.
 
-**The port.** `backend/app/engine/market_map.py` is the Pine, bar for bar,
-with every input as a `MarketMapConfig` field. `--profile v1.0.0` selects the
+**The port.** `backend/app/engine/market_map.py` is the active Python implementation,
+with its inputs represented as `MarketMapConfig` fields. `--profile v1.0.0` selects the
 v1.0.0 inputs and grading that produced the round 1 exports; `--set
 field=value` overrides any field. It is pure (no network, no database); the
 script fetches bars with the cached clients in `app/engine/alpaca.py` and
@@ -273,8 +255,7 @@ and SIP refuses a same-day daily request. Bars are regular hours only unless
   `time`, `eod`, `target`, `overnight_exit`), the stop moving a bar late, a
   moved stop filling at the close it is already through (and that exit being
   noticed a bar later), the cooldown boundary, both daily limits, grades,
-  midday modes, tiers, and the stop cap and floor. Every Pine input is
-  checked against its `MarketMapConfig` default by reading the Pine source. Planted defects
+  midday modes, tiers, and the stop cap and floor. Synthetic-bar tests exercise the supported configuration and rule behavior. Planted defects
   (breakeven at 0.5R, as a default and in the logic; a 10-minute cooldown;
   counting breakeven exits as losses; no slippage on stops; a network import)
   each fail it.
@@ -373,10 +354,8 @@ above.
 
 - **Proven here:** every setup, on both sides, produces a payload that the real
   v1 parser accepts, with the canonical `alert_id`. The `sl1` comments import
-  into Strategy Lab with no warnings or key conflicts. The test rebuilds all of
-  this from the Pine source itself, and planted defects (a bad key, a changed
-  id template, colliding `sl1` keys, a new number format, an invalid setup
-  slug) all fail it.
+  into Strategy Lab with no warnings or key conflicts. The former Pine payload tests were retired with the webhook; Python strategy
+  tests and historical export comparisons remain.
 - **Not proven:** that it compiles, that the setups make money, or that
   backtesting on the underlying says much about options (no theta, IV or
   spread; slippage is a flat 2 ticks). Exits are single-leg, but you scale

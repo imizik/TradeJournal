@@ -1,15 +1,30 @@
+import type { ChartPosition } from "@/lib/chartJournal";
 import { apiUrl } from "@/lib/api";
 import { cleanDrawings, cleanToolStyles, DEFAULT_TOOL_STYLES } from "./drawings";
 import type { Drawing, DrawingKind, ToolStyle } from "./drawings";
+import type { Earnings } from "./symbolInfo";
+import type { AlertsPayload } from "./alerts";
 
 export const INTERVALS = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1D", "1W"] as const;
 export type Interval = typeof INTERVALS[number];
 export type ChartBar = {
   time: number; end_time: number; open: number; high: number; low: number; close: number; volume: number;
-  source: "alpaca_sip" | "tradier";
+  source: "alpaca_sip" | "tradier" | "sample_fixture";
   volumePending?: boolean;
   extended: boolean; ema9: number | null; ema20: number | null; ema50: number | null; ema200: number | null;
   vwap: number | null; rsi: number | null;
+  /**
+   * The regular session's volume-weighted standard deviation of minute prices around VWAP
+   * (C2.7's VWAP bands): null where VWAP is; absent on candles from an older build or a live tick.
+   */
+  vwap_sd?: number | null;
+  /**
+   * Relative volume (C2.4): today's regular-session volume through this candle over the
+   * baseline's average through the same minute. Present on a workspace response's intraday
+   * candles when the symbol trades today; null where there is none (outside regular hours,
+   * no baseline yet, or too few baseline sessions had traded by then). History pages omit it.
+   */
+  rvol?: number | null;
 };
 /** One recorded split, from the provider named in `PriceAdjustment.source`. */
 export type SplitRecord = { ex_date: string; ratio: number; label: string };
@@ -26,26 +41,103 @@ export type PriceAdjustment = {
 export type FillMarker = { id: string; time: number; label: string; buy: boolean };
 /**
  * One automatic level (C2.1), on the chart's basis. `evidence` says what kind of
- * number it is: a provider field (observed), a formula over bars (calculated) or
- * a heuristic (inferred). `bar_time` is the start of the bar that set it;
- * `formed_at` is when it became final, null while `developing` and for round numbers.
+ * number it is: a provider field (observed), a formula over bars (calculated), a
+ * heuristic (inferred) or a convention (assumed: signed gamma and the gamma flip,
+ * C4.4). `bar_time` is the start of the bar that set it; `formed_at` is when it
+ * became final, null while `developing`, for round numbers and for option strikes.
  */
 export type AutoLevel = {
-  kind: string; label: string; price: number; evidence: "observed" | "calculated" | "inferred";
+  kind: string; label: string; price: number; evidence: "observed" | "calculated" | "inferred" | "assumed";
   timeframe: "1m" | "1D" | null; source: "tradier" | "alpaca_sip" | null;
   bar_time: number | null; formed_at: number | null; developing: boolean;
 };
-/** Levels within one band of each other (C2.2); a lone level is a zone of one. `score` counts independent sources. */
+/** Total span is less than one band (C2.2). `score` counts distinct origins, not independent evidence. */
 export type AutoZone = { id: string; low: number; high: number; label: string; score: number; members: AutoLevel[] };
 /**
  * A symbol's automatic levels for `day` (the session in progress, or the next
  * one). `band` is a tenth of the daily ATR, null without one; `missing` says
  * why a group of levels is absent.
  */
-export type AutoLevels = { day: string; as_of: number; atr: number | null; band: number | null; zones: AutoZone[]; missing: Record<string, string> };
-export type LevelEvent = { event: "tested" | "broken" | "reclaimed"; time: number };
+export type AutoLevels = {
+  day: string; as_of: number; atr: number | null; band: number | null; zones: AutoZone[]; missing: Record<string, string>;
+  session?: "regular" | "extended";
+  /** False when the zones leave the automatic levels out (only options levels asked for); absent before C4.4. */
+  auto?: boolean;
+  /** The options levels layer (C4.4) when asked for: what its strikes are and why any are missing. */
+  options?: OptionsInfo;
+  /** The expected-move range bands (C2.7) when asked for: each captured straddle, or why there is none yet. */
+  ranges?: RangesInfo;
+};
+/**
+ * One expiration's at-the-money straddle (C2.7), captured once a session five minutes after
+ * the open around the price then (`anchor`), and fixed for the rest of the day. `move` is the
+ * straddle's mid per share; `tags` say whether it is the nearest expiration, the nearest Friday or both.
+ */
+export type RangeBand = {
+  expiration: string; tags: ("nearest" | "friday")[]; today: boolean; anchor: number; move: number; percent: number;
+  strike: number; iv: number | null; quoted_at: number | null; captured_at: number;
+};
+export type RangesInfo = {
+  state: "ready" | "loading" | "waiting" | "closed" | "unavailable" | "none"; message: string | null;
+  symbol: string; root: string; source: string; day: string; bands: RangeBand[];
+};
+/** Max pain (C4.7): one expiration's strike where its open contracts would pay least. Inferred. */
+export type MaxPain = { price: number; expiration: string; note: string };
+/** One strike's open interest and volume (observed) and dollar gamma for a 1% move (calculated), across a scope's expirations (C4.2). */
+export type OptionStrike = {
+  strike: number; call_oi: number | null; put_oi: number | null; call_volume: number | null; put_volume: number | null;
+  call_gamma: number | null; put_gamma: number | null;
+  oi_change?: { session: string | null; previous_session: string | null; status: "ready" | "unavailable"; calls?: number | null; puts?: number | null };
+  /** Both sides' dollar gamma: summed, or the calls' less the puts' when signed (assumed). */
+  gamma: number | null;
+  /** Its place by the layer's measure on both sides together, then by each side's open interest and volume. */
+  rank: number | null; call_oi_rank: number | null; put_oi_rank: number | null; call_volume_rank: number | null; put_volume_rank: number | null;
+};
+export type OptionsMeasure = "oi" | "volume" | "gamma";
+export type OptionsScope = "nearest" | "week" | "all";
+/** Where signed gamma crosses zero near the price: a model estimate on an assumed dealer side; null price when it does not cross. */
+export type GammaFlip = { price: number | null; low: number; high: number; note: string; assumption: string };
+export type OptionsTotals = {
+  call_oi: number; put_oi: number; call_volume: number; put_volume: number;
+  put_call_oi: number | null; put_call_volume: number | null; call_volume_oi: number | null; put_volume_oi: number | null;
+};
+/**
+ * What the options levels (C4.4) or the strike ladder (C4.5) rest on. `spot` is
+ * the price gamma was computed at; `fetched_at` the oldest chain's read time
+ * (seconds); `greeks_updated_at` the provider's IV stamp, verbatim.
+ */
+export type OptionsInfo = {
+  state: "ready" | "loading" | "unavailable" | "none"; message: string | null;
+  symbol: string; root: string; scope: OptionsScope; source: string; spot: number | null;
+  expirations: string[]; scope_note: string | null;
+  mode?: OptionsMeasure; signed?: boolean;
+  fetched_at?: number; last_trade_at?: number | null; greeks_updated_at?: string | null;
+  excluded?: Record<string, number>; missing?: Record<string, number>; totals?: OptionsTotals;
+  strikes?: OptionStrike[]; flip?: GammaFlip | null;
+  /** The scope's nearest expiration's max pain (C4.7); absent before it, null without open interest. */
+  max_pain?: MaxPain | null;
+  max_pain_reason?: string | null;
+};
+export type OptionsLadder = OptionsInfo & {
+  signed: boolean; rows: OptionStrike[];
+  walls: Partial<Record<"call_oi" | "put_oi" | "call_volume" | "put_volume", number | null>>;
+};
+export type LevelEvent = { event: "tested" | "approached" | "broken" | "reclaimed"; time: number; bar_time?: number; direction?: "above" | "below" };
 /** How price treated a zone today on one intraday panel's closed bars (C2.3). */
-export type LevelInteraction = { state: "untested" | "tested" | "broken" | "reclaimed" | "developing"; events: LevelEvent[]; at_level: boolean };
+export type LevelInteraction = {
+  state: "untested" | "touched" | "approached" | "tested" | "broken" | "reclaimed" | "developing";
+  events: LevelEvent[]; at_level: boolean; near_level?: boolean; since?: number;
+  last_close?: number | null; last_close_at?: number | null;
+};
+/**
+ * What today's relative volume is measured against (C2.4): the market calendar's 20
+ * sessions before `day`, of which `traded` had regular-session volume. Only `ready`
+ * has candle values; otherwise `message` says why and `missing` lists sessions not stored yet.
+ */
+export type RvolBaseline = {
+  state: "ready" | "building" | "insufficient" | "unavailable"; day: string; sessions: string[];
+  traded: number; missing: string[]; message: string | null;
+};
 /** `level_events` (intraday panels of a workspace response): each automatic zone's interactions, by zone id. */
 export type ChartPanelData = { bars: ChartBar[]; markers: FillMarker[]; level_events?: Record<string, LevelInteraction> };
 export type HistoryPage = {
@@ -65,8 +157,11 @@ export type MarketDay = {
   sessions: { part: "pre" | "regular" | "post"; start: number; end: number }[]; note: string | null;
 };
 export type ChartQuote = {
-  symbol: string; name: string; last: number | null; change: number | null;
-  change_percentage: number | null; volume: number | null; previous_close: number | null; trade_time: number | null;
+  symbol: string; name: string; instrument_type?: string; last: number | null; change: number | null;
+  change_percentage: number | null; volume: number | null; previous_close: number | null;
+  /** Tradier's explicit current regular-session close; null until it is known. */
+  regular_close?: number | null; trade_time: number | null;
+  day_high?: number | null; day_low?: number | null; week_52_high?: number | null; week_52_low?: number | null;
 };
 /** One symbol's candles in a workspace response. */
 export type SymbolPanels = {
@@ -77,14 +172,23 @@ export type SymbolPanels = {
   adjustment?: PriceAdjustment | null;
   /** Absent from a backend older than C2.3. */
   auto_levels?: AutoLevels | null;
+  /** Today's relative-volume baseline; null on a day with no session, absent from a backend older than C2.4. */
+  rvol?: RvolBaseline | null;
+  /** The symbol's earnings from the backend's cache (C2.5); absent from a backend older than C2.5. */
+  earnings?: Earnings | null;
+  /** Open trades on the symbol (C3.2); absent from a backend older than C3.2. */
+  positions?: ChartPosition[];
 };
 export type ChartData = SymbolPanels & {
+  sample_data?: boolean;
   symbol: string; provider: string; session: "regular" | "extended"; delayed: boolean;
   refresh_seconds: number; checked_at: number; quotes: ChartQuote[];
   history_note: string; fills: FillMarker[]; fills_truncated: boolean;
   market?: MarketDay;
   /** Symbols that panels hold on their own (C7.1), without quotes. */
   extras?: Record<string, SymbolPanels>;
+  /** Every level alert (C5.1); absent from a backend older than C5.1. */
+  alerts?: AlertsPayload;
 };
 export type ChartStreamTick = {
   type: "tick"; symbol: string; at: number; price: number; open: number; high: number; low: number;
@@ -238,6 +342,10 @@ export type ChartSettings = {
   studiesHidden: boolean;
   /** Automatic levels hidden from every chart (C2.3); a field of its own for the same reason. */
   autoLevelsHidden: boolean;
+  /** The options levels layer (C4.4): off until asked for, and its filters. */
+  optionsLayer: OptionsLayer;
+  /** The range bands (C2.7): expected-move levels and VWAP ±1σ/±2σ, off until shown; a field of its own like `autoLevelsHidden`. */
+  rangeBandsHidden: boolean;
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -254,12 +362,37 @@ export type ChartSettings = {
    */
   layoutProportions: Record<string, Proportions>;
 };
+/**
+ * The options levels layer (C4.4): hidden until asked for. `mode` ranks strikes by
+ * open interest, volume or gamma; `scope` is the nearest expiration (0DTE when it
+ * is today's), the nearest one's week, or every one within 45 days; `nearest` is
+ * how many option zones each side of the price draw besides the walls; `signed`
+ * gives gamma an assumed dealer side and, on SPY, QQQ and SPX, the gamma flip.
+ */
+export type OptionsLayer = { hidden: boolean; mode: OptionsMeasure; scope: OptionsScope; nearest: number; signed: boolean };
+export const OPTIONS_NEAREST = { min: 1, max: 5 } as const;
+export const DEFAULT_OPTIONS_LAYER: OptionsLayer = { hidden: true, mode: "oi", scope: "week", nearest: 3, signed: false };
+export function cleanOptionsLayer(input: unknown): OptionsLayer {
+  const value = (input && typeof input === "object" ? input : {}) as Partial<Record<keyof OptionsLayer, unknown>>;
+  const nearest = Number(value.nearest);
+  return {
+    hidden: value.hidden !== false,
+    mode: value.mode === "volume" || value.mode === "gamma" ? value.mode : "oi",
+    scope: value.scope === "nearest" || value.scope === "all" ? value.scope : "week",
+    nearest: Number.isInteger(nearest) && nearest >= OPTIONS_NEAREST.min && nearest <= OPTIONS_NEAREST.max ? nearest : DEFAULT_OPTIONS_LAYER.nearest,
+    signed: value.signed === true,
+  };
+}
+/** The workspace's `options` query for a shown layer (measure, scope, signed), or null while it is hidden. Only gamma has a sign. */
+export const optionsQuery = (layer: OptionsLayer) => layer.hidden ? null : `${layer.mode}.${layer.scope}.${layer.signed && layer.mode === "gamma" ? 1 : 0}`;
+
 export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
-  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   proportions: null, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
@@ -308,6 +441,8 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       hiddenGroups: { levels: value.hiddenGroups?.levels === true, drawings: value.hiddenGroups?.drawings === true },
       studiesHidden: value.studiesHidden === true,
       autoLevelsHidden: value.autoLevelsHidden === true,
+      optionsLayer: cleanOptionsLayer(value.optionsLayer),
+      rangeBandsHidden: value.rangeBandsHidden !== false,
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
@@ -437,16 +572,33 @@ export function focusPanel(settings: ChartSettings, index: number): ChartSetting
 }
 
 /** `extras` lists the intervals each symbol held by a panel needs. */
-export async function fetchChartData({ symbol, intervals, watchlist, session, extras }: {
+/**
+ * `options` asks for the options levels layer (`optionsQuery`) and `ranges` for the range bands (C2.7);
+ * with either, `auto: false` leaves the automatic levels out of the zones.
+ */
+export async function fetchChartData({ symbol, intervals, watchlist, session, extras, options = null, ranges = false, auto = true }: {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: ChartSettings["session"]; extras: Record<string, Interval[]>;
+  options?: string | null; ranges?: boolean; auto?: boolean;
 }, signal: AbortSignal): Promise<ChartData> {
   const query = new URLSearchParams({ symbol, intervals: intervals.join(","), watchlist: watchlist.join(","), session });
   const held = Object.entries(extras).map(([name, frames]) => `${name}:${frames.join(".")}`).join(",");
   if (held) query.set("extras", held);
+  if (options) query.set("options", options);
+  if (ranges) query.set("ranges", "1");
+  if ((options || ranges) && !auto) query.set("auto", "0");
   const response = await fetch(apiUrl(`/charts/workspace?${query}`), { cache: "no-store", signal });
   const body = await response.json();
   if (!response.ok) throw new Error(typeof body.detail === "string" ? body.detail : body.detail?.message ?? "Unable to load chart data.");
   return body;
+}
+
+/** The strike ladder (C4.5) around `spot`, the chart's latest price. */
+export async function fetchOptionsLadder({ symbol, scope, signed, spot }: { symbol: string; scope: OptionsScope; signed: boolean; spot: number | null }, signal: AbortSignal): Promise<OptionsLadder> {
+  const query = new URLSearchParams({ scope, signed: signed ? "1" : "0" });
+  if (spot && spot > 0) query.set("spot", String(spot));
+  const response = await fetch(apiUrl(`/charts/options/${encodeURIComponent(symbol)}/ladder?${query}`), { cache: "no-store", signal });
+  if (!response.ok) throw new Error("The strike ladder is unavailable. Try again.");
+  return response.json();
 }
 
 export async function fetchChartHistory({ symbol, interval, session, before, continuation, signal }: {
@@ -485,6 +637,34 @@ export function retainHistory(bars: ChartBar[], live: ChartBar[], visible: { fro
 }
 
 export const chartStreamUrl = (symbols: string[]) => apiUrl(`/charts/stream?symbols=${encodeURIComponent(symbols.join(","))}`);
+
+/** Resolve a validated timestamp against the same New York session windows supplied by the backend. */
+export function marketSessionAt(stamp: number | null | undefined, market?: MarketDay): "pre" | "regular" | "post" | null {
+  if (stamp == null || !Number.isFinite(stamp) || !market) return null;
+  return market.sessions.find((part) => stamp >= part.start && stamp < part.end)?.part ?? null;
+}
+
+/** Extended-hours percent only uses a timestamped trade and its session's explicit close reference. */
+export function sessionChange(priceValue: number | null | undefined, session: "pre" | "regular" | "post" | null,
+  quote: ChartQuote | undefined): number | null {
+  if (!session) return null;
+  const reference = session === "post" ? quote?.regular_close : quote?.previous_close;
+  return priceValue != null && priceValue > 0 && reference != null && reference > 0
+    ? (priceValue / reference - 1) * 100 : null;
+}
+
+/**
+ * A quote's change when no trade is fresh: in pre- or postmarket, by the same
+ * rule as a trade (`sessionChange`); otherwise its last regular-session price
+ * against the previous close, else Tradier's own day change. After the close
+ * this is the day's closing change.
+ */
+export function quoteChange(quote: ChartQuote | undefined, session: "pre" | "regular" | "post" | null): number | null {
+  if (!quote) return null;
+  if (session === "pre" || session === "post") return sessionChange(quote.last, session, quote);
+  return quote.last != null && quote.last > 0 && quote.previous_close != null && quote.previous_close > 0
+    ? (quote.last / quote.previous_close - 1) * 100 : quote.change_percentage;
+}
 
 export function parseChartTick(value: unknown): ChartStreamTick | null {
   if (!value || typeof value !== "object") return null;
@@ -543,6 +723,25 @@ export function shownPrice({ tick, quote, candle, scope }: {
 /** Intraday candles older than 45 seconds read as stale: the countdown and status stop implying freshness. */
 export const staleCandles = (now: number, fetched: number | undefined) => !!fetched && Math.floor(now - fetched) > 45;
 
+/**
+ * A volume bar's opacity by relative volume (C2.4): faint under 0.5×, as before up to
+ * 1.5×, brighter to 2.5×, brightest beyond. A candle without RVol keeps the plain shade.
+ */
+export function volumeAlpha(rvol: number | null | undefined): string {
+  if (rvol == null) return "3d";
+  return rvol < 0.5 ? "1f" : rvol < 1.5 ? "3d" : rvol < 2.5 ? "80" : "d9";
+}
+const sessionDay = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" });
+/** "RVol vs 20 sessions Sep 1 – Sep 28", or "vs 18 of 20" when some never traded in regular hours. */
+export function rvolCoverage(baseline: RvolBaseline): string {
+  const days = baseline.sessions;
+  if (!days.length) return "RVol: no sessions";
+  const span = `${sessionDay.format(new Date(`${days[0]}T12:00:00Z`))} – ${sessionDay.format(new Date(`${days.at(-1)}T12:00:00Z`))}`;
+  return `RVol vs ${baseline.traded === days.length ? days.length : `${baseline.traded} of ${days.length}`} sessions ${span}`;
+}
+/** "2.6×", with two decimals under 0.1× so a quiet candle never reads 0.0×. */
+export const rvolText = (rvol: number) => `${rvol.toFixed(rvol < 0.1 ? 2 : 1)}×`;
+
 export const price = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const etTime = (stamp: number, daily = false) => new Date(stamp * 1000).toLocaleString("en-US", {
   timeZone: "America/New_York", ...(daily ? { month: "short", day: "numeric", year: "numeric" } : { hour: "numeric", minute: "2-digit" }),
@@ -552,6 +751,36 @@ export function barAt(bars: ChartBar[], time: number): ChartBar | undefined {
   while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time <= time) low = mid + 1; else high = mid; }
   const bar = bars[low - 1];
   return bar && time < bar.end_time ? bar : undefined;
+}
+
+/** An earnings date on the candle that holds it (C2.5). */
+export type EarningsMark = { time: number; date: string; label: string; estimated: boolean };
+/**
+ * Each report date with a loaded candle, past reports and the next one alike.
+ * A daily or weekly candle holds the date's New York midday. Intraday, the
+ * date's first candle carries it, because the report's time of day is unknown.
+ * A date without a loaded candle (a future one, or older than the history) has none.
+ */
+export function earningsMarks(bars: ChartBar[], earnings: Earnings | null | undefined, interval: Interval): EarningsMark[] {
+  if (!earnings || !bars.length) return [];
+  const dates = [...earnings.reports.map((report) => ({ ...report, estimated: false })),
+    ...(earnings.next ? [{ date: earnings.next.date, label: earnings.next.label, estimated: earnings.next.status === "estimated" }] : [])];
+  const marks: EarningsMark[] = [];
+  for (const entry of dates) {
+    const midnight = Date.parse(`${entry.date}T00:00:00Z`) / 1000;
+    if (!intradayInterval(interval)) {
+      // 16:30 UTC is 12:30 New York in summer and 11:30 in winter: inside every regular session.
+      const bar = barAt(bars, midnight + 16.5 * 3600);
+      if (bar) marks.push({ ...entry, time: bar.time });
+      continue;
+    }
+    // New York's midnight is 04:00 or 05:00 UTC; no candle starts between 20:00 and 04:00 New York.
+    const after = midnight + 4 * 3600;
+    let low = 0, high = bars.length;
+    while (low < high) { const mid = (low + high) >>> 1; if (bars[mid].time < after) low = mid + 1; else high = mid; }
+    if (low < bars.length && nyDate.format(bars[low].time * 1000) === entry.date) marks.push({ ...entry, time: bars[low].time });
+  }
+  return marks.sort((a, b) => a.time - b.time);
 }
 
 export const INTERVAL_SECONDS: Record<Interval, number> = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400, "1D": 86400, "1W": 604800 };
@@ -622,6 +851,9 @@ export const countdown = (seconds: number) => {
  * unchanged bar objects, so the prefix check is usually reference equality;
  * REST refreshes compare values, and any changed older bar forces a reset.
  */
+/** Candles a chart opens on: the main chart, and each smaller panel. */
+export const OPENING_BARS = 110;
+export const PANEL_OPENING_BARS = 65;
 export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" | "append" | "reset" {
   if (!prev.length || !next.length) return prev.length === next.length ? "same" : "reset";
   const appended = next.length === prev.length + 1;
@@ -633,7 +865,7 @@ export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" |
   if (a.time !== b.time) return "reset";
   return sameBar(a, b) ? "same" : "last";
 }
-const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "rsi"] as const;
+const BAR_KEYS = ["time", "end_time", "source", "open", "high", "low", "close", "volume", "volumePending", "extended", "ema9", "ema20", "ema50", "ema200", "vwap", "vwap_sd", "rsi", "rvol"] as const;
 const sameBar = (a: ChartBar, b: ChartBar) => a === b || BAR_KEYS.every((key) => a[key] === b[key]);
 
 export type TimeRange = { from: number; to: number };
@@ -675,10 +907,15 @@ export type ChartJump = { panel: string; times: number[]; prices: number[] };
 export function createChartCommands() {
   const listeners = new Set<(command: ChartCommand) => void>();
   const jumps = new Set<(jump: ChartJump) => void>();
+  // Each panel's picture of itself, for a plan's frozen chart image (C3.4).
+  const pictures = new Map<string, () => HTMLCanvasElement | null>();
   return {
     listen(fn: (command: ChartCommand) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; },
     emit(command: ChartCommand) { listeners.forEach((fn) => fn(command)); },
     listenJump(fn: (jump: ChartJump) => void) { jumps.add(fn); return () => { jumps.delete(fn); }; },
     jump(target: ChartJump) { jumps.forEach((fn) => fn(target)); },
+    provideSnapshot(panel: string, fn: () => HTMLCanvasElement | null) { pictures.set(panel, fn); return () => { if (pictures.get(panel) === fn) pictures.delete(panel); }; },
+    /** The panel as drawn now: candles, studies and the lines drawn on its canvas. Null when it is not on screen. */
+    snapshot(panel: string): HTMLCanvasElement | null { try { return pictures.get(panel)?.() ?? null; } catch { return null; } },
   };
 }

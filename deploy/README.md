@@ -1,11 +1,10 @@
 # Ubuntu 24.04 deployment
 
 This package runs one private, single-user TradeJournal installation. It uses
-native systemd services for Next.js, the API, the sync, Polygon, Webull and
-Gmail worker lanes, plus local/offsite backup, Gmail-import, Sync Everything
+native systemd services for Next.js, the API, the sync, Polygon, Webull,
+Gmail and capture (voice-plan transcription) worker lanes, plus local/offsite backup, Gmail-import, Sync Everything
 and phone-alert timers. Production now uses PostgreSQL on the VPS. The original Neon primary is
 retained as a pre-cutover recovery source; it is no longer the live database.
-An optional, separately credentialed service accepts TradingView webhooks.
 
 ## Access and layout
 
@@ -20,8 +19,7 @@ An optional, separately credentialed service accepts TradingView webhooks.
 | Runtime state | `/var/lib/tradejournal/data`, `oauth`, `job-locks`, `frontend-cache` |
 | Private application config | `/etc/tradejournal/backend.env`; root owned, mode 0600 |
 | Migration credentials | `/etc/tradejournal/migration.env`; root owned, mode 0600 |
-| TradingView ingress | `127.0.0.1:8090`; dedicated `tradejournal-ingress` OS user |
-| Ingress configuration | `/etc/tradejournal/tradingview.env`; root owned, mode 0600 |
+| Legacy TradingView configuration | Existing `/etc/tradejournal/tradingview.env` is preserved but unused |
 | Offsite backup credentials | `/etc/tradejournal/offsite.env` and `restic-password`; root owned, mode 0600 |
 | Phone alert settings | `/etc/tradejournal/alerts.env`; root owned, mode 0600 |
 
@@ -29,9 +27,9 @@ The frontend proxy has the same authority as the unauthenticated private API.
 Keep **both** services behind private access. Restrict the Tailscale access
 policy to the journal owner's devices/identity. Do not use Funnel, a public
 reverse proxy, public port forwarding, or expose 3000/8080 in the firewall.
-The only application designed for public webhooks is the separate TradingView
-ingress on 8090. Its opt-in service is included; the dedicated public HTTPS
-proxy is configured separately under [TradingView webhooks](#tradingview-webhooks).
+C5.2 retires the public TradingView webhook receiver. The frontend and API
+remain private; the release controller removes the old ingress unit during an
+upgrade and does not bind port 8090.
 
 All API/worker processes share the same hostname, database URL and local lock
 directory. This is not a multi-host worker deployment. Stop the old laptop's
@@ -118,8 +116,7 @@ Set `FRONTEND_PUBLIC_URL` to the private HTTPS Tailscale origin and
 `BACKEND_PUBLIC_URL` to that origin plus `/api/backend`. Configure only the
 integration keys needed. Autostarts default to false; turn on Webull listening
 only after installing its credentials and stopping the old executor.
-TradingView analysis, when enabled, remains API-owned. Real-time Gmail import
-is opt-in and needs no public endpoint; see
+Real-time Gmail import is opt-in and needs no public endpoint; see
 [Real-time Gmail import](#real-time-gmail-import).
 
 Copy needed state from the old host **before activation**, with all writers
@@ -163,6 +160,18 @@ Use the HTTPS address reported by Serve. Per the
 this shares with the tailnet; Funnel would expose it publicly. No public
 database port, frontend port or API port is needed.
 
+## Voice plans
+
+Voice plans on the chart (Charts C3.5) are saved under
+`/var/lib/tradejournal/data/captures`, so the daily backup includes the
+recordings and frozen chart images with the database rows that point to them.
+`tradejournal-worker@capture` transcribes them with Whisper on this server.
+The launcher points `CAPTURE_MODEL_DIR` at `/var/lib/tradejournal/models`,
+outside the backed-up data. The first transcription downloads the model
+(about 150 MB) from Hugging Face; only the model is downloaded, and recordings
+never leave the server. `CAPTURE_TRANSCRIBER=off` in `backend.env` keeps
+recordings and skips transcription.
+
 ## Backups and scheduled Robinhood import
 
 The release installs five timers:
@@ -195,6 +204,12 @@ The release installs five timers:
   request once the session is recorded; holidays record nothing. A session's
   open interest cannot be captured after 20:00, so if the job cannot be queued
   within ten minutes the unit fails and the phone alert says so.
+- `tradejournal-rvol-history.timer` queues the relative-volume history at
+  06:00 New York on weekdays, with an 08:40 catch-up: it stores the 20 SIP
+  sessions before today for each chart watchlist name, so chart RVol is ready
+  at the open. A stored session is never fetched again. If the job cannot be
+  queued within ten minutes the run is skipped, not failed: RVol waits for the
+  next slot.
 - `tradejournal-alerts.timer` checks every two minutes whether anything above,
   the API or real-time Gmail has stopped working, and sends a phone alert.
   Without `/etc/tradejournal/alerts.env` the check is skipped; see
@@ -226,8 +241,9 @@ database, since a successful upload alone does not prove recoverability.
 ### Production database cutover (2026-09-23)
 
 The Ubuntu 24.04 VPS runs PostgreSQL 18 on `127.0.0.1:5432/tradejournal`.
-The app uses `tj_app`; Alembic uses `tj_owner`; the optional TradingView ingress
-role is `tj_ingress`. PostgreSQL, the API and the frontend listen on loopback;
+The app uses `tj_app`; Alembic uses `tj_owner`; a legacy `tj_ingress` role may
+remain in existing databases and is not used by current releases. Removing that
+role is a separate operator decision. PostgreSQL, the API and the frontend listen on loopback;
 private Tailscale Serve reaches only the frontend. No database port is public.
 
 For the cutover, all application writers and timers were stopped. A final Neon
@@ -372,8 +388,8 @@ clears. It never repeats an alert.
 | TradeJournal isn't responding | any of its API requests fails | 5 min |
 | Gmail needs reconnecting / Robinhood import stopped | `GET /gmail/health` is `down` or `degraded` | 10 min |
 | *Job* failed | the newest finished run of a job type failed; listeners are excluded, and Gmail jobs wait 10 min and stay quiet while the Gmail alert is active | — |
-| Nightly backup, Offsite backup, Scheduled Sync Everything or Options snapshot failed | its systemd service is `failed` | — |
-| *Schedule* is switched off | the backup, offsite, Sync Everything, Gmail-check or options-snapshot timer is not active | 15 min |
+| Nightly backup, Offsite backup, Scheduled Sync Everything, Options snapshot or Relative volume history failed | its systemd service is `failed` | — |
+| *Schedule* is switched off | the backup, offsite, Sync Everything, Gmail-check, options-snapshot or relative-volume-history timer is not active | 15 min |
 
 Failures that finished before the first check are history and never alerted.
 A reboot clears systemd's failed state; only a later successful run counts as
@@ -383,6 +399,10 @@ import says to run *Rebuild trades*. Messages pass through ntfy.sh, so they
 carry only a title and the first line of an error, never fills or P&L.
 [Automatic deployment](#automatic-deployment) reports each deploy, hold and
 failure to the same topic.
+
+Level alerts set on the charts (Charts C5.1) go to the same topic: the API
+service reads `alerts.env` too (optional, as above) and sends each firing
+itself, with the symbol, the level, the price and the time.
 
 Create `/etc/tradejournal/alerts.env` from `deploy/alerts.env.example` (root
 owned, mode 0600). Anyone who knows a topic on ntfy.sh can read it, so use a
@@ -401,105 +421,19 @@ five-minute period and ten-minute grace that notifies the same ntfy topic.
 Every check pings it, or pings `/fail` when a notification could not be
 delivered, and the outside service alerts when the pings stop.
 
-## TradingView webhooks
+## Retired TradingView webhook ingress
 
-The deployment includes `tradejournal-ingress.service`, disabled by default.
-It runs on loopback port 8090 as a separate `tradejournal-ingress` OS user,
-with only `/etc/tradejournal/tradingview.env` injected by systemd. The unit
-cannot read the journal's runtime data, OAuth files, backups or private
-configuration. The launcher removes inherited private credentials, forces
-the PostgreSQL URL to be explicit, and disables Uvicorn access logging.
-Analysis remains in the private API, using its existing durable claim/retry
-worker and private Alpaca credentials.
+C5.2 removes the public webhook application, its 8090 listener, deployment
+unit and Pine alert source. Existing `tradingview_alert` rows remain available
+through the private read-only Signals API and pages. The release controller
+stops and removes an old `tradejournal-ingress.service` during activation.
 
-### Enable the receiver and analysis
-
-1. Install a release containing the ingress service. The installer creates
-   its OS user and a root-only `tradingview.env` with ingress disabled.
-2. In `/etc/tradejournal/backend.env`, configure `ALPACA_API_KEY` and
-   `ALPACA_API_SECRET`, then set `TRADINGVIEW_ANALYSIS_AUTOSTART=true`.
-3. In `/etc/tradejournal/tradingview.env`, set:
-
-   ```dotenv
-   TRADINGVIEW_INGRESS_ENABLED=true
-   TRADINGVIEW_DATABASE_URL=postgresql+psycopg://tj_ingress:URL_ENCODED_PASSWORD@127.0.0.1:5432/tradejournal
-   TRADINGVIEW_WEBHOOK_TOKEN=DEDICATED_RANDOM_TOKEN_AT_LEAST_32_BYTES
-   ```
-
-   Generate the token with `python3 -c 'import secrets; print(secrets.token_urlsafe(32))'`.
-   Use the existing restricted ingress role, never `tj_app` or `tj_owner`.
-   It needs SELECT/INSERT/UPDATE on `tradingview_alert`, USAGE on `public`,
-   no other table privileges, no CREATE on `public`, and no role memberships
-   or administrative flags. See [database roles](../docs/agent/environments.md#database-roles).
-   Match the private URL's host, port, database and routing parameters exactly.
-4. Run the read-only check before activation:
-
-   ```bash
-   sudo /opt/tradejournal/releases/RELEASE_ID/backend/.venv/bin/python /opt/tradejournal/releases/RELEASE_ID/deploy/ingress.py
-   sudo tradejournal-deploy activate RELEASE_ID --confirm-database '127.0.0.1:5432/tradejournal'
-   curl --fail http://127.0.0.1:8090/health
-   ```
-
-   Preflight checks the configured worker, matching database endpoint, real
-   schema access and effective role privileges before stopping a healthy
-   release. It prints only whether ingress is enabled. Activation starts and
-   checks ingress after the private API is healthy; a failed ingress startup
-   follows the same rollback path as an API/frontend failure. The health check
-   proves DB/token readiness, not Alpaca connectivity or a live verdict.
-
-### Public HTTPS with a free hostname
-
-[DuckDNS](https://www.duckdns.org/about.jsp) provides a free hostname such as
-`your-alerts.duckdns.org`. Point its IPv4 record at the VPS public IPv4 address.
-[Caddy](https://caddyserver.com/docs/automatic-https) obtains and renews HTTPS
-certificates automatically. This uses the existing VPS; no additional hosted
-relay or purchased domain is required.
-
-Install Caddy following its [official package instructions](https://caddyserver.com/docs/install#debian-ubuntu-raspbian).
-Use `deploy/Caddyfile.tradingview.example` as the dedicated `/etc/caddy/Caddyfile`,
-replacing both `alerts.example.com` and `203.0.113.10` with the actual hostname
-and the public IPv4 address assigned to the VPS interface. Review existing
-Caddy configuration before replacing it if the host already uses Caddy.
-The explicit bind keeps Caddy off the private Tailscale Serve address.
-If the VPS uses NAT, choose its assigned interface address for the bind and
-its public address for DNS. Allow inbound TCP 80/443 to that interface in
-both the VPS and provider firewalls; keep 3000/8080/8090/5432 closed publicly.
-
-```bash
-sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-sudo systemctl enable caddy
-sudo systemctl restart caddy
-```
-
-The template disables the Caddy admin API, so use a service restart rather
-than `caddy reload`. Only HTTPS POST `/tradingview/webhook` is forwarded to
-8090; other application paths return 404. HTTP is used only for certificate
-validation and otherwise returns 404. No journal/frontend route is proxied.
-Access logs are disabled, and request fields are removed from Caddy runtime
-error logs, since upstream failures would otherwise record the query token.
-Do not enable debug/request logging at another proxy hop.
-
-TradingView's URL is:
-
-```text
-https://YOUR_HOSTNAME/tradingview/webhook?token=YOUR_DEDICATED_TOKEN
-```
-
-The public endpoint uses 443; 8090 remains internal. TradingView accepts ports
-80/443, requires 2FA for webhooks, and cancels a request taking more than three
-seconds ([official webhook requirements](https://www.tradingview.com/support/solutions/43000529348-how-to-configure-webhook-alerts/)).
-The receiver acknowledges persistence without waiting for market analysis.
-Check readiness locally, then use a current contract-valid alert to confirm
-the public response and the private `/signals` record. Resending it must
-return `dup:true`; unauthenticated requests must return 401. A synthetic old
-alert proves receipt/deduplication but will be skipped by analysis.
-
-The controller preserves the ingress config across releases, includes it in
-local/encrypted offsite backups when present, and stops ingress during
-migration or release switching. Rolling back to a release without ingress
-support removes/disables its unit; the public proxy then returns an upstream
-error until a supporting release is activated. Set ingress to `false` and
-activate the current release to disable it deliberately.
+The deployment does not delete `/etc/tradejournal/tradingview.env`, remove the
+`tradejournal-ingress` OS account, drop the `tj_ingress` database role, or
+delete stored alert rows. Those are preserved for recovery and require a
+separate operator decision. Existing Caddy or firewall configuration is outside
+the release artifact; remove the old webhook route and public 80/443 allowance
+when retiring that endpoint.
 
 ## Updates, restarts and rollback
 
@@ -507,8 +441,8 @@ Install the next verified archive using its checksum. The installer creates
 an offline venv and preserves state/config. Release IDs cannot be overwritten.
 When the controller changes, update `/usr/local/sbin/tradejournal-deploy` from
 that verified artifact too. Before switching, wait for long-running jobs to
-finish; deployment stops the six private services, optional ingress, and every
-timer except the phone-alert check, which keeps watching so a release that
+finish; deployment stops the six private services, any installed retired ingress unit,
+and every timer except the phone-alert check, which keeps watching so a release that
 fails to start is still reported. Workers get 90 seconds to finish, after
 which systemd can kill them. Queued jobs survive. Interrupted jobs fail
 visibly and need an explicit new run; destructive or paid work is never
@@ -522,7 +456,7 @@ sudo tradejournal-deploy status
 sudo tradejournal-deploy prune --keep 3
 # API-only restart leaves the four worker services running:
 sudo systemctl restart tradejournal-api
-sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -u tradejournal-worker@gmail -f
+sudo journalctl -u tradejournal-api -u tradejournal-worker@sync -u tradejournal-worker@polygon -u tradejournal-worker@webull -u tradejournal-worker@gmail -u tradejournal-worker@capture -f
 # Roll back code only, when its required schema still matches:
 sudo tradejournal-deploy rollback --confirm-database 'HOST/DATABASE'
 ```
@@ -569,13 +503,15 @@ goes live about 10 minutes after it lands.
 A newer build waits, and is installed later or by a person, while:
 
 - it is 09:25–16:15 New York time on a weekday. An activation restarts
-  everything for about a minute, and a TradingView alert arriving then is
-  lost. Adding the `deploy-now` label to the pull request, before or after
+  the private app for about a minute. Adding the `deploy-now` label to the pull request, before or after
   merging, releases it on the next check;
 - a sync or enrichment job is running, or the API is not answering;
-- it adds or removes an Alembic revision. The release is installed but not
-  activated, and the phone is told. `run --allow-migration` (below) takes and
-  verifies a backup, migrates and activates;
+- it adds or removes an Alembic revision and `AUTODEPLOY_AUTO_MIGRATE` is not
+  `true`. With that setting enabled, the deployer creates and verifies a fresh
+  backup for the confirmed database and running commit, migrates, and activates.
+  A backup or migration failure stops the release and alerts the phone. After
+  a migration failure, the controller attempts to restart the prior release
+  only when the database is still compatible;
 - it is not ahead of the running commit on `main`. The deployer never moves
   the server backwards, and never replaces a build deployed by hand from a
   branch;
@@ -592,6 +528,13 @@ an `NTFY_URL` in `autodeploy.env` sends them to a different topic instead. The
 timer is enabled by every activation; without that file its service is
 skipped.
 
+Set `AUTODEPLOY_AUTO_MIGRATE=true` in the root-only configuration to let green
+`main` builds with schema changes deploy after the market-hours hold. This does
+not make an old release schema-compatible: a failed migration may require a
+forward fix or a deliberate database restore. Keep the offsite backup and
+restore drill healthy; the deployer's immediate pre-migration check verifies
+the new local restore point, not an offsite restore.
+
 ```bash
 sudo install -m 0600 /opt/tradejournal/current/deploy/autodeploy.env.example /etc/tradejournal/autodeploy.env
 sudoedit /etc/tradejournal/autodeploy.env
@@ -600,7 +543,7 @@ PY=/opt/tradejournal/current/backend/.venv/bin/python
 sudo $PY $AUTODEPLOY status
 # Skip the market-hours wait for the newest build:
 sudo $PY $AUTODEPLOY run --now
-# Apply a held schema change: verified backup, migrate, activate:
+# Apply a held schema change once when automatic migrations are disabled:
 sudo $PY $AUTODEPLOY run --now --allow-migration
 sudo journalctl -u tradejournal-autodeploy --since today
 ```
@@ -615,9 +558,8 @@ release switch. Its decisions are kept in
 ## Verification boundaries
 
 `backend/tests/test_deployment.py` covers rollback ordering, incompatible
-schemas, checksums, unsafe extraction, ingress configuration isolation,
-preflight failure, opt-in service lifecycle and forced runtime bindings. Browser
-smoke tests exercise the same-origin proxy with seeded data. The Ubuntu
+schemas, checksums, unsafe extraction, and removal of an installed retired
+ingress unit. Browser smoke tests exercise the same-origin proxy with seeded data. The Ubuntu
 workflow additionally installs the built artifact, migrates fresh Postgres,
 executes queued work, restarts the API without restarting its worker, checks
 crash recovery, upgrades through the real autodeploy unit, rolls back, checks
@@ -626,10 +568,8 @@ stops and starts the entire service set. The upgrade polls a local stand-in
 for GitHub's releases API; the live Release workflow and the VPS polling
 GitHub are exercised only after a merge. `backend/tests/test_autodeploy.py`
 covers the decisions: market hours and `deploy-now`, ancestry, busy jobs,
-schema holds, checksums, and notifications sent once per build. It also runs a restricted PostgreSQL ingress
-role, real webhook duplicate/auth checks, stale-alert analysis, a separate OS
-user, and the shipped Caddy routing/error-log filter over local HTTP fixtures.
-It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
+optional schema migrations, fresh backups, checksums, and notifications sent
+once per build. It checks boot enablement; it does not verify public DNS/ACME certificates, reboot
 a VPS, enroll Tailscale, exercise Neon networking, or contact live providers;
 the Gmail listener runs there disabled, and its Pub/Sub path is covered by
 `backend/tests/test_gmail_listener.py` with a fake subscriber. The workflow
@@ -640,3 +580,248 @@ ntfy.sh itself is proved only by `alerts.py test` on the server.
 The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
 and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites).
+
+### A3 Practice preparation (opt-in, disabled)
+
+The package includes a dedicated `practice` worker lane and
+`tradejournal-practice.service` / `tradejournal-practice.timer`. The release
+controller installs the timer but does not enable it. It runs at 08:50
+America/New_York only after a separate operator enablement decision. The finite
+job uses the same persistent `JOB_LOCK_DIR`; manual requests do not wait behind
+broker imports or voice transcription. Calendar failures/closures and missed
+09:00 deadlines produce explicit records. Preparation never arms a plan.
+
+Both `PRACTICE_SCHEDULE_ENABLED` and `PRACTICE_AGENT_ENABLED` default off.
+Enabling an agent requires explicit approval of the exact Anthropic model,
+`PRACTICE_AGENT_TIMEOUT_SECONDS` (≤120), `PRACTICE_AGENT_INPUT_TOKENS` (≤20000),
+`PRACTICE_AGENT_OUTPUT_TOKENS` (≤4000), `PRACTICE_AGENT_DAILY_USD`,
+`PRACTICE_AGENT_INPUT_USD_PER_MILLION` and
+`PRACTICE_AGENT_OUTPUT_USD_PER_MILLION`, with operator-verified rate provenance.
+There is at most one reserved attempt per ET day, including revisions; failed
+or uncertain calls never retry automatically. Missing usage/cost remains unknown.
+Do not enable the timer or paid runtime merely because these units are packaged.
+A3 deployment requires separate approval and migration/Ubuntu CI verification.
+Three real sessions with actual morning-plus-review timings are still required
+for [live acceptance](../docs/agent/a3-implementation-contract.md).
+
+## Optional browser authentication (disabled by default)
+
+The existing installation stays private through Tailscale. Chunk 2 adds an
+opt-in authenticated mode and a separately configured assistant frontend;
+there is no bundled public TLS ingress and the assistant unit is never enabled
+by the release controller. The
+[access contract](../docs/agent/cloud-browser-auth-contract.md) defines the
+sample-data browser trial and the separate live-exposure gate.
+
+The owner frontend remains on loopback port 3000 and establishes owner sessions
+through its private server credential. The assistant frontend is a separate
+process on loopback port 3001 with a separate credential and OS identity. Its
+credential can transport browser sessions but cannot bootstrap an owner. API
+port 8080 and PostgreSQL remain loopback-only. Do not publish the private owner
+frontend or the legacy unauthenticated API.
+
+Auth configuration is generated explicitly, after selecting origins, with
+`deploy/access-config.py`. It writes six mode-0600 files into a named directory
+without printing secrets or replacing existing credentials:
+
+- `access-backend.env`: backend auth settings and distinct ingress/service keys.
+- `access-owner.env`: the private frontend's ingress credential and origin.
+- `access-assistant.env`: the assistant credential/origin, with
+  `TJ_ASSISTANT_ENABLED=false`.
+- `access-monitor.env`: health-monitor capability.
+- `access-automation.env`: only the existing scheduled job operations.
+- `access-mcp.env`: a private manual MCP capability, not a Dot credential.
+
+The API and owner units load their optional files on restart. The monitor and
+job units load only their named capabilities. The assistant unit uses a dynamic
+OS user, cannot read private state/configuration, and has no database or owner
+credentials. Backup archives include any installed auth configuration files.
+The existing private profile remains the default when no auth files exist;
+an assistant profile cannot fall back to it.
+
+On a configured private owner frontend, `/access` creates/revokes/resets
+assistant logins and shows new access keys once. Public signup is unavailable.
+The inspector gets explicit market symbols and selected practice-run IDs,
+never write, paid-model, import or arm rights. Optional journal inspection is
+available only when the operator has explicitly configured a sample-data
+installation and grants it. That configuration flag is an operator assertion,
+not proof that a database contains no real data; verify the actual isolated
+fixture installation before issuing the grant. Market-only chart responses
+omit journal markers, positions and alert data. Assistant chart preferences
+stay in its browser.
+
+Only an approved sample/live trial may turn on `TJ_ASSISTANT_ENABLED` and start
+`tradejournal-assistant.service`. No Tailscale Funnel, firewall change, DNS/TLS
+service or public reverse proxy is installed by this package. In authenticated
+mode, the production browser origin must use HTTPS; insecure cookies are
+accepted only with the explicit loopback-fixture switch. Session revocation is
+checked on every request and at most every 15 seconds on active SSE streams.
+
+Deployment and rollback stop the assistant unit before switching code and do
+not restart it automatically. Keep it stopped when rolling back to a release
+without auth. Re-enablement requires checking the exact code/configuration and
+approved ingress. Owner access, API/worker health and deterministic paper
+monitoring are checked independently.
+
+Verification: `scripts/verify.sh` now includes the ordinary browser suite and
+`frontend/playwright.auth.config.ts`, using a separate sample database and two
+loopback frontend instances. Browser fixtures prove login, private owner
+bootstrap, denied writes/reads, session audience separation, logout and
+revocation; they do not establish a live Dot connection, HTTPS deployment or
+actual Tailscale ACL behavior. Auth Postgres round-trip/revocation and schema
+checks are included in parity CI; native process sandbox behavior is exercised by the disposable Ubuntu
+`deploy/auth-smoke.py` trial and must pass CI before live exposure. No local
+Mac run establishes that native result.
+
+### Approved isolated Dot sample trial
+
+The separately approved temporary trial and its actual observations are in the
+[access contract](../docs/agent/cloud-browser-auth-contract.md#approved-sample-installation-and-handoff).
+It is a pinned copied runtime, not the production assistant unit. Production
+authentication configuration and private access are unchanged.
+
+The [preparation script](dot_trial_install.py) requires root, an explicit verified
+release and a portable frontend archive. It refuses to overwrite trial state or
+credentials or pre-existing trial units. Failed preparation stops/removes only
+units, identities and directories created by that invocation before allowing a
+retry. If cleanup cannot stop a process, it retains state and reports incomplete
+rollback for inspection. Keep the verified release's Linux dependencies: a local
+archive contains compiled JS/assets, never native macOS `node_modules`. The
+[fixture entry point](dot_trial_app.py) checks both configuration and actual
+sample-fill provenance before importing the application. HTTP fixture responses
+sit inside authorization, not in front of it. The running trial rejects all
+non-authentication domain writes for owners as well as assistants; the sole
+POST exception returns fixture position quotes without writing journal data.
+
+The trial's services share a private network namespace. Only frontend bridges
+3101/3102 bind host loopback; the API does not bind the host namespace. The public
+proxy points only to 3101; private sample administration uses Tailscale Serve
+8443. Original public Caddy routes and private Serve 443 remain unchanged.
+The temporary DNS service is [sslip.io](https://sslip.io/), with HTTPS managed
+by the existing [Caddy proxy](https://caddyserver.com/docs/automatic-https).
+
+Keys are root-owned mode-0600 files under `/etc/tradejournal-dot-trial`. Do not
+print them, include them in chat, commit them or reuse production credentials.
+The owner can reset/revoke the dedicated inspector from the private sample
+`/access` page. Operator controls on the pinned copied runtime are:
+
+```bash
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_control.py revoke trader-jo
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_control.py disable
+```
+
+`disable` removes the public Caddy import before revoking every non-owner
+principal and version-bumping each to invalidate existing sessions,
+disabling the assistant profile and stopping trial sockets/processes. It retains
+sample data and revoked credential records for explicit recovery; every
+assistant needs a new key before re-enabling. It preserves unrelated Caddy
+configuration. The private sample Serve mapping may remain stopped/unavailable;
+do not reset the full Tailscale configuration to remove it. Native revocation
+was observed; the full shutdown/re-enable recovery drill remains unobserved.
+Production deployment does not update or restart this pinned sample runtime.
+
+
+### Selected sample decision-writing increment
+
+Isaac selected [Trader Jo's first saved sample decision](../docs/agent/dot-decision-trial-contract.md)
+on 2026-10-09. The original inspector remains read-only. A separate writer is
+bound to one MU/NBIS sample run, has no journal access, and may only save its own
+simulated choices. `TJ_SAMPLE_DECISION_WRITES` is disabled unless explicitly set
+on the guarded sample runtime. No production profile is enabled by this change.
+
+Use [dot_trial_update.py](dot_trial_update.py) with the exact reviewed commit,
+the selected-source backend archive and portable standalone frontend archive.
+It validates archives before stopping trial processes, preserves Linux
+dependencies and old code/assets/permission flags, and rolls back on startup
+failure. Root-private recovery files remain under the isolated trial root.
+Then [dot_trial_seed.py](dot_trial_seed.py) prepares today's immutable simulated
+MU/NBIS packets and privately saves the separate login. Existing credentials
+require explicit `--rotate`; resets invalidate prior sessions. Never print the
+access key or put it in a chat prompt.
+
+```bash
+sudo python3 /path/to/dot_trial_update.py --backend-archive /path/to/backend.tar.gz --frontend-archive /path/to/frontend.tar.gz --commit <reviewed-40-character-commit>
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_seed.py
+```
+
+Both commands refuse other runtime/database targets. Production configuration,
+Tailscale/Caddy routes and journal data are outside this update. Saving a
+simulated TAKE never arms a paper plan; its distinct sample policy cannot pass
+A2's schema check. Native update and actual Dot write/reopen observations must
+be reported separately from local browser/fixture checks.
+
+
+### Manual synthetic MCP HTTPS trial
+
+The [D0 runbook](../docs/agent/cloud-mcp-d0-runbook.md) prepares a standalone
+synthetic `get_profile` service for a private ChatGPT Server URL + OAuth plugin.
+Use the manual-only templates under `deploy/cloud-mcp-d0/`; normal releases
+neither install nor activate them. A dedicated HTTPS hostname forwards only
+MCP/metadata to a mode-0660 Unix socket. The service verifies expiring local
+public keys under a network-disabled systemd sandbox, with no model keys, app
+imports, paid jobs, OpenAI tunnel or Platform runtime key. Operator key refresh
+is a separate bounded HTTPS fetch of issuer metadata/public keys; its optional
+15-minute timer publishes only public keys. No model/job scheduler is added.
+Stop both socket and service to prevent reactivation.
+
+The deployment CI adds a separate disposable TLS/Caddy/socket smoke after the
+ordinary package smoke. It checks real IPv4/IPv6 socket denial and offline
+verification, authentication refusal, exact route allowlisting, revocation,
+restart and teardown. This fixture evidence does not prove an actual Dot, live
+issuer, laptop-off use or account-level usage controls. Those remain trial
+acceptance steps; no public route is created by merging the implementation.
+
+### Manual assigned sample MCP reads
+
+The [D1 contract](../docs/agent/cloud-mcp-d1-contract.md) selects two read tools
+for one existing MU/NBIS sample assistant. Templates under `deploy/cloud-mcp-d1/`
+add only a private Unix socket bridge into the isolated sample API namespace;
+the offline adapter and backend both validate the same approved OAuth token.
+They do not expose the raw backend publicly or reuse an owner/service key.
+Normal deployment does not install these units/drop-ins or enable the new scope.
+The runbook covers staged pinned dependencies, exact principal/version binding,
+separate `practice:read` consent, manual activation and D0 rollback. CI exercises
+the actual namespace/Unix boundary; actual Dot tool/UI acceptance remains separate.
+
+The [first D2 increment](../docs/agent/cloud-mcp-d2-contract.md) adds own sample
+choice save/receipt tools through that same private bridge. Its catalog remains
+off with `decision_writes=false` (the default). Writes also require
+`TJ_CLOUD_MCP_DECISION_WRITES=true`, existing sample-write flags, current
+`decision_write=true` and separate `practice:write` OAuth consent. Include
+`cloud_mcp_d2_common.py` when staging the standalone adapter; update API/MCP
+sources together with rollback retained. Receipt reads require only the existing
+read scope; withdrawing writes preserves existing D1 choice reads. This remains
+a manual demo increment, with no production activation or context creation.
+
+### Selected sample paper replay increment
+
+Isaac selected [Jo’s own sample paper replay](../docs/agent/dot-sample-replay-contract.md)
+on 2026-10-09. Keep prior inspector/writer keys and decisions. The updater’s
+explicit selected source set includes the replay engine and P0 schema refusal.
+Enable the new capability only on the already-approved guarded sample runtime:
+
+```bash
+sudo python3 /path/to/dot_trial_update.py --backend-archive /path/to/backend.tar.gz --frontend-archive /path/to/frontend.tar.gz --commit <reviewed-40-character-commit> --enable-sample-replay
+sudo /opt/tradejournal-dot-trial/runtime/backend/.venv/bin/python /opt/tradejournal-dot-trial/runtime/deploy/dot_trial_seed.py --replay
+```
+
+The new default ID is `trader-jo-replay`, with one fresh sample run, MU/NBIS, no
+journal access and explicit replay permission. The key remains in a mode-0600
+private file and is entered only in the sign-in flow. The original WAIT records
+cannot become replay plans. No live provider, watcher, model, timer, broker or
+notification is enabled. New flags/code/assets roll back together if the isolated
+runtime fails readiness. Future continuations are hidden until each actor starts
+its own TAKE; stored sample outcomes never write journal fills or P0 events.
+
+
+### Historical demo connector mode
+
+The existing D1/D2 standalone source set also supports one explicitly linked
+historical assistant; see [the contract](../docs/agent/cloud-mcp-historical-contract.md).
+Keep `sample_only=true`, set `exercise_kind="historical"` in the private config,
+and opt in with `TJ_CLOUD_MCP_HISTORICAL_ENABLED=true` in the isolated API only.
+The existing historical factory/writer flags and current own-run grants remain
+required. Restart the verifiers together after any mode or identity change.
+Do not repoint the synthetic account, change production configuration or copy
+provider/model credentials. Historical replay is available only in the browser.
+Activation and real Jo/restart acceptance remain a separate manual demo step.

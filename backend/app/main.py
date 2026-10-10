@@ -15,7 +15,14 @@ from app.database import engine
 from app.schema import ensure_current
 from app.models import Account, FILL_LIGHT, Fill
 from app.routers import health, accounts, fills, trades, stats, rebuild, quotes, daily_review, auth, market_context, sync, webull, gmail_push, packets, research, strategy_lab, tradingview_alerts, charts
+from app.routers import level_alerts as level_alerts_router
+from app.routers import captures as captures_router
 from app.routers import symbol_info
+from app.routers import decisions as decisions_router
+from app.routers import practice as practice_router
+from app.routers import cloud_practice, cloud_choices
+from app.routers import access as access_router
+from app.access_middleware import AccessMiddleware
 from app.routers.fills import (
     _rebuild_trades,
     backup_manual_fills,
@@ -169,38 +176,23 @@ def _maybe_autostart_gmail_listener() -> None:
         submit_job(job_id)
 
 
-def _tradingview_analysis_autostart_enabled() -> bool:
-    configured = os.environ.get(
-        "TRADINGVIEW_ANALYSIS_AUTOSTART",
-        "false",
-    ).strip().lower()
-    if configured in {"1", "true", "yes"}:
-        return True
-    if configured in {"0", "false", "no"}:
-        return False
-    _log.warning(
-        "Invalid TRADINGVIEW_ANALYSIS_AUTOSTART=%r; disabling worker",
-        configured,
-    )
-    return False
-
-
-def _maybe_start_tradingview_analysis_worker(app: FastAPI):
-    """Start one cooperative DB-backed worker in the private API process."""
-
-    if not _tradingview_analysis_autostart_enabled():
-        _log.info(
-            "TradingView analysis worker skipped: autostart disabled"
-        )
+async def _maybe_start_level_alerts(app_: FastAPI, stream):
+    """Level alerts (Charts C5.1) are judged here whether or not a chart is open."""
+    app_.state.level_alerts = None
+    if os.environ.get("LEVEL_ALERTS_AUTOSTART", "true").lower() == "false":
         return None
+    from app.engine.chart_calendar import chart_calendar
+    from app.engine.chart_feed import chart_feed
+    from app.engine.chart_splits import chart_splits
+    from app.engine.level_alert_monitor import LevelAlertMonitor
+    from app.engine.paper import PaperWatcher
 
-    from app.engine.tradingview_analysis import TradingViewAnalysisWorker
-
-    worker = TradingViewAnalysisWorker(engine)
-    worker.start()
-    app.state.tradingview_analysis_worker = worker
-    _log.info("TradingView analysis worker started")
-    return worker
+    paper = PaperWatcher(engine, chart_feed, chart_calendar, chart_splits, clock=time.time)
+    monitor = LevelAlertMonitor(engine, stream, feed=chart_feed, calendar=chart_calendar, splits=chart_splits, paper=paper)
+    stream.attach(monitor)
+    await monitor.start()
+    app_.state.level_alerts = monitor
+    return monitor
 
 
 @asynccontextmanager
@@ -220,22 +212,21 @@ async def lifespan(_app: FastAPI):
     _maybe_autostart_webull_listener()
     _maybe_autostart_gmail_watch()
     _maybe_autostart_gmail_listener()
-    tradingview_worker = _maybe_start_tradingview_analysis_worker(_app)
     from app.engine.chart_calendar import chart_calendar
     from app.engine.chart_stream import ChartMarketStream
     chart_market_stream = ChartMarketStream(calendar=chart_calendar.cached)
     _app.state.chart_market_stream = chart_market_stream
+    level_alerts = await _maybe_start_level_alerts(_app, chart_market_stream)
     try:
         yield
     finally:
+        if level_alerts is not None:
+            await level_alerts.stop()
         await chart_market_stream.stop()
         from app.engine.job_runtime import execution_mode, shutdown_requested
 
         if execution_mode() == "embedded":
             shutdown_requested.set()  # let an embedded Gmail listener end cleanly
-        if tradingview_worker is not None:
-            tradingview_worker.stop()
-            _log.info("TradingView analysis worker stopped")
 
 
 app = FastAPI(title="Trade Journal API", lifespan=lifespan)
@@ -267,6 +258,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(cloud_practice.router, prefix="/cloud-mcp/practice", tags=["sample cloud reads"])
+app.include_router(cloud_choices.router, prefix="/cloud-mcp/practice", tags=["sample cloud choices"])
+app.include_router(access_router.router, prefix="/access", tags=["app access"])
 app.include_router(health.router, tags=["health"])
 app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
@@ -277,12 +271,16 @@ app.include_router(rebuild.router, prefix="/rebuild", tags=["rebuild"])
 app.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
 app.include_router(charts.router, prefix="/charts", tags=["charts"])
 app.include_router(symbol_info.router, prefix="/charts", tags=["charts"])
+app.include_router(level_alerts_router.router, prefix="/charts", tags=["charts"])
+app.include_router(captures_router.router, prefix="/charts", tags=["charts"])
 app.include_router(daily_review.router, prefix="/daily-review", tags=["daily-review"])
 app.include_router(market_context.router, prefix="/market-context", tags=["market-context"])
 app.include_router(sync.router, prefix="/sync", tags=["sync"])
 app.include_router(webull.router, prefix="/webull", tags=["webull"])
 app.include_router(gmail_push.router, prefix="/gmail", tags=["gmail"])
 app.include_router(packets.router, prefix="/packets", tags=["packets"])
+app.include_router(practice_router.router, prefix="/practice", tags=["practice"])
+app.include_router(decisions_router.router, prefix="/decisions", tags=["decisions"])
 app.include_router(
     tradingview_alerts.router,
     prefix="/tradingview",
@@ -290,3 +288,6 @@ app.include_router(
 )
 app.include_router(research.router, prefix="/research", tags=["research"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
+
+# Inspect the finalized route catalog; permission checks precede all handlers.
+app.add_middleware(AccessMiddleware, routes=app.router.routes)

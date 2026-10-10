@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 ET = ZoneInfo("America/New_York")
 UTC = ZoneInfo("UTC")
 OPEN_SIDES = {"buy", "buy_to_open", "sell_to_open"}
-REFERENCE_REVISION = "decimal-reference-v1"
+REFERENCE_REVISION = "decimal-reference-v2"
 
 
 def number(value):
@@ -228,15 +228,18 @@ def option_path(trade, fills, bars):
     if final is not None and final > peak:
         peak, peak_time = final, closed
     giveback = peak - final if final is not None else None
+    # A positive peak must survive the six-place persisted dollar precision.
+    # A smaller value cannot support a capture ratio or positive-peak time.
+    positive_peak = rounded(peak) > 0
     values = {"option_mfe_pct": rounded(max(zero, max(s["mfe"] for s in samples))),
               "option_mae_pct": rounded(max(zero, max(s["mae"] for s in samples))),
               "option_max_price_seen": max(s["high"] for s in samples), "option_min_price_seen": min(s["low"] for s in samples),
               "option_peak_unrealized_pnl": rounded(max(zero, max(s["favorable"] for s in samples))),
               "option_worst_unrealized_pnl": rounded(min(zero, min(s["adverse"] for s in samples))),
               "option_peak_total_pnl": rounded(peak), "option_giveback_from_peak": rounded(giveback),
-              "option_exit_efficiency": rounded(final / peak * 100) if final is not None and peak > 0 else None,
-              "option_giveback_pct": rounded(giveback / peak * 100) if giveback is not None and peak > 0 else None,
-              "time_to_option_mfe_minutes": int((peak_time - opened).total_seconds() / 60) if peak_time else None}
+              "option_exit_efficiency": rounded(final / peak * 100) if final is not None and positive_peak else None,
+              "option_giveback_pct": rounded(giveback / peak * 100) if giveback is not None and positive_peak else None,
+              "time_to_option_mfe_minutes": int((peak_time - opened).total_seconds() / 60) if peak_time and positive_peak else None}
     return {"values": values, "reason": None, "samples": [{k: rounded(v) if isinstance(v, Decimal) else v for k, v in s.items()} for s in samples],
             "peak_minute": peak_time.isoformat() if peak_time else None, "bars": len(samples)}
 

@@ -1,5 +1,7 @@
-import { api, Account } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { Account } from "@/lib/api";
 import TradesTable from "@/components/TradesTable";
+import { newYorkToday } from "@/lib/format";
 
 export default async function TradesPage({
   searchParams,
@@ -71,7 +73,7 @@ export default async function TradesPage({
         </FilterGroup>
       </div>
 
-      <TradesTable trades={trades} accountMap={accountMap} />
+      <TradesTable trades={trades} accountMap={accountMap} thisYear={Number(newYorkToday().slice(0, 4))} />
     </div>
   );
 }

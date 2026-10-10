@@ -63,7 +63,7 @@ cat <<'DONE'
 Setup complete.
 
   bash scripts/verify.sh        run every check
-  bash startdev.sh              run the app (backend 8080, ingress 8090, web 3000)
+  bash startdev.sh              run the app (backend 8080, web 3000)
 
 Optional integrations are configured in backend/.env; see backend/.env.example.
 DONE

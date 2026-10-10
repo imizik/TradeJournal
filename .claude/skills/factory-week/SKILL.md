@@ -1,15 +1,15 @@
 ---
 name: factory-week
-description: Run the strategy factory's weekly idea loop now, by hand, with this session as the idea model instead of the Anthropic API (so it runs on the user's Claude plan). Use when the user asks to run the factory, do a factory run now, or get new strategy ideas judged.
+description: Run the strategy factory's weekly idea loop now, by hand, with this session as the idea model instead of the scheduled run's `claude -p` (both on the user's Claude plan). Use when the user asks to run the factory, do a factory run now, or get new strategy ideas judged.
 ---
 
 # A factory week, with you as the idea model
 
 The strategy factory (`docs/strategy-factory.md`) runs by itself every Sunday
-and asks Claude for new ideas through the Anthropic API. This is the same run
-started by hand, and you answer instead of the API: the factory writes the
-brief, you write the ideas, and the factory judges them exactly as it judges
-the API's, records them, pushes the results and sends the phone its summary.
+and has `claude -p` answer its brief on the Claude plan. This is the same run
+started by hand, and you answer instead: the factory writes the brief, you
+write the ideas, and the factory judges them exactly as it judges the
+scheduled run's, records them, pushes the results and sends the phone its summary.
 
 It all happens in the factory checkout, `/Users/user/TradeJournal-factory`
 (branch `factory/ledger`, which holds the live ledger), never in this
@@ -41,8 +41,8 @@ report or the ledger), say so and suggest running this in a fresh session.
    `--budget N` (N as they choose, 3 by default) on this command and on
    step 4's.
 
-2. **Read the brief in full.** It is long: the rules (the system prompt the
-   API gets), the spec format, the catalog of families and features, every
+2. **Read the brief in full.** It is long: the rules (the idea model's
+   system prompt), the spec format, the catalog of families and features, every
    idea so far with its results, discovery evidence, and earlier lessons.
 
 3. **Answer it as the idea model**, following its rules and its JSON format
@@ -73,7 +73,7 @@ report or the ledger), say so and suggest running this in a fresh session.
 4. **Judge and record:**
 
    ```bash
-   bash /Users/user/TradeJournal-factory/scripts/factory_week.sh --answer <scratchpad>/factory-answer.json --answer-by "<your model's name>"
+   bash /Users/user/TradeJournal-factory/scripts/factory_week.sh --answer <scratchpad>/factory-answer.json --answer-by "<your model's name> in a Claude Code session"
    ```
 
    Every idea is backtested, which takes from a few minutes to most of an

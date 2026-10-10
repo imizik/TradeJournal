@@ -1,0 +1,11 @@
+[Unit]
+Description=Opt-in practice preparation at 08:50 New York
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 08:50:00 America/New_York
+Persistent=true
+AccuracySec=1s
+Unit=tradejournal-practice.service
+
+[Install]
+WantedBy=timers.target

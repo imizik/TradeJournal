@@ -35,24 +35,31 @@ native PowerShell launcher for the app itself.
 | Deployment lint | `cd backend && ruff check --config pyproject.toml ../deploy` | Defects in release building and server-operation scripts |
 | Docs | `cd backend && pytest tests/test_docs_links.py -q` | A navigation document naming a file or a heading that no longer exists. It cannot see a claim that is merely untrue — for that, `.claude/skills/docs-drift/SKILL.md` |
 | Docs | `cd backend && pytest tests/test_docs_freshness.py -q` | That the drift pass above is overdue: it counts code commits since `docs/agent/last-reconciled.json` and fails past 30. It cannot check that the pass happened, only that someone was asked. CI runs it on pull requests only, so it never blocks a release from `main` |
-| Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | The public ingress reaching the private database, app or credentials; a private module importing the ingress side; a pure engine module reaching the network |
-| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, TradingView contract/persistence/analysis, Webull, schema drift, independent metric validation, the Market Map port, the strategy factory on synthetic bars, the Charts routes, session calendar, history cache, stream and split-adjusted price basis on fixtures, and the import boundaries again |
+| Import boundaries | `cd backend && pytest tests/test_import_boundaries.py -q` | A pure engine module reaching the network or database engine |
+| Backend tests | `cd backend && pytest -q` | FIFO reconstruction, email parsing, routes, Strategy Lab, historical TradingView parser/persistence/analysis and read-only route coverage, Webull, schema drift, independent metric validation, the Market Map port, the strategy factory on synthetic bars, the Charts routes, session calendar, history cache, stream and split-adjusted price basis on fixtures, and the import boundaries again |
 | Frontend typecheck | `cd frontend && npm run typecheck` | Type errors across app/, components/, lib/ |
 | Frontend lint | `cd frontend && npm run lint` | React Hooks defects, dead code, Next anti-patterns |
 | Frontend build | `cd frontend && npm run build` | Server-component and route errors typecheck alone misses |
 | Browser smoke | `cd frontend && npm run e2e` | Whether pages actually render real data |
 | Postgres parity | `TEST_DATABASE_URL=... pytest tests/test_postgres_parity.py` | Dialect behavior SQLite cannot show (CI only) |
 
-CI (`.github/workflows/ci.yml`) runs backend, frontend, browser and Postgres
-jobs on every pull request, and posts the browser tests' pictures on pull
-requests that change the frontend (see [browser tests](#browser-tests)).
+CI (`.github/workflows/ci.yml`) runs backend, frontend and Postgres jobs on
+every pull request. It runs the two browser shards unless the diff contains only
+Markdown under `docs/`, root README/agent guides or the PR template
+(`scripts/ci_scope.sh`, shared with the deployment workflow and covered by
+`test_ci_scope_script.py`). Documentation-only pull requests skip that
+disposable application environment. Pushes to `main` and
+manual runs always run the complete suite. Browser pictures are posted on
+pull requests that change the frontend (see [browser tests](#browser-tests)).
 Postgres parity, migration-path and role checks are additional to the local
 script. `.github/workflows/deployment.yml` also
 builds an Ubuntu artifact and exercises actual systemd installation, proxy
 requests, queued work, restart, release switching and rollback with disposable
-Postgres. It also exercises the optional ingress, its restricted DB/OS roles,
-duplicate delivery, stale-alert analysis and Caddy routing/token-log filtering
-over local HTTP. Public DNS and certificate issuance are not covered.
+Postgres for every pull request outside the same documentation allowlist.
+Documentation-only pull requests skip the disposable installation. Pushes to `main` and manual
+runs always build it. The updated package confirms the retired ingress unit is
+removed during an upgrade and that no service listens on port 8090. Signals row
+rendering remains covered by the browser fixture suite.
 See [deployment verification](../../deploy/README.md#verification-boundaries).
 It checks boot enablement but does not reboot a real VPS or test Tailscale/live
 integrations. Agent verification is not the only signal.
@@ -66,12 +73,20 @@ commit is never published. The decisions the VPS makes are covered by
 unit against a local stand-in for GitHub. The Release workflow itself and the
 live GitHub polling run only after a merge.
 
-Review is a separate layer and proves nothing about correctness. Codex reviews
-pull requests through the `chatgpt-codex-connector` GitHub App, which is
-configured in ChatGPT rather than in this repository, so no workflow here can
-see its quota or tell you when it stops posting. It is advisory, it is not a
-required check, and `main` has no branch protection — a PR can merge with no
-review at all.
+Native subagent review is a separate layer, not proof that runtime behavior
+works. The [pre-PR review workflow](pr-review.md) sends findings directly to the
+active owner, requires review to cover the final head, and bounds repair rounds. Missing or
+partial results never pass. CI remains required even when the narrow docs-only
+policy or an explicit user instruction skips model review. The former CLI
+runner, hooks and receipt gate are retired; the guide notes what remains of
+them. Native review is instruction-driven, while
+GitHub enforces CI. Neither resumes an ended local owning session automatically.
+
+If another checkout owns the default browser-test ports, set
+`E2E_BACKEND_PORT=8199 E2E_FRONTEND_PORT=3199 bash scripts/verify.sh --e2e`.
+Both the servers and direct API test requests use those ports; the seeded
+database remains in this worktree. Do not reuse or stop another checkout's
+test servers.
 
 ## Credentials and data: none required
 
@@ -80,8 +95,9 @@ Tests need no API keys and touch no real data.
 - `backend/tests/conftest.py` pins the whole session to a throwaway SQLite
   database **before** anything imports `app.database`. An exported
   `DATABASE_URL` — including a hosted Neon one — is ignored.
-- Every external integration (Gmail, Polygon, Alpaca, Anthropic, Webull,
-  TradingView) is opt-in and dormant when its variables are unset.
+- External provider interactions are stubbed or excluded from local tests. The
+  historical TradingView row reads use seeded fixtures; live level-alert delivery
+  needs a phone check.
 
 This matters more than it looks. Several tests drive the real `app.main:app`
 through `TestClient`, and that app's lifespan runs `_seed_and_normalize_roth_account()` (which can
@@ -148,7 +164,11 @@ happen where you ran, say so rather than reporting the pass as proof.
 
 ## Browser tests
 
-`frontend/e2e/` holds Playwright smoke tests. They exist because typecheck,
+`frontend/e2e/` holds Playwright smoke tests.
+The additional `playwright.sample.config.ts` suite boots the real authenticated
+fixture profile to exercise scoped MU/NBIS sample saves, reload/reopen, chart
+indicators/URLs and practice-only calendar links. Its namespace/file isolation
+remains a separate native check; its choices are simulated and cannot arm. They exist because typecheck,
 lint and build all pass on a component that is broken at runtime -- verified:
 a one-character change making the dashboard render every dollar figure 100x
 too small passes all three, and fails the browser tests.
@@ -176,6 +196,13 @@ links, empty symbols, remembered placeholder tabs, debouncing, late-response
 rejection, failure/retry and the collapsed 390 px layout. It makes no claim
 about live provider feeds. `backend/tests/test_symbol_info.py` covers missing
 results, zero-duration holds, recent-record limits and the two-query adapter.
+Its Events tests stub `/charts/symbol/{symbol}/events`; the earnings
+normalizers and cache are proven on recorded Tradier responses in
+`backend/tests/test_symbol_info_events.py`. A live Tradier read, and whether an
+estimated date matches the company's announcement, are outside the suite.
+Its Forecast test stubs `/charts/symbol/{symbol}/forecast`; the straddle choice,
+its refusals and the earnings expiration are proven in
+`backend/tests/test_options_feed.py` with a fake chain client.
 
 `frontend/e2e/charts.spec.ts` covers the Charts workspace with stubbed candle and
 quote responses: five canvases, symbol linking, saved levels, streamed trade updates,
@@ -224,7 +251,20 @@ missing-split banner, a history page on a different split set refused, and a
 possible unrecorded split noted on its panel), and daily/weekly depth (a 12-year
 1D chart and a 30-year 1W chart panned page by page to their first bar with a
 stable zoom and the start-of-history label, 1D to 1W to 5m switching, and a
-390px touch pan). Chart
+390px touch pan), the workspace shell and its dividers (C7.3/C7.4: five charts
+filling 1440×900 and 1920×1080 without page scroll, the main chart's minimum
+height at 1280×720, the toolbar at 1024px, dividers dragged, stepped by key,
+clamped and reset with no chart re-render or request, saved proportions shared
+between browsers while the dock's width stays per device, and maximize/restore
+keeping the same chart instances), automatic levels (the nearest three each
+side, a hover or tap card, the group hidden on every chart), relative volume
+(shaded bars, the legend's RVol and its sessions, no baseline said so),
+earnings (markers intraday and daily, the 14-day badge), level alerts (set from
+a level's or an automatic level's menu, the bell grayed once fired, the list
+re-arming and removing), and the options layers (walls and ranked strikes
+through every filter, the strike ladder, max pain, and the range bands'
+expected-move levels, VWAP bands and cards, two bands on one cent each showing
+their own straddle). Chart
 tests use an in-memory settings fake (`frontend/e2e/fixtures/chartSettings.ts`)
 unless tagged `@real-settings`, so they never share state through the database. Lightweight Charts internals and per-chart render counts are
 read through test-only `window.__tjCharts`, `window.__tjRenders` and `window.__tjDrawings` maps the
@@ -242,7 +282,18 @@ chains (SPY, and SPX with both roots) and pins the options budget, coded
 failures and that Tradier option field names stay in the adapters.
 `backend/tests/test_options_recorder.py` covers the daily options snapshot job:
 its capture window, resume after a restart, missed sessions marked unavailable
-and the real adapter's budget. Actual Tradier/Webull
+and the real adapter's budget. `backend/tests/test_options_positioning.py`
+pins positioning, gamma and the flip to hand-worked numbers, and
+`backend/tests/test_options_feed.py` the chart's option cache, cadence and an
+hour of polling inside the budget, all with fake chains; live option data with
+a moving price is not covered. `backend/tests/test_chart_rvol.py` holds every
+chart candle's relative volume equal to fill context's
+`compute_rvol_time_adjusted` on the same bars, and
+`backend/tests/test_rvol_history.py` covers the morning job that stores the
+sessions it needs. `backend/tests/test_chart_levels.py` pins each automatic
+level and the confluence rule on fixture bars, including a DST day and a half
+day, and `backend/tests/test_level_alerts.py` the alert monitor (see Level
+alerts under the integration notes below). Actual Tradier/Webull
 access is checked separately by `backend/scripts/check_chart_feed.py`, split
 records and the adjusted prices against both providers by
 `backend/scripts/check_chart_splits.py` (read-only, a real split), live option
@@ -409,14 +460,27 @@ Be honest about this when reporting work:
   with no market-data credentials, so quote-dependent UI shows its empty state.
   Phone alerts reach a loopback stand-in for ntfy in the deployment workflow;
   delivery through ntfy.sh and the dead-man's-switch ping are proved only by
-  `deploy/alerts.py test` and a real alert on the server.
+  `deploy/alerts.py test` and a real alert on the server. Level alerts (Charts
+  C5.1) are tested with trades fed through the real stream parser, stub
+  1-minute bars and a stub ntfy sender; a live Tradier stream firing one and
+  the message reaching the phone are proved only by a real alert after the
+  deploy. Pre-trade capture (Charts C3.4, C3.5) runs its browser tests
+  against the real e2e backend, with Chromium's fake microphone (a tone)
+  and transcription off. Transcript states use stubbed responses, and the
+  backend tests use a stand-in speech engine. A real microphone on the
+  desktop and the phone, the five-second walkthrough, and Whisper on the
+  VPS (model download, speed on two cores) are checked only by hand.
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
   proved only by a real weekly run. The documentation drift routine
   (`scripts/docs_drift_week.sh`) is tested the same way, with stub `claude`,
   `gh` and `curl`. Whether Claude's pass is any good is judged in review of
-  the pull request it opens.
+  the pull request it opens. `scripts/review_carry.sh`, which lets a clean
+  review survive integrating main, is tested against a throwaway repository
+  (`test_review_carry_script.py`). It proves only that the feature's own patch
+  is unchanged; whether main's incoming changes alter what the feature relies
+  on is the owner's recorded judgment plus current-head CI.
   The live-quote providers are the clearest case: `test_quotes_provider.py`
   and `test_tradier.py` pin the dispatch, the batching, the response shapes and
   the fallback, and prove nothing at all about whether a quote is *correct* or
@@ -442,11 +506,13 @@ showing the response, or running the app and exercising the page.
 
 ```bash
 bash startdev.sh                                  # backend 8080, frontend 3000
-TRADINGVIEW_INGRESS_ENABLED=true bash startdev.sh # also ingress on 8090
+
 ```
 
-The TradingView ingress is opt-in; ordinary work does not need it. Everything
-binds to `127.0.0.1`. Only ever tunnel `8090`; the private API has no auth.
+The private API and frontend bind to `127.0.0.1`. The legacy profile has no
+auth and must only be reached through private access. Optional authenticated
+mode and its disabled assistant listener follow the
+[cloud-browser contract](cloud-browser-auth-contract.md).
 
 ## Historical metric evidence
 
@@ -458,3 +524,35 @@ for the snapshot format, report command, coverage and source-verification limits
 and deliberate input mutations, in addition to hand-calculated cases. A local
 match on cached inputs does not establish broker completeness, executable
 quotes or predictive value. Missing/stale results are not counted as matches.
+
+
+## Authenticated browser boundaries
+
+Full verification additionally runs `npx playwright test --config
+playwright.auth.config.ts` after the ordinary browser suite has built the
+frontend. It starts a separate seeded SQLite database, authenticated backend
+and two frontend instances on distinct loopback ports. Override
+`AUTH_BACKEND_PORT`, `AUTH_OWNER_PORT`, and `AUTH_ASSISTANT_PORT` together when
+needed. Running that configuration alone requires a fresh frontend build with
+`NEXT_PUBLIC_API_URL=/api/backend`. All optional provider/model/listener work
+is disabled in its fixture environment.
+
+Backend auth tests exercise the registered route inventory, forged identity,
+CSRF, credential/session expiry/reset/revocation, symbol/resource denial and
+active SSE revocation. Deployment fixtures prove secret-file separation and
+disabled unit packaging; Postgres parity exercises session persistence and
+revocation. Browser tests inspect actual rendered pages and direct requests,
+including session audience replay and protected server-rendered data.
+
+A local fixture browser is not the Dot's cloud browser. Real secure sign-in,
+HTTPS, Tailscale ACLs, native process isolation, live provider data and laptop-
+off operation require the separately approved sample-data trial. No internet
+entry is enabled by running these tests or merging this implementation.
+
+The sample browser suite also exercises an assigned TAKE replay through actual
+authentication and its own scoped start button: double click/retry, frozen receipt
+preservation, readable per-share base/stress outcomes, reload/reopen and a delayed
+pre-start response. Backend sample replay tests cover real concurrent SQLite
+requests and interruption rollback; Postgres advisory-lock parity is CI-only.
+Native namespace/process/credential preservation and actual Dot use remain
+separate observations.

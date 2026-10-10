@@ -275,3 +275,92 @@ def test_stopping_a_queued_listener_does_not_start_it(database):
     job_id = create_run(database, "webull_listener", status="queued_stop")
     assert runtime.recover_interrupted(lane="webull") == 1
     assert read_job(database, job_id).status == "succeeded"
+
+
+def test_a3_preparation_lane_does_not_queue_behind_import_or_capture(database, tmp_path):
+    sync_id = create_run(database)
+    worker = held_worker(sync_id, tmp_path / "release", tmp_path / "effects")
+    try:
+        wait_until_inside(database, sync_id, worker)
+        practice_id = create_run(database, "practice_prepare")
+        with runtime._lock(runtime.lock_directory(), "lane-capture") as held:
+            assert held
+            runtime.execute_job(practice_id, runner=lambda: jobs._finish_job(practice_id, 1, 1))
+        assert read_job(database, practice_id).status == "succeeded"
+        assert read_job(database, sync_id).status == "running"
+    finally:
+        worker.kill()
+        worker.communicate(timeout=5)
+
+
+def test_a3_killed_owner_retains_reserved_call_and_original_cohort(database, tmp_path):
+    from app.engine import practice
+    from app.models import PracticeAgentCall, PracticeRun
+    with Session(database) as db:
+        run = practice.start(db)
+        run.status = "preparing"
+        db.add(run)
+        db.commit()
+        run_id, job_id = run.id, run.job_id
+    gate = tmp_path / "reserved"
+    code = f'''
+import time,uuid
+from pathlib import Path
+from sqlmodel import Session
+from app.database import engine
+from app.models import PracticeRun,PracticeAgentCall
+from app.engine import job_runtime
+
+def hold():
+    with Session(engine) as db:
+        run=db.get(PracticeRun,uuid.UUID({str(run_id)!r}))
+        db.add(PracticeAgentCall(day=run.day,run_id=run.id,model="fixture",prompt_version="fixture",payload_json="{{}}",config_json="{{}}"))
+        db.commit()
+    Path({str(gate)!r}).touch()
+    while True:
+        time.sleep(.1)
+job_runtime.execute_job(uuid.UUID({str(job_id)!r}),runner=hold)
+'''
+    process = subprocess.Popen([sys.executable, "-c", code], cwd=BACKEND, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 15
+        while not gate.exists():
+            assert process.poll() is None and time.monotonic() < deadline
+            time.sleep(.025)
+    finally:
+        process.kill()
+        process.communicate(timeout=5)
+    assert runtime.recover_interrupted(lane="practice") == 1
+    with Session(database) as db:
+        run = db.get(PracticeRun, run_id)
+        assert practice.view(db, run)["agent"]["status"] == "uncertain"
+        assert practice.start(db).id == run_id
+        assert db.exec(select(PracticeAgentCall)).one().output_json is None
+
+
+@pytest.mark.parametrize("result", ["completed", "no_session", "failed", "scheduled_disabled"])
+def test_a3_real_dispatch_finishes_after_expiring_session(database, monkeypatch, result):
+    from datetime import timedelta, timezone
+    from app import database as db_module
+    from app.engine import analyzer, chart_calendar, practice
+    from app.models import PracticeRun
+    monkeypatch.setattr(db_module, "engine", database)
+    monkeypatch.setenv("PRACTICE_AGENT_ENABLED", "false")
+    monkeypatch.setenv("PRACTICE_SCHEDULE_ENABLED", "false")
+    hours = None if result == "failed" else {"status": "closed"} if result == "no_session" else {"status": "open", "open": 570, "close": 960}
+    monkeypatch.setattr(chart_calendar.chart_calendar, "hours", lambda _: hours)
+    calls = []
+    def packet(symbol):
+        calls.append(symbol)
+        return {"symbol": symbol, "data_source": "alpaca_sip", "recent_minute_bars": [{"t": (datetime.now(timezone.utc)-timedelta(minutes=2)).isoformat(), "o": 100, "h": 102, "l": 99, "c": 101}]}
+    monkeypatch.setattr(analyzer, "build_ticker_analysis", packet)
+    with Session(database) as db:
+        run = practice.start(db, mode="scheduled" if result == "scheduled_disabled" else "manual")
+        run_id, job_id = run.id, run.job_id
+    runtime.execute_job(job_id)  # actual handler, default expire_on_commit=True
+    assert read_job(database, job_id).status == ("failed" if result in {"failed", "scheduled_disabled"} else "succeeded")
+    with Session(database) as db:
+        saved = db.get(PracticeRun, run_id)
+        assert saved.result == ("failed" if result == "scheduled_disabled" else result)
+    runtime.execute_job(job_id)
+    assert len(calls) == (5 if result == "completed" else 0)

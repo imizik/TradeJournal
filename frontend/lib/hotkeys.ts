@@ -26,7 +26,9 @@ export type Hotkey =
   /** Levels and drawings (C1.1): the workspace ignores these when nothing is selected or there is nothing to undo. */
   | { kind: "delete" }
   | { kind: "undo" }
-  | { kind: "redo" };
+  | { kind: "redo" }
+  /** Plan trade (C3.4): the capture sheet for the main chart's symbol. */
+  | { kind: "plan" };
 
 type KeyPress = Pick<KeyboardEvent, "key" | "code" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">;
 
@@ -37,6 +39,8 @@ export function readHotkey(event: KeyPress, typed: string): Hotkey | null {
   if (altKey) {
     // Option+R types ® on a Mac, so the reset matches the key's position.
     if (code === "KeyR" && !shiftKey) return { kind: "reset" };
+    // Option+P types π on a Mac, so the key's position is what counts here too.
+    if (code === "KeyP" && !shiftKey) return { kind: "plan" };
     if (key === "ArrowDown" || key === "ArrowUp") return { kind: "step", by: key === "ArrowDown" ? 1 : -1 };
     return null;
   }
@@ -89,6 +93,9 @@ export const HOTKEY_HELP: { group: string; rows: { keys: string; does: string }[
     { keys: "⌘ + Shift + Z or Ctrl + Shift + Z", does: "Redo" },
     { keys: "Esc", does: "Put away the drawing tool, or deselect (while dragging: put it back)" },
     { keys: "Hold ⌘ or Ctrl", does: "Magnet while placing or dragging: snap to open, high, low or close" },
+  ] },
+  { group: "Journal", rows: [
+    { keys: "Alt + P", does: "Plan trade: save what you are taking and your plan before entering" },
   ] },
   { group: "View", rows: [
     { keys: "Alt + R", does: "Reset every chart: latest candles, automatic price scale" },

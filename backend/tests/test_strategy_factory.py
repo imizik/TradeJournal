@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from app.engine.factory_brief import SYSTEM_PROMPT
+from app.engine.factory_brief import IDEAS_SCHEMA, SYSTEM_PROMPT
 from app.engine.factory_data import NYSE_EARLY_CLOSES
 from app.engine.factory_gates import required_t
 from app.engine.factory_rules import canonical, parse_spec, spec_id
@@ -219,7 +219,7 @@ def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
         asked.append((system, text))
         return ANSWER, "a stub model, 10 tokens in and 5 out"
 
-    assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
+    assert script.main([*args, "week", "--use-api"], source_factory=StubSource, proposer=proposer) == 0
     ((system, text),) = asked
     assert system == SYSTEM_PROMPT and "Propose up to 3 new candidates this week." in text
     assert '"recovery_swing"' in text and "## Discovery evidence" in text
@@ -239,7 +239,7 @@ def test_week_asks_for_ideas_judges_them_and_reports(script, tmp_path):
 
     # The same week again: one of three used, and the same idea is now in the ledger.
     asked.clear()
-    assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
+    assert script.main([*args, "week", "--use-api"], source_factory=StubSource, proposer=proposer) == 0
     assert "Propose up to 2 new candidates this week." in asked[0][1]
     assert len(read_lines(paths["ledger.jsonl"])) == 1
     # A second report the same day gets its own name; the first is kept.
@@ -258,7 +258,7 @@ def test_week_stops_when_the_budget_is_used_and_dry_run_only_prints(script, tmp_
     assert printed.startswith(SYSTEM_PROMPT) and "Propose up to 3 new candidates" in printed
     assert not paths["reports"].exists() and not paths["ledger.jsonl"].exists()
     paths["ledger.jsonl"].write_text(used_week(script))
-    assert script.main([*args, "week"], source_factory=StubSource, proposer=proposer) == 0
+    assert script.main([*args, "week", "--use-api"], source_factory=StubSource, proposer=proposer) == 0
     assert "budget of 3 candidates is already used" in capsys.readouterr().out
 
 
@@ -288,23 +288,36 @@ def test_a_claude_code_session_can_answer_the_brief_instead_of_the_api(script, t
     paths["ledger.jsonl"].write_text(used_week(script))
     today = datetime.now(ET).date()
     # The week's three are used; a run the user asks for can go past them.
-    brief = tmp_path / "brief.md"
-    assert script.main([*args, "week", "--dry-run", "--brief-out", str(brief), "--budget", "2"],
-                       source_factory=StubSource) == 0
+    brief, schema = tmp_path / "brief.md", tmp_path / "schema.json"
+    assert script.main([*args, "week", "--dry-run", "--brief-out", str(brief), "--schema-out", str(schema),
+                        "--budget", "2"], source_factory=StubSource) == 0
     assert brief.read_text().startswith(SYSTEM_PROMPT) and "Propose up to 2 new candidates this week." in brief.read_text()
+    assert json.loads(schema.read_text()) == IDEAS_SCHEMA  # what claude -p holds its answer to
     answer = tmp_path / "answer.json"
     answer.write_text(json.dumps(ANSWER))
     assert script.main([*args, "week", "--answer", str(answer), "--answer-by", "Claude Opus 5.5", "--budget", "2"],
                        source_factory=StubSource) == 0
     record = read_lines(paths["ledger.jsonl"])[-1]
     assert (record["name"], record["batch"]) == ("Daily EMA reclaim", script.week_start(today).isoformat())
-    assert "Idea model: Claude Opus 5.5 in a Claude Code session, no API call." in (
+    assert "Idea model: Claude Opus 5.5, no API call." in (
         paths["reports"] / f"{today}.md").read_text()
     answer.write_text(json.dumps({"ideas": [], "lessons": "none"}))
     with pytest.raises(SystemExit, match="does not fit the format: answer lacks wanted"):
         script.main([*args, "week", "--answer", str(answer), "--budget", "1"], source_factory=StubSource)
     with pytest.raises(SystemExit):
         script.main([*args, "week", "--budget", "0"], source_factory=StubSource)
+
+
+@pytest.mark.parametrize("options", [[], ["--budget", "2"], ["--answer", "a.json", "--use-api"], ["--dry-run", "--use-api"]])
+def test_the_api_is_asked_only_with_use_api(script, tmp_path, options, monkeypatch):
+    # Without --use-api, `week` never reaches the Anthropic SDK or the key: no flag at all is refused,
+    # not taken as the API, and --use-api goes with nothing else.
+    paths, args = weekly_paths(tmp_path)
+    monkeypatch.setattr(script, "claude_proposer", lambda s, t: pytest.fail("the API was asked"))
+    with pytest.raises(SystemExit) as stopped:
+        script.main([*args, "week", *options], source_factory=StubSource)
+    assert stopped.value.code == 2
+    assert not paths["reports"].exists()
 
 
 def test_the_live_ledger_is_written_only_on_the_factory_branch(script, tmp_path, monkeypatch):
@@ -317,7 +330,7 @@ def test_the_live_ledger_is_written_only_on_the_factory_branch(script, tmp_path,
     with pytest.raises(SystemExit, match="The live ledger is on branch factory/ledger"):
         script.main([*out, "run", str(spec_path)], source_factory=StubSource)
     with pytest.raises(SystemExit, match="The live ledger is on branch factory/ledger"):
-        script.main([*out, "week"], source_factory=StubSource, proposer=lambda s, t: (ANSWER, ""))
+        script.main([*out, "week", "--use-api"], source_factory=StubSource, proposer=lambda s, t: (ANSWER, ""))
     assert not live.exists()
     monkeypatch.setattr(script, "_git", lambda *args: "factory/ledger" if "--abbrev-ref" in args else "abc1234")
     assert script.main([*out, "run", str(spec_path)], source_factory=StubSource) == 0

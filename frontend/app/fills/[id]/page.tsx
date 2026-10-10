@@ -1,6 +1,9 @@
-import { api, Fill } from "@/lib/api";
+import { api } from "@/lib/serverApi";
+import type { Fill } from "@/lib/api";
 import ManualFillForm from "@/components/ManualFillForm";
 import { notFound } from "next/navigation";
+import Link from "next/link";
+import { chartLink, newYorkSeconds } from "@/lib/chartJournal";
 
 function fillTitle(fill: Fill) {
   if (fill.instrument_type === "stock") {
@@ -74,7 +77,11 @@ export default async function FillDetailPage({
         <a href={cancelHref} className="text-sm text-muted-foreground hover:text-foreground">
           Back
         </a>
-        <h1 className="mt-2 text-xl font-semibold text-foreground">{fillTitle(fill)}</h1>
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-semibold text-foreground">{fillTitle(fill)}</h1>
+          {newYorkSeconds(fill.executed_at) !== null && <Link href={chartLink({ symbol: fill.ticker, from: newYorkSeconds(fill.executed_at)!, fill: fill.id })}
+            className="inline-flex items-center rounded-md border px-2.5 py-1 text-xs text-foreground hover:bg-muted">Open on chart</Link>}
+        </div>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
           Editing a fill rebuilds trades from scratch using the corrected fill history. If this changes how fills group
           together, the original trade detail URL may no longer exist after save.

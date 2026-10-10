@@ -14,8 +14,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # See CI's matching scope job. A docs-only pull request needs link and
+  # freshness coverage, not a disposable Ubuntu installation. Every main
+  # commit and manual run still builds and smoke-tests the release package.
+  changes:
+    name: Changed deployment scope
+    runs-on: ubuntu-latest
+    outputs:
+      runtime: ${{ steps.scope.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+
+      - name: Classify pull-request scope
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "runtime=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          bash scripts/ci_scope.sh | tee -a "$GITHUB_OUTPUT"
+
   ubuntu:
-    name: Ubuntu package and systemd
+    name: Ubuntu package and systemd build
+    needs: changes
+    if: github.event_name != 'pull_request' || needs.changes.outputs.runtime == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
@@ -49,9 +77,36 @@ jobs:
         run: python deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Install and exercise actual services
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/smoke.py dist/*.tar.gz
+      - name: Exercise isolated MCP HTTPS ingress and network denial
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-d0/smoke.py
+      - name: Exercise sample MCP reads across the real Unix namespace bridge
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-d1/smoke.py
       - name: Save verified release
         uses: actions/upload-artifact@v4
         with:
           name: tradejournal-ubuntu-24.04-x86_64
           path: dist/
           retention-days: 14
+
+  # Preserve the established required-check name and fail closed if the scope
+  # classifier cannot decide whether the package test is needed. A docs-only
+  # pull request reaches this tiny gate without provisioning Ubuntu services.
+  deployment_gate:
+    name: Ubuntu package and systemd
+    needs: [changes, ubuntu]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the package smoke test when in scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          RUNTIME_CHANGED: ${{ needs.changes.outputs.runtime }}
+          UBUNTU_RESULT: ${{ needs.ubuntu.result }}
+        run: |
+          test "$CHANGES_RESULT" = success
+          if [ "$EVENT_NAME" = "pull_request" ] && [ "$RUNTIME_CHANGED" != true ]; then
+            echo "Documentation-only pull request; Ubuntu package test is not needed."
+            exit 0
+          fi
+          test "$UBUNTU_RESULT" = success

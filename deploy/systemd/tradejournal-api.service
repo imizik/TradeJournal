@@ -4,11 +4,14 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+EnvironmentFile=-/etc/tradejournal/access-backend.env
 Type=simple
 User=tradejournal
 Group=tradejournal
 WorkingDirectory=/opt/tradejournal/current/backend
 EnvironmentFile=/etc/tradejournal/backend.env
+# Level alerts (Charts C5.1) send through the phone-alert topic; optional, as phone alerts are.
+EnvironmentFile=-/etc/tradejournal/alerts.env
 ExecStart=/opt/tradejournal/current/backend/.venv/bin/python /opt/tradejournal/current/deploy/launch.py api
 Restart=on-failure
 RestartSec=5

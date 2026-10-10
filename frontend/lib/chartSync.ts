@@ -1,7 +1,8 @@
+import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetStateAction } from "react";
 import { apiUrl } from "@/lib/api";
-import { DEFAULT_SETTINGS, LAYER_GROUPS, MAX_KEPT_LAYOUTS, STORAGE_KEY, cleanLayoutProportions, cleanProportions, layoutKeys, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
+import { DEFAULT_SETTINGS, LAYER_GROUPS, MAX_KEPT_LAYOUTS, STORAGE_KEY, cleanLayoutProportions, cleanOptionsLayer, cleanProportions, layoutKeys, sanitizeSettings, uniqueLayoutNames, validSymbol } from "@/lib/charts";
 import type { ChartSettings, Indicators } from "@/lib/charts";
 import { cleanDrawings, cleanToolStyles, DRAWING_KINDS, MAX_DRAWINGS } from "@/lib/drawings";
 
@@ -28,7 +29,7 @@ const json = (value: unknown) => JSON.stringify(value);
 
 /** The shared part of the settings in a canonical key order, so equal settings compare equal. */
 export function shared(settings: ChartSettings): SharedSettings {
-  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, hiddenGroups, studiesHidden, autoLevelsHidden, linkRange, smallSize, immersiveWatchlist, layouts, proportions, layoutProportions } = settings;
+  const { intervals, panelSymbols, watchlist, session, layout, indicators, levels, drawings, toolStyles, magnet, hiddenGroups, studiesHidden, autoLevelsHidden, optionsLayer, rangeBandsHidden, linkRange, smallSize, immersiveWatchlist, layouts, proportions, layoutProportions } = settings;
   const kept = layouts.map(({ id, name, ...arrangement }) => ({ id, name, ...layoutKeys(arrangement) }));
   const sizes = cleanLayoutProportions(layoutProportions, kept);
   return { intervals, panelSymbols, watchlist, session, layout, indicators, linkRange, smallSize, immersiveWatchlist,
@@ -38,7 +39,11 @@ export function shared(settings: ChartSettings): SharedSettings {
     levels: Object.fromEntries(Object.keys(levels).sort().filter((symbol) => levels[symbol].length).map((symbol) => [symbol, levels[symbol]])),
     // Always sent, even empty: the server keeps a field a save leaves out, so omitting it could never clear it.
     drawings: cleanDrawings(Object.fromEntries(Object.keys(drawings).sort().map((symbol) => [symbol, drawings[symbol]])), validSymbol),
-    toolStyles: cleanToolStyles(toolStyles), magnet, hiddenGroups: { levels: hiddenGroups.levels, drawings: hiddenGroups.drawings }, studiesHidden, autoLevelsHidden };
+    toolStyles: cleanToolStyles(toolStyles), magnet, hiddenGroups: { levels: hiddenGroups.levels, drawings: hiddenGroups.drawings }, studiesHidden, autoLevelsHidden,
+    // A top-level field too: a tab on a build before C4.4 leaves it out of its saves, so the server keeps it.
+    optionsLayer: cleanOptionsLayer(optionsLayer),
+    // Likewise for C2.7's range bands.
+    rangeBandsHidden };
 }
 const same = (a: SharedSettings, b: SharedSettings) => json(a) === json(b);
 const fromServer = (data: unknown) => shared(sanitizeSettings(data ?? {}));
@@ -75,7 +80,7 @@ function mergeKeys<T>(base: Record<string, T>, mine: Record<string, T>, theirs: 
  */
 export function rebase(base: SharedSettings, mine: SharedSettings, theirs: SharedSettings): SharedSettings {
   const out: SharedSettings = { ...theirs, indicators: { ...theirs.indicators } };
-  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "autoLevelsHidden", "proportions"] as const;
+  const scalars = ["intervals", "panelSymbols", "session", "layout", "linkRange", "smallSize", "immersiveWatchlist", "magnet", "studiesHidden", "autoLevelsHidden", "optionsLayer", "rangeBandsHidden", "proportions"] as const;
   for (const key of scalars) if (json(mine[key]) !== json(base[key])) Object.assign(out, { [key]: mine[key] });
   for (const key of Object.keys(mine.indicators) as (keyof Indicators)[])
     if (mine.indicators[key] !== base.indicators[key]) out.indicators[key] = mine.indicators[key];
@@ -149,6 +154,9 @@ function writeLocal(settings: ChartSettings, meta: Meta): boolean {
  * refreshed when the page regains focus or every 30 seconds while visible.
  */
 export function useChartSettings() {
+  const { owner, grants } = useAppAccess();
+  const localOnly = !owner;
+  const allowedSymbols = (grants.symbols ?? []).join(",");
   const [settings, setSettings] = useState<ChartSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
   const [sync, setSync] = useState<SyncState>("loading");
@@ -163,6 +171,7 @@ export function useChartSettings() {
   const pending = useRef<number | undefined>(undefined);
 
   const push = useCallback(async () => {
+    if (localOnly) return;
     const sending = shared(latest.current);
     if (saving.current || same(sending, confirmed.current)) return;
     saving.current = true;
@@ -186,11 +195,18 @@ export function useChartSettings() {
     saving.current = false;
     setStored(writeLocal(latest.current, { revision: revision.current, base: confirmed.current }));
     setSync(saved);
-  }, []);
+  }, [localOnly]);
 
   useEffect(() => {
     let alive = true;
     const local = readLocal();
+    if (localOnly) {
+      const allowed = allowedSymbols.split(",").filter(Boolean);
+      const saved = local.settings ?? DEFAULT_SETTINGS;
+      const safe = { ...saved, watchlist: allowed, symbol: allowed.includes(saved.symbol) ? saved.symbol : allowed[0] ?? "SPY", recent: [], levels: {}, drawings: {} };
+      queueMicrotask(() => { if (alive) { setSettings(safe); setReady(true); setSync("saved"); } });
+      return () => { alive = false; };
+    }
     const base = local.meta?.base ?? shared(DEFAULT_SETTINGS);
     // This browser's copy shows while the server's loads (read after hydration,
     // so the server render matches). Anything changed meanwhile is part of this
@@ -215,7 +231,7 @@ export function useChartSettings() {
       setSync("offline");
     }).finally(() => { if (alive) setReady(true); });
     return () => { alive = false; };
-  }, []);
+  }, [localOnly, allowedSymbols]);
 
   useEffect(() => {
     latest.current = settings;
@@ -223,15 +239,15 @@ export function useChartSettings() {
     edits.current += 1;
     setStored(writeLocal(settings, { revision: revision.current, base: confirmed.current }));
     window.clearTimeout(pending.current);
-    if (same(shared(settings), confirmed.current)) return;
+    if (localOnly || same(shared(settings), confirmed.current)) return;
     setSync((state) => state === "saved" ? "saving" : state);
     // A change made while a save is in flight waits for it, then saves on top.
     const attempt = () => { if (saving.current) pending.current = window.setTimeout(attempt, 250); else void push(); };
     pending.current = window.setTimeout(attempt, 400);
-  }, [settings, ready, push]);
+  }, [settings, ready, push, localOnly]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || localOnly) return;
     const refresh = async () => {
       if (document.hidden || saving.current) return;
       // Unsaved changes (made offline, or while a save failed) go first; a conflict merges them.
@@ -253,7 +269,7 @@ export function useChartSettings() {
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
     return () => { window.clearInterval(timer); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
-  }, [ready, push]);
+  }, [ready, push, localOnly]);
 
   useEffect(() => () => window.clearTimeout(pending.current), []);
 

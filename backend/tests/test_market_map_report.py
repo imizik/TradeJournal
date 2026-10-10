@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import importlib.util
 import math
-import re
 import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -30,20 +29,6 @@ from app.engine.strategy_csv import parse_tradingview_csv
 from tests.market_map_bars import DAY, NEXT_DAY, PRIOR_DAY, daily_history, flat_benchmark, quiet_day, session
 
 BACKEND = Path(__file__).resolve().parents[1]
-PINE = (BACKEND.parent / "docs" / "pine" / "isaac_market_map.pine").read_text()
-
-
-def _pine_function(name: str) -> str:
-    lines = PINE.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith(f"{name}("))
-    body = [lines[start]]
-    for line in lines[start + 1 :]:
-        if line and not line.startswith(" "):
-            break
-        body.append(line)
-    return "\n".join(body)
-
-
 def _three_trade_run():
     """Two days of the power-window factory: stop, time and eod exits."""
     bars = quiet_day()
@@ -62,17 +47,20 @@ def _three_trade_run():
     [(1.8234567, "1.823457"), (-0.3125, "-0.3125"), (0.0000004, "0"), (-0.0000004, "0"), (3, "3"),
      (12345.678901234, "12345.678901"), (0.08, "0.08"), (math.nan, "null"), (None, "null")],
 )
-def test_numbers_render_as_pine_f_num(value, text) -> None:
+def test_numbers_render_as_six_decimal_tradingview_values(value, text) -> None:
     assert pine_number(value) == text
 
 
-def test_comments_carry_the_pine_keys_in_the_pine_order() -> None:
+def test_comments_keep_the_stable_strategy_lab_field_order() -> None:
     trade = _three_trade_run().closed_trades[0]
-    pine_entry = re.findall(r'f_sl1\("([^"]+)"', _pine_function("f_entryComment"))
-    pine_exit = re.findall(r'f_sl1\("([^"]+)"', _pine_function("f_exitComment"))
+    entry_keys = [token.split("=", 1)[0] for token in entry_comment(trade).split("|")[1:]]
+    exit_keys = [token.split("=", 1)[0] for token in exit_comment(trade).split("|")[1:]]
 
-    assert [token.split("=")[0] for token in entry_comment(trade).split("|")[1:]] == pine_entry
-    assert [token.split("=")[0] for token in exit_comment(trade).split("|")[1:]] == pine_exit
+    assert entry_keys == [
+        "setup", "side", "grade", "size", "score", "window", "tier",
+        "rvol", "rs_vs_spy", "gap_atr", "ext_atr", "risk_atr",
+    ]
+    assert exit_keys == ["exit_reason", "mfe_r"]
 
 
 # --- TradingView-shaped CSV --------------------------------------------------------

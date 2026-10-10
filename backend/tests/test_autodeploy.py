@@ -2,9 +2,9 @@
 
 deploy/autodeploy.py runs on the VPS as root and switches the live release, so
 every refusal here is a guard against an outage: installing onto a busy or
-unhealthy server, moving backwards, undoing an operator's rollback, applying a
-schema change nobody watched. The real download, install and activation path
-runs under systemd in the Ubuntu CI smoke (deploy/smoke.py).
+unhealthy server, moving backwards, undoing an operator's rollback, or applying
+a schema change without a fresh verified backup. The real download, install
+and activation path runs under systemd in the Ubuntu CI smoke (deploy/smoke.py).
 """
 
 from datetime import datetime, timezone
@@ -13,6 +13,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -70,6 +71,7 @@ class Server:
         self.busy = False
         self.healthy = True
         self.fail = None
+        self.fail_recovery = False
         self.calls = []
         self.notes = []
         monkeypatch.setattr(autodeploy, "github", self.github)
@@ -78,7 +80,7 @@ class Server:
         monkeypatch.setattr(autodeploy, "controller", self.controller)
         monkeypatch.setattr(autodeploy, "job_running", lambda: self.busy)
         monkeypatch.setattr(autodeploy, "api_healthy", lambda: self.healthy)
-        monkeypatch.setattr(autodeploy, "backup", lambda current: self.calls.append(("backup",)))
+        monkeypatch.setattr(autodeploy, "backup", lambda current, identity: self.calls.append(("backup", identity)))
         monkeypatch.setattr(autodeploy, "notify", lambda settings, title, message, **_: self.notes.append((title, message)))
 
     def github(self, settings, path, *, missing=None):
@@ -99,11 +101,15 @@ class Server:
         self.calls.append(tuple(str(arg) for arg in args))
         if args[0] == self.fail:
             raise self.autodeploy.Failed(f"tradejournal-deploy {args[0]} failed")
+        if args[0] == "activate" and args[1] == "old" and self.fail_recovery:
+            raise self.autodeploy.Failed("Prior release schema is incompatible")
         if args[0] == "install":
             make_release(self.root, "new", NEW, getattr(self, "new_revisions", ("001_initial.py",)))
         if args[0] == "activate":
             (self.root / "current").unlink()
             (self.root / "current").symlink_to(self.root / "releases" / args[1])
+            if args[1] == "old":
+                self.healthy = True
         return ""
 
     def steps(self):
@@ -127,11 +133,12 @@ def server(autodeploy, monkeypatch):
     return Server(autodeploy, autodeploy.ROOT, monkeypatch)
 
 
-def settings(autodeploy, hold="09:25-16:15"):
+def settings(autodeploy, hold="09:25-16:15", auto_migrate=False):
     return autodeploy.Settings(
         enabled=True,
         repository="owner/repo",
         confirm_database="127.0.0.1:5432/tradejournal",
+        auto_migrate=auto_migrate,
         hold=autodeploy.parse_hold(hold),
         keep=3,
         api_url="https://api.github.test",
@@ -258,15 +265,83 @@ def test_allow_migration_backs_up_before_migrating(autodeploy, server):
     assert [step[0] for step in server.steps()] == ["download", "install-controller", "install", "backup", "migrate", "activate", "prune"]
 
 
-@pytest.mark.parametrize(("healthy", "title"), [(True, "TradeJournal update failed"), (False, "TradeJournal is DOWN")])
-def test_failed_migration_says_whether_the_app_is_still_up(autodeploy, server, healthy, title):
+def test_automatic_migration_after_market_hours(autodeploy, server):
+    server.new_revisions = ("001_initial.py", "002_add_column.py")
+    autodeploy.deploy(settings(autodeploy, auto_migrate=True), now=THURSDAY_5PM_NEW_YORK)
+    assert [step[0] for step in server.steps()] == ["download", "install-controller", "install", "backup", "migrate", "activate", "prune"]
+    assert server.steps()[3] == ("backup", "127.0.0.1:5432/tradejournal")
+
+
+def test_failed_backup_blocks_migration_and_alerts_once(autodeploy, server, monkeypatch):
+    server.new_revisions = ("001_initial.py", "002_add_column.py")
+
+    def fail_backup(*_args):
+        raise autodeploy.Failed("No fresh backup")
+
+    monkeypatch.setattr(autodeploy, "backup", fail_backup)
+    for _ in range(2):
+        with pytest.raises(autodeploy.Failed, match="No fresh backup"):
+            autodeploy.deploy(settings(autodeploy, auto_migrate=True), now=THURSDAY_5PM_NEW_YORK)
+    assert "migrate" not in [step[0] for step in server.steps()]
+    assert [title for title, _ in server.notes] == ["TradeJournal backup failed"]
+    assert json.loads((autodeploy.STATE / "state.json").read_text())["outcome"] == "backup-failed"
+
+
+@pytest.mark.parametrize("case", ["fresh", "stale", "wrong-database", "wrong-commit"])
+def test_pre_migration_backup_must_be_fresh_verified_and_for_running_database(autodeploy, tmp_path, monkeypatch, case):
+    backups = tmp_path / "backups"
+    backups.mkdir()
+    old = backups / "old"
+    old.mkdir()
+    (backups / "latest").symlink_to(old)
+    new = backups / "new"
+    new.mkdir()
+    identity = "127.0.0.1:5432/tradejournal"
+    manifest = {"database_identity": identity, "commit": OLD}
+    if case == "wrong-database":
+        manifest["database_identity"] = "other.example/tradejournal"
+    if case == "wrong-commit":
+        manifest["commit"] = NEW
+    (new / "manifest.json").write_text(json.dumps(manifest))
+    monkeypatch.setattr(autodeploy, "BACKUPS", backups)
+    commands = []
+
+    def run(command, *, check):
+        commands.append([str(part) for part in command])
+        if command[:2] == ["systemctl", "start"] and case != "stale":
+            (backups / "latest").unlink()
+            (backups / "latest").symlink_to(new)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(autodeploy.subprocess, "run", run)
+    if case == "fresh":
+        autodeploy.backup(autodeploy.ROOT / "current", identity)
+        assert commands[-1][-2:] == ["verify", str(new)]
+    else:
+        with pytest.raises(autodeploy.Failed, match="nothing was changed"):
+            autodeploy.backup(autodeploy.ROOT / "current", identity)
+        assert len(commands) == 1
+
+
+@pytest.mark.parametrize("healthy", [True, False])
+def test_failed_migration_restores_prior_release_if_needed(autodeploy, server, healthy):
     server.new_revisions = ("001_initial.py", "002_add_column.py")
     server.fail = "migrate"
     server.healthy = healthy
     with pytest.raises(autodeploy.Failed):
         autodeploy.deploy(settings(autodeploy), now=THURSDAY_5PM_NEW_YORK, allow_migration=True)
-    assert "activate" not in [step[0] for step in server.steps()]
-    assert [note_title for note_title, _ in server.notes] == [title]
+    assert [step for step in server.steps() if step[0] == "activate"] == ([] if healthy else [("activate", "old", "--confirm-database", "127.0.0.1:5432/tradejournal")])
+    assert [note_title for note_title, _ in server.notes] == ["TradeJournal update failed"]
+
+
+def test_failed_migration_reports_outage_when_old_schema_cannot_restart(autodeploy, server):
+    server.new_revisions = ("001_initial.py", "002_add_column.py")
+    server.fail = "migrate"
+    server.healthy = False
+    server.fail_recovery = True
+    with pytest.raises(autodeploy.Failed):
+        autodeploy.deploy(settings(autodeploy, auto_migrate=True), now=THURSDAY_5PM_NEW_YORK)
+    assert [note_title for note_title, _ in server.notes] == ["TradeJournal is DOWN"]
 
 
 def test_failed_activation_is_reported_once_and_not_retried(autodeploy, server):
@@ -367,7 +442,9 @@ def test_settings_come_from_a_root_only_file(autodeploy, tmp_path, monkeypatch):
         "AUTODEPLOY_CONFIRM_DATABASE=127.0.0.1:5432/tradejournal\nAUTODEPLOY_HOLD_WINDOW=off\nNTFY_URL=\n"
     )
     loaded = autodeploy.load_settings(config)
-    assert (loaded.enabled, loaded.hold, loaded.keep, loaded.api_url, loaded.ntfy) == (True, None, 3, "https://api.github.com", {})
+    assert (loaded.enabled, loaded.auto_migrate, loaded.hold, loaded.keep, loaded.api_url, loaded.ntfy) == (True, False, None, 3, "https://api.github.com", {})
+    config.write_text(config.read_text() + "AUTODEPLOY_AUTO_MIGRATE=true\n")
+    assert autodeploy.load_settings(config).auto_migrate is True
 
     # With no topic of its own it reports on the phone alerts' topic...
     (tmp_path / "alerts.env").write_text("NTFY_URL=https://ntfy.sh/alerts-topic\nNTFY_TOKEN=tk_secret\nALERT_APP_URL=https://server.ts.net\n")

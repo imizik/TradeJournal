@@ -17,6 +17,7 @@ access. Keys remain on the private backend.
 
 The section below the watchlist in the Watchlist dock tab follows the main
 chart's underlying. On a phone it lives inside the Watchlist bottom sheet. Its
+tabs keep their full names and wrap onto a second row in a narrow dock. Its
 **You** tab reads all accounts' journal history through
 `GET /charts/symbol/{symbol}/you`, independently of candles or the stream.
 It shows completed-trade count, realized P&L, win rate, average stored hold
@@ -28,12 +29,143 @@ the sample count on hover. Results sum stored FIFO P&L without reconstructing
 it. Account names accompany each record; positions are not merged across
 accounts. The source and read time are shown, with calculated/observed labels.
 
-Overview, News, Events and Forecast are placeholders for the
+Its **Events** tab (T1.4) reads `GET /charts/symbol/{symbol}/events`: the
+next earnings date with Tradier's status (*Confirmed*, or *Estimated*: Tradier's
+estimate, which the company has not announced), days away in New York calendar
+days, the fiscal quarter, and "Time of day not published", because Tradier's
+calendar has dates only; then the last eight confirmed report dates, the next
+announced and the last ex-dividend date with amount and pay date, and splits
+in the last two years. Each block names its source and when Tradier was read,
+and degrades on its own: an ETF's calendar reads "Tradier lists no earnings",
+a failed read shows why and any older copy. No upcoming date reads "Not
+announced"; nothing is guessed. The backend keeps Tradier's normalized rows
+in memory and under `backend/data/symbol_info/v1/tradier/` for 12 hours
+(calendar) or 24 (dividends, splits) and reads Tradier at most 10 times a
+minute, apart from the chart feed's budget and cooldowns; a cold symbol costs
+three requests, a warm one none.
+
+Its **Forecast** tab (T2.1) reads `GET /charts/symbol/{symbol}/forecast`
+with the chart's latest price: the implied move, the at-the-money straddle's
+mid (*calculated*) for the nearest expiration, the nearest Friday, and the
+first expiration strictly after the next report (from the Events cache; the
+report's time of day is unknown, so an expiration on its date may close before
+it). Each row shows ±$ and ±% of the price, the strike, both legs' bid and
+ask, the IV and the staler leg's quote time. The strike is the one nearest the
+price listing both a call and a put; a leg with no bid or ask, a crossed
+quote, or a spread wider than its own mid reads "Market too wide" with the
+reason, never a number. Chains come through the chart's option feed (below),
+60 seconds fresh, and the tab reads again each minute while it is open; until
+the chart has a price it waits for one.
+
+Below it, **Past earnings reactions** (T2.2) read `GET /charts/symbol/{symbol}/reactions`
+once per symbol, apart from the forecast so the implied move is never held up
+by the daily-history read. For each of the latest eight confirmed reports the
+report session and the next session are measured from completed, split-adjusted
+Tradier daily bars (dividends not adjusted) and the larger absolute full-day
+move is shown with its gap, so the average leans high; the report's time of day
+is unknown. A row refuses a number when a bar, calendar day or split check is
+missing, conflicting or unverified. The average needs four usable reports.
+
+Its **Short** tab (T3.1) reads `GET /charts/symbol/{symbol}/short`: the latest
+FINRA short interest in shares with its settlement date (FINRA publishes twice a
+month and the figure lags the date by about two weeks), days to cover (Polygon's,
+*observed*), short interest as a percent of **shares outstanding** (*calculated*;
+there is no float, so it is never labelled as a percent of float) and the change
+from the prior report. **Borrow** shows *Hard to borrow* when the symbol is
+missing from Tradier's easy-to-borrow list and *Easy to borrow* when it is on it.
+**Short volume** lists the last ten sessions' ratio (short volume over FINRA-reported
+volume, *calculated*), which is a share of the volume FINRA's facilities report
+and not of all trading. Shares outstanding come from Polygon's ticker details; if
+they are missing the percentage reads "—" with a note. A symbol without FINRA rows
+(an unknown ticker) reads "No FINRA short interest is published". Polygon is read
+at most once a day per symbol per dataset (cached under
+`backend/data/symbol_info/v1/polygon/`), through the enricher's limiter without
+waiting more than two seconds; a 429, failure or busy limiter serves the cached copy
+with its age and mutes Polygon for five minutes. Tradier's list is one call a day
+(cached under `.../tradier/`), apart from the chart feed. Each block degrades alone.
+
+Its **News** tab (T1.2) reads `GET /charts/symbol/{symbol}/news`: the newest
+20 headlines from Alpaca (Benzinga, cached 60 s) and Polygon (cached 15 minutes
+on disk under `backend/data/symbol_info/v1/polygon/`), merged and deduplicated by
+canonical link and normalized headline. Rows show relative time (New York time
+on hover), headline, publisher, a "+N tickers" chip, the summary on expand and
+the link out. **Focused** (default on) hides articles that tag more than three
+symbols. Polygon's per-ticker sentiment, when present, is labelled as Polygon's
+opinion. New headlines wait behind an "N new" button. The tab reads again each
+minute only while it is open and the page is visible. Polygon shares the free
+plan's 5 calls a minute with fill enrichment, so it is read only for this tab,
+through the enricher's limiter, never retried, and a 429 or failure serves the
+cached copy with its age and mutes Polygon for five minutes (Alpaca news likewise
+reads once on a 2.5 s budget with no retry and mutes itself for five minutes); each source's state
+(`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
+Polygon failure.
+
+A **Peers** strip (T3.4) sits above the tabs whenever the panel is expanded:
+Polygon's related companies for the active symbol as chips, each with today's
+percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
+seven days on disk, read through the enricher's limiter the way the News feed
+is (never waits more than 2 s, never retried, a 429 or failure serves the
+cached copy with its age and mutes Polygon for five minutes). The changes come
+from one batched Tradier quote call for all peers through the chart feed's
+budgeted read (15 s cache); the quote's `average_volume` is not used. A peer
+without a quote keeps its chip with "—". Funds and ETFs (SPY) have no related
+companies: the strip says so. Clicking a chip runs the watchlist row's handler
+(chart switches, and the phone sheet closes), so it does not add the peer to
+the watchlist. The strip fetches once after the ticker settles for 300 ms and
+again each minute while the page is visible, independent of the open tab.
+
+Its **Financials** tab (T3.2) reads `GET /charts/symbol/{symbol}/financials`:
+the last eight fiscal quarters of revenue, gross margin, operating margin, net
+income and diluted EPS as small bars, with growth against the same fiscal
+quarter a year earlier under revenue, net income and EPS. The source is SEC
+EDGAR's XBRL companyfacts (`data.sec.gov`, ticker to CIK from
+`www.sec.gov/files/company_tickers.json`), not Polygon. A quarter is a 10-Q
+fact spanning 80-105 days, never picked by `fp` (6- and 9-month year-to-date
+facts share it); the value comes from the latest filing that repeats the
+quarter and the fiscal label from the earliest. Margins are calculated from
+revenue, gross profit and operating income, never read. Q4 is filed only in
+the annual 10-K, so it shows as an empty column (—), never a derived number;
+a missing field is null, never zero. A foreign issuer that files only 20-Fs
+(NBIS) reads "No quarterly SEC financials for this issuer."; an ETF or unknown
+ticker reads "Not available for ETFs or funds." The server cache keeps only the
+normalized quarters under `backend/data/symbol_info/v1/sec/` (never the 4 MB
+payload; the ticker map is cached seven days), stays fresh until the next 10-Q
+is due (latest quarter end + 105 days, at least a day) and then re-checks
+daily; a failed read serves the cached copy with its age and is not retried for
+five minutes. Requests are paced to five a second at most. SEC returns 403
+without a contact in the `User-Agent`, so set `SEC_USER_AGENT` (a name and
+email) in the server's `backend.env`; the tab says so when SEC refuses.
+
+Overview is a placeholder for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
-on this device. Only an expanded You tab fetches, once after the ticker
-settles for 300 ms; old requests are cancelled. The panel starts collapsed
-below 1024 px and follows the watchlist's visibility in full-screen mode.
-There are no external calls, new tables or migrations for this panel.
+on this device. Only an expanded Overview, You, News, Events, Forecast or Financials tab
+fetches, once after the ticker settles for 300 ms; old requests are cancelled.
+Overview shows price, change, day range and a 52-week range from the chart's
+existing quote, so it does not make a second quote request; the company name
+comes from that quote too, because Tradier's fundamentals carry none. Three
+independent Tradier fundamentals reads, each cached for 24 hours under
+`backend/data/symbol_info/v1/tradier/`, supply the rest: the company call
+gives sector (a Morningstar code), employees, IPO date, description, market
+cap, enterprise value, shares outstanding and the 13F share held by
+institutions; the ratios call gives the valuation ratios and 60-month beta;
+the statistics call gives only the volume averages. Key statistics joins the
+company and statistics reads and shows the older read time. Each read uses one
+share class, never mixing fields across them. The Ownership section (T3.3)
+shows the 13F summary from that same company call with no extra request (holders,
+share held, existing holders buying and selling, new and sold-out holders, shares
+bought and sold, as-of date), and net insider activity over 90 days by transaction
+date from one more read, `GET /charts/symbol/{symbol}/insiders`, made after the
+Overview has loaded so stepping the watchlist never fires it. That read is Yahoo
+(`yfinance` `insider_transactions`, labelled "Yahoo, unofficial"), cached a day under
+`backend/data/symbol_info/v1/insiders/`, and a failed read serves the older copy with its age.
+Only Yahoo rows whose text starts "Purchase" or "Sale" count as buying and
+selling; awards, gifts, option exercises and blank rows are excluded and
+counted as left out. Net value is blank when any counted row has no value.
+Funds skip the request. Every value has its source and read
+time on hover; ETF/fund fundamentals and individual provider failures are
+shown as unavailable without hiding other blocks. The panel starts
+collapsed below 1024 px and follows the watchlist's visibility in full-screen
+mode. There are no new tables or migrations for this panel.
 
 ## License and data costs
 
@@ -44,7 +176,8 @@ license payment. See the version's [LICENSE](https://github.com/tradingview/ligh
 and [attribution instructions](https://github.com/tradingview/lightweight-charts/tree/v5.2.1#license).
 
 Preserve the upstream notices and license. The current source enables
-`attributionLogo` in `PriceChart.tsx`, links TradingView and its notice in the
+`attributionLogo` on the main chart in `PriceChart.tsx` (one logo, not one per
+chart), links TradingView and its notice in the
 workspace's status strip (in the toolbar's More menu on a phone, in full screen
 too), and ships `frontend/public/lightweight-charts-NOTICE.txt`
 and `frontend/public/lightweight-charts-LICENSE.txt`. Keep attribution available
@@ -172,11 +305,34 @@ cd backend
   chart is the only one shown, 410px tall (the whole screen in full screen).
 - Intervals: 1m, 3m, 5m, 15m, 30m, 1h, 4h, 1D and 1W. Select a smaller chart to
   make it the main one; all panels follow the selected symbol and crosshair.
-- EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14).
-- Extended-session shading and regular/extended hours selection. Daily and
+- EMA 9/20/50/200, regular-session VWAP, volume and Wilder RSI(14). Today's
+  regular-session volume bars are shaded by relative volume (C2.4; see
+  [Relative volume](#relative-volume-c24)).
+- Earnings (C2.5): an **E** below each report date's candle and an
+  "Earnings in 5 d" badge in the header (see [Earnings](#earnings-c25)).
+- Level alerts (C5.1): set from the menu on a level, a horizontal ray or an
+  automatic level; a bell at each price, gray once fired, and the Alerts list
+  in the dock (see [Level alerts](#level-alerts-c51)).
+- Options levels (C4.4), off until shown from Layers: call and put walls and
+  the strikes ranked by open interest, volume or gamma, merged with the
+  automatic levels, and the strike ladder (C4.5) in the dock (see
+  [Options levels](#options-levels-c44) and [Strike ladder](#strike-ladder-c45)),
+  with max pain (C4.7).
+- Range bands (C2.7), off until shown from Layers: today's and Friday's
+  expected move from the at-the-money straddle, priced five minutes after the
+  open and fixed for the session, and VWAP ±1σ/±2σ (see
+  [Range bands](#range-bands-c27)).
+- Extended-session shading, one flat band per run of premarket or after-hours
+  candles (`frontend/lib/sessionShade.ts`), and regular/extended hours
+  selection: the toolbar's **Extended hours** toggle is lit while those candles
+  show. Daily and
   weekly charts always use the provider's daily bars, never extended-hours
   aggregates. Prices are split-adjusted (see Price basis below); dividends are not adjusted.
 - A 30-symbol watchlist, saved horizontal price levels, and journal fill arrows.
+- The journal on the chart (C3.1–C3.3): hover a fill arrow for a one-line
+  summary and click it for its trade's card; open positions as lines; "Open on
+  chart" from a trade or fill page opens that trade's candles (see
+  [Journal on the chart](#journal-on-the-chart-c31c33)).
 - Levels, drawings, watchlist, intervals, session, indicators, layout and named layouts are saved on the
   server (`GET`/`PUT /charts/settings`, table `chart_settings`), so the phone
   and the desktop share them. The symbol on screen and the recent symbols stay
@@ -195,7 +351,11 @@ cd backend
 - **Drawing layer (C1.1).** Levels are drawn by one series primitive per chart
   (`frontend/lib/drawings.ts`) instead of library price lines, anchored to
   price, so a level is at the same price on every panel of its symbol at any
-  zoom. A mouse press on a level selects it and dragging moves it; the level
+  zoom. Each level and ray tags its price on the price axis; one priced out of
+  view keeps a tag only if it is the nearest on its side, pinned to that edge
+  with a small arrow beside it pointing the way, so levels out of view never
+  pile up at the edge looking like prices in view. The arrow is drawn in the
+  pane rather than added to the tag's text, which would widen the price axis. A mouse press on a level selects it and dragging moves it; the level
   moves by the drag (it does not jump to the pointer) and the chart does not
   pan underneath. On touch, a tap within 14px selects a level and only a
   selected level drags, so panning across a level never moves it, and the page
@@ -238,7 +398,9 @@ cd backend
 - **Context menu (C1.3).** Right-click a chart, or hold a finger still on it
   for half a second, for its menu (`frontend/components/charts/ChartMenu.tsx`).
   A mouse opens it at the pointer; a finger opens it as a bottom sheet with
-  44px rows, closed by its backdrop. On empty chart space it offers **Add level
+  44px rows, closed by its backdrop. The sheet opens under the held finger, and
+  that finger's lift presses nothing: until a new touch starts, a click is
+  dropped. On empty chart space it offers **Add level
   at** and **Copy price** for the price under the pointer (to the cent; the
   magnet applies, as it does to a placed level), **Reset chart scale** for that
   chart alone, and **Layers**: show or hide My levels, Drawings, Auto levels,
@@ -297,18 +459,26 @@ cd backend
 - **Automatic levels (C2.3).** Every chart draws the
   [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
   dimmer than the user's own: a lone level as a thin dotted line, a confluence
-  zone as a shaded band, named at the left on the main chart (three names at
-  most, then "+2"). Only the nearest three zones above and below the latest
+  zone as a shaded band, named at the left on the main chart on a solid tag:
+  its most telling member (option landmarks, then the expected move, prior day
+  and week, session ranges, swings, round numbers, ranked strikes) and how many
+  more it holds ("Max pain +2"; a round number reads "Round 223"). Tags never
+  overlap: the open card's zone wins, then the zones nearest the price, and a
+  tag that would cover another or be cut by the pane's edge is left out. Only
+  the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
-  the pointer: the members, each with its price, what it is, whether it is
-  observed, calculated or inferred, its source and when it formed, the number
-  of independent sources, and how price met it today on that chart's closed
-  bars (untested, tested, broken or reclaimed, with times, and whether price is
-  at it now). A tap, or a click, keeps the card open until the next tap or its
-  **Close**. A daily or weekly chart draws the same levels; its card says
-  interactions are read on intraday charts. The levels arrive with each
-  15-second workspace refresh; nothing here reads a provider.
+  the pointer in that chart only; linked crosshairs never open cards in other
+  charts. The card shows the members, each with its price, what it is, whether
+  it is observed, calculated or inferred, its source and when it formed, the number
+  of landmarks, and how price met the visible zone on closed candles: approaches,
+  contacts/departures and directional closes, confirmed at candle end. It names
+  the session, history start and last closed candle instead of claiming where
+  the live price is now. A tap, or a click, keeps the card open until the next tap or its
+  **Close**, or that chart changes symbol, interval or session. A daily or weekly
+  chart draws the same levels; its card says interactions are read on intraday
+  charts. The levels arrive with each 15-second workspace refresh; nothing here
+  reads a provider.
 - Fill arrows describe buy/sell execution and instrument type. Option premiums
   never become an underlying stock price. Recent fills link to their records.
 - **Layouts** (toolbar button) saves the current arrangement under a name, such
@@ -346,8 +516,21 @@ cd backend
 - One private API-owned Tradier WebSocket market stream serves all visible chart
   tabs. Valid trade prices are batched to at most one event per second and sent
   to each tab through private server-sent events. Symbol changes update that
-  single upstream subscription. Hidden or paused tabs disconnect; the stream
-  reconnects after provider or network failures.
+  single upstream subscription. It carries up to three chart symbols plus the
+  30-symbol watchlist, so watchlist prices update without per-symbol streams or
+  extra REST polling. A watchlist tick is shown as live for at most 45 seconds;
+  its source and age appear on hover, and pausing keeps the last trade marked
+  as paused with its age rather than reverting silently to an older quote.
+  Premarket percent compares its timestamped trade with `prevclose`, and
+  postmarket percent compares it with Tradier's explicit regular-session
+  `close`. If that close is absent, the postmarket percent is unavailable.
+  With nothing fresh, a row shows its shown price's change dimmed rather than a
+  dash, and the hover says so: a streamed trade older than 45 seconds (it stays
+  shown until a newer one arrives) by its session's rule, and a quote by the
+  same rule in pre- and postmarket, otherwise its last regular-session price
+  against the previous close (after the close, the day's closing change).
+  Hidden or paused tabs disconnect; the stream reconnects after provider or
+  network failures.
 - The 15-second visible-tab REST refresh remains the source of truth for volume,
   indicators, fill markers, and recovery after missed stream events. Live prices
   move the selected intraday candles between refreshes; volume and studies may
@@ -382,16 +565,29 @@ cd backend
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
 - The selected price says whether it is a streamed trade, an extended-hours
-  candle, or a Tradier quote. The watchlist keeps its batched provider quotes,
-  which can show regular-session closes after hours.
+  candle, or a Tradier quote. A premarket or after-hours price names its
+  session and is measured from the previous close or the regular close, by the
+  watchlist's rule; after hours the regular close and its day change stand
+  beside it ("252.50 +1.00% After hours · Close 250.00 -3.85%"), so the
+  headline and the watchlist's close never disagree silently. Watchlist rows use streamed trades when available;
+  their batched quote fallback can show regular-session closes after hours.
 - Intraday charts load older SIP/raw pages when the visible range nears the
   loaded left edge. A 5m chart can navigate six months through pages. The
-  candle hover legend says **SIP** or **Tradier**. Today's forming bars and
+  candle hover legend says **SIP** or **Tradier** (a smaller chart names its
+  source only when it is SIP; the status strip names Tradier). Today's forming bars and
   the live stream remain Tradier; daily/weekly bars remain Tradier and page
   back through the symbol's whole daily history (see Daily and weekly depth).
-- When today has no intraday bars (before 04:00, weekends, holidays), each
-  intraday panel opens on the latest completed SIP sessions instead of an
-  empty chart.
+- When today's tail has fewer candles than the chart opens on (110 on the main
+  chart, 65 on a smaller one) — none before 04:00, on weekends and holidays; a
+  few early in the day; and always on 15m and coarser, whose whole session is
+  64 candles or fewer — the panel loads the latest completed SIP sessions at
+  once instead of waiting for a pan. Completed sessions come from the disk cache,
+  so only a symbol's first cold read costs Alpaca requests (a 1h or 4h first
+  page spans months of sessions because of the 1,400-candle warmup). A chart
+  always opens at that width even before older candles arrive, so a few
+  premarket candles sit at the right instead of stretching across the chart; a
+  series that is genuinely shorter (a recent listing) stays right-aligned with
+  space to its left, as does Reset.
 - On a New York date rollover, the refresh removes the completed Tradier day
   and requests its SIP replacement for the displayed intraday panels without
   waiting for a pan. A pending or failed replacement is disclosed as history
@@ -409,8 +605,10 @@ cd backend
   updates are running, data is not delayed or stale (refresh within 45 seconds,
   no error or partial refresh), the clock is inside the selected session, and
   the newest candle belongs to the current session segment. Otherwise it says
-  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. A
-  holiday reads Market closed, and on an early-close day the regular session
+  Paused, Delayed data, Stale data, Market closed, or Waiting for bars. Market
+  closed shows on the main chart only, since it is the same on every chart; the
+  status strip stops saying the latest candle may be forming while no session
+  is open. A holiday reads Market closed, and on an early-close day the regular session
   and its last buckets end at 13:00. Only unusual days get a label beside the
   quote: *Early close 1:00 PM ET*, the closure's name on a weekday holiday, or
   a warning that clock hours apply because the calendar is unavailable.
@@ -463,12 +661,14 @@ fills in the requested history are returned, with truncation disclosed.
 Private `GET /charts/stream` holds an SSE response. Only the backend uses the
 Tradier token and upstream WebSocket. There is one upstream market connection
 per API process; the supported deployment runs one API process. The stream is
-demand-driven and bounded to the symbols each tab is viewing (three at most).
+demand-driven; each tab may request up to three chart symbols and 30 watchlist
+symbols over that connection.
 
 `backend/app/engine/chart_feed.py` loads today's candles (15-second TTL), a
 ten-day daily tail (60-second TTL) joined to the whole daily series that
 `chart_daily.py` reads once per symbol per New York date, and a single batch of
-watchlist quotes (15-second TTL).
+watchlist quotes (15-second TTL). That quote batch is the initial and recovery
+snapshot; live updates come from the shared stream.
 All five panels share these reads. A lock coalesces concurrent misses; a bounded
 96-entry cache and a 60-request/minute chart budget leave headroom under
 Tradier's 120/min token allowance. A visible five-chart workspace on one stable
@@ -495,7 +695,10 @@ record, including an empty session, has no TTL and costs zero provider calls
 across API restarts. Corrupt records require deliberate repair. The separate
 Alpaca chart budget is 30 actual HTTP attempts per rolling minute in one API
 process; a 429 honors Retry-After. No Alpaca request targets the latest
-15 minutes. The frontend keeps at most 12,000 normalized candles per panel,
+15 minutes. Alpaca answers a symbol or day without a single minute (an index
+such as SPX, or a stock before it listed; seen 2026-10-03) with `"bars": null`;
+that is reported as *Alpaca has no minute bars for SPX on 2026-10-02* and not
+stored, so scroll-back never walks an index's empty days back to 2016. The frontend keeps at most 12,000 normalized candles per panel,
 including the current tail, and rereads evicted pages from this disk cache.
 
 `backend/app/engine/chart_calendar.py` adapts Tradier's `/v1/markets/calendar`
@@ -655,7 +858,7 @@ applies; rendering a marker does not revalidate the original execution time.
 ### Option chains (C4.1)
 
 `backend/app/engine/options_chain.py` is the Tradier option chain adapter.
-Nothing on the chart uses it yet; the recorder (C4.3) is its first caller. It
+The recorder (C4.3) and the chart's option feed (C4.4, C4.5, T2.1) call it. It
 turns `/v1/markets/options/expirations` (every root included, so SPXW dates
 appear) and `/v1/markets/options/chains` (one request per expiration, with
 greeks) into the provider-independent `OptionChain` and `OptionContract` of
@@ -730,6 +933,180 @@ first place in that order. Nothing on the chart reads the snapshots yet.
   When anything in scope is still missing, the job fails with that first, so
   the phone alert names it; what was recorded stays.
 
+### Options positioning (C4.2)
+
+`backend/app/engine/options_positioning.py` is pure: it computes on the
+normalized chains it is handed, the underlying's price and a time. For one
+root over a set of expirations it gives each strike's call and put open
+interest and volume, call and put dollar gamma, and in aggregate the put/call
+ratios of open interest and volume and each side's volume over its open
+interest (unavailable over a zero). Run on one expiration it is the
+per-expiration breakdown.
+
+| Number | Kind | Definition |
+|---|---|---|
+| Open interest, volume | *observed* | The provider's fields summed per strike; open interest is OCC's overnight figure for the previous close, volume the session's so far. A side with nothing listed is unavailable; a real zero stays zero. |
+| Call wall, put wall | *calculated* | The strike with the most call (put) open interest across the chosen expirations; in volume mode, the most traded. A tie goes to the strike nearer the price, then the lower. |
+| Rank | *calculated* | A strike's place by the measure; for a card, also its place by each side's open interest and volume. |
+| Dollar gamma | *calculated* | Black-Scholes gamma × open interest × shares per contract × S² × 0.01: the change in the shares' dollar delta for a 1% move. Unsigned. |
+| Signed gamma | *assumed* | Calls' dollar gamma less puts': dealers taken as long calls and short puts. Open interest does not say who holds a contract. Off unless asked for. |
+| Gamma flip | *assumed*, model estimate | Where signed dollar gamma changes sign nearest the price, searched within 5% either way on a 41-point grid and then bisected, each strike's IV and the time held. SPY, QQQ and SPX only. |
+| Max pain (C4.7) | *inferred* | For one expiration, the listed strike K minimising what its open contracts would pay at expiry: call open interest × (K − strike) below K plus put open interest × (strike − K) above it, times the contract size. A tie goes to the lower strike; none without open interest. The arithmetic is exact; that price drifts to it is folklore. |
+
+Model assumptions, for every contract alike:
+
+- **Rate and dividends** are zero. Over 45 days at most, a 4% rate moves an
+  at-the-money gamma by well under 1%.
+- **Time** runs in calendar years (365 days) to the contract's expiry: 16:00
+  New York, the calendar's close on an early close (13:00), or 09:30 for an
+  AM-settled index root (SPX, NDX, RUT). An expired contract has no gamma;
+  its open interest and volume still count for the session.
+- **Volatility** is the provider's mid IV, else its smoothed-surface IV
+  (ORATS, refreshed hourly, `greeks_updated_at` shown verbatim). The
+  provider's own gamma is never used: gamma is recomputed at the chart's
+  latest price, which does not make the IV fresher.
+- **0DTE.** A same-day contract's gamma grows without bound near its strike
+  as the close nears, and ends at expiry. That is the model's behaviour, not
+  an error; the card shows when the chains and the IV were read.
+- **Missing inputs** (no IV, no open interest, a contract size the provider
+  did not give) leave that contract without gamma, counted in `missing`;
+  nothing is assumed to be 100 shares.
+- **Roots.** One positioning reads one root. SPX's chart reads SPXW (its
+  dailies and weeklies); AM-settled SPX contracts and adjusted roots after a
+  corporate action (`NVDA1`) are counted in `excluded`, never merged.
+
+### Options levels (C4.4)
+
+Off by default. Layers → Options levels (or the chart menu's Layers) shows it
+on every chart, with its filters saved in the shared workspace
+(`optionsLayer`):
+
+- **Measure.** *Open interest*: the call and put walls, then the ten strikes
+  with the most open interest on both sides together. *Volume*: the volume
+  walls ("Call vol wall", "Put vol wall") and the most traded strikes.
+  *Gamma*: the open-interest walls and the strikes with the most dollar gamma;
+  with **Signed gamma and flip (assumed)** the ranks use net signed gamma and
+  SPY, QQQ and SPX add the gamma flip. Each strike appears once; both walls on
+  one strike are two members of one zone.
+- **Expirations.** *0DTE / nearest*: the next to expire, labelled 0DTE when
+  it is today's and "Next expiration … (no 0DTE today)" otherwise. *This
+  week*: the nearest one's Monday-to-Friday week (default). *Within 45
+  days*: every one. Expired ones are gone from 16:00 (09:30 AM-settled).
+- **Strikes each side** (1–5, default 3): the option zones nearest the price
+  on each side. Walls, the flip and max pain always draw. Changing it reads nothing.
+
+**Max pain** (C4.7) is computed for the scope's nearest expiration (today's
+on SPY and QQQ with *0DTE / nearest*) and draws as an *inferred* level, tinted
+orange. Its card names the expiration and says it is a reference, not a
+target; like the walls, it holds still through a session. Unknown open interest
+or size on a relevant nonzero contract suppresses the calculation rather than
+silently dropping that contract; the options footer says why it is unavailable.
+
+The workspace request carries the choice (`options=oi.week.0`: measure,
+scope, signed; `auto=0` when the automatic levels are hidden). The backend
+adds the strikes to the automatic levels before confluence (C2.2), so a call
+wall at the prior day's high is one zone, "PDH + Call wall", whose card shows
+both and whose interactions (C2.3) are read like any zone's. Open-interest
+strikes hold still through a session; volume and gamma strikes are
+`developing` and read "moves during the session". A zone with an option member
+is tinted: calls teal, puts rose, other strikes violet, the flip amber.
+Hovering or tapping one shows each strike's call and put open interest and
+volume with their ranks, its dollar gamma (signed ones say *assumed side*),
+its rank by the measure and its distance from the price, then the scope, when
+the chains were read, that open interest is the prior close's, the IV stamp,
+the price gamma was computed at, and anything missing or left out. A panel
+holding its own symbol (C7.1) shows that symbol's nearest expiration only.
+
+Chains come from `backend/app/engine/options_feed.py`, never inside the
+workspace request: the workspace reads memory and starts a background refresh
+of what is stale, and the page asks again after four seconds while a symbol's
+chains are still loading. The scope's expirations must all be in memory
+before anything draws ("Loaded 6 of 14 expirations"); a chain read on an
+earlier New York date is not used. Cadence per symbol: the nearest three
+unexpired expirations at most every 60 seconds, farther ones every 10 minutes,
+the expiration list every 30 minutes, at most six chains per pass, nearest
+first. The feed takes at most 24 of the options budget's 30 reads a minute
+whatever asks (layer, ladder, Forecast), leaving room for the recorder's
+catch-up run; a refused read keeps the older copy with its time, and an
+access refusal or rate limit stops reads for a minute. A simulated hour of
+polling (SPY on 45 days, QQQ and IWM held, ladder and Forecast open) peaks at
+19 reads in a minute and settles near 8.
+
+An alert made from an option zone keeps its price like any alert. When that
+zone is no longer there (a volume wall moved), its row in the Alerts list
+says so and the alert stays where it was.
+
+### Strike ladder (C4.5)
+
+The side dock's third tab (Strike ladder), closed until opened; on a phone
+it opens from the More menu (the top row keeps its height for the chart) as a
+bottom sheet. It reads `GET /charts/options/{symbol}/ladder?scope=&signed=&spot=`
+with the chart's latest price, over the options layer's expirations and gamma
+sign (changing them here changes the layer's too), every minute while the page
+is visible. It shows 25 strikes each side of the price, which sits between the
+strikes around it, and opens scrolled to it inside the panel. Each row: put
+volume and put open interest left of the strike, call open interest and volume
+right, open interest shaded by its size, and dollar gamma as the bar under the
+strike (green and red by sign when signed). The open-interest walls are bold
+and named. A click or tap marks the strike on every chart of the symbol as a
+solid "Strike …" line and brings it onto the main chart's price scale; a
+second click clears it, and charting another symbol drops it. On a phone the
+tap also closes the sheet so the chart shows.
+
+### Open-interest change (C4.6)
+
+The ladder and each options strike card show call and put open-interest changes
+from the latest stored session to the immediately preceding stored session,
+with both dates. Changes are calculated from `option_chain_snapshot` rows only;
+the chart does not request a provider read for this history. Contracts match by
+root, expiration, option side and strike. An explicit stored zero is valid; a
+contract missing from the earlier snapshot has an unavailable change because
+its earlier open interest is unknown. A latest or prior session marked partial
+or unavailable also leaves the change unavailable, so a missed session never
+falls back to an older snapshot. The ladder's live chain values retain their
+existing refresh behavior.
+
+### Range bands (C2.7)
+
+Off by default. Layers → Range bands (or the chart menu's Layers) shows them
+on every chart, saved in the shared workspace (`rangeBandsHidden`):
+
+- **Expected move.** For the nearest expiration (0DTE on SPY and QQQ) and the
+  nearest Friday, the at-the-money straddle's mid (T2.1's rule: the strike
+  nearest the price listing both legs; a leg without a bid or ask, crossed,
+  or wider than its own mid gives no number) is drawn as "EM 0DTE high/low"
+  and "EM Fri high/low": the price at that moment plus and minus the
+  straddle. One expiration that is both reads once. It is *calculated* and
+  draws blue; its card gives the strike, the straddle's price and percent,
+  the IV, when it was priced and the price it was centred on, and says it is
+  what the options market charged for a move either way, not a forecast.
+- **When.** A band is priced once a New York session, on the first workspace
+  request at least five minutes after the calendar's open (09:35 on a normal
+  day) with a chain read after that time, all four option bid/ask event times
+  known and within the preceding minute, and a live price (today's newest
+  minute, no older than two minutes; a layout of daily and weekly charts alone reads no minutes, so it
+  prices nothing and reads no chains), and is then fixed for the day:
+  nothing more is read for it. After the close the session's bands stay
+  drawn and nothing new is priced (today's 0DTE has expired, and later quotes
+  are not the session's). Fresh fetches containing stale, missing or future
+  quote times cannot freeze a new band. Before 09:35, on a closed day, or with the
+  calendar unavailable, nothing draws and the Layers panel says why. A wide
+  market is not captured and is tried on the next read. A capture lives in
+  the API process's memory, so the first look at a symbol after 09:35, or a
+  restart, prices it later; the card's time says when.
+- **VWAP bands.** On intraday charts, VWAP ±1σ (dashed) and ±2σ (dotted),
+  where σ is the regular session's volume-weighted standard deviation of the
+  same minute HLC3 prices VWAP uses (`vwap_sd` on each candle). None outside
+  the regular session or on daily and weekly charts.
+
+The workspace request carries `ranges=1` (and `auto=0` when the automatic
+levels are hidden). The expected-move levels join the automatic levels before
+confluence, so "262 + EM Fri high" is one zone whose interactions are read
+and from which an alert can be made; every expected-move level draws while the
+switch is on, however far from the price. Chains come through the options feed
+and its budget: the nearest and the Friday chain until both are captured, then
+none. Panels holding their own symbol (SPY, QQQ) get their own bands.
+
 ### Automatic levels (C2.1)
 
 `backend/app/engine/chart_levels.py` computes the session and structure levels
@@ -770,42 +1147,57 @@ group, why any are missing. Only bars complete by `as_of` count.
   absent postmarket cannot be told from a quiet one. A closed day has no
   session levels; its prior-day, prior-week and swing levels remain.
 
-**The band.** One band, a tenth of the daily ATR(14) (Wilder, from the
-completed daily bars, as fill context computes `atr_14`), scales from SPY to
-CVNA. Without an ATR (under 15 daily bars) nothing merges except levels at the
-same price, no interactions are read, and `missing.confluence` says so.
+**The band.** A tenth of prior daily ATR(14) scales the maximum zone width
+and a separate proximity buffer. Neither pads an actual contact or crossing.
+Under 15 daily bars, or with a missing trading session anywhere in the daily
+tail, ATR is unavailable: exact-price levels still merge but no interactions
+are read. Interior gaps also suppress swings, with missing-input reasons.
+The workspace resolves calendar months across the ordinary daily tail so known
+holidays are not mistaken for missing trading sessions. Calendar reads are
+capped at 150 days: sparse/stale symbols do not fetch years of calendars;
+older unresolved dates use the existing clock fallback.
 
-**Confluence zones (C2.2).** Levels are sorted by price; each joins the zone
-below it when it is less than one band above that zone's highest member, so a
-run of close levels merges whole. A zone spans its members' own prices (never
-rounded or padded) and is named by them, highest first, a repeated name
-counted ("PDH + 21,500 + OR15 high", "Swing high ×2"). Its score is the number
-of independent sources: members set by the same bar (`timeframe` and
-`bar_time`) count once, so a premarket high that is also the overnight high, or
-a prior-day high that is also the week's, is one source; a round number is its
-own. A lone level is a zone of one. Its id is the members' kinds and prices.
+**Confluence zones (C2.2).** Nearest-pair complete-link clustering merges
+adjacent clusters by their smallest combined span, ties to the lower cluster.
+The total span must be strictly less than one band: a chain of individually
+close levels cannot create an arbitrarily wide zone. A zone spans its members'
+own prices, never padded or rounded, and names members highest first with
+repeated names counted. The card counts **landmarks**, not independent evidence
+or strength. The retained API `score` counts distinct bar origins (`timeframe`,
+`bar_time`), or kind/price rules; aliases from the same bar count once there.
+A lone level is a zone of one; its id is its members' kinds and prices.
 
-**Interactions (C2.3).** Read for each intraday panel on its closed bars of
-the session's date, from when the zone formed: its earliest formed member, so
-a level from an earlier session or a round number counts from the first bar,
-and a zone whose members are all still developing reads `developing`. The
-tolerance band is the zone widened by one band on each side. Price's side is
-set by the last close before that start (or the first bar's open); if that
-was inside the band, the first close outside sets it, and moving away from
-there counts as a test.
+**Interactions (C2.3).** Closed intraday candles on the session's date count
+only after the **latest** confirmation/observation of the current combination.
+The card shows `since`; earlier bars are excluded rather than attributed to
+bounds that were not yet known. This is a scan of the current confirmed
+combination, not a persistent log of earlier versions. Any developing member
+makes the combination `developing` with no fixed history. Fixed option levels
+start when first observed in this API process; refresh preserves that time,
+while restart/new-session/new-scope observation starts again.
 
-- *tested*: a bar reached the band, and a later bar lies wholly outside it on
-  the side price came from. A retest from the other side after a break is a
-  test too.
-- *broken*: a close beyond the band on the other side from where price started.
-  A close inside the band breaks nothing.
-- *reclaimed*: after a break, a close back beyond the band on the starting side.
-  Another break after that is *broken* again.
+The prior close, or first candle's open, initializes the side relative to the
+visible bounds. Unknown side does not fabricate contact. Actual candle ranges
+must intersect the displayed zone for contact:
 
-The state shown is the latest break or reclaim, else *tested*, else
-*untested*; the card lists every event with its bar's time, and `at_level`
-says the latest closed bar reached the band. A daily or weekly panel reads no
-interactions.
+- *touched*: contact observed, departure not yet completed.
+- *tested*: after contact, a later candle lies wholly outside on the current
+  side. The card says **Touched; left above/below**, without claiming reaction
+  strength. A retest after a crossing counts too.
+- *approached*: an outer-buffer-only visit, pending or followed by departure.
+  Approaches are separate from contacts. The card states the nearby bounds,
+  one band beyond each visible edge.
+- *broken*: a close across the visible zone onto the other side, including a
+  gap. The card says **Closed above/below**. A close inside breaks nothing.
+- *reclaimed*: a later close back onto the original side, shown as **Returned
+  above/below**. It can be downward and implies no bullish diagnosis.
+
+State retains the last crossing/return, else pending contact/proximity, else
+the latest departure or no interaction. Events carry `direction`, candle start
+`bar_time`, and confirmation `time` at candle **end**. Cards mark times as
+confirmed and name regular/extended hours. `at_level` means the last closed
+candle intersected the visible zone, not that the live quote is there; the
+card displays that candle's close/time. Daily/weekly panels read no interactions.
 
 **Delivery.** `GET /charts/workspace` sends `auto_levels` for the main symbol
 and each held symbol (`day`, `as_of`, `atr`, `band`, `zones`, `missing`), and
@@ -818,7 +1210,380 @@ a layout without a daily panel now reads the daily bars too, and a failure
 there is the levels' to report, not a chart issue. The calendar covers three
 weeks back and ten days ahead (months not yet published read as clock hours).
 
+### Relative volume (C2.4)
+
+A candle's RVol is today's cumulative regular-session volume through that
+candle over the average cumulative volume through the same minute of day in
+the 20 sessions before today. `backend/app/engine/chart_rvol.py` (pure) is fill
+context's `indicators.compute_rvol_time_adjusted` evaluated at every minute:
+on the same bars a candle's RVol equals the fill-context RVol of a fill at the
+end of that candle.
+
+- **What counts.** Volume counts from 09:30 New York by the clock. A session
+  counts toward a minute once it has traded at or after 09:30 by then, and a
+  minute that fewer than five sessions had reached has no RVol. A half day in
+  the window counts its whole session for the minutes after its 13:00 close,
+  as fill context does. Only today's regular-session candles have an RVol:
+  premarket, postmarket, older sessions (history pages) and daily and weekly
+  charts have none. On a day whose regular session opens at another time
+  there is none either, since its minutes cannot be compared.
+- **Through which minute.** A completed candle counts through its last minute
+  (a 5m candle at 10:15 through 10:19). A candle still forming counts through
+  the newest minute bar, so its volume so far is set against the baseline so
+  far. A candle's RVol therefore changes only while it forms.
+- **The baseline.** 390 numbers per symbol per day, one for each minute from
+  09:30 through 15:59, over the market calendar's 20 sessions before today.
+  They are read from the completed SIP sessions on disk
+  (`ChartHistory.volume_profile` reads each file once per process and keeps
+  its profile), multiplied by every split from that session up to today, so
+  they are on today's basis. Every one of the 20 must be stored: until then
+  there is no baseline (`building`, listing what is missing), never one over
+  fewer sessions. A session stored empty (the symbol did not trade, for
+  example before it listed) stays in the window and adds nothing; with fewer
+  than five sessions that traded the state is `insufficient`. Without the
+  market calendar it is `unavailable`. A workspace refresh makes no provider
+  request for any of this.
+- **Storing the sessions.** Charting a symbol stores its sessions as its older
+  candles load (C0.0). `backend/app/engine/rvol_history.py` stores them ahead
+  of time for every name on the shared chart watchlist: it is the
+  `rvol_history` job in the sync lane, queued at 06:00 and 08:40 New York on
+  weekdays by `tradejournal-rvol-history.timer` or from the Sync Center. It
+  uses the chart history's Alpaca budget in its own process (30 requests a
+  minute), sleeps when that is spent, and stops after ten minutes; the next
+  run continues. A stored session is never fetched again, so after the first
+  run each morning costs one request per name. Sessions are fetched newest
+  first. A day Alpaca has no minutes for (an index such as SPX, or a stock
+  before it listed) is not stored, so that name has no baseline until it has
+  20 sessions; the job notes it and moves on without failing. Refused
+  credentials stop it; a session that fails otherwise is named in the job's
+  error after the rest are stored, so the phone alert says which.
+- **On the chart.** Volume bars keep their up/down color and brighten with
+  RVol: faint under 0.5×, as before up to 1.5×, brighter to 2.5× and
+  brightest beyond; a candle without RVol keeps the plain shade. The main
+  chart's study row reads *RVol 2.6× for 10:17 AM* for the hovered (or latest)
+  candle and names the sessions the baseline covers (*RVol vs 20 sessions
+  Sep 4 – Oct 1*, or *vs 18 of 20* when two never traded), or says *RVol
+  baseline not built yet* or *RVol unavailable* with the reason on hover. A
+  regular-session candle of today without a value reads *RVol —*, with why on
+  hover. A smaller chart's row is too tight beside its countdown, so there a
+  candle with RVol shows *RVol 2.6×* in place of its volume, and the volume,
+  candle time and sessions are on hover. Hiding Volume hides RVol too.
+- **Delivery.** `GET /charts/workspace` sends `rvol` for the main symbol and
+  each held symbol (`state`, `day`, `sessions`, `traded`, `missing`,
+  `message`; null on a day without a session), and every intraday candle of
+  today carries `rvol`, null where there is none. The forming candle's RVol
+  updates with the 15-second refresh, as its volume does; a streamed new
+  candle has none until then.
+
+### Earnings (C2.5)
+
+Report dates come from Tradier's corporate calendar through the same cache as
+the Events tab ([Symbol info panel](#symbol-info-panel)); the normalizing and
+its traps are in the [symbol info roadmap](symbol-info-roadmap.md#data-traps-the-probes-found).
+
+- **Markers.** Every chart marks each report date it has a candle for with a
+  violet **E** below the candle: past confirmed reports and the next date
+  alike, through every page of older history. A daily or weekly candle holds
+  the date. On an intraday chart the date's first candle carries it, because
+  the report's time of day (before the open or after the close) is not
+  published. An estimated date's marker reads **E?**. A date without a
+  candle, such as the next report before its day, has no marker; the badge
+  covers it. Earnings markers do not follow the Journal (fills) layer.
+- **Badge.** From 14 days before the next report through its day, the main
+  chart's header reads *Earnings in 5 d*, *Earnings tomorrow* or *Earnings
+  today*, with *· est.* when Tradier's date is an estimate. Days are New York
+  calendar days and turn at New York's midnight. The quarter, the date, the
+  status and the source are on hover. A smaller chart holding its own symbol
+  shows the short form (*E 5 d?*) on its canvas, where its header has no room;
+  on a phone the main chart uses the short form too. No upcoming date, or one
+  more than 14 days out, shows nothing.
+- **Delivery.** `GET /charts/workspace` sends `earnings` for the main symbol
+  and each held symbol (`state`: `ready`, `none` for an ETF or index, `loading`
+  or `unavailable`; `next`, every past report, `source`, `fetched_at`,
+  `message`). It answers from the cache only. Symbols whose copy is missing or
+  older than 12 hours, the watchlist's included, are read on a background
+  thread in one batched request per ten symbols, so a chart never waits on
+  Tradier's fundamentals; the next 15-second refresh carries them.
+
+### Level alerts (C5.1)
+
+An alert watches one price for one symbol and sends a phone message when it
+fires, whether or not any chart is open. It fires once; **Re-arm** arms it
+again from the current price.
+
+- **Making one.** Right-click (long-press on a phone) a saved level, a
+  horizontal ray or an automatic level: *Alert when price touches*, *Alert
+  when price crosses*, or *Alert on a 5m close beyond*, with the candle of the
+  chart the menu opened on (5m from a daily or weekly chart). The chart's
+  newest streamed trade, else its newest candle, else the quote, says which
+  side the alert waits on; price exactly at the level is refused. An
+  automatic zone's alert watches its edge nearest the price (its middle from
+  inside it). The alert keeps its own price: dragging or deleting the level
+  leaves it, and a split after the day it was made moves it as it moves a
+  saved level. It counts the trades and candles of the chart's session setting
+  when it was made: regular hours only, or extended. At most 20 are active,
+  on 5 symbols, so their reads stay inside the shared Tradier allowance.
+  Trendlines, rectangles and notes take no alert.
+- **When it fires.** *Touches*: a trade at the level or beyond it.
+  *Crosses*: a trade beyond it by any amount. Both are judged on each trade
+  the stream validates, before the browser's one-second coalescing. *Closes
+  beyond*: a candle of the chosen interval, closing after the alert was made,
+  closes beyond the level. A candle is judged 30 seconds after it closes, on
+  the close Tradier's 1-minute bars then hold; a later correction is not
+  judged again.
+- **No chart open, restarts and outages.** The monitor
+  (`backend/app/engine/level_alert_monitor.py`) runs in the API process. While
+  any session could trade (04:00–20:00 New York on weekdays) it adds the
+  alerted symbols to the one upstream stream's subscription, beside the
+  symbols visible charts follow. The stream records when it carried each
+  symbol. At least every 20 seconds a sweep reads today's 1-minute bars
+  through the chart feed's shared, cached and budgeted request (an open chart
+  of the symbol makes the same request) for two cases: closes-beyond alerts,
+  and touch or cross alerts over minutes the stream did not carry, such as a
+  restart, a reconnect or an outage. A bar's high or low then stands in for
+  the trades, and the event says it came from 1-minute bars. A symbol the
+  stream carried throughout costs no read, and nothing is read on a closed
+  day (weekends and the calendar's holidays), before an alert's session or
+  once its last candle has been judged. A minute without trades counts as
+  judged. Each alert stores how far it has been judged, so a restart resumes
+  where it stopped.
+- **Recorded once.** Each firing is one `level_alert_event` row, unique per
+  alert and arming. A reconnect, a restart, the sweep and the stream finding
+  the same firing, or a second API process can therefore not record a second
+  one; an alert removed or re-armed while its firing waited records nothing.
+  A firing the database could not save stays in memory and is saved on the
+  next pass; its alert is not judged again meanwhile.
+- **Delivered at least once.** Delivery is an outbox on that row, separate
+  from deduplication. A pass claims a pending event with an update only one
+  process can win, sends it through ntfy (the topic in
+  `/etc/tradejournal/alerts.env`, which the API now reads) and marks it sent.
+  A failure is retried after 30 s, 1, 2, 5 and then every 15 minutes. A claim
+  older than two minutes (a crash mid-send) is put back, so the phone may
+  then get the same message twice; it never gets none while the server runs.
+  An event not delivered within six hours expires rather than arriving that
+  late. Without `NTFY_URL` events wait, retried every five minutes, and the
+  chart says phone alerts are not set up.
+- **The phone message** names the symbol, the level, the price and when:
+  *SPY crossed above 581.20*, *Crossed at 581.24 (trade), 10:42:13 AM ET.
+  Alert on PDH.* A closes-beyond message names the candle; one noticed more
+  than two minutes late says so.
+- **On the chart.** A bell at each alert's price, at the pane's right edge just
+  below the line, on every chart of the symbol: amber while armed, gray once
+  fired. The menu on the level lists its alerts, with *Re-arm* and *Remove*.
+  The **Alerts** list in the dock (in the Watchlist sheet on a phone) shows
+  every alert for any symbol: what it waits for, when it fired and at what
+  price, and whether the phone message was sent, is being retried (the error
+  on hover) or expired.
+- **Delivery to the browser.** `GET /charts/workspace` carries `alerts`
+  (every alert, newest firing first, and `phone`: whether this server can
+  send). `GET`, `POST /charts/alerts`, `POST /charts/alerts/{id}/rearm` and
+  `DELETE /charts/alerts/{id}` return the same list and wake the monitor.
+
+### Journal on the chart (C3.1–C3.3)
+
+Read-only views of the journal on the candles. Nothing here calls a provider
+except the option mark, which is asked for from a card.
+
+- **Fill arrows and the trade card (C3.1).** Hovering an arrow shows its
+  one-line summary (side, size, call/put/stock, the candle's time). Clicking it
+  opens its trade's card (`components/charts/TradeCard.tsx`; on a phone, a
+  bottom sheet): the contract, account, direction and status; every entry and
+  exit with its time and price; realized P&L, or for an open trade what is
+  still open, its first-in-first-out average cost and what partial exits
+  realized; MFE, MAE and exit efficiency from the trade path run; and the first
+  entry's market context from enrichment (VWAP distance, relative volume,
+  chase, VWAP reclaim, opening-range breakout, distances from the day's,
+  prior day's and premarket highs and lows). Each section is labeled
+  **Current**, **Stale** (computed on an older version of the trade, its inputs
+  or the calculation) or **Missing**, with what to run. Context read from one
+  exchange (Alpaca IEX) says that its VWAP and volume can differ from the
+  chart's consolidated candles, and every number names its source: none is
+  recomputed from the candles on screen. Option prices are the premium per
+  contract in dollars and the card says they are not underlying prices; an
+  option entry shows the underlying price observed at it, or "underlying not
+  recorded". **Get mark and open P&L** reads one quote through the dashboard's
+  60-second cache (`GET /charts/journal/trades/{id}/mark`) and shows its age,
+  amber past five minutes. Routes: `GET /charts/journal/fills/{id}` and
+  `GET /charts/journal/trades/{id}` (`app/engine/chart_journal.py`).
+- **Position lines (C3.2).** `positions` in `GET /charts/workspace` lists each
+  open trade on every symbol shown (three queries a symbol). A stock draws a
+  solid line at the average cost of the shares still open, first in, first out
+  (after selling the first lot, the rest's cost, not every entry's), titled
+  with the size, account and open P&L at the latest quote. An option draws a
+  dashed line at the underlying price observed at its first entry (enrichment,
+  else the fill's own), titled "underlying at entry", and no line when none was
+  observed: a premium is never drawn on the price axis. Partial exits are the
+  fill arrows. Lines move with later splits like saved levels, and the Journal
+  group in Layers hides them with the arrows.
+- **Historical chart mode (C3.3).** **Open on chart** on a trade page or a fill
+  page links to `/charts?symbol=…&from=…&to=…&trade=…` (or `fill=`). The
+  charts switch to that symbol, load the stored history page that ends at the
+  close of the trade's last day (20:00 New York; daily and weekly charts about
+  three months after it) into every chart of the symbol, centre each on the
+  trade with its arrows, and open the card. Candles come from the same deep
+  history as scrolling back (C0.0): Alpaca SIP minutes for intraday charts,
+  Tradier's daily bars for 1D/1W, never Alpaca IEX. A banner names the dates
+  with **Back to live**, which drops the trade's pages and returns every chart
+  to its latest candles; choosing another symbol also ends the mode. A gap
+  between the trade's page and today fills from the side in view, one page at
+  a time, as the user scrolls toward the present. A malformed link is ignored.
+
+### Pre-trade capture (C3.4, C3.5)
+
+**Plan trade** records what you are taking and your plan before you enter. It
+never recommends a trade and never sends an order.
+
+- **Opening it.** Use the **Plan trade** button in the toolbar (on a phone,
+  **Plan** in the main chart's own bar) or **Alt+P**. Alt+P matches the key's position, so
+  Option+P works on a Mac. It does nothing while you type in a field, while
+  another dialog is open or on a key repeat. A desktop opens a compact sheet
+  at the right; a phone opens a bottom sheet.
+- **The four actions.** Open; choose **Buy calls**, **Buy puts** or **Buy
+  stock** (**More** adds Short stock, Sell calls and Sell puts); tap a
+  template, whose full wording stays visible; then **Save plan** or Enter. The
+  ticker and account are fixed when the sheet opens and shown at its top.
+  Switching the chart's symbol never moves them. **Change** and the account
+  menu are the only ways to change them. **Discretionary / no explicit plan**
+  is always offered, and so are a short note and optional strike, expiration
+  and quantity. Nothing else is required.
+- **Setup.** The gear in the sheet holds the default account (or *choose each
+  time*) and up to three favorite templates: a setup name and your own
+  invalidation or exit wording. Editing a template raises its revision. A
+  saved plan keeps the wording it was saved with. A save from a sheet showing
+  an older revision is refused instead of being swapped for the new wording.
+- **What is frozen.** At the moment of saving, the sheet records the main
+  chart's interval, session, visible range, last candle, the shown price with
+  its source and staleness, the price basis and splits, and the visible
+  levels, drawings and automatic zones. It reads these from what the page
+  already holds and makes no market-data request. It also makes a JPEG of the
+  main chart's canvas, at most 1600 px wide. Labels drawn over the canvas as
+  page elements are not in the image, and the plan says so. A plan whose
+  symbol the main chart is not showing gets no snapshot and records why. A
+  failed image saves the plan anyway and says *The chart image could not be
+  made*. An image that fails to upload waits in the browser for **Retry
+  image**; the server accepts only that frozen picture, once.
+- **Saved means saved.** Only the server's answer shows *Saved*. Each sheet
+  has its own request ID, so a double tap, a retried request or a lost answer
+  never makes a second plan. A plan the server turns down keeps the sheet open
+  with the reason. A plan that cannot reach the server waits in this browser's
+  IndexedDB, audio included, and the sheet locks to that exact request. After
+  a reload the strip shows *Not saved* with **Retry**. When the browser cannot
+  store it, the sheet says to keep the tab open.
+- **The strip.** It sits between the toolbar and the charts and shows the
+  newest plan from the last day: ticker, side, setup and wording, and when the
+  server received it. Its details show the account, the snapshot, the image,
+  the recording and transcript, and later notes. **Did not take trade** keeps
+  the plan as a record. The ✕ hides the strip on this device only. A plan sent
+  from the outbox shows the device's time as unverified beside the server's.
+- **Voice.** Choose the side, then press and hold **Hold to record**. Release
+  saves the clip. A short press, the keyboard, or a microphone prompt that
+  took the press switches to **Stop & save**. The browser asks for the
+  microphone only then. Clips stop at 30 seconds and offer **Save recording**
+  or **Discard**. A cancelled press, a hidden tab or a lost device does the
+  same. Closing the sheet discards an unsaved clip. A template is optional. A
+  denied or missing microphone leaves the click path working.
+- **Transcription.** The server saves the whole recording before the plan
+  counts. Its receipt time is the plan's time, and a later transcript never
+  moves it. A `capture_transcribe` job in the `capture` lane then runs Whisper
+  (`base.en`, faster-whisper) on the server. The audio never leaves
+  TradeJournal. The strip shows *Recording saved — transcribing*, then the
+  literal text, with *No speech was recognized* for an empty result. It
+  checks every 3 seconds only while a transcript is pending. A failure or an
+  interrupted worker shows the error with **Retry transcript**; nothing
+  retries by itself. With `CAPTURE_TRANSCRIBER=off` or the engine missing,
+  the plan says *Not transcribed* and plays back. **Correct transcript** and
+  **Add a later note** append notes marked *Corrected later* or *Added later*
+  beside the original. The plan itself is never edited.
+- **Storage.** `trade_capture`, `trade_capture_note`, `capture_template` and
+  `capture_profile` are user records, separate from fills and rebuildable
+  trades. Audio (WebM, Ogg, MP4 or WAV, checked by their bytes, 1 KB to 3 MB)
+  and images (PNG, JPEG or WebP, at most 1.5 MB) live under
+  `CAPTURE_STORAGE_DIR`, by default `backend/data/captures`. Each file is
+  written and flushed before its row commits. Only the private API serves
+  them: `GET /charts/captures/{id}/audio` and `/image`.
+- **Routes.** `GET`/`PUT /charts/captures/setup`;
+  `POST /charts/captures/templates`; `PUT` and `DELETE
+  /charts/captures/templates/{id}`; `GET`/`POST /charts/captures`;
+  `POST /charts/captures/voice` (multipart `meta` and `audio`); and
+  `POST /charts/captures/{id}/image`, `/not-taken`, `/notes` and `/transcribe`.
+
+Linking a plan to the trade it became, and counting captures, are
+[C3.6](#plans-linked-to-trades-c36).
+
+### Plans linked to trades (C3.6)
+
+A saved plan is tied to the trade it was for by the user; nothing links itself.
+
+- **Needs linking.** The strip says how many plans need linking and opens the
+  view (`components/charts/LinkReview.tsx`, a bottom sheet on a phone). For each
+  plan from the last 30 days (or since counting began) that is neither linked
+  nor marked not taken, it suggests trades with the same account, underlying
+  and opening side (Buy calls is `buy_to_open` calls, Buy stock is `buy`; Short
+  stock has no journal trade to match), the exact strike and expiration where
+  the plan gave them, and a first entry within ten minutes after the server
+  received the plan. Several matches are all offered; **Link** on one confirms
+  it. **Link another trade…** lists other compatible trades within a week,
+  each labeled with its timing. One plan links to one trade, and a trade takes
+  one plan: partial opening fills are one trade, and a re-entry is a new trade
+  that needs its own plan. "Already linked" is judged by the trade each link
+  resolves to now, and partial unique indexes on `capture_link` keep two
+  devices linking at once from both succeeding. A linked plan cannot be marked
+  not taken until it is unlinked. A linked plan unlinks from the strip, and every link
+  and unlink is kept as history.
+- **Timing.** Compares when the server received the complete plan (UTC) with
+  the trade's first entry, a New York minute. A plan received before that
+  minute began is **Before entry**. One received inside the minute, or for an
+  entry with no time of day, is **Timing unverified**. One received after it,
+  such as a late upload, a plan linked to an earlier trade, or a reflection, is
+  **After entry (retrospective)**. Notes and links never change a plan's time.
+- **Rebuilds and resyncs.** A link is stored as the first entry fill's account
+  and `raw_email_id`, and is resolved through that fill on every read. After a
+  rebuild it follows the fill's trade, and timing is judged again (an earlier
+  fill imported later can make a plan retrospective). If the fill is gone, the
+  link is unresolved and listed for relinking, never moved to another trade.
+- **Coverage.** **Start counting from now** (with the accounts to count) shows
+  "X of Y recorded trades since the start date have a confirmed pre-entry
+  plan" (with how many were discretionary), plus needs linking (a suggestion
+  is waiting), no plan, after entry and timing unverified. Trades whose entry
+  has a date but no time are excluded and counted separately. It covers only
+  trades in the journal, measures capture rather than discipline or results,
+  and never nags. The count refreshes with the strip when a new journal fill
+  reaches the chart, not on a timer of its own.
+- **Where a linked plan shows.** In the strip, the trade card (C3.1) and the
+  trade page: wording, note, recording and transcript, the chart image, later
+  notes labeled as later, and the timing.
+- Routes: `GET /charts/captures/review`, `POST /charts/captures/{id}/link` and
+  `/unlink`, `PUT /charts/captures/tracking`,
+  `GET /charts/captures/for-trade/{trade_id}`; `needs_linking` in
+  `GET /charts/captures`, and `link` and `link_history` on each plan.
+  Migration `b5d7e9f1a3c6` adds `capture_link` and two tracking columns on
+  `capture_profile`.
+
+`backend/tests/test_capture_links.py` covers minute timing across daylight
+saving, tied and date-only entries; suggestions by account, side, contract and
+window, with same-ticker ambiguity left to the user; one plan per trade and
+re-entries; manual, late and reflected links staying retrospective; history on
+unlink; a delayed import turning a waiting plan into a suggestion; plans not
+taken; links surviving a rebuild, being judged again after an earlier fill
+arrives, and going unresolved when the fill is gone; and the coverage count's
+activation, accounts, pending and excluded trades. The browser scenario in
+`frontend/e2e/chart-journal.spec.ts` saves a plan, adds a fill to the e2e
+database, confirms the suggested link, and reads the plan and its coverage on
+the strip and the trade page.
+
 ## Verification and remaining scope
+
+`backend/tests/test_chart_journal.py` covers first-in-first-out open lots
+(scale-ins, partial exits, shorts, tied minutes), stock and option position
+lines (the option line is the observed underlying or none, never the premium),
+per-contract units, card states for missing, current and stale path metrics
+and context (including single-venue context), an orphan fill, and the option
+mark's age and open P&L. `frontend/e2e/chart-journal.spec.ts` hovers and clicks
+a fill arrow for its card, reads the labeled states and an old mark, checks the
+lines and the Journal toggle, opens a months-old trade from a link with its
+page request, centring, arrows and card, goes back to live, shows the card as
+a bottom sheet at 390px, and follows a seeded trade's **Open on chart** link to
+a card read from the real journal route. A live option mark is not exercised.
 
 `backend/tests/test_charts.py` covers DST/session resampling, minute-weighted
 VWAP, a numeric Wilder RSI reference, malformed bars, shared caches, cooldown,
@@ -866,6 +1631,14 @@ text inline. At 390px a swipe and a tap open nothing, a held finger opens
 the chart menu and a level's menu as bottom sheets with 44px rows and swatches,
 a held finger on a selected level opens its menu without moving it, and the
 backdrop closes the sheet.
+Range-band and max-pain tests turn the range bands on from Layers, read the
+expected-move levels on all five charts (one merged with a round number), the
+VWAP bands on intraday charts and none on the daily chart, an expected-move
+card, the request's `ranges=1` and `auto=0`, the saved switch through a reload
+and its menu toggle; and read max pain far below the price among the options
+levels with its *inferred* card. Backend tests pin max pain and the VWAP
+standard deviation by hand and the capture rule with a fake clock; live chains
+at 09:35 are not exercised.
 Workspace-shell tests (C7.3) measure the page and the chart grid at 1440×900
 and 1920×1080 with the dock open and closed (no page scrolling, all five
 charts in view, and with the dock closed a grid at least 80% of the window's
@@ -954,21 +1727,109 @@ still-forming bars, missing daily and minute bars, swing confirmation and
 lookback, and round-number spacing. It also feeds the same bars to the
 fill-context functions at four fill times and checks that the chart's
 premarket, opening-range and prior-day levels equal them. Confluence tests
-cover merging, levels a band apart staying apart, a chain merging whole, no
-band, and the independent-source rule; interaction tests pin untested, a test
-that completes only on moving away, a close inside the band, broken, a gap
-through, reclaimed, a retest after a break, starting inside the band, the
-formation start and zone width. A workspace test checks the levels, the
+cover bounded clustering, threshold edges, order invariance and shared origins.
+Interactions pin visible contacts, near misses, unknown-side gaps, one event
+per departure, candle-end confirmation and latest-member formation. Daily-tail
+tests cover interior missing sessions and known holidays. A workspace test checks the levels, the
 stored previous session and each panel's interactions in the response.
 Browser tests (C2.3) stub the response: every chart draws exactly the nearest
 three zones each side, hovering a zone on the 5m chart reads its card (members,
-sources, evidence, formation, two independent sources, a test and a break with
-times), a daily chart's card defers interactions to intraday charts, moving
+sources, evidence, formation, landmark count, approach/contact/cross direction,
+confirmation times, history start and session), a daily chart's card defers interactions to intraday charts, moving
 off closes it, the Layers group lists what is missing, hides the levels on all
 five charts through a reload, and the chart menu shows them again. A card
 kept open by a click gives way to hovering once a symbol switch removes its
 level. At 390px a tap opens a card that stays until its 32px Close. What the canvas paints is
 checked by screenshot review only.
+`backend/tests/test_chart_rvol.py` builds twenty sessions across Labor Day
+(one that traded only premarket, one stored empty, one that starts at 09:47
+with every third minute missing, one that stops at 13:00) and a morning with
+two missing minutes, and checks that every 1m, 5m and 1h candle's RVol equals
+`compute_rvol_time_adjusted` for a fill at that candle's end (the forming
+candle at the newest minute). It also pins the five-session minimum per minute,
+the calendar window, today's regular candles only, the workspace values and
+states (ready, building, insufficient, unavailable, a closed day, a late open),
+a split inside the window, the profile read once per process and one session
+fetched once for the job. `backend/tests/test_rvol_history.py` covers the job's
+scope, a rerun that costs nothing, a weekend run, waiting out the budget,
+refused credentials, a failed session named after the rest are stored, the
+ten-minute stop and resume, a missing calendar and the Sync Center job; the
+timer is in `backend/tests/test_deployment.py`. Browser tests (C2.4) stub the
+response: the main chart names the sessions and reads the latest candle's RVol,
+the volume colors follow each candle's RVol, hovering reads a candle's own value
+and *RVol —* with its reason, a 1m smaller chart shows *RVol 1.1×* in place of
+its volume without clipping and gives the candle and sessions on hover, a daily
+chart shows none, a baseline still building says so and shades nothing, and at
+390px the main chart's RVol and sessions wrap into view. What the canvas paints
+is checked by screenshot review only.
+`backend/tests/test_symbol_info_events.py` runs the normalizers on recorded,
+trimmed Tradier responses (`tests/fixtures/tradier/fundamentals_2026-10-04.json`):
+CVNA's confirmed and estimated rows for one quarter resolve to the confirmed
+date and the leftover estimate never becomes a second report, NVDA's next date
+stays *estimated*, conference calls and conferences are not reports, an ETF
+has no calendar, no upcoming row gives no date, rows come from one share class,
+and dividends and splits read every table shape. It also covers the cache: the
+chart never waits, one batched call covers the watchlist, the 12-hour refresh,
+the disk copy after a restart, a failure's cooldown with the older copy kept,
+10 reads a minute and a missing key, and the Events route's blocks. Browser
+tests (C2.5) stub the workspace: an **E** lands on the date's first 5m and 15m
+candle and on the daily candle, a 1m session without a report and a symbol
+without dates have none, and with a fixed clock the badge is absent 15 days out,
+appears at 14, turns *tomorrow* at 23:30 New York though UTC has turned, reads
+*today*, and is gone the day after; an estimated date held by a smaller chart
+reads *E 10 d?*, and at 390px the short form stays in the header. The Events
+tab's browser tests stub its route. The live calendar was read on 2026-10-04 for
+twelve watchlist names; what the canvas paints is checked by screenshot review
+only.
+`backend/tests/test_level_alerts.py` feeds Tradier-shaped trades through the
+real stream parser. A touch is not a cross, the crossing trade fires one event
+before coalescing, and later trades add none. A restarted monitor and a second
+detector record nothing more, and the database refuses a second row for one
+arming. A reconnect gap is judged on 1-minute bars while covered minutes are
+not, and a covered stream costs no read and saves its progress. A
+closes-beyond alert with no browser or stream waits for its candle to be final,
+skips one that closed before it was armed, and reads once per minute. Nothing
+is read after the session's last candle, on a Saturday or on a calendar
+holiday, and a firing the database failed to save is saved on the next pass.
+Extended
+trades count only for an extended alert. Delivery tests show that a failed send
+is retried after its backoff and never lost or repeated once sent, that a stale
+claim is put back while a fresh one is left alone, and that without ntfy an
+event waits and then expires. The running loop records and sends a streamed
+firing at once. The routes create, refuse (at the level, a duplicate, a sixth
+symbol, a daily close), re-arm as a new generation and remove. Browser tests
+(C5.1) stub the alert routes: a level's menu sets a crossing alert with the
+chart's price as the side, bells appear on both charts of the symbol, a fired
+alert's bell turns gray and the list reads its time, price and sent message,
+Re-arm and Remove call the server. An automatic zone's menu sets a close-beyond
+alert on that chart's interval at the zone's near edge and says when phone
+alerts are not set up. At 390px the list sits in the Watchlist sheet with
+44px buttons. A message reaching a real phone is not covered by any test.
+`backend/tests/test_options_positioning.py` pins the C4.2 formulas to
+hand-worked numbers: at-the-money Black-Scholes gamma, dollar gamma for a 1%
+move, gamma at six hours to the close, expiry at the close, an early close and
+an AM-settled root, and a gamma flip whose crossing has a closed form
+(√(105 × 95) × e^(−σ²T/2)). It also covers sums across expirations with roots
+kept apart, missing values kept missing and counted, ratios over zero, walls
+and ties, chart levels for each measure (each strike once, assumed labels for
+signed gamma and the flip), the merge of a wall with the prior day's high, and
+the three scopes before and after a close. `backend/tests/test_options_feed.py`
+drives the feed with a fake chain client and clock: background loading over
+polls, a held symbol's single expiration, a refused read served from the older
+copy with a cooldown, yesterday's chains not used, the ladder centred on the
+price, the straddle choice and its refusals, the earnings expiration, and an
+hour of polling that never exceeds 30 reads in a minute.
+`backend/tests/test_charts.py` shows strikes merging with the automatic levels
+in `ChartFeed._levels` (and alone when those are hidden) and the routes'
+validation. Browser tests stub the chains: the layer's every filter, the
+request it makes, a merged zone's card, signed gamma's flip, hiding the
+automatic levels, a reload and the chart menu's toggle; the ladder centred on
+the price, a strike marked on all five charts and cleared, its scope and sign
+shared with the layer, and at 390px a bottom sheet with 44px rows whose tap
+marks the strike and shows the chart; the Forecast tab's rows, its refusal and
+the price it sends. A live read on 2026-10-04 (SPY and NVDA, 11 requests)
+returned walls, a flip and straddles; intraday behaviour with a moving price is
+not covered by a test.
 `backend/tests/test_chart_calendar.py` covers Tradier calendar parsing,
 malformed and incomplete months, completed months on disk, daily refresh,
 failure backoff and the shared budget. The chart tests pin an older half day's

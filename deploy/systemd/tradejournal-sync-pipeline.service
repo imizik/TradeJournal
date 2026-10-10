@@ -4,6 +4,7 @@ Wants=network-online.target tradejournal-api.service tradejournal-worker@sync.se
 After=network-online.target tradejournal-api.service tradejournal-worker@sync.service
 
 [Service]
+EnvironmentFile=-/etc/tradejournal/access-automation.env
 Type=oneshot
 User=tradejournal
 Group=tradejournal

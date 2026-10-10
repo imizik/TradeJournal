@@ -49,13 +49,21 @@ os.environ["MIGRATION_DATABASE_URL"] = f"sqlite:///{_TEST_DB_PATH}"
 os.environ["JOB_EXECUTION_MODE"] = "external"
 os.environ["JOB_LOCK_DIR"] = str(Path(_TEST_DB_DIR) / "job-locks")
 
+# Voice plans (Charts C3.5): recordings go to a scratch directory, and the
+# speech-to-text engine stays off unless a test supplies its own.
+os.environ["CAPTURE_STORAGE_DIR"] = str(Path(_TEST_DB_DIR) / "captures")
+os.environ["CAPTURE_TRANSCRIBER"] = "off"
+os.environ["CAPTURE_MODEL_DIR"] = str(Path(_TEST_DB_DIR) / "models")
+
 # Keep optional integrations dormant. Each is already opt-in, but an exported
 # value from a developer shell should not change what the suite exercises.
 for _flag in (
     "GMAIL_WATCH_AUTOSTART",
     "GMAIL_LISTENER_ENABLED",
     "WEBULL_LISTENER_AUTOSTART",
-    "TRADINGVIEW_ANALYSIS_AUTOSTART",
+    "LEVEL_ALERTS_AUTOSTART",
+    "PRACTICE_AGENT_ENABLED",
+    "PRACTICE_SCHEDULE_ENABLED",
 ):
     os.environ[_flag] = "false"
 
@@ -63,6 +71,9 @@ for _flag in (
 # QUOTES_PROVIDER=tradier would otherwise change which code path the suite
 # exercises. Tests that mean to exercise a provider set it themselves.
 os.environ["QUOTES_PROVIDER"] = "yfinance"
+# Ordinary regression fixtures exercise the private legacy profile. Auth tests
+# explicitly enable authenticated mode in their isolated app/database.
+os.environ["TJ_ACCESS_ENABLED"] = "false"
 os.environ.pop("WEBULL_LISTENER_ACCOUNTS", None)
 
 # The application no longer builds the schema. Alembic does (app/schema.py),

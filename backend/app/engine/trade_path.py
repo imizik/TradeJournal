@@ -544,9 +544,13 @@ def option_position_path(trade: Trade, fills: list[Fill], bars: list[dict]) -> d
     entries = [f for f in ordered if f.side in _ENTRY_SIDES]
     if not entries or not bars:
         return {"option_path_quality": "unavailable_bars"}
-    entered = sum(float(f.contracts) for f in entries)
-    exited = sum(float(f.contracts) for f in ordered if f.side not in _ENTRY_SIDES)
-    if exited > entered + 1e-9 or (trade.status == "closed" and abs(entered - exited) > 1e-9):
+    # Keep premiums, quantity and PnL decimal through the entire exposure
+    # ledger. A float residue at a true zero peak can create huge ratios.
+    zero = Decimal(0)
+    quantity_epsilon = Decimal("0.000000001")
+    entered = sum((Decimal(str(f.contracts)) for f in entries), zero)
+    exited = sum((Decimal(str(f.contracts)) for f in ordered if f.side not in _ENTRY_SIDES), zero)
+    if exited > entered + quantity_epsilon or (trade.status == "closed" and abs(entered - exited) > quantity_epsilon):
         return {"option_path_quality": "unavailable_fill_allocation"}
     df = bars_to_df(bars)
     opened = trade.opened_at.replace(tzinfo=ET).astimezone(UTC)
@@ -555,27 +559,27 @@ def option_position_path(trade: Trade, fills: list[Fill], bars: list[dict]) -> d
     fill_times = [f.executed_at.replace(tzinfo=ET).astimezone(UTC) for f in ordered]
     sign = 1 if entries[0].side == "buy_to_open" else -1
     lots = deque()
-    realized = 0.0
+    realized = zero
     pointer = 0
-    peak_open = worst_open = 0.0
-    peak_total = 0.0
-    mfe = mae = 0.0
+    peak_open = worst_open = zero
+    peak_total = zero
+    mfe = mae = zero
     high_seen, low_seen, peak_time = None, None, None
     for stamp, bar in df.iterrows():
         while pointer < len(ordered) and fill_times[pointer] <= stamp:
             fill = ordered[pointer]
-            qty, price = float(fill.contracts), float(fill.price)
+            qty, price = Decimal(str(fill.contracts)), Decimal(str(fill.price))
             if fill.side in _ENTRY_SIDES:
                 lots.append([qty, price])
             else:
-                while qty > 1e-9 and lots:
+                while qty > quantity_epsilon and lots:
                     used = min(qty, lots[0][0])
                     realized += sign * (price - lots[0][1]) * used
                     lots[0][0] -= used
                     qty -= used
-                    if lots[0][0] < 1e-9:
+                    if lots[0][0] < quantity_epsilon:
                         lots.popleft()
-                if qty > 1e-9:
+                if qty > quantity_epsilon:
                     return {"option_path_quality": "unavailable_fill_allocation"}
             pointer += 1
         if not lots or any(stamp <= t < stamp + timedelta(minutes=1) for t in fill_times):
@@ -584,7 +588,7 @@ def option_position_path(trade: Trade, fills: list[Fill], bars: list[dict]) -> d
         basis = sum(lot[0] * lot[1] for lot in lots)
         if basis <= 0:
             continue
-        high, low = float(bar["high"]) * 100, float(bar["low"]) * 100
+        high, low = Decimal(str(bar["high"])) * 100, Decimal(str(bar["low"])) * 100
         favorable = sign * ((high if sign > 0 else low) * qty - basis)
         adverse = sign * ((low if sign > 0 else high) * qty - basis)
         peak_open, worst_open = max(peak_open, favorable), min(worst_open, adverse)
@@ -595,19 +599,23 @@ def option_position_path(trade: Trade, fills: list[Fill], bars: list[dict]) -> d
         low_seen = low if low_seen is None else min(low_seen, low)
     if high_seen is None:
         return {"option_path_quality": "unavailable_holding_bars"}
-    final = float(trade.realized_pnl) if trade.realized_pnl is not None else None
+    final = Decimal(str(trade.realized_pnl)) if trade.realized_pnl is not None else None
     if final is not None and final > peak_total:
         peak_total, peak_time = final, closed
-    giveback = max(0, peak_total - final) if final is not None else None
+    giveback = max(zero, peak_total - final) if final is not None else None
+    # The dollar peak is persisted with six decimal places. Ratios and the
+    # time to a positive peak are unavailable if that stored peak is zero.
+    stored_peak = peak_total.quantize(Decimal("0.000001"))
+    has_positive_peak = stored_peak > zero
     return {
         "option_path_quality": "observed_1min",
         "option_mfe_pct": _f(mfe), "option_mae_pct": _f(mae),
         "option_max_price_seen": _f(high_seen), "option_min_price_seen": _f(low_seen),
         "option_peak_unrealized_pnl": _f(peak_open), "option_worst_unrealized_pnl": _f(worst_open),
-        "option_peak_total_pnl": _f(peak_total), "option_giveback_from_peak": _f(giveback),
-        "option_exit_efficiency": _f(final / peak_total * 100) if final is not None and peak_total > 0 else None,
-        "option_giveback_pct": _f(giveback / peak_total * 100) if giveback is not None and peak_total > 0 else None,
-        "time_to_option_mfe_minutes": int((peak_time - opened).total_seconds() / 60) if peak_time else None,
+        "option_peak_total_pnl": float(stored_peak), "option_giveback_from_peak": _f(giveback),
+        "option_exit_efficiency": _f(final / peak_total * 100) if final is not None and has_positive_peak else None,
+        "option_giveback_pct": _f(giveback / peak_total * 100) if giveback is not None and has_positive_peak else None,
+        "time_to_option_mfe_minutes": int((peak_time - opened).total_seconds() / 60) if peak_time and has_positive_peak else None,
     }
 
 
