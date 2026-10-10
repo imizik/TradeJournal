@@ -175,6 +175,10 @@ you change it (`verification.md`, "What is NOT covered yet").
   bars: cohort report in R, Strategy Lab CSVs, `--parity` against exports
 - `imm_export_cohorts.py`, `playbook_cohorts.py` — the cohort evidence
   `docs/pine/README.md` cites
+- `research_studio.py` — explicit-root cache-only discovery population preview;
+  no UI, provider, database, outcomes or Factory execution. Shared stop-free
+  features and strict masks live in `app/engine/research_studio.py`;
+  [R1 contract](research-studio-r1.md) owns source/identity and acceptance.
 - `strategy_factory.py` — judges a strategy spec through the factory's gates
   and appends the result to `research/ledger.jsonl`; `prepare` fetches the SIP
   minute bars it needs (the only step that calls Alpaca); `week` is the weekly

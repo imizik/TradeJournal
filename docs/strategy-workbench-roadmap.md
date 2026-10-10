@@ -1,7 +1,8 @@
 # Strategy Workbench: Research Studio roadmap
 
-**Status: R0 selected and probed 2026-10-10; R1–R4 remain unselected.** No Studio feature is implemented
-by this plan. The existing filename is retained so links remain stable.
+**Status: R0 complete; R1 event observations implemented 2026-10-10.**
+R2–R4 remain unselected. The [R1 contract](agent/research-studio-r1.md) records
+implementation and acceptance; no Studio UI or outcome engine exists. The existing filename is retained so links remain stable.
 The product-aware review at `4c42018` supersedes the strategy-form-first
 proposal of 2026-10-07 as recorded below. Implementation requires selection
 of one bounded phase; this update authorizes no data purchase, protocol
@@ -31,9 +32,10 @@ or first-release requirements. The Studio does not establish profitability.
 
 ## Sequencing and ownership
 
-The user selected **R0 only** on 2026-10-10 ahead of further S1–S2 work.
-[Audit and bounded R1 contract](agent/research-studio-r0.md) record the results.
-S1–S2 otherwise retain their priority; this does not select R1 or change another
+The user selected **R0, then R1** on 2026-10-10 ahead of further S1–S2 work.
+[R0 evidence](agent/research-studio-r0.md) and the
+[R1 contract](agent/research-studio-r1.md) record the results.
+S1–S2 otherwise retain their priority; this does not select R2 or change another
 board's active item. That order is a product
 priority, **not a technical dependency**: an independent event lab needs
 neither a swing family nor the practice loop. If repeated one-off research
@@ -283,8 +285,8 @@ are established. Fetch occurrence chart windows lazily from the same manifest.
 
 ## Small delivery phases
 
-R0 probes are complete with documented evidence limits; R1–R4 are **planned,
-not started**. V1 is complete only after R4.
+R0 probes and bounded R1 observations are complete with documented evidence
+limits; R2–R4 are **planned, not started**. V1 is complete only after R4.
 Each phase is separately selected and reviewed, with one bounded result; the
 plan does not authorize implementing the entire sequence at once.
 
@@ -309,7 +311,8 @@ pass/fail criteria and measured bottlenecks; do not build a general quant platfo
 The standard repository verification and review requirements still apply to
 each implementation change. Fixture correctness, browser behavior, actual
 cache coverage, performance and human usefulness are separate evidence layers.
-None is marked complete by this planning PR.
+The R0/R1 reports distinguish observed acceptance from remaining later-phase
+proof; the complete connected Studio remains unbuilt.
 
 ## Later capabilities and reopening criteria
 
@@ -329,13 +332,14 @@ None is marked complete by this planning PR.
 
 ## Decisions still open
 
-- R0 alone was selected before further S1–S2 work; R1 requires a separate selection.
+- R0 and R1 were selected before further S1–S2 work; R2 requires a separate selection.
 - Approved cache host and component measurements are recorded in the
   [R0 report](agent/research-studio-r0.md); end-to-end performance is still unproved.
-- Concrete uncertainty parameters and data-quality eligibility policy: settle
-  in the bounded R1 contract, then prove in R2 before displaying results.
+- Data-quality masks and concrete uncertainty parameters are fixed in the
+  [R1 contract](agent/research-studio-r1.md). R2 must prove analysis/calibration
+  before displaying results.
 - Whether a saved event merits Factory promotion and how that promotion uses
   the weekly budget: decide only when the later handoff slice is selected.
 
-The next planning decision is whether to select the bounded R1 contract,
-accepting the measured coverage limitations. R0 does not authorize R1.
+The next planning decision is whether to select R2 after inspecting R1
+coverage and correctness evidence. R1 does not authorize R2.

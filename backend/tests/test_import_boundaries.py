@@ -57,6 +57,8 @@ PURE_MODULES = {
     "app.engine.factory_model",
     "app.engine.factory_gates",
     "app.engine.factory_brief",
+    "app.engine.research_studio",  # stop-free supplied-snapshot observations
+    "app.engine.research_studio_data",  # explicit cache-only files; no provider/DB/environment
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.
