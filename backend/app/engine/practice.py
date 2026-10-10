@@ -96,6 +96,7 @@ def view(db: Session, run: PracticeRun, *, details=True, recover=True):
     if recover:
         recover_view(db, run)
     call = db.exec(select(PracticeAgentCall).where(PracticeAgentCall.run_id == run.id)).first()
+    manual_shadow = bool(call and call.prompt_version == "advisor-shadow-fixture-v1")
     opps = opportunities(db, run.id) if details else []
     contexts = {c.id: c for c in db.exec(select(DecisionContext).where(DecisionContext.id.in_([o.context_id for o in opps if o.context_id]))).all()} if opps else {}
     saved_records = list(db.exec(select(DecisionRecord).where(DecisionRecord.opportunity_id.in_([f"a3:{o.id}" for o in opps]))).all()) if opps else []
@@ -129,11 +130,15 @@ def view(db: Session, run: PracticeRun, *, details=True, recover=True):
         "created_at": iso(run.created_at), "finished_at": iso(run.finished_at), "deadline": iso(run.deadline),
         "calendar": json.loads(run.calendar_json), "policy_version": run.policy_version, "policy_hash": run.policy_hash,
         "brief": json.loads(run.brief_json), "timings": json.loads(run.timings_json),
+        "manual_shadow": manual_shadow,
+        "independence": "independence-unverified" if manual_shadow else None,
         "agent": {"status": call.status if call else "disabled", "model": call.model if call else None,
             "prompt_version": call.prompt_version if call else practice_agent.PROMPT_VERSION,
             "started_at": iso(call.started_at) if call else None, "finished_at": iso(call.finished_at) if call else None,
-            "runtime_seconds": (call.finished_at - call.started_at).total_seconds() if call and call.finished_at else None,
-            "limits": json.loads(call.config_json) if call else None,
+            "runtime_seconds": (call.finished_at - call.started_at).total_seconds() if call and call.finished_at and not manual_shadow else None,
+            "transport": "manual-local" if manual_shadow else "configured adapter",
+            "runner_provenance": "caller unverified" if manual_shadow else None,
+            "limits": json.loads(call.config_json) if call and not manual_shadow else None,
             "error": (call.error if all_visible or call.status in {"budget_exhausted", "uncertain"} else "Output validation failed; verdict details withheld") if call and call.error else None,
             "usage": json.loads(call.usage_json) if call and call.usage_json else None,
             "cost": call.cost_usd if call else None, "cost_provenance": "configured token rates" if call and call.cost_usd is not None else "unavailable"},
@@ -211,6 +216,47 @@ def runner_payload(db, run):
             for o in opportunities(db, run.id) if o.context_id]}
 
 
+def commit_agent_choices(db, run, choices):
+    """Validate/write the complete A3 batch; caller owns the atomic commit."""
+    opps = {str(o.id): o for o in opportunities(db, run.id)}
+    if not isinstance(choices, list) or len(choices) != len(opps):
+        raise ValueError("Expected exactly one choice for each shared opportunity")
+    if any(not isinstance(c, dict) or not isinstance(c.get("opportunity_id"), str) for c in choices):
+        raise ValueError("Choices must have typed opportunity IDs")
+    ids = [c.get("opportunity_id") for c in choices]
+    if set(ids) != set(opps) or len(set(ids)) != len(ids):
+        raise ValueError("Forged or duplicated opportunity ownership")
+    if sum(c.get("decision") == "take" for c in choices) > 3:
+        raise ValueError("At most three agent TAKEs")
+    # Validate every choice before writing any decision; writes then have stable IDs.
+    for c in choices:
+        opp = opps[c["opportunity_id"]]
+        request = {k: v for k, v in c.items() if k != "opportunity_id"}
+        if set(request) - {"decision", "rationale", "wait_condition", "wait_expiry", "plan"}:
+            raise ValueError("Unapproved model operation or actor")
+        if not isinstance(request.get("rationale", ""), str) or len(request.get("rationale", "")) > 2000:
+            raise ValueError("Rationale must be bounded text")
+        if request.get("wait_condition") is not None and (not isinstance(request["wait_condition"], str) or len(request["wait_condition"]) > 500):
+            raise ValueError("WAIT condition must be bounded text")
+        check = {"operation_id": "validate", "opportunity_id": "validate", "actor": "agent:a3",
+            "context_id": str(opp.context_id), "symbol": opp.symbol, **request}
+        _, _, _, decision, _, detail = decisions._validate_request(check)
+        ctx = db.get(DecisionContext, opp.context_id)
+        if decision == "take":
+            session = paper.regular_session(run.day, json.loads(run.calendar_json))
+            plan = detail["plan"]
+            expiry = decisions._utc(plan.get("expiry"), "expiry")
+            if not session or expiry.replace(tzinfo=UTC).timestamp() > paper.watch_cutoff(session):
+                raise ValueError("Agent TAKE expiry exceeds the P0 watch cutoff")
+            if plan.get("cost_model") != paper.COST or plan.get("freshness_limit_seconds") != paper.FRESHNESS_SECONDS:
+                raise ValueError("Agent TAKE must retain P0 costs and freshness")
+            decisions._validate_take(opp.symbol, ctx.captured_at, json.loads(ctx.data_json), detail["plan"], now_utc())
+        elif decision == "wait" and decisions._utc(detail["wait_expiry"], "wait_expiry") <= now_utc():
+            raise ValueError("WAIT expiry must be future")
+    for c in choices:
+        choose(db, opps[c["opportunity_id"]], {k: v for k, v in c.items() if k != "opportunity_id"}, actor="agent:a3", commit=False)
+
+
 def run_agent(db, run, *, adapter=practice_agent.invoke):
     limits = practice_agent.config()
     if limits is None:
@@ -245,46 +291,9 @@ def run_agent(db, run, *, adapter=practice_agent.invoke):
         db.add(call)
         db.commit()  # preserve exact output before validation
         output = json.loads(result["raw"])
-        choices = output["choices"]
-        opps = {str(o.id): o for o in opportunities(db, run.id)}
-        if set(output) != {"choices"} or not isinstance(choices, list) or len(choices) != len(opps):
-            raise ValueError("Expected exactly one choice for each shared opportunity")
-        if any(not isinstance(c, dict) or not isinstance(c.get("opportunity_id"), str) for c in choices):
-            raise ValueError("Choices must have typed opportunity IDs")
-        ids = [c.get("opportunity_id") for c in choices]
-        if set(ids) != set(opps) or len(set(ids)) != len(ids):
-            raise ValueError("Forged or duplicated opportunity ownership")
-        if sum(c.get("decision") == "take" for c in choices) > 3:
-            raise ValueError("At most three agent TAKEs")
-        if result.get("stop_reason") != "end_turn":
+        if set(output) != {"choices"} or result.get("stop_reason") != "end_turn":
             raise ValueError("Incomplete model output")
-        # Validate every choice before writing any decision; writes then have stable IDs.
-        for c in choices:
-            opp = opps[c["opportunity_id"]]
-            request = {k: v for k, v in c.items() if k != "opportunity_id"}
-            if set(request) - {"decision", "rationale", "wait_condition", "wait_expiry", "plan"}:
-                raise ValueError("Unapproved model operation or actor")
-            if not isinstance(request.get("rationale", ""), str) or len(request.get("rationale", "")) > 2000:
-                raise ValueError("Rationale must be bounded text")
-            if request.get("wait_condition") is not None and (not isinstance(request["wait_condition"], str) or len(request["wait_condition"]) > 500):
-                raise ValueError("WAIT condition must be bounded text")
-            check = {"operation_id": "validate", "opportunity_id": "validate", "actor": "agent:a3",
-                "context_id": str(opp.context_id), "symbol": opp.symbol, **request}
-            _, _, _, decision, _, detail = decisions._validate_request(check)
-            ctx = db.get(DecisionContext, opp.context_id)
-            if decision == "take":
-                session = paper.regular_session(run.day, json.loads(run.calendar_json))
-                plan = detail["plan"]
-                expiry = decisions._utc(plan.get("expiry"), "expiry")
-                if not session or expiry.replace(tzinfo=UTC).timestamp() > paper.watch_cutoff(session):
-                    raise ValueError("Agent TAKE expiry exceeds the P0 watch cutoff")
-                if plan.get("cost_model") != paper.COST or plan.get("freshness_limit_seconds") != paper.FRESHNESS_SECONDS:
-                    raise ValueError("Agent TAKE must retain P0 costs and freshness")
-                decisions._validate_take(opp.symbol, ctx.captured_at, json.loads(ctx.data_json), detail["plan"], now_utc())
-            elif decision == "wait" and decisions._utc(detail["wait_expiry"], "wait_expiry") <= now_utc():
-                raise ValueError("WAIT expiry must be future")
-        for c in choices:
-            choose(db, opps[c["opportunity_id"]], {k: v for k, v in c.items() if k != "opportunity_id"}, actor="agent:a3", commit=False)
+        commit_agent_choices(db, run, output["choices"])
         call.status = "completed"
     except (ValueError, KeyError, TypeError) as exc:
         db.rollback()  # no partial response may survive receipt-time revalidation
