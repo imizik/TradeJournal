@@ -5758,14 +5758,19 @@ test.describe("voice plans", () => {
     const mic = sheet.getByRole("button", { name: "Record voice plan" });
     await mic.dispatchEvent("pointerdown", { button: 0, pointerId: 7, isPrimary: true });
     await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
-    await page.waitForTimeout(600);
+    // As in the hold/release test, give the real fake-mic encoder enough audio
+    // to exceed the server's unchanged 1,000-byte usable-recording minimum.
+    await page.waitForTimeout(1500);
     await sheet.getByRole("button", { name: "Recording: release to save" }).dispatchEvent("pointercancel", { pointerId: 7 });
     await expect(sheet.getByRole("status").filter({ hasText: "press was interrupted" })).toBeVisible();
     const before = (await savedCaptures(request)).length;
     await sheet.getByRole("button", { name: "Save recording" }).click();
     await expect(sheet).toHaveCount(0);
     expect((await savedCaptures(request)).length).toBe(before + 1);
-    expect((await savedCaptures(request))[0].side).toBe("buy_puts");
+    const row = (await savedCaptures(request))[0];
+    expect(row.side).toBe("buy_puts");
+    expect(row.audio?.bytes).toBeGreaterThanOrEqual(1000);
+    expect(row.audio?.ms).toBeGreaterThan(1000);
   });
 
   test("the 30-second limit stops the clip and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {
