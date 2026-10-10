@@ -9,7 +9,7 @@ native subagent definitions and this policy, not an orchestration framework
 |---|---|
 | `.claude/agents/engineer.md` | Sonnet worker: owns one bounded task through implementation and verification, returns a short report or an escalation |
 | `.claude/agents/reviewer.md` | Sonnet reviewer: reads a finished diff against the contract and `domain-rules.md`, returns verified findings |
-| `.claude/agents/risk-reviewer.md` | Opus reviewer for consequential changes, with a separate focused invocation when needed |
+| `.claude/agents/risk-reviewer.md` | Opus reviewer for tier-2 changes, run as separate general and focused invocations |
 
 Profiles explicitly select their model and effort. Other subagents inherit the
 client's defaults; the repo no longer forces a global Sonnet override. Reviewer
@@ -89,10 +89,10 @@ behavior, spending, production data.
 ## Review tiers
 
 Use the shared [native pre-PR review policy](pr-review.md) as the only tier table.
-Normal changes use a fresh Sonnet `reviewer`. Consequential changes use an Opus
-`risk-reviewer` plus a separate focused invocation; the lead reads the risky
-hunks and verifies acceptance evidence. The owner fixes findings and re-reviews
-the final diff before publishing ready work. Small UI, test or refactor diffs
+Most changes use a fresh Sonnet `reviewer`. A tier-2 change uses an Opus
+`risk-reviewer` plus a focused invocation; the lead reads the risky hunks and
+verifies acceptance evidence. The owner fixes findings and gets
+them rechecked before publishing ready work. Small UI, test or refactor diffs
 are not automatically exempt. CI remains required; the user alone merges.
 
 ## Recording it

@@ -94,18 +94,22 @@ person. A PR is ready to merge only when it is ready to go live; see
 Follow the [native pre-PR review workflow](docs/agent/pr-review.md) before
 publishing ready work. The owner classifies the full diff, invokes a fresh
 reviewer in the same client, receives its findings directly, repairs valid
-issues and obtains review of the final candidate. Normal changes get one
-reviewer; consequential changes get a stronger general reviewer and a separate
-focused reviewer. Use the explicit model profiles in the guide, not the default
-implementation worker. Reviewers do not invoke reviewers themselves.
+issues and obtains review of the final candidate. Most changes get one
+reviewer. A change that could alter a tier-2 area of the guide's table (money
+correctness, destructive or real-data changes, auth/permissions/security,
+migrations, deployment, or CI, branch protection, or the verification or review
+policy and tooling), including a refactor meant to preserve behavior, gets a
+stronger general reviewer and a focused reviewer. Use the
+explicit model profiles in the guide, not the default implementation worker.
+Reviewers do not invoke reviewers themselves.
 
 The agent may skip only genuinely explanatory, non-agent documentation, with
 a reason in the PR. Other changes require review unless the user explicitly
 requests a skip. CI always runs. At most three rounds are automatic; timeouts,
 quota errors, missing results and unresolved findings are incomplete, never a
-pass. Keep the owner active until review and current-head CI finish, or report
-a specific blocker and leave the PR draft. Do not call another provider's CLI
-or wait for GitHub comments as the normal review path.
+pass. Keep the owner active until review completes and current-head CI
+passes, or report a specific blocker and leave the PR draft. Do not call
+another provider's CLI or wait for GitHub comments as the normal review path.
 
 The user authorizes branch pushes, PR updates and bounded review repairs as the
 normal workflow. The user alone merges; never merge or enable auto-merge.

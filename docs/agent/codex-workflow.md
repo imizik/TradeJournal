@@ -143,7 +143,7 @@ check with an informal review.
 
 The owner follows the [native pre-PR review workflow](pr-review.md), including
 its risk tiers, explicit reviewer models, fresh context, three-round budget,
-final-diff coverage and current-head CI check. Review is required even when the
+final-head coverage and current-head CI check. Review is required even when the
 lead implemented the change directly. Luna worker defaults do not apply to
 reviewers. A reviewer returns findings to the owner through the native subagent
 tool; no external CLI or GitHub waiter sits between them. The lead still owns
