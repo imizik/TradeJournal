@@ -70,8 +70,8 @@ migrations require an explicit server setting and a fresh verified backup.
 Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
-Two scheduled processes run off the server, both started by launchd on the
-development Mac and neither touching a database:
+Two scheduled processes run off the server, neither touching a database (the
+first is started by launchd on the development Mac):
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
@@ -79,11 +79,13 @@ development Mac and neither touching a database:
   on the Claude plan token, never API credits, and writes only to that
   branch, which is never merged (`docs/strategy-factory.md`). The direct
   Anthropic API call remains only behind an explicit `--use-api`.
-- The weekly documentation drift pass (`scripts/docs_drift_week.sh`, in a
-  checkout kept at `main`). Once 20 code commits have landed since the docs
-  were reconciled, Claude runs the `docs-drift` skill headless, allowed to
-  edit only documentation. The script checks the result, pushes a branch and
-  opens a pull request for review. It never merges.
+- The weekly documentation drift pass, a Claude Code routine in Anthropic's
+  cloud on the Claude plan (claude.ai/code/routines, "Weekly docs drift
+  pass"), started every Saturday from a fresh clone of `main`. Once 20 code
+  commits have landed since the docs were reconciled, it runs the
+  `docs-drift` skill, editing only documentation, runs the docs tests and
+  opens a pull request on `claude/docs-drift-<date>` for review. It never
+  merges.
 
 ## Data flow
 

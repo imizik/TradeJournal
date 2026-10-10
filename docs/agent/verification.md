@@ -473,11 +473,11 @@ Be honest about this when reporting work:
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
-  proved only by a real weekly run. The documentation drift routine
-  (`scripts/docs_drift_week.sh`) is tested the same way, with stub `claude`,
-  `gh` and `curl`. Whether Claude's pass is any good is judged in review of
-  the pull request it opens. `scripts/review_carry.sh`, which lets a clean
-  review survive integrating main, is tested against a throwaway repository
+  proved only by a real weekly run. The documentation drift routine runs in
+  Anthropic's cloud and has no test here; whether its pass is any good is
+  judged in review of the pull request it opens.
+  `scripts/review_carry.sh`, which lets a clean review survive integrating
+  main, is tested against a throwaway repository
   (`test_review_carry_script.py`). It proves only that the feature's own patch
   is unchanged; whether main's incoming changes alter what the feature relies
   on is the owner's recorded judgment plus current-head CI.
