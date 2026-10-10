@@ -264,6 +264,13 @@ and unrelated records. Reuse the [product roadmap](../product-roadmap.md#dots-as
 for later reflections and commitments; do not expand the independent runner's
 catalog to accommodate the personal coach.
 
+The first [journal coach snapshot slice](cloud-mcp-journal-contract.md) uses a
+separate offline OAuth gateway over an explicitly selected, hash-bound export
+of closed trades and statistics. It does not widen the browser/sample grant,
+share review notes, deploy a service or activate real-data access. Production
+role setup, approved account/date selection and actual Jo acceptance remain
+separate gates.
+
 D2 must call the existing domain validators and retain exact frozen context,
 policy/provenance and immutable receipts. Creating context is a write even
 though the current local tool is named `get_decision_context`. Remove the

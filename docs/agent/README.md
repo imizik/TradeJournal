@@ -6,6 +6,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 
 | Document | Read it when |
 |---|---|
+| [cloud-mcp-journal-contract.md](cloud-mcp-journal-contract.md) | Separate journal coaching through a bounded approved export, exact statistics and offline OAuth; no production activation |
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
 | [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
