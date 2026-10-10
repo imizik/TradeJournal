@@ -73,6 +73,12 @@ roll back; disable its persisted grant before restart. Prior demo records remain
 in the isolated file. The private API remains private. This adds no OAuth grants,
 production activation, live captures, real journal changes or schedules.
 
+The existing bounded trial source updater includes the owner router/engine and
+shared Practice validator as import dependencies of `app.main`. It excludes the
+standalone shadow gateway/operator CLI and changes no units, grants, sockets or
+activation flags. Actual import-overlay regression tests detect omission of
+each dependency; rollback removes new files and restores the prior validator.
+
 The supported gateway executable re-execs before importing engines with only
 PATH and its clean-process/dotenv-disable markers, then reads the private local
 binding. The factory rejects ambient provider/model/database credentials and

@@ -1,9 +1,11 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 
 const BACKEND = path.resolve(__dirname, "../../backend");
-const PYTHON = path.join(BACKEND, ".venv/bin/python");
+const VENV_PYTHON = path.join(BACKEND, ".venv/bin/python");
+const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
 const DB = path.join(BACKEND, "data/e2e_seed.db");
 const API = `http://127.0.0.1:${process.env.E2E_BACKEND_PORT || 8099}`;
 const env = { ...process.env, DATABASE_URL: `sqlite:///${DB}`, MIGRATION_DATABASE_URL: `sqlite:///${DB}`, PRACTICE_AGENT_ENABLED: "false" };
