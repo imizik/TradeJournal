@@ -87,6 +87,8 @@ def fake_claude(tmp_path, monkeypatch):
     from app.ai import review_context
 
     monkeypatch.setattr(review_context, "build", lambda session, day, trades: {"gaps": ["stubbed in tests"]})
+    # The monthly review has its own tests (tests/test_monthly_review.py); these runs are about the day.
+    monkeypatch.setattr(plan_reviews, "plan_month", lambda session, today: None)
     plan_runner._checked.clear()
     yield fake
     plan_runner._checked.clear()

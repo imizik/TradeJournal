@@ -179,7 +179,8 @@ are separate from the local verification script.
 
 `app.jobs.plan_reviews` is a finite systemd oneshot
 (`tradejournal-plan-reviews.timer`, opt-in), not a `job_run` lane: it reviews
-only the latest trading day and writes its Daily Review row directly, holds
+only the latest trading day (and, on its first run of a month, last month as
+a whole) and writes its review rows directly, holds
 its own file lock in `TJ_PLAN_REVIEW_DIR` so two runs never overlap, and
 records its outcome in a status file in that directory
 (`GET /daily-review/runner`). It calls Claude only through

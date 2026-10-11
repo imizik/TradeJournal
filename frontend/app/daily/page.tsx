@@ -2,7 +2,7 @@ import PracticeRoutine from "@/components/PracticeRoutine";
 import PracticeRunLinks from "@/components/PracticeRunLinks";
 import { requireAccess } from "@/lib/accessServer";
 import { api } from "@/lib/serverApi";
-import type { DailyReviewIndexItem, PlanRunnerStatus } from "@/lib/api";
+import type { DailyReviewIndexItem, MonthlyReviewIndexItem, PlanRunnerStatus } from "@/lib/api";
 import { money } from "@/lib/format";
 
 function formatDate(value: string) {
@@ -26,8 +26,10 @@ function monthLabel(value: string) {
 export default async function DailyReviewPage() {
   const access = await requireAccess();
   if (!access.owner && !access.grants.journal_read) return <PracticeRoutine />;
-  const [days, practice, runner] = await Promise.all([api.dailyReviews(), api.practiceRuns(),
-    access.owner ? api.planRunner().catch(() => null) : Promise.resolve(null)]);
+  const [days, practice, runner, months] = await Promise.all([api.dailyReviews(), api.practiceRuns(),
+    access.owner ? api.planRunner().catch(() => null) : Promise.resolve(null),
+    access.owner ? api.monthlyReviews().catch(() => [] as MonthlyReviewIndexItem[]) : Promise.resolve([] as MonthlyReviewIndexItem[])]);
+  const monthly = new Map(months.map((item) => [item.month, item]));
   const savedCount = days.filter((day) => day.saved && !day.source_data_stale).length;
   const groups = groupByMonth(days);
   // A trade dated on a weekend (an expiry or a late fill) still needs a cell: then every month shows Saturday and Sunday.
@@ -67,7 +69,7 @@ export default async function DailyReviewPage() {
         <div className="space-y-6" data-testid="daily-calendar">
           <Legend />
           {groups.map(([month, monthDays]) => (
-            <MonthGrid key={month} month={month} days={monthDays} weekends={weekends} />
+            <MonthGrid key={month} month={month} days={monthDays} weekends={weekends} review={monthly.get(month)} />
           ))}
         </div>
       )}
@@ -118,7 +120,7 @@ const reviewState = (day: DailyReviewIndexItem) => day.source_data_stale ? REVIE
  * links to its review and is tinted by the P&L that closed on it, with a dot
  * once it has been reviewed.
  */
-function MonthGrid({ month, days, weekends }: { month: string; days: DailyReviewIndexItem[]; weekends: boolean }) {
+function MonthGrid({ month, days, weekends, review }: { month: string; days: DailyReviewIndexItem[]; weekends: boolean; review?: MonthlyReviewIndexItem }) {
   const columns = weekends ? 7 : 5;
   const { year, month: monthNumber } = parts(`${month}-01`);
   const byDay = new Map(days.map((day) => [parts(day.day).day, day]));
@@ -136,7 +138,11 @@ function MonthGrid({ month, days, weekends }: { month: string; days: DailyReview
   return (
     <section className="space-y-2" aria-label={monthLabel(days[0].day)}>
       <div className="flex items-baseline justify-between gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{monthLabel(days[0].day)}</h2>
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">{monthLabel(days[0].day)}</h2>
+          {review && <a href={`/daily/month/${month}`} className="text-xs font-medium text-blue-400 hover:text-blue-300">
+            {review.saved ? `Month review · ${(review.grade ?? "").split(":")[0] || "saved"}` : "Run month review"}</a>}
+        </div>
         {anyClosed && <p className="text-xs text-muted-foreground">Closed P&amp;L <span className={`font-medium tabular-nums ${pnlColor(closed)}`}>{money(closed, { signed: true, cents: false })}</span></p>}
       </div>
       <div className={`grid gap-1.5 sm:gap-2 ${weekends ? "grid-cols-7" : "grid-cols-5"}`}>

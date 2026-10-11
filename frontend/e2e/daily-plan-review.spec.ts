@@ -56,3 +56,41 @@ test("the calendar says whether nightly plan reviews are set up, and a plan revi
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("daily-plan-review-phone.png"), fullPage: true });
 });
+
+const monthly = {
+  summary: "Mornings paid, afternoons leaked: +$1,840 before 11:00, -$2,310 after 14:00.",
+  month_grade: "C: steady size, but the afternoon habit erased the morning edge",
+  edge: [{ finding: "Opening-hour SPY calls", evidence: "22 trades, +$1,840, 64% win rate" }],
+  leaks: [{ finding: "Entries after 14:00", evidence: "17 trades, -$2,310, 29% win rate" }, { finding: "Chase entries", evidence: "11 trades, -$960" }],
+  recurring_patterns: [{ finding: "Held losers past 30 minutes", evidence: "losers held 41 min median vs winners 12 min" }],
+  rules_scorecard: [{ rule: "Max 2 contracts", kept: 14, broken: 3, verdict: "keep" }, { rule: "No entries after 3 PM", kept: 6, broken: 9, verdict: "tighten" }],
+  last_commitment_check: { commitment: "Max 2 contracts", result: "kept", evidence: "17 of 20 days at 2 or fewer" },
+  one_commitment: "No new entries after 14:00 in October — that window lost $2,310 on 17 trades.",
+  vs_last_month: ["Win rate 48% vs 41%", "Average loss -$135 vs -$190"],
+  data_gaps: ["Path metrics for 30 of 46 trades"],
+  generated_by: "claude-sonnet-5 through claude -p on the Claude plan",
+};
+
+test("each calendar month links to its monthly review, which shows the edge, leaks, rules and one commitment", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/daily");
+  const link = page.getByRole("link", { name: /Run month review|Month review/ }).first();
+  await expect(link).toBeVisible();
+  await link.click();
+  await expect(page).toHaveURL(/\/daily\/month\/\d{4}-\d{2}$/);
+  await page.route("**/api/backend/monthly-review", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    const body = route.request().postDataJSON() as { month: string };
+    await route.fulfill({ json: { month: body.month, review: monthly, generated_at: "2026-10-01T00:12:00Z", trade_count: 46 } });
+  });
+  await page.getByRole("button", { name: /Run Monthly Review|Regenerate Monthly Review/ }).click();
+  await expect(page.getByLabel("Next month's commitment")).toContainText("No new entries after 14:00");
+  await expect(page.getByText("Where Your Money Came From")).toBeVisible();
+  await expect(page.getByText("Where It Leaked")).toBeVisible();
+  await expect(page.getByLabel("Rules scorecard")).toContainText("Tighten");
+  await expect(page.getByText("Last month: Max 2 contracts")).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("monthly-review-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("monthly-review-phone.png"), fullPage: true });
+});

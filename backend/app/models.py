@@ -202,6 +202,18 @@ class DailyReviewRecord(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
+class MonthlyReviewRecord(SQLModel, table=True):
+    """One calendar month's review across all its trades (app/ai/monthly_reviewer.py)."""
+    __tablename__ = "monthly_review"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    month: str = Field(index=True, unique=True)  # "YYYY-MM", New York calendar
+    review_json: str = Field(sa_column=Column(Text, nullable=False))
+    trade_count: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class ResearchWorkspace(SQLModel, table=True):
     """Durable editable state for a research module (e.g. the AI Buildout
     cockpit). Single-user, local-first: the whole workspace is one JSON blob

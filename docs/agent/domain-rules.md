@@ -345,6 +345,10 @@ is verifiable rather than hopeful.
   it has no review, gained trades since, or went stale) and never backfills:
   a past day gets a review from its own button. It stops on a sign-in other
   than the plan token.
+- The monthly review (`app/ai/monthly_reviewer.py`) counts a trade in the month
+  it closed (New York), the dashboard's rule. The nightly run writes last
+  month's review on its first run of a new month, once; a month can be
+  (re)written from its own page. It reads statistics, never fills, on the plan.
 - The review's day context (`app/ai/review_context.py`) is read as of the
   review day, except the trader's saved chart levels, which are their current
   levels and are labelled so to the model. Every part degrades on its own into
