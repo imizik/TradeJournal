@@ -104,3 +104,50 @@ test("proxy propagates request abort, response cancel and its 40-second bound up
     if (priorToken === undefined) delete process.env.TJ_MOOMOO_LAB_TOKEN; else process.env.TJ_MOOMOO_LAB_TOKEN = priorToken;
   }
 });
+
+
+test("private HTTPS transport pins its configured owner origin and denies assistants and missing owner sessions", async () => {
+  const source = readFileSync(path.join(__dirname, "../app/api/level2-lab/session/route.ts"), "utf8");
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  const origin = "https://fixture.tail000.ts.net";
+  let profile = "private_legacy", owner = true;
+  const output: { GET?: (request: Request) => Promise<Response>; POST?: (request: Request) => Promise<Response> } = {};
+  new Function("require", "exports", compiled)(() => ({ accessConfig: () => ({ profile, origin }),
+    currentAccess: async () => owner ? { enabled: true, owner: true } : null }), output);
+  const names = ["TJ_MOOMOO_LAB_ENABLED", "TJ_MOOMOO_LAB_TOKEN", "TJ_MOOMOO_WEB_ORIGIN"];
+  const prior = names.map(name => process.env[name]);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return new Response('{"event":"status","phase":"closed"}\n', { headers: { "Content-Type": "application/x-ndjson" } }); };
+  const request = (host = "fixture.tail000.ts.net", suppliedOrigin = origin) => new Request("http://localhost:3000/api/level2-lab/session", {
+    method: "POST", headers: { Host: host, Origin: suppliedOrigin, "Content-Type": "application/x-level2-start" },
+  });
+  try {
+    process.env.TJ_MOOMOO_LAB_ENABLED = "true";
+    process.env.TJ_MOOMOO_LAB_TOKEN = "invented-loopback-token-00000000000000";
+    process.env.TJ_MOOMOO_WEB_ORIGIN = origin;
+    expect((await output.POST!(request("evil.invalid"))).status).toBe(503);
+    expect((await output.POST!(request(undefined, "https://evil.invalid"))).status).toBe(400);
+    expect((await output.POST!(request(undefined, "null"))).status).toBe(400);
+    expect((await output.POST!(request("127.0.0.1:3000", "http://127.0.0.1:3000"))).status).toBe(503);
+    profile = "assistant";
+    expect((await output.POST!(request())).status).toBe(403);
+    expect((await output.GET!(new Request(origin + "/api/level2-lab/session", { headers: { Host: "fixture.tail000.ts.net" } }))).status).toBe(403);
+    profile = "owner"; owner = false;
+    expect((await output.POST!(request())).status).toBe(403);
+    expect(calls).toBe(0);
+    owner = true;
+    expect(await (await output.POST!(request())).text()).toContain('"closed"');
+    profile = "private_legacy";
+    expect(await (await output.POST!(request())).text()).toContain('"closed"');
+    expect(calls).toBe(2);
+    for (const invalid of ["https://evil.invalid", origin + "/", "http://fixture.tail000.ts.net", "https://fixture.tail000.ts.net:8443", "https://user@fixture.tail000.ts.net"]) {
+      process.env.TJ_MOOMOO_WEB_ORIGIN = invalid;
+      expect((await output.POST!(request())).status).toBe(503);
+    }
+    expect(calls).toBe(2);
+  } finally {
+    globalThis.fetch = originalFetch;
+    names.forEach((name, index) => { if (prior[index] === undefined) delete process.env[name]; else process.env[name] = prior[index]; });
+  }
+});

@@ -7,13 +7,16 @@ import http.server
 import json
 import os
 from pathlib import Path
+import pwd
 import shutil
+import secrets
 import subprocess
 import sys
 import tarfile
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import control
@@ -129,6 +132,70 @@ def autodeploy_pass():
     return json.loads(state.read_text()) if state.exists() else {}
 
 
+def moomoo_status(token, timeout=15):
+    request = urllib.request.Request(
+        "http://127.0.0.1:8196/status",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                status = json.load(response)
+            if status != {"enabled": True}:
+                raise ValueError("Unexpected bridge readiness status")
+            return status
+        except urllib.error.HTTPError:
+            raise  # Authentication/configuration errors are not startup races.
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Bridge readiness timed out") from None
+            time.sleep(0.1)
+
+
+def assert_moomoo_credentials_are_loaded_as_service_user():
+    pid = control.run("systemctl", "show", control.MOOMOO_SERVICE, "--property=MainPID", "--value", capture_output=True, text=True).stdout.strip()
+    environ = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
+    value = next(item.partition(b"=")[2].decode() for item in environ if item.startswith(b"CREDENTIALS_DIRECTORY="))
+    directory = Path(value)
+    for name in ("appkey", "phase1-ed25519.pem"):
+        info = (directory / name).stat()
+        assert info.st_uid == 0 and (info.st_mode & 0o777) == 0o440
+    # ExecStartPre invokes credentials() as this unit's service user. A
+    # successful start proves it loaded and parsed both runtime copies.
+
+
+def prepare_moomoo_smoke():
+    """Create an idle, credential-free fixture for native systemd lifecycle checks."""
+    try:
+        pwd.getpwnam("tradejournal-moomoo")
+    except KeyError:
+        control.run("useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", "tradejournal-moomoo")
+        pwd.getpwnam("tradejournal-moomoo")
+    credentials = control.CONFIG / "moomoo"
+    credentials.mkdir(mode=0o700)
+    # Runtime-generated fixture material is synthetic and never reaches a
+    # provider. The bridge does not read it at startup.
+    appkey = credentials / "appkey"
+    appkey.write_text("deployment-smoke-fixture\n")
+    appkey.chmod(0o600)
+    private_key = credentials / "phase1-ed25519.pem"
+    control.run("openssl", "genpkey", "-algorithm", "ED25519", "-out", private_key)
+    private_key.chmod(0o600)
+    token = secrets.token_urlsafe(32)
+    bridge_env = control.CONFIG / "moomoo-bridge.env"
+    bridge_env.write_text(f"TJ_MOOMOO_LAB_TOKEN={token}\nTJ_MOOMOO_CREDENTIAL_DIR={credentials}\n")
+    bridge_env.chmod(0o600)
+    frontend_env = control.CONFIG / "moomoo-frontend.env"
+    frontend_env.write_text(
+        f"TJ_MOOMOO_LAB_TOKEN={token}\nTJ_MOOMOO_LAB_ENABLED=true\n"
+        "TJ_MOOMOO_WEB_ORIGIN=https://tradejournal-smoke.tailnet.ts.net\n"
+    )
+    frontend_env.chmod(0o600)
+    control.run("systemctl", "enable", control.MOOMOO_SERVICE)
+    return token
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("archive", type=Path)
@@ -161,8 +228,19 @@ def main():
         assert not (control.UNITS / "tradejournal-ingress.service").exists()
         control.run("systemctl", "is-enabled", *control.SERVICES, *control.TIMERS)
         assert subprocess.run(["systemctl", "is-enabled", "--quiet", "tradejournal-practice.timer"], check=False).returncode != 0
+        assert subprocess.run(["systemctl", "is-enabled", "--quiet", control.MOOMOO_SERVICE], check=False).returncode != 0
         control.run("systemctl", "start", "tradejournal-practice.service")
         assert request("/practice/runs")["runs"] == []  # disabled service creates no cohort or paid call
+        moomoo_token = prepare_moomoo_smoke()
+        control.run("systemctl", "start", control.MOOMOO_SERVICE)
+        assert moomoo_status(moomoo_token) == {"enabled": True}
+        assert_moomoo_credentials_are_loaded_as_service_user()
+        control.run("systemctl", "stop", control.MOOMOO_SERVICE)
+        assert subprocess.run(["systemctl", "is-active", "--quiet", control.MOOMOO_SERVICE], check=False).returncode != 0
+        control.run("systemctl", "start", control.MOOMOO_SERVICE)
+        assert moomoo_status(moomoo_token) == {"enabled": True}
+        bridge_pid = control.run("systemctl", "show", control.MOOMOO_SERVICE, "--property=MainPID", "--value", capture_output=True, text=True).stdout.strip()
+        assert bridge_pid not in ("", "0")
         # A real 08:00/17:00 New York run would make the sync POSTs below
         # return 409. Enablement is what this smoke asserts.
         control.run("systemctl", "stop", "tradejournal-sync-pipeline.timer")
@@ -259,10 +337,14 @@ def main():
                         break
                     time.sleep(5)
                 assert control.current().name == second.name
+                assert moomoo_status(moomoo_token) == {"enabled": True}
+                upgraded_bridge_pid = control.run("systemctl", "show", control.MOOMOO_SERVICE, "--property=MainPID", "--value", capture_output=True, text=True).stdout.strip()
+                assert upgraded_bridge_pid not in ("", "0", bridge_pid)
                 assert Path("/usr/local/sbin/tradejournal-deploy").read_bytes() == (second / "deploy/control.py").read_bytes()
                 assert sentinel.read_text() == "persistent\n"
                 cli("rollback", "--confirm-database", IDENTITY)
                 assert control.current() == release
+                assert moomoo_status(moomoo_token) == {"enabled": True}
                 # The next pass must not put back the build an operator left.
                 assert autodeploy_pass()["outcome"] == "rolled-back"
                 assert control.current() == release
@@ -278,10 +360,22 @@ def main():
         # This is deliberately not labelled a physical VPS reboot test.
         control.stop_services()
         control.start_services(release, IDENTITY)
+        assert moomoo_status(moomoo_token) == {"enabled": True}
         assert request("/stats")["total_trades"] == 6
         assert job_status() == "succeeded"
         control.run(release / "backend/.venv/bin/python", release / "deploy/auth-smoke.py")
-        print("Native deployment smoke passed: install, migration, private proxy, workers, retired ingress cleanup, no 8090 listener, backup, timers, phone alerts, API restart, crash restart, unattended upgrade, rollback that stays rolled back, prune, persistent state and full restart")
+        # A rollback target predating the opt-in bridge removes and disables
+        # that unit cleanly, without deleting its private operator state.
+        legacy = Path(tempfile.mkdtemp())
+        (legacy / "deploy").mkdir()
+        shutil.copytree(release / "deploy/systemd", legacy / "deploy/systemd")
+        (legacy / "deploy/systemd" / control.MOOMOO_SERVICE).unlink()
+        control.install_units(legacy)
+        assert not (control.UNITS / control.MOOMOO_SERVICE).exists()
+        assert subprocess.run(["systemctl", "is-enabled", "--quiet", control.MOOMOO_SERVICE], check=False).returncode != 0
+        assert (control.CONFIG / "moomoo-bridge.env").is_file() and (control.CONFIG / "moomoo").is_dir()
+        shutil.rmtree(legacy)
+        print("Native deployment smoke passed: install, migration, private proxy, workers, retired ingress cleanup, no 8090 listener, backup, timers, phone alerts, API restart, crash restart, manual moomoo bridge start/stop/status, unattended upgrade, rollback that stays rolled back, legacy rollback unit cleanup, prune, persistent state and full restart")
     finally:
         subprocess.run(["systemctl", "kill", "--signal=SIGCONT", "tradejournal-worker@sync"], check=False)
         subprocess.run(["journalctl", "--no-pager", "-n", "150", *[f"--unit={unit}" for unit in [*control.SERVICES, "tradejournal-ingress", control.AUTODEPLOY]]], check=False)

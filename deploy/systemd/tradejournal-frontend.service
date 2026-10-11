@@ -4,6 +4,7 @@ After=network-online.target
 
 [Service]
 EnvironmentFile=-/etc/tradejournal/access-owner.env
+EnvironmentFile=-/etc/tradejournal/moomoo-frontend.env
 Type=simple
 User=tradejournal
 Group=tradejournal

@@ -32,6 +32,11 @@ AUTODEPLOY = "tradejournal-autodeploy"
 TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
 PRACTICE_UNITS = ["tradejournal-practice.service", "tradejournal-practice.timer"]
 OPTIONAL_UNITS = ["tradejournal-assistant.service", *PRACTICE_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
+# The manual market-depth bridge is installed with releases but remains disabled
+# unless an operator provisions its config and enables it explicitly.
+MOOMOO_SERVICE = "tradejournal-moomoo.service"
+MOOMOO_FRONTEND_ENV = CONFIG / "moomoo-frontend.env"
+OPTIONAL_UNITS.append(MOOMOO_SERVICE)
 # Retired units stay listed until upgrades have removed their installed copies.
 RETIRED_SERVICES = ["tradejournal-ingress"]
 # The alert check keeps running through a deployment, so a release that fails
@@ -178,7 +183,9 @@ def install_units(release: Path) -> None:
 
 def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
-    for service in ["tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    # The bridge owns a provider socket and must stop before its frontend and
+    # release target are replaced, including when rolling back old releases.
+    for service in [MOOMOO_SERVICE, "tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
@@ -242,6 +249,21 @@ def start_services(release: Path, confirmation: str) -> None:
         enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", practice_timer], check=False)
         if enabled.returncode == 0:
             run("systemctl", "start", practice_timer)
+    # A release never enables the capability. Only restart it when the
+    # operator separately enabled the unit and explicitly opted in the
+    # frontend configuration; absent files and disabled units are normal.
+    if moomoo_is_enabled():
+        run("systemctl", "start", MOOMOO_SERVICE)
+
+
+def moomoo_is_enabled() -> bool:
+    enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", MOOMOO_SERVICE], check=False)
+    if enabled.returncode != 0 or not MOOMOO_FRONTEND_ENV.is_file():
+        return False
+    for line in MOOMOO_FRONTEND_ENV.read_text().splitlines():
+        if line.strip() == "TJ_MOOMOO_LAB_ENABLED=true":
+            return True
+    return False
 
 
 def activate(release: Path, confirmation: str) -> None:

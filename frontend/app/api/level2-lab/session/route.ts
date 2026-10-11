@@ -1,4 +1,4 @@
-import { accessConfig } from "@/lib/accessServer";
+import { accessConfig, currentAccess } from "@/lib/accessServer";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +10,33 @@ async function handler(request: Request) {
     const host = request.headers.get("host") ?? "";
     const local = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)
       && ["localhost", "127.0.0.1"].map(name => `${name}${url.port ? `:${url.port}` : ""}`).includes(host);
+    // Production remains behind owner-restricted Tailscale Serve, with Next
+    // bound to loopback. Host/Origin pinning is CSRF protection, not identity.
+    // Never infer a permitted origin from client-supplied forwarded headers.
+    const configuredOrigin = process.env.TJ_MOOMOO_WEB_ORIGIN ?? "";
+    let privateOrigin = "";
+    if (configuredOrigin) {
+      const parsed = new URL(configuredOrigin);
+      if (parsed.origin !== configuredOrigin || parsed.protocol !== "https:" ||
+        !parsed.hostname.endsWith(".ts.net") || parsed.port || parsed.username || parsed.password) {
+        return Response.json({ enabled: false }, { status: request.method === "GET" ? 200 : 503 });
+      }
+      if (host === parsed.host && ["http:", "https:"].includes(url.protocol) &&
+        ["localhost", "127.0.0.1", parsed.hostname].includes(url.hostname)) privateOrigin = parsed.origin;
+    }
+    const permittedOrigin = privateOrigin || (!configuredOrigin && local ? `http://${host}` : "");
+    if (config.profile === "owner") {
+      const access = await currentAccess();
+      if (!access?.enabled || !access.owner) return Response.json({ detail: "Not permitted" }, { status: 403 });
+      if (privateOrigin && config.origin !== privateOrigin) return Response.json({ detail: "Not permitted" }, { status: 403 });
+    }
     const token = process.env.TJ_MOOMOO_LAB_TOKEN ?? "";
-    if (!local || process.env.TJ_MOOMOO_LAB_ENABLED !== "true" || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
+    if (!permittedOrigin || process.env.TJ_MOOMOO_LAB_ENABLED !== "true" || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
       return Response.json({ enabled: false }, { status: request.method === "GET" ? 200 : 503 });
     }
-    if (url.search || (request.method === "POST" && (request.headers.get("origin") !== `http://${host}` ||
+    if (url.search || (request.method === "POST" && (request.headers.get("origin") !== permittedOrigin ||
       request.headers.get("content-type") !== "application/x-level2-start"))) {
-      return Response.json({ detail: "Fixed local session required" }, { status: 400 });
+      return Response.json({ detail: "Fixed same-origin session required" }, { status: 400 });
     }
     if (request.method === "POST" && request.body) {
       const reader = request.body.getReader();

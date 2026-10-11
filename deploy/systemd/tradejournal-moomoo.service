@@ -1,0 +1,29 @@
+[Unit]
+Description=TradeJournal manual moomoo market-depth bridge
+After=network-online.target
+
+[Service]
+Type=simple
+User=tradejournal-moomoo
+Group=tradejournal-moomoo
+WorkingDirectory=/opt/tradejournal/current/backend
+EnvironmentFile=/etc/tradejournal/moomoo-bridge.env
+LoadCredential=appkey:/etc/tradejournal/moomoo/appkey
+LoadCredential=phase1-ed25519.pem:/etc/tradejournal/moomoo/phase1-ed25519.pem
+ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m scripts.moomoo_lab_server
+ExecStartPre=/opt/tradejournal/current/backend/.venv/bin/python -c "from scripts.moomoo_lab_server import check_credentials; check_credentials()"
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+InaccessiblePaths=-/var/lib/tradejournal -/etc/tradejournal
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

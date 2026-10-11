@@ -9,15 +9,20 @@ inspection display, not a validated live trading feed.
 
 `backend/scripts/moomoo_lab_server.py` is a standalone FastAPI service on
 127.0.0.1:8196. It is not imported by the journal app and has no database,
-startup subscription, deployment unit, timer, recording or ML pipeline.
+startup subscription, timer, recording or ML pipeline. An explicitly enabled
+production systemd unit can host the same passive bridge.
 Only an authenticated POST starts provider work. GET status never reads
 credentials or contacts moomoo. One process permits one active session.
 
-The server reuses the secured local AppKey and Ed25519 private key and the
+The server reuses the secured AppKey and Ed25519 private key and the
 existing diagnostic signature implementation. Credentials remain outside Git
 and the browser. A separate ephemeral bearer token protects the loopback bridge.
-The Next route is disabled by default, refuses assistant profiles and remote
-origins, and accepts only a same-origin local POST with no arguments or body.
+The Next route is disabled by default and refuses assistant profiles. Local
+development accepts only its loopback HTTP origin. Explicit production setup
+pins one private HTTPS Tailscale origin and Host; it accepts only a same-origin
+POST with no arguments or body. Authenticated owner profiles also require an
+owner session. The private legacy entrance retains owner-restricted Tailscale
+access without an additional login; Host/Origin checks are not identity proof.
 It forwards to a fixed loopback endpoint without browser cookies or credentials.
 No provider URL, symbol or duration can be supplied by the browser.
 
@@ -87,9 +92,39 @@ bridge; it subscribes only after that click. Stop the frontend with Ctrl+C and
 exit that terminal to stop the bridge. Use one bridge process; port 8196 is
 fixed. Both services must bind exclusively to loopback. Do not omit the frontend
 hostname argument: a local URL or Origin header alone cannot authenticate the
-network peer. Do not configure these flags in production or deployment files.
+network peer. Production uses the separately provisioned private configuration below.
 If credentials/whitelist are unavailable, inspect the sanitized status; no
 alternative signing formats or entitlement upgrades are attempted.
+
+## Production connection
+
+The owner authorized a VPS-hosted passive bridge. Provider credentials remain
+outside the release, under `/etc/tradejournal/moomoo/`, mode 0700, root owned; the two
+credential files are root-private mode 0600. systemd `LoadCredential` supplies
+read-only private runtime copies to the dedicated `tradejournal-moomoo` user.
+The bridge reads `CREDENTIALS_DIRECTORY`, preserving root-only traversal of
+`/etc/tradejournal`; local tools may use `TJ_MOOMOO_CREDENTIAL_DIR` without
+altering the original standalone diagnostic's local credential path. The bridge does not load the
+journal environment or database. A shared token stays in root-private systemd
+environment files, never in browser configuration.
+
+`tradejournal-moomoo.service` binds only 127.0.0.1:8196. It is opt-in: ordinary
+releases do not enable it. Once explicitly enabled, deployment stops it before
+switching releases, restarts it against the new release, and stops/removes it
+when rolling back to code without the unit. Restart never resumes a session.
+The owner frontend reads optional `moomoo-frontend.env`; the assistant frontend
+does not. Production requires an exact configured HTTPS `.ts.net` origin, the
+matching Host and POST Origin. Client forwarded headers confer no authority.
+The existing owner-only Tailscale restriction and loopback frontend binding
+remain essential. No Funnel, public route or private-API exposure is added.
+
+Provision and activation instructions are in
+[the deployment runbook](../deploy/README.md#manual-moomoo-level-2-connection).
+Activation and provider authentication are separate evidence from fixture tests.
+Changing the source IP may require adding the VPS public egress IP to the
+AppKey whitelist. Do not disable the whitelist or buy access to resolve a refusal.
+Market-hours delivery testing remains deferred; setup can be checked while
+closed without asserting changing quotes, exchange freshness or live usability.
 
 ## Verification
 

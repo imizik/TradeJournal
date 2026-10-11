@@ -342,6 +342,7 @@ def test_every_managed_unit_ships_with_the_release():
     assert "tradejournal-sync-pipeline.timer" in control.TIMERS
     assert "tradejournal-offsite-backup.timer" in control.TIMERS
     assert "tradejournal-alerts.timer" in control.TIMERS
+    assert control.MOOMOO_SERVICE in control.OPTIONAL_UNITS
     for name in control.OPTIONAL_UNITS:
         assert (systemd / name).is_file(), name
     timer = (systemd / "tradejournal-sync-pipeline.timer").read_text()
@@ -685,6 +686,83 @@ def test_deployment_pauses_the_autodeploy_timer_but_never_its_running_service(co
     assert "tradejournal-autodeploy.service" in control.OPTIONAL_UNITS
 
 
+def test_moomoo_bridge_stops_before_frontend_during_release_switch(control, monkeypatch):
+    stopped = []
+
+    def systemctl(command, **_kwargs):
+        if command[1] == "show":
+            return SimpleNamespace(stdout="loaded\n", check_returncode=lambda: None)
+        return None
+
+    monkeypatch.setattr(control.subprocess, "run", systemctl)
+    monkeypatch.setattr(control, "run", lambda *args: stopped.append(args[-1]))
+    control.stop_services()
+    assert stopped.index(control.MOOMOO_SERVICE) < stopped.index("tradejournal-frontend")
+
+
+def test_moomoo_bridge_restart_requires_enabled_unit_and_explicit_frontend_config(control, tmp_path, monkeypatch):
+    env = tmp_path / "moomoo-frontend.env"
+    monkeypatch.setattr(control, "MOOMOO_FRONTEND_ENV", env)
+    monkeypatch.setattr(control.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0))
+    assert not control.moomoo_is_enabled()
+    env.write_text("TJ_MOOMOO_LAB_ENABLED=false\n")
+    assert not control.moomoo_is_enabled()
+    env.write_text("TJ_MOOMOO_LAB_ENABLED=true\n")
+    assert control.moomoo_is_enabled()
+    monkeypatch.setattr(control.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1))
+    assert not control.moomoo_is_enabled()
+
+
+def test_moomoo_unit_is_loopback_bridge_with_separate_read_only_credentials():
+    systemd = Path(__file__).resolve().parents[2] / "deploy/systemd"
+    bridge = (systemd / "tradejournal-moomoo.service").read_text()
+    frontend = (systemd / "tradejournal-frontend.service").read_text()
+    assert "User=tradejournal-moomoo" in bridge
+    assert "ExecStart=/opt/tradejournal/current/backend/.venv/bin/python -m scripts.moomoo_lab_server" in bridge
+    assert "LoadCredential=appkey:/etc/tradejournal/moomoo/appkey" in bridge
+    assert "LoadCredential=phase1-ed25519.pem:/etc/tradejournal/moomoo/phase1-ed25519.pem" in bridge
+    assert "InaccessiblePaths=-/var/lib/tradejournal -/etc/tradejournal" in bridge
+    assert "EnvironmentFile=-/etc/tradejournal/moomoo-frontend.env" in frontend
+
+
+def test_moomoo_provisioning_accepts_only_canonical_private_https_origin():
+    config = load("moomoo_config")
+    assert config.validate_origin("https://tradejournal.tailnet.ts.net") == "https://tradejournal.tailnet.ts.net"
+    for origin in (
+        "http://tradejournal.tailnet.ts.net",
+        "https://tradejournal.tailnet.ts.net.evil.example",
+        "https://TRADEJOURNAL.tailnet.ts.net",
+        "https://tradejournal.tailnet.ts.net:443",
+        "https://tradejournal.tailnet.ts.net/path",
+    ):
+        with pytest.raises(ValueError, match="canonical private HTTPS"):
+            config.validate_origin(origin)
+
+
+def test_moomoo_provisioning_validates_ed25519_pem_without_secret_fixtures(tmp_path):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    from cryptography.hazmat.primitives.asymmetric.rsa import generate_private_key
+
+    config = load("moomoo_config")
+
+    def write_key(name, key):
+        path = tmp_path / name
+        path.write_bytes(key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ))
+        path.chmod(0o600)
+        return path
+
+    ed25519 = write_key("ed25519.pem", Ed25519PrivateKey.generate())
+    rsa = write_key("rsa.pem", generate_private_key(public_exponent=65537, key_size=2048))
+    assert config.read_source(ed25519, key=True)
+    with pytest.raises(ValueError, match="must contain an Ed25519"):
+        config.read_source(rsa, key=True)
+
+
 def test_practice_timer_is_packaged_but_never_enabled_by_install():
     systemd = Path(__file__).resolve().parents[2] / "deploy/systemd"
     control = load("control")
@@ -698,3 +776,75 @@ def test_practice_timer_is_packaged_but_never_enabled_by_install():
     assert "app.jobs.practice_schedule" in service
     assert "TimeoutStartSec=5min" in service
     assert "EnvironmentFile=/etc/tradejournal/backend.env" in service
+
+
+def test_moomoo_provisioning_preserves_existing_state_and_cleans_partial_creation(tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    config = load("moomoo_config")
+    target = tmp_path / "etc"
+    monkeypatch.setattr(config, "CONFIG", target)
+    monkeypatch.setattr(config, "CREDENTIALS", target / "moomoo")
+    monkeypatch.setattr(config, "BRIDGE_ENV", target / "bridge.env")
+    monkeypatch.setattr(config, "FRONTEND_ENV", target / "frontend.env")
+    monkeypatch.setattr(config.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(config.pwd, "getpwnam", lambda name: SimpleNamespace())
+    appkey, pem = tmp_path / "source-appkey", tmp_path / "source-key"
+    appkey.write_bytes(b"fixture-appkey")
+    pem.write_bytes(Ed25519PrivateKey.generate().private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    appkey.chmod(0o600)
+    pem.chmod(0o600)
+    target.mkdir(mode=0o700)
+    config.FRONTEND_ENV.write_text("preserve")
+    with pytest.raises(FileExistsError):
+        config.provision(appkey, pem, "https://fixture.tail000.ts.net")
+    assert config.FRONTEND_ENV.read_text() == "preserve"
+    config.FRONTEND_ENV.unlink()
+    original = config.atomic_secret
+    def fail_frontend(path, content, mode):
+        if path == config.FRONTEND_ENV:
+            raise OSError("fixture-write-failure")
+        original(path, content, mode)
+    monkeypatch.setattr(config, "atomic_secret", fail_frontend)
+    with pytest.raises(OSError, match="fixture-write-failure"):
+        config.provision(appkey, pem, "https://fixture.tail000.ts.net")
+    assert list(target.iterdir()) == []
+    assert appkey.read_bytes() == b"fixture-appkey"
+    monkeypatch.setattr(config, "atomic_secret", original)
+    config.provision(appkey, pem, "https://fixture.tail000.ts.net")
+    bridge = dict(line.split("=", 1) for line in config.BRIDGE_ENV.read_text().splitlines())
+    frontend = dict(line.split("=", 1) for line in config.FRONTEND_ENV.read_text().splitlines())
+    assert bridge["TJ_MOOMOO_LAB_TOKEN"] == frontend["TJ_MOOMOO_LAB_TOKEN"]
+    assert frontend["TJ_MOOMOO_WEB_ORIGIN"] == "https://fixture.tail000.ts.net"
+    assert config.FRONTEND_ENV.stat().st_mode & 0o777 == 0o600
+    assert config.CREDENTIALS.stat().st_mode & 0o777 == 0o700
+
+
+def test_moomoo_native_readiness_wait_is_bounded_and_rejects_auth_and_invalid_status(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    smoke = load("smoke")
+    clock = [0.0]
+    monkeypatch.setattr(smoke.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(smoke.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    calls = []
+    def starting(request, timeout):
+        calls.append(request)
+        if len(calls) == 1:
+            raise smoke.urllib.error.URLError("connection refused fixture")
+        return io.BytesIO(b'{"enabled":true}')
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", starting)
+    assert smoke.moomoo_status("fixture-token") == {"enabled": True}
+    assert len(calls) == 2
+    def refused(*args, **kwargs):
+        raise smoke.urllib.error.URLError("connection refused fixture")
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", refused)
+    with pytest.raises(RuntimeError, match="readiness timed out"):
+        smoke.moomoo_status("fixture-token", timeout=0.2)
+    def unauthorized(*args, **kwargs):
+        raise smoke.urllib.error.HTTPError("fixture", 403, "denied", {}, None)
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", unauthorized)
+    with pytest.raises(smoke.urllib.error.HTTPError):
+        smoke.moomoo_status("fixture-token")
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(b'{"enabled":false}'))
+    with pytest.raises(ValueError, match="Unexpected bridge readiness"):
+        smoke.moomoo_status("fixture-token")
