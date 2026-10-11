@@ -45,7 +45,7 @@ test.describe("dashboard", () => {
     const main = page.locator("main").first();
     const order = await main.evaluate((root) => {
       const text = root.textContent ?? "";
-      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Shows what is still open"), performance: text.indexOf("Trading Performance") };
+      return { today: text.indexOf("Today's Closed P&L"), positions: text.indexOf("Active Options"), performance: text.indexOf("Trading Performance") };
     });
     expect(order.today).toBeGreaterThanOrEqual(0);
     expect(order.positions).toBeGreaterThanOrEqual(0);
@@ -55,6 +55,9 @@ test.describe("dashboard", () => {
     await expect(main).not.toContainText("$-");
     await page.setViewportSize({ width: 1440, height: 1100 });
     await page.screenshot({ path: test.info().outputPath("dashboard-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: test.info().outputPath("dashboard-phone.png") });
+    await page.setViewportSize({ width: 1440, height: 1100 });
 
     // Aggregates computed from the seeded, reconstructed closed trades.
     await expect(page.getByText("+$1,019.00").first()).toBeVisible();
@@ -66,16 +69,17 @@ test.describe("dashboard", () => {
     await page.getByRole("button", { name: "1M" }).click();
     await expect(page.getByText("1M Closed P&L")).toBeVisible();
     await expect(page.getByText("-$281.00", { exact: true })).toBeVisible();
-    await expect(page.getByText("Closed Trades", { exact: true }).locator("xpath=..")).toContainText("2");
+    await expect(page.getByText("2 closed trades in the selected period", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "ALL" }).click();
-    await expect(page.getByText("+$1,019.00", { exact: true })).toBeVisible();
+    await expect(page.getByText("+$1,019.00", { exact: true }).first()).toBeVisible();
 
     // All three open positions reach the table, and the two AAPL positions
     // stay separated by account rather than merging.
     const openPositions = page.getByRole("table").first();
-    await expect(openPositions.getByText("RNXT").first()).toBeVisible();
     await expect(openPositions.getByText("Roth IRA").first()).toBeVisible();
     await expect(openPositions.getByText("Individual").first()).toBeVisible();
+    await page.getByTestId("stock-holdings").locator("summary").click();
+    await expect(page.getByTestId("stock-holdings").getByText("RNXT", { exact: true })).toBeVisible();
   });
 
   test("refreshes server-rendered tables when a sync job finishes", async ({ page }) => {

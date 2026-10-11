@@ -6,6 +6,7 @@ import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTab
 import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import PracticeRoutine from "@/components/PracticeRoutine";
+import OwnerDashboard from "@/components/dashboard/OwnerDashboard";
 import { money, newYorkToday } from "@/lib/format";
 import {
   buildOpenPositionMeta,
@@ -25,7 +26,7 @@ const fmt$ = (val: number | null | undefined) => money(val, { signed: true, cent
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ account?: string; type?: string; decision?: string }>;
+  searchParams: Promise<{ account?: string; type?: string; decision?: string; practice_run?: string }>;
 }) {
   const access = await requireAccess();
   if (access.grants.decision_write || access.grants.market_decision_write) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /></div>;
@@ -105,15 +106,24 @@ export default async function DashboardPage({
     openTrades.filter((t) => t.instrument_type === "stock").map((t) => t.ticker)
   )];
 
+  let quoteError = false;
   const [bulkFills, optionQuotes, stockPrices] = await Promise.all([
     openTrades.length > 0
       ? api.bulkTradeFills(openTrades.map((t) => t.id))
       : Promise.resolve({} as Record<string, Fill[]>),
     optionPositions.length > 0
-      ? api.positionQuotes(optionPositions)
+      ? api.positionQuotes(optionPositions).catch((error) => {
+          if (!access.owner) throw error;
+          quoteError = true;
+          return [] as PositionQuote[];
+        })
       : Promise.resolve([] as PositionQuote[]),
     stockTickers.length > 0
-      ? api.stockQuotes(stockTickers)
+      ? api.stockQuotes(stockTickers).catch((error) => {
+          if (!access.owner) throw error;
+          quoteError = true;
+          return {} as Record<string, number | null>;
+        })
       : Promise.resolve({} as Record<string, number | null>),
   ]);
 
@@ -171,6 +181,13 @@ export default async function DashboardPage({
   );
 
   const recentClosed = trades.filter((trade) => trade.status !== "open").slice(0, 10);
+
+  if (access.owner) return <OwnerDashboard
+    trades={trades} accounts={accounts} stats={stats} rows={openPositionRows}
+    quotes={quotesByTradeId} today={newYorkToday()} unrealized={totalUnrealizedPnl}
+    quotedCount={quotedPositions.length} grossValue={grossMarkedValue} netValue={netMarkedValue}
+    largest={largestMarkedPosition} decisions={decisions.decisions} params={resolvedParams} quoteError={quoteError}
+  />;
 
   return (
     <div className="space-y-6">

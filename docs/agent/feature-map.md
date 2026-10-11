@@ -272,6 +272,18 @@ reason, and ruff lints them without importing them.
   The golden snapshot reads the Alpaca cache; `test_seed_snapshot.py` points
   it at an empty directory so a developer's cache cannot leak into the result.
 
+## Owner Dashboard foundation
+
+The owner root view mounts `frontend/components/dashboard/OwnerDashboard.tsx`:
+ET closed-P&L summary, factual session counts, compact active options, collapsed
+stock holdings, exposure disclosure, compact performance and five recent trades
+ordered by close time. Account/type filters and decision/run references stay in
+the URL. Full Practice remains below the summary links until relocation is
+complete. Journal-reader and decision-writer assistant branches retain their
+existing surfaces. See the [inventory and staged plan](../dashboard-redesign.md).
+`frontend/e2e/dashboard.spec.ts` exercises states, scopes, navigation and desktop
+and phone pictures; the browser harness has offline position quotes.
+
 ## Open-position basis
 
 Dashboard and Daily Review share `frontend/lib/dashboard.ts` for remaining

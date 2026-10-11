@@ -35,7 +35,7 @@ const PYTHON = existsSync(VENV_PYTHON) ? VENV_PYTHON : "python3";
 // regardless of how Playwright orders setup against webServer startup.
 const backendCommand = [
   `"${PYTHON}" scripts/seed_dev_data.py --database-url "sqlite:///${E2E_DB}"`,
-  `"${PYTHON}" -m uvicorn app.main:app --host 127.0.0.1 --port ${BACKEND_PORT}`,
+  `"${PYTHON}" -m uvicorn e2e.fixtures.dashboard_backend:app --app-dir "${__dirname}" --host 127.0.0.1 --port ${BACKEND_PORT}`,
 ].join(" && ");
 
 export default defineConfig({
