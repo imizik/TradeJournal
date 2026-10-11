@@ -13,9 +13,13 @@ every panel:
    losing context.
 
 Candles get visual priority. Dense is not bad by itself; the question is
-signal-to-noise **for the task**. `docs/charts-roadmap.md` already says the
-default should favor candles, VWAP, user levels, fills and volume, with the
-rest disclosed progressively.
+signal-to-noise **for the task**. `docs/charts-roadmap.md` (Progressive
+disclosure) says the default should favor candles, VWAP, user levels, fills
+and volume; the shipped defaults (`DEFAULT_SETTINGS` in
+`frontend/lib/charts.ts`) currently show more. Changing a default only
+affects setups without saved settings — the user's own chart keeps its
+saved studies. Resetting saved settings changes their data: propose it as a
+separate decision, never fold it into a defaults change.
 
 ## Tasks to walk (pick 2–3)
 

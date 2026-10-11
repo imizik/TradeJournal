@@ -27,10 +27,19 @@ find test-results -name '*.png'
   market-shaped session with real EMA/VWAP/RSI and fills) and saves
   `charts-realistic-desktop.png` (1440×900) and `charts-realistic-phone.png`.
   Use `realisticPanels()` in any new test whose picture a person will judge.
-- Which test saves which picture: `grep -n "outputPath(" e2e/*.spec.ts`.
+- Find the pictures that answer your question first:
+  `grep -n "outputPath(" e2e/*.spec.ts` (e.g. phone questions: the
+  `phone`-named pictures in `charts.spec.ts` and `phone.spec.ts`). Run
+  several tests at once with `-g "realistic candles|toolbar controls"`.
   A failing test also leaves `test-failed-1.png` and a trace in its folder.
-- `test-results/` is wiped on every run: copy baseline pictures to your
-  scratch directory before running again.
+- Paths are relative to `frontend/`. `test-results/` is wiped on every run:
+  `cp -R test-results <scratch>/before` before running again.
+- Seeded state shows up in every picture and is not a finding: the
+  Gmail-disconnected banner, placeholder watchlist quotes (262.66, "–"),
+  "Loading peers…" in the info panel.
+- A still cannot prove something off-screen is reachable (a horizontally
+  scrolling chip row, a sheet's lower half): assert it — e.g.
+  `await chip.scrollIntoViewIfNeeded(); await expect(chip).toBeInViewport()`.
 - Ports busy: `E2E_BACKEND_PORT=8199 E2E_FRONTEND_PORT=3199 npx playwright
   test ...`. Never run two suites on the same ports, and never stop another
   checkout's servers.
@@ -65,11 +74,20 @@ bash scripts/ux_sandbox.sh        # run in the background; ready in ~10 s
 - It refuses to start in a checkout with its own `backend/.env` or `.env`
   (use a worktree), or on busy ports, and stops itself unless the app's
   `/api/backend/health` reports `ux_sandbox.db`.
-- The first `/charts` load takes ~15 s (dev compile plus provider fetch).
-  The app runs as `next dev`; for performance numbers compare like with
-  like, and confirm anything that matters on the production build.
+- The first `/charts` load takes 15–30 s (dev compile plus provider fetch).
+  Poll instead of waiting blind or screenshotting the spinner, e.g. run
+  `document.querySelectorAll('[data-testid="canvas-main"] canvas').length`
+  until it is non-zero. The app runs as `next dev`; for performance numbers
+  compare like with like, and confirm what matters on the production build.
+- Settings persist in the sandbox file across sessions and agents. To judge
+  the shipped defaults, delete `backend/data/ux_sandbox/` before starting
+  and compare against `DEFAULT_SETTINGS` in `frontend/lib/charts.ts`.
 - Drive it with the Claude desktop app's built-in browser pane, or any
-  Playwright-capable browser tool or short script. Claude in Chrome on this
+  Playwright-capable browser tool or short script. The pane returns
+  downscaled screenshots, and clicks and zoom use that screenshot's
+  coordinate frame; a zoom crop adds no resolution. Read small text and
+  sizes from the DOM instead, e.g.
+  `[...document.querySelectorAll("canvas")].map((c) => Math.round(c.getBoundingClientRect().height))`. Claude in Chrome on this
   setup drives a different computer and cannot reach this Mac's localhost.
 - Ctrl+C (or stopping the background task) stops both servers. Delete
   `backend/data/ux_sandbox/` to start over.
@@ -91,7 +109,8 @@ then only look:
 ## Reading pictures well
 
 - Every image read costs tokens. Read only the target surface: one whole
-  screen plus at most one crop per state, desktop and phone. Prefer a
+  screen plus at most one crop per state, desktop and phone; a before/after
+  pair of the same view counts as one. Prefer a
   `locator.screenshot` to a full page when the question is local.
 - Candles, lines and price-axis labels are drawn on a canvas: only a picture
   shows them. Toolbar, dock and table chrome is DOM: check it in the test

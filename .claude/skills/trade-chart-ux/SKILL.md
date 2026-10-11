@@ -61,8 +61,9 @@ invented one, and defend existing decisions that are already good.
    what must not change. State
    assumptions instead of asking when the defaults are reasonable.
 2. **Look first.** One whole-screen picture plus at most one crop of the
-   problem area per state: the realistic-candle test picture for charts,
-   the UX sandbox for real sessions and interaction. Then read the source
+   problem area per state: the realistic-candle test picture for charts
+   (or the sandbox if browser tests cannot run), the UX sandbox for real
+   sessions and interaction. Then read the source
    for what you saw.
 3. **First glance.** What draws the eye first, second, third — and what
    should for this task.
@@ -123,7 +124,9 @@ can feel on the real trackpad (`references/gesture-lens.md`).
 
 ## Report
 
-Keep it short; skip sections with nothing in them.
+Keep it short; skip sections with nothing in them. A narrow question (one
+screen, one fix) gets the verdict, the findings that answer it and the
+next decision — not the full form.
 
 1. **Verdict** — 2–3 sentences: biggest obstacle, what works, what to protect.
 2. **Coverage** — commit, environment and data, viewports, pictures taken,
@@ -140,7 +143,8 @@ hard for them to judge.
 
 ## Handoff
 
-For another agent, use the brief in `docs/agent/delegation.md` (The brief)
-and add: baseline picture paths, viewports and data state, the
+For another agent, use the brief in `docs/agent/delegation.md` (The brief).
+With no roadmap item, CONTRACT is the user's request plus this audit's
+acceptance criteria; VERIFY is the UI gate above, then the full suite. Add: baseline picture paths, viewports and data state, the
 picture/DOM acceptance criteria, the e2e spec that will hold the new
 screenshots, and the trading-meaning invariants that the change touches.
