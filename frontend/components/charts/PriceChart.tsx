@@ -4,8 +4,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
-import { COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
 import { newsLabel, newsMarks, newsTip } from "@/lib/newsMarkers";
 import type { NewsMark } from "@/lib/newsMarkers";
@@ -24,14 +24,15 @@ import SelectionBar from "./SelectionBar";
 import ToolbarMenu from "./ToolbarMenu";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
+import { ZOOM_SPEEDS, readZoomSpeed } from "@/lib/zoomSpeed";
 
-const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
+const OVERLAYS = ["ema9", "ema20", "ema50", "ema200", "vwap"] as const;
 const tickFormats = {
   [TickMarkType.Year]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric" }),
   [TickMarkType.Month]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short" }),
   [TickMarkType.DayOfMonth]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }),
 };
-type Overlay = keyof typeof COLORS;
+type Overlay = typeof OVERLAYS[number];
 const MIN_BAR_SPACING = 2;
 const NO_DRAWINGS: Drawing[] = [];
 const NO_ALERTS: AlertMark[] = [];
@@ -49,6 +50,8 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
 }
 /** The range bands' VWAP bands (C2.7): VWAP plus and minus one and two of the session's standard deviations. */
 const VWAP_BANDS = [2, 1, -1, -2] as const;
+/** A VWAP band is the VWAP color at a faint alpha, the nearer bands stronger. */
+const bandColor = (vwap: string, k: number) => vwap + (Math.abs(k) === 1 ? "70" : "45");
 type VwapBand = typeof VWAP_BANDS[number];
 function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
   const b = bars[index];
@@ -101,8 +104,16 @@ const SECOND_TEXT: Partial<Record<Tool, string>> = { trend: "Click the second po
 /** A finger held this long without moving opens the chart menu (C1.3); moving further than `HOLD_SLOP` first is a pan or a crosshair scrub. */
 const LONG_PRESS = 500;
 const HOLD_SLOP = 10;
-/** How far above its candle's high a news marker (and the stack under it) can sit, for a tap to count as on it. */
-const NEWS_REACH = 56;
+/**
+ * Room for the candles: the price scale leaves this fraction of the pane above and below the candles, and volume is a thin strip along the
+ * bottom (drawn from `VOLUME_TOP` down, a little under the lowest candles, faint enough to read through) instead of a band the candles must clear.
+ */
+const CANDLE_MARGINS = { top: 0.10, bottom: 0.12 };
+const VOLUME_TOP = 0.88;
+/** A news marker's centre floats this many pixels above its candle's high: clear of the candle and of a fill arrow on it, and never part of the price scale's fit. */
+const NEWS_LIFT_PX = 26;
+/** How far from a news marker's centre a tap still counts as on it. */
+const NEWS_REACH = 24;
 /** A jump to an item drawn before the loaded candles (C1.4) loads at most this many older pages, and gives up after this long. */
 const JUMP_PAGES = 20;
 const JUMP_MS = 20_000;
@@ -131,13 +142,15 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: SessionShade; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; news: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  /** The studies' line colors (the user's choices over the defaults). */
+  colors?: Record<ColorKey, string>;
   /**
    * A smaller chart's own studies, from its header menu, already in `indicators`; null follows the workspace's,
    * slimmed while the chart is compact. `onStudies` sets them (null: follow again); `studiesHidden` is the Indicators group hidden everywhere.
@@ -210,6 +223,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onFill?(id: string): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const colorsRef = useRef(colors);
   const box = useRef<HTMLElement>(null);
   // A smaller chart under `COMPACT_PANEL` is compact; the ref is read where the chart opens or resets its view.
   const [compact, setCompact] = useState(false);
@@ -246,6 +260,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   // The news markers drawn, by marker id, for hover headlines and clicks (T3.5). A tap on a phone pins the popover, which opens the News tab from its button.
   const newsRef = useRef<NewsMark[]>([]);
   const newsById = useRef(new Map<string, NewsMark>());
+  // Dragging the price axis turns the price scale's automatic fit off (the candles can then leave the pane); the Auto chip turns it back on.
+  const [manualScale, setManualScale] = useState<{ top: number } | null>(null);
+  const autoScale = useRef<() => void>(() => {});
+  const newsPriceRef = useRef(new Map<string, number>());
+  const placeNewsRef = useRef<() => void>(() => {});
   const [newsOpen, setNewsOpen] = useState<{ mark: NewsMark; x: number; y: number; width: number; height: number; pinned: boolean } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
@@ -284,7 +303,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
       // entireTextOnly: a price cut off at a pane's edge is left out rather than printed against the next pane's.
-      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 }, entireTextOnly: true },
+      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: CANDLE_MARGINS.top, bottom: CANDLE_MARGINS.bottom }, entireTextOnly: true },
       timeScale: { borderColor: "#263141", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
@@ -293,13 +312,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     });
     const candles = chart.addSeries(CandlestickSeries, { upColor: "#2bc9a4", downColor: "#ee617a", wickUpColor: "#2bc9a4", wickDownColor: "#ee617a", borderVisible: false });
     const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    volume.priceScale().applyOptions({ scaleMargins: { top: VOLUME_TOP, bottom: 0 } });
     const lines = {} as Bundle["lines"];
-    for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    for (const name of OVERLAYS) lines[name] = chart.addSeries(LineSeries, { color: colorsRef.current[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const bands = {} as Bundle["bands"];
-    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: Math.abs(k) === 1 ? "#f5e6a170" : "#f5e6a145", lineWidth: 1,
+    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: bandColor(colorsRef.current.vwap, k), lineWidth: 1,
       lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     const markers = createSeriesMarkers(candles, []);
+    // News markers are their own set, and the scale ignores them: a story far above the candles is clipped, never a reason to shrink them.
+    const news = createSeriesMarkers(candles, [], { autoScale: false });
     const shade = new SessionShade(() => barsRef.current);
     candles.attachPrimitive(shade);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
@@ -309,7 +330,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     candles.attachPrimitive(autoLayer);
     const bells = new AlertLayer();
     candles.attachPrimitive(bells);
-    bundle.current = { chart, candles, volume, shade, lines, bands, markers, layer, auto: autoLayer, bells, frame: "" };
+    bundle.current = { chart, candles, volume, shade, lines, bands, markers, news, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
@@ -579,17 +600,30 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("touchend", onTouchEnd, true);
     element.addEventListener("touchcancel", onTouchEnd, true);
     element.addEventListener("contextmenu", onContextMenu, true);
+    // lightweight-charts zooms by deltaY / 100 per wheel event with no speed option, so a trackpad's small deltas crawl.
+    // Re-send the event with deltaY scaled by this device's Zoom speed; deltaX (the pan) and the cursor anchor are untouched.
+    const scaled = new WeakSet<Event>();
+    const onWheel = (event: WheelEvent) => {
+      const factor = ZOOM_SPEEDS[readZoomSpeed()];
+      if (scaled.has(event) || factor === 1 || event.deltaY === 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const again = new WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, view: window, clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+        deltaX: event.deltaX, deltaY: event.deltaY * factor, deltaZ: event.deltaZ, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey });
+      scaled.add(again);
+      (event.target as Element).dispatchEvent(again);
+    };
+    element.addEventListener("wheel", onWheel, { capture: true, passive: false });
     const unpin = () => { pinnedLive.current = false; };
     for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
     const newsAt = (x: number, y: number, slop: number) => {
       let best: { mark: NewsMark; dx: number } | undefined;
       for (const mark of newsRef.current) {
-        const bar = barAt(barsRef.current, mark.time);
+        const price = newsPriceRef.current.get(mark.id);
         const left = chart.timeScale().timeToCoordinate(mark.time as UTCTimestamp);
-        const top = bar ? candles.priceToCoordinate(bar.high) : null;
-        if (left === null || top === null) continue;
+        const at = price === undefined ? null : candles.priceToCoordinate(price);
+        if (left === null || at === null) continue;
         const dx = Math.abs(left - x);
-        if (dx > slop || y < top - NEWS_REACH || y > top + 6) continue;
+        if (dx > slop || Math.abs(y - at) > NEWS_REACH) continue;
         if (!best || dx < best.dx) best = { mark, dx };
       }
       return best?.mark;
@@ -730,9 +764,45 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       tryJump();
     });
     const stopSnapshot = commands.provideSnapshot(id, () => barsRef.current.length ? chart.takeScreenshot() : null);
+    // Whether the candle pane's price scale still fits itself: read after anything that can change it (a drag, the wheel, a double click, a reset, a jump).
+    let disposed = false;
+    const syncScale = () => !disposed && setManualScale((now) => {
+      if (candles.priceScale().options().autoScale) return now ? null : now;
+      const top = Math.max(0, (chart.panes()[0]?.getHeight() ?? 0) - 22);
+      return now && now.top === top ? now : { top };
+    });
+    // News markers sit a fixed number of pixels above their candle's high, so their price is worked out from where the scale is now,
+    // and again after the scale settles or the zoom changes. They are a separate set the price scale ignores: one far above is clipped.
+    const placeNews = () => {
+      if (disposed) return;
+      const [high, low] = [candles.coordinateToPrice(0), candles.coordinateToPrice(100)];
+      const lift = high === null || low === null ? 0 : Math.abs(high - low) / 100 * NEWS_LIFT_PX;
+      const stories = newsRef.current.flatMap((m) => {
+        const bar = barAt(barsRef.current, m.time);
+        if (!bar || !lift) return [];
+        newsPriceRef.current.set(m.id, bar.high + lift);
+        return [{ time: m.time as UTCTimestamp, position: "atPriceMiddle" as const, price: bar.high + lift, shape: "square" as const, size: 0.5, color: "#94a3b8", text: newsLabel(m), id: m.id }];
+      });
+      news.setMarkers(stories);
+    };
+    placeNewsRef.current = placeNews;
+    let newsTimer = 0;
+    const replaceNews = () => { window.clearTimeout(newsTimer); newsTimer = window.setTimeout(placeNews, 120); };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(replaceNews);
+    const afterScale = () => { window.setTimeout(syncScale, 0); window.setTimeout(syncScale, 120); replaceNews(); };
+    autoScale.current = () => { candles.priceScale().applyOptions({ autoScale: true }); syncScale(); };
+    for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.addEventListener(type, afterScale, { capture: true, passive: true });
+    const scaleWatch = new ResizeObserver(syncScale);
+    scaleWatch.observe(element);
+    const stopScale = commands.listen(afterScale);
+    const stopScaleJump = commands.listenJump(afterScale);
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
     return () => {
+      disposed = true;
+      for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.removeEventListener(type, afterScale, true);
+      window.clearTimeout(newsTimer); chart.timeScale().unsubscribeVisibleLogicalRangeChange(replaceNews); placeNewsRef.current = () => {};
+      scaleWatch.disconnect(); stopScale(); stopScaleJump(); autoScale.current = () => {};
       stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
       element.removeEventListener("pointerleave", releasePointer);
@@ -740,7 +810,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
-      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
+      element.removeEventListener("wheel", onWheel, true);
+      markers.detach(); news.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
@@ -749,13 +820,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const current = bundle.current;
     if (!current || indicators.rsi === !!current.rsi) return;
     if (current.rsi) { current.chart.removeSeries(current.rsi); current.rsi = undefined; return; }
-    const rsi = current.chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
+    const rsi = current.chart.addSeries(LineSeries, { color: colorsRef.current.rsi, lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
     // Keep 100 and 0 clear of the divider, so they never sit against the price pane's bottom label.
     rsi.priceScale().applyOptions({ scaleMargins: { top: 0.24, bottom: 0.18 } });
     rsi.createPriceLine({ price: 70, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
     rsi.createPriceLine({ price: 30, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
-    current.chart.panes()[1].setHeight(main ? 85 : 60);
+    current.chart.panes()[1].setHeight(main ? 64 : 60);
     rsi.setData(barsRef.current.map(rsiPoint));
     current.rsi = rsi;
   }, [indicators.rsi, main]);
@@ -798,13 +869,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // follows the live edge only when the user is already looking at it.
       const last = bars.length - 1;
       if (change === "append") {
-        for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+        for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last - 1, name));
         for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last - 1, k));
       }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
       current.shade.update();
-      for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
+      for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last, name));
       for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
       return chartCommitted(symbol, live.store.get(symbol).ticks.at(-1), main);
@@ -822,7 +893,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     current.candles.setData(bars.map(candlePoint));
     current.volume.setData(bars.map(volumePoint));
     current.shade.update();
-    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
+    for (const name of OVERLAYS) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
     for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
@@ -842,8 +913,17 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const current = bundle.current;
     if (!current) return;
     current.volume.applyOptions({ visible: indicators.volume });
-    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
+    for (const name of OVERLAYS) current.lines[name].applyOptions({ visible: indicators[name] });
   }, [indicators]);
+  // A chosen color reaches the lines, the VWAP bands (at their own alpha) and the RSI line in place.
+  useEffect(() => {
+    colorsRef.current = colors;
+    const current = bundle.current;
+    if (!current) return;
+    for (const name of OVERLAYS) current.lines[name].applyOptions({ color: colors[name] });
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ color: bandColor(colors.vwap, k) });
+    current.rsi?.applyOptions({ color: colors.rsi });
+  }, [colors]);
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
@@ -866,17 +946,24 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const fills = indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
       position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
       color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : [];
-    const stories = newsRef.current.map((m) => ({ time: m.time as UTCTimestamp, position: "aboveBar" as const, shape: "square" as const,
-      size: 0.8, color: "#cbd5e1", text: newsLabel(m), id: m.id }));
-    bundle.current?.markers.setMarkers([...fills, ...reports, ...stories].sort((a, b) => a.time - b.time));
+    bundle.current?.markers.setMarkers([...fills, ...reports].sort((a, b) => a.time - b.time));
     fillMarks.current = new Map(indicators.fills ? (markers ?? []).map((m) => [m.id, { label: m.label, time: m.time }]) : []);
-    newsById.current = new Map(newsRef.current.map((m) => [m.id, m]));
     setFillTip(null);
-    if (container.current) {
-      container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
-      container.current.dataset.news = newsRef.current.map((m) => `${m.time}:${m.articles.length}`).join(",");
-    }
-  }, [markers, earningsKey, newsKey, pending, indicators.fills, main]);
+    if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
+  }, [markers, earningsKey, pending, indicators.fills, main]);
+  // The main chart's news markers: placed by `placeNews` (above), which needs the price scale, so a tick that changes nothing here re-places them in place.
+  const barsKey = panel?.bars.length ? `${panel.bars.length}:${panel.bars.at(-1)!.time}:${panel.bars.at(-1)!.high}:${panel.bars.at(-1)!.low}` : "";
+  useEffect(() => {
+    if (pending) return;
+    newsById.current = new Map(marked.map((m) => [m.id, m]));
+    newsPriceRef.current = new Map();
+    if (container.current) container.current.dataset.news = marked.map((m) => `${m.time}:${m.articles.length}`).join(",");
+    placeNewsRef.current();
+    // The scale settles on new candles over the next frames.
+    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(() => placeNewsRef.current()));
+    return () => window.cancelAnimationFrame(frame);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the keys stand for `marked` and the candles
+  }, [newsKey, barsKey, pending, main]);
   // A popover closes when its markers change, not when a poll rebuilds the fill list under it.
   useEffect(() => { queueMicrotask(() => setNewsOpen(null)); }, [newsKey, pending]);
 
@@ -1003,14 +1090,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         </div>
         {!main && timer}
         {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
-          {indicators.vwap && <span style={{ color: COLORS.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+          {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
           {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
           {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
-          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
+          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
           {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
-            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: COLORS[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
+            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
             <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
-              {emas.map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
+              {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
           </span>}
           {rvolValue}
           {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
@@ -1020,6 +1107,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {/* TradingView's "A": shown only once the price axis has been dragged (the candles may be off the pane); one click fits the candles again. */}
+        {manualScale && !pending && <button type="button" data-testid={`${id}-price-auto`} aria-label="Auto price scale: fit the candles again" title="Fit the price scale to the candles"
+          onClick={() => autoScale.current()} style={{ top: manualScale.top }}
+          className="absolute right-1 z-10 h-[18px] rounded border border-sky-400/50 bg-[#141b26]/90 px-1.5 text-[10px] font-semibold leading-none text-sky-300 hover:bg-sky-400/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-sky-400">Auto</button>}
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
         {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
         {cardZone && card && compact && !card.pinned ? <div role="tooltip" aria-label="Level" className="pointer-events-none absolute left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-0.5 font-mono text-[10px] text-slate-200 shadow-lg"

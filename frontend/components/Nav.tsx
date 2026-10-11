@@ -25,6 +25,7 @@ const navItems = [
   { href: "/signals", label: "Signals", icon: Radio },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
+  { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
   { href: "/research/ai-buildout", label: "Research", icon: FlaskConical },
 ];
 

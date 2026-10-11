@@ -38,7 +38,7 @@ Selected R3 adds the owner `/research-studio` workspace and two owner-only
 forwarding routes to a manually started bearer-authenticated loopback research
 sidecar. Cache preparation and R2 computation remain outside the app API/sync
 process. No deployment unit or startup hook is installed; see the
-[R3 contract](research-studio-r3.md).
+[R3 contract](research-studio-r3.md). [R4](research-studio-r4.md) adds frozen-parent comparisons in a finite child and append-only conclusions within the same research-owned store, preserving the R2 schema and private forwarding boundary.
 
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.

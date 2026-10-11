@@ -242,6 +242,23 @@ export const STUDIES = ["ema9", "ema20", "ema50", "ema200", "vwap", "volume", "r
 export const shownIndicators = (indicators: Indicators, groupHidden: boolean): Indicators =>
   groupHidden ? { ...indicators, ...Object.fromEntries(STUDIES.map((key) => [key, false])) } : indicators;
 export type Study = typeof STUDIES[number];
+/** The line colors of the studies that draw one; the Indicators menu lets each be changed. */
+export const INDICATOR_COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1", rsi: "#b494f5" } as const;
+export type ColorKey = keyof typeof INDICATOR_COLORS;
+/** Only the colors that differ from `INDICATOR_COLORS`, so a changed default still reaches a chart that never chose. */
+export type IndicatorColors = Partial<Record<ColorKey, string>>;
+/** Saved colors from outside this code: known studies with a #rrggbb value that is not already the default. */
+export function cleanIndicatorColors(value: unknown): IndicatorColors {
+  const out: IndicatorColors = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const key of Object.keys(INDICATOR_COLORS) as ColorKey[]) {
+    const color = (value as Record<string, unknown>)[key];
+    if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color) && color.toLowerCase() !== INDICATOR_COLORS[key]) out[key] = color.toLowerCase();
+  }
+  return out;
+}
+/** Every study's color: the chosen one, else its default. */
+export const indicatorColors = (chosen: IndicatorColors): Record<ColorKey, string> => ({ ...INDICATOR_COLORS, ...chosen });
 export const INDICATOR_NAMES: Record<keyof Indicators, string> = { ema9: "EMA 9", ema20: "EMA 20", ema50: "EMA 50", ema200: "EMA 200", vwap: "RTH VWAP", volume: "Volume", rsi: "RSI 14", fills: "My fills" };
 /** A smaller chart's own studies, chosen from its header; null follows the workspace's. */
 export type PanelStudies = Record<Study, boolean>;
@@ -358,7 +375,9 @@ export type ChartSettings = {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: "regular" | "extended";
   /** Per panel, aligned with `intervals`: a symbol the panel holds, or null to follow `symbol`. The main panel always follows. */
   panelSymbols: (string | null)[];
-  layout: "multi" | "single"; indicators: Indicators; levels: Record<string, PriceLevel[]>;
+  layout: "multi" | "single"; indicators: Indicators;
+  /** Line colors the user chose for studies, shared with every device; empty means all defaults. */
+  indicatorColors: IndicatorColors; levels: Record<string, PriceLevel[]>;
   /** Rays, trend lines, zones and notes per symbol (C1.2). */
   drawings: Record<string, Drawing[]>;
   /** The style each drawing tool last used, so the next one starts there. */
@@ -427,7 +446,7 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
-  indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
+  indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true }, indicatorColors: {},
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
   optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
   // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
@@ -472,6 +491,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       session: value.session === "regular" ? "regular" : "extended",
       layout: value.layout === "single" ? "single" : "multi",
       indicators: Object.fromEntries(Object.entries(DEFAULT_SETTINGS.indicators).map(([key, fallback]) => [key, typeof value.indicators?.[key] === "boolean" ? value.indicators[key] : fallback])) as Indicators,
+      indicatorColors: cleanIndicatorColors(value.indicatorColors),
       levels,
       drawings: cleanDrawings(value.drawings, validSymbol),
       toolStyles: cleanToolStyles(value.toolStyles),
