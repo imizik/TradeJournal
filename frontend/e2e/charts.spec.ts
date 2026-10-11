@@ -4147,7 +4147,7 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   const toolbar = page.locator("header[aria-label='Chart toolbar']");
   expect(await toolbar.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   expect((await fit(page)).pageWidth).toBeLessThanOrEqual(1024);
-  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Plan trade", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder"]) {
+  for (const name of ["Chart symbol", "Indicators", "Layouts", "Show single chart", "Link time ranges", "Plan trade", "Pause chart updates", "Refresh charts", "Keyboard shortcuts", "Enter full-screen charts", "Watchlist", "Layers", "Strike ladder", "Level 2"]) {
     const control = name === "Chart symbol" ? page.getByLabel(name) : page.getByRole("button", { name, exact: name !== "Layouts" });
     await expect(control.first(), name).toBeInViewport();
   }
@@ -4170,8 +4170,8 @@ test("the toolbar fits a 1024px window, its menus close on Escape before anythin
   await clickAway(page);
   await expect(page.getByRole("group", { name: "Chart indicators" })).toHaveCount(0);
 
-  // Focus order: the toolbar's last control (the strike ladder's dock tab, C4.5), then the tool rail, then the charts, with the dock last.
-  await page.getByRole("button", { name: "Strike ladder", exact: true }).focus();
+  // Focus order: the toolbar's last control (the Level 2 dock tab, after the strike ladder's, C4.5), then the tool rail, then the charts, with the dock last.
+  await page.getByRole("button", { name: "Level 2", exact: true }).focus();
   await page.keyboard.press("Tab");
   await expect(tool(page, "price level")).toBeFocused(); // Undo and Redo are disabled, so the first tool is next
   await page.getByRole("button", { name: "Magnet" }).focus();
@@ -6565,4 +6565,169 @@ test("indicator colors change the lines and legend, persist, reject bad values a
   await expect(panel).toBeInViewport({ ratio: 1 });
   await panel.getByRole("button", { name: "Reset colors" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: test.info().outputPath("indicator-colors-phone.png"), animations: "disabled" });
+});
+
+// ---- Level 2 dock tab: owner-only, manual, NVDA only. Provider responses are synthetic; nothing here proves live behavior or entitlements. ----
+const L2_PATH = "**/api/level2-lab/session";
+const l2Book = [
+  { event: "status", phase: "authenticated" },
+  { event: "status", phase: "subscribed", kind: "order_book", code: 0 },
+  { event: "book", symbol: "US.NVDA", received_ms: 1791657000123, books: [{ exchange: "UNKNOWN", source_time_ms: null, estimated_age_ms: null, order_volume_precision: 3,
+    bids: [{ price: 123.4567, volume: 100.25, order_count: null, mpid: null }], asks: [] }] },
+  { event: "summary", report: { authentication: { status: "success", code: 0 }, status: "completed", subscriptions: { order_book: { status: "success", code: 0 } }, message_counts: { ORDER_BOOK: 1 }, unsubscribe: { status: "success", code: 0 }, closed: true } },
+].map((record) => JSON.stringify(record)).join("\n") + "\n";
+type L2Window = Window & { l2Posts: { aborted: boolean }[] };
+/** Records every Level 2 POST and whether its request was aborted; `hold` keeps the response open so the session stays active. */
+async function level2Service(page: Page, options: { enabled?: boolean; hold?: boolean } = {}) {
+  const calls = { get: 0, post: 0 };
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    (window as unknown as L2Window).l2Posts = [];
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if ((init?.method ?? "GET").toUpperCase() === "POST" && url.includes("/api/level2-lab/session") && init?.signal) {
+        const record = { aborted: init.signal.aborted };
+        (window as unknown as L2Window).l2Posts.push(record);
+        init.signal.addEventListener("abort", () => { record.aborted = true; }, { once: true });
+      }
+      return original(input, init);
+    }) as typeof window.fetch;
+  });
+  await page.route(L2_PATH, async (route) => {
+    if (route.request().method() === "GET") { calls.get += 1; return route.fulfill({ json: { enabled: options.enabled ?? true } }); }
+    calls.post += 1;
+    if (options.hold) await new Promise((resolve) => setTimeout(resolve, 2500));
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: options.hold ? "" : l2Book }).catch(() => undefined);
+  });
+  return calls;
+}
+const l2Aborted = (page: Page) => page.evaluate(() => (window as unknown as L2Window).l2Posts.map((post) => post.aborted));
+const l2Tab = (page: Page) => page.getByRole("button", { name: "Level 2", exact: true });
+const l2Connect = (page: Page) => page.getByRole("button", { name: "Connect for 30 seconds" });
+const setSymbol = async (page: Page, symbol: string) => { const input = page.getByLabel("Chart symbol"); await input.fill(symbol); await input.press("Enter"); };
+
+test("Level 2 opens in the dock without starting a session, shows a replaced latest book, and says NVDA only elsewhere", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByRole("region", { name: /NVDA .* chart/ })).toHaveCount(5);
+  expect(calls).toEqual({ get: 0, post: 0 }); // a closed Level 2 tab does not even check the service
+  await l2Tab(page).click();
+  const panel = sidePanel(page).getByTestId("live-depth-session");
+  await expect(l2Connect(page)).toBeEnabled();
+  expect(calls.post).toBe(0);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-idle-desktop.png") });
+  await l2Connect(page).click();
+  await expect(panel.getByText("Freshness unavailable")).toBeVisible();
+  await expect(panel.getByText("123.4567")).toBeVisible();
+  await expect(panel.getByText("Subscription: success · code 0").first()).toBeVisible();
+  expect(calls.post).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-book-desktop.png") });
+  // The dock's other tabs still work, and returning does not reconnect.
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(sidePanel(page).getByRole("region", { name: "Layers" })).toBeVisible();
+  await l2Tab(page).click();
+  await expect(l2Connect(page)).toBeEnabled();
+  await expect(panel.getByText("123.4567")).toHaveCount(0);
+  expect(calls.post).toBe(1);
+  // Another symbol: no provider traffic, no NVDA book under its name.
+  await setSymbol(page, "MRVL");
+  await expect(sidePanel(page).getByText("Level 2 depth supports NVDA only")).toBeVisible();
+  await expect(panel).toHaveCount(0);
+  expect(calls.post).toBe(1);
+});
+
+test("a saved Level 2 dock tab restores without a session, and a disabled service leaves Connect off", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page, { enabled: false });
+  await page.addInitScript(() => localStorage.setItem("tradejournal.charts.dock.v1", JSON.stringify({ open: true, tab: "level2" })));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await expect(page.getByText("Local live service is disabled.")).toBeVisible();
+  await expect(l2Connect(page)).toBeDisabled();
+  expect(calls.post).toBe(0);
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  expect(calls.post).toBe(0);
+});
+
+test("Level 2: closing the dock, switching tabs, switching symbol, hiding the page and leaving Charts each abort the session, with no reconnect", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page, { hold: true });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  const start = async () => { if (!(await l2Connect(page).isVisible())) await l2Tab(page).click(); await l2Connect(page).click(); await expect(page.getByRole("button", { name: "Session running…" })).toBeVisible(); };
+  await l2Tab(page).click();
+  await start();
+  await l2Tab(page).click(); // a second press closes the dock
+  await expect.poll(() => l2Aborted(page)).toEqual([true]);
+  await l2Tab(page).click(); // reopening shows a fresh, idle panel
+  await expect(l2Connect(page)).toBeEnabled();
+  expect(calls.post).toBe(1);
+  await start();
+  await page.getByRole("button", { name: "Layers", exact: true }).click(); // another tab
+  await expect.poll(() => l2Aborted(page)).toEqual([true, true]);
+  await l2Tab(page).click();
+  await start();
+  await setSymbol(page, "MRVL"); // another symbol
+  await expect.poll(() => l2Aborted(page)).toEqual([true, true, true]);
+  await setSymbol(page, "NVDA");
+  await expect(l2Connect(page)).toBeEnabled();
+  await start();
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect.poll(() => l2Aborted(page)).toEqual([true, true, true, true]);
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: false }); });
+  await page.reload();
+  await expect(l2Connect(page)).toBeEnabled(); // the dock restores open on Level 2 with no session
+  expect(calls.post).toBe(4);
+  await start();
+  await page.getByRole("link", { name: "Dashboard" }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect.poll(() => l2Aborted(page)).toEqual([true]); // the active request's signal was aborted on leaving Charts
+  await page.waitForTimeout(300);
+  expect(calls.post).toBe(5);
+});
+
+test("on a phone Level 2 is in the More menu as a sheet, with no page overflow", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/charts?symbol=NVDA");
+  await page.getByRole("button", { name: "More chart controls" }).click();
+  await page.getByRole("button", { name: "Level 2", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Level 2" });
+  await expect(sheet.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
+  expect(calls.post).toBe(0);
+  await sheet.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await expect(sheet.getByText("123.4567")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-book-phone.png") });
+  await sheet.getByRole("button", { name: "Close Level 2" }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
+test("Level 2 stays readable at the dock's minimum width and in full screen", async ({ page }) => {
+  await stub(page);
+  const calls = await level2Service(page);
+  const min = 200; // DOCK_WIDTH.min
+  await page.addInitScript((width) => {
+    localStorage.setItem("tradejournal.charts.dock.v1", JSON.stringify({ open: true, tab: "level2" }));
+    localStorage.setItem("tradejournal.charts.dock.width.v1", String(width));
+  }, min);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await l2Connect(page).click();
+  await expect(sidePanel(page).getByText("123.4567")).toBeVisible();
+  expect((await sidePanel(page).boundingBox())?.width).toBeLessThanOrEqual(min + 1);
+  expect(await sidePanel(page).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-min-width.png") });
+  await page.getByRole("button", { name: "Enter full-screen charts" }).click();
+  if (!(await sidePanel(page).isVisible())) await l2Tab(page).click();
+  await expect(l2Connect(page)).toBeEnabled();
+  await l2Connect(page).click();
+  await expect(sidePanel(page).getByText("123.4567")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({ path: test.info().outputPath("level2-dock-fullscreen.png") });
+  expect(calls.post).toBe(2);
 });

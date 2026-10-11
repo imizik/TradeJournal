@@ -139,7 +139,7 @@ with Session(engine) as db:
     await expect(panel).toContainText("Position checks cover Roth IRA · options only");
     await page.goto("/?type=option&sync=open");
     await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
-    expect(new URL(page.url()).search).toBe("?type=option");
+    await expect.poll(() => new URL(page.url()).search).toBe("?type=option"); // the sync flag is cleared just after the dialog opens
     expect(errors).toEqual([]);
   } finally {
     execFileSync(python, ["-c", `

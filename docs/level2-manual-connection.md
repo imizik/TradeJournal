@@ -35,6 +35,18 @@ contains bounded first/last diagnostic samples and total received counts.
 The live section does not create a heatmap/history. The existing heatmap uses
 invented replay data only. Reload starts without an active provider session.
 
+## Charts dock panel
+
+The owner's Charts dock has an optional **Level 2** tab (a phone reaches it from
+the More menu as a sheet). It follows the main chart's symbol: NVDA shows the
+same manual session as the lab (`LiveDepthSession`, compact layout); any other
+symbol shows an NVDA-only notice and makes no request. Assistants get no tab,
+and a saved Level 2 tab restores as the watchlist for them. The session lives
+only while the panel is mounted: closing the dock, switching tabs or symbols,
+hiding the page and leaving Charts abort it, and reopening shows an idle panel
+with an explicit Connect. Only the dock's open/tab choice is stored on the
+device; no depth data is. Browser checks use synthetic responses only.
+
 ## Fields and clocks
 
 - Price and volume retain provider numeric precision. Volume is labeled provider

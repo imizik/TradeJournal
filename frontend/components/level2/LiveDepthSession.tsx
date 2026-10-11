@@ -102,13 +102,15 @@ function BookTable({ book, side }: { book: LiveBook; side: "bids" | "asks" }) {
   return <table className="w-full table-fixed text-right text-xs tabular-nums" aria-label={`${side === "bids" ? "Bid" : "Ask"} levels`}>
     <thead className="text-muted-foreground"><tr><th className="py-1 text-left font-normal">Price</th><th className="font-normal">Provider volume*</th><th className="font-normal">Orders</th></tr></thead>
     <tbody>{levels.length ? levels.map((level, index) => <tr className="border-t border-border/50" key={`${side}-${index}`}>
-      <td className="py-1 text-left font-medium">{String(level.price)}</td>
-          <td>{String(level.volume)}</td><td>{level.order_count ?? "Unavailable"}</td>
+      <td className="py-1 text-left font-medium break-all">{String(level.price)}</td>
+          <td className="px-1 break-all">{String(level.volume)}</td><td className="break-words">{level.order_count ?? "Unavailable"}</td>
     </tr>) : <tr><td colSpan={3} className="py-2 text-left text-muted-foreground">No levels in this update</td></tr>}</tbody>
   </table>;
 }
 
-export default function LiveDepthSession() {
+/** `compact` adapts the same session to the Charts dock: stacked books, one column, no page heading. Parsing and cancellation are unchanged. */
+export default function LiveDepthSession({ compact = false }: { compact?: boolean }) {
+  const again = compact ? "Close and reopen this panel to start again." : "Reload to start again.";
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [availability, setAvailability] = useState<"checking" | "ready" | "unavailable">("checking");
   const [running, setRunning] = useState(false);
@@ -145,8 +147,8 @@ export default function LiveDepthSession() {
     setStarted(true);
     setRunning(false);
     setSessionPhase("closed");
-    setMessage("Session stopped. Any retained book is for inspection only. Reload to start again.");
-  }, []);
+    setMessage(`Session stopped. Any retained book is for inspection only. ${again}`);
+  }, [again]);
 
   useEffect(() => {
     const onVisibility = () => { if (document.hidden && abortRef.current) stop(); };
@@ -207,32 +209,18 @@ export default function LiveDepthSession() {
       }
       buffer += decoder.decode();
       if (buffer) consumeLine(buffer);
-      if (!controller.signal.aborted) setMessage(sawClosed ? "Session closed. Any retained book is for inspection only. Reload to start again." : "Session ended. Any retained book is for inspection only. Reload to start again.");
+      if (!controller.signal.aborted) setMessage(sawClosed ? `Session closed. Any retained book is for inspection only. ${again}` : `Session ended. Any retained book is for inspection only. ${again}`);
     } catch {
-      if (abortRef.current === controller) setMessage(controller.signal.aborted ? "Session timed out. Any retained book is for inspection only. Reload to start again." : "The local service connection ended. Reload to start again.");
+      if (abortRef.current === controller) setMessage(controller.signal.aborted ? `Session timed out. Any retained book is for inspection only. ${again}` : `The local service connection ended. ${again}`);
     } finally {
       window.clearTimeout(timeout);
       if (abortRef.current === controller) { abortRef.current = null; setRunning(false); }
     }
   };
 
-  return <section aria-labelledby="live-depth-title" className="space-y-3 rounded-lg border border-sky-400/30 bg-card p-4" data-testid="live-depth-session">
-    <div className="flex flex-wrap items-center gap-3">
-      <h2 id="live-depth-title" className="text-lg font-semibold">Manual provider session</h2>
-      <span className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">MANUAL · 30 SECONDS</span>
-    </div>
-    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. Latest order-book update only; no recording, history, saved metrics, or automatic reconnect.</p>
-    <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
-    {availability === "unavailable" && <p role="status" className="rounded border border-amber-400/40 p-2 text-sm text-amber-200">Local service is not enabled or unavailable. No provider connection was started.</p>}
-    {availability === "ready" && !enabled && <p role="status" className="rounded border border-muted p-2 text-sm text-muted-foreground">Local live service is disabled. No provider connection was started.</p>}
-    <div className="flex flex-wrap items-center gap-2">
-      <Button onClick={connect} disabled={availability !== "ready" || !enabled || running || started}>{running ? "Session running…" : started ? "Reload to start again" : "Connect for 30 seconds"}</Button>
-      <Button variant="outline" onClick={stop} disabled={!running}>Stop</Button>
-      <span role="status" aria-live="polite" className="text-sm text-muted-foreground">{message}</span>
-    </div>
-    {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}</p>}
-    {protocolError && <p role="status" className="text-xs text-amber-200">An invalid or oversized protocol line was ignored.</p>}
-    <div className="grid gap-3 sm:grid-cols-3" aria-label="Per-kind provider acknowledgements">
+  // Compact (dock) mode puts the latest book first so the depth is visible without scrolling past diagnostics.
+  const diagBlocks = <>
+    <div className={compact ? "grid gap-2" : "grid gap-3 sm:grid-cols-3"} aria-label="Per-kind provider acknowledgements">
       {KINDS.map(kind => {
         const status = statuses[kind];
         const countKind = kind.toUpperCase() as "QUOTE" | "ORDER_BOOK" | "TICKER";
@@ -251,7 +239,8 @@ export default function LiveDepthSession() {
       <p>Unsubscribe: {summary.unsubscribe?.status ?? "Unavailable"} · Closed: {summary.closed === undefined ? "Unavailable" : summary.closed ? "Yes" : "No"}</p>
       <p>No-message success does not confirm live delivery.</p>
     </div>}
-    {bookEvent && <div className="space-y-3 rounded border p-3" aria-label="Latest provider book">
+  </>;
+  const bookBlock = bookEvent && <div className="space-y-3 rounded border p-3" aria-label="Latest provider book">
       <div className="flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
         <span>Received: {displayTime(bookEvent.received_ms)} (local receive timestamp)</span>
         <span>Symbol: {bookEvent.symbol}</span>
@@ -268,12 +257,40 @@ export default function LiveDepthSession() {
           </div>
           <p className="text-xs text-muted-foreground">{book.bids.length} bid entries · {book.asks.length} ask entries</p>
           <p className="text-xs text-muted-foreground">Source time: {displayTime(book.source_time_ms)} · received separately above · provider volume precision: {book.order_volume_precision ?? "unavailable"}</p>
-          <div className="grid min-w-0 gap-4 md:grid-cols-2"><BookTable book={book} side="bids" /><BookTable book={book} side="asks" /></div>
+          <div className={compact ? "grid min-w-0 gap-3" : "grid min-w-0 gap-4 md:grid-cols-2"}><BookTable book={book} side="bids" /><BookTable book={book} side="asks" /></div>
           <p className="text-xs text-muted-foreground">* Provider volume units are unverified. Exchange is shown only when supplied by the provider; MPIDs are separate provider labels.</p>
           {mpids.length > 0 && <p className="text-xs text-muted-foreground">Reported MPIDs (not exchange evidence): {mpids.join(", ")}</p>}
           <p className="text-xs text-amber-200">Latest update is for inspection only; no current freshness is claimed.</p>
         </div>;
       })}
-    </div>}
+    </div>;
+
+  return <section aria-labelledby="live-depth-title" className={compact ? "min-w-0 space-y-2 border-b border-sky-400/20 p-3 text-slate-200" : "space-y-3 rounded-lg border border-sky-400/30 bg-card p-4"} data-testid="live-depth-session" data-compact={compact || undefined}>
+    <div className="flex flex-wrap items-center gap-3">
+      <h2 id="live-depth-title" className={compact ? "text-xs font-medium" : "text-lg font-semibold"}>Manual provider session</h2>
+      <span className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">MANUAL · 30 SECONDS</span>
+    </div>
+    {compact
+      ? <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">About this session (US.NVDA, 30 seconds, manual)</summary>
+        <div className="space-y-1 pt-1">
+    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. Latest order-book update only; no recording, history, saved metrics, or automatic reconnect.</p>
+    <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
+        </div></details>
+      : <>
+    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. Latest order-book update only; no recording, history, saved metrics, or automatic reconnect.</p>
+    <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
+      </>}
+    {availability === "unavailable" && <p role="status" className="rounded border border-amber-400/40 p-2 text-sm text-amber-200">Local service is not enabled or unavailable. No provider connection was started.</p>}
+    {availability === "ready" && !enabled && <p role="status" className="rounded border border-muted p-2 text-sm text-muted-foreground">Local live service is disabled. No provider connection was started.</p>}
+    <div className="flex flex-wrap items-center gap-2">
+      <Button size={compact ? "sm" : undefined} onClick={connect} disabled={availability !== "ready" || !enabled || running || started}>{running ? "Session running…" : started ? (compact ? "Reopen to start again" : "Reload to start again") : "Connect for 30 seconds"}</Button>
+      <Button size={compact ? "sm" : undefined} variant="outline" onClick={stop} disabled={!running}>Stop</Button>
+      <span role="status" aria-live="polite" className="text-sm text-muted-foreground">{message}</span>
+    </div>
+    {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}</p>}
+    {protocolError && <p role="status" className="text-xs text-amber-200">An invalid or oversized protocol line was ignored.</p>}
+    {compact && bookBlock}
+    {diagBlocks}
+    {!compact && bookBlock}
   </section>;
 }
