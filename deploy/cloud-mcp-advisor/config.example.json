@@ -1,0 +1,21 @@
+{
+  "enabled": false,
+  "advisor_only": true,
+  "issuer_url": "https://advisor-identity.example.test/",
+  "resource_url": "https://advisor.example.test/advisor/mcp",
+  "jwks_url": "https://advisor-identity.example.test/.well-known/jwks.json",
+  "jwks_file": "/etc/tradejournal-advisor/public-keys.json",
+  "client_id": "REQUIRES-SEPARATE-APPROVAL",
+  "client_claim": "client_id",
+  "backend_socket": "/run/tradejournal-advisor/backend.sock",
+  "profiles": [{
+    "subject": "REQUIRES-SEPARATE-APPROVAL",
+    "id": "advisor_00000000-0000-0000-0000-000000000001",
+    "enabled": false,
+    "binding_version": 1,
+    "assignment_id": "00000000-0000-0000-0000-000000000002",
+    "run_id": "00000000-0000-0000-0000-000000000003",
+    "packet_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "request_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }]
+}
