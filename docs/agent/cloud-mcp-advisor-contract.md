@@ -18,7 +18,7 @@ A separate strict `advisor_only=true` configuration binds exactly one advisor su
 
 Configuration `enabled` and profile `enabled` are read on every token verification. Identity, binding version, assignment/run/digests, resource and socket changes require a deliberate restart and refuse the current process. The persisted assignment's enabled state and original expiry independently apply to every request read, receipt read and save, including exact retries. Profile-only discovery returns no assigned content. Revoking write scope alone preserves authorized active request reads; revoking the profile or assignment refuses both. Existing owner GET recovery after assignment expiry/revocation remains available.
 
-The backend database filename is a separate startup argument, absent from the adapter's OAuth configuration. Startup requires an existing private isolated SQLite `.db`, current migration head and invented fixture assignment. The backend executable re-execs before importing application engines with dotenv disabled and no ambient provider/model/database credentials. Both serving factories reject those credentials; the adapter has no database role. Socket file permissions, process mounts/UIDs and native namespace restrictions must be reviewed before any later activation. Source-only isolation does not establish those operating-system controls.
+The backend database filename is a separate startup argument, absent from the adapter's OAuth configuration. Startup requires an existing private isolated SQLite file with the .db suffix, current migration head and invented fixture assignment. The backend executable re-execs before importing application engines with dotenv disabled and no ambient provider/model/database credentials. Both serving factories reject those credentials; the adapter has no database role. Socket file permissions, process mounts/UIDs and native namespace restrictions must be reviewed before any later activation. Source-only isolation does not establish those operating-system controls.
 
 ## Ledger, provenance and recovery
 
@@ -32,7 +32,7 @@ After any uncertain save, read `get_advisor_request`, compare the complete recei
 
 ## Dormant setup, replacement and rollback gates
 
-This slice supplies source and offline tests only. No units, reverse proxy, public listener, grants, key refresh, credentials, connector registration or normal deployment packaging are added. It starts nothing on merge. New fixture preparation, actual invented-packet transmission and signed-in Jo acceptance need the owner's separate approval.
+This slice adds dormant source and offline tests. The existing `deploy/build.py` archives tracked backend source and copies it into normal release artifacts, so the three advisor modules ship through that path. No advisor units, socket mounts, reverse-proxy routes, public listener, grants, key refresh, credentials or connector registration are added; normal releases do not start or activate this advisor entrance. The repository's normal release deployment still applies. New fixture preparation, actual invented-packet transmission and signed-in Jo acceptance need the owner's separate approval.
 
 For later review, a disabled configuration has this shape (placeholders are not working grants):
 
