@@ -42,6 +42,8 @@ MACRO_FILE = Path(__file__).resolve().parents[1] / "data" / "macro_calendar.json
 HEADLINES = 5
 EARNINGS_WINDOW = 7
 WALL_BAND = 0.12  # strikes within 12% of the price
+WALL_MAX_AGE_DAYS = 5  # an older snapshot no longer describes the day
+SIDES = {"c": "call", "call": "call", "p": "put", "put": "put"}  # the recorder stores "C" / "P"
 # Semiconductors trade with SMH more than with their Morningstar sector's ETF.
 SEMIS = {"NVDA", "AMD", "AVGO", "MU", "INTC", "QCOM", "TSM", "ARM", "MRVL", "SMCI", "AMAT", "LRCX", "KLAC", "TXN", "ON",
          "MCHP", "ADI", "NXPI", "ASML", "SNDK", "WDC", "STX", "ALAB", "CRDO", "COHR", "MPWR", "TER", "ENTG", "GFS", "SWKS"}
@@ -62,6 +64,7 @@ def build(session: Session, day: date, trades: list[Trade]) -> dict:
             value = read()
         except Exception as exc:  # one source failing must not cost the review
             log.warning("Review context %s failed for %s", name, day, exc_info=True)
+            session.rollback()  # build only reads; a failed statement must not leave the transaction aborted for the save
             gaps.append(f"{gap} ({type(exc).__name__})")
             return None
         if value in (None, {}, []):
@@ -71,15 +74,28 @@ def build(session: Session, day: date, trades: list[Trade]) -> dict:
 
     context["plans"] = part("plans", lambda: plans(session, day, trades), "No captured trade plans for this day")
     context["tags"] = part("tags", lambda: tags(session, trades), "No tags on these trades")
-    daily = part("daily bars", lambda: daily_moves(day, [*MARKET, *underlyings, *sector_etfs(underlyings).values()]),
+    stocks = [symbol for symbol in underlyings if symbol not in FUNDS]
+    facts = part("tradier", lambda: company_facts(stocks, day), "Sector and earnings unavailable (Tradier)") or {} if stocks else {}
+    for symbol in stocks:
+        if symbol not in SEMIS and facts.get(symbol, {}).get("sector_state") not in ("ready", "none"):
+            gaps.append(f"Sector unavailable for {symbol}, so its move against its sector is unknown")
+        if facts.get(symbol, {}).get("earnings", {}).get("state") not in ("ready", "none"):
+            gaps.append(f"Earnings dates unavailable for {symbol}")
+    etfs = sector_etfs(underlyings, facts)
+    daily = part("daily bars", lambda: daily_moves(day, [*MARKET, *underlyings, *etfs.values()]),
                  "Daily bars unavailable, so market and relative moves are unknown") or {}
+    now = datetime.now(ET)
+    partial = day == now.date() and now.time() < time(16, 30)
+    if partial:
+        gaps.append(f"Reviewed during the session: market and ticker numbers are intraday as of {now:%H:%M}, not the day's close")
     context["market"] = {
+        "partial_as_of": now.strftime("%H:%M") if partial else None,
         "indexes": {symbol: daily[symbol] for symbol in MARKET if symbol in daily} or None,
         "intraday": part("intraday", lambda: intraday_shape(day), "SPY/QQQ minute bars unavailable, so the market's intraday shape is unknown"),
         "volatility": part("vix", lambda: gauges(day), "VIX and 10-year yield unavailable"),
     }
     context["macro"] = part("macro", lambda: macro_events(day), "Macro calendar unavailable for this day")
-    context["tickers"] = part("tickers", lambda: ticker_context(session, day, underlyings, daily, gaps), "No per-ticker context")
+    context["tickers"] = part("tickers", lambda: ticker_context(session, day, underlyings, daily, etfs, facts, gaps), "No per-ticker context")
     return context
 
 
@@ -108,6 +124,10 @@ def plans(session: Session, day: date, trades: list[Trade]) -> dict:
     end = start + timedelta(days=1)
     captures = session.exec(select(TradeCapture).where(
         (TradeCapture.id.in_(list(linked))) | ((TradeCapture.received_at >= start) & (TradeCapture.received_at < end)))).all()
+    # A plan of the day linked to another day's trade was traded, just not today.
+    linked_elsewhere = set(session.exec(select(CaptureLink.capture_id).where(
+        CaptureLink.unlinked_at.is_(None), CaptureLink.capture_id.in_([c.id for c in captures if c.id not in linked]))).all()) if captures else set()
+    captures = [capture for capture in captures if capture.id in linked or capture.id not in linked_elsewhere]
     if not captures:
         return {}
     notes: dict = defaultdict(list)
@@ -180,10 +200,14 @@ def fired_alerts(session: Session, day: date, symbols: list[str]) -> dict[str, l
 def open_interest_walls(session: Session, day: date, symbol: str, spot: float | None) -> dict | None:
     """The biggest call and put open-interest strikes near the price, from the latest snapshot on or before the day."""
     latest = session.exec(select(OptionChainSnapshot.session_date).where(OptionChainSnapshot.underlying == symbol,
-                                                                         OptionChainSnapshot.session_date <= day)
+                                                                         OptionChainSnapshot.session_date <= day,
+                                                                         OptionChainSnapshot.session_date >= day - timedelta(days=WALL_MAX_AGE_DAYS))
                           .order_by(OptionChainSnapshot.session_date.desc()).limit(1)).first()
     if latest is None or not spot:
         return None
+    from app.engine.options_positioning import primary_root
+
+    root = primary_root(symbol)
     totals: dict[tuple[str, float], int] = defaultdict(int)
     for snapshot in session.exec(select(OptionChainSnapshot).where(OptionChainSnapshot.underlying == symbol,
                                                                    OptionChainSnapshot.session_date == latest,
@@ -192,18 +216,23 @@ def open_interest_walls(session: Session, day: date, symbol: str, spot: float | 
         try:
             payload = json.loads(snapshot.data_json)
             columns = payload["columns"]
-            side_at, strike_at, oi_at = columns.index("type"), columns.index("strike"), columns.index("open_interest")
+            root_at, side_at, strike_at, oi_at = (columns.index(name) for name in ("root", "type", "strike", "open_interest"))
         except (KeyError, ValueError, TypeError):
             continue
         for row in payload["rows"]:
+            if row[root_at] != root:  # an adjusted root after a split has strikes on another basis
+                continue
             strike, oi = row[strike_at], row[oi_at]
-            if oi and abs(float(strike) / spot - 1) <= WALL_BAND:
-                totals[(row[side_at], float(strike))] += int(oi)
+            side = SIDES.get(str(row[side_at]).lower())
+            if side and oi and abs(float(strike) / spot - 1) <= WALL_BAND:
+                totals[(side, float(strike))] += int(oi)
     if not totals:
         return None
     top = lambda side: [{"strike": strike, "open_interest": oi} for (kind, strike), oi in  # noqa: E731
                         sorted(totals.items(), key=lambda item: -item[1]) if kind == side][:3]
     calls, puts = sum(oi for (kind, _), oi in totals.items() if kind == "call"), sum(oi for (kind, _), oi in totals.items() if kind == "put")
+    if not top("call") and not top("put"):
+        return None
     return {"as_of_session": latest.isoformat(), "expirations": "next 45 days", "call_walls": top("call"), "put_walls": top("put"),
             "put_call_oi": round(puts / calls, 2) if calls else None}
 
@@ -286,9 +315,12 @@ def gauges(day: date) -> dict:
 
 def macro_events(day: date) -> dict:
     calendar = json.loads(MACRO_FILE.read_text())
-    if day.isoformat() > calendar["covers_through"]:
+    if not calendar["covers_from"] <= day.isoformat() <= calendar["covers_through"]:
         raise LookupError("the macro calendar does not cover this day")
-    window = {day.isoformat(): "today", (day + timedelta(days=1)).isoformat(): "next day"}
+    following = day + timedelta(days=1)
+    while following.weekday() >= 5:  # a Friday's next session is Monday
+        following += timedelta(days=1)
+    window = {day.isoformat(): "today", following.isoformat(): "next trading day"}
     events = [{"when": window[event["date"]], "time_et": event["time"], "event": event["name"], "kind": event["kind"]}
               for event in calendar["events"] if event["date"] in window]
     return {"events": events, "calendar": "FOMC, CPI and jobs reports only"}
@@ -296,7 +328,14 @@ def macro_events(day: date) -> dict:
 
 # ---------------------------------------------------------------- per ticker
 
-def sector_etfs(symbols: list[str]) -> dict[str, str]:
+def company_facts(symbols: list[str], day: date) -> dict[str, dict]:
+    """Sector and earnings from Tradier, one batched read for all the day's stocks (app.engine.symbol_info_tradier)."""
+    from app.engine import symbol_info_tradier
+
+    return symbol_info_tradier.symbol_events.review_facts(symbols, day)
+
+
+def sector_etfs(symbols: list[str], facts: dict[str, dict] | None = None) -> dict[str, str]:
     out = {}
     for symbol in symbols:
         if symbol in FUNDS:
@@ -304,19 +343,14 @@ def sector_etfs(symbols: list[str]) -> dict[str, str]:
         if symbol in SEMIS:
             out[symbol] = "SMH"
             continue
-        try:
-            from app.engine import symbol_info_tradier
-
-            sector = symbol_info_tradier.symbol_events.overview(symbol).get("datasets", {}).get("company", {}).get("sector")
-        except Exception:
-            sector = None
+        sector = (facts or {}).get(symbol, {}).get("sector")
         if sector in SECTOR_ETF:
             out[symbol] = SECTOR_ETF[sector]
     return out
 
 
-def ticker_context(session: Session, day: date, symbols: list[str], daily: dict, gaps: list[str]) -> dict:
-    sectors = sector_etfs(symbols)
+def ticker_context(session: Session, day: date, symbols: list[str], daily: dict, sectors: dict[str, str],
+                   facts: dict[str, dict], gaps: list[str]) -> dict:
     news = _headlines(day, [symbol for symbol in symbols if symbol not in FUNDS], gaps)
     levels = saved_levels(session, symbols)
     alerts = fired_alerts(session, day, symbols)
@@ -333,7 +367,7 @@ def ticker_context(session: Session, day: date, symbols: list[str], daily: dict,
             if etf and daily.get(etf):
                 row["sector_etf"] = etf
                 row["vs_sector_pct"] = round(move["change_pct"] - daily[etf]["change_pct"], 2)
-        earnings = _earnings_near(symbol, day) if symbol not in FUNDS else None
+        earnings = _earnings_near(facts.get(symbol, {}).get("earnings"), day)
         if earnings:
             row["earnings"] = earnings
         if news.get(symbol):
@@ -345,6 +379,8 @@ def ticker_context(session: Session, day: date, symbols: list[str], daily: dict,
             walls = None
         if walls:
             row["options_open_interest"] = walls
+        elif symbol in FUNDS or move:
+            gaps.append(f"No recent options snapshot for {symbol}, so its open-interest walls are unknown")
         if levels.get(symbol):
             row["your_saved_levels_now"] = levels[symbol]
         if alerts.get(symbol):
@@ -354,17 +390,15 @@ def ticker_context(session: Session, day: date, symbols: list[str], daily: dict,
     return out
 
 
-def _earnings_near(symbol: str, day: date) -> dict | None:
-    try:
-        from app.engine import symbol_info_tradier
-
-        view = symbol_info_tradier.symbol_events.events(symbol, day)["earnings"]
-    except Exception:
+def _earnings_near(view: dict | None, day: date) -> dict | None:
+    if not view or view.get("state") not in ("ready", "none"):
         return None
     near = {}
     upcoming = view.get("next")
     if upcoming and (date.fromisoformat(upcoming["date"]) - day).days <= EARNINGS_WINDOW:
         near["next"] = {**upcoming, "days_after": (date.fromisoformat(upcoming["date"]) - day).days}
+        if near["next"]["days_after"] == 0:
+            near["next"]["time_note"] = view.get("time_note")  # before the open or after the close is unknown
     past = next((row for row in view.get("reports") or [] if (day - date.fromisoformat(row["date"])).days <= EARNINGS_WINDOW), None)
     if past:
         near["last"] = {**past, "days_before": (day - date.fromisoformat(past["date"])).days}
@@ -377,19 +411,23 @@ def _headlines(day: date, symbols: list[str], gaps: list[str]) -> dict[str, list
     from app.engine.news import fetch_news
 
     start = datetime.combine(day, time(4, 0), ET)
-    try:
-        articles = fetch_news(symbols=symbols, start=start, end=start + timedelta(hours=16), limit=50)
-    except Exception as exc:
-        gaps.append(f"Headlines unavailable ({type(exc).__name__})")
-        return {}
-    out: dict[str, list[str]] = defaultdict(list)
-    for article in sorted(articles, key=lambda item: item.get("created_at") or ""):
-        stamp = str(article.get("created_at") or "")
+    out: dict[str, list[str]] = {}
+    for symbol in symbols:
+        # One read per ticker, so a busy name never crowds out another; articles naming many tickers are skipped.
         try:
-            at = datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone(ET).strftime("%H:%M")
-        except ValueError:
-            at = "?"
-        for symbol in article.get("symbols") or []:
-            if symbol in symbols and len(out[symbol]) < HEADLINES:
-                out[symbol].append(f"{at} {article.get('headline')}")
-    return dict(out)
+            articles = fetch_news(symbols=[symbol], start=start, end=start + timedelta(hours=16), limit=30)
+        except Exception as exc:
+            gaps.append(f"Headlines unavailable for {symbol} ({type(exc).__name__})")
+            continue
+        rows = []
+        for article in sorted(articles, key=lambda item: str(item.get("created_at") or "")):
+            if len(article.get("symbols") or []) > 3:
+                continue
+            try:
+                at = datetime.fromisoformat(str(article.get("created_at")).replace("Z", "+00:00")).astimezone(ET).strftime("%H:%M")
+            except ValueError:
+                at = "?"
+            rows.append(f"{at} {article.get('headline')}")
+        if rows:
+            out[symbol] = rows[:HEADLINES]
+    return out

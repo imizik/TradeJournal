@@ -1,5 +1,6 @@
 {
   "_note": "Scheduled US macro releases the Daily Review shows the coach. Times are New York. FOMC: federalreserve.gov/monetarypolicy/fomccalendars.htm (statement 14:00 on the second day; * = with projections). CPI and the jobs report: bls.gov release archives (bls.gov/bls/news-release/cpi.htm, empsit.htm) and schedules (bls.gov/schedule/news_release/). October 2025 CPI and jobs reports were not published (federal funding lapse). Extend before covers_through passes; a day after it says so in the review's data gaps.",
+  "covers_from": "2025-01-01",
   "covers_through": "2026-12-31",
   "events": [
     {"date": "2025-01-10", "time": "08:30", "kind": "jobs", "name": "Jobs report (Dec 2024)"},
@@ -57,6 +58,7 @@
     {"date": "2026-09-11", "time": "08:30", "kind": "cpi", "name": "CPI (Aug 2026)"},
     {"date": "2026-09-16", "time": "14:00", "kind": "fomc", "name": "FOMC decision with projections"},
     {"date": "2026-10-02", "time": "08:30", "kind": "jobs", "name": "Jobs report (Sep 2026)"},
+    {"date": "2026-10-14", "time": "08:30", "kind": "cpi", "name": "CPI (Sep 2026)"},
     {"date": "2026-10-28", "time": "14:00", "kind": "fomc", "name": "FOMC decision"},
     {"date": "2026-11-06", "time": "08:30", "kind": "jobs", "name": "Jobs report (Oct 2026)"},
     {"date": "2026-11-10", "time": "08:30", "kind": "cpi", "name": "CPI (Oct 2026)"},

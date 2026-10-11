@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.ai import review_context
+from app.engine import options_recorder
 from app.models import (Account, CaptureLink, ChartSettingsRecord, Fill, LevelAlert, LevelAlertEvent, OptionChainSnapshot, Tag,
                         Trade, TradeCapture, TradeCaptureNote, TradeFill, TradeTag)
 
@@ -41,7 +42,10 @@ def offline(monkeypatch):
     monkeypatch.setattr(review_context, "intraday_shape", lambda day: {"SPY": {"trend_efficiency": 0.12, "close_vs_vwap_pct": -0.3}})
     monkeypatch.setattr(review_context, "gauges", lambda day: {"vix": {"close": 21.4, "change": 2.1}, "source": "yfinance (unofficial)"})
     monkeypatch.setattr(review_context, "_headlines", lambda day, symbols, gaps: {"NVDA": ["10:02 Nvidia wins order"]})
-    monkeypatch.setattr(review_context, "_earnings_near", lambda symbol, day: {"next": {"date": "2026-10-02", "status": "confirmed", "label": "Q3", "days_after": 2}})
+    monkeypatch.setattr(review_context, "company_facts", lambda symbols, day: {symbol: {
+        "sector": "Technology", "sector_state": "ready",
+        "earnings": {"state": "ready", "next": {"date": "2026-10-02", "status": "confirmed", "label": "Q3"}, "reports": [], "time_note": "no time"}}
+        for symbol in symbols})
     return calls
 
 
@@ -71,7 +75,10 @@ def test_plans_link_to_their_trade_with_minutes_before_entry_and_untraded_plans_
                      capture(1, datetime(2026, 9, 30, 14, 0), wording="Calls if 182 holds", quantity=2, strike=185.0),
                      CaptureLink(capture_id=UUID(int=901), account_id=ACCOUNT, source_key="mail-1", method="manual"),
                      TradeCaptureNote(capture_id=UUID(int=901), kind="note", text="Held too long"),
-                     capture(2, datetime(2026, 9, 30, 15, 30), underlying="AMD", wording="AMD puts under 160", not_taken_at=datetime(2026, 9, 30, 18))])
+                     capture(2, datetime(2026, 9, 30, 15, 30), underlying="AMD", wording="AMD puts under 160", not_taken_at=datetime(2026, 9, 30, 18)),
+                     # Captured today, linked to a trade on another day: traded, so not "not traded".
+                     capture(3, datetime(2026, 9, 30, 21, 0), underlying="MU", wording="MU calls Monday"),
+                     CaptureLink(capture_id=UUID(int=903), account_id=ACCOUNT, source_key="mail-other-day", method="manual")])
     session.commit()
     plans = review_context.plans(session, DAY, [traded])
     linked = plans["by_trade"][str(traded.id)][0]
@@ -91,9 +98,11 @@ def test_levels_alerts_tags_and_open_interest_walls(session):
                                      event_at=datetime(2026, 9, 30, 13, 58, tzinfo=timezone.utc).replace(tzinfo=None)),
                      OptionChainSnapshot(session_date=date(2026, 9, 29), underlying="NVDA", expiration=date(2026, 10, 2), provider="tradier",
                                          captured_at=datetime(2026, 9, 29, 21), contracts=4, data_json=json.dumps({
-                                             "columns": ["root", "type", "strike", "open_interest", "volume"],
-                                             "rows": [["NVDA", "call", 190, 50000, 1], ["NVDA", "call", 185, 20000, 1],
-                                                      ["NVDA", "put", 175, 30000, 1], ["NVDA", "call", 260, 99999, 1]]}))])
+                                             # The recorder's own columns and side codes.
+                                             "columns": options_recorder.COLUMNS,
+                                             "rows": [["NVDA", "C", 190, 50000, 1], ["NVDA", "C", 185, 20000, 1],
+                                                      ["NVDA", "P", 175, 30000, 1], ["NVDA", "C", 260, 99999, 1],
+                                                      ["NVDA1", "C", 180, 999999, 1]]}))])  # an adjusted root is left out
     session.commit()
     assert review_context.tags(session, [traded]) == {str(traded.id): ["ORB"]}
     assert review_context.saved_levels(session, ["NVDA", "AMD"]) == {"NVDA": [{"price": 178, "label": None}, {"price": 182.5, "label": "PDH"}]}
@@ -102,10 +111,11 @@ def test_levels_alerts_tags_and_open_interest_walls(session):
     assert walls["as_of_session"] == "2026-09-29"
     assert walls["call_walls"] == [{"strike": 190.0, "open_interest": 50000}, {"strike": 185.0, "open_interest": 20000}]  # 260 is too far
     assert walls["put_walls"] == [{"strike": 175.0, "open_interest": 30000}] and walls["put_call_oi"] == 0.43
+    # A snapshot more than five days older than the day no longer describes it.
+    assert review_context.open_interest_walls(session, date(2026, 10, 9), "NVDA", 180.0) is None
 
 
 def test_build_puts_the_day_together_and_names_every_gap(session, offline, monkeypatch):
-    monkeypatch.setattr(review_context, "sector_etfs", lambda symbols: {"NVDA": "SMH"})
     traded = trade(1)
     session.add(traded)
     session.commit()
@@ -117,6 +127,19 @@ def test_build_puts_the_day_together_and_names_every_gap(session, offline, monke
     assert context["market"]["volatility"]["vix"]["close"] == 21.4
     assert context["macro"] == {"events": [], "calendar": "FOMC, CPI and jobs reports only"}
     assert "No captured trade plans for this day" in context["gaps"] and "No tags on these trades" in context["gaps"]
+    assert "No recent options snapshot for NVDA, so its open-interest walls are unknown" in context["gaps"]
+
+
+def test_unavailable_tradier_data_is_a_named_gap_not_silence(session, offline, monkeypatch):
+    monkeypatch.setattr(review_context, "company_facts", lambda symbols, day: {symbol: {
+        "sector": None, "sector_state": "unavailable", "earnings": {"state": "unavailable", "next": None, "reports": []}} for symbol in symbols})
+    traded = trade(1, ticker="TSLA")
+    session.add(traded)
+    session.commit()
+    context = review_context.build(session, DAY, [traded])
+    assert "Sector unavailable for TSLA, so its move against its sector is unknown" in context["gaps"]
+    assert "Earnings dates unavailable for TSLA" in context["gaps"]
+    assert "earnings" not in (context["tickers"] or {}).get("TSLA", {})
 
 
 def test_a_failing_provider_is_a_gap_not_a_failed_review(session, offline, monkeypatch):
@@ -125,7 +148,6 @@ def test_a_failing_provider_is_a_gap_not_a_failed_review(session, offline, monke
 
     monkeypatch.setattr(review_context, "daily_moves", down)
     monkeypatch.setattr(review_context, "intraday_shape", down)
-    monkeypatch.setattr(review_context, "sector_etfs", lambda symbols: {})
     traded = trade(1)
     session.add(traded)
     session.commit()
@@ -136,14 +158,41 @@ def test_a_failing_provider_is_a_gap_not_a_failed_review(session, offline, monke
 
 def test_the_macro_calendar_names_release_days_and_refuses_days_it_does_not_cover():
     assert review_context.macro_events(date(2026, 9, 15))["events"] == [
-        {"when": "next day", "time_et": "14:00", "event": "FOMC decision with projections", "kind": "fomc"}]
+        {"when": "next trading day", "time_et": "14:00", "event": "FOMC decision with projections", "kind": "fomc"}]
+    # Friday's next trading day is Monday: the Oct 2 jobs report is "today", and Friday Sep 11's CPI.
+    assert review_context.macro_events(date(2026, 10, 9))["events"] == []
+    assert [event["when"] for event in review_context.macro_events(date(2026, 10, 13))["events"]] == ["next trading day"]
     assert [event["kind"] for event in review_context.macro_events(date(2026, 9, 11))["events"]] == ["cpi"]
     with pytest.raises(LookupError):
         review_context.macro_events(date(2027, 2, 1))
+    with pytest.raises(LookupError):
+        review_context.macro_events(date(2024, 12, 31))
     calendar = json.loads(review_context.MACRO_FILE.read_text())
     dates = [event["date"] for event in calendar["events"]]
     assert dates == sorted(dates) and all(event["kind"] in {"fomc", "cpi", "jobs"} for event in calendar["events"])
 
 
-def test_semis_compare_with_smh_and_funds_have_no_sector():
-    assert review_context.sector_etfs(["NVDA", "SPY", "SPXW"]) == {"NVDA": "SMH"}
+def test_semis_compare_with_smh_funds_have_no_sector_and_others_follow_their_sector():
+    facts = {"META": {"sector": "Communication Services"}, "XYZ": {"sector": None}}
+    assert review_context.sector_etfs(["NVDA", "SPY", "SPXW", "META", "XYZ"], facts) == {"NVDA": "SMH", "META": "XLC"}
+
+
+def test_earnings_on_the_day_carry_the_unknown_time_of_day():
+    view = {"state": "ready", "next": {"date": "2026-09-30", "status": "confirmed", "label": "Q3"}, "reports": [], "time_note": "Time of day not published."}
+    assert review_context._earnings_near(view, DAY)["next"]["time_note"] == "Time of day not published."
+    assert review_context._earnings_near({"state": "unavailable"}, DAY) is None
+
+
+def test_a_review_during_the_session_says_its_numbers_are_intraday(session, offline, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 30, 13, 5, tzinfo=tz)
+
+    monkeypatch.setattr(review_context, "datetime", Clock)
+    traded = trade(1)
+    session.add(traded)
+    session.commit()
+    context = review_context.build(session, DAY, [traded])
+    assert context["market"]["partial_as_of"] == "13:05"
+    assert any(gap.startswith("Reviewed during the session") for gap in context["gaps"])

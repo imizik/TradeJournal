@@ -64,7 +64,7 @@ def _review_with_api(message: str) -> dict:
     client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     response = client.messages.create(
         model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
-        max_tokens=2400,
+        max_tokens=4000,
         system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(REVIEW_SCHEMA)}"}],
     )
@@ -429,15 +429,17 @@ day_context holds what was around the trades. Use it to judge decisions in their
   side, strike, size, timing) in plan_vs_execution, one item per traded plan; a traded position with no plan is
   "no_plan" only when other trades that day had plans. Empty when there are no plans. A plan not traded is not a
   mistake by itself; mention it only if it would have been the better trade by the facts given.
-- market: the indexes' day (change, gap, close_in_range, range_vs_20d), SPY/QQQ intraday shape (trend_efficiency near
+- market: when partial_as_of is set the review ran during the session, so every market and ticker number is intraday
+  as of that time, not the close. The indexes' day (change, gap, close_in_range, range_vs_20d), SPY/QQQ intraday shape (trend_efficiency near
   1 is a trend day, near 0 chop; close_vs_vwap_pct; when the high and low printed) and VIX / 10-year yield.
   market_read is one or two sentences: what kind of day it was and whether the trader traded with it or against it
   (e.g. buying calls into a chop day with VIX up). Say "Market context unavailable" when it is missing.
-- macro: FOMC, CPI and jobs releases that day or the next, with New York times. Trades opened shortly before a
+- macro: FOMC, CPI and jobs releases that day or the next trading day, with New York times. Trades opened shortly before a
   release, or held through one, carry event risk worth naming.
 - tickers: each underlying's move against SPY and its sector ETF (relative strength), earnings within a week
-  (days_before / days_after), the day's headlines (observed, never proof of cause), option open-interest walls from
-  the latest snapshot (strikes where open interest clusters near the price), your_alerts_fired (the trader's own
+  (days_before / days_after; a report on the day itself has no known time of day), the day's headlines (observed,
+  never proof of cause; a ticker without headlines had none found), option open-interest walls from the latest snapshot within five days (as_of_session; strikes
+  where open interest clusters near the price), your_alerts_fired (the trader's own
   price alerts that day) and your_saved_levels_now (the trader's CURRENT saved levels: they may have been added or
   moved after this day, so treat them as a hint, never as proof the level existed then).
 - tags: the trader's own labels on trades.
