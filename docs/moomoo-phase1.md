@@ -155,6 +155,13 @@ remain a vendor clarification before production integration.
 
 ## Permissions and restrictions
 
+The later [depth permissions and usage-rights audit](moomoo-depth-permissions-rights-audit.md)
+rechecked public schemas, quotas and broker/exchange policies. The owner supplied
+only the broad Market Quote label; named products, numeric account ceilings and
+private ML recording rights remain unresolved. It also records the announced
+2026 Nasdaq AI-policy update, whose revised text was not retrieved. No new
+market-data test or permission activation occurred in that audit.
+
 | Question | Verified or unresolved |
 | --- | --- |
 | Actual accessible depth | REST ARCA 6 bid / 20 ask, NASDAQ empty; streaming book 60 distinct valid prices per side with ARCA MPIDs. REST `num` omitted to request the permission-based default maximum. Available liquidity can be less than the limit. |
