@@ -7,6 +7,13 @@ Eight bounded read-only requests succeeded. Current metric sources remain in
 place: interval publication/finality, auction handling and field semantics
 remain unresolved.
 
+A [subsequent read-only investigation](moomoo-auction-time-semantics.md) sampled
+the DST transition and five-minute labels and identified condition-coded closing
+trades. It strengthens the interval-end interpretation and explains nearly all
+of the closing-volume discrepancy; official publication/finality and some
+aggregation differences remain unresolved. Results below describe this earlier
+run.
+
 ## Cost evidence
 
 The current [official developer platform](https://open.moomoo.com/) describes
