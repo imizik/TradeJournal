@@ -55,3 +55,39 @@ def answer(run_id: uuid.UUID, body: Answer, db: Session = Depends(get_session)):
         return advisor_shadow.advisor_output(db, run_id, body.model_dump(mode="json"))
     except decisions.DecisionError as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+class HandoffReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    opportunity_id: str = Field(min_length=36, max_length=36)
+    fact_name: str = Field(max_length=128)
+
+
+class HandoffAnswer(Answer):
+    references: list[HandoffReference] = Field(min_length=1, max_length=10)
+
+
+class ImportEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: str = Field(max_length=64)
+    assignment_id: str = Field(min_length=36, max_length=36)
+    run_id: str = Field(min_length=36, max_length=36)
+    packet_sha256: str = Field(min_length=64, max_length=64)
+    request_sha256: str = Field(min_length=64, max_length=64)
+    answer: HandoffAnswer
+
+
+@router.post("/runs/{run_id}/advisor-handoff")
+def handoff(run_id: uuid.UUID, body: Question, db: Session = Depends(get_session)):
+    try:
+        return advisor_shadow.advisor_handoff(db, run_id, body.model_dump())
+    except decisions.DecisionError as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/runs/{run_id}/advisor-import")
+def import_answer(run_id: uuid.UUID, body: ImportEnvelope, db: Session = Depends(get_session)):
+    try:
+        return advisor_shadow.advisor_import(db, run_id, body.model_dump(mode="json"))
+    except decisions.DecisionError as exc:
+        raise HTTPException(409, str(exc)) from exc

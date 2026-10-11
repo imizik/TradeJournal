@@ -318,6 +318,8 @@ def test_assistant_cannot_reach_owner_advisor_shadow_routes(boundary):
     assert boundary.public.get(f"/advisor-shadow/runs/{run_id}").status_code == 403
     assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/advisor-packet", json={"question": "forged", "user_plan": "forged"}).status_code == 403
     assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/advisor-output", json={}).status_code == 403
+    for action in ("advisor-handoff", "advisor-import"):
+        assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/{action}", json={}).status_code == 403
 
 
 def test_stream_revalidation_does_not_spend_request_budget(boundary):
