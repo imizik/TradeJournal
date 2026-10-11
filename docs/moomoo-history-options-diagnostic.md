@@ -7,6 +7,12 @@ It adds no provider adapter, journal recalculation, app registration, chart-feed
 change, database/cache writes, paid entitlement or collector. Market-hours
 streaming remains deferred. No account/trading endpoints were called.
 
+The [broader comparison](moomoo-broader-history-options.md) adds September-expired
+NVDA history, SPY's full option session, a nonstandard UVXY example and a stock
+split check. The [endpoint-to-metric map](moomoo-endpoint-metric-map.md) distinguishes
+those results from documentation-only candidates. The observations below remain
+the original two-call NVDA cohort.
+
 ## Scope and command
 
 The frozen comparison cohort is NVDA, its 2026-10-16 $230 call (active at the

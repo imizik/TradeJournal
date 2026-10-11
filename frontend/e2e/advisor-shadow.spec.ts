@@ -10,7 +10,8 @@ const DB = path.join(BACKEND, "data/e2e_seed.db");
 const API = `http://127.0.0.1:${process.env.E2E_BACKEND_PORT || 8099}`;
 const env = { ...process.env, DATABASE_URL: `sqlite:///${DB}`, MIGRATION_DATABASE_URL: `sqlite:///${DB}`, PRACTICE_AGENT_ENABLED: "false" };
 
-test("manual advisor/shadow packet, assistance, complete choices and paired review survive reopening", async ({ page, request }) => {
+for (const transport of ["manual-paste", "oauth-mcp"]) {
+test(`${transport} advisor/shadow packet, assistance, complete choices and paired review survive reopening`, async ({ page, request }) => {
   const seeded = execFileSync(PYTHON, ["-c", `
 import json
 from sqlmodel import Session
@@ -60,25 +61,65 @@ with Session(engine) as db:
     };
     expect(exported.assignment_id).toBe(fixture.assignment_id);
     expect(exported.run_id).toBe(fixture.run_id);
-    // The real backend commits, then its response is lost. Recovery must GET the
-    // receipt, compare the full desired envelope and never send an automatic retry.
-    let imports = 0;
-    await page.route(`**/advisor-shadow/runs/${fixture.run_id}/advisor-import`, async (route) => {
-      imports += 1;
-      const response = await route.fetch();
-      expect(response.ok()).toBeTruthy();
-      await route.abort("failed");
-    });
-    await panel.getByTestId("advisor-answer-form").getByRole("textbox").fill(JSON.stringify(envelope));
-    await panel.getByRole("button", { name: "Save advisor response" }).click();
-    await expect(panel).toContainText("Saved advisor receipt recovered from the owner record. No retry was sent.");
-    expect(imports).toBe(1);
+    let savedReceipt;
+    if (transport === "manual-paste") {
+      // The real backend commits, then its response is lost. Recovery reads
+      // the complete immutable receipt without an automatic retry.
+      let imports = 0;
+      await page.route(`**/advisor-shadow/runs/${fixture.run_id}/advisor-import`, async (route) => {
+        imports += 1;
+        const response = await route.fetch();
+        expect(response.ok()).toBeTruthy();
+        await route.abort("failed");
+      });
+      await panel.getByTestId("advisor-answer-form").getByRole("textbox").fill(JSON.stringify(envelope));
+      await panel.getByRole("button", { name: "Save advisor response" }).click();
+      await expect(panel).toContainText("Saved advisor receipt recovered from the owner record. No retry was sent.");
+      expect(imports).toBe(1);
+      savedReceipt = JSON.parse(await panel.getByTestId("advisor-receipt").textContent() ?? "{}");
+      await page.unroute(`**/advisor-shadow/runs/${fixture.run_id}/advisor-import`);
+    } else {
+      // Generated offline OAuth token, real MCP SDK -> restricted backend ->
+      // shared SQLite ledger. No issuer contact, external grant or listener.
+      savedReceipt = JSON.parse(execFileSync(PYTHON, ["-c", `
+import json,sys,tempfile,time,uuid
+from pathlib import Path
+from cryptography.hazmat.primitives.asymmetric import rsa
+from fastapi.testclient import TestClient
+from sqlmodel import create_engine
+import httpx
+from cloud_mcp_advisor import create_server
+from cloud_mcp_advisor_bridge import build_app
+from tests.test_cloud_mcp_d0 import _token,_jwks,ISSUER,JWKS_URL
+from app.engine import advisor_shadow
+from sqlmodel import Session
+body=json.load(sys.stdin)
+engine=create_engine("sqlite:///"+sys.argv[1],connect_args={"check_same_thread":False,"timeout":2})
+resource="https://advisor.example.test/advisor/mcp"
+with Session(engine) as db:
+    exported=advisor_shadow.owner_view(db,uuid.UUID(body["run_id"]))["advisor"]["export"]
+with tempfile.TemporaryDirectory(prefix="tj-advisor-browser-") as temp:
+    key=rsa.generate_private_key(public_exponent=65537,key_size=2048)
+    keys=Path(temp)/"keys.json"
+    keys.write_text(json.dumps({"issuer_url":ISSUER,"jwks_url":JWKS_URL,"fetched_at":int(time.time())-1,"expires_at":int(time.time())+600,**_jwks(key.public_key())}))
+    cfg=Path(temp)/"advisor.json"
+    cfg.write_text(json.dumps({"enabled":True,"advisor_only":True,"issuer_url":ISSUER,"resource_url":resource,"jwks_url":JWKS_URL,"jwks_file":str(keys),"client_id":"advisor-client","backend_socket":str(Path(temp)/"unused.sock"),"profiles":[{"subject":"jo-advisor","id":"advisor_"+str(uuid.uuid4()),"enabled":True,"binding_version":1,**{k:exported[k] for k in ("assignment_id","run_id","packet_sha256","request_sha256")}}]}))
+    token=_token(key,audience=resource,subject="jo-advisor",client_id="advisor-client",scope="advisor:profile advisor:read advisor:write")
+    server=create_server(cfg,backend_transport=httpx.ASGITransport(app=build_app(engine,cfg)))
+    with TestClient(server.streamable_http_app()) as client:
+        response=client.post(resource,headers={"Authorization":"Bearer "+token,"Accept":"application/json"},json={"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"save_advisor_answer","arguments":{k:body[k] for k in ("packet_sha256","request_sha256","answer")}}})
+        result=response.json()["result"]
+        assert not result.get("isError"),result
+        print(json.dumps(result["structuredContent"]["receipt"]))
+` , DB], { cwd: BACKEND, env: { PATH: process.env.PATH, NODE_ENV: "test", PYTHON_DOTENV_DISABLED: "1" }, input: JSON.stringify(envelope), encoding: "utf8" }));
+      await panel.getByRole("button", { name: "Reload advisor record" }).click();
+      await expect(panel).toContainText("oauth-mcp");
+    }
     await expect(panel.getByTestId("advisor-saved-answer")).toContainText(answer.summary);
-    const savedReceipt = JSON.parse(await panel.getByTestId("advisor-receipt").textContent() ?? "{}");
+    expect(savedReceipt.transport).toBe(transport);
     expect(savedReceipt.submitted_output).toEqual(envelope);
     expect(savedReceipt.request_sha256).toBe(exported.request_sha256);
     expect(savedReceipt.packet_sha256).toBe(exported.packet_sha256);
-    await page.unroute(`**/advisor-shadow/runs/${fixture.run_id}/advisor-import`);
     await expect(panel.getByTestId("advisor-saved-answer")).toContainText("sample_fixture");
     // The external interface's actor is server-derived; manual fixture transport is explicit.
     execFileSync(PYTHON, ["-c", `
@@ -144,3 +185,5 @@ with Session(engine) as db:
 ` , fixture.run_id], { cwd: BACKEND, env });
   }
 });
+
+}

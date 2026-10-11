@@ -33,6 +33,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 | `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
 | `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
+| `docs/agent/cloud-mcp-advisor-contract.md` | Dormant advisor-only MCP fixture catalog, separate offline OAuth/Unix boundary, immutable cited receipts and later activation gates |
 | `docs/agent/advisor-shadow-contract.md` | Manual fixture advisor/shadow assignment, packet/receipt isolation, disclosure order and later cloud/forward gates |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
 | `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |

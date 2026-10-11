@@ -284,7 +284,17 @@ export const COLUMN_MIN_PX = 160;
  */
 export const SMALL_SHARES: Record<SmallChartSize, number> = { compact: 0.275, normal: 0.378, tall: 0.518 };
 const EQUAL_COLUMNS = [0.25, 0.25, 0.25, 0.25];
-export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.normal, columns: EQUAL_COLUMNS };
+/** New setups start with the compact lower row, so the main chart gets about 72% of the grid; saved settings keep their own size. */
+export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.compact, columns: EQUAL_COLUMNS };
+/** The two built-in layout presets (not stored as user layouts): the main chart dominant, or the earlier balance. `dock` is applied per device. */
+export const LAYOUT_PRESETS = [
+  { id: "active", name: "Active", detail: "Main chart large, lower row compact, side dock closed", smallSize: "compact", dock: false },
+  { id: "research", name: "Research", detail: "Balanced rows, side dock open", smallSize: "normal", dock: true },
+] as const satisfies readonly { id: string; name: string; detail: string; smallSize: SmallChartSize; dock: boolean }[];
+export type LayoutPreset = (typeof LAYOUT_PRESETS)[number];
+/** A preset arranges the five charts and sets the desktop split; intervals, held symbols, linked ranges and a phone's chart height stay as they are. */
+export const applyPreset = (settings: ChartSettings, preset: LayoutPreset): ChartSettings =>
+  ({ ...settings, layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
 const thousandths = (value: number) => Math.round(value * 1000) / 1000;
 /**
  * Proportions from outside this code, kept to what the dividers can make: the
@@ -420,7 +430,8 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
   optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
-  proportions: null, layoutProportions: {},
+  // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
+  proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
