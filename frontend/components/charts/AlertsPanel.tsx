@@ -22,8 +22,9 @@ export default function AlertsPanel({ data, prices, moved, narrow, onRearm, onRe
   const active = alerts.filter((alert) => alert.state === "active").length;
   const icon = `inline-flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 ${narrow ? "h-11 w-11" : "h-6 w-6"}`;
   // Open for an alert that is waiting, or one whose phone message did not go: that is status, not first-use help.
-  const attention = active > 0 || alerts.some((alert) => alert.event && alert.event.delivery !== "sent");
-  return <DockSection name="alerts" ariaLabel="Price alerts" title="Alerts" count={`${active}/${MAX_ACTIVE} active`} defaultOpen={attention} narrow={narrow}
+  const undelivered = alerts.some((alert) => alert.event && alert.event.delivery !== "sent");
+  const attention = active > 0 || undelivered;
+  return <DockSection name="alerts" ariaLabel="Price alerts" title="Alerts" count={`${active}/${MAX_ACTIVE} active`} defaultOpen={attention} forceOpen={undelivered} narrow={narrow}
     info="Right-click (long-press on a phone) a level, a horizontal ray or an automatic level to set an alert. It reaches your phone with this page closed."
     status={data && !data.phone ? <p className="text-[10px] leading-4 text-amber-300">Phone alerts are not set up on this server, so alerts show here only.</p> : undefined}>
     {alerts.length ? <ul className="space-y-2">{alerts.map((alert) => {

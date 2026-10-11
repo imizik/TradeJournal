@@ -8,10 +8,11 @@ import { ChevronDown, ChevronRight, Info } from "lucide-react";
  * One section of the watchlist dock (levels, alerts, journal): a one-line header with its count,
  * a fold, an optional (i) that reveals the first-use help, and an optional action beside them.
  * `status` stays visible when the section is folded (a warning is status, not help). The fold is
- * remembered on this device only; until the person folds it, `defaultOpen` decides.
+ * remembered on this device only; until the person folds it, `defaultOpen` decides. `forceOpen`
+ * (an error or a failed delivery inside) opens it whatever was saved, so a fold never hides a problem.
  */
-export default function DockSection({ name, ariaLabel, title, count, defaultOpen, info, status, action, narrow, children }: {
-  name: string; ariaLabel: string; title: string; count: ReactNode; defaultOpen: boolean; info?: ReactNode; status?: ReactNode;
+export default function DockSection({ name, ariaLabel, title, count, defaultOpen, forceOpen, info, status, action, narrow, children }: {
+  name: string; ariaLabel: string; title: string; count: ReactNode; defaultOpen: boolean; forceOpen?: boolean; info?: ReactNode; status?: ReactNode;
   /** Receives `reveal`, which opens the section without saving that as the person's choice. */
   action?(reveal: () => void): ReactNode; narrow: boolean; children: ReactNode;
 }) {
@@ -23,7 +24,7 @@ export default function DockSection({ name, ariaLabel, title, count, defaultOpen
   useEffect(() => {
     try { const saved = localStorage.getItem(key); if (saved === "1" || saved === "0") queueMicrotask(() => setChosen(saved === "1")); } catch { /* device storage is optional */ }
   }, [key]);
-  const open = revealed || (chosen ?? defaultOpen);
+  const open = !!forceOpen || revealed || (chosen ?? defaultOpen);
   const toggle = () => {
     const next = !open;
     setChosen(next); setRevealed(false);
