@@ -222,7 +222,7 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
       }
 
       // Fills: slim open chevrons on the big chart, dots on the small ones.
-      for (const { group, x, tip, half, count } of this.fills) {
+      for (const { group, x, tip, half } of this.fills) {
         const color = group.buy ? BUY : SELL;
         if (small) {
           const r = group.fills.length > 1 ? 2.9 : 2.1;
@@ -230,14 +230,12 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
           c.fillStyle = color; c.globalAlpha = 0.95; c.fill(); c.lineWidth = 1 * h; c.strokeStyle = INK; c.stroke(); c.globalAlpha = 1;
           continue;
         }
-        // Several fills whose count has no room beside them stack a second, fainter chevron: merged, not single.
-        const stacked = group.fills.length > 1 && !count;
-        for (const [step, alpha] of stacked ? [[0, 0.95], [3.4, 0.55]] : [[0, 0.95]]) {
-          const apex = tip + (group.buy ? step : -step), base = apex + (group.buy ? height : -height);
-          c.beginPath(); c.moveTo((x - half) * h, base * v); c.lineTo(x * h, apex * v); c.lineTo((x + half) * h, base * v);
-          c.lineWidth = (line + 2) * h; c.strokeStyle = INK; c.globalAlpha = 1; c.stroke(); // a thin dark edge keeps it apart from a wick behind it
-          c.lineWidth = line * h; c.strokeStyle = color; c.globalAlpha = alpha; c.stroke();
-        }
+        // Always one chevron per candle per side; a merged one is a touch heavier and brighter (its count, when there is room, sits beside it).
+        const merged = group.fills.length > 1;
+        const apex = tip, base = tip + (group.buy ? height : -height);
+        c.beginPath(); c.moveTo((x - half) * h, base * v); c.lineTo(x * h, apex * v); c.lineTo((x + half) * h, base * v);
+        c.lineWidth = (line + 2) * h; c.strokeStyle = INK; c.globalAlpha = 1; c.stroke(); // a thin dark edge keeps it apart from a wick behind it
+        c.lineWidth = (line + (merged ? 0.5 : 0)) * h; c.strokeStyle = color; c.globalAlpha = merged ? 1 : 0.8; c.stroke();
         c.globalAlpha = 1;
       }
 

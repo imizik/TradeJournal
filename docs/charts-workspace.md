@@ -2050,8 +2050,7 @@ Fills, report dates and news are one series primitive, `MarkLayer` in
 markers (which cannot be slim, merge or stay out of the price fit). Fills merge
 to one slim open chevron per candle per side: a buy under the low, a sell over
 the high, five pixels off the wick, in the candles' up and down colors, with a
-small count beside it only when several merged (a crowded zoom with no room for
-the count stacks a second, fainter chevron instead). Nothing is hidden by
+small count beside it only when several merged and there is room (a crowded zoom drops the count, never adds a shape; a merged chevron is just slightly heavier and brighter). Nothing is hidden by
 merging: hover lists every fill in the candle (its label and candle time; the
 marker data carries no price), a click on a single fill opens its trade card and
 on a merged one pins a list whose rows each open their own trade. Report dates
