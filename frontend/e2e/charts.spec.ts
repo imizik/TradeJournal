@@ -1941,6 +1941,15 @@ test.describe("phone layouts", () => {
 });
 
 // ---- C0.6: one split-adjusted price basis ----
+// A 100-bar fixture is shorter than the main chart's 110-bar opening range,
+// so the product correctly requests history during mount, before any test pan.
+// Hold only the mocked response until the exact initial candles are asserted.
+function holdHistoryResponse() {
+  let release: () => void = () => {};
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  return { released, release };
+}
+
 const NVDA_SPLIT: PriceAdjustment = { ...ADJUSTED, splits: [{ ex_date: "2024-06-10", ratio: 10, label: "10-for-1" }] };
 async function stubAdjustment(page: Page, adjustment: PriceAdjustment) {
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...fixture(route.request().url()), adjustment } }));
@@ -1987,10 +1996,12 @@ test("missing split data says so on the chart instead of guessing", async ({ pag
 test("a history page on a different split basis than the candles on screen is refused, not mixed in", async ({ page }) => {
   await registerCharts(page);
   const base = Math.floor(Date.now() / 1000);
+  const history = holdHistoryResponse();
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...currentFixture(route.request().url(), base), adjustment: NVDA_SPLIT } }));
   let asked = 0;
-  await page.route("**/api/backend/charts/history?**", (route) => {
+  await page.route("**/api/backend/charts/history?**", async (route) => {
     asked++;
+    await history.released;
     const query = new URL(route.request().url()).searchParams;
     const before = Number(query.get("before"));
     const template = fixture(route.request().url()).panels["5m"]!.bars[0];
@@ -2002,8 +2013,12 @@ test("a history page on a different split basis than the candles on screen is re
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
-  await page.waitForTimeout(120);
+  await expect.poll(() => asked).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")?.timeScale().getVisibleLogicalRange() ?? null
+  )).not.toBeNull();
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  history.release();
   await expect(page.getByRole("button", { name: "Retry history" }).first()).toBeVisible();
   expect(asked).toBeGreaterThan(0);
   await expect(page.getByText("A split was recorded while these charts were open").first()).toBeVisible();
@@ -2013,9 +2028,13 @@ test("a history page on a different split basis than the candles on screen is re
 test("a possible unrecorded split in older candles is noted on its panel without shifting the page banner", async ({ page }) => {
   await registerCharts(page);
   const base = Math.floor(Date.now() / 1000);
+  const history = holdHistoryResponse();
   const jump = "Price jumps 10x between 2024-06-07 and 2024-06-10, like a forward split that is not in the split data. Prices there are not adjusted.";
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: currentFixture(route.request().url(), base) }));
-  await page.route("**/api/backend/charts/history?**", (route) => {
+  let asked = 0;
+  await page.route("**/api/backend/charts/history?**", async (route) => {
+    asked++;
+    await history.released;
     const query = new URL(route.request().url()).searchParams;
     const before = Number(query.get("before"));
     const template = fixture(route.request().url()).panels["5m"]!.bars[0];
@@ -2026,8 +2045,13 @@ test("a possible unrecorded split in older candles is noted on its panel without
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
-  await page.waitForTimeout(120);
+  await expect.poll(() => asked).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")?.timeScale().getVisibleLogicalRange() ?? null
+  )).not.toBeNull();
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  history.release();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "1300");
   await expect(page.getByRole("region", { name: "MRVL 5m chart" }).getByRole("status")).toContainText("Price jumps 10x between 2024-06-07 and 2024-06-10");
   await expect(page.getByRole("status", { name: "Price basis warning" })).toHaveCount(0);
 });
