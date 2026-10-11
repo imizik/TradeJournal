@@ -1,11 +1,15 @@
 # Dependable advisor connection upkeep
 
 Selected October 11, 2026 as Dots sequence step 3 on the
-[delivery board](dots-integration.md#functionality-sequence). Contract only:
-nothing here is built, installed or activated. The connected trial (step 1)
-stays owned by the existing advisor chat, and its approved digest-bound package
-is not changed by this document. Implementation targets a successor bundle
-revision after that trial records its result.
+[delivery board](dots-integration.md#functionality-sequence). The connected
+trial (step 1) was observed the same evening on the retained v2 install.
+
+Status: scope item 1 and the runbook (item 4) are built as the optional
+`deploy/advisor_keys_control.py` component for that v2 install
+([bundle runbook](../../deploy/cloud-mcp-advisor/README.md#optional-public-key-upkeep-for-the-v2-trial)).
+It is not installed, activated or observed. The v2 install has no repository
+activation command; its operator activation identity must follow item 2. The
+owner status view (item 3) is not built.
 
 ## Problem
 

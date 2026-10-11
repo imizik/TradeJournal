@@ -1,0 +1,12 @@
+[Unit]
+Description=Maintain the advisor public verification keys every 15 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Unit=tradejournal-advisor-keys.service
+
+[Install]
+WantedBy=timers.target

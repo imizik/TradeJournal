@@ -220,8 +220,8 @@ config must be deliberately enabled; persisted assignment must also be active.
 Only public RSA verification keys belong in the snapshot; no client secret,
 signing key, cookie or database/provider credential belongs in the bundle.
 Serving never fetches keys. Manual refresh, OAuth issuer consent/revocation and
-updating the dedicated binding are separate approved operator actions. No key
-timer/schedule is supplied. Placeholders are explicitly nonworking.
+updating the dedicated binding are separate approved operator actions. This
+bundle supplies no key timer; the v2 trial's optional upkeep is described below. Placeholders are explicitly nonworking.
 
 Review a concrete hostname replacement of `Caddyfile.example` before publishing.
 It forwards only `/advisor/mcp` GET/POST/DELETE/OPTIONS and its exact protected
@@ -254,6 +254,61 @@ These commands do not create grants or transmit to Jo. Activation starts only
 the two optional socket/process pairs and verifies active state; any startup
 failure attempts stopping both groups. No boot enablement follows. Current
 implementation work must leave this step paused.
+
+## Optional public-key upkeep for the v2 trial
+
+Without upkeep the advisor stops accepting new sign-ins when its manual public-key
+snapshot expires (at most one hour). `deploy/advisor_keys_control.py` adds the
+[connection upkeep contract](../../docs/agent/advisor-connection-upkeep-contract.md)
+publisher to the installed side-by-side v2 trial only. Run it as root from a
+root-private copy of the reviewed source revision.
+
+1. `advisor_keys_control.py stage --bundle <new-private-dir>` copies only
+   `cloud_mcp_d0_refresh.py` and the three key units, and prints the manifest
+   SHA-256 to approve.
+2. Stop all six advisor units (sockets first). `install --bundle <dir>
+   --approve-install <sha256> --dns <resolver-ip> --host-ip <public-ip>`
+   refuses unless the trial installation verifies, the advisor is stopped and the
+   current snapshot is fresh. It creates `tj-advisor-keys` (primary group
+   `tj-advisor`, no other memberships), `/opt/tradejournal-advisor-v2-keys`,
+   `/etc/tradejournal-advisor-v2-keys` (public issuer/JWKS URLs and the UID-only
+   `tj_advisor_keys` nftables table) and `/var/lib/tradejournal-advisor-v2-keys`
+   (0750, snapshot 0640, seeded from the current snapshot). It installs the
+   publisher oneshot, its network unit and a 15-minute timer, appends only that
+   directory to the existing `BindReadOnlyPaths=` of the adapter and backend
+   services, points the advisor config's `jwks_file` there and updates the trial
+   record's unit digests. It starts, enables and contacts nothing.
+3. Separately approved activation: `systemctl start
+   tradejournal-advisor-keys.service` once and confirm `check` reports `fresh`,
+   then `systemctl enable --now tradejournal-advisor-keys.timer`, then start the
+   advisor sockets and services. Recheck UIDs, namespaces, AF_UNIX-only serving
+   and the owner/API denials as for the original start.
+4. `check` prints the snapshot state (`fresh`, `expiring` within 15 minutes,
+   `expired`, `issuer-mismatch` or `unreadable`), its expiry and whether the
+   timer is active. It never prints key material.
+5. `remove` (advisor stopped) disables the timer, stops both key units, copies
+   the latest maintained snapshot back to the original path (keeping the old one
+   under `previous/`), restores the original config and serving-unit bytes and
+   removes the three key units. The UID, directories and snapshots remain.
+
+The publisher reads only the public URLs and writes only its snapshot directory;
+the advisor config, fixture, sockets, owner files and journal/production paths
+are inaccessible to it. A failed refresh keeps the previous snapshot, which still
+expires normally. Activation identities for this install must bind the issuer
+and JWKS URLs plus a fresh `check`, not the snapshot digest, which changes every
+refresh. Upkeep does not change Auth0 consent or token lifetimes.
+
+### Connection recovery
+
+| Symptom | Cause | Action |
+|---|---|---|
+| ChatGPT says "Authentication succeeded, action discovery failed" | Token rejected: wrong `client_claim` for the API's JWT profile (Auth0 profile sends `azp`), or a different signed-in user than the bound subject | Confirm `client_claim`; sign out of the issuer browser session and reconnect as the dedicated advisor user, not Google |
+| Jo sees the app but none of the three tools | ChatGPT kept the tool list captured when discovery failed | Plugin settings → Manage app → **Refresh tools**, then start a new Jo conversation |
+| New sign-ins or calls refused after about an hour | Public-key snapshot expired | `check`; start the key oneshot, inspect its journal, confirm the timer is enabled |
+| Backend exits with "assignment expired or revoked" | The bound request passed its 30-minute expiry | Create a new approved request; old receipts stay readable to the owner |
+| Save returns "refused or immutable content conflicts" with no receipt | Malformed answer (often the whole `answer_contract` wrapper instead of its six-field `answer`) or a real conflict | Read `get_advisor_request` first; resend only `summary`, `interpretation`, `risks`, `conditions`, `gaps`, `references` |
+| Units inactive after host reboot or deploy | Advisor units have no Install section by design | Verify the installation, then start sockets before services |
+| Operator command refuses with inventory drift | Root Python wrote `__pycache__` into the runtime | Run operator Python with `-B` and `PYTHONDONTWRITEBYTECODE=1`; remove only the generated caches, then recheck |
 
 ## Stop, replacement and receipt-preserving rollback
 
