@@ -81,6 +81,93 @@ the independent backend still refuses missing read/write scopes with401.
 
 ## Installation and activation are separate approval gates
 
+### Side-by-side upgrade for the private owner trial
+
+The optional `deploy/advisor_trial_stage.py` and `advisor_trial_control.py`
+support the already installed, inactive v1 advisor without overwriting its
+runtime, installation record, isolated ledger or recovery export. They are
+not called by normal release installation or auto-deployment. Installation
+creates disabled v2 resources; it does **not** restart the owner frontend,
+start/enable units, apply a ledger ACL, allocate a live assignment, refresh
+keys, create grants or publish a proxy. Native CI's `trial_smoke.py` is only a
+disposable test harness and must never be used as an operator installer.
+
+The owner entrance is the existing authenticated **private demo app** at
+`https://vps-c6302cfc.tail978c2e.ts.net:8443/advisor-review`. This is a regular
+TradeJournal page, not the production entrance. Production's legacy access
+mode, journal connector, shared database and all existing grants remain
+unchanged. The existing `tradejournal-dot-trial-owner.service` alone receives
+a guarded drop-in: static `tj-advisor-web-owner` user/private group, new Node
+and frontend runtime paths, and a public-only advisor environment file. Its
+existing EnvironmentFile, API8091, private session gateway and backend unit
+dependencies remain in place. No credential file is copied or printed.
+
+New resources are `/opt/tradejournal-advisor-v2` (root-owned adapter/backend,
+compiled frontend/Node, inventory, previous-unit backups and recovery),
+`/etc/tradejournal-advisor-v2/{advisor,owner}` (separately readable public
+configuration), `/var/lib/tradejournal-advisor-v2/fixture.db` (new invented
+ledger), and `/run/tradejournal-advisor{,-owner}-v2` (private sockets). The
+six existing-name advisor units are the backend, MCP and owner socket/service
+pairs. The new reader account `tj-advisor-owner` differs from the writer and
+frontend; its later approved named-UID ACL applies only to the **new** ledger.
+The owner socket's group is only `tj-advisor-web-owner`, never the general
+production `tradejournal` group. Actual UID and GID are recorded independently.
+
+Prepare a private JSON guard file containing exactly `old_record_sha256`,
+`frontend_unit_sha256`, `owner_env_sha256`, and `api_env_sha256`, obtained from
+the bounded read-only inventory. Include the full source/artifact provenance,
+intended host, existing owner URL, new paths/accounts and unit/drop-in diff in
+the human approval. Stage with verified offline wheels and the exact reviewed
+Ubuntu24.04/x86_64/Node22 archive (no downloads/build on the retained host):
+
+```bash
+backend/.venv/bin/python deploy/advisor_trial_stage.py /absolute/private/trial-bundle \
+  --archive /absolute/verified-release.tar.gz --archive-sha256 REVIEWED_TAR_SHA256 \
+  --wheels /absolute/verified-wheels --guards /absolute/private/host-guards.json
+```
+
+Staging rejects archive digest/platform/source mismatch, duplicate/traversing
+paths, links and special files. A previous compiled frontend is accepted only
+when the complete tracked frontend source equals the current checkout. Every
+staged file/mode, including the v2 proxy socket target, joins the manifest.
+The installer requires the exact approved manifest SHA, root-private staging,
+unchanged old runtime/unit/owner-auth guards, stopped old advisor units, absent
+v2 destinations and absent new identities/owner units/drop-ins:
+
+```bash
+sudo /usr/bin/python3.12 -B deploy/advisor_trial_control.py install \
+  --bundle /root/approved-trial-bundle --approve-install REVIEWED_MANIFEST_SHA256
+sudo /usr/bin/python3.12 -B deploy/advisor_trial_control.py preflight
+```
+
+There is no activation action in this install-only controller. A later grouped
+approval must separately cover the fresh invented freeze/question/plan,
+dedicated bindings, public keys valid for at most one hour, exact reader ACL,
+proxy fragment/Caddy append, the six unit starts and the one private frontend
+restart. Compute the final startup guard from those **actual** approved inputs
+at execution time; preparation cannot honestly supply that digest yet. Do not
+use the v1 activation controller for v2: it correctly refuses replaced units.
+Use the existing fixture CLI/JWKS preparation procedures only after approval,
+allocate the30-minute request late, and preserve any existing v2 receipt before
+considering a new request. Manual receipt capability files remain private.
+
+```bash
+sudo /usr/bin/python3.12 -B deploy/advisor_trial_control.py stop
+sudo /usr/bin/python3.12 -B deploy/advisor_trial_control.py rollback
+```
+
+Stop attempts all three sockets first, then all three processes, even after
+runtime drift. Rollback stops those six units, refuses changed inventories,
+units, account/group authority, auth guards or backups, restores the exact old
+four units, and removes only the owned owner pair/drop-in. Old and new ledgers,
+receipts, recovery, accounts, runtimes and records remain. It never implicitly
+stops/restarts the private owner frontend. **If that frontend was restarted
+onto v2, rollback is incomplete until the separately approved explicit restart
+and verification restores its original runtime/DynamicUser identity/session
+behavior.** A failed partial install retains inert destinations for deliberate
+recovery and refuses overwrite/retry; it restores only unit files still equal
+to this attempt's exact new bytes. Preserve diagnostics and receipts.
+
 **Stop here until the owner approves the concrete installation.** Inspect the
 reviewed commit/artifact/bundle digests, file modes/owners, exact users/paths/
 units and intended isolated host. Take a root-private copy of the reviewed
