@@ -330,6 +330,11 @@ def test_a_run_stopped_midway_reads_as_interrupted_and_a_crash_leaves_a_failed_s
         plan_reviews.main([])
     status = plan_reviews.read_status()
     assert status["state"] == "failed" and "database went away" in status["message"]
+    plan_reviews._write_status({"state": "ok", "written": [{"day": "2026-08-31"}], "failed": [{"day": "2026-08-30", "error": "old"}]})
+    with pytest.raises(RuntimeError):
+        plan_reviews.main([])
+    status = plan_reviews.read_status()
+    assert status["state"] == "failed" and status["written"] == [] and status["failed"] == []  # not last night's
 
 
 def test_rules_from_an_old_review_carry_how_old_they_are(fake_claude, engine):

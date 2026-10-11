@@ -85,11 +85,16 @@ def _single_run():
     directory = state_dir()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "run.lock").open("w") as handle:
-        try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            yield False
-            return
+        # A status read holds the lock for an instant; only a lock still held after a second is another run.
+        for attempt in range(10):
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if attempt == 9:
+                    yield False
+                    return
+                time.sleep(0.1)
         yield True
 
 
@@ -198,7 +203,10 @@ def main(argv: list[str] | None = None) -> int:
             with Session(engine) as session:
                 status = run(session, max(1, args.max), args.dry_run)
         except Exception as exc:  # a database or code failure still leaves a truthful status
-            status = {**(read_status() or {}), "state": "failed", "message": f"The run failed: {type(exc).__name__}: {str(exc)[:300]}",
+            # Keep what this run already recorded; never last night's results as tonight's.
+            previous = read_status() or {}
+            kept = previous if previous.get("state") == "running" else {"planned": [], "written": [], "failed": []}
+            status = {**kept, "state": "failed", "message": f"The run failed: {type(exc).__name__}: {str(exc)[:300]}",
                       "finished_at": datetime.now(timezone.utc).isoformat()}
             status.setdefault("started_at", status["finished_at"])
             if not args.dry_run:

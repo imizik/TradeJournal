@@ -2,7 +2,7 @@ import json
 import threading
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,7 +30,7 @@ from app.engine.job_runtime import execute_job, in_sync_worker, submit_job
 from app.engine.enricher import polygon_calls_per_minute
 from app.engine.options_recorder import record as record_option_snapshots
 from app.engine.rvol_history import store as store_rvol_history
-from app.models import Fill, JobRun, Trade
+from app.models import Fill, JobRun
 from app.environment import require_destructive_confirmation
 from app.routers.fills import (
     DestructiveConfirmation,
