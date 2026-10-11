@@ -144,44 +144,53 @@ test("a fill arrow's hover and card label units, stale and missing metrics, and 
   await expect(main).toHaveAttribute("data-positions", "");
 });
 
-test("a trade opened from its page shows its months-old candles and arrows, its card, and goes back to live", async ({ page }) => {
-  await registerCharts(page);
-  const now = Math.floor(Date.now() / 1000);
-  const history: { interval: string; before: number }[] = [];
-  await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now) }));
-  await page.route("**/api/backend/charts/history?**", (route) => {
-    const query = new URL(route.request().url()).searchParams;
-    const interval = query.get("interval") as Interval;
-    const before = Number(query.get("before"));
-    history.push({ interval, before });
-    const step = STEP[interval];
-    const page_ = bars(Math.floor(before / step) * step, step, 1200, 90);
-    const entry = page_.find((b) => b.time <= ENTRY && ENTRY < b.end_time);
-    return route.fulfill({ json: { symbol: query.get("symbol"), interval, session: "extended", before, limit: 1200, bars: page_,
-      markers: entry ? [{ id: FILL, time: entry.time, label: "buy to open 1 call", buy: true }] : [],
-      older_cursor: page_[0].time, exhausted: false, continuation: null, warmup: "ready", source: interval === "1D" ? "tradier" : "alpaca_sip",
-      price_basis: "split_adjusted", adjustment: { basis: "split_adjusted", status: "ok", source: "alpaca_corporate_actions", as_of: now, splits: [], daily: {}, dividends: "unsupported", dividends_note: "", warnings: [] },
-      fills_truncated: false, issue: null } });
-  });
-  await page.route(`**/api/backend/charts/journal/trades/${TRADE}`, (route) => route.fulfill({ json: { ...CARD, fill: null } }));
-  await page.goto(`/charts?symbol=NVDA&from=${ENTRY}&to=${EXIT}&trade=${TRADE}`);
-  const banner = page.getByRole("status", { name: "Past trade view" });
-  await expect(banner).toContainText("Showing NVDA Jul 14, 2026, 9:40 AM–10:20 AM ET");
-  await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toHaveCount(1);
-  // The 5m page ends at the close of that day's extended session (20:00 New York), not today.
-  await expect.poll(() => history.find((h) => h.interval === "5m")?.before).toBe(Date.parse("2026-07-15T01:00:00Z") / 1000);
-  // The main chart is centred on the trade, with its arrow on the entry candle.
-  await expect.poll(async () => { const range = await visible(page); return !!range && range.from <= ENTRY && range.to >= EXIT; }).toBe(true);
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
-  await expect(page.getByRole("dialog", { name: "Trade card" })).toContainText("MRVL 1/15/27 110C");
-  await page.screenshot({ path: test.info().outputPath("past-trade-desktop.png") });
+for (const arrival of ["together", "main first", "main last"]) {
+  test(`a trade opened from its page shows its months-old candles and arrows, its card, and goes back to live (${arrival})`, async ({ page }) => {
+    await registerCharts(page);
+    const now = Math.floor(Date.now() / 1000);
+    const history: { interval: string; before: number }[] = [];
+    const firstPages = new Set<string>();
+    await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now) }));
+    await page.route("**/api/backend/charts/history?**", async (route) => {
+      const query = new URL(route.request().url()).searchParams;
+      const interval = query.get("interval") as Interval;
+      const before = Number(query.get("before"));
+      history.push({ interval, before });
+      // The panels load independently. Exercise either side of the focus race,
+      // without relaxing the entry/exit, marker or back-to-live assertions.
+      if (!firstPages.has(interval)) {
+        firstPages.add(interval);
+        if (arrival !== "together" && (interval === "5m") !== (arrival === "main first")) await new Promise((resolve) => setTimeout(resolve, 750));
+      }
+      const step = STEP[interval];
+      const page_ = bars(Math.floor(before / step) * step, step, 1200, 90);
+      const entry = page_.find((b) => b.time <= ENTRY && ENTRY < b.end_time);
+      return route.fulfill({ json: { symbol: query.get("symbol"), interval, session: "extended", before, limit: 1200, bars: page_,
+        markers: entry ? [{ id: FILL, time: entry.time, label: "buy to open 1 call", buy: true }] : [],
+        older_cursor: page_[0].time, exhausted: false, continuation: null, warmup: "ready", source: interval === "1D" ? "tradier" : "alpaca_sip",
+        price_basis: "split_adjusted", adjustment: { basis: "split_adjusted", status: "ok", source: "alpaca_corporate_actions", as_of: now, splits: [], daily: {}, dividends: "unsupported", dividends_note: "", warnings: [] },
+        fills_truncated: false, issue: null } });
+    });
+    await page.route(`**/api/backend/charts/journal/trades/${TRADE}`, (route) => route.fulfill({ json: { ...CARD, fill: null } }));
+    await page.goto(`/charts?symbol=NVDA&from=${ENTRY}&to=${EXIT}&trade=${TRADE}`);
+    const banner = page.getByRole("status", { name: "Past trade view" });
+    await expect(banner).toContainText("Showing NVDA Jul 14, 2026, 9:40 AM–10:20 AM ET");
+    await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toHaveCount(1);
+    // The 5m page ends at the close of that day's extended session (20:00 New York), not today.
+    await expect.poll(() => history.find((h) => h.interval === "5m")?.before).toBe(Date.parse("2026-07-15T01:00:00Z") / 1000);
+    // The main chart is centred on the trade, with its arrow on the entry candle.
+    await expect.poll(async () => { const range = await visible(page); return !!range && range.from <= ENTRY && range.to >= EXIT; }).toBe(true);
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
+    await expect(page.getByRole("dialog", { name: "Trade card" })).toContainText("MRVL 1/15/27 110C");
+    await page.screenshot({ path: test.info().outputPath("past-trade-desktop.png") });
 
-  await page.getByRole("dialog", { name: "Trade card" }).getByRole("button", { name: "Close trade card" }).click();
-  await banner.getByRole("button", { name: "Back to live" }).click();
-  await expect(banner).toHaveCount(0);
-  expect(new URL(page.url()).search).toBe("");
-  await expect.poll(async () => (await visible(page))?.to ?? 0).toBeGreaterThan(now - 600);
-});
+    await page.getByRole("dialog", { name: "Trade card" }).getByRole("button", { name: "Close trade card" }).click();
+    await banner.getByRole("button", { name: "Back to live" }).click();
+    await expect(banner).toHaveCount(0);
+    expect(new URL(page.url()).search).toBe("");
+    await expect.poll(async () => (await visible(page))?.to ?? 0).toBeGreaterThan(now - 600);
+  });
+}
 
 test.describe("phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });

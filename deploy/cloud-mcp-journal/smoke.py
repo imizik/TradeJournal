@@ -38,6 +38,7 @@ WRITE_PROBE = STATE / "sandbox-write-probe.bin"
 UNIT_DIR = Path("/etc/systemd/system")
 SOCKET_UNIT = "tradejournal-journal-coach.socket"
 SERVICE_UNIT = "tradejournal-journal-coach.service"
+CREDENTIAL_UNIT = f"journal-credential-smoke-{os.getpid()}.service"
 ACCOUNT = "tj-journal-coach"
 RESOURCE = "https://journal.example.test/mcp"
 ISSUER = "https://identity.example.test/"
@@ -87,7 +88,7 @@ def preflight() -> None:
     if occupied_account():
         raise RuntimeError(f"refusing pre-existing {ACCOUNT} user or group")
     # A unit may already be loaded from another unit search path or be active.
-    for unit in (SOCKET_UNIT, SERVICE_UNIT):
+    for unit in (SOCKET_UNIT, SERVICE_UNIT, CREDENTIAL_UNIT):
         if run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0:
             raise RuntimeError(f"refusing active pre-existing {unit}")
         if run("systemctl", "cat", unit, check=False).returncode == 0:
@@ -128,7 +129,7 @@ def prepare() -> None:
     run("chown", f"root:{ACCOUNT}", WRITE_PROBE)
 
     for name in ("cloud_mcp_d0.py", "cloud_mcp_journal.py", "journal_coach_snapshot.py",
-                 "journal_coach_publication.py"):
+                 "journal_coach_publication.py", "journal_coach_refresh.py"):
         shutil.copy2(REPO / "backend" / name, BACKEND / name)
     run(sys.executable, "-m", "venv", VENV)
     run(VENV / "bin/python", "-m", "pip", "install", "--disable-pip-version-check",
@@ -144,6 +145,74 @@ def prepare() -> None:
     (UNIT_DIR / SOCKET_UNIT).chmod(0o644)
     (UNIT_DIR / SERVICE_UNIT).chmod(0o644)
     run("systemctl", "daemon-reload")
+
+
+def exercise_systemd_credentials() -> None:
+    """Read invented private inputs through real LoadCredential; never export."""
+    inputs = CONFIG_DIR / "credential-smoke"
+    inputs.mkdir(mode=0o700)
+    inputs.chmod(0o700)
+    scope = inputs / "scope.json"
+    scope.write_text(json.dumps({
+        "account_ids": ["00000000-0000-4000-8000-000000000001"],
+        "rolling_days": 30, "publication_file": "/tmp/unpublished-journal.json",
+    }))
+    credential = inputs / "database-url"
+    credential.write_bytes(b"invented-no-database-url")
+    scope.chmod(0o600)
+    credential.chmod(0o600)
+    probe = BACKEND / "credential-smoke.py"
+    probe.write_text('''import os, tempfile
+from pathlib import Path
+import journal_coach_refresh as reader
+assert os.geteuid() != 0
+directory = Path(os.environ["CREDENTIALS_DIRECTORY"])
+scope = directory / "scope.json"
+credential = directory / "database-url"
+assert reader._config(scope)[1] == 30
+assert reader._regular_private_file(credential, 100, "fixture") == b"invented-no-database-url"
+try:
+    with credential.open("ab"):
+        pass
+except OSError:
+    pass
+else:
+    raise AssertionError("delivered credential is writable")
+assert not Path("/tmp/unpublished-journal.json").exists()
+with tempfile.TemporaryDirectory() as tmp:
+    ordinary = Path(tmp) / "credential"
+    ordinary.write_bytes(b"invented-no-database-url")
+    for mode in (0o440, 0o640, 0o644):
+        ordinary.chmod(mode)
+        try:
+            reader._regular_private_file(ordinary, 100, "fixture")
+        except reader.RefreshError:
+            pass
+        else:
+            raise AssertionError("ordinary readable input accepted")
+    for mode in (0o400, 0o600):
+        ordinary.chmod(mode)
+        assert reader._regular_private_file(ordinary, 100, "fixture") == b"invented-no-database-url"
+print("PASS: actual service UID reads systemd credentials at mode " + oct(credential.stat().st_mode & 0o777)
+      + "; delivered credential is immutable; ordinary readable inputs refuse; no DB or publication")
+''')
+    probe.chmod(0o640)
+    run("chown", f"root:{ACCOUNT}", probe)
+    try:
+        run("systemd-run", f"--unit={CREDENTIAL_UNIT}", "--wait", "--pipe", "--collect",
+            "--property=Type=oneshot", "--property=TimeoutStartSec=20",
+            f"--property=User={ACCOUNT}", f"--property=Group={ACCOUNT}",
+            "--property=PrivateNetwork=yes", "--property=RestrictAddressFamilies=AF_UNIX",
+            "--property=ProtectSystem=strict", "--property=PrivateTmp=yes",
+            "--property=NoNewPrivileges=yes",
+            f"--property=LoadCredential=scope.json:{scope}",
+            f"--property=LoadCredential=database-url:{credential}",
+            VENV / "bin/python", probe)
+        print("PASS: native LoadCredential delivery, input validation and ordinary-file refusal")
+    finally:
+        run("systemctl", "stop", CREDENTIAL_UNIT, check=False)
+        shutil.rmtree(inputs)
+        probe.unlink()
 
 
 def fixture(trades: list[dict] | None = None, *, generated_at: str | None = None) -> dict:
@@ -483,6 +552,7 @@ def stop_and_cleanup() -> None:
     # Cleanup targets are only paths that passed the empty-host preflight.
     run("systemctl", "disable", "--now", SOCKET_UNIT, check=False)
     run("systemctl", "stop", SERVICE_UNIT, check=False)
+    run("systemctl", "stop", CREDENTIAL_UNIT, check=False)
     for name in (SOCKET_UNIT, SERVICE_UNIT):
         (UNIT_DIR / name).unlink(missing_ok=True)
         shutil.rmtree(UNIT_DIR / f"{name}.d", ignore_errors=True)
@@ -564,6 +634,7 @@ def main() -> None:
     production_dir_created = not PRODUCTION_MARKER_DIR.exists()
     try:
         prepare()
+        exercise_systemd_credentials()
         nonce = secrets.token_hex(32)
         OWNER_MARKER.write_text(nonce + "\n", encoding="ascii")
         OWNER_MARKER.chmod(0o600)
