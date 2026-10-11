@@ -18,6 +18,7 @@ import PlanSheet from "./PlanSheet";
 import type { ChartSnapshot } from "./PlanSheet";
 import PlanStrip from "./PlanStrip";
 import PriceChart from "./PriceChart";
+import { beginHistoryLoad, type OlderState } from "@/lib/chartHistory";
 import Sheet from "./Sheet";
 import Splitter from "./Splitter";
 import type { SplitDrag } from "./Splitter";
@@ -27,7 +28,7 @@ import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
 import { activeLayout, applyLayout, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
-import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillMarker, HiddenGroups, Indicators, Interval, MarketDay, OptionsLayer, PanelStudies, PriceAdjustment, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
+import type { ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, HiddenGroups, Indicators, Interval, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
 import { autoLevelsShown } from "@/lib/autoLevels";
 import { createStreamStore, useClock, useStream } from "@/lib/chartStore";
 import { receiveChartTick, startSymbolTiming, useQuoteTiming } from "@/lib/chartPerformance";
@@ -49,9 +50,6 @@ const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", save
 const button = (size = "h-8 px-2.5") => `inline-flex ${size} items-center justify-center gap-1.5 rounded-md border border-slate-700/60 text-xs transition-colors hover:bg-slate-800 disabled:opacity-40`;
 /** A borderless toolbar or rail button; `on` is a selected tool or an open panel. */
 const plain = (on: boolean, tone = "bg-sky-400/15 text-sky-300") => `inline-flex shrink-0 items-center justify-center gap-1 rounded text-xs transition-colors disabled:opacity-30 ${on ? tone : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"}`;
-type OlderPanel = { bars: ChartBar[]; markers: FillMarker[]; exhausted: boolean; warmup: string; issue: string | null; loading: boolean; calendarNote?: string | null; adjustment?: PriceAdjustment; adjustmentNote?: string | null; historyStart?: string | null };
-/** Older history per frame (`symbol|interval`), for one session. */
-type OlderState = { key: string; panels: Partial<Record<string, OlderPanel>> };
 /** A symbol at an interval: what one panel draws, and the key its history is kept under. */
 type Frame = { symbol: string; interval: Interval };
 type Slot = Frame & { index: number };
@@ -502,9 +500,7 @@ export default function ChartWorkspace() {
     const before = beforeOverride ?? past?.bars[0]?.time ?? feed.panels[frame.interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
     const controller = new AbortController();
     historyFlights.current.set(key, controller);
-    setOlder((state) => state.key !== session ? state : ({ ...state, panels: { ...state.panels,
-      [key]: { bars: past?.bars ?? [], markers: past?.markers ?? [], exhausted: past?.exhausted ?? false,
-        warmup: past?.warmup ?? "pending", issue: null, loading: true } } }));
+    setOlder((state) => beginHistoryLoad(state, session, key));
     let continuation: string | null = null;
     try {
       while (!controller.signal.aborted) {

@@ -1475,6 +1475,8 @@ except the option mark, which is asked for from a card.
   to its latest candles; choosing another symbol also ends the mode. A gap
   between the trade's page and today fills from the side in view, one page at
   a time, as the user scrolls toward the present. A malformed link is ignored.
+  Starting another page load preserves candles, fill markers and source metadata
+  from responses already queued, even before those responses have rendered.
 
 ### Pre-trade capture (C3.4, C3.5)
 
