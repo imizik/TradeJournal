@@ -1,6 +1,7 @@
 """R3 single-host session beside explicit cache/store roots, never app jobs/DB."""
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import gc
 import hashlib
 import threading
 import time
@@ -26,6 +27,7 @@ class ResearchSession:
         self.preparation = threading.Lock()
         self.execution = threading.Lock()
         self.worker = None
+        self.last_submission = None
 
     @contextmanager
     def _prepare(self):
@@ -66,6 +68,7 @@ class ResearchSession:
         with self._prepare():
             obs = self._observations(definition, fresh=True)
             status = self.store.enqueue(obs.snapshot, definition, operation_id)
+            self.last_submission = {"run_id": status["run_id"], "data_id": status["data_id"]}
             with self.store._root() as fd:
                 self.store._immutable(fd, f"submission.{operation_id}.json", canonical_bytes(
                     {"run_id": status["run_id"], "outcome_informed": outcome_informed}))
@@ -80,21 +83,34 @@ class ResearchSession:
         # Explicit finite dispatch; startup/restart never replays work.
         if not self.execution.acquire(blocking=False):
             raise Busy("Research worker is already active")
-        try:
-            with self._prepare():
-                # Release warmed features before fork/exec; retain immutable bars.
-                self.observations = None
-                self.key = None
-        except Exception:
+        if not self.preparation.acquire(blocking=False):
             self.execution.release()
-            raise
+            raise Busy("Research preparation is busy; retry shortly")
+        self.observations = None
+        self.chart_snapshot = None
+        self.key = None
+        gc.collect()
+        released = False
+        def child_started():
+            nonlocal released
+            if not released:
+                self.preparation.release()
+                released = True
         def work():
             try:
-                self.store.work_once()
+                # Keep preparation out of the fork window. Afterwards chart/
+                # preview requests may rebuild independently from frozen data.
+                self.store.work_once(on_child_started=child_started)
             finally:
+                child_started()
                 self.execution.release()
         self.worker = threading.Thread(target=work, name="research-parent", daemon=False)
-        self.worker.start()
+        try:
+            self.worker.start()
+        except Exception:
+            child_started()
+            self.execution.release()
+            raise
         return {"status": "dispatched"}
 
     def _saved_snapshot(self, run_id):
@@ -117,7 +133,11 @@ class ResearchSession:
         if type(reveal) is not bool:
             raise ValueError("reveal must be a boolean")
         with self._prepare():
-            snapshot = self._saved_snapshot(run_id) if run_id else self.chart_snapshot
+            frozen_run = run_id
+            if frozen_run is None and self.chart_snapshot is None and self.last_submission:
+                if self.last_submission["data_id"] == data_id:
+                    frozen_run = self.last_submission["run_id"]
+            snapshot = self._saved_snapshot(frozen_run) if frozen_run else self.chart_snapshot
             if snapshot is None or snapshot.identity != data_id:
                 raise ValueError("Chart population expired; preview again or reopen the saved run")
             if snapshot.engine_fingerprint != engine_fingerprint():
@@ -130,9 +150,16 @@ class ResearchSession:
             self.key = None if run_id else self.key
             features = observations.features(symbol, moment)
             day = moment.astimezone(ET).date()
-            source = next(s for s in snapshot.symbols if s.symbol == symbol)
-            bars = [b for b in source.bars if b.time.astimezone(ET).date() == day
-                    and (reveal or b.time.timestamp() + 300 <= moment.timestamp())]
+            quality = observations._quality[symbol]
+            coverage = quality.coverage.get(day)
+            series = quality.series
+            # Analysis and chart share the same frozen inferred-split basis.
+            # Partial resamples remain absent, never apparently complete candles.
+            indices = [i for i, stamp in enumerate(series.time) if stamp.astimezone(ET).date() == day
+                       and coverage.bucket_complete(series.minute[i])
+                       and (reveal or stamp.timestamp() + 300 <= moment.timestamp())] if series and coverage else []
+            bars = [{"time": int(series.time[i].timestamp()), "open": series.open[i], "high": series.high[i],
+                     "low": series.low[i], "close": series.close[i]} for i in indices]
             if str(uuid.UUID(operation_id)) != operation_id:
                 raise ValueError("canonical inspection UUID required")
             record = {"kind": "chart_inspection", "future_revealed": reveal, "data_id": data_id, "run_id": run_id,
@@ -144,7 +171,6 @@ class ResearchSession:
             return {"data_id": data_id, "symbol": symbol, "decision_time": moment.astimezone(timezone.utc).isoformat(),
                     "occurrence_id": symbol + ":" + moment.astimezone(timezone.utc).isoformat(),
                     "revealed": reveal, "exposure_id": operation_id,
-                    "bars": [{"time": int(b.time.timestamp()), "open": b.open, "high": b.high,
-                              "low": b.low, "close": b.close} for b in bars],
+                    "bars": bars,
                     "features": {k: {"value": v.value, "reasons": list(v.reasons), "unit": FEATURE_UNITS[k]} for k, v in features.items()},
                     "provenance": snapshot.provenance}

@@ -44,7 +44,7 @@ export default function ResearchStudio() {
     const abort = new AbortController();
     const timer = setTimeout(() => { setLoading(true); setError(""); void prepared<Population>("preview", {raw: draft}, abort.signal).then(p => {
       if (!abort.signal.aborted && currentRef.current === current) { setPopulation(p); setPreviewKey(current); }
-    }).catch(e => { if (!abort.signal.aborted) setError(e.message); }).finally(() => { if (!abort.signal.aborted) setLoading(false); }); }, 80);
+    }).catch(e => { if (!abort.signal.aborted) setError(e.message); }).finally(() => { if (!abort.signal.aborted) setLoading(false); }); }, 40);
     return () => { clearTimeout(timer); abort.abort(); };
   }, [config, current, draft]);
   async function history() { try { setRuns((await command<{runs: Status[]}>("runs")).runs); } catch (e) { setError((e as Error).message); } }
@@ -56,16 +56,17 @@ export default function ResearchStudio() {
     return () => { active = false; clearInterval(id); };
   }, [run]);
   async function start() {
-    const frozen = current, seq = ++runSequence.current; setSubmitting(true); setError("");
+    const frozen = current, seq = ++runSequence.current; ++chartSequence.current; setChart(null); setSelected(null); setChartLoading(false); setResult(null); setSubmitting(true); setError("");
     try { const s = await command<Status>("enqueue", {raw: draft, operation_id: crypto.randomUUID(), outcome_informed: informed});
       if (seq !== runSequence.current) return;
+      ++chartSequence.current; setChart(null); setSelected(null); setChartLoading(false);
       setRun(s); setRunKey(frozen); setResult(null);
       if (s.status === "queued") await command("execute");
       await history();
     } catch (e) { setError((e as Error).message); } finally { if (seq === runSequence.current) setSubmitting(false); }
   }
   async function reopen(s: Status) {
-    ++runSequence.current; setRun(s); if (s.definition) { currentRef.current = key(s.definition); setDraft(s.definition); setRunKey(key(s.definition)); }
+    ++runSequence.current; setSubmitting(false); setRun(s); if (s.definition) { currentRef.current = key(s.definition); setDraft(s.definition); setRunKey(key(s.definition)); }
     setResult(null); setChart(null); setSelected(null); ++chartSequence.current;
     if (s.status === "completed") await revealResult(s);
   }
@@ -78,11 +79,16 @@ export default function ResearchStudio() {
   async function control(action: "cancel" | "retry") {
     if (!run) return; const seq = runSequence.current; try { const s = await command<Status>(action, {run_id: run.run_id, operation_id: crypto.randomUUID()}); if (seq === runSequence.current) setRun(s); if (action === "retry") await command("execute"); await history(); } catch (e) { setError((e as Error).message); }
   }
+  async function recover() {
+    if (!run) return; const seq=runSequence.current; setError("");
+    try { await command("recover"); const s=await command<Status>("status",{run_id:run.run_id}); if(seq===runSequence.current) setRun(s); await history(); }
+    catch(e) {setError((e as Error).message);}
+  }
   async function inspect(e: Occurrence, reveal = false, saved = false) {
-    const seq = ++chartSequence.current; setSelected(e); setSelectedSaved(saved); setChart(null); setChartLoading(true);
+    const seq = ++chartSequence.current, initiatingRun = runSequence.current; setSelected(e); setSelectedSaved(saved); setChart(null); setChartLoading(true);
     try { const c = await prepared<Chart>("chart", {symbol: e.symbol, decision_time: e.decision_time, data_id: saved ? result?.population.data_id : population?.data_id, run_id: saved ? result?.run_id : null, reveal, operation_id: crypto.randomUUID()});
-      if (seq === chartSequence.current) { setChart(c); setSelected({...e, occurrence_id: c.occurrence_id, decision_time: c.decision_time, features: c.features}); if (reveal) setInformed(true); }
-    } catch (err) { if (seq === chartSequence.current) setError((err as Error).message); } finally { if (seq === chartSequence.current) setChartLoading(false); }
+      if (seq === chartSequence.current && initiatingRun === runSequence.current) { setChart(c); setSelected({...e, occurrence_id: c.occurrence_id, decision_time: c.decision_time, features: c.features}); if (reveal) setInformed(true); }
+    } catch (err) { if (seq === chartSequence.current && initiatingRun === runSequence.current) setError((err as Error).message); } finally { if (seq === chartSequence.current && initiatingRun === runSequence.current) setChartLoading(false); }
   }
   function edit(d: Definition) { currentRef.current = key(d); setLoading(true); setChartLoading(false); setDraft(d); ++chartSequence.current; setChart(null); setSelected(null); }
   async function browse() {
@@ -128,7 +134,7 @@ export default function ResearchStudio() {
       <div className="flex gap-2 flex-wrap"><button className={button} disabled={draft.predicates.length >= 3} onClick={() => edit({...draft, predicates: [...draft.predicates, {feature: "day_move", minimum: null, maximum: 0}]})}>Add AND condition</button><button className={button + " bg-sky-950"} disabled={loading || submitting || previewKey !== current || !!run && ["queued", "running"].includes(run.status)} onClick={start}>{submitting ? "Preparing immutable run…" : "Run analysis"}</button><span role="status">{loading ? "Preparing population…" : population && previewKey === current ? `Preview: ${population.event_count} events · ${population.eligible_moments} ordinary moments` : "Preview does not match this draft"}</span></div>
       {population && <div className="text-xs text-muted-foreground">{population.distinct_dates} dates · {population.distinct_calendar_weeks} calendar weeks · largest-day share {population.largest_day_fraction === null ? "unavailable" : (population.largest_day_fraction*100).toFixed(1)+"%"}. Eligible: {population.eligible_symbols.join(", ") || "none"}. Unavailable: {population.unavailable_symbols.join(", ") || "none"}.<details><summary>Coverage and exclusions {previewKey !== current ? "(previous preview)" : ""}</summary><pre className="overflow-auto max-h-48">{JSON.stringify({coverage: population.coverage, exclusions: population.exclusions}, null, 2)}</pre></details></div>}
     </section>
-    {run && <section className="rounded border p-3 space-y-2" aria-label="Run status"><p>{previous ? "Previous result — draft changed" : "Frozen run"} · <code className="break-all">{run.run_id}</code> · attempt {run.attempt} · <strong>{run.status}</strong></p>{run.reason && <p>{run.reason}</p>}<div className="flex gap-2">{["queued", "running"].includes(run.status) && <button className={button} onClick={() => control("cancel")}>Cancel run</button>}{["failed", "cancelled"].includes(run.status) && <button className={button} onClick={() => control("retry")}>Retry frozen run</button>}{run.status === "queued" && <button className={button} onClick={() => command("execute").catch(e => setError(e.message))}>Start queued worker</button>}{run.status === "completed" && !result && <button className={button} onClick={() => revealResult(run)}>Reveal analysis (records exposure)</button>}</div></section>}
+    {run && <section className="rounded border p-3 space-y-2" aria-label="Run status"><p>{previous ? "Previous result — draft changed" : "Frozen run"} · <code className="break-all">{run.run_id}</code> · attempt {run.attempt} · <strong>{run.status}</strong></p>{run.reason && <p>{run.reason}</p>}<div className="flex gap-2">{["queued", "running"].includes(run.status) && <button className={button} onClick={() => control("cancel")}>Cancel run</button>}{["failed", "cancelled"].includes(run.status) && <button className={button} onClick={() => control("retry")}>Retry frozen run</button>}{["queued", "running"].includes(run.status) && <button className={button} onClick={() => run.status === "running" ? recover() : command("execute").catch(e => setError(e.message))}>{run.status === "running" ? "Check worker / recover interrupted run" : "Start queued worker"}</button>}{run.status === "completed" && !result && <button className={button} disabled={submitting} onClick={() => revealResult(run)}>Reveal analysis (records exposure)</button>}</div></section>}
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
     <div className="space-y-4 min-w-0">
       <section className="rounded border p-4 space-y-3" aria-label="Chart explorer"><h2 className="font-medium">Discovery chart</h2><div className="flex flex-wrap gap-2"><select aria-label="Chart symbol" className={field} value={draft.universe.includes(symbol) ? symbol : draft.universe[0]} onChange={e => setSymbol(e.target.value)}>{draft.universe.map(s => <option key={s}>{s}</option>)}</select><input aria-label="Chart date" className={field} type="date" min={draft.start} max={draft.end} value={day} onChange={e => setDay(e.target.value)}/><input aria-label="Decision clock" type="time" step="300" className={field} value={clock} onChange={e => setClock(e.target.value)}/><button className={button} disabled={loading || previewKey !== current} onClick={browse}>Inspect decision</button></div>

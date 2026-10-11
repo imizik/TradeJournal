@@ -85,7 +85,8 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
     payload = canonical_bytes(raw)
     if len(payload) > MAX_BYTES:
         raise ValueError("prepared snapshot exceeded research byte bound")
-    return gzip.compress(payload, mtime=0)
+    # Bounded compression favors interactive submission over a marginal size gain.
+    return gzip.compress(payload, compresslevel=3, mtime=0)
 
 
 def decode_snapshot(payload: bytes) -> Snapshot:
@@ -390,7 +391,7 @@ class ResearchStore:
                 self._event(db, run_id, state["attempt"], "exposed")
             return json.loads(raw)
 
-    def _child(self, request, payload, run_id, worker_fd):
+    def _child(self, request, payload, run_id, worker_fd, on_started=None):
         script = Path(__file__).resolve().parents[2] / "scripts/research_studio_worker.py"
         envelope = canonical_bytes({"request": request, "snapshot": base64.b64encode(payload).decode(), "parent": os.getpid()})
         process = subprocess.Popen([sys.executable, str(script)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -404,6 +405,8 @@ class ResearchStore:
         thread = threading.Thread(target=communicate, daemon=True)
         thread.start()
         try:
+            if on_started is not None:
+                on_started()
             while thread.is_alive():
                 if self.status(run_id)["cancel_requested"]:
                     process.terminate()
@@ -424,15 +427,26 @@ class ResearchStore:
             process.wait()
             thread.join(timeout=1)
 
-    def work_once(self, *, compute=None):
+    @classmethod
+    def _recover(cls, db):
+        dead = db.execute("SELECT run_id,number,cancel_requested FROM attempt WHERE state='running'").fetchall()
+        for run_id, attempt, cancelled in dead:
+            state = "cancelled" if cancelled else "failed"
+            db.execute("UPDATE attempt SET state=?,reason=? WHERE run_id=? AND number=?",
+                       (state, "interrupted worker; explicit retry required", run_id, attempt))
+            cls._event(db, run_id, attempt, state, "interrupted worker; explicit retry required")
+        return [cls._status(db, run_id) for run_id, _, _ in dead]
+
+    def recover(self):
+        """Explicit metadata-only recovery; never dispatch queued work or read bars."""
+        with self._lock("worker.lock", nonblocking=True):
+            with self._db(write=True) as db:
+                return {"recovered": self._recover(db)}
+
+    def work_once(self, *, compute=None, on_child_started=None):
         with self._lock("worker.lock", nonblocking=True) as worker_fd:
             with self._db(write=True) as db:
-                dead = db.execute("SELECT run_id,number,cancel_requested FROM attempt WHERE state='running'").fetchall()
-                for run_id, attempt, cancelled in dead:
-                    state = "cancelled" if cancelled else "failed"
-                    db.execute("UPDATE attempt SET state=?,reason=? WHERE run_id=? AND number=?",
-                               (state, "interrupted worker; explicit retry required", run_id, attempt))
-                    self._event(db, run_id, attempt, state, "interrupted worker; explicit retry required")
+                self._recover(db)
                 chosen = db.execute("SELECT a.run_id,a.number FROM attempt a JOIN run r ON r.id=a.run_id WHERE a.state='queued' ORDER BY r.created,a.number LIMIT 1").fetchone()
                 if chosen is None:
                     return {"status": "idle"}
@@ -449,7 +463,7 @@ class ResearchStore:
                 if hashlib.sha256(payload).hexdigest() != request["snapshot_sha256"]:
                     raise ValueError("immutable prepared snapshot changed")
                 if compute is None:
-                    result, metrics = self._child(request, payload, run_id, worker_fd)
+                    result, metrics = self._child(request, payload, run_id, worker_fd, on_child_started)
                 else:  # Owner-injected fixture computations, never a CLI selector.
                     metrics = None
                     snapshot = decode_snapshot(payload)

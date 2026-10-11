@@ -13,7 +13,7 @@ from app.engine.research_studio_data import DiscoveryCache  # noqa: E402
 from app.engine.research_studio_store import ResearchStore  # noqa: E402
 from app.engine.research_studio_session import Busy, ResearchSession  # noqa: E402
 
-ACTIONS = frozenset({"preview", "enqueue", "runs", "status", "result", "cancel", "retry", "execute", "chart"})
+ACTIONS = frozenset({"preview", "enqueue", "runs", "status", "result", "cancel", "retry", "execute", "recover", "chart"})
 
 
 class Command(BaseModel):
@@ -39,7 +39,7 @@ def create_app(session, token):
         try:
             methods = {"preview": session.preview, "enqueue": session.enqueue, "runs": session.runs,
                        "status": session.store.status, "result": session.store.result,
-                       "execute": session.execute, "chart": session.chart}
+                       "execute": session.execute, "recover": session.store.recover, "chart": session.chart}
             if body.action in ("cancel", "retry"):
                 return session.store.control(action=body.action, **body.arguments)
             return methods[body.action](**body.arguments)

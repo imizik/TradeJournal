@@ -7,6 +7,7 @@ import uuid
 from fastapi.testclient import TestClient
 import pytest
 
+from app.engine.market_map import ET
 from app.engine.research_studio_session import Busy, ResearchSession
 from app.engine.research_studio_store import ResearchStore
 from scripts.research_studio_server import create_app
@@ -71,7 +72,7 @@ def test_finite_dispatch_no_startup_replay_and_busy_refusal(session, definition,
     session.enqueue(definition.canonical(), op())
     assert session.worker is None
     entered, finish = threading.Event(), threading.Event()
-    monkeypatch.setattr(session.store, "work_once", lambda: (entered.set(), finish.wait(3)))
+    monkeypatch.setattr(session.store, "work_once", lambda **kwargs: (entered.set(), finish.wait(3)))
     session.execute()
     assert entered.wait(1)
     with pytest.raises(Busy):
@@ -126,3 +127,86 @@ def test_engine_upgrade_does_not_recalculate_saved_chart_as_original(session, de
         session.chart(symbol="MU", decision_time=clock().isoformat(), data_id=run["data_id"],
                       run_id=run["run_id"], operation_id=op())
     assert not list(session.store.root.glob("inspection.*"))
+
+
+@pytest.mark.parametrize("reveal", [False, True])
+@pytest.mark.parametrize("saved", [False, True])
+def test_partial_buckets_never_become_chart_candles(session, definition, snapshot, reveal, saved):
+    from tests.test_research_studio_analysis import changed
+    partial = changed(snapshot, remove_minute=595, partial=True)
+    session.source.snapshot = lambda *a, **k: partial
+    run = session.enqueue(definition.canonical(), op()) if saved else session.preview(definition.canonical())
+    chart = session.chart(symbol="MU", decision_time=clock().isoformat(), data_id=run["data_id"],
+                          run_id=run["run_id"] if saved else None, reveal=reveal, operation_id=op())
+    assert int(clock(minute=595).timestamp()) not in {b["time"] for b in chart["bars"]}
+    assert int(clock(minute=590).timestamp()) in {b["time"] for b in chart["bars"]}
+
+
+@pytest.mark.parametrize("saved", [False, True])
+def test_chart_and_endpoint_use_same_frozen_split_basis(session, definition, snapshot, saved):
+    from dataclasses import replace
+    from datetime import date
+    from app.engine.research_studio import Observations
+    from app.engine.research_studio_analysis import outcome
+    source = snapshot.symbols[0]
+    bars = tuple(replace(b, open=b.open/10, high=b.high/10, low=b.low/10, close=b.close/10)
+                 if b.time.astimezone(ET).date() == date(2023,7,10)
+                 else b for b in source.bars)
+    adjusted = replace(snapshot, symbols=(replace(source, bars=bars), snapshot.symbols[1]))
+    session.source.snapshot = lambda *a, **k: adjusted
+    # Pre-split July7 occurrence, endpoint differs tenfold from raw input prices.
+    decision = clock(day=date(2023,7,7))
+    run = session.enqueue(definition.canonical(), op()) if saved else session.preview(definition.canonical())
+    chart = session.chart(symbol="MU", decision_time=decision.isoformat(), data_id=run["data_id"],
+                          run_id=run["run_id"] if saved else None, reveal=True, operation_id=op())
+    analysis = outcome(Observations(adjusted), "MU", decision)
+    endpoint = analysis["outcomes"]["30m"]
+    candle = next(b for b in chart["bars"] if b["time"] == int(decision.timestamp())+25*60)
+    assert candle["close"] == endpoint["endpoint_price"] == 10
+    assert candle["open"] == 10 and candle["high"] == 10.1 and candle["low"] == 9.9
+
+
+def test_previous_snapshot_compression_reopens_same_content(snapshot):
+    import gzip
+    from app.engine.research_studio_store import encode_snapshot, decode_snapshot
+    current = encode_snapshot(snapshot)
+    previous = gzip.compress(gzip.decompress(current), compresslevel=9, mtime=0)
+    assert decode_snapshot(current).identity == decode_snapshot(previous).identity == snapshot.identity
+
+
+def test_recovery_bypasses_preparation_and_never_dispatches_queued_work(session, definition):
+    run = session.enqueue(definition.canonical(), op())
+    with session._prepare():
+        assert session.store.recover() == {"recovered": []}
+    assert session.store.status(run["run_id"])["status"] == "queued"
+    with session.store._lock("worker.lock", nonblocking=True):
+        with pytest.raises(ValueError, match="already active"):
+            session.store.recover()
+
+
+def test_fork_window_releases_data_then_chart_uses_frozen_submission(session, definition, monkeypatch):
+    run = session.enqueue(definition.canonical(), op())
+    session.source.snapshot = lambda *a, **k: (_ for _ in ()).throw(AssertionError("source reopened"))
+    seen = []
+    def child(*, on_child_started):
+        assert session.observations is None and session.chart_snapshot is None
+        assert session.preparation.locked()
+        on_child_started()
+        assert not session.preparation.locked()
+        chart = session.chart(symbol="MU", decision_time=clock().isoformat(), data_id=run["data_id"], operation_id=op())
+        seen.append(chart["data_id"])
+    monkeypatch.setattr(session.store, "work_once", child)
+    session.execute()
+    session.worker.join(2)
+    assert seen == [run["data_id"]]
+    assert not session.preparation.locked() and not session.execution.locked()
+
+
+def test_thread_start_failure_releases_admission_without_claiming_work(session, definition, monkeypatch):
+    run = session.enqueue(definition.canonical(), op())
+    monkeypatch.setattr("app.engine.research_studio_session.threading.Thread.start",
+                        lambda self: (_ for _ in ()).throw(RuntimeError("fixture thread refused")))
+    with pytest.raises(RuntimeError, match="refused"):
+        session.execute()
+    assert not session.preparation.locked() and not session.execution.locked()
+    assert session.store.status(run["run_id"])["status"] == "queued"
