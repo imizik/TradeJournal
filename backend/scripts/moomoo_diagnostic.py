@@ -411,7 +411,9 @@ def display_book(message: dict, received_ms: int, offset_ms: float | None) -> di
                  "source_time_ms": clock["source_time_ms"], "estimated_age_ms": clock["estimated_age_ms"],
                  "order_volume_precision": number(book.get("order_volume_precision"))}
         for source, target in (("bid", "bids"), ("ask", "asks")):
-            levels = book.get(source + "_list", [])
+            levels = book.get(source + "_list")
+            if levels is None:
+                levels = []  # Absent/null sides are unavailable, never deltas.
             if not isinstance(levels, list) or len(levels) > 60:
                 raise DiagnosticError("Book level count exceeds the lab bound.")
             entry[target] = []

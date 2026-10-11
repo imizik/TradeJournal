@@ -3,7 +3,7 @@ import type { ChartQuote } from "@/lib/charts";
 import { readAt } from "@/lib/symbolInfo";
 import type { OverviewBlock, SymbolOverview } from "@/lib/symbolInfo";
 import SymbolInfoOwnership, { ownersReported } from "./SymbolInfoOwnership";
-import { HEADING, Row, Rows } from "./SymbolInfoParts";
+import { Block, EXPLAIN, Row, Rows } from "./SymbolInfoParts";
 import type { FooterSource } from "./SymbolInfoParts";
 
 const number = (value: number | null, digits = 2) => value == null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: digits });
@@ -18,17 +18,17 @@ const blockLabel = (block: OverviewBlock) => `${block.source} · ${readAt(block.
 
 const range = (low: number, high: number) => `$${price(low)}–${price(high)}`;
 
+
 /** One dataset's block: its rows, or why there are none. The source line is the tab's single footer. */
-function Dataset({ title, block, unavailable, children }: { title: string; block: OverviewBlock; unavailable: string; children: ReactNode }) {
-  return <section aria-label={title} className="space-y-1.5">
-    <h3 className={HEADING}>{title}</h3>
+function Dataset({ name, title, block, unavailable, children }: { name: string; title: string; block: OverviewBlock; unavailable: string; children: ReactNode }) {
+  return <Block name={name} title={title} forceOpen={block.state !== "ready" && block.state !== "none" || !!block.message}>
     {block.state === "ready" ? children : <p className={block.state === "none" ? "text-slate-500" : "text-amber-300"}>{block.state === "none" ? unavailable : block.message ?? "Not loaded yet."}</p>}
     {block.state === "ready" && block.message && <p className="text-[10px] text-amber-300">{block.message} Showing the cached copy ({readAt(block.fetched_at)}).</p>}
-  </section>;
+  </Block>;
 }
 
 /** Fundamentals plus the quote already loaded by the chart workspace. */
-export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { data: SymbolOverview; quote?: ChartQuote | null; quoteFetchedAt: number | null }) {
+export default function SymbolInfoOverview({ data, quote, quoteFetchedAt, children }: { data: SymbolOverview; quote?: ChartQuote | null; quoteFetchedAt: number | null; /** Blocks placed last, above the source line (Peers). */ children?: ReactNode }) {
   const qTitle = quoteLabel(quote, quoteFetchedAt);
   const weekLow = quote?.week_52_low ?? null;
   const weekHigh = quote?.week_52_high ?? null;
@@ -52,19 +52,18 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
     { source: ratios.source, at: ratios.fetched_at, label: "Valuation" },
   ];
 
-  return <div className="space-y-4 text-[11px]">
-    <section aria-label="Price and range" className="space-y-1.5">
-      <h3 className={HEADING}>Price and range</h3>
+  return <div className="space-y-2 text-[11px]">
+    <Block name="price" title="Price and range">
       <Rows>
         <Row label="Price" value={spot == null ? "—" : `$${price(spot)}`} title={qTitle} />
         <Row label="Change" value={quote?.change == null ? "—" : `${quote.change >= 0 ? "+" : "−"}$${number(Math.abs(quote.change))} (${quote.change_percentage == null ? "—" : `${quote.change_percentage >= 0 ? "+" : ""}${number(quote.change_percentage)}%`})`} title={qTitle} />
         <Row label="Day range" value={quote?.day_low == null || quote?.day_high == null ? "—" : range(quote.day_low, quote.day_high)} title={qTitle} />
-        <Row label="52-week range" value={weekLow == null || weekHigh == null ? "—" : range(weekLow, weekHigh)} title={qTitle} />
+        <Row label="52-week range" value={weekLow == null || weekHigh == null ? "—" : range(weekLow, weekHigh)} title={qTitle} explain={EXPLAIN.week52} />
       </Rows>
       {weekPosition != null && <div title={qTitle} className="relative mt-1 h-1 rounded bg-slate-700" role="img" aria-label={`Price is ${Math.round(weekPosition)} percent through the 52-week range`}><span className="absolute -top-0.5 h-2 w-1 rounded bg-sky-300" style={{ left: `${weekPosition}%` }} /></div>}
-    </section>
+    </Block>
 
-    <Dataset title="Company" block={company} unavailable={noFundamentals}>
+    <Dataset name="company" title="Company" block={company} unavailable={noFundamentals}>
       {name && <h4 title={company.name ? blockLabel(company) : qTitle} className="font-medium text-slate-200">{name}</h4>}
       <Rows>
         <Row label="Sector" value={company.sector ?? "—"} title={blockLabel(company)} />
@@ -74,27 +73,27 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt }: { da
       {company.description && <p title={blockLabel(company)} className="line-clamp-2 leading-4 text-slate-400">{company.description}</p>}
     </Dataset>
 
-    <Dataset title="Key statistics" block={statistics} unavailable={noFundamentals}>
+    <Dataset name="statistics" title="Key statistics" block={statistics} unavailable={noFundamentals}>
       <Rows>
-        <Row label="Market cap" value={dollars(statistics.market_cap)} title={blockLabel(statistics)} />
-        <Row label="Enterprise value" value={dollars(statistics.enterprise_value)} title={blockLabel(statistics)} />
-        <Row label="Shares outstanding" value={number(statistics.shares_outstanding, 0)} title={blockLabel(statistics)} />
-        {!heldInOwnership && <Row label="Held by institutions" value={held} title={`${blockLabel(statistics)}${held === "—" ? " · not reported" : ""}`} />}
-        <Row label="30-day avg volume" value={number(statistics.average_volume_30_day, 0)} title={`30-day average volume · ${blockLabel(statistics)}`} />
+        <Row label="Market cap" value={dollars(statistics.market_cap)} title={blockLabel(statistics)} explain={EXPLAIN.marketCap} />
+        <Row label="Enterprise value" value={dollars(statistics.enterprise_value)} title={blockLabel(statistics)} explain={EXPLAIN.enterpriseValue} />
+        <Row label="Shares outstanding" value={number(statistics.shares_outstanding, 0)} title={blockLabel(statistics)} explain={EXPLAIN.shares} />
+        {!heldInOwnership && <Row label="Held by institutions" value={held} title={`${blockLabel(statistics)}${held === "—" ? " · not reported" : ""}`} explain={EXPLAIN.held} />}
+        <Row label="30-day avg volume" value={number(statistics.average_volume_30_day, 0)} title={`30-day average volume · ${blockLabel(statistics)}`} explain={EXPLAIN.volume} />
       </Rows>
     </Dataset>
 
-    <Dataset title="Valuation" block={ratios} unavailable={noFundamentals}>
+    <Dataset name="valuation" title="Valuation" block={ratios} unavailable={noFundamentals}>
       <Rows>
-        <Row label="P/E" value={number(ratios.pe)} title={blockLabel(ratios)} />
-        <Row label="P/S" value={number(ratios.price_to_sales)} title={blockLabel(ratios)} />
-        <Row label="P/B" value={number(ratios.price_to_book)} title={blockLabel(ratios)} />
-        <Row label="EV/EBITDA" value={number(ratios.ev_to_ebitda)} title={blockLabel(ratios)} />
-        <Row label="Dividend yield" value={yieldPercent(ratios.dividend_yield)} title={blockLabel(ratios)} />
-        <Row label="Beta (60 mo)" value={number(ratios.beta_60_month)} title={`Beta, 60 months · ${blockLabel(ratios)}`} />
+        <Row label="P/E" value={number(ratios.pe)} title={blockLabel(ratios)} explain={EXPLAIN.pe} />
+        <Row label="P/S" value={number(ratios.price_to_sales)} title={blockLabel(ratios)} explain={EXPLAIN.ps} />
+        <Row label="P/B" value={number(ratios.price_to_book)} title={blockLabel(ratios)} explain={EXPLAIN.pb} />
+        <Row label="EV/EBITDA" value={number(ratios.ev_to_ebitda)} title={blockLabel(ratios)} explain={EXPLAIN.evEbitda} />
+        <Row label="Dividend yield" value={yieldPercent(ratios.dividend_yield)} title={blockLabel(ratios)} explain={EXPLAIN.dividend} />
+        <Row label="Beta (60 mo)" value={number(ratios.beta_60_month)} title={`Beta, 60 months · ${blockLabel(ratios)}`} explain={EXPLAIN.beta} />
       </Rows>
     </Dataset>
 
-    <SymbolInfoOwnership symbol={data.symbol} company={company} fund={isFund} unavailable={noFundamentals} sources={sources} />
+    <SymbolInfoOwnership symbol={data.symbol} company={company} fund={isFund} unavailable={noFundamentals} sources={sources}>{children}</SymbolInfoOwnership>
   </div>;
 }
