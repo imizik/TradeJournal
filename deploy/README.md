@@ -631,8 +631,8 @@ and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/conf
 ### Nightly reviews on the Claude plan (opt-in)
 
 `tradejournal-plan-reviews.timer` writes the Daily Review for the latest
-trading day at 20:00 New York (after Sync Everything, enrichment and the
-options catch-up), with Claude Code on the owner's Claude plan, never API
+trading day at 20:10 New York (after Sync Everything, enrichment, the options
+catch-up and the day's final minute bars), with Claude Code on the owner's Claude plan, never API
 credits. It reviews that day when it has no review, gained trades since its
 review, or went stale; it never backfills older days, which get a review from
 their own Daily Review button. The button uses the same plan. The release

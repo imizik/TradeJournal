@@ -225,10 +225,14 @@ export type DailyReview = {
   rules_check?: RuleCheck[];
   vs_baseline?: string[];
   data_gaps?: string[];
+  /** Prompt v3: the day's market backdrop in a sentence or two, and each captured plan against what was done. */
+  market_read?: string;
+  plan_vs_execution?: PlanCheck[];
   generated_by?: string;
 };
 
 export type RuleCheck = { rule: string; set_on: string; result: "kept" | "broken" | "partly" | "not_tested"; evidence: string };
+export type PlanCheck = { ticker: string; planned: string; did: string; result: "followed" | "deviated" | "partly" | "no_plan" };
 
 /** The nightly reviews on the Claude plan (backend app/jobs/plan_reviews.py): the last run's status file. */
 export type PlanRunnerStatus = {
