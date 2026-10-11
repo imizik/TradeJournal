@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
-import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
+import { COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
 import { newsLabel, newsMarks, newsTip } from "@/lib/newsMarkers";
 import type { NewsMark } from "@/lib/newsMarkers";
@@ -13,7 +13,7 @@ import { chartCommitted } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
-import { AutoLevelLayer, isOption, isRange, shownZones } from "@/lib/autoLevels";
+import { AutoLevelLayer, chartLabel, isOption, isRange, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
 import { SessionShade } from "@/lib/sessionShade";
 import type { AlertMark } from "@/lib/alerts";
@@ -21,6 +21,7 @@ import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
 import { positionLineTitle, type ChartPosition } from "@/lib/chartJournal";
 import SelectionBar from "./SelectionBar";
+import ToolbarMenu from "./ToolbarMenu";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
 
@@ -61,26 +62,26 @@ const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.op
 const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: (b.close >= b.open ? "#2bc9a4" : "#ee617a") + volumeAlpha(b.rvol) });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
 /**
- * The opening zoom: the latest candles at a fixed width. Fewer candles than that
+ * The opening zoom: the latest `count` candles. Fewer candles than that
  * (today's first premarket minutes, before the history pages arrive) sit at the
  * right with room to their left, so the history fills in at this zoom instead of
  * stretching the first few candles across the chart.
  */
-const openingRange = (bars: number, main: boolean) => ({ from: bars - (main ? OPENING_BARS : PANEL_OPENING_BARS), to: bars + 4 });
+const openingRange = (bars: number, count: number) => ({ from: bars - count, to: bars + 4 });
 /**
  * Reset: the latest candles at the opening zoom, every pane's price scale back
  * to automatic (dragging an axis turns it off). Realtime: the latest candle at
  * the current zoom.
  */
-function moveView(chart: IChartApi, bars: number, main: boolean, command: ChartCommand) {
+function moveView(chart: IChartApi, bars: number, opening: number, command: ChartCommand) {
   const scale = chart.timeScale();
   if (command === "reset") {
     chart.panes().forEach((_, pane) => chart.priceScale("right", pane).applyOptions({ autoScale: true }));
-    scale.setVisibleLogicalRange(openingRange(bars, main));
+    scale.setVisibleLogicalRange(openingRange(bars, opening));
     return;
   }
   const range = scale.getVisibleLogicalRange();
-  const width = range ? range.to - range.from : main ? 114 : 69;
+  const width = range ? range.to - range.from : opening + 4;
   scale.setVisibleLogicalRange({ from: bars + 4 - width, to: bars + 4 });
 }
 /** Browser tests register a map here to inspect chart ranges; production never defines it. */
@@ -135,8 +136,13 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  /**
+   * A smaller chart's own studies, from its header menu, already in `indicators`; null follows the workspace's,
+   * slimmed while the chart is compact. `onStudies` sets them (null: follow again); `studiesHidden` is the Indicators group hidden everywhere.
+   */
+  ownStudies?: PanelStudies | null; onStudies?(next: PanelStudies | null): void; studiesHidden?: boolean;
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
   /** This symbol's automatic levels (C2.3), null while hidden, and this chart's interactions with them. */
@@ -204,6 +210,26 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onFill?(id: string): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLElement>(null);
+  // A smaller chart under `COMPACT_PANEL` is compact; the ref is read where the chart opens or resets its view.
+  const [compact, setCompact] = useState(false);
+  const compactNow = useRef(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element || main) return;
+    const measure = () => {
+      const { width, height } = element.getBoundingClientRect();
+      if (!width && !height) return; // a panel hidden on a phone keeps what it was
+      compactNow.current = width < COMPACT_PANEL.width || height < COMPACT_PANEL.height;
+      setCompact(compactNow.current);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [main]);
+  const openingBars = () => main ? OPENING_BARS : compactNow.current ? COMPACT_OPENING_BARS : PANEL_OPENING_BARS;
+  const indicators = useMemo(() => compact && !ownStudies ? slimIndicators(given) : given, [compact, ownStudies, given]);
   const bundle = useRef<Bundle | null>(null);
   const barsRef = useRef<ChartBar[]>([]);
   const resets = useRef(0);
@@ -478,7 +504,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // An automatic level under the pointer, when no level or drawing of the user's is (C5.1 alerts on it).
       const auto = plot && !hit && !now.tool ? autoLayer.hit(at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
       const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
-      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, main, "reset"); } });
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, openingBars(), "reset"); } });
     };
     // A finger held still: its own timer, since browsers differ on whether a
     // long press fires `contextmenu` (Android does, iOS does not; whichever
@@ -652,7 +678,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       if (!barsRef.current.length) return;
       quiet();
       pinnedLive.current = true;
-      moveView(chart, barsRef.current.length, main, command);
+      moveView(chart, barsRef.current.length, openingBars(), command);
     });
     // A jump from the layers panel (C1.4): centre the item's moments at the
     // current zoom (widened to fit a long drawing), then widen the price
@@ -680,7 +706,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         if (!spots.length) return;
         const [first, last] = [Math.min(...spots), Math.max(...spots)];
         const range = scale.getVisibleLogicalRange();
-        const width = range ? range.to - range.from : main ? 114 : 69;
+        const width = range ? range.to - range.from : openingBars() + 4;
         quiet();
         if (first < -0.5 && !actions.current.exhausted && pending.pages < JUMP_PAGES) {
           pending.pages += 1;
@@ -716,7 +742,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
       markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
-  }, [id, link, rangeLink, commands, main]);
+  }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
   // RSI lives in a second pane, added and removed in place; the pane goes with its series.
   useEffect(() => {
@@ -801,7 +827,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && (initial.current || !prior.length)) {
-      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, main));
+      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, openingBars()));
       initial.current = false;
     } else if (bars.length && following && logical) {
       const width = logical.to - logical.from;
@@ -810,7 +836,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     else if (bars.length && range) current.chart.timeScale().setVisibleRange(range);
     retryJump.current();
     if (bars.length) return chartCommitted(symbol, undefined, main);
-  }, [panel, pending, dataKey, symbol, interval, main, live.store]);
+  }, [panel, pending, dataKey, symbol, interval, main, live.store]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
   useEffect(() => {
     const current = bundle.current;
@@ -885,14 +911,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
-    current.auto.set(zones, main, lastClose);
+    current.auto.set(zones, main, lastClose, compact);
     setCard((open) => open && !zones.some((zone) => zone.id === open.id) ? null : open);
     if (container.current) {
+      container.current.dataset.compact = compact ? "true" : "false";
       container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
       container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
       container.current.dataset.rangeLevels = zones.filter((zone) => zone.members.some(isRange)).map((zone) => zone.label).join(",");
     }
-  }, [zones, pending, main, lastClose]);
+  }, [zones, pending, main, lastClose, compact]);
   useEffect(() => {
     bundle.current?.auto.setHighlight(pending ? null : highlight);
     if (container.current) container.current.dataset.highlight = highlight === null || pending ? "" : String(highlight);
@@ -910,7 +937,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
   // Relative volume (C2.4) beside a regular-session candle of today: its value, or why it has none.
-  const showRvol = indicators.volume && intradayInterval(interval);
+  // A compact chart keeps the readout, which costs no room, while it leaves out the volume bars.
+  const showRvol = given.volume && intradayInterval(interval);
   // The main chart's study row says it in full. A smaller chart's row is already tight beside its
   // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
   const volumeText = bar ? Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume) : "";
@@ -922,11 +950,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const chosenDrawing = selected ? drawings.find((drawing) => drawing.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
   // header keeps room for its controls at quarter width.
+  // A compact chart's header buttons sit closer, so its symbol and interval keep their room.
+  const button = compact ? "p-1" : "p-1.5";
   const timer = !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
   return (
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
-    <section aria-label={`${symbol} ${interval} chart`} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
+    <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
         {/* A narrow chart (C7.4's dividers allow 160px) clips its symbol and interval, never its buttons. */}
         <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs">{onPickSymbol
@@ -940,13 +970,23 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
           {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className={`flex shrink-0 items-center ${compact ? "gap-0" : "gap-1"}`}>
           {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
             className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
-          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, main, "reset"); } }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
-          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded p-1.5 hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
-          {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
+          {onStudies && <ToolbarMenu floating label={`${id} studies`} title={ownStudies ? "This chart's own studies" : compact ? "Studies: slimmed while this chart is small" : "Studies: same as every chart"}
+            className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${ownStudies ? "text-sky-300" : "text-slate-500"}`}
+            content={() => <div className="flex w-52 flex-col gap-0.5 text-[11px]">
+              <button aria-pressed={!ownStudies} onClick={() => onStudies(null)} className={`rounded px-2 py-1 text-left hover:bg-slate-800 ${ownStudies ? "text-slate-400" : "text-slate-200"}`}>
+                Automatic<span className="block text-[10px] text-slate-500">Same as every chart; only EMA 9 and VWAP while this chart is small</span></button>
+              <p className="mt-1 px-2 text-[10px] uppercase tracking-wide text-slate-500">This chart only</p>
+              {studiesHidden && <p className="px-2 text-[10px] text-amber-300">Indicators are hidden on every chart.</p>}
+              {STUDIES.map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
+                className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-slate-800 disabled:opacity-50 ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
+            </div>}><SlidersHorizontal size={13} aria-hidden /><span className="sr-only">{`${id} studies`}</span></ToolbarMenu>}
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
+          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
+          {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><Expand size={13} /></button>}
         </div>
       </div>
       <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
@@ -968,7 +1008,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
         {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
-        {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
+        {cardZone && card && compact && !card.pinned ? <div role="tooltip" aria-label="Level" className="pointer-events-none absolute left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-0.5 font-mono text-[10px] text-slate-200 shadow-lg"
+          style={card.above ? { top: Math.max(2, Math.round(card.y) - 26) } : { top: Math.round(card.y) + 8 }}>
+          {chartLabel(cardZone)} {cardZone.low === cardZone.high ? price(cardZone.low) : `${price(cardZone.low)}–${price(cardZone.high)}`}<span className="text-slate-500"> · click for more</span></div>
+        : cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
           // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
             : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
