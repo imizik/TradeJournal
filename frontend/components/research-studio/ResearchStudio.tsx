@@ -82,7 +82,7 @@ export default function ResearchStudio() {
   function selectPeriod(value: string) {
     const period = config?.newer_mu?.periods.find(p=>p.start===value);
     const next: Definition = period ? {...initial, version:2, start:period.start, end:period.end} : initial;
-    resetQuestion(); currentRef.current="|"+key(next); setDraft(next); setDay(next.start); setSymbol("MU"); setError("");
+    resetQuestion(); setPopulation(null); setPreviewKey(""); currentRef.current="|"+key(next); setDraft(next); setDay(next.start); setSymbol("MU"); setError("");
   }
   function resetQuestion() {
     ++runSequence.current; comparisonAbort.current?.abort(); ++chartSequence.current; setParent(null); setRun(null); setResult(null); setComparison(null); setChart(null); setSelected(null); setSelectedContext(null); setSubmitting(false); setComparing(false); setChartLoading(false); setLoading(true);
@@ -141,10 +141,10 @@ export default function ResearchStudio() {
     edit({...draft, universe: parent ? draft.universe : [selected.symbol], predicates: [{feature: "move_15m_atr", minimum: null, maximum: v}, {feature: "rvol", minimum: volume, maximum: null}]});
   }
   const previous = !!run && current !== runKey;
-  const shownPopulation = result?.population ?? population;
+  const shownPopulation = result?.population ?? (previewKey===current ? population : null);
   const events = shownPopulation?.events ?? [];
   const selectedOutcome = (selectedContext ?? result)?.events.find(e => e.symbol + ":" + e.decision_time === selected?.occurrence_id)?.outcomes[horizon];
-  const selectId = (id: string) => { const e = events.find(e => e.occurrence_id === id); if (e) void inspect(e, false, !!result); };
+  const selectId = (id: string) => { const e = events.find(e => e.occurrence_id === id); if (e && (result || previewKey===current)) void inspect(e, false, !!result); };
   const noteIds=comparison ? [comparison.parent_run_id,comparison.variant_run_id] : run ? [run.run_id] : [];
   const supportsR4=!!config?.capabilities?.includes("variants")&&!!config?.capabilities?.includes("conclusions");
   const unchangedVariant=!!parent?.definition && key(parent.definition)===key(draft);

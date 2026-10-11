@@ -383,7 +383,22 @@ test("fixed newer MU periods preserve discovery bounds, record exposure and fit 
   try {
     await page.goto("/research-studio");
     await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");
+    await page.locator("button[data-occurrence-id]").first().click();
+    await expect(page.getByLabel("MU historical five-minute candles")).toBeVisible();
+    let releasePreview:()=>void=()=>{}, enterPreview:()=>void=()=>{};
+    const previewGate=new Promise<void>(resolve=>releasePreview=resolve), previewEntered=new Promise<void>(resolve=>enterPreview=resolve);
+    await page.route("**/research-studio/command",async route=>{
+      if(route.request().postDataJSON().action==="preview" && route.request().postDataJSON().arguments.raw.version===2){enterPreview();await previewGate;}
+      await route.continue();
+    });
     await page.getByLabel("Study period",{exact:true}).selectOption("2026-01-01");
+    await previewEntered;
+    try {
+      await expect(page.locator("button[data-occurrence-id]")).toHaveCount(0,{timeout:1000});
+      await expect(page.getByRole("status").filter({hasText:"Preparing population"})).toBeVisible();
+      await expect(page.getByLabel("MU historical five-minute candles")).toHaveCount(0);
+    } finally { releasePreview(); }
+
     await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");
     await expect(page.getByText("2026-01-01 – 2026-10-09",{exact:true})).toBeVisible();
     await expect(page.getByLabel("Fixed MU volume threshold")).toHaveValue("1.5");

@@ -52,7 +52,8 @@ def test_calendar_is_not_inferred_from_missing_cache_files():
 
 @pytest.mark.parametrize('approved', [False, True])
 def test_source_refuses_unapproved_dates_and_symbols_before_payload_open(tmp_path, monkeypatch, approved):
-    root = tmp_path / 'sip'; root.mkdir()
+    root = tmp_path / 'sip'
+    root.mkdir()
     source = DiscoveryCache(root, allow_newer_mu=approved)
     def refuse(*args, **kwargs):
         pytest.fail('invalid request opened a source path')
@@ -70,8 +71,10 @@ def test_source_refuses_unapproved_dates_and_symbols_before_payload_open(tmp_pat
 
 @pytest.fixture
 def session(tmp_path):
-    root = tmp_path / 'sip'; root.mkdir()
-    store = tmp_path / 'store'; store.mkdir(mode=0o700)
+    root = tmp_path / 'sip'
+    root.mkdir()
+    store = tmp_path / 'store'
+    store.mkdir(mode=0o700)
     # Independent full-minute hand fixture. Populate 25 prior sessions and one
     # event session; all later expected sessions stay missing, never holidays.
     days = [d for d in session_dates(NEWER_END, version=2) if d <= date(2026, 1, 2)][-26:]
@@ -113,7 +116,8 @@ def test_newer_preview_is_causal_gap_aware_and_source_exposure_precedes_read(ses
 
 
 def test_discovery_snapshot_roundtrip_keeps_legacy_identity(tmp_path):
-    root = tmp_path / 'sip'; root.mkdir()
+    root = tmp_path / 'sip'
+    root.mkdir()
     snapshot = DiscoveryCache(root).snapshot(('MU',), through=date(2023, 7, 3))
     restored = decode_snapshot(encode_snapshot(snapshot))
     assert restored.identity == snapshot.identity and restored.source_version == 1
