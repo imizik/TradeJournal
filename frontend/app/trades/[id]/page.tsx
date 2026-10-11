@@ -240,7 +240,7 @@ export default function TradeDetailPage({ params }: { params: Promise<{ id: stri
         {trade.ai_review ? (
           <AiReview raw={trade.ai_review} />
         ) : reviewLoading ? (
-          <p className="text-sm text-muted-foreground">Generating review...</p>
+          <p className="text-sm text-muted-foreground">Generating review on your Claude plan (usually under a minute)...</p>
         ) : (
           <button
             onClick={handleReviewClick}
@@ -286,14 +286,20 @@ function AiReview({ raw }: { raw: string }) {
           </div>
         )}
         <p className="text-foreground/80">{review.summary}</p>
-        <div className="flex gap-4 text-xs">
-          <span>
-            Entry: <span className="font-medium">{review.entry_quality}</span>
-          </span>
-          <span>
-            Exit: <span className="font-medium">{review.exit_quality}</span>
-          </span>
+        <div className="space-y-1 text-xs">
+          <p>
+            <span className="text-muted-foreground">Entry: </span><span className="font-medium">{review.entry_quality}</span>
+          </p>
+          <p>
+            <span className="text-muted-foreground">Exit: </span><span className="font-medium">{review.exit_quality}</span>
+          </p>
         </div>
+        {review.market_read && (
+          <p className="text-xs"><span className="text-muted-foreground">Market: </span>{review.market_read}</p>
+        )}
+        {review.plan_check && (
+          <p className="text-xs"><span className="text-muted-foreground">Plan vs trade: </span>{review.plan_check}</p>
+        )}
         {review.suggestions?.length > 0 && (
           <ul className="list-inside list-disc space-y-1 text-foreground/70">
             {review.suggestions.map((suggestion: string, index: number) => (
@@ -301,6 +307,10 @@ function AiReview({ raw }: { raw: string }) {
             ))}
           </ul>
         )}
+        {review.data_gaps?.length > 0 && (
+          <p className="text-xs text-amber-300/80">Missing: {review.data_gaps.join(" · ")}</p>
+        )}
+        {review.generated_by && <p className="text-[11px] text-muted-foreground">Written by {review.generated_by}</p>}
       </div>
     );
   } catch {

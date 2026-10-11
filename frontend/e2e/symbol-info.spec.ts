@@ -744,7 +744,8 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   await page.route("**/api/backend/charts/symbol/*/insiders", (route) => route.fulfill({ json: INSIDERS }));
   const source = { provider: "polygon", label: "Polygon related companies", state: "ok", fetched_at: 1_790_000_000, age_seconds: 7200, message: null };
   await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: { symbol: "MU", as_of: "2026-10-08T15:00:00Z", state: "ready", source, quotes: { ...source, provider: "tradier", label: "Tradier quotes", age_seconds: null },
-    peers: [{ symbol: "WDC", name: "Western Digital", last: 120.5, change_percentage: 1.2 }, { symbol: "STX", name: "Seagate", last: 98.1, change_percentage: -0.4 }] } }));
+    peers: [{ symbol: "WDC", name: "Western Digital", last: 120.5, change_percentage: 1.2 }, { symbol: "STX", name: "Seagate", last: 98.1, change_percentage: -0.4 }],
+    valuation: { source: "Tradier company fundamentals", state: "ready", fetched_at: 1_790_000_000, message: null, median: { pe: 31.2, price_to_sales: 4.1, price_to_book: null, ev_to_ebitda: null }, counted: { pe: 4, price_to_sales: 4, price_to_book: 2, ev_to_ebitda: 1 } } } }));
   await page.goto("/charts");
   const info = panel(page);
   await info.getByRole("tab", { name: "Overview", exact: true }).click();
@@ -760,6 +761,10 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   await valuation.getByRole("button", { name: "P/E", exact: true }).click();
   await expect(valuation.locator("[data-explain]")).toContainText("what you pay for $1 of profit");
   await expect(valuation).toContainText("52.5");
+  // Beside the ratio: the peers' median, only where at least three peers report one.
+  await expect(valuation).toContainText("peers 31.2");
+  await expect(valuation).toContainText("peers 4.1");
+  expect(await valuation.getByText(/peers/).count()).toBe(2);
   await page.setViewportSize({ width: 1440, height: 2200 });
   await page.screenshot({ path: test.info().outputPath("dock-blocks-overview-desktop.png"), animations: "disabled" });
   await page.setViewportSize({ width: 1440, height: 900 });

@@ -149,9 +149,12 @@ shares, institutional ownership, average volume and the valuation ratios) have
 a dotted label: a tap shows what the number means and what it is usually
 compared with, as general context rather than a verdict on the symbol.
 
-A **Peers** block (T3.4) is the last block of the **Overview** tab:
-Polygon's related companies for the active symbol as chips, each with today's
-percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
+A **Peers** block (T3.4) is the last block of the **Overview** tab: the
+active symbol's peers as chips, each with today's percent change, from
+`GET /charts/symbol/{symbol}/peers`. A symbol in a hand-picked group
+(`backend/app/data/peer_groups.json`, written for the symbols the owner
+trades) takes that group's other members and names the group under the chips;
+any other symbol uses Polygon's related companies. The Polygon list is cached
 seven days on disk, read through the enricher's limiter the way the News feed
 is (never waits more than 2 s, never retried, a 429 or failure serves the
 cached copy with its age and mutes Polygon for five minutes). The changes come
@@ -163,6 +166,11 @@ companies: the strip says so. Clicking a chip runs the watchlist row's handler
 the watchlist. The strip fetches once after the ticker settles for 300 ms and
 again each minute while the page is visible and Overview is open; the read
 lives in the panel, so folding or moving the block does not read again.
+The same response carries the peers' median P/E, P/S, P/B and EV/EBITDA from
+one batched Tradier fundamentals read (cached a day, shared with Overview);
+only positive values count and a median needs three peers. The Valuation
+block shows it beside each ratio ("52.5 · peers 31.2"), with the count, group
+and read time in the row's tooltip; a failed read leaves the chips alone.
 
 Its **Financials** tab (T3.2) reads `GET /charts/symbol/{symbol}/financials`:
 the last eight fiscal quarters of revenue, gross margin, operating margin, net

@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import type { ChartQuote } from "@/lib/charts";
 import { readAt } from "@/lib/symbolInfo";
-import type { OverviewBlock, SymbolOverview } from "@/lib/symbolInfo";
+import type { OverviewBlock, PeerRatio, PeerValuation, SymbolOverview } from "@/lib/symbolInfo";
 import SymbolInfoOwnership, { ownersReported } from "./SymbolInfoOwnership";
 import { Block, EXPLAIN, Row, Rows } from "./SymbolInfoParts";
 import type { FooterSource } from "./SymbolInfoParts";
@@ -18,6 +18,16 @@ const blockLabel = (block: OverviewBlock) => `${block.source} · ${readAt(block.
 
 const range = (low: number, high: number) => `$${price(low)}–${price(high)}`;
 
+/** A ratio with its peers' median beside it ("52.5 · peers 31"), when at least three peers report one. */
+function againstPeers(value: number | null, field: PeerRatio, peers: PeerValuation | null | undefined, group: string | undefined) {
+  const median = peers?.state === "ready" ? peers.median[field] ?? null : null;
+  if (median == null) return { value: number(value), note: "" };
+  return {
+    value: <>{number(value)}<span className="text-slate-500"> · peers {number(median, median >= 100 ? 0 : 1)}</span></>,
+    note: `\nPeers: median of ${peers?.counted[field]} ${group ? `in ${group}` : "related companies"} with a positive value · ${peers?.source} · ${readAt(peers?.fetched_at ?? null)}`,
+  };
+}
+
 
 /** One dataset's block: its rows, or why there are none. The source line is the tab's single footer. */
 function Dataset({ name, title, block, unavailable, children }: { name: string; title: string; block: OverviewBlock; unavailable: string; children: ReactNode }) {
@@ -28,7 +38,9 @@ function Dataset({ name, title, block, unavailable, children }: { name: string; 
 }
 
 /** Fundamentals plus the quote already loaded by the chart workspace. */
-export default function SymbolInfoOverview({ data, quote, quoteFetchedAt, children }: { data: SymbolOverview; quote?: ChartQuote | null; quoteFetchedAt: number | null; /** Blocks placed last, above the source line (Peers). */ children?: ReactNode }) {
+export default function SymbolInfoOverview({ data, quote, quoteFetchedAt, peers, peerGroup, children }: { data: SymbolOverview; quote?: ChartQuote | null; quoteFetchedAt: number | null;
+  /** The Peers read's valuation medians, shown beside P/E, P/S, P/B and EV/EBITDA. */ peers?: PeerValuation | null; peerGroup?: string;
+  /** Blocks placed last, above the source line (Peers). */ children?: ReactNode }) {
   const qTitle = quoteLabel(quote, quoteFetchedAt);
   const weekLow = quote?.week_52_low ?? null;
   const weekHigh = quote?.week_52_high ?? null;
@@ -85,10 +97,10 @@ export default function SymbolInfoOverview({ data, quote, quoteFetchedAt, childr
 
     <Dataset name="valuation" title="Valuation" block={ratios} unavailable={noFundamentals}>
       <Rows>
-        <Row label="P/E" value={number(ratios.pe)} title={blockLabel(ratios)} explain={EXPLAIN.pe} />
-        <Row label="P/S" value={number(ratios.price_to_sales)} title={blockLabel(ratios)} explain={EXPLAIN.ps} />
-        <Row label="P/B" value={number(ratios.price_to_book)} title={blockLabel(ratios)} explain={EXPLAIN.pb} />
-        <Row label="EV/EBITDA" value={number(ratios.ev_to_ebitda)} title={blockLabel(ratios)} explain={EXPLAIN.evEbitda} />
+        {([["P/E", "pe", EXPLAIN.pe], ["P/S", "price_to_sales", EXPLAIN.ps], ["P/B", "price_to_book", EXPLAIN.pb], ["EV/EBITDA", "ev_to_ebitda", EXPLAIN.evEbitda]] as const).map(([label, field, explain]) => {
+          const shown = againstPeers(ratios[field], field, peers, peerGroup);
+          return <Row key={field} label={label} value={shown.value} title={`${blockLabel(ratios)}${shown.note}`} explain={explain} />;
+        })}
         <Row label="Dividend yield" value={yieldPercent(ratios.dividend_yield)} title={blockLabel(ratios)} explain={EXPLAIN.dividend} />
         <Row label="Beta (60 mo)" value={number(ratios.beta_60_month)} title={`Beta, 60 months · ${blockLabel(ratios)}`} explain={EXPLAIN.beta} />
       </Rows>

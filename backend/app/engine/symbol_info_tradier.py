@@ -115,6 +115,17 @@ class SymbolEvents:
                            "earnings": {**self._earnings(symbol, today, REPORTS_SHOWN, issues["calendars"]), "time_note": TIME_NOTE}}
         return out
 
+    def peer_ratios(self, symbols: list[str]) -> dict:
+        """Valuation ratios for a symbol's peers: one batched read (a day's cache, shared with the Overview)."""
+        issue = self.refresh("ratios", symbols)
+        rows, dates = {}, []
+        for symbol in symbols:
+            entry, meta = self._block("ratios", symbol, issue)
+            if entry and entry.rows:
+                rows[symbol] = entry.rows[0]
+                dates.append(meta["fetched_at"])
+        return {"rows": rows, "fetched_at": min(dates) if dates else None, "message": issue}
+
     def events(self, symbol: str, today: date) -> dict:
         """Everything the Events tab shows for one symbol. Each block degrades on its own."""
         issues = {dataset: self.refresh(dataset, [symbol]) for dataset in EVENT_DATASETS}

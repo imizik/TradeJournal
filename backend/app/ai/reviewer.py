@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from anthropic import Anthropic
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
@@ -13,6 +12,25 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv(BACKEND_DIR.parent / ".env")
 
+PROMPT_VERSION = 2
+REVIEW_FIELDS = ("strategy", "flags", "summary", "entry_quality", "exit_quality", "suggestions")
+REVIEW_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [*REVIEW_FIELDS, "market_read", "plan_check", "data_gaps"],
+    "properties": {
+        "strategy": {"type": "string"},
+        "flags": {"type": "array", "items": {"type": "string"}, "maxItems": 6},
+        "summary": {"type": "string"},
+        "entry_quality": {"type": "string"},
+        "exit_quality": {"type": "string"},
+        "suggestions": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+        "market_read": {"type": "string"},
+        "plan_check": {"type": ["string", "null"]},
+        "data_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+    },
+}
+
 
 def review_trade(
     trade: Trade,
@@ -20,61 +38,55 @@ def review_trade(
     companion_trades: Optional[list[Trade]] = None,
     stats: Optional[dict] = None,
     session: Optional[Session] = None,
+    backend: str | None = None,
 ) -> dict:
+    """One trade's review, from Claude on the owner's plan (app.ai.plan_runner), like the daily review.
+
+    The Anthropic API is used only when ``AI_REVIEW_BACKEND=api`` is set explicitly; nothing falls back to it.
+    The day's context (plans, market, sector, news, option walls, alerts) comes from ``review_context`` for
+    the trade's New York open date.
     """
-    Generates an AI trade review using Claude API with prompt caching.
-
-    Args:
-        trade: The Trade object to review
-        fills: List of Fill objects for this trade (sorted by executed_at)
-        companion_trades: Other trades opened ~5min before/after this one on same ticker
-        stats: Dict from /stats endpoint for trader-level context
-        session: Database session for loading tags
-
-    Returns:
-        Dict with keys: strategy, flags, summary, entry_quality, exit_quality, suggestions
-    """
-
-    # Assemble trade context JSON
     context = _assemble_context(trade, fills, companion_trades, stats, session)
+    if session is not None and trade.opened_at is not None:
+        from app.ai import review_context
 
-    # Call Claude API with prompt caching
-    client = Anthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
-    )
+        context["day_context"] = review_context.build(session, trade.opened_at.date(), [trade])
+    message = f"Review this trade:\n\n{json.dumps(context, indent=2, default=str)}"
+    chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
+    if chosen == "api":
+        review = _review_with_api(message)
+        review["generated_by"] = f"{os.environ.get('ANTHROPIC_MODEL', 'claude-opus-4-7')} through the Anthropic API"
+    else:
+        from app.ai import plan_runner
 
-    message = client.messages.create(
-        model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
-        max_tokens=1024,
-        system=[
-            {
-                "type": "text",
-                "text": _SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": f"Review this trade:\n\n{json.dumps(context, indent=2, default=str)}",
-            }
-        ],
-    )
-
-    # Parse and validate response
-    try:
-        response_text = message.content[0].text
-        review = _parse_json_response(response_text)
-    except (json.JSONDecodeError, IndexError, AttributeError) as e:
-        snippet = response_text[:300] if "response_text" in locals() else "<no text>"
-        raise ValueError(f"Failed to parse AI response: {e}. Response starts: {snippet!r}") from e
-
-    # Validate required fields
-    required = {"strategy", "flags", "summary", "entry_quality", "exit_quality", "suggestions"}
-    if not required.issubset(review.keys()):
-        raise ValueError(f"AI response missing required fields. Got: {review.keys()}")
-
+        answer = plan_runner.ask(_SYSTEM_PROMPT, message, REVIEW_SCHEMA)
+        review = answer.data
+        review["generated_by"] = answer.author
+        review["usage"] = {"input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
+                           "api_equivalent_usd": answer.api_equivalent_usd, "seconds": answer.seconds}
+    missing = [field for field in REVIEW_FIELDS if field not in review]
+    if missing:
+        raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
+    review["prompt_version"] = PROMPT_VERSION
     return review
+
+
+def _review_with_api(message: str) -> dict:
+    from anthropic import Anthropic
+
+    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
+        model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
+        max_tokens=2000,
+        system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(REVIEW_SCHEMA)}"}],
+    )
+    response_text = ""
+    try:
+        response_text = response.content[0].text
+        return _parse_json_response(response_text)
+    except (json.JSONDecodeError, IndexError, AttributeError) as exc:
+        raise ValueError(f"Failed to parse AI response: {exc}. Response starts: {response_text[:300]!r}") from exc
 
 
 def _assemble_context(
@@ -245,56 +257,40 @@ def _parse_json_response(text: str) -> dict:
         return json.loads(stripped[start : end + 1])
 
 
-_SYSTEM_PROMPT = """You are an expert options and stock trade reviewer. Your job is to analyze trades and provide actionable feedback.
+_SYSTEM_PROMPT = """You are an expert options and stock trade reviewer coaching one retail trader. Analyze one trade and give
+actionable feedback grounded only in the JSON you receive.
 
 You will receive a JSON object with:
-- trade: Details about the trade (entry/exit prices, P&L, holding time, whether it expired worthless, etc.)
-- fills: Individual executions with timestamps, IV/delta/underlying data where available
-- companion_trades: Other trades opened ~5 minutes before/after this one (may indicate multi-leg strategies)
-- ticker_stats: This ticker's historical performance (win rate, avg P&L %)
-- trader_context: Overall trading stats and prior behavioral flags observed
-- trade.path_metrics: Precomputed path metrics when available, including option peak open P&L, worst open P&L,
-  giveback from peak, option MFE/MAE, and exit efficiency
+- trade: entry/exit prices, P&L, holding time, whether it expired worthless, tags. Timestamps are New York wall-clock.
+- fills: individual executions with timestamps and IV/delta/underlying data where available
+- companion_trades: other trades on the same ticker opened within 5 minutes (may be legs of one spread)
+- ticker_stats: this ticker's history (count, win rate, total P&L); trader_context: overall win rate and flags
+- trade.path_metrics: when present, option peak open P&L, worst open P&L, giveback from peak, MFE/MAE and exit
+  efficiency. Distinguish a trade that never worked from one that worked and then reversed: a small realized loss
+  after a large positive option_peak_unrealized_pnl is an exit/risk-management issue.
+- day_context: what was around the trade that day, when available:
+  - plans: what the trader captured before entering (by_trade, with minutes_before_entry). When this trade has a plan,
+    plan_check compares it with what was done (instrument, side, strike, size, timing, exit); null when there is none.
+  - market: the indexes' day, SPY/QQQ intraday shape (trend_efficiency near 1 is a trend day, near 0 chop), VIX and the
+    10-year yield. When partial_as_of is set, numbers are intraday as of that time. market_read is one sentence: what
+    kind of day it was and whether this trade went with it or against it; "Market context unavailable" when missing.
+  - macro: FOMC, CPI and jobs releases that day or the next trading day; a trade held into one carried event risk.
+  - tickers: the underlying's move against SPY and its sector ETF, earnings within a week, the day's headlines
+    (observed, never proof of cause), option open-interest walls, the trader's alerts that fired, and their CURRENT
+    saved levels (may have been added later: a hint, never proof).
+  - gaps: parts that were unavailable.
+Never invent prices, levels, news or data that is not in the JSON. When missing data limits a judgement, name it in
+data_gaps (at most three) instead of guessing.
 
-**Output only a JSON object with these fields. Do not wrap it in markdown. Do not include any text before or after the JSON:**
+Fields:
+- strategy: name and direction, e.g. "Long Call (bullish directional)", "Iron Condor", "PMCC".
+- flags: short snake_case labels such as early_exit, late_exit, oversized, revenge_trade, good_entry, chased_entry,
+  against_the_tape, held_into_event, gave_back_peak, no_plan, followed_plan, scalp, lucky_win, expired_worthless.
+- summary: one or two sentences.
+- entry_quality / exit_quality: start with one word (Excellent, Good, Fair, Poor or Terrible), then one or two
+  sentences on timing and price relative to the day's move, levels and context.
+- suggestions: at most three, specific and checkable on the next trade (a rule, not a mood).
 
-```json
-{
-  "strategy": "<Name and direction, e.g. 'Long Call (bullish directional)', 'Iron Condor', 'PMCC'>",
-  "flags": [
-    "<flag1>",
-    "<flag2>"
-  ],
-  "summary": "<1-2 sentence trade summary>",
-  "entry_quality": "<1-2 sentence assessment of entry timing and price relative to the day's move and market context>",
-  "exit_quality": "<1-2 sentence assessment of exit timing and price>",
-  "suggestions": [
-    "<actionable suggestion 1>",
-    "<actionable suggestion 2>"
-  ]
-}
-```
-
-**Flag examples** (use as inspiration, not exhaustive):
-- "early_exit" — sold before target, left money on table
-- "late_exit" — held through reversal, reduced gains
-- "oversized" — contracts too large for account
-- "undersized" — tiny position, not worth the risk/reward
-- "revenge_trade" — entered shortly after a loss
-- "good_entry" — entered near support/key level
-- "forced_exit" — closed for non-technical reasons
-- "expired_worthless" — let profitable credit trade expire
-- "scalp" — very short hold (minutes), high friction
-- "lucky_win" — won despite poor entry/exit
-- "time_decay_winner" — theta worked in trader's favor
-
-**Scoring entry/exit quality:**
-- "Excellent" — entered/exited at inflection point or key technical level
-- "Good" — reasonable timing, within typical variance
-- "Fair" — middle of the range, neither great nor poor
-- "Poor" — missed obvious signal or overstayed
-- "Terrible" — against the trend, reversed immediately
-
-Prioritize actionable insights. If the trade was a winner, note what worked. If it lost, identify the teachable moment. Reference IV, delta, underlying price, and hold time when available.
-When trade.path_metrics are present, distinguish trades that never worked from trades that worked and then reversed. A small realized loss after a large positive option_peak_unrealized_pnl is an exit/risk-management issue.
+If the trade won, say what worked and whether it was repeatable or lucky. If it lost, find the teachable moment.
+Reference IV, delta, underlying price and hold time when available.
 """
