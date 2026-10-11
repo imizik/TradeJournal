@@ -113,14 +113,13 @@ def month_stats(session: Session, month: str, gaps: list[str]) -> dict | None:
             return None if value is None else ("yes" if value == 1 else "no")
         return read
 
-    premiums = sorted(float(trade.total_premium_paid) for trade in trades if trade.total_premium_paid)
-    low, high = (premiums[len(premiums) // 3], premiums[2 * len(premiums) // 3]) if len(premiums) >= 6 else (None, None)
+    # Thirds by rank, so each holds a third of the sized trades whatever their premiums.
+    sized = sorted((trade for trade in trades if trade.total_premium_paid), key=lambda trade: float(trade.total_premium_paid))
+    thirds = {trade.id: ("smallest third", "middle third", "largest third")[index * 3 // len(sized)]
+              for index, trade in enumerate(sized)} if len(sized) >= 6 else {}
 
     def size(trade: Trade) -> str | None:
-        if low is None or not trade.total_premium_paid:
-            return None
-        value = float(trade.total_premium_paid)
-        return "smallest third" if value <= low else "middle third" if value <= high else "largest third"
+        return thirds.get(trade.id)
 
     spy = _spy_days(month, gaps)
     by_day: dict[date, float] = defaultdict(float)

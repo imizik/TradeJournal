@@ -55,7 +55,7 @@ export default function MonthlyAiPanel({ month, monthLabel, closedTrades, initia
         {error ? <p className="text-red-400">{error}</p>
           : status === "loading" ? <p>Reviewing the month&apos;s statistics and daily reviews. This can take a minute or two…</p>
           : review ? <Result review={review} generatedAt={generatedAt} />
-          : <p>No monthly review yet. It is written automatically on the first nightly run of the next month, or run it now.</p>}
+          : <p>No monthly review yet. It is written automatically on the first nightly run of the next month. You can run it now; a review written before the month ends is replaced by that nightly one.</p>}
       </div>
     </section>
   );

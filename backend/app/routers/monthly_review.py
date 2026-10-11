@@ -26,7 +26,9 @@ def _month(value: str) -> str:
 def list_monthly_reviews(session: Session = Depends(get_session)):
     """Months with closed trades (newest first), whether each has a saved review, and its grade."""
     counts: dict[str, int] = {}
-    for closed_at in session.exec(select(Trade.closed_at).where(Trade.status.in_(("closed", "expired")), Trade.closed_at.is_not(None))).all():
+    # The review's own rule (app.ai.monthly_reviewer.closed_trades): closed or expired, with a recorded P&L.
+    for closed_at in session.exec(select(Trade.closed_at).where(Trade.status.in_(("closed", "expired")), Trade.closed_at.is_not(None),
+                                                                Trade.realized_pnl.is_not(None))).all():
         key = closed_at.strftime("%Y-%m")
         counts[key] = counts.get(key, 0) + 1
     records = {record.month: record for record in session.exec(select(MonthlyReviewRecord)).all()}

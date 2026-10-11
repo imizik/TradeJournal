@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.ai import monthly_reviewer, plan_runner
 from app.database import get_session
@@ -151,3 +151,26 @@ def test_routes_list_months_generate_and_read(engine, fake, client, monkeypatch)
     assert client.post("/monthly-review", json={"month": "Sept"}).status_code == 400
     monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN")
     assert client.post("/monthly-review", json={"month": "2026-09"}).status_code == 503
+
+
+def test_a_review_written_mid_month_or_before_late_trades_is_replaced_after_the_month_ends(engine, fake):
+    seed(engine, trade(1, datetime(2026, 9, 10, 10, 0), 75),
+         MonthlyReviewRecord(month="2026-09", review_json=json.dumps(MONTHLY), trade_count=1,
+                             updated_at=datetime(2026, 9, 15, 18, 0)))  # run from its page mid-month
+    with Session(engine) as session:
+        assert plan_reviews.plan_month(session, date(2026, 10, 1)) == "2026-09"
+        record = session.exec(select(MonthlyReviewRecord)).one()
+        record.updated_at = datetime(2026, 10, 2, 0, 15)  # the nightly one, after the month ended
+        session.add(record)
+        session.commit()
+        assert plan_reviews.plan_month(session, date(2026, 10, 2)) is None
+        session.add(trade(2, datetime(2026, 9, 29, 10, 0), -20))  # a late import for September
+        session.commit()
+        assert plan_reviews.plan_month(session, date(2026, 10, 3)) == "2026-09"
+
+
+def test_size_thirds_hold_a_third_each(engine, fake):
+    seed(engine, *[trade(n, datetime(2026, 9, 1 + n, 10, 0), 10, premium=100 * n) for n in range(1, 7)])
+    with Session(engine) as session:
+        sizes = {row["group"]: row["trades"] for row in monthly_reviewer.month_stats(session, "2026-09", [])["by"]["size"]}
+    assert sizes == {"smallest third": 2, "middle third": 2, "largest third": 2}

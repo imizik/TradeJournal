@@ -128,13 +128,20 @@ def plan(session: Session) -> list[tuple[date, str]]:
 
 
 def plan_month(session: Session, today: date) -> str | None:
-    """Last calendar month, when it had closed trades and has no monthly review yet: the first run of a month writes it."""
+    """Last calendar month, when it had closed trades and no review of the whole month: none yet, one written before
+    the month ended (run from its page mid-month), or one that covered fewer trades than have closed in it since."""
     from app.ai import monthly_reviewer
 
     month = monthly_reviewer.previous_month(today.strftime("%Y-%m"))
-    if session.exec(select(MonthlyReviewRecord.id).where(MonthlyReviewRecord.month == month)).first() is not None:
+    trades = monthly_reviewer.closed_trades(session, month)
+    if not trades:
         return None
-    return month if monthly_reviewer.closed_trades(session, month) else None
+    record = session.exec(select(MonthlyReviewRecord).where(MonthlyReviewRecord.month == month)).first()
+    if record is None:
+        return month
+    _, end = monthly_reviewer.month_bounds(month)
+    month_end_utc = end.replace(tzinfo=ZoneInfo("America/New_York")).astimezone(timezone.utc).replace(tzinfo=None)
+    return month if record.updated_at < month_end_utc or record.trade_count < len(trades) else None
 
 
 def run(session: Session, dry_run: bool = False, today: date | None = None) -> dict:
