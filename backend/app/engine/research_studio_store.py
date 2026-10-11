@@ -82,6 +82,8 @@ def encode_snapshot(snapshot: Snapshot) -> bytes:
                         "coverage": [{**asdict(c), "day": str(c.day)} for c in s.coverage],
                         "bars": [[b.time.isoformat(), b.open, b.high, b.low, b.close, b.volume] for b in s.bars]}
                        for s in snapshot.symbols]}
+    if snapshot.source_version != 1:
+        raw["source_version"] = snapshot.source_version
     payload = canonical_bytes(raw)
     if len(payload) > MAX_BYTES:
         raise ValueError("prepared snapshot exceeded research byte bound")
@@ -99,7 +101,7 @@ def decode_snapshot(payload: bytes) -> Snapshot:
         SymbolSnapshot(s["symbol"], tuple(Bar(datetime.fromisoformat(b[0]), *b[1:]) for b in s["bars"]),
                        tuple(Coverage(**{**c, "day": date.fromisoformat(c["day"])}) for c in s["coverage"]))
         for s in raw["symbols"]), tuple(tuple(row) for row in raw["manifest"]),
-        raw["engine_fingerprint"], raw["provenance"])
+        raw["engine_fingerprint"], raw["provenance"], source_version=raw.get("source_version", 1))
 
 
 class ResearchStore:

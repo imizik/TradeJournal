@@ -718,6 +718,8 @@ return {
   syncSummary: () => get<SyncSummary>("/sync/summary"),
   gmailHealth: () => get<GmailHealth>("/gmail/health"),
   syncJobs: () => get<SyncJob[]>("/sync/jobs"),
+  levelAlerts: () => get<import("./alerts").AlertsPayload>("/charts/alerts"),
+  symbolEvents: (symbol: string) => get<import("./symbolInfo").SymbolEvents>(`/charts/symbol/${encodeURIComponent(symbol)}/events`),
   syncRuns: () => get<SyncRun[]>("/sync/runs"),
   runSyncPipeline: () => post<{ pipeline_run_id: string }>("/sync/pipeline/run"),
   runSyncJob: (jobType: string, range: "day" | "week" | "month" | "all" = "week", force = false) =>

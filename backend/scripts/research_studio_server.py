@@ -57,9 +57,10 @@ def main():
     parser.add_argument("--cache-root", type=Path, required=True)
     parser.add_argument("--store-root", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8097)
+    parser.add_argument("--allow-newer-mu", action="store_true", help="owner-approved fixed MU study through 2026-10-09; marks dates exposed")
     args = parser.parse_args()
     token = os.environ.get("TJ_RESEARCH_TOKEN", "")
-    source = DiscoveryCache(args.cache_root)
+    source = DiscoveryCache(args.cache_root, allow_newer_mu=args.allow_newer_mu)
     session = ResearchSession(source, ResearchStore(args.store_root, source_root=source.root))
     import uvicorn
     uvicorn.run(create_app(session, token), host="127.0.0.1", port=args.port, workers=1)
