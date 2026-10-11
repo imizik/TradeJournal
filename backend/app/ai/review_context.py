@@ -376,6 +376,7 @@ def ticker_context(session: Session, day: date, symbols: list[str], daily: dict,
             walls = open_interest_walls(session, day, symbol, move["close"] if move else None)
         except Exception:
             log.warning("Open-interest walls failed for %s", symbol, exc_info=True)
+            session.rollback()  # never leave the transaction aborted for the save
             walls = None
         if walls:
             row["options_open_interest"] = walls
