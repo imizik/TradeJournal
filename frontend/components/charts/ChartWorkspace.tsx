@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useAppAccess } from "@/components/AccessProvider";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpRight, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
+import { ArrowUpRight, ChartCandlestick, NotebookPen, Pencil, Check, ChevronDown, ChevronUp, Columns3, Crosshair, Expand, Eye, EyeOff, Info, Keyboard, Layers as LayersIcon, LayoutGrid, Link2, List, ListOrdered, Loader2, Lock, Magnet, MoreHorizontal, MoveRight, Pause, Play, Plus, RectangleHorizontal, Redo2, RefreshCw, Rows3, Search, Slash, SlidersHorizontal, Square, Trash2, Type, Undo2, X } from "lucide-react";
 import AlertsPanel from "./AlertsPanel";
 import DockSection from "./DockSection";
 import TradeCard from "./TradeCard";
@@ -14,6 +14,7 @@ import HotkeySheet from "./HotkeySheet";
 import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
+import Level2Panel from "./Level2Panel";
 import OptionsLadder from "./OptionsLadder";
 import PlanSheet from "./PlanSheet";
 import type { ChartSnapshot } from "./PlanSheet";
@@ -95,7 +96,7 @@ const describeEdit = (edit: DrawingEdit, symbol: string) => `${editVerb(edit)} $
  * symbol's levels and fills) or the layers. Whether it is open, and on which,
  * is this device's choice; a phone's sheet always starts closed.
  */
-type DockTab = "watchlist" | "layers" | "options";
+type DockTab = "watchlist" | "layers" | "options" | "level2";
 const DOCK_KEY = "tradejournal.charts.dock.v1";
 /** C1.4 remembered only an open layers panel; a device that left it open opens the dock on Layers. */
 const LAYERS_OPEN_KEY = "tradejournal.charts.layers.open.v1";
@@ -652,12 +653,12 @@ export default function ChartWorkspace() {
   useEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(DOCK_KEY) ?? "null") as { open?: unknown; tab?: unknown } | null;
-      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" || saved.tab === "options" ? saved.tab : "watchlist" });
+      if (saved && typeof saved.open === "boolean") setDock({ open: saved.open, tab: saved.tab === "layers" || saved.tab === "options" || (saved.tab === "level2" && owner) ? saved.tab : "watchlist" });
       else if (localStorage.getItem(LAYERS_OPEN_KEY) === "1") setDock({ open: true, tab: "layers" });
       const wide = Number(localStorage.getItem(DOCK_WIDTH_KEY));
       if (Number.isFinite(wide) && wide > 0) setDockWidth(clamp(Math.round(wide), DOCK_WIDTH.min, DOCK_WIDTH.max));
     } catch { /* open on the watchlist, at the default width */ }
-  }, []);
+  }, [owner]);
   // Full screen's dock was shared until C7.4: a device without its own choice yet starts from the shared one, once loaded.
   useEffect(() => {
     if (!ready || fullDock !== null) return;
@@ -1229,6 +1230,8 @@ export default function ChartWorkspace() {
   }
   const ladderPanel = (sheet: boolean) => <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
     highlight={strike?.symbol === symbol ? strike.price : null} sheet={sheet} onStrike={chooseStrike} onLayer={setOptions} onClose={() => showDock(null)} />;
+  // Level 2 is the owner's: an assistant with a saved Level 2 tab sees the watchlist and starts no request.
+  const level2Panel = (sheet: boolean) => <Level2Panel symbol={symbol} sheet={sheet} onClose={() => showDock(null)} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
     onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions} onLabels={setFillLabels} onNewsSmall={setNewsSmall}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
@@ -1388,8 +1391,11 @@ export default function ChartWorkspace() {
   // The dock's tabs: a press opens that panel, a second press closes the dock. A phone's top row has room for two;
   // its strike ladder opens from the More menu.
   const dockTabs = ([["watchlist", "Watchlist", List, "Watchlist, levels and your latest fills"], ["layers", "Layers", LayersIcon, "Layers: show, hide, lock and delete what the charts draw"],
-    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"]] as const).filter(([tab]) => !narrow || tab !== "options").map(([tab, name, Icon, hint]) =>
+    ["options", "Strike ladder", Rows3, "Strike ladder: open interest, volume and gamma by strike"], ["level2", "Level 2", ListOrdered, "Level 2: a manual, 30-second NVDA depth session"]] as const)
+    .filter(([tab]) => (!narrow || (tab !== "options" && tab !== "level2")) && (tab !== "level2" || owner)).map(([tab, name, Icon, hint]) =>
     <button key={tab} aria-label={name} aria-expanded={dockShown && dock.tab === tab} title={hint} onClick={() => toggleDock(tab)} className={`${plain(dockShown && dock.tab === tab)} ${control}`}><Icon size={14} /></button>);
+  const level2Button = (close: () => void) => owner && <button aria-label="Level 2" title="Level 2: a manual, 30-second NVDA depth session" onClick={() => { close(); showDock("level2"); }}
+    className={`${plain(false)} ${control} text-[11px]`}><ListOrdered size={13} /><span>Level 2</span></button>;
   const ladderButton = (close: () => void) => <button aria-label="Strike ladder" title="Strike ladder: open interest, volume and gamma by strike" onClick={() => { close(); showDock("options"); }}
     className={`${plain(false)} ${control} text-[11px]`}><Rows3 size={13} /><span>Strike ladder</span></button>;
 
@@ -1634,7 +1640,7 @@ export default function ChartWorkspace() {
           {narrow
             // A phone keeps one row of controls: the rest wait in a menu.
             ? <ToolbarMenu label="More chart controls" align="right" title="More chart controls" className={`${plain(false)} ${control}`}
-              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{focusButton(close)}{secondary}{ladderButton(close)}{pauseButton}{refreshButton}{keysButton}
+              content={(close) => <div className="flex w-72 flex-wrap items-center gap-1">{focusButton(close)}{secondary}{ladderButton(close)}{level2Button(close)}{pauseButton}{refreshButton}{keysButton}
                 <div className="mt-1 w-full space-y-2 border-t border-slate-700/60 pt-2 text-[10px] text-slate-500">{about}{attribution}</div></div>}><MoreHorizontal size={14} aria-hidden /><span className="sr-only">More chart controls</span></ToolbarMenu>
             : <>{planButton}{sep}{pauseButton}{refreshButton}{keysButton}</>}
           {immersive
@@ -1711,7 +1717,7 @@ export default function ChartWorkspace() {
           onDrag={dragDock} onStep={(by) => { const most = dockLimit(); keepDockWidth(clamp((dockBox.current?.getBoundingClientRect().width ?? dockWidth) - by * 16, DOCK_WIDTH.min, most)); }}
           onEdge={(to) => keepDockWidth(to === "min" ? DOCK_WIDTH.min : dockLimit())} onReset={() => keepDockWidth(DOCK_WIDTH.default)} />}
         {!narrow && dockShown && <aside ref={dockBox} aria-label="Side panel" style={{ width: dockWidth, maxWidth: `max(${DOCK_WIDTH.min}px, calc(100% - ${GRID_MIN_PX + 40}px))` }} className="shrink-0 overflow-y-auto overscroll-contain bg-[#121924]">
-          {dock.tab === "layers" ? layersPanel(false) : dock.tab === "options" ? ladderPanel(false) : watchlistPanel}
+          {dock.tab === "layers" ? layersPanel(false) : dock.tab === "options" ? ladderPanel(false) : dock.tab === "level2" && owner ? level2Panel(false) : watchlistPanel}
         </aside>}
       </div>
 
@@ -1751,7 +1757,7 @@ export default function ChartWorkspace() {
       })()}
       {plan && <PlanSheet key={plan.key} symbol={plan.symbol} chartSymbol={symbol} setup={captureSetup} setupError={setupError} narrow={narrow} snapshot={snapshotFor}
         onSetup={setCaptureSetup} onSaved={planSaved} onQueued={() => void outboxAll().then(setOutbox)} onRejected={() => void loadSetup()} onClose={() => setPlan(null)} />}
-      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
+      {narrow && sheet && (dock.tab === "layers" ? layersPanel(true) : dock.tab === "options" ? ladderPanel(true) : dock.tab === "level2" && owner ? level2Panel(true) : <Sheet label="Watchlist" onClose={() => showDock(null)}>{watchlistPanel}</Sheet>)}
       {menu && (!menu.id || menuItem) && <ChartMenu key={`${menu.panel}|${menu.id}|${menu.at.x}|${menu.at.y}`} at={menu.at} symbol={menu.symbol} price={menu.price} item={menuItem}
         layers={layerToggles} hidden={hiddenItems(menu.symbol)} alerts={menuAlerts} onAddLevel={(value) => menuAddLevel(menu.symbol, value)} onCopyPrice={(value) => void copyPrice(value)} onReset={menu.reset}
         onEdit={(patch) => { if (menu.id) editItem(menu.symbol, menu.id, patch); }} onDuplicate={() => { if (menu.id) duplicateItem(menu.symbol, menu.id, menu.panel); }}
