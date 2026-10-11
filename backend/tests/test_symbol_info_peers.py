@@ -233,3 +233,9 @@ def test_peer_ratios_is_one_batched_tradier_read(tmp_path, monkeypatch):
     assert reads == [("ratios", ["AMD", "AVGO", "QCOM"])] and out["rows"]["AVGO"] == {"pe": 10.0} and out["message"] is None
     events.peer_ratios(["AMD", "AVGO", "QCOM"])
     assert len(reads) == 1  # cached a day
+
+
+def test_no_groups_file_means_polygon_for_every_symbol(tmp_path):
+    from app.engine.symbol_info_peers import load_groups
+
+    assert load_groups(tmp_path / "missing.json") == {}

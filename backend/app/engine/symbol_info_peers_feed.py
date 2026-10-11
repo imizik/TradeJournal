@@ -60,7 +60,7 @@ class SymbolPeers:
         self.root = root
         self._clock = clock
         self._quotes = quotes or self._read_quotes
-        self._groups = load_groups() if groups is None else groups
+        self._groups = groups  # read on first use, not at import
         self._ratios = ratios or self._read_ratios
         self._memory: dict[str, tuple[float, list[str]]] = {}
         self._quiet_until: dict[str, tuple[float, str]] = {}
@@ -138,6 +138,8 @@ class SymbolPeers:
             log.warning("Could not cache Polygon peers for %s: %s", symbol, exc)
 
     def _related(self, symbol: str, now: float) -> tuple[list[str] | None, dict]:
+        if self._groups is None:
+            self._groups = load_groups()
         if symbol in self._groups:
             name, tickers = self._groups[symbol]
             return tickers, {"provider": "curated", "label": f"Peer group: {name}", "state": "ok", "fetched_at": None,

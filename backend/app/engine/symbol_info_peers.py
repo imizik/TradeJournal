@@ -35,8 +35,11 @@ def normalize_related(body: object, symbol: str) -> list[str]:
 
 
 def load_groups(path: Path = GROUPS_FILE) -> dict[str, tuple[str, list[str]]]:
-    """Symbol -> (group name, its peers in order). A symbol in several groups keeps its first."""
+    """Symbol -> (group name, its peers in order). A symbol in several groups keeps its first.
+    No file (bundles that leave out ``data`` folders) means no groups: every symbol uses Polygon."""
     out: dict[str, tuple[str, list[str]]] = {}
+    if not path.is_file():
+        return out
     for group in json.loads(path.read_text())["groups"]:
         members = [str(m).upper() for m in group["members"]]
         for symbol in members:
