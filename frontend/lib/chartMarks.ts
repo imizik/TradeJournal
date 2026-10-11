@@ -64,6 +64,16 @@ type Target = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
 export type MarkSet = { fills: FillGroup[]; labels: FillLabels; reports: EarningsMark[]; news: NewsMark[]; small: boolean };
 
+// One offscreen context measures label text for every chart, instead of a new canvas per paint.
+let measuring: CanvasRenderingContext2D | null | undefined;
+const measurer = () => {
+  if (measuring === undefined) {
+    measuring = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
+    if (measuring) measuring.font = `500 9px ${FONT}`;
+  }
+  return measuring;
+};
+
 export class MarkLayer implements ISeriesPrimitive<Time> {
   private chart: IChartApi | null = null;
   private series: ISeriesApi<SeriesType, Time> | null = null;
@@ -122,8 +132,10 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
     const placed: PlacedFill[] = [];
     const lowBuy = new Set<number>();
     for (const group of this.set_.fills) {
-      const [x, bar] = [at(group.time), byTime(group.time)];
-      if (x === null || !bar) continue;
+      const x = at(group.time);
+      if (x === null) continue;
+      const bar = byTime(group.time);
+      if (!bar) continue;
       const edge = series.priceToCoordinate(group.buy ? bar.low : bar.high);
       if (edge === null) continue;
       if (group.buy) lowBuy.add(group.time);
@@ -139,8 +151,7 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
 
     // Text labels: under a buy, over a sell, kept clear of each other (a crowded one is left to the hover).
     if (wantText.size) {
-      const measure = typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d");
-      if (measure) measure.font = `500 9px ${FONT}`;
+      const measure = measurer();
       const boxes: { l: number; r: number; t: number; b: number }[] = [];
       for (const item of placed) {
         if (!item.label || !measure) continue;
@@ -155,9 +166,11 @@ export class MarkLayer implements ISeriesPrimitive<Time> {
 
     // Report dates: a ring with an E, under the candle (and under its buy chevron when it has one).
     for (const mark of this.set_.reports) {
-      const [x, bar] = [at(mark.time), byTime(mark.time)];
+      const x = at(mark.time);
+      if (x === null) continue;
+      const bar = byTime(mark.time);
       const low = bar ? series.priceToCoordinate(bar.low) : null;
-      if (x === null || low === null) continue;
+      if (low === null) continue;
       this.reports.push({ mark, x, y: low + GAP + (lowBuy.has(mark.time) ? height + 5 : 0) + (small ? 5 : 7) });
     }
 
