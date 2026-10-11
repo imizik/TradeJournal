@@ -81,7 +81,10 @@ them. Retry is explicit, increments the attempt, preserves the logical run and
 prior history, and cannot run changed engine code against an old snapshot.
 
 Run identity binds canonical definition, raw/prepared data identity, R1 and R2
-code fingerprints, analysis specification and NumPy version. Every new enqueue
+code fingerprints, analysis specification and NumPy version. Submission saves
+the actual specification and NumPy version; cached results retain those labels
+and remain reopenable after an upgrade. Queued/retried work refuses changed
+code/version before prepared-data access. Every new enqueue
 rereads/hashes approved source data; same-date corrections create a new run.
 A repeat operation UUID with the identical action/run is idempotent; conflicting
 reuse refuses. Reopening completed results appends one exposure for a new UUID;

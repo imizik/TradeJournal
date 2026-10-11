@@ -19,10 +19,11 @@ import sys
 import threading
 import stat
 import uuid
+import numpy as np
 
 from app.engine.market_map import Bar
 from app.engine.research_studio import Coverage, Observations, Snapshot, SymbolSnapshot, parse_definition
-from app.engine.research_studio_analysis import Cancelled, analysis_id, canonical_bytes
+from app.engine.research_studio_analysis import SPEC, Cancelled, analysis_id, canonical_bytes
 from app.engine.research_studio_data import engine_fingerprint
 
 MAX_BYTES = 128 * 1024 * 1024
@@ -34,6 +35,7 @@ def code_identity() -> str:
     root = Path(__file__).resolve().parent
     digest = hashlib.sha256()
     digest.update(engine_fingerprint().encode())
+    digest.update(np.__version__.encode())
     for name in ("research_studio_analysis.py", "research_studio_store.py"):
         digest.update(name.encode())
         digest.update((root / name).read_bytes())
@@ -257,7 +259,8 @@ class ResearchStore:
             raise ValueError("immutable research request changed")
         request = json.loads(raw)
         definition = parse_definition(request["definition"])
-        if request["run_id"] != run_id or analysis_id(definition, request["data_id"], request["code_id"]) != run_id:
+        if request["run_id"] != run_id or analysis_id(definition, request["data_id"], request["code_id"],
+                                                   numpy_version=request["numpy_version"], spec=request["analysis_spec"]) != run_id:
             raise ValueError("immutable research request identity mismatch")
         return request
 
@@ -289,7 +292,8 @@ class ResearchStore:
         run_id = analysis_id(definition, snapshot.identity, code)
         payload = encode_snapshot(snapshot)
         request = {"run_id": run_id, "definition": definition.canonical(), "data_id": snapshot.identity,
-                   "code_id": code, "snapshot_sha256": hashlib.sha256(payload).hexdigest()}
+                   "code_id": code, "snapshot_sha256": hashlib.sha256(payload).hexdigest(),
+                   "analysis_spec": SPEC, "numpy_version": np.__version__}
         raw = canonical_bytes(request).decode()
         with self._db(write=True) as db:
             if str(uuid.UUID(operation_id)) != operation_id:

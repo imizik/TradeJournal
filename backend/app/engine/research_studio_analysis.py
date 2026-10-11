@@ -53,12 +53,13 @@ def canonical_bytes(value) -> bytes:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
-def analysis_id(definition: Definition, data_id: str, code_id: str) -> str:
+def analysis_id(definition: Definition, data_id: str, code_id: str, *, numpy_version=None, spec=None) -> str:
     for value in (data_id, code_id):
         if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
             raise ValueError("analysis identity requires content fingerprints")
     return hashlib.sha256(canonical_bytes({"definition": definition.canonical(), "data": data_id,
-                                          "analysis_code": code_id, "spec": SPEC, "numpy": np.__version__})).hexdigest()
+                                          "analysis_code": code_id, "spec": SPEC if spec is None else spec,
+                                          "numpy": np.__version__ if numpy_version is None else numpy_version})).hexdigest()
 
 
 def _check(cancel: Callable[[], bool]) -> None:

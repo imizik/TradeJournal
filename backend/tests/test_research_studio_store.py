@@ -303,3 +303,16 @@ def test_protected_request_date_refused_even_with_updated_checksum(store, snapsh
     with pytest.raises(ValueError):
         store.work_once()
     assert "snapshot.json.gz" not in opened
+
+
+def test_cached_results_reopen_with_saved_versions_but_old_jobs_cannot_recompute_after_upgrade(store, snapshot, definition, monkeypatch):
+    import numpy as np
+    run = store.enqueue(snapshot, definition, operation())["run_id"]
+    store.work_once(compute=analyze)
+    original = store.result(run, operation())
+    queued = store.enqueue(snapshot, replace(definition, window_end=605), operation())["run_id"]
+    monkeypatch.setattr(np, "__version__", "invented-upgrade")
+    assert store.result(run, operation()) == original
+    assert store.status(run)["status"] == "completed"
+    assert store.work_once()["status"] == "failed"
+    assert "code changed" in store.status(queued)["reason"]
