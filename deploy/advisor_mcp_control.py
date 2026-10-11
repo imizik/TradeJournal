@@ -26,10 +26,12 @@ BACKEND_ACCOUNT = "tj-advisor-backend"
 RECORD = ROOT / "installation.json"
 SOCKETS = tuple(u for u in UNITS if u.endswith(".socket"))
 SERVICES = tuple(u for u in UNITS if u.endswith(".service"))
+ADMIN_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 def run(*args, check=True):
-    result = subprocess.run([str(a) for a in args], capture_output=True, check=False)
+    result = subprocess.run([str(a) for a in args], capture_output=True, check=False,
+        env={"PATH": ADMIN_PATH, "PYTHON_DOTENV_DISABLED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
     if check and result.returncode:
         raise RuntimeError("Advisor operation refused: " + str(args[0]))
     return result
@@ -85,6 +87,47 @@ def stop():
         raise RuntimeError("Advisor shutdown command failed; both groups were attempted")
 
 
+def runtime_inventory():
+    """Hash all installed code/dependencies before invoking their interpreter.
+
+    Nothing is ignored: installed bytecode and import hooks are code too. The
+    read-only serving mounts cannot generate caches; preflight uses -B. OS
+    interpreter symlink targets are pinned as well as the links themselves.
+    """
+    result = {}
+    for role in ("adapter", "backend"):
+        tree = exact(ROOT / role)
+        for path in (tree, *sorted(tree.rglob("*"))):
+            relative = str(path.relative_to(ROOT))
+            info = path.lstat()
+            mode = info.st_mode & 0o777
+            if info.st_uid != 0 or (not path.is_symlink() and mode & 0o022):
+                raise ValueError("Advisor runtime ownership or writable mode changed")
+            entry = {"mode": mode, "uid": info.st_uid, "gid": info.st_gid}
+            if path.is_symlink():
+                if ".venv" not in path.parts:
+                    raise ValueError("Advisor runtime source symlink refused")
+                target = path.resolve(strict=True)
+                target_info = target.stat()
+                if target_info.st_uid != 0 or target_info.st_mode & 0o022:
+                    raise ValueError("Advisor runtime interpreter target is writable")
+                if target.is_dir() and not target.is_relative_to(tree):
+                    raise ValueError("External runtime directory symlink refused")
+                entry.update(kind="symlink", link=os.readlink(path), target=str(target),
+                    target_mode=target_info.st_mode & 0o777, target_uid=target_info.st_uid,
+                    target_gid=target_info.st_gid, target_sha256=digest(target) if target.is_file() else None)
+            elif path.is_file():
+                entry.update(kind="file", sha256=digest(path))
+            elif path.is_dir():
+                entry.update(kind="directory")
+            else:
+                raise ValueError("Advisor runtime special file refused")
+            result[relative] = entry
+        if not (tree / ".venv/bin/python").is_file():
+            raise ValueError("Advisor runtime interpreter missing")
+    return result
+
+
 def install(bundle, *, approve_install):
     root_only()
     bundle = exact(bundle)
@@ -105,9 +148,9 @@ def install(bundle, *, approve_install):
             for p in (ROOT / name).rglob("*"):
                 p.chmod(0o644 if p.is_file() else 0o755)
             (ROOT / name).chmod(0o755)
-            run("/usr/bin/python3.12", "-m", "venv", ROOT / name / ".venv")
+            run("/usr/bin/python3.12", "-B", "-m", "venv", ROOT / name / ".venv")
             packages = ["mcp==1.28.1", "PyJWT[crypto]==2.13.0"] if name == "adapter" else ["trade-journal-backend==0.1.0"]
-            run(ROOT / name / ".venv/bin/python", "-m", "pip", "install", "--no-index", "--find-links",
+            run(ROOT / name / ".venv/bin/python", "-B", "-m", "pip", "install", "--no-index", "--find-links",
                 bundle / "wheels", *packages)
         for name in ("config.json", "public-keys.json"):
             shutil.copyfile(bundle / "config" / name, CONFIG / name)
@@ -124,8 +167,7 @@ def install(bundle, *, approve_install):
         record = {"format": "advisor-installation-v1", "manifest_sha256": approve_install,
             "source_commit": validate(bundle)["source_commit"], "enabled": False,
             "units": {u: digest(UNIT_DIR / u) for u in UNITS},
-            "source_files": {str(p.relative_to(ROOT)): digest(p) for role in ("adapter", "backend")
-                for p in (ROOT / role).rglob("*") if p.is_file() and ".venv" not in p.parts},
+            "runtime_inventory": runtime_inventory(),
             "original_fixture_sha256": digest(STATE / "fixture.db")}
         RECORD.write_text(json.dumps(record, indent=2) + "\n")
         RECORD.chmod(0o600)
@@ -159,15 +201,14 @@ def installed(*, verify_runtime=True):
         exact(UNIT_DIR / name)
         if digest(UNIT_DIR / name) != expected or (UNIT_DIR / (name + ".d")).exists():
             raise ValueError("Advisor units changed; review replacement before activation")
-    for relative, expected in record["source_files"].items():
-        path = exact(ROOT / relative)
-        if digest(path) != expected or path.stat().st_uid != 0 or path.stat().st_mode & 0o022:
-            raise ValueError("Advisor runtime source changed or is writable")
+    if runtime_inventory() != record.get("runtime_inventory"):
+        raise ValueError("Advisor runtime inventory changed; review replacement before execution")
     return record
 
 
 def activation_identity():
     """Read-only preflight in the private runtime; no issuer/provider access."""
+    record = installed()  # Must precede any call into the installed interpreter.
     config = json.loads((CONFIG / "config.json").read_text())
     if (not config["enabled"] or not config["profiles"][0]["enabled"]
             or config["backend_socket"] != str(RUN / "backend.sock")
@@ -180,10 +221,12 @@ def activation_identity():
     script = ('from cloud_mcp_advisor_bridge import create_app; '
         'from cloud_mcp_advisor_common import read_config; from cloud_mcp_d0 import local_keys; '
         'import sys; local_keys(read_config(sys.argv[1])); create_app(sys.argv[1],sys.argv[2])')
-    subprocess.run([ROOT / "backend/.venv/bin/python", "-c", script, str(CONFIG / "config.json"), str(STATE / "fixture.db")],
+    subprocess.run([ROOT / "backend/.venv/bin/python", "-B", "-c", script, str(CONFIG / "config.json"), str(STATE / "fixture.db")],
         cwd=ROOT / "backend", env={"PATH": "/usr/bin:/bin", "PYTHON_DOTENV_DISABLED": "1"},
         capture_output=True, check=True)
-    return {"installation_sha256": digest(RECORD), "config_sha256": digest(CONFIG / "config.json"),
+    return {"installation_sha256": digest(RECORD),
+        "runtime_inventory_sha256": hashlib.sha256(json.dumps(record["runtime_inventory"], sort_keys=True).encode()).hexdigest(),
+        "config_sha256": digest(CONFIG / "config.json"),
         "keys_sha256": digest(CONFIG / "public-keys.json"), "fixture_sha256": digest(STATE / "fixture.db")}
 
 

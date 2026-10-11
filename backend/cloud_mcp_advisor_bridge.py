@@ -5,7 +5,7 @@ import sys
 # Clean before importing engines that may load .env. Re-exec preserves the
 # inherited socket FD and PID; no token/database credentials enter the process.
 if __name__ == "__main__" and os.environ.get("TJ_ADVISOR_MCP_CLEAN_PROCESS") != "1":
-    os.execve(sys.executable, [sys.executable, *sys.argv], {
+    os.execve(sys.executable, [sys.executable, "-B", *sys.argv], {
         "PATH": os.environ.get("PATH", ""), "PYTHON_DOTENV_DISABLED": "1",
         "TJ_ADVISOR_MCP_CLEAN_PROCESS": "1", **{k: os.environ[k] for k in ("LISTEN_PID", "LISTEN_FDS") if k in os.environ}})
 

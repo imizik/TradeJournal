@@ -7,7 +7,7 @@ After=tradejournal-advisor-backend.socket
 User=tj-advisor-backend
 Group=tj-advisor
 WorkingDirectory=/opt/tradejournal-advisor/backend
-ExecStart=/opt/tradejournal-advisor/backend/.venv/bin/python /opt/tradejournal-advisor/backend/cloud_mcp_advisor_bridge.py --config /etc/tradejournal-advisor/config.json --database /var/lib/tradejournal-advisor/fixture.db
+ExecStart=/opt/tradejournal-advisor/backend/.venv/bin/python -B /opt/tradejournal-advisor/backend/cloud_mcp_advisor_bridge.py --config /etc/tradejournal-advisor/config.json --database /var/lib/tradejournal-advisor/fixture.db
 Environment=PYTHON_DOTENV_DISABLED=1
 UMask=0077
 PrivateNetwork=true

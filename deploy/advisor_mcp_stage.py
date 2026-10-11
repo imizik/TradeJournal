@@ -18,6 +18,12 @@ BACKEND_FILES = (*ADAPTER_FILES, "cloud_mcp_advisor_bridge.py", "pyproject.toml"
 FORMAT = "advisor-disabled-bundle-v1"
 
 
+def reviewed_git(*args):
+    # This script already runs from this reviewed source. Trust only that exact
+    # checkout for each read; never persist global/wildcard safe.directory.
+    return subprocess.check_output(["git", "-c", f"safe.directory={SOURCE}", *args], cwd=SOURCE)
+
+
 def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -75,7 +81,7 @@ def stage(destination, *, wheels=None):
     # Source allowlist excludes dotenv, backend/data, tests, caches and credentials.
     originals = {f"adapter/{name}": SOURCE / "backend" / name for name in ADAPTER_FILES}
     originals.update({f"backend/{name}": SOURCE / "backend" / name for name in BACKEND_FILES})
-    tracked = subprocess.check_output(["git", "ls-files", "-z", "backend/app", "backend/alembic"], cwd=SOURCE).decode().split("\0")
+    tracked = reviewed_git("ls-files", "-z", "backend/app", "backend/alembic").decode().split("\0")
     for relative in filter(None, tracked):
         file = SOURCE / relative
         if file.suffix in {".py", ".mako"}:
@@ -129,7 +135,7 @@ engine.dispose()
             "jwks_url": config["jwks_url"], "fetched_at": 0, "expires_at": 0, "keys": []}) + "\n")
         for path in destination.rglob("*"):
             path.chmod(0o600 if path.is_file() else 0o700)
-        commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=SOURCE, text=True).strip()
+        commit = reviewed_git("rev-parse", "HEAD").decode().strip()
         manifest = {"format": FORMAT, "enabled": False, "fixture_only": True,
             "source_commit": commit, "inventory": inventory(destination)}
         (destination / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

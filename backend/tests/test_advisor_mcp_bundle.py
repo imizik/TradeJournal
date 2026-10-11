@@ -1,6 +1,7 @@
 """Disabled bundle/control proof; never operates host users, systemd or ingress."""
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -57,6 +58,23 @@ def test_private_disabled_migrated_invented_single_binding_no_credentials(prepar
     assert set(p.name for p in (prepared / "adapter").iterdir()) == set(stage.ADAPTER_FILES)
     assert not list(prepared.rglob("*.timer")) and not list(prepared.rglob("*.env"))
     assert json.loads((prepared / "config/public-keys.json").read_text())["expires_at"] == 0
+
+
+def test_git_trust_is_exact_checkout_command_only_and_admin_environment_is_clean(monkeypatch):
+    seen = []
+    def git(command, **kwargs):
+        seen.append((command, kwargs))
+        return b"verified commit"
+    monkeypatch.setattr(stage.subprocess, "check_output", git)
+    stage.reviewed_git("rev-parse", "HEAD")
+    assert seen == [(["git", "-c", f"safe.directory={stage.SOURCE}", "rev-parse", "HEAD"], {"cwd": stage.SOURCE})]
+    def execute(command, **kwargs):
+        assert kwargs["env"] == {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
+            "PYTHON_DOTENV_DISABLED": "1", "PYTHONDONTWRITEBYTECODE": "1"}
+        assert "ANTHROPIC_API_KEY" not in kwargs["env"] and "SUDO_UID" not in kwargs["env"]
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(control.subprocess, "run", execute)
+    control.run("groupadd", "--system", "fixture-name-never-executed")
 
 
 @pytest.mark.parametrize("change", ["bytes", "mode", "extra", "missing", "symlink", "manifest_path"])
@@ -128,9 +146,33 @@ def mock_host(tmp_path, monkeypatch):
     control.UNIT_DIR.mkdir()
     monkeypatch.setattr(control, "RECORD", control.ROOT / "installation.json")
     monkeypatch.setattr(control, "root_only", lambda: None)
+    original_stat = Path.stat
+    original_lstat = Path.lstat
+    def owned(value):
+        fields = list(value)
+        fields[4] = 0
+        return os.stat_result(fields)
+    def root_stat(path, *args, **kwargs):
+        value = original_stat(path, *args, **kwargs)
+        return owned(value) if path.is_relative_to(tmp_path) else value
+    def root_lstat(path, *args, **kwargs):
+        value = original_lstat(path, *args, **kwargs)
+        return owned(value) if path.is_relative_to(tmp_path) else value
+    monkeypatch.setattr(Path, "stat", root_stat)
+    monkeypatch.setattr(Path, "lstat", root_lstat)
     calls = []
     def command(*args, check=True):
         calls.append(tuple(map(str, args)))
+        if "venv" in args:
+            venv = Path(args[-1])
+            (venv / "bin").mkdir(parents=True)
+            (venv / "lib").mkdir()
+            interpreter = tmp_path / "host-python"
+            if not interpreter.exists():
+                interpreter.write_text("verified executable fixture")
+                interpreter.chmod(0o755)
+            (venv / "bin/python").symlink_to(interpreter)
+            (venv / "lib/dependency.py").write_text("verified dependency fixture")
         code = 3 if "is-active" in args else 0
         return SimpleNamespace(returncode=code)
     monkeypatch.setattr(control, "run", command)
@@ -205,3 +247,47 @@ def test_failed_activation_stops_both_pairs_and_wrong_approval_never_starts(tmp_
         control.activate(approve_activation=approved)
     assert ("systemctl", "stop", *control.SOCKETS) in calls
     assert ("systemctl", "stop", *control.SERVICES) in calls
+
+
+@pytest.mark.parametrize("change", ["dependency", "added_import", "interpreter", "symlink", "bytecode", "mode"])
+def test_installed_runtime_mutation_refuses_before_interpreter_or_service(prepared, tmp_path, monkeypatch, change):
+    calls = mock_host(tmp_path, monkeypatch)
+    monkeypatch.setattr(control, "preflight_install", lambda bundle: stage.validate(bundle))
+    control.install(prepared, approve_install=stage.digest(prepared / "manifest.json"))
+    config = json.loads((control.CONFIG / "config.json").read_text())
+    config.update(enabled=True, resource_url="https://advisor.fixture.invalid/advisor/mcp",
+        issuer_url="https://identity.fixture.invalid/", client_id="approved-fixture",
+        backend_socket=str(control.RUN / "backend.sock"), jwks_file=str(control.CONFIG / "public-keys.json"))
+    config["profiles"][0].update(enabled=True, subject="approved-fixture")
+    (control.CONFIG / "config.json").write_text(json.dumps(config))
+    invoked = []
+    def interpreter(*args, **kwargs):
+        invoked.append(args)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(control.subprocess, "run", interpreter)
+    control.installed()
+    original_identity = control.activation_identity()
+    original_approval = __import__("hashlib").sha256(json.dumps(original_identity, sort_keys=True).encode()).hexdigest()
+    invoked.clear()
+    calls.clear()
+    venv = control.ROOT / "backend/.venv"
+    if change == "dependency":
+        (venv / "lib/dependency.py").write_text("altered importable dependency")
+    elif change == "added_import":
+        (venv / "lib/new_import.pth").write_text("import unwanted_fixture_module")
+    elif change == "interpreter":
+        (tmp_path / "host-python").write_text("altered external executable")
+    elif change == "symlink":
+        (venv / "other").write_text("alternate executable")
+        (venv / "bin/python").unlink()
+        (venv / "bin/python").symlink_to("../other")
+    elif change == "bytecode":
+        (venv / "lib/__pycache__").mkdir()
+        (venv / "lib/__pycache__/dependency.cpython-312.pyc").write_bytes(b"altered compiled import")
+    else:
+        (venv / "lib/dependency.py").chmod(0o666)
+    with pytest.raises(ValueError, match="runtime"):
+        control.activation_identity()  # Public preflight entry must validate first.
+    with pytest.raises(ValueError, match="runtime"):
+        control.activate(approve_activation=original_approval)
+    assert not invoked and not any("start" in c for c in calls)

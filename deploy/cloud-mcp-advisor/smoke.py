@@ -153,7 +153,7 @@ def exercise(archive, scratch):
     MARKER.write_text("invented readable host marker")
     MARKER.chmod(0o644)
     for role in ("adapter", "backend"):
-        probe = control.ROOT / role / "native-boundary.py"
+        probe = control.CONFIG / ("native-boundary-" + role + ".py")
         probe.write_text('''import errno,os,socket,sys
 from pathlib import Path
 assert os.geteuid()!=0
@@ -172,7 +172,8 @@ else:
     try: marker.read_bytes()
     except OSError as e: assert e.errno in (errno.ENOENT,errno.EACCES,errno.EPERM)
     else: raise AssertionError("production mount readable")
-    for p in (Path("/etc/tradejournal-advisor/config.json"),Path(__file__)):
+    runtime=Path("/opt/tradejournal-advisor/"+("adapter" if "adapter" in __file__ else "backend")+"/cloud_mcp_advisor.py")
+    for p in (Path("/etc/tradejournal-advisor/config.json"),runtime):
         try:
             with p.open("ab"): pass
         except OSError as e: assert e.errno in (errno.EROFS,errno.EACCES,errno.EPERM)
@@ -190,11 +191,11 @@ print("advisor native boundary positive" if positive else "advisor native bounda
         probe.chmod(0o644)
         account = control.ACCOUNT if role == "adapter" else control.BACKEND_ACCOUNT
         python = control.ROOT / role / ".venv/bin/python"
-        run("runuser", "-u", account, "--", python, probe, "positive")
+        run("runuser", "-u", account, "--", python, "-B", probe, "positive")
         unit = "tradejournal-advisor-mcp.service" if role == "adapter" else "tradejournal-advisor-backend.service"
         dropin = control.UNIT_DIR / (unit + ".d")
         dropin.mkdir()
-        (dropin / "native-ci.conf").write_text(f"[Service]\nExecStartPre={python} {probe}\n")
+        (dropin / "native-ci.conf").write_text(f"[Service]\nExecStartPre={python} -B {probe}\n")
     run("systemctl", "daemon-reload")
     run("systemctl", "restart", *control.SERVICES)
     for unit in control.SERVICES:
@@ -360,7 +361,7 @@ def main():
         python = Path("/opt/tradejournal/current/backend/.venv/bin/python")
         if not python.is_file():
             raise ValueError("Existing disposable package smoke runtime required")
-        result = run(python, __file__, args.archive.resolve(), "--inner", env={"PATH": "/usr/bin:/bin",
+        result = run(python, "-B", __file__, args.archive.resolve(), "--inner", env={"PATH": control.ADMIN_PATH,
             "GITHUB_ACTIONS": "true", "TJ_DISPOSABLE_RUNNER": "1", "PYTHON_DOTENV_DISABLED": "1"})
         sys.stdout.write(result.stdout.decode())
         return
