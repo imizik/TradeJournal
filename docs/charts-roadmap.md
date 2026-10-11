@@ -1327,6 +1327,36 @@ follow-up item and leave the gate open.
 - State the remaining TradingView dependency: this epic does not port the Pine
   alert loop; G0 remains a separate chart-workflow gate.
 
+## UX pass (trade-chart-ux audit, 2026-10-11)
+
+A read-only audit with the `trade-chart-ux` skill (UX sandbox on real MU
+candles, realistic-candle production build, 1440×900 and 390×844) found the
+main chart squeezed rather than slow: in five-chart mode its canvas was 358 px
+of a 900 px window, with 98 visible buttons. Measured on synthetic input, CPU
+4× slowed, five repeats: five charts cost 1.6–1.9× Focus; live ticks were the
+only condition that dropped frames (main thread 82–85% busy); a two-finger
+swipe 15% off horizontal zoomed 4.7% while panning, because the library zooms
+on any vertical component. Nothing was saturated at normal CPU speed. A real
+trackpad and a live session were not tested.
+
+One small PR each, in order, through the skill's UI gate:
+
+| ID | Change | Done when |
+|---|---|---|
+| UX-A | "Active" and "Research" layout presets; new setups default the lower row to the compact share | Done in this branch: at 1440×900 the main canvas grew from about 381 to 458 px (+20%, browser-test banner included) with all five charts visible and the dock closed; saved settings untouched. A fixed 560 px needs chrome trimming, which is outside UX-A |
+| UX-B | Small-chart header controls on hover or keyboard focus (always on phone); one-row legend, EMAs folded, "VWAP —" says why | ≤ 2 visible controls per small chart at rest, all reachable by keyboard; legend one row at 1440 px |
+| UX-C | Back to live returns to the symbol held before a past trade | Opening a trade from MU and pressing Back to live shows MU |
+| UX-D | Level labels avoid candles; shaded bands only for the nearest zones; Layers explanations behind an info control | No label covers a candle in the realistic picture; levels are never hidden, only labels |
+| UX-E | Two-finger swipes lock to their dominant axis, behind a toggle | Only if the trackpad test shows zoom drift: a synthetic dx 10 / dy 1.5 swipe drifts ≤ 0.5%; pinch and wheel unchanged |
+| UX-F | At most one paint per frame per chart for live ticks; no re-render for unseen values | Only if paused feels clearly smoother than live: five charts + live ≤ 1.3× no-live cost, no frame over 34 ms; last price and freshness never lag |
+| UX-G | Crosshair moves stop re-rendering all five chart components | Measured first; only if UX-F leaves a gap |
+
+The one-minute trackpad test that gates UX-E and UX-F, in five-chart mode then
+Focus: a deliberately sloppy two-finger pan on 5m (does the zoom creep?);
+pinch over one candle (anchored, no jump); the same pan live, then with
+**Pause chart updates** (clearly smoother paused?); pan far back (no jump when
+older candles load); **End** (snaps to the latest candle).
+
 ## Later (not this epic)
 
 Worth doing once the phases above have shipped, in roughly this order:
