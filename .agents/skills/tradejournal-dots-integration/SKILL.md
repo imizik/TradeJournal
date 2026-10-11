@@ -31,6 +31,26 @@ actions and current authorization from fresh evidence. Historical provider bars
 can be demo-only while `sample_data=false`; do not relabel them as invented.
 Past receipts establish past observations, not current service health or grants.
 
+## Take the shortest supported path
+
+For OAuth setup, read [the fast path](references/oauth-fast-path.md). Check
+admin access and provider capacity early, while preparing the local proposal;
+do not discover a blocked Create button after a long approval sequence.
+
+Prefer an existing authorized API/CLI to browser work. Otherwise batch supported
+UI actions against fresh state. Give the user a short, exact handoff when login,
+private credentials or several simple form edits would be faster manually.
+After a few minutes without a new verified result, stop and assess the blocker
+instead of continuing navigation or coordinator polling.
+
+Keep one owner and one private progress record: approved scope, allocated public
+IDs, verified settings, remaining action and evidence links. Reuse unchanged
+proof; do not reload every contract, rerun tests or audit all existing clients
+at each handoff. Group known changes into a concrete approval at each required
+contract gate, then execute that approved scope without asking again per field.
+This does not combine creation, publication and startup when the contract
+requires separate approvals.
+
 ## Prepare and activate within the requested scope
 
 1. Inspect the current source revision, existing connector binding and relevant
