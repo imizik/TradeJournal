@@ -247,10 +247,13 @@ def test_owner_templates_are_dormant_readonly_and_outside_four_unit_installer():
     import sys
 
     sys.path.insert(0, str(root / "deploy"))
-    from advisor_mcp_stage import UNITS, BACKEND_FILES
+    from advisor_mcp_stage import ADAPTER_FILES, BACKEND_FILES, UNITS
 
     assert len(UNITS) == 4 and not any("owner" in name for name in UNITS)
-    assert "cloud_advisor_owner.py" not in BACKEND_FILES
+    # The bridge uses the kernel-peer protocol, without installing owner units
+    # or giving the adapter the owner reader implementation.
+    assert "cloud_advisor_owner.py" in BACKEND_FILES
+    assert "cloud_advisor_owner.py" not in ADAPTER_FILES
 
 
 @pytest.mark.parametrize(

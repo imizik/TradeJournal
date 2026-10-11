@@ -421,3 +421,41 @@ denial, exact named-UID-only ACL and live grant removal refusal, legitimate
 advisor read/save after the grant, receipt recovery/restart, disabled config,
 stop of both optional units and receipt-preserving unit rollback. It
 cleans its own temporary resources and is not an operator installer.
+
+## Dormant repeatable-question mode
+
+The [assignment contract](../../docs/agent/advisor-assignment-contract.md) adds
+`/advisor-review/questions` using the existing advisor bridge, packet and
+OAuth identity. It does **not** change the #251 installation/activation bundle
+or authorize its execution. Normal install leaves this mode off.
+
+A later concrete retained activation must inventory the reviewed source/runtime
+and configure `assignment_management=true` and `owner_peer_uid` equal to the
+existing dedicated authenticated frontend UID in the advisor config. The
+adapter UID must be different; its executable refuses the owner UID. Keep the
+original profile binding as the fixture scope anchor. Configure the owner
+frontend with `TJ_ADVISOR_MANAGEMENT_ENABLED=true`,
+`TJ_ADVISOR_MANAGER_SOCKET` naming that bridge's exact `backend.sock`, and
+`TJ_ADVISOR_MANAGER_SOCKET_UID` matching the existing backend socket owner.
+The private frontend needs only a read-only mount of that Unix socket directory
+and an exact named-user connect grant on the socket, preserved on socket
+recreation by the reviewed unit configuration. Do not give the frontend the
+adapter group or database access. The owner reader remains read-only with its
+existing UID/ACL. No public proxy or OAuth catalog/identity change is needed.
+These are required inputs to a later reviewed activation packet, not a retained
+installer or a command to modify the current host.
+
+Stop sockets and processes before replacing runtime/config; start the reviewed
+pairs together. Question create/assign/revoke thereafter updates only the
+isolated fixture ledger and needs no restart or OAuth edit. For rollback, stop
+the entrances, disable management in advisor/frontend configuration, restore
+the reviewed previous runtime, and remove only its extra frontend socket mount
+and named socket grant. Preserve the database and original reader. Original
+single-request recovery remains available; managed receipts require this
+version's owner management reader, so retain its verified source for recovery.
+
+`trial_smoke.py` exercises distinct actual Linux UIDs and a temporary named
+socket ACL only on its guarded disposable runner. The auth browser suite proves
+the real owner session/CSRF/BFF and two-question UI path on invented data. Neither
+is actual Jo transmission or retained activation. Keep the original connected
+trial's remaining acceptance with its existing owner.

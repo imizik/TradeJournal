@@ -265,6 +265,8 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             run("systemctl", "restart", *[u for u in control.UNITS if u.endswith(".service")])
             assert rpc("get_advisor_request")["receipt"] == receipt
             assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).json()["receipt"] == receipt
+            managed_questions(run, advisor_config, record, rpc, answer)
+            assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).json()["receipt"] == receipt
         engine.dispose()
         runtime_override.mkdir()
         (runtime_override / "fixture.conf").write_text("[Service]\nEnvironment=UNREVIEWED_FIXTURE=true\n")
@@ -365,3 +367,62 @@ def interrupted_install(bundle, run):
         run("userdel", account)
         if run("getent", "group", account, check=False).returncode == 0:
             run("groupdel", account)
+
+
+def managed_questions(run, original_config, record, rpc, answer):
+    """Disposable native UID proof; never an activation/install procedure."""
+    import struct
+    import uuid
+    config_path = control.CONFIG / "advisor/config.json"
+    original_bytes = config_path.read_bytes()
+    web_uid = record["new_accounts"][trial.WEB_ACCOUNT]["uid"]
+    socket_path = Path(trial.RUN) / "backend.sock"
+    config_path.write_text(json.dumps({**original_config, "assignment_management": True, "owner_peer_uid": web_uid}))
+    services = [u for u in control.UNITS if u.endswith(".service") and "owner" not in u]
+    run("systemctl", "restart", *services)
+    # Preserve existing owner/group rw, adding only this named frontend UID.
+    undefined = 0xFFFFFFFF
+    entries = ((1, 6, undefined), (2, 6, web_uid), (4, 6, undefined), (16, 6, undefined), (32, 0, undefined))
+    acl = struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+    os.setxattr(socket_path, "system.posix_acl_access", acl)
+    script = """import http.client,json,socket,sys
+class Unix(http.client.HTTPConnection):
+    def connect(self):
+        self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+        self.sock.settimeout(5)
+        self.sock.connect(sys.argv[1])
+c=Unix('fixture'); c.request(sys.argv[2],'/owner/advisor/assignments',body=sys.argv[3],headers={'Content-Type':'application/json'})
+r=c.getresponse(); print(json.dumps({'status':r.status,'body':json.loads(r.read())}))
+"""
+    def owner(method="GET", body=None, account=trial.WEB_ACCOUNT):
+        result = run("runuser", "-u", account, "--", "/usr/bin/python3", "-I", "-c", script,
+            socket_path, method, "" if body is None else json.dumps(body))
+        return json.loads(result.stdout)
+    try:
+        assert owner(account=old.ACCOUNT)["status"] == 403
+        assert owner(account=old.BACKEND_ACCOUNT)["status"] == 403
+        first = owner("POST", {"operation_id": str(uuid.uuid4()), "question": "First invented question?", "user_plan": "Wait", "invented_only": True})
+        assert first["status"] == 200
+        request = first["body"]["record"]["request"]
+        assert rpc("get_advisor_request")["request"] == request
+        body = {"packet_sha256": request["packet_sha256"], "request_sha256": request["request_sha256"], "answer": answer}
+        saved = rpc("save_advisor_answer", body)["receipt"]
+        # Owner GET list and create retry recover exact bytes, without selectors in MCP.
+        second = owner("POST", {"operation_id": str(uuid.uuid4()), "question": "Second invented question?", "user_plan": "Wait", "invented_only": True})
+        assert second["status"] == 200
+        next_request = second["body"]["record"]["request"]
+        assert next_request["assignment_id"] != request["assignment_id"]
+        assert rpc("get_advisor_request")["request"] == next_request
+        revoked = owner("POST", {"revoke": request["assignment_id"]})
+        assert revoked["status"] == 200 and revoked["body"]["record"]["receipt"] == saved
+        assert owner("POST", {"revoke": next_request["assignment_id"]})["status"] == 200
+        run("systemctl", "restart", *services)
+        assert owner()["status"] == 200
+        assert owner("POST", {"revoke": request["assignment_id"]})["body"]["record"]["receipt"] == saved
+        assert owner(account=old.ACCOUNT)["status"] == 403
+        print("Managed advisor native passed: distinct frontend/adapter/backend UIDs, named socket grant, two immutable assignments without OAuth edits/restart, cited receipt preserved across revoke and process replacement")
+    finally:
+        os.removexattr(socket_path, "system.posix_acl_access")
+        socket_path.chmod(0o660)
+        config_path.write_bytes(original_bytes)
+        run("systemctl", "restart", *services)

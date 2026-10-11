@@ -16,7 +16,7 @@ const loaded = new Module(source, module);
 loaded.filename = source; loaded.paths = module.paths;
 const regular = loaded.require.bind(loaded);
 loaded.require = name => name === 'server-only' ? {} : name === './accessServer' ? {
-  accessConfig: () => ({ profile: profile.value, target: 'http://127.0.0.1:8129' }),
+  accessConfig: () => ({ profile: profile.value, target: 'http://127.0.0.1:8129', origin: 'http://owner' }),
   upstreamHeaders: incoming => new Headers({ cookie: incoming.get('cookie') ?? '', 'x-tj-gateway': 'invented-owner-gateway' }),
 } : regular(name);
 loaded._compile(transformed, source);
@@ -83,3 +83,49 @@ test('oversize, redirect and malformed reader responses fail without retry/fallb
     assert.equal((await read()).status, 503); assert.equal(requests, 1);
   });
 });
+
+
+const managerSource = path.resolve(__dirname, '../lib/advisorAssignments.ts');
+const managerModule = new Module(managerSource, module);
+managerModule.filename = managerSource; managerModule.paths = module.paths;
+managerModule.require = name => name === './advisorOwner' ? loaded.exports : loaded.require(name);
+managerModule._compile(ts.transpileModule(fs.readFileSync(managerSource, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, managerSource);
+const createBody = { operation_id: '00000000-0000-0000-0000-000000000001', question: 'Invented question?', user_plan: 'Wait', invented_only: true };
+const managerResponse = JSON.stringify({ schema_version: 'advisor_assignments_v1', demo_only: true, assignments: [], selected: null });
+const manage = (overrides = {}) => managerModule.exports.advisorAssignments(new Request('http://owner/api/advisor-assignments', {
+  method: 'POST', headers: { cookie: 'fixture-owner', Origin: 'http://owner', 'x-tj-csrf': 'fixture-csrf', 'Content-Type': 'application/json' }, body: JSON.stringify(createBody), ...overrides,
+}));
+function managerSocket(socket) {
+  const next = path.join(path.dirname(socket), 'backend.sock'); fs.renameSync(socket, next);
+  Object.assign(process.env, { TJ_ADVISOR_MANAGEMENT_ENABLED: 'true', TJ_ADVISOR_MANAGER_SOCKET: next, TJ_ADVISOR_MANAGER_SOCKET_UID: String(process.getuid()) });
+  global.fetch = async () => Response.json({ enabled: true, owner: true, csrf: 'fixture-csrf' });
+}
+
+test('management validates owner CSRF and origin before Unix writes; forwards only bounded action', async () => fixture(async ({ server, socket }) => {
+  managerSocket(socket); let writes = 0;
+  server.on('request', (request, response) => {
+    writes++; assert.equal(request.method, 'POST'); assert.equal(request.url, '/owner/advisor/assignments');
+    for (const key of ['cookie', 'authorization', 'x-tj-gateway', 'x-tj-csrf', 'origin']) assert.equal(request.headers[key], undefined);
+    let received = ''; request.on('data', chunk => { received += chunk; });
+    request.on('end', () => { assert.deepEqual(JSON.parse(received), createBody); response.setHeader('Content-Type', 'application/json'); response.end(managerResponse); });
+  });
+  for (const headers of [{ Origin: 'http://owner', 'x-tj-csrf': 'wrong' }, { Origin: 'http://wrong', 'x-tj-csrf': 'fixture-csrf' }]) assert.equal((await manage({ headers })).status, 403);
+  assert.equal(writes, 0);
+  const result = await manage(); assert.equal(result.status, 200); assert.equal(await result.text(), managerResponse); assert.equal(writes, 1);
+}));
+
+test('management refuses revoked sessions before dispatch, invalid body and oversize without writes', async () => fixture(async ({ server, socket }) => {
+  managerSocket(socket); let writes = 0; server.on('request', () => { writes++; });
+  for (const value of [{ ...createBody, invented_only: false }, { ...createBody, question: 'x'.repeat(2001) }, { revoke: 'foreign' }]) assert.equal((await manage({ body: JSON.stringify(value) })).status, 400);
+  assert.equal((await manage({ body: 'x'.repeat(8193) })).status, 503);
+  let checks = 0; global.fetch = async () => ++checks === 1 ? Response.json({ enabled: true, owner: true, csrf: 'fixture-csrf' }) : new Response('', { status: 401 });
+  assert.equal((await manage()).status, 401); assert.equal(writes, 0);
+}));
+
+test('management uncertain response never retries and assistant/legacy cannot reach it', async () => fixture(async ({ server, socket }) => {
+  managerSocket(socket); let writes = 0;
+  server.on('request', request => { writes++; request.destroy(); });
+  for (const value of ['assistant', 'private_legacy']) { profile.value = value; assert.equal((await manage()).status, 403); }
+  assert.equal(writes, 0); profile.value = 'owner';
+  const response = await manage(); assert.equal(response.status, 503); assert.match(await response.text(), /Reload saved questions/); assert.equal(writes, 1);
+}));

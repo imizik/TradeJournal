@@ -414,3 +414,16 @@ Optional owner units remain excluded from the four-unit installer; checks are
 `backend/tests/test_cloud_advisor_owner.py`, `frontend/scripts/advisor-owner.test.js`,
 `frontend/e2e/advisor-owner.auth.ts` and the disposable advisor native smoke.
 See the [direct owner boundary](cloud-mcp-advisor-contract.md#direct-owner-review-in-tradejournal-dormant).
+
+
+### Repeatable invented advisor questions
+
+`/advisor-review/questions` is an explicitly enabled authenticated owner flow,
+linked from `/advisor-review`. `frontend/components/AdvisorAssignments.tsx` and the
+`/api/advisor-assignments` BFF use the isolated advisor bridge and
+`backend/app/engine/advisor_assignments.py`; they never use the journal database.
+The [bounded contract](advisor-assignment-contract.md) owns its assignment,
+revocation and dormant activation boundary. Proof lives in
+`backend/tests/test_advisor_assignments.py`, the existing owner transport test
+`frontend/scripts/advisor-owner.test.js`, and
+`frontend/e2e/advisor-assignments.auth.ts`. Actual Jo acceptance is separate.

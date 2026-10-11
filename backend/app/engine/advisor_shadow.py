@@ -377,10 +377,7 @@ def advisor_import(db, run_id, body, *, transport="manual-paste", authorize=None
             return result
         active_assignment(config)
         received_at = practice.iso(practice.now_utc())
-        saved = {**{k: exported[k] for k in keys}, "received_at": received_at, "submitted_output": body,
-            "transport": transport, "runner_provenance": "caller unverified", "independence": "independence-unverified",
-            "model": "unavailable", "usage": "unavailable", "cost": "unavailable", "demo_only": True}
-        saved["receipt_sha256"] = digest(saved)
+        saved = answer_receipt(exported, body, transport, received_at=received_at)
         advisor["receipt"] = saved
         advisor["response"] = body["answer"]
         advisor["received_at"] = received_at
@@ -395,3 +392,14 @@ def advisor_import(db, run_id, body, *, transport="manual-paste", authorize=None
     except Exception:
         db.rollback()
         raise
+
+
+def answer_receipt(exported, body, transport, *, received_at=None):
+    """The shared immutable receipt format for manual and connected answers."""
+    keys = ("version", "assignment_id", "run_id", "packet_sha256", "request_sha256")
+    received_at = received_at or practice.iso(practice.now_utc())
+    saved = {**{k: exported[k] for k in keys}, "received_at": received_at, "submitted_output": body,
+        "transport": transport, "runner_provenance": "caller unverified", "independence": "independence-unverified",
+        "model": "unavailable", "usage": "unavailable", "cost": "unavailable", "demo_only": True}
+    saved["receipt_sha256"] = digest(saved)
+    return bounded(saved)

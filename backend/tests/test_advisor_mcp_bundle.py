@@ -141,6 +141,8 @@ socket.socket=OfflineSocket
 from cloud_mcp_advisor_common import read_config
 from cloud_mcp_d0 import local_keys
 from cloud_mcp_advisor_bridge import create_app
+from cloud_advisor_owner import OwnerProtocol
+assert callable(OwnerProtocol)
 local_keys(read_config(sys.argv[1]))
 create_app(sys.argv[1],sys.argv[2])
 print("clean copied-source factory passed without IP/credentials/listener")
@@ -155,6 +157,7 @@ print("clean copied-source factory passed without IP/credentials/listener")
     assert {p.name for p in data.iterdir()} == {"alpaca_cache"}
     assert list((data / "alpaca_cache").iterdir()) == []
     assert not (control.ROOT / "adapter/data").exists()
+    assert not (control.ROOT / "adapter/cloud_advisor_owner.py").exists()
 
 
 def test_factory_mutation_refuses_before_preflight_returns_approval(prepared, tmp_path, monkeypatch):

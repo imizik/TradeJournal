@@ -8,7 +8,7 @@ const LIMIT = 65536;
 const DEADLINE = 5000;
 let activeReads = 0;
 
-async function socketIdentity(socketPath: string, expectedUid: number) {
+export async function socketIdentity(socketPath: string, expectedUid: number) {
   let parent = path.dirname(socketPath);
   while (true) {
     const stat = await lstat(parent);
@@ -21,18 +21,19 @@ async function socketIdentity(socketPath: string, expectedUid: number) {
   return `${stat.dev}:${stat.ino}:${stat.uid}:${stat.gid}:${stat.mode}`;
 }
 
-async function ownerSession(target: string, incoming: Headers, signal: AbortSignal) {
+export async function ownerSession(target: string, incoming: Headers, signal: AbortSignal, csrf?: string) {
   const response = await fetch(`${target}/access/me`, { headers: upstreamHeaders(incoming), cache: "no-store", redirect: "manual", signal });
   if (response.status === 401) return 401;
   if (!response.ok) return 503;
   const access = await response.json();
+  if (csrf !== undefined && (!csrf || csrf !== access.csrf)) return 403;
   return access.enabled === true && access.owner === true ? 200 : 403;
 }
 
-async function singleton(socketPath: string, signal: AbortSignal): Promise<Buffer> {
+export async function advisorUnix(socketPath: string, signal: AbortSignal, route = "/owner/advisor", body?: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const request = unixRequest({ socketPath, path: "/owner/advisor", method: "GET", agent: false,
-      headers: { Accept: "application/json", "Content-Length": "0" }, signal }, (response) => {
+    const request = unixRequest({ socketPath, path: route, method: body === undefined ? "GET" : "POST", agent: false,
+      headers: { Accept: "application/json", "Content-Type": "application/json", "Content-Length": String(Buffer.byteLength(body ?? "")) }, signal }, (response) => {
       if (response.statusCode !== 200 || !response.headers["content-type"]?.startsWith("application/json")) {
         response.destroy(); reject(new Error("Owner reader refused")); return;
       }
@@ -47,7 +48,7 @@ async function singleton(socketPath: string, signal: AbortSignal): Promise<Buffe
       response.on("aborted", () => reject(new Error("Owner response incomplete")));
     });
     request.on("error", reject);
-    request.end();
+    request.end(body);
   });
 }
 
@@ -70,7 +71,7 @@ export async function advisorOwner(request: Request) {
     activeReads += 1;
     try {
       const before = await socketIdentity(socketPath, expectedUid);
-      const body = await singleton(socketPath, signal);
+      const body = await advisorUnix(socketPath, signal);
       if (before !== await socketIdentity(socketPath, expectedUid)) throw new Error("Owner socket changed");
       // Uncached revalidation closes owner revocation during a slow ledger read.
       const latest = await ownerSession(config.target, request.headers, signal);
