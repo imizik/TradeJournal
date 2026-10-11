@@ -47,7 +47,7 @@ async function DashboardData({ access, searchParams }: { access: AppAccess; sear
     return await loadDashboard(access, searchParams);
   } catch (error) {
     if (!access.owner) throw error;
-    return <DashboardError />;
+    return <DashboardError searchParams={await searchParams} />;
   }
 }
 

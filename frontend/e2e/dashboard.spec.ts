@@ -191,3 +191,26 @@ test("empty, missing quote, quote error and journal retry states are explicit", 
     await expect(page.getByTestId("owner-dashboard")).toBeVisible();
   } finally { await state("ready"); }
 });
+
+test("journal retry makes a fresh page GET and preserves scoped deep links", async ({ page, request }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  const params = new URLSearchParams({ account: "all", type: "option", decision: "00000000-0000-0000-0000-000000000001", practice_run: "00000000-0000-0000-0000-000000000002" });
+  try {
+    expect((await request.post(`${API}/__test/dashboard-state?value=journal_error`)).ok()).toBe(true);
+    await page.goto(`/?${params}`);
+    await expect(page.getByRole("heading", { name: "Workspace could not load" })).toBeVisible();
+    await page.screenshot({ path: test.info().outputPath("dashboard-native-retry-error-desktop.png") });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({ path: test.info().outputPath("dashboard-native-retry-error-phone.png") });
+    expect((await request.post(`${API}/__test/dashboard-state?value=ready`)).ok()).toBe(true);
+    const navigation = page.waitForResponse((response) => response.request().isNavigationRequest() && new URL(response.url()).pathname === "/", { timeout: 10_000 });
+    await page.getByRole("button", { name: "Try again" }).click();
+    expect((await navigation).request().method()).toBe("GET");
+    await expect(page.getByTestId("owner-dashboard")).toBeVisible();
+    expect(Object.fromEntries(new URL(page.url()).searchParams)).toEqual(Object.fromEntries(params));
+    await expect(page.getByLabel("Journal summary", { exact: true })).toContainText("2 options · 0 stocks");
+    await page.screenshot({ path: test.info().outputPath("dashboard-native-retry-recovered-phone.png") });
+  } finally {
+    await request.post(`${API}/__test/dashboard-state?value=ready`);
+  }
+});
