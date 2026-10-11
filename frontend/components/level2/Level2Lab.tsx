@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
+import LiveDepthSession from "@/components/level2/LiveDepthSession";
 import {
   bookAge, bookState, depthSummary, DURATION_MS, HEATMAP_PRICES, priceText,
   REPLAY_FRAMES, replayAt, sourceTime, type BookState, type ReplayFrame,
@@ -109,10 +110,20 @@ export default function Level2Lab() {
     <header className="space-y-2">
       <div className="flex flex-wrap items-center gap-3">
         <h1 className="text-2xl font-semibold">Level 2 lab</h1>
+      </div>
+      <p className="text-sm text-muted-foreground">An isolated manual provider diagnostic and a separate synthetic replay. Neither updates saved trade metrics.</p>
+    </header>
+
+    <LiveDepthSession />
+
+    <section aria-labelledby="synthetic-replay-title" className="space-y-4 rounded-lg border border-amber-400/20 p-4" data-testid="synthetic-replay">
+    <header className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 id="synthetic-replay-title" className="text-lg font-semibold">Synthetic replay</h2>
         <span className="rounded border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-xs font-semibold text-amber-300">SYNTHETIC REPLAY</span>
       </div>
-      <p className="text-sm text-muted-foreground">US.NVDA · invented ARCA price-level book. No moomoo connection or real market data.</p>
-      <p className="text-xs text-muted-foreground">One venue fixture, not consolidated depth or a TotalView/ArcaBook entitlement claim. Nasdaq coverage is unverified. Nothing here updates saved trade metrics.</p>
+      <p className="text-sm text-muted-foreground">US.NVDA · invented ARCA price-level book. No provider connection or real market data.</p>
+      <p className="text-xs text-muted-foreground">One venue fixture, not consolidated depth or a TotalView/ArcaBook entitlement claim. Nasdaq coverage is unverified.</p>
     </header>
 
     <section aria-label="Replay controls" className="rounded-lg border bg-card p-4">
@@ -153,6 +164,7 @@ export default function Level2Lab() {
       <Ladder frame={frame} state={state} />
       <Heatmap offsetMs={offsetMs} />
     </div>
-    <p className="text-xs text-muted-foreground">Replay is memory-only, starts paused, stops at 20 seconds and pauses when this tab is hidden. No archive, recording, ML pipeline or live-data switch is included.</p>
+    <p className="text-xs text-muted-foreground">This replay is memory-only, starts paused, stops at 20 seconds and pauses when this tab is hidden. It has no archive, recording or ML pipeline.</p>
+    </section>
   </div>;
 }

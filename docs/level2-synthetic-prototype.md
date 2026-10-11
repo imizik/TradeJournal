@@ -1,8 +1,10 @@
 # Level 2 synthetic prototype
 
 Open **Level 2 lab** in the owner navigation (phone: **More**) or `/level2-lab`.
-This isolated frontend page contains an invented US.NVDA ARCA price-level book.
-It does not mount the Charts workspace, call a market-data endpoint, use moomoo
+The synthetic section contains an invented US.NVDA ARCA price-level book.
+The separate [manual connection section](level2-manual-connection.md) is disabled
+by default and connects only through an explicitly started local bridge.
+The synthetic section does not mount the Charts workspace, call a market-data endpoint, use moomoo
 credentials, create WebSockets, write storage or update journal metrics. Existing
 shell health/status reads remain unchanged. The existing access proxy keeps the
 new page outside restricted assistant access; no access policy was changed.
@@ -38,8 +40,8 @@ handling, history gaps, cleanup and isolation; it saves desktop/phone pictures.
 Typecheck/lint and exact-head CI are recorded in the PR. The baseline route was
 404; baseline pictures were captured in the disposable seeded browser environment.
 
-Market-hours testing is deferred. A later, separately approved live connection
-must establish actual source fields, units, venue coverage, clocks and recovery
-behavior before presenting this as usable market data. Recording, historical
+Market-hours testing is deferred. The manual connection section still requires
+actual source-field, unit, venue, clock and recovery validation before presenting
+its display as usable market data. Recording, historical
 depth storage, ML training and changes to current feed/metric sources remain
 outside this prototype.
