@@ -141,6 +141,11 @@ you change it (`verification.md`, "What is NOT covered yet").
 
 ## Getting evidence for a change
 
+The isolated **Level 2 lab** (`/level2-lab`, owner navigation) is a frontend-only
+synthetic replay prototype: `frontend/components/level2/Level2Lab.tsx` and
+`frontend/lib/level2Replay.ts`, covered by `frontend/e2e/level2-lab.spec.ts`.
+It uses no provider or saved metrics; see the [prototype notes](../level2-synthetic-prototype.md).
+
 - **Engine or router change:** the test module in the table, or drive the
   route through `TestClient(app)` the way `test_fill_import.py` does.
 - **Anything a page shows:** `bash scripts/verify.sh --e2e`. The smoke tests
