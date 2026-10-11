@@ -341,9 +341,10 @@ is verifiable rather than hopeful.
   and from its own opt-in nightly timer (`app/jobs/plan_reviews.py`), both on
   the Claude plan through `app/ai/plan_runner.py`: never API credits, and
   never a fallback to them. `AI_REVIEW_BACKEND=api` is the only way back to
-  the Anthropic API. The nightly run reviews at most `TJ_PLAN_REVIEW_MAX` days
-  (latest, then stale, then older days newest first) and stops on a sign-in
-  other than the plan token or two failed calls in a row.
+  the Anthropic API. The nightly run reviews only the latest trading day (when
+  it has no review, gained trades since, or went stale) and never backfills:
+  a past day gets a review from its own button. It stops on a sign-in other
+  than the plan token.
 - `webull_listener` is a persistent listener, not a finite sync job.
 
 ## Strategy Lab

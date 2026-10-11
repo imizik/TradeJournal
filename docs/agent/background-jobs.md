@@ -178,12 +178,13 @@ are separate from the local verification script.
 ## Nightly plan reviews
 
 `app.jobs.plan_reviews` is a finite systemd oneshot
-(`tradejournal-plan-reviews.timer`, opt-in), not a `job_run` lane: it writes
-Daily Review rows directly, one day at a time, holds its own file lock in
-`TJ_PLAN_REVIEW_DIR` so two runs never overlap, and records its outcome in
-a status file in that directory (`GET /daily-review/runner`). It calls Claude
-only through `app.ai.plan_runner` (the Claude plan token); an interrupted run
-keeps the reviews it saved, and the next run picks up the rest.
+(`tradejournal-plan-reviews.timer`, opt-in), not a `job_run` lane: it reviews
+only the latest trading day and writes its Daily Review row directly, holds
+its own file lock in `TJ_PLAN_REVIEW_DIR` so two runs never overlap, and
+records its outcome in a status file in that directory
+(`GET /daily-review/runner`). It calls Claude only through
+`app.ai.plan_runner` (the Claude plan token); after a failed or interrupted
+run, the next run tries that day again.
 
 ## A3 finite daily preparation
 
