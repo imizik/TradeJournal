@@ -148,3 +148,73 @@ rollback does not migrate or delete any journal/paper data.
   ChatGPT Work runner isolation, deployment, laptop-off or forward acceptance.
 - Broad verification, native review rounds and exact-head CI belong to the PR's
   completion record. No production service/grant/export/schedule was changed.
+
+## Phase 2: local manual Jo handoff
+
+The owner UI now saves a versioned `advisor-jo-handoff-v1` JSON export using
+`POST /advisor-shadow/runs/{run_id}/advisor-handoff`, then imports a complete
+answer envelope using `POST /advisor-shadow/runs/{run_id}/advisor-import`.
+These are private owner routes; authenticated assistants cannot reach them
+directly or through the frontend proxy. No route was added to the shadow gateway.
+No connector, grant, service, network listener or model call is added.
+
+This session's exposed tool inventory contains a D0 practice catalog and
+separate journal read-only tools, with no advisor handoff tool. That observation
+is not an inspection of Jo's signed-in account or its available tools. Generic
+connected MCP support does not make the local loopback gateway reachable by Jo.
+The smallest supported transport is manual copy/paste. Journal read-only
+connectors and their identities remain separate and unchanged.
+
+The immutable export includes server-assigned assignment/run IDs, the original
+neutral packet and its SHA-256, the question, user plan, request time, assignment
+expiry and disclosure comparison. `request_sha256` hashes the canonical object
+containing version, assignment_id, run_id, packet_sha256, expires_at,
+requested_at, comparison, question and user_plan. The comparison is saved as
+assisted before exposure unless all five human choices are already frozen.
+The UI reopens the exact persisted export instead of creating another request.
+An existing Phase-1 advisor request cannot be upgraded; its original raw-answer
+routes and saved records remain readable without the new hashes.
+
+A real manual trial requires a fresh active invented assignment. Existing legacy
+or expired Phase-1 assignments are not upgraded. Only after bounded owner trial
+approval, use the existing fixture creation CLI from the operator walkthrough
+to prepare that fresh assignment; do not retain or activate a trial capability
+as part of implementation verification.
+
+Use only invented scenario text for the explicit question and plan; exclude real
+journal details, account information and credentials. No new data class is
+authorized for transmission. After explicit owner approval to share this
+invented scenario, copy the complete export JSON into
+signed-in Jo. This shares the invented packet, question and plan with Jo.
+The export asks for exactly one bounded answer using only these inputs, no tool
+or live-data use, and a JSON envelope echoing version, assignment_id, run_id,
+packet_sha256 and request_sha256. The `answer` contains five nonempty bounded
+strings (summary, interpretation, risks, conditions, gaps) and one to ten
+references containing original opportunity_id/fact_name pairs. Paste that
+complete envelope back into the owner UI. There is no automatic send or retry.
+Prompt instructions do not prove that Jo followed the tool or data restrictions.
+
+Import validates identity and exact original fact pairs under the shared SQLite
+writer lock. The immutable receipt preserves the submitted envelope, receipt
+time and server identity. `receipt_sha256` hashes the complete canonical receipt
+without its own hash field, binding output and time to request/packet/assignment.
+Hashes establish content equality, not factual interpretation, model identity,
+independence, usefulness or trading edge. Caller-unverified interpretation,
+invented/missing inputs, independence-unverified provenance and unavailable
+actual model/usage/cost remain explicit.
+
+New exports and imports, including exact POST retries, refuse expired or revoked
+assignments. First saves recheck expiry immediately before commit; revocation
+shares the writer lock. Exact active retries return original content, and changed
+requests or answers conflict. Owner `GET /advisor-shadow/runs/{run_id}` continues
+to recover saved exports/receipts after expiry or revocation. After an uncertain
+POST result the UI reads this saved record and compares the complete desired
+envelope before reporting recovery. A missing receipt requires an explicit
+manual retry; a different receipt is a conflict, and no retry is sent automatically.
+
+Only local invented-fixture acceptance is authorized for implementation/testing.
+Actual owner-approved transmission, signed-in Jo reasoning, exact export/answer/
+receipt equality across a real reopen, and account/tool isolation observations
+remain separate Phase-2 acceptance gates. No credential handling, OAuth grants,
+external transmission, live capture, real journal change, order, arm, schedule or
+production activation is authorized by this implementation.

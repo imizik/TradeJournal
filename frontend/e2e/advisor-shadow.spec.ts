@@ -31,9 +31,20 @@ with Session(engine) as db:
     await expect(panel.getByTestId("advisor-packet")).toContainText("simulated_raw");
     await panel.getByLabel("Your question").fill("Is a SPY close above 100 sufficient to take this plan?");
     await panel.getByLabel("Your plan").fill("I would wait for a completed 15-minute close above 100, with a fixed stop and guard.");
+    const competing = await page.context().newPage();
+    await competing.goto(`/?practice_run=${fixture.run_id}`);
+    const competingPanel = competing.getByTestId("advisor-shadow-panel");
+    await competingPanel.getByLabel("Your question").fill("A different invented question");
+    await competingPanel.getByLabel("Your plan").fill("A different invented plan");
     await panel.getByRole("button", { name: "Save and expose advisor packet" }).click();
     await expect(panel).toContainText("Comparison: assisted");
     const exported = JSON.parse(await panel.getByLabel("Advisor packet for copying").inputValue());
+    await competingPanel.getByRole("button", { name: "Save and expose advisor packet" }).click();
+    await expect(competingPanel).toContainText("A different immutable advisor request is already saved");
+    await expect(competingPanel.getByLabel("Your question")).toHaveValue(exported.question);
+    await expect(competingPanel.getByLabel("Your plan")).toHaveValue(exported.user_plan);
+    expect(JSON.parse(await competingPanel.getByLabel("Advisor packet for copying").inputValue())).toEqual(exported);
+    await competing.close();
     const opportunity = exported.packet.opportunities[0];
     const answer = {
       summary: "No verified TAKE is supported; wait for an approved market packet.",
@@ -43,9 +54,31 @@ with Session(engine) as db:
       gaps: "Real provider data, news and full-session coverage are unavailable.",
       references: [{ opportunity_id: opportunity.opportunity_id, fact_name: opportunity.price_facts[0].name }],
     };
-    await panel.getByTestId("advisor-answer-form").getByRole("textbox").fill(JSON.stringify(answer));
+    const envelope = {
+      version: exported.version, assignment_id: exported.assignment_id, run_id: exported.run_id,
+      packet_sha256: exported.packet_sha256, request_sha256: exported.request_sha256, answer,
+    };
+    expect(exported.assignment_id).toBe(fixture.assignment_id);
+    expect(exported.run_id).toBe(fixture.run_id);
+    // The real backend commits, then its response is lost. Recovery must GET the
+    // receipt, compare the full desired envelope and never send an automatic retry.
+    let imports = 0;
+    await page.route(`**/advisor-shadow/runs/${fixture.run_id}/advisor-import`, async (route) => {
+      imports += 1;
+      const response = await route.fetch();
+      expect(response.ok()).toBeTruthy();
+      await route.abort("failed");
+    });
+    await panel.getByTestId("advisor-answer-form").getByRole("textbox").fill(JSON.stringify(envelope));
     await panel.getByRole("button", { name: "Save advisor response" }).click();
+    await expect(panel).toContainText("Saved advisor receipt recovered from the owner record. No retry was sent.");
+    expect(imports).toBe(1);
     await expect(panel.getByTestId("advisor-saved-answer")).toContainText(answer.summary);
+    const savedReceipt = JSON.parse(await panel.getByTestId("advisor-receipt").textContent() ?? "{}");
+    expect(savedReceipt.submitted_output).toEqual(envelope);
+    expect(savedReceipt.request_sha256).toBe(exported.request_sha256);
+    expect(savedReceipt.packet_sha256).toBe(exported.packet_sha256);
+    await page.unroute(`**/advisor-shadow/runs/${fixture.run_id}/advisor-import`);
     await expect(panel.getByTestId("advisor-saved-answer")).toContainText("sample_fixture");
     // The external interface's actor is server-derived; manual fixture transport is explicit.
     execFileSync(PYTHON, ["-c", `
@@ -69,6 +102,10 @@ with Session(engine) as db:
     expect(human.ok()).toBeTruthy();
     await page.reload();
     await expect(page.getByTestId("advisor-saved-answer")).toContainText(answer.summary);
+    expect(JSON.parse(await page.getByLabel("Advisor packet for copying").inputValue())).toEqual(exported);
+    expect(JSON.parse(await page.getByTestId("advisor-receipt").textContent() ?? "{}")).toEqual(savedReceipt);
+    await expect(panel.getByLabel("Your question")).toHaveValue(exported.question);
+    await expect(panel.getByLabel("Your plan")).toHaveValue(exported.user_plan);
     const paired = page.getByTestId("practice-opportunity").filter({ hasText: `Opportunity ${first.id}` });
     await expect(paired).toContainText("Disagreement: human WAIT · agent SKIP");
     await expect(paired).toContainText("assisted");

@@ -343,3 +343,168 @@ def test_advisor_export_assistance_immutable_response_and_fact_citations(fixture
     assert owner.get(f"/advisor-shadow/runs/{run_id}").json() == answer.json()
     assert "user_plan" not in json.dumps(client.get("/receipt").json())
     assert counts(engine) == (5 if all_humans else 0, 0)
+
+
+def handoff(owner, run_id):
+    result = owner.post(f"/advisor-shadow/runs/{run_id}/advisor-handoff", json={
+        "question": "Is an invented close enough?", "user_plan": "Wait for verified prices and fixed risk"})
+    assert result.status_code == 200
+    exported = result.json()
+    opp = exported["packet"]["opportunities"][0]
+    envelope = {key: exported[key] for key in ("version", "assignment_id", "run_id", "packet_sha256", "request_sha256")}
+    envelope["answer"] = {"summary": "Wait", "interpretation": "Invented evidence only", "risks": "Calendar unavailable",
+        "conditions": "Verified prices and risk", "gaps": "Real prices unavailable",
+        "references": [{"opportunity_id": opp["opportunity_id"], "fact_name": opp["price_facts"][0]["name"]}]}
+    return exported, envelope
+
+
+@pytest.mark.parametrize("all_humans", [False, True])
+def test_handoff_durable_identity_receipt_and_phase1_isolation(fixture, all_humans):
+    engine, run_id, call_id, token, client, owner = fixture
+    shadow = client.get("/packet").json()
+    if all_humans:
+        for opp in shadow["packet"]["opportunities"]:
+            assert owner.post(f"/practice/opportunities/{opp['opportunity_id']}/choice", json={"decision": "skip", "rationale": "Frozen blind"}).status_code == 200
+    exported, envelope = handoff(owner, run_id)
+    assert exported["assignment_id"] == str(call_id) and exported["run_id"] == str(run_id)
+    assert exported["packet"] == shadow["packet"]
+    assert exported["comparison"] == ("independent" if all_humans else "assisted")
+    identity = {key: exported[key] for key in ("version", "assignment_id", "run_id", "packet_sha256", "expires_at", "requested_at", "comparison", "question", "user_plan")}
+    assert service.digest(identity) == exported["request_sha256"]
+    assert owner.get(f"/advisor-shadow/runs/{run_id}").json()["advisor"]["export"] == exported
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-handoff", json={"question": exported["question"], "user_plan": exported["user_plan"]}).json() == exported
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-handoff", json={"question": "changed", "user_plan": exported["user_plan"]}).status_code == 409
+    saved = owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=envelope)
+    assert saved.status_code == 200
+    receipt = saved.json()["advisor"]["receipt"]
+    assert receipt["submitted_output"] == envelope
+    assert receipt["receipt_sha256"] == service.digest({k: v for k, v in receipt.items() if k != "receipt_sha256"})
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=envelope).json() == saved.json()
+    changed = json.loads(json.dumps(envelope))
+    changed["answer"]["summary"] = "Changed interpretation"
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=changed).status_code == 409
+    assert owner.get(f"/advisor-shadow/runs/{run_id}").json() == saved.json()
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-output", json=envelope["answer"]).status_code == 409
+    assert client.get("/packet").json() == shadow
+    assert client.get("/receipt").json()["choices"] == []
+    assert counts(engine) == (5 if all_humans else 0, 0)
+    with Session(engine) as db:
+        service.set_enabled(db, call_id, False)
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=envelope).status_code == 409
+    assert owner.get(f"/advisor-shadow/runs/{run_id}").json() == saved.json()
+
+
+@pytest.mark.parametrize("key", ["version", "assignment_id", "run_id", "packet_sha256", "request_sha256", "citation_id", "citation_name", "empty_citations"])
+def test_handoff_tampered_identity_and_citations_refuse_without_receipt(fixture, key):
+    _, run_id, _, _, _, owner = fixture
+    _, envelope = handoff(owner, run_id)
+    if key == "citation_id":
+        envelope["answer"]["references"][0]["opportunity_id"] = str(uuid.uuid4())
+    elif key == "citation_name":
+        envelope["answer"]["references"][0]["fact_name"] = "invented_nonexistent"
+    elif key == "empty_citations":
+        envelope["answer"]["references"] = []
+    else:
+        envelope[key] = str(uuid.uuid4()) if key.endswith("_id") else "x" * len(envelope[key])
+    result = owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=envelope)
+    assert result.status_code in (409, 422)
+    assert owner.get(f"/advisor-shadow/runs/{run_id}").json()["advisor"]["receipt"] is None
+
+
+@pytest.mark.parametrize("revoked", [False, True])
+def test_handoff_expiry_revocation_new_writes_refuse_saved_owner_record_recovers(fixture, monkeypatch, revoked):
+    engine, run_id, call_id, _, _, owner = fixture
+    exported, envelope = handoff(owner, run_id)
+    if revoked:
+        with Session(engine) as db:
+            service.set_enabled(db, call_id, False)
+    else:
+        monkeypatch.setattr(practice, "now_utc", lambda: decisions._utc(exported["expires_at"], "expiry").replace(tzinfo=None))
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=envelope).status_code == 409
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-handoff", json={"question": exported["question"], "user_plan": exported["user_plan"]}).status_code == 409
+    recovered = owner.get(f"/advisor-shadow/runs/{run_id}")
+    assert recovered.status_code == 200 and recovered.json()["advisor"]["export"] == exported
+    assert recovered.json()["advisor"]["receipt"] is None
+
+
+@pytest.mark.parametrize("action", ["export", "import"])
+def test_handoff_expiry_at_commit_rolls_back_disclosure_or_receipt(fixture, monkeypatch, action):
+    engine, run_id, call_id, _, _, owner = fixture
+    envelope = handoff(owner, run_id)[1] if action == "import" else None
+    original = service.active_assignment
+    calls = 0
+    def expire_before_commit(config):
+        nonlocal calls
+        calls += 1
+        if calls >= (3 if action == "import" else 2):
+            monkeypatch.setattr(practice, "now_utc", lambda: decisions._utc(config["expires_at"], "expiry").replace(tzinfo=None))
+        return original(config)
+    monkeypatch.setattr(service, "active_assignment", expire_before_commit)
+    if action == "export":
+        result = owner.post(f"/advisor-shadow/runs/{run_id}/advisor-handoff", json={"question": "test", "user_plan": "wait"})
+    else:
+        result = owner.post(f"/advisor-shadow/runs/{run_id}/advisor-import", json=envelope)
+    assert result.status_code == 409
+    with Session(engine) as db:
+        config = json.loads(db.get(PracticeAgentCall, call_id).config_json)
+        if action == "export":
+            assert "advisor" not in config and db.get(PracticeRun, run_id).comparison == "independent"
+        else:
+            assert config["advisor"]["receipt"] is None
+
+
+def test_phase1_record_is_readable_without_new_identity_and_never_upgraded(fixture):
+    engine, run_id, call_id, _, _, owner = fixture
+    request = {"question": "legacy", "user_plan": "wait"}
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-packet", json=request).status_code == 200
+    before = owner.get(f"/advisor-shadow/runs/{run_id}").json()
+    assert "export" not in before["advisor"]
+    assert owner.post(f"/advisor-shadow/runs/{run_id}/advisor-handoff", json=request).status_code == 409
+    assert owner.get(f"/advisor-shadow/runs/{run_id}").json() == before
+    with Session(engine) as db:
+        assert json.loads(db.get(PracticeAgentCall, call_id).config_json)["advisor"] == before["advisor"]
+
+
+def test_concurrent_handoff_import_exact_retry_and_conflict_share_one_receipt(fixture):
+    engine, run_id, _, _, _, owner = fixture
+    _, envelope = handoff(owner, run_id)
+    changed = json.loads(json.dumps(envelope))
+    changed["answer"]["summary"] = "Different answer"
+    def save(body):
+        with Session(engine) as db:
+            try:
+                return service.advisor_import(db, run_id, body)["advisor"]["receipt"]
+            except decisions.DecisionError:
+                return None
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(pool.map(save, [envelope, envelope, changed]))
+    saved = owner.get(f"/advisor-shadow/runs/{run_id}").json()["advisor"]["receipt"]
+    assert saved is not None
+    assert all(result is None or result == saved for result in results)
+    assert any(result is None for result in results)
+    assert save(saved["submitted_output"]) == saved
+
+
+def test_revocation_committing_while_import_waits_for_writer_lock_refuses(fixture):
+    from threading import Event
+    engine, run_id, call_id, _, _, owner = fixture
+    _, envelope = handoff(owner, run_id)
+    started = Event()
+    def waiting_import():
+        started.set()
+        with Session(engine) as db:
+            with pytest.raises(decisions.DecisionError, match="expired or revoked"):
+                service.advisor_import(db, run_id, envelope)
+    with Session(engine) as revoker:
+        service.lock(revoker)
+        call = revoker.get(PracticeAgentCall, call_id)
+        config = json.loads(call.config_json)
+        config["enabled"] = False
+        call.config_json = service.canonical(config)
+        revoker.add(call)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(waiting_import)
+            assert started.wait(1)
+            revoker.commit()
+            future.result(timeout=3)
+    assert owner.get(f"/advisor-shadow/runs/{run_id}").json()["advisor"]["receipt"] is None
