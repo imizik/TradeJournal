@@ -13,6 +13,12 @@ split check. The [endpoint-to-metric map](moomoo-endpoint-metric-map.md) disting
 those results from documentation-only candidates. The observations below remain
 the original two-call NVDA cohort.
 
+The later [option-field study](moomoo-option-field-validation.md) found sizes
+and OI returned as integer strings for four standard contracts. Its typed
+decoder recovered values that matched Tradier. Earlier numeric-only summaries
+cannot establish absence or a permission restriction; their complete raw wire
+shapes were not retained. The standalone quantity decoder is now repaired.
+
 ## Scope and command
 
 The frozen comparison cohort is NVDA, its 2026-10-16 $230 call (active at the
@@ -85,7 +91,7 @@ background collector.
 | Active and expired chains | 224 and 176 contracts respectively; both requested calls were present. This establishes recently expired chain access for this example, not a long-term archive. |
 | Stock and both option histories | Each returned 390 minute rows despite `num=370`; no next-page indication. Labels ran from 09:31 through 16:00 ET. |
 | Option IV/HV history | Five timestamped points for each contract, spaced one day apart in this sample. Intraday cadence, publication time and older archive coverage remain unverified. |
-| Option screen | Five NVDA contracts returned with numeric last price, IV and Greeks. A documented-field follow-up also returned bid/ask and multiplier/share size 100. Bid/ask sizes and OI were absent in the two sampled rows despite explicit requests. This is not proof of a permission restriction. |
+| Option screen | Five NVDA contracts returned with numeric last price, IV and Greeks. A documented-field follow-up also returned bid/ask and multiplier/share size 100. The then numeric-only parser did not produce usable bid/ask sizes or OI despite explicit requests. This does not prove wire-field absence or a permission restriction; see the later typed field study. |
 | Existing sources | Alpaca IEX stock bars, default-endpoint option history and indicative option snapshots succeeded. Tradier quotes/Greeks and Polygon stock aggregates succeeded. These are the local configured sources, not a new assertion about production settings. |
 
 Two protocol details mattered:
