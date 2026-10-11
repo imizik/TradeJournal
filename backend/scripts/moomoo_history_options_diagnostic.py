@@ -321,6 +321,25 @@ def volatility(payload) -> dict:
             "units": "IV/HV percent; premium percentage points", "historical_cadence_verified": False}
 
 
+def option_quantity(value) -> int | None:
+    """Decode reported nonnegative int64 quantities, including JSON strings.
+
+    This does not convert shares, lots or contracts. Reject arbitrary text,
+    fractional values and floating integers whose precision cannot be trusted.
+    Price, IV and Greek parsing deliberately retain their existing rules.
+    """
+    if isinstance(value, str):
+        if not re.fullmatch(r"[0-9]{1,19}", value):
+            return None
+        value = int(value)
+    numeric = number(value)
+    if numeric is None or not 0 <= numeric <= 2**63 - 1:
+        return None
+    if isinstance(numeric, float) and (not numeric.is_integer() or numeric > 2**53 - 1):
+        return None
+    return int(numeric)
+
+
 def quote_fields(row: dict, provider: str) -> dict:
     if provider == "tradier":
         greek = mapping(row.get("greeks"))
@@ -337,7 +356,9 @@ def quote_fields(row: dict, provider: str) -> dict:
                   "greeks": {k: number(mapping(row.get("greeks")).get(k)) for k in ("delta", "gamma", "theta", "vega")},
                   "source_times_ms": {"quote": iso_ms(q.get("t")), "trade": iso_ms(trade.get("t"))}}
     else:
-        result = {k: number(row.get(k)) for k in ("price", "bid_price", "ask_price", "bid_volume", "ask_volume", "open_interest", "implied_volatility", "delta", "gamma", "theta", "vega", "multiplier", "contract_share_size")}
+        quantities = {"bid_volume", "ask_volume", "open_interest", "volume"}
+        result = {k: option_quantity(row.get(k)) if k in quantities else number(row.get(k))
+                  for k in ("price", "bid_price", "ask_price", "bid_volume", "ask_volume", "open_interest", "volume", "implied_volatility", "delta", "gamma", "theta", "vega", "multiplier", "contract_share_size")}
         result.update(units="Reported values; screener wire scaling and Greek conventions not established.",
                       source_time_ms=None, freshness="No documented per-contract quote timestamp in screen response.")
     return result
