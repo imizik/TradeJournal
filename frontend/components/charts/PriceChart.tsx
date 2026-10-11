@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
-import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType } from "lightweight-charts";
+import type { IChartApi, ISeriesApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
 import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
-import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, FillLabels, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
-import { newsLabel, newsMarks, newsTip } from "@/lib/newsMarkers";
-import type { NewsMark } from "@/lib/newsMarkers";
+import { newsMarks, newsTip } from "@/lib/newsMarkers";
+import type { NewsCluster } from "@/lib/newsMarkers";
+import { groupFills, MarkLayer } from "@/lib/chartMarks";
+import type { FillGroup } from "@/lib/chartMarks";
 import { chartCommitted } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
@@ -110,13 +112,18 @@ const HOLD_SLOP = 10;
  */
 const CANDLE_MARGINS = { top: 0.10, bottom: 0.12 };
 const VOLUME_TOP = 0.88;
-/** A news marker's centre floats this many pixels above its candle's high: clear of the candle and of a fill arrow on it, and never part of the price scale's fit. */
-const NEWS_LIFT_PX = 26;
-/** How far from a news marker's centre a tap still counts as on it. */
-const NEWS_REACH = 24;
+/** How far from a fill chevron or news marker the pointer still counts as on it (the marker layer widens it for a finger). */
+const MARK_SLOP = 3;
 /** A jump to an item drawn before the loaded candles (C1.4) loads at most this many older pages, and gives up after this long. */
 const JUMP_PAGES = 20;
 const JUMP_MS = 20_000;
+/** When a news marker's stories were published: its candle, or the first and last of the candles it joins. */
+function newsSpan(mark: NewsCluster, interval: Interval) {
+  const day = (t: number) => etTime(t, true);
+  if (!intradayInterval(interval)) return mark.last === mark.time ? `${day(mark.time)} session` : `${day(mark.time)} – ${day(mark.last)} sessions`;
+  if (mark.last === mark.time) return `${day(mark.time)} ${etTime(mark.time)} ET candle`;
+  return day(mark.time) === day(mark.last) ? `${day(mark.time)} ${etTime(mark.time)} – ${etTime(mark.last)} ET candles` : `${day(mark.time)} ${etTime(mark.time)} – ${day(mark.last)} ${etTime(mark.last)} ET`;
+}
 /** What the countdown needs besides the clock and the candles. */
 export type ClockFeed = { session: "regular" | "extended"; market?: MarketDay | null; paused: boolean; delayed: boolean; failed: boolean; fetched?: number };
 
@@ -142,12 +149,12 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: SessionShade; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; news: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; marks: MarkLayer; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
   colors?: Record<ColorKey, string>;
@@ -172,6 +179,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   earnings?: Earnings | null;
   /** The main chart's news markers (T3.5): the symbol's articles, or null while the layer is off. Only Focused articles are marked. */
   news?: { symbol: string; articles: NewsArticle[] } | null;
+  /** A smaller chart marks news too (Layers, News markers: News on small charts); off, only the main chart does. */
+  newsSmall?: boolean;
+  /** Which fills the main chart labels with text (Layers, Journal): none, the newest candle's, or all. Smaller charts never label. */
+  fillLabels?: FillLabels;
   /** A click on a news marker (a tap's popover button on touch): the ids of the articles on that candle. */
   onNews?(ids: string[]): void;
   /** This symbol's level alerts (C5.1), on the chart's basis: a bell at each price. */
@@ -254,18 +265,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
   const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted: !!history?.exhausted });
-  // The fill arrows drawn, by fill id, for hover summaries and clicks (C3.1).
-  const fillMarks = useRef(new Map<string, { label: string; time: number }>());
-  const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number; width: number } | null>(null);
-  // The news markers drawn, by marker id, for hover headlines and clicks (T3.5). A tap on a phone pins the popover, which opens the News tab from its button.
-  const newsRef = useRef<NewsMark[]>([]);
-  const newsById = useRef(new Map<string, NewsMark>());
+  // The fill chevron under the pointer: its fills, listed (C3.1). A tap, or a click on several, pins the list so a fill can be picked from it.
+  const [fillTip, setFillTip] = useState<{ group: FillGroup; x: number; y: number; width: number; pinned: boolean } | null>(null);
+  // A news marker's headlines (T3.5), hovered or pinned by a tap; a pinned one opens the News tab from its button.
   // Dragging the price axis turns the price scale's automatic fit off (the candles can then leave the pane); the Auto chip turns it back on.
   const [manualScale, setManualScale] = useState<{ top: number } | null>(null);
   const autoScale = useRef<() => void>(() => {});
-  const newsPriceRef = useRef(new Map<string, number>());
-  const placeNewsRef = useRef<() => void>(() => {});
-  const [newsOpen, setNewsOpen] = useState<{ mark: NewsMark; x: number; y: number; width: number; height: number; pinned: boolean } | null>(null);
+  const [newsOpen, setNewsOpen] = useState<{ mark: NewsCluster; x: number; y: number; width: number; height: number; pinned: boolean } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
@@ -318,9 +324,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const bands = {} as Bundle["bands"];
     for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: bandColor(colorsRef.current.vwap, k), lineWidth: 1,
       lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
-    const markers = createSeriesMarkers(candles, []);
-    // News markers are their own set, and the scale ignores them: a story far above the candles is clipped, never a reason to shrink them.
-    const news = createSeriesMarkers(candles, [], { autoScale: false });
+    // Fills, report dates and news are one primitive (`lib/chartMarks.ts`): the price scale ignores it, so a mark never shrinks the candles.
+    const marks = new MarkLayer(() => barsRef.current);
+    candles.attachPrimitive(marks);
     const shade = new SessionShade(() => barsRef.current);
     candles.attachPrimitive(shade);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
@@ -330,9 +336,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     candles.attachPrimitive(autoLayer);
     const bells = new AlertLayer();
     candles.attachPrimitive(bells);
-    bundle.current = { chart, candles, volume, shade, lines, bands, markers, news, layer, auto: autoLayer, bells, frame: "" };
+    bundle.current = { chart, candles, volume, shade, lines, bands, marks, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
+    (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.set(id, marks);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
     autoLayers?.set(id, autoLayer);
     // An automatic level's card: hovering one shows it (unless the user's own level or drawing is
@@ -379,12 +386,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       setHover(time === null ? null : barAt(barsRef.current, time) ?? null);
       link.emit(time, id);
       const at = event.point && cardHoverEnabled.current && (event.paneIndex ?? 0) === 0 && !actions.current.tool ? event.point : null;
-      // A fill arrow under the pointer: its one-line summary (C3.1).
-      const fill = at && typeof event.hoveredObjectId === "string" ? fillMarks.current.get(event.hoveredObjectId) : undefined;
-      setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y, width: element.clientWidth }) : null);
-      // A news marker under the pointer: its headlines (T3.5). A popover a tap pinned stays until the next tap.
-      const story = at && typeof event.hoveredObjectId === "string" ? newsById.current.get(event.hoveredObjectId) : undefined;
-      setNewsOpen((open) => open?.pinned ? open : story ? (open?.mark === story ? open : { mark: story, x: at!.x, y: at!.y, width: element.clientWidth, height: element.clientHeight, pinned: false }) : null);
+      // A fill chevron under the pointer lists its fills (C3.1); a news marker, its headlines (T3.5). A list a tap or click pinned stays until the next one.
+      const over = at ? marks.hit(at.x, at.y, MARK_SLOP) : null;
+      const fill = over?.kind === "fill" ? over.group : undefined;
+      setFillTip((open) => open?.pinned ? open : fill ? (open?.group.id === fill.id && open.group.fills.length === fill.fills.length ? open : { group: fill, x: at!.x, y: at!.y, width: element.clientWidth, pinned: false }) : null);
+      const story = over?.kind === "news" ? over.cluster : undefined;
+      setNewsOpen((open) => open?.pinned ? open : story ? (open?.mark.id === story.id ? open : { mark: story, x: at!.x, y: at!.y, width: element.clientWidth, height: element.clientHeight, pinned: false }) : null);
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -615,42 +622,31 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("wheel", onWheel, { capture: true, passive: false });
     const unpin = () => { pinnedLive.current = false; };
     for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
-    const newsAt = (x: number, y: number, slop: number) => {
-      let best: { mark: NewsMark; dx: number } | undefined;
-      for (const mark of newsRef.current) {
-        const price = newsPriceRef.current.get(mark.id);
-        const left = chart.timeScale().timeToCoordinate(mark.time as UTCTimestamp);
-        const at = price === undefined ? null : candles.priceToCoordinate(price);
-        if (left === null || at === null) continue;
-        const dx = Math.abs(left - x);
-        if (dx > slop || Math.abs(y - at) > NEWS_REACH) continue;
-        if (!best || dx < best.dx) best = { mark, dx };
-      }
-      return best?.mark;
-    };
     chart.subscribeClick((event) => {
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
       if (performance.now() < tapsOffUntil) return; // the lift after a long press
-      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); setNewsOpen(null); return; }
+      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); setNewsOpen(null); setFillTip(null); return; }
       const touch = performance.now() - lastTouch < 1000;
       const slop = touch ? TOUCH_SLOP : MOUSE_SLOP;
       const hit = layer.hit(event.point.x, event.point.y, slop)?.id ?? null;
-      // A fill arrow opens its trade's card (C3.1); the user's own levels and drawings win where they overlap.
-      if (!hit && typeof event.hoveredObjectId === "string" && fillMarks.current.has(event.hoveredObjectId) && now.onFill) {
-        now.onSelect?.(null); tapCard(null, 0); setFillTip(null);
-        now.onFill(event.hoveredObjectId);
+      // The marks are drawn by `marks`, and a finger finds one by where it is drawn: the library reports no hovered object for a tap.
+      const over = hit ? null : marks.hit(event.point.x, event.point.y, touch ? TOUCH_SLOP : MARK_SLOP);
+      // A fill chevron opens its trade's card (C3.1); one that holds several fills lists them first, to pick from. The user's own levels and drawings win where they overlap.
+      if (over?.kind === "fill" && now.onFill) {
+        now.onSelect?.(null); tapCard(null, 0); setNewsOpen(null);
+        if (over.group.fills.length === 1) { setFillTip(null); now.onFill(over.group.fills[0].id); }
+        else setFillTip({ group: over.group, x: event.point.x, y: event.point.y, width: element.clientWidth, pinned: true });
         return;
       }
       // A news marker (T3.5): a click opens the articles in the News tab; a tap shows their headlines first.
-      // The library reports no hovered marker for a tap, so a touch finds the marker by where it is drawn: above its candle.
-      const story = hit ? undefined : typeof event.hoveredObjectId === "string" ? newsById.current.get(event.hoveredObjectId) : touch ? newsAt(event.point.x, event.point.y, slop) : undefined;
-      if (story) {
+      if (over?.kind === "news") {
         now.onSelect?.(null); tapCard(null, 0); setFillTip(null);
-        if (touch) setNewsOpen({ mark: story, x: event.point.x, y: event.point.y, width: element.clientWidth, height: element.clientHeight, pinned: true });
-        else { setNewsOpen(null); now.onNews?.(story.articles.map((article) => article.id)); }
+        if (touch) setNewsOpen({ mark: over.cluster, x: event.point.x, y: event.point.y, width: element.clientWidth, height: element.clientHeight, pinned: true });
+        else { setNewsOpen(null); now.onNews?.(over.cluster.articles.map((article) => article.id)); }
         return;
       }
+      setFillTip(null);
       setNewsOpen(null);
       now.onSelect?.(hit);
       tapCard(hit ? null : autoLayer.hit(event.point.y, slop), event.point.y);
@@ -771,25 +767,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       const top = Math.max(0, (chart.panes()[0]?.getHeight() ?? 0) - 22);
       return now && now.top === top ? now : { top };
     });
-    // News markers sit a fixed number of pixels above their candle's high, so their price is worked out from where the scale is now,
-    // and again after the scale settles or the zoom changes. They are a separate set the price scale ignores: one far above is clipped.
-    const placeNews = () => {
-      if (disposed) return;
-      const [high, low] = [candles.coordinateToPrice(0), candles.coordinateToPrice(100)];
-      const lift = high === null || low === null ? 0 : Math.abs(high - low) / 100 * NEWS_LIFT_PX;
-      const stories = newsRef.current.flatMap((m) => {
-        const bar = barAt(barsRef.current, m.time);
-        if (!bar || !lift) return [];
-        newsPriceRef.current.set(m.id, bar.high + lift);
-        return [{ time: m.time as UTCTimestamp, position: "atPriceMiddle" as const, price: bar.high + lift, shape: "square" as const, size: 0.5, color: "#94a3b8", text: newsLabel(m), id: m.id }];
-      });
-      news.setMarkers(stories);
-    };
-    placeNewsRef.current = placeNews;
-    let newsTimer = 0;
-    const replaceNews = () => { window.clearTimeout(newsTimer); newsTimer = window.setTimeout(placeNews, 120); };
-    chart.timeScale().subscribeVisibleLogicalRangeChange(replaceNews);
-    const afterScale = () => { window.setTimeout(syncScale, 0); window.setTimeout(syncScale, 120); replaceNews(); };
+    const afterScale = () => { window.setTimeout(syncScale, 0); window.setTimeout(syncScale, 120); };
     autoScale.current = () => { candles.priceScale().applyOptions({ autoScale: true }); syncScale(); };
     for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.addEventListener(type, afterScale, { capture: true, passive: true });
     const scaleWatch = new ResizeObserver(syncScale);
@@ -801,9 +779,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     return () => {
       disposed = true;
       for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.removeEventListener(type, afterScale, true);
-      window.clearTimeout(newsTimer); chart.timeScale().unsubscribeVisibleLogicalRangeChange(replaceNews); placeNewsRef.current = () => {};
       scaleWatch.disconnect(); stopScale(); stopScaleJump(); autoScale.current = () => {};
-      stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
+      stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); (window as typeof window & { __tjMarks?: Map<string, MarkLayer> }).__tjMarks?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
       element.removeEventListener("pointerleave", releasePointer);
       window.removeEventListener("mouseup", onPlaceUp); element.removeEventListener("contextmenu", onContextMenu, true);
@@ -811,7 +788,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
       element.removeEventListener("wheel", onWheel, true);
-      markers.detach(); news.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
+      candles.detachPrimitive(marks); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
@@ -935,35 +912,25 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
   const earningsKey = useMemo(() => JSON.stringify(earningsMarks(panel?.bars ?? [], earnings, interval)), [panel?.bars, earnings, interval]);
   // News markers (T3.5): the main chart's Focused articles, each on the candle that holds its time. A tick that leaves them on the same candles changes nothing.
-  const newsList = main && news && news.symbol === symbol ? news.articles : null;
+  const newsList = (main || newsSmall) && news && news.symbol === symbol ? news.articles : null;
   const marked = useMemo(() => newsList ? newsMarks(panel?.bars ?? [], newsList, interval) : [], [panel?.bars, newsList, interval]);
   const newsKey = marked.map((mark) => `${mark.time}:${mark.articles.map((article) => article.id).join(",")}`).join("|");
-  useEffect(() => { newsRef.current = marked; });
+  // Fills merge by candle and side (`groupFills`); the key stands for them, so a poll that changes nothing leaves a pinned list open.
+  const groups = useMemo(() => indicators.fills ? groupFills(markers ?? []) : [], [markers, indicators.fills]);
+  const fillKey = groups.map((group) => `${group.id}:${group.fills.map((fill) => fill.id).join(",")}`).join("|");
+  const reports = useMemo(() => JSON.parse(earningsKey) as EarningsMark[], [earningsKey]);
   useEffect(() => {
     if (pending) return;
-    const reports = (JSON.parse(earningsKey) as EarningsMark[]).map((m) => ({ time: m.time as UTCTimestamp, position: "belowBar" as const,
-      shape: "circle" as const, color: m.estimated ? "#a78bfa99" : "#a78bfa", text: m.estimated ? "E?" : "E", id: `earnings:${m.date}` }));
-    const fills = indicators.fills ? (markers ?? []).map((m) => ({ time: m.time as UTCTimestamp,
-      position: m.buy ? "belowBar" as const : "aboveBar" as const, shape: m.buy ? "arrowUp" as const : "arrowDown" as const,
-      color: m.buy ? "#67d5eb" : "#f4c66b", text: main ? m.label : "", id: m.id })) : [];
-    bundle.current?.markers.setMarkers([...fills, ...reports].sort((a, b) => a.time - b.time));
-    fillMarks.current = new Map(indicators.fills ? (markers ?? []).map((m) => [m.id, { label: m.label, time: m.time }]) : []);
-    setFillTip(null);
-    if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
-  }, [markers, earningsKey, pending, indicators.fills, main]);
-  // The main chart's news markers: placed by `placeNews` (above), which needs the price scale, so a tick that changes nothing here re-places them in place.
-  const barsKey = panel?.bars.length ? `${panel.bars.length}:${panel.bars.at(-1)!.time}:${panel.bars.at(-1)!.high}:${panel.bars.at(-1)!.low}` : "";
-  useEffect(() => {
-    if (pending) return;
-    newsById.current = new Map(marked.map((m) => [m.id, m]));
-    newsPriceRef.current = new Map();
-    if (container.current) container.current.dataset.news = marked.map((m) => `${m.time}:${m.articles.length}`).join(",");
-    placeNewsRef.current();
-    // The scale settles on new candles over the next frames.
-    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(() => placeNewsRef.current()));
-    return () => window.cancelAnimationFrame(frame);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- the keys stand for `marked` and the candles
-  }, [newsKey, barsKey, pending, main]);
+    bundle.current?.marks.set({ fills: groups, labels: main ? fillLabels : "off", reports, news: marked, small: !main });
+    if (container.current) {
+      container.current.dataset.earnings = reports.map((m) => `${m.date}@${m.time}`).join(",");
+      container.current.dataset.fillMarks = groups.map((group) => `${group.time}:${group.buy ? "buy" : "sell"}:${group.fills.length}`).join(",");
+      container.current.dataset.fillLabels = main ? fillLabels : "off";
+      container.current.dataset.news = marked.map((m) => `${m.time}:${m.articles.length}`).join(",");
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the keys stand for `groups` and `marked`
+  }, [fillKey, reports, newsKey, fillLabels, pending, main]);
+  useEffect(() => { queueMicrotask(() => setFillTip(null)); }, [fillKey, pending]);
   // A popover closes when its markers change, not when a poll rebuilds the fill list under it.
   useEffect(() => { queueMicrotask(() => setNewsOpen(null)); }, [newsKey, pending]);
 
@@ -1120,13 +1087,26 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
             : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
-        {fillTip && !pending && <div role="tooltip" aria-label="Fill summary" className="pointer-events-none absolute z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg"
-          style={{ left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - 30) }}>
-          {fillTip.label} · {etTime(fillTip.time, true)} {intradayInterval(interval) ? `${etTime(fillTip.time)} ET candle` : ""}{onFill ? " · click for the trade" : ""}</div>}
+        {fillTip && !pending && (() => {
+          const { group } = fillTip;
+          const when = `${etTime(group.time, true)} ${intradayInterval(interval) ? `${etTime(group.time)} ET candle` : ""}`;
+          const place = { left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - (group.fills.length > 1 ? 30 + group.fills.length * 18 : 30)) };
+          const frame = "absolute z-10 max-w-[calc(100%-1rem)] rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg";
+          // One fill reads on a line; several are listed, and a pinned list's rows each open their own trade.
+          if (group.fills.length === 1) return <div role="tooltip" aria-label="Fill summary" className={`pointer-events-none truncate ${frame}`} style={place}>
+            {group.fills[0].label} · {when}{onFill ? " · click for the trade" : ""}</div>;
+          return <div role={fillTip.pinned ? "dialog" : "tooltip"} aria-label="Fill summary" data-fill-tip={group.id} className={`${frame} w-56 ${fillTip.pinned ? "" : "pointer-events-none"}`} style={place}>
+            <p className="text-[10px] text-slate-400">{group.fills.length} {group.buy ? "buys" : "sells"} · {when}</p>
+            <ul className="mt-0.5">{group.fills.map((fill) => <li key={fill.id}>{fillTip.pinned && onFill
+              ? <button onClick={() => { setFillTip(null); onFill(fill.id); }} className="flex min-h-9 w-full items-center text-left text-sky-300 hover:text-sky-200">{fill.label}</button>
+              : <span className="block truncate leading-[18px]">{fill.label}</span>}</li>)}</ul>
+            {!fillTip.pinned && onFill && <p className="text-[10px] text-sky-300">Click to pick a trade</p>}
+            {fillTip.pinned && <button onClick={() => setFillTip(null)} className="mt-0.5 min-h-9 w-full rounded border border-slate-700 text-slate-300">Close</button>}</div>;
+        })()}
         {newsOpen && !pending && <div role={newsOpen.pinned ? "dialog" : "tooltip"} aria-label="News headlines" data-news-tip={newsOpen.mark.time}
           className={`absolute z-10 w-64 max-w-[calc(100%-1rem)] space-y-1 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1.5 text-[11px] text-slate-200 shadow-lg ${newsOpen.pinned ? "" : "pointer-events-none"}`}
           style={{ left: Math.max(4, Math.min(newsOpen.x + 10, newsOpen.width - 264)), top: Math.max(4, Math.min(newsOpen.y + 14, newsOpen.height - 40 - newsTip(newsOpen.mark).lines.length * 34)) }}>
-          <p className="text-[10px] text-slate-400">{etTime(newsOpen.mark.time, true)}{intradayInterval(interval) ? ` ${etTime(newsOpen.mark.time)} ET candle` : " session"} · {newsOpen.mark.articles.length} {newsOpen.mark.articles.length === 1 ? "headline" : "headlines"}</p>
+          <p className="text-[10px] text-slate-400">{newsSpan(newsOpen.mark, interval)} · {newsOpen.mark.articles.length} {newsOpen.mark.articles.length === 1 ? "headline" : "headlines"}</p>
           <ul className="space-y-1">{newsTip(newsOpen.mark).lines.map((line, index) => <li key={index} className="line-clamp-2">{line}</li>)}</ul>
           {newsTip(newsOpen.mark).more > 0 && <p className="text-[10px] text-slate-400">+{newsTip(newsOpen.mark).more} more</p>}
           {newsOpen.pinned ? <div className="flex gap-2 pt-1">

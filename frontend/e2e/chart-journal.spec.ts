@@ -88,8 +88,9 @@ async function hoverFill(page: Page, time: number, low: number) {
     return { x: chart.timeScale().timeToCoordinate(t), y: candles.priceToCoordinate(p) };
   }, [time, low]);
   const box = (await page.getByTestId("canvas-main").boundingBox())!;
-  for (let dy = 4; dy <= 40; dy += 3) {
+  for (let pass = 0; pass < 3; pass++) for (let dy = 4; dy <= 40; dy += 3) { // a few passes: the chevron is drawn a frame after the candles
     await page.mouse.move(box.x + at.x!, box.y + at.y! + dy);
+    await page.waitForTimeout(pass ? 20 : 0);
     if (await page.getByRole("tooltip", { name: "Fill summary" }).isVisible()) return { x: box.x + at.x!, y: box.y + at.y! + dy };
   }
   throw new Error("No fill arrow answered under the candle.");

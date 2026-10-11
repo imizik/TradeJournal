@@ -131,7 +131,8 @@ async function seed(context: BrowserContext, extra: Record<string, unknown> = {}
   // must not move the plot while its screen coordinates are being measured.
   await context.route("**/api/backend/charts/captures?**", (route) => route.fulfill({ json: { captures: [] } }));
   await context.addInitScript(({ key, settings, tab }) => {
-    (window as typeof window & { __tjCharts?: Map<string, unknown> }).__tjCharts = new Map();
+    (window as typeof window & { __tjCharts?: Map<string, unknown>; __tjMarks?: Map<string, unknown> }).__tjCharts = new Map();
+    (window as typeof window & { __tjMarks?: Map<string, unknown> }).__tjMarks = new Map();
     if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(settings));
     if (tab) localStorage.setItem("tradejournal.charts.symbol-info.tab.v1", tab);
   }, { key: STORAGE_KEY, settings: { ...DEFAULT_SETTINGS, ...settingsData, ...extra }, tab });
@@ -158,27 +159,27 @@ const canvas = (page: Page) => page.getByTestId("canvas-main");
 const panel = (page: Page) => page.getByRole("region", { name: "Symbol info", exact: true });
 const tooltip = (page: Page) => page.getByRole("tooltip", { name: "News headlines" });
 
-/** Where the candle at `time` is on the page: its x and the y of its high. */
-async function onPage(page: Page, time: number, high: number) {
-  const at = await page.evaluate(([t, p]) => {
-    const chart = (window as unknown as { __tjCharts: Map<string, Api> }).__tjCharts.get("main")!;
-    const candles = chart.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
-    return { x: chart.timeScale().timeToCoordinate(t), y: candles.priceToCoordinate(p) };
-  }, [time, high]);
+type Marks = { clusters(): { time: number; last: number; count: number; x: number; y: number }[]; fillBoxes(): { id: string; buy: boolean; count: number; x: number; y: number }[] };
+/** Where the news marker holding the candle at `time` is on the page (the strip along the pane's bottom), and where a fill chevron is. */
+async function markerOnPage(page: Page, time: number) {
+  const at = await page.evaluate((t) => (window as unknown as { __tjMarks: Map<string, Marks> }).__tjMarks.get("main")!.clusters().find((c) => c.time <= t && t <= c.last) ?? null, time);
+  expect(at, "no news marker holds that candle").not.toBeNull();
   const box = (await canvas(page).boundingBox())!;
-  return { x: box.x + at.x!, y: box.y + at.y! };
+  return { x: box.x + at!.x, y: box.y + at!.y };
 }
-/** Move up from the candle's high until the marker above it answers with its headlines. */
+async function fillOnPage(page: Page) {
+  const at = await page.evaluate(() => (window as unknown as { __tjMarks: Map<string, Marks> }).__tjMarks.get("main")!.fillBoxes()[0]);
+  const box = (await canvas(page).boundingBox())!;
+  return { x: box.x + at.x, y: box.y + at.y + (at.buy ? 4 : -4) };
+}
+/** Move onto the news marker holding the candle until it answers with its headlines. */
 async function hoverMarker(page: Page, time: number) {
   await page.mouse.move(2, 2); // leave the chart first, so a tooltip still open is not taken for this marker's
   await expect(tooltip(page)).toHaveCount(0);
-  const top = await onPage(page, time, 102);
-  for (let dy = -3; dy >= -140; dy -= 3) {
-    await page.mouse.move(top.x, top.y + dy);
-    await page.waitForTimeout(30);
-    if (await tooltip(page).isVisible()) return { x: top.x, y: top.y + dy };
-  }
-  throw new Error("No news marker answered above the candle.");
+  const at = await markerOnPage(page, time);
+  await page.mouse.move(at.x, at.y);
+  await expect(tooltip(page)).toBeVisible();
+  return at;
 }
 
 test("markers sit on the right candle on 1m and 1D; hover lists the headlines, click opens them in the News tab, and one read serves both", async ({ page, context }) => {
@@ -199,6 +200,7 @@ test("markers sit on the right candle on 1m and 1D; hover lists the headlines, c
   await expect(tooltip(page)).not.toContainText("Five stocks moving today");
   await page.mouse.move(point.x, point.y - 80);
   await expect(tooltip(page)).toHaveCount(0);
+  await page.mouse.move(point.x, point.y); // back onto it to click
 
   // Click: the symbol info panel shows the News tab with that candle's articles lit, without another read.
   await expect(panel(page).getByRole("tab", { name: "You", exact: true })).toHaveAttribute("aria-selected", "true");
@@ -213,12 +215,13 @@ test("markers sit on the right candle on 1m and 1D; hover lists the headlines, c
   expect(reads).toHaveLength(1);
 
   // 1D: a candle is a session. Tuesday holds its own two stories and Monday's after-hours one; the weekend piece is Monday's.
+  // Four daily candles sit a few pixels apart, so the two sessions' markers are one on screen: four headlines, newest first.
   await page.getByLabel("Main interval").selectOption("1D");
   await expect(main).toHaveAttribute("data-news", `${EDT("10-05T09:30:00")}:1,${EDT("10-06T09:30:00")}:3`);
   await hoverMarker(page, EDT("10-06T09:30:00"));
-  await expect(tooltip(page)).toContainText("Oct 6, 2026 session");
-  await expect(tooltip(page)).toContainText("3 headlines");
-  expect(await tooltip(page).getByRole("listitem").allTextContents()).toEqual(["Analyst lifts target", "Nvidia ships a chip", "After-hours supply report"]);
+  await expect(tooltip(page)).toContainText("Oct 5, 2026 – Oct 6, 2026 sessions");
+  await expect(tooltip(page)).toContainText("4 headlines");
+  expect(await tooltip(page).getByRole("listitem").allTextContents()).toEqual(["Analyst lifts target", "Nvidia ships a chip", "After-hours supply report", "Weekend profile piece"]);
   await hoverMarker(page, EDT("10-05T09:30:00"));
   await expect(tooltip(page)).toContainText("Weekend profile piece");
   expect(reads).toHaveLength(1);
@@ -326,22 +329,19 @@ test("with the News tab open the tab and the markers share one read, then one ea
   expect(reads).toHaveLength(3);
 });
 
-test("a news marker does not hide a fill arrow on the same candle: both still answer", async ({ page, context }) => {
+test("a news marker does not hide a fill chevron on the same candle: both still answer", async ({ page, context }) => {
   await seed(context);
   // A sale on the 10:05 candle the two stories mark.
   const reads = await stub(page, [{ id: "00000000-0000-4000-8000-000000000001", time: EDT("10-06T10:05:00"), label: "sell to close 1 share", buy: false }]);
   await page.goto("/charts");
   await expect(canvas(page)).toHaveAttribute("data-markers", "1");
   await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
-  const top = await onPage(page, EDT("10-06T10:05:00"), 102);
-  const seen = new Set<string>();
-  for (let dy = -3; dy >= -60; dy -= 3) {
-    await page.mouse.move(top.x, top.y + dy);
-    await page.waitForTimeout(30);
-    if (await page.getByRole("tooltip", { name: "Fill summary" }).isVisible()) seen.add("fill");
-    if (await tooltip(page).isVisible()) seen.add("news");
-  }
-  expect([...seen].sort()).toEqual(["fill", "news"]);
+  const fill = await fillOnPage(page);
+  await page.mouse.move(fill.x, fill.y);
+  await expect(page.getByRole("tooltip", { name: "Fill summary" })).toContainText("sell to close 1 share");
+  await expect(tooltip(page)).toHaveCount(0);
+  await hoverMarker(page, EDT("10-06T10:05:00"));
+  await expect(page.getByRole("tooltip", { name: "Fill summary" })).toHaveCount(0);
   expect(reads).toHaveLength(1);
 });
 
@@ -357,12 +357,9 @@ test.describe("on a phone", () => {
     await page.goto("/charts");
     await page.clock.runFor(400);
     await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
-    const top = await onPage(page, EDT("10-06T10:05:00"), 102);
+    const marker = await markerOnPage(page, EDT("10-06T10:05:00"));
     let popover = page.getByRole("dialog", { name: "News headlines" });
-    for (let dy = -3; dy >= -140 && !(await popover.isVisible()); dy -= 3) {
-      await page.touchscreen.tap(top.x, top.y + dy);
-      await page.waitForTimeout(150);
-    }
+    await page.touchscreen.tap(marker.x, marker.y);
     await expect(popover).toContainText("Analyst lifts target");
     await expect(popover).toContainText("Nvidia ships a chip");
     // A workspace poll rebuilds the fill list; the pinned popover stays open through it.
