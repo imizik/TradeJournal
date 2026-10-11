@@ -173,7 +173,7 @@ async function hoverMarker(page: Page, time: number) {
   await page.mouse.move(2, 2); // leave the chart first, so a tooltip still open is not taken for this marker's
   await expect(tooltip(page)).toHaveCount(0);
   const top = await onPage(page, time, 102);
-  for (let dy = -3; dy >= -45; dy -= 3) {
+  for (let dy = -3; dy >= -140; dy -= 3) {
     await page.mouse.move(top.x, top.y + dy);
     await page.waitForTimeout(30);
     if (await tooltip(page).isVisible()) return { x: top.x, y: top.y + dy };
@@ -189,6 +189,7 @@ test("markers sit on the right candle on 1m and 1D; hover lists the headlines, c
   // 1m: Monday's after-hours story lands on Tuesday's open. The weekend piece is before the first loaded candle, and the roundup and last week's story have none.
   await expect(main).toHaveAttribute("data-news", `${EDT("10-06T09:30:00")}:1,${EDT("10-06T10:05:00")}:2`);
   await expect.poll(() => reads.length).toBe(1);
+  await page.screenshot({ path: test.info().outputPath("news-markers-desktop.png"), animations: "disabled" });
 
   const point = await hoverMarker(page, EDT("10-06T10:05:00"));
   await expect(tooltip(page)).toContainText("Oct 6, 2026 10:05 AM ET candle");
@@ -358,7 +359,7 @@ test.describe("on a phone", () => {
     await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
     const top = await onPage(page, EDT("10-06T10:05:00"), 102);
     let popover = page.getByRole("dialog", { name: "News headlines" });
-    for (let dy = -3; dy >= -45 && !(await popover.isVisible()); dy -= 3) {
+    for (let dy = -3; dy >= -140 && !(await popover.isVisible()); dy -= 3) {
       await page.touchscreen.tap(top.x, top.y + dy);
       await page.waitForTimeout(150);
     }
@@ -377,4 +378,29 @@ test.describe("on a phone", () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     expect(reads).toHaveLength(1); // the sheet's tab joined the chart's read
   });
+});
+
+test("news markers never move the price scale: the visible prices are the same with and without them", async ({ page, context }) => {
+  await seed(context);
+  await stub(page);
+  const range = () => page.evaluate(() => {
+    const chart = (window as unknown as { __tjCharts: Map<string, unknown> }).__tjCharts.get("main")! as unknown as Api & { panes(): { getHeight(): number }[] };
+    const candles = chart.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")! as unknown as { coordinateToPrice(y: number): number | null };
+    // The prices at the pane's top and bottom edges: the same fit puts the same prices there, whatever the pane's height.
+    return [candles.coordinateToPrice(0), candles.coordinateToPrice((chart.panes()[0] as unknown as { getHeight(): number }).getHeight())];
+  });
+  // The scale settles over the first frames; read it once two reads in a row agree.
+  const settled = async () => { let last = await range(); for (let i = 0; i < 40; i++) { await page.waitForTimeout(100); const next = await range(); if (JSON.stringify(next) === JSON.stringify(last) && i > 4) return next; last = next; } return last; };
+  await page.goto("/charts");
+  await expect(canvas(page)).toHaveAttribute("data-news", /:2/);
+  const withNews = await settled();
+  await page.screenshot({ path: test.info().outputPath("news-markers-lifted-desktop.png"), animations: "disabled" });
+  await page.unroute("**/api/backend/charts/symbol/*/news");
+  await page.route("**/api/backend/charts/symbol/*/news", (route) => route.fulfill({ json: newsBody([]) }));
+  await page.reload();
+  await expect(canvas(page).locator("canvas").first()).toBeVisible();
+  await expect(canvas(page)).toHaveAttribute("data-news", "");
+  const without = await settled();
+  // A pixel of pane height moves these by a hundredth; a marker widening the fit would move them by whole candles.
+  without.forEach((price, i) => expect(price).toBeCloseTo(withNews[i]!, 1));
 });

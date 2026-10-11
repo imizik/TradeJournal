@@ -321,10 +321,15 @@ class ResearchStore:
             return self._status(db, run_id)
 
     def enqueue(self, snapshot, definition, operation_id):
+        return self._enqueue_prepared(snapshot.identity, encode_snapshot(snapshot), definition, operation_id)
+
+    def _enqueue_prepared(self, data_id, payload, definition, operation_id):
+        """Shared admission for newly encoded or verified frozen-parent bytes."""
         code = code_identity()
-        run_id = analysis_id(definition, snapshot.identity, code)
-        payload = encode_snapshot(snapshot)
-        request = {"run_id": run_id, "definition": definition.canonical(), "data_id": snapshot.identity,
+        run_id = analysis_id(definition, data_id, code)
+        if type(payload) is not bytes or len(payload) > MAX_BYTES:
+            raise ValueError("prepared snapshot exceeded research byte bound")
+        request = {"run_id": run_id, "definition": definition.canonical(), "data_id": data_id,
                    "code_id": code, "snapshot_sha256": hashlib.sha256(payload).hexdigest(),
                    "analysis_spec": SPEC, "numpy_version": np.__version__}
         raw = canonical_bytes(request).decode()
