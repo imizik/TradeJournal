@@ -51,8 +51,12 @@ incomplete; never fall back to a weaker model.
 
 ## Owner sequence
 
-1. **Prepare.** Finish the work and required checks, noting the commit each ran
-   on; rerun any whose code or dependencies changed since. If what a user does
+1. **Prepare.** Finish the work and required local acceptance, noting the commit
+   each check ran on; rerun any whose code or dependencies changed since. Follow
+   either full local verification or the
+   [CI-backed path](verification.md#ci-backed-verification). In that path, full CI
+   may run alongside review after local acceptance; missing CI remains named
+   proof pending, never a completed pass. If what a user does
    changes (a form, flow or navigation; not a copy edit), complete their task
    end to end in a representative running app and say which environment; a
    local run is not Jo's cloud-browser acceptance. Integrate the target branch

@@ -348,7 +348,7 @@ function VoiceControls({ recorder, narrow, disabled, ready, onNeedChoice, onSave
           onContextMenu={(event) => event.preventDefault()}
           className={`inline-flex touch-none select-none items-center gap-1.5 rounded-md border px-3 text-xs font-medium ${narrow ? "h-11" : "h-9"} ${live ? "border-rose-400 bg-rose-500/20 text-rose-100" : "border-slate-600 text-slate-200 hover:bg-slate-800"} disabled:opacity-40`}>
           <Mic size={13} className={phase === "recording" ? "animate-pulse text-rose-300" : ""} />{phase === "asking" ? "Allow the microphone…" : live ? "Release to save" : "Hold to record"}</button>)}
-      {live && <span role="timer" aria-label="Recording time" className="font-mono text-xs text-rose-200">{secs(elapsed)} / 0:30</span>}
+      {phase === "recording" && <span role="timer" aria-label="Recording time" className="font-mono text-xs text-rose-200">{secs(elapsed)} / 0:30</span>}
       {live && <button type="button" data-own-enter onClick={recorder.discard} className="ml-auto text-[11px] text-slate-400 hover:text-slate-200">Discard</button>}
       {!live && phase !== "review" && <span className="text-[10px] leading-4 text-slate-500">or tap it, then Stop &amp; save. Up to 30 seconds.</span>}
     </div>

@@ -29,7 +29,7 @@ export default function SymbolInfoPeers({ symbol, onSelect }: { symbol: string; 
   const shown = result?.symbol === symbol ? result : null;
   const data = shown?.data;
   const source = data ? `${data.source.label}${data.source.age_seconds != null ? `, read ${Math.round(data.source.age_seconds / 3600)} h ago` : ""}` : "";
-  return <div role="group" aria-label="Peers" className="border-b border-slate-700/40 px-3 py-2">
+  return <div role="group" aria-label="Peers" className="mb-3 border-b border-slate-700/40 pb-3">
     <p className="mb-1 text-[10px] uppercase tracking-wider text-slate-600">Peers</p>
     {!shown ? <p role="status" className="text-xs text-slate-500">Loading peers…</p>
       : shown.error ? <p className="text-xs text-slate-500">Peers unavailable.</p>

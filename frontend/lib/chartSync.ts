@@ -176,17 +176,19 @@ export function useChartSettings() {
   const edits = useRef(0);
   const pending = useRef<number | undefined>(undefined);
 
-  const push = useCallback(async () => {
+  const push = useCallback(async function push() {
     if (localOnly) return;
     const sending = shared(latest.current);
     if (saving.current || same(sending, confirmed.current)) return;
     saving.current = true;
     setSync("saving");
     let saved: SyncState = "saved";
+    let acknowledged = false;
     try {
       const saved = await saveSettings(revision.current, sending);
       revision.current = saved.revision;
       confirmed.current = sending;
+      acknowledged = true;
     } catch (err) {
       if (err instanceof Conflict) {
         // Another device saved first: keep its changes and put this device's on top.
@@ -200,7 +202,15 @@ export function useChartSettings() {
     }
     saving.current = false;
     setStored(writeLocal(latest.current, { revision: revision.current, base: confirmed.current }));
-    setSync(saved);
+    const stillDirty = acknowledged && !same(shared(latest.current), confirmed.current);
+    setSync(stillDirty ? "saving" : saved);
+    // Undo may have returned to the old confirmed copy while this save was in
+    // flight. Its effect then needed no save, but this ACK changed the base.
+    // Conflict merges wait for their settings effect; failed writes stay offline.
+    if (stillDirty) {
+      window.clearTimeout(pending.current);
+      pending.current = window.setTimeout(() => void push(), 400);
+    }
   }, [localOnly]);
 
   useEffect(() => {

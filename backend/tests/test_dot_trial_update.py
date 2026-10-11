@@ -14,7 +14,8 @@ spec = importlib.util.spec_from_file_location("dot_trial_update", Path(__file__)
 updater = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(updater)
 ABSENT_BEFORE_UPDATE = {"backend/app/engine/sample_practice.py", "deploy/dot_trial_seed.py",
-                       "backend/app/engine/advisor_shadow.py", "backend/app/routers/advisor_shadow.py"}
+                       "backend/app/engine/advisor_shadow.py", "backend/app/routers/advisor_shadow.py",
+                       "backend/app/routers/research_studio.py"}
 
 
 def archive(path, values):
@@ -370,7 +371,8 @@ def test_market_permission_is_explicit_and_restored_on_failed_start(update_fixtu
 
 
 @pytest.mark.parametrize("omitted", [None, "backend/app/engine/advisor_shadow.py",
-    "backend/app/routers/advisor_shadow.py", "backend/app/engine/practice.py"])
+    "backend/app/routers/advisor_shadow.py", "backend/app/engine/practice.py",
+    "backend/app/routers/research_studio.py"])
 def test_selected_overlay_restores_actual_main_import_dependencies(tmp_path, omitted):
     """A prior installation lacks new modules/helper; the overlay must supply them.
 
@@ -386,6 +388,10 @@ def test_selected_overlay_restores_actual_main_import_dependencies(tmp_path, omi
         shutil.copy2(path, backend / path.name)
     for name in ("backend/app/engine/advisor_shadow.py", "backend/app/routers/advisor_shadow.py"):
         (runtime / name).unlink()
+    # Model an older trial with no Research Studio feature installed. Enumerate
+    # its modules from source, so a new transitive import cannot hide in the copy.
+    for path in (backend / "app").rglob("research_studio*.py"):
+        path.unlink()
     practice = backend / "app/engine/practice.py"
     practice.write_text(practice.read_text().replace("def commit_agent_choices(", "def previous_batch_helper("))
     for name in updater.SOURCE_FILES - ({omitted} if omitted else set()):

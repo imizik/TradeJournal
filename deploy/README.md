@@ -734,6 +734,9 @@ the selected-source backend archive and portable standalone frontend archive.
 It validates archives before stopping trial processes, preserves Linux
 dependencies and old code/assets/permission flags, and rolls back on startup
 failure. Root-private recovery files remain under the isolated trial root.
+The selected backend bundle includes the Research Studio forwarding router
+required by app startup on older trials. It does not install or start the
+research sidecar; no research token or new permission is enabled.
 Then [dot_trial_seed.py](dot_trial_seed.py) prepares today's immutable simulated
 MU/NBIS packets and privately saves the separate login. Existing credentials
 require explicit `--rotate`; resets invalidate prior sessions. Never print the

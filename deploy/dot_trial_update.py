@@ -22,6 +22,7 @@ SOURCE_FILES = frozenset({"backend/app/engine/decisions.py", "backend/app/engine
     "backend/app/engine/paper.py", "backend/app/engine/sample_replay.py",
     "backend/app/engine/sample_practice.py", "backend/app/routers/practice.py", "backend/app/routers/access.py",
     "backend/app/access_manifest.py", "backend/app/access_middleware.py", "backend/app/main.py",
+    "backend/app/routers/research_studio.py",
     "backend/app/engine/cloud_practice_access.py", "backend/app/routers/cloud_practice.py",
     "backend/app/routers/cloud_choices.py", "backend/cloud_mcp_d2_common.py",
     "backend/cloud_mcp_d0.py", "backend/cloud_mcp_d1_common.py",

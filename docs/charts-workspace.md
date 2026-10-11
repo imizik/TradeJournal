@@ -126,7 +126,7 @@ the Watchlist sheet on the News tab. Markers stack with fill arrows and earnings
 dates without covering them, and a level or drawing under the pointer still wins
 a click. Historical chart mode shows only the articles whose candles are loaded.
 
-A **Peers** strip (T3.4) sits above the tabs whenever the panel is expanded:
+A **Peers** strip (T3.4) sits at the top of the **Overview** tab:
 Polygon's related companies for the active symbol as chips, each with today's
 percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
 seven days on disk, read through the enricher's limiter the way the News feed
@@ -399,7 +399,9 @@ cd backend
   Ctrl+Shift+Z, or the Undo and Redo buttons beside **Draw price level**, whose
   hover text names the step. Undo is per tab, 100 steps, and replays item by
   item onto the levels as they are now, so another device's levels are left
-  alone. Levels are still saved in the same `levels` shape, so a tab running
+  alone. Undo made before an earlier save responds is saved after that
+  acknowledgement too, including when it restores the last confirmed levels.
+  Levels are still saved in the same `levels` shape, so a tab running
   an older build keeps reading and merging them.
 - **Drawing tools (C1.2).** Beside Undo and Redo: price level, horizontal ray,
   trend line, rectangle zone and text note, then **Magnet**. A tool arms the
@@ -484,17 +486,23 @@ cd backend
   the studies that were on come back with it. **Auto levels** (C2.3) sits
   between Drawings and Journal: it hides the automatic levels on every chart
   (an `autoLevelsHidden` field of its own, for the same reason) and lists any
-  levels the main symbol is missing and why. Options join when their layer
+  levels the main symbol is missing and why. Each layer's explanation sits
+  behind a small info button on its row (`aria-expanded`, closed at rest and
+  not remembered); status text, such as what is missing, always shows. Options join when their layer
   exists (C4.4).
 - **Automatic levels (C2.3).** Every chart draws the
   [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
   dimmer than the user's own: a lone level as a thin dotted line, a confluence
-  zone as a shaded band, named at the left on the main chart on a solid tag:
+  zone as a shaded band, named on the main chart on a solid tag, in clear space (UX-D: the rightmost gap of its row that no candle's high-low span crosses, which is the room past the last bar when there is some):
   its most telling member (option landmarks, then the expected move, prior day
   and week, session ranges, swings, round numbers, ranked strikes) and how many
   more it holds ("Max pain +2"; a round number reads "Round 223"). Tags never
-  overlap: the open card's zone wins, then the zones nearest the price, and a
-  tag that would cover another or be cut by the pane's edge is left out. Only
+  overlap: the open card's zone wins, then the zones nearest the price; a tag
+  that would cover another tries below the band, and one with no clear gap, or
+  that would be cut by the pane's edge, collapses to a short mark at the right
+  edge. Levels are never hidden, only names move or collapse. Only the zone
+  price is inside, else the nearest one above and one below, is shaded; the
+  others draw as their two dotted edge lines. Only
   the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
@@ -601,6 +609,19 @@ cd backend
   (`/charts/stream?symbols=…`). History, retries and day rollover are kept per
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
+- **Quiet chrome (UX-B).** On a device that hovers and at 768px or wider, a
+  smaller chart's header shows only its symbol and interval at rest. Its
+  studies, crosshair-reset, Maximize and Focus controls (`data-quiet-controls`,
+  `app/globals.css`) fade in while the pointer is over that chart, focus is
+  inside it or one of its menus is open; they stay rendered, in the tab order
+  and with the same names. Touch devices and phone widths always show them.
+  The main chart's legend is one row at 1440px: O/H/L/C, **VWAP**, **RSI**, one
+  **EMA** item (a dot per EMA that is on; EMA 9/20/50/200 values open on hover or
+  keyboard focus), then RVol. A candle with no VWAP reads "VWAP —", whose
+  tooltip says why: daily and weekly candles have none, extended-hours candles
+  have none (the backend builds VWAP from regular-session minutes only), and a
+  forming candle with no regular-session trade yet has none. A phone wraps the
+  row.
 - A smaller chart narrower than 360px or shorter than 260px (header included)
   is **compact** (`COMPACT_PANEL` in `frontend/lib/charts.ts`): it opens on the
   latest 40 candles instead of 65, its header buttons sit closer, and its
@@ -1535,7 +1556,8 @@ never recommends a trade and never sends an order.
 - **Voice.** Choose the side, then press and hold **Hold to record**. Release
   saves the clip. A short press, the keyboard, or a microphone prompt that
   took the press switches to **Stop & save**. The browser asks for the
-  microphone only then. Clips stop at 30 seconds and offer **Save recording**
+  microphone only then. The recording timer appears after the microphone opens
+  and recording starts; permission or device startup time is excluded. Clips stop at 30 seconds and offer **Save recording**
   or **Discard**. A cancelled press, a hidden tab or a lost device does the
   same. Closing the sheet discards an unsaved clip. A template is optional. A
   denied or missing microphone leaves the click path working.
