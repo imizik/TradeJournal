@@ -235,9 +235,9 @@ export type PlanRunnerStatus = {
   configured: boolean;
   status: null | {
     started_at: string; finished_at: string | null;
-    state: "running" | "ok" | "partial" | "failed" | "nothing";
+    state: "running" | "ok" | "failed" | "nothing" | "interrupted";
     message: string; written: { day: string; reason: string; grade: string | null }[];
-    failed: { day: string; reason: string; error: string }[]; backfill_remaining: number;
+    failed: { day: string; reason: string; error: string }[];
     usage: { input_tokens: number; output_tokens: number; api_equivalent_usd: number }; model: string | null;
   };
 };

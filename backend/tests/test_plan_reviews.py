@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import pytest
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.ai import daily_reviewer, plan_runner
 from app.database import get_session
@@ -210,44 +210,46 @@ def test_the_review_never_falls_back_to_the_api(fake_claude, engine, monkeypatch
 
 # ---- the nightly run ----
 
-def test_the_run_reviews_the_latest_day_then_stale_then_backfill_newest_first_within_its_cap(fake_claude, engine):
+def test_the_run_reviews_only_the_latest_day_and_never_backfills(fake_claude, engine):
     add(engine, *[trade(day, datetime(2026, 9, day, 10, 0), datetime(2026, 9, day, 11, 0)) for day in range(1, 8)],
-        review_record("2026-09-02", source_data_stale=True), review_record("2026-09-04"))
+        review_record("2026-09-02", source_data_stale=True))
     with Session(engine) as session:
-        picked, remaining = plan_reviews.plan(session, 4)
-        assert [(day.isoformat(), reason) for day, reason in picked] == [
-            ("2026-09-07", "latest"), ("2026-09-02", "stale"), ("2026-09-06", "backfill"), ("2026-09-05", "backfill")]
-        assert remaining == 2  # Sep 3 and Sep 1
-        status = plan_reviews.run(session, 4)
+        assert plan_reviews.plan(session) == [(datetime(2026, 9, 7).date(), "latest")]
+        status = plan_reviews.run(session)
     assert status["state"] == "ok"
-    assert [item["day"] for item in status["written"]] == ["2026-09-07", "2026-09-02", "2026-09-06", "2026-09-05"]
-    assert status["backfill_remaining"] == 2
-    assert status["usage"]["output_tokens"] == 1200
+    assert [item["day"] for item in status["written"]] == ["2026-09-07"]
+    assert status["usage"]["output_tokens"] == 300
     with Session(engine) as session:
-        assert plan_reviews.plan(session, 10)[0] == [(datetime(2026, 9, 3).date(), "backfill"), (datetime(2026, 9, 1).date(), "backfill")]
+        # Older unreviewed days and an older stale review wait for their own button.
+        assert plan_reviews.plan(session) == []
+        assert plan_reviews.run(session)["state"] == "nothing"
 
 
-def test_a_review_written_mid_session_is_redone_when_trades_were_added(fake_claude, engine):
+def test_the_latest_day_is_redone_when_trades_were_added_or_its_review_went_stale(fake_claude, engine):
     add(engine, trade(1, datetime(2026, 9, 7, 10, 0), datetime(2026, 9, 7, 11, 0)), trade(2, datetime(2026, 9, 7, 14, 0), datetime(2026, 9, 7, 15, 0)),
         review_record("2026-09-07"))  # saved when only one trade existed
     with Session(engine) as session:
-        assert plan_reviews.plan(session, 10)[0] == [(datetime(2026, 9, 7).date(), "latest")]
+        assert plan_reviews.plan(session) == [(datetime(2026, 9, 7).date(), "trades added")]
+        record = session.exec(select(DailyReviewRecord)).one()
+        record.trade_count = 2
+        record.review_json = json.dumps({**ANSWER, "source_data_stale": True})
+        session.add(record)
+        session.commit()
+        assert plan_reviews.plan(session) == [(datetime(2026, 9, 7).date(), "stale")]
 
 
-def test_two_failed_calls_in_a_row_stop_the_run_and_the_plan_being_unavailable_fails_it(fake_claude, engine, monkeypatch):
-    add(engine, *[trade(day, datetime(2026, 9, day, 10, 0), datetime(2026, 9, day, 11, 0)) for day in range(1, 6)])
+def test_a_failed_call_is_recorded_and_the_plan_being_unavailable_fails_the_run(fake_claude, engine, monkeypatch):
+    add(engine, trade(1, datetime(2026, 9, 1, 10, 0), datetime(2026, 9, 1, 11, 0)))
     fake_claude.set(mode="error")
     with Session(engine) as session:
-        status = plan_reviews.run(session, 10)
-    assert status["state"] == "failed" and len(status["failed"]) == 2 and status["written"] == []
-    assert "usage limit" in status["message"]
-    fake_claude.set(mode="ok")
-    fake_claude.set(auth="api_key")
+        status = plan_reviews.run(session)
+    assert status["state"] == "failed" and len(status["failed"]) == 1 and status["written"] == []
+    assert "usage limit" in status["failed"][0]["error"]
+    fake_claude.set(mode="ok", auth="api_key")
     plan_runner._checked.clear()
     with Session(engine) as session:
-        status = plan_reviews.run(session, 10)
+        status = plan_reviews.run(session)
     assert status["state"] == "failed" and "Claude plan is not available" in status["message"]
-    assert len(status["failed"]) == 1
 
 
 def test_main_writes_the_status_and_exits_1_only_on_failure(fake_claude, engine, monkeypatch):
@@ -310,7 +312,7 @@ def test_the_nightly_run_stays_on_the_plan_even_when_the_button_is_set_to_the_ap
     monkeypatch.setenv("AI_REVIEW_BACKEND", "api")
     add(engine, trade(1, datetime(2026, 9, 1, 10, 0), datetime(2026, 9, 1, 11, 0)))
     with Session(engine) as session:
-        status = plan_reviews.run(session, 10)
+        status = plan_reviews.run(session)
     assert status["state"] == "ok"
     assert status["model"].endswith("on the Claude plan")
 

@@ -630,12 +630,12 @@ and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/conf
 
 ### Nightly reviews on the Claude plan (opt-in)
 
-`tradejournal-plan-reviews.timer` writes the Daily Review for each trading day
-at 20:00 New York (after Sync Everything, enrichment and the options
-catch-up), with Claude Code on the owner's Claude plan, never API credits. Each
-night it reviews the latest day, then reviews marked stale, then older days that
-never had one, newest first, at most 10 (`TJ_PLAN_REVIEW_MAX`), so a backfill
-takes several nights. The Daily Review button uses the same plan. The release
+`tradejournal-plan-reviews.timer` writes the Daily Review for the latest
+trading day at 20:00 New York (after Sync Everything, enrichment and the
+options catch-up), with Claude Code on the owner's Claude plan, never API
+credits. It reviews that day when it has no review, gained trades since its
+review, or went stale; it never backfills older days, which get a review from
+their own Daily Review button. The button uses the same plan. The release
 carries Claude Code at the version `deploy/claude-code/package.json` pins, as
 `bin/claude`; its state is under `/var/lib/tradejournal/claude` and the last
 run's status in `/var/lib/tradejournal/plan-reviews/status.json`, which the
@@ -667,9 +667,10 @@ An enabled timer survives releases; a release never enables it. A rollback to
 a release from before this feature removes the units, so after rolling forward
 again, enable the timer once more. To stop the
 nightly reviews, `sudo systemctl disable --now tradejournal-plan-reviews.timer`.
-The run uses the plan's usage like any Claude Code session; it stops after two
-failed calls in a row (most likely the plan's limit) and continues the next
-night. `claude-plan.env.example` lists the optional model, cap and timeout.
+The run uses the plan's usage like any Claude Code session, about one review a
+trading day; a failed call (for example the plan's limit) is recorded and the
+next run tries again. `claude-plan.env.example` lists the optional model,
+timeout and budget.
 
 ### A3 Practice preparation (opt-in, disabled)
 

@@ -79,13 +79,12 @@ export default async function DailyReviewPage() {
 function PlanReviewStatus({ runner }: { runner: PlanRunnerStatus | null }) {
   const status = runner?.status;
   const when = (value: string | null | undefined) => value ? new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET" : "";
-  const problem = !runner || !runner.configured || status?.state === "failed" || status?.state === "partial";
+  const problem = !runner || !runner.configured || status?.state === "failed" || status?.state === "interrupted";
   const text = !runner ? "Nightly AI reviews: status unavailable."
     : !runner.configured ? "Nightly AI reviews are not set up on the Claude plan yet."
     : !status ? "Nightly AI reviews: set up, no run yet (each night at 8 PM ET)."
     : status.state === "running" ? `Nightly AI reviews: running since ${when(status.started_at)}.`
-    : [`Nightly AI reviews: last run ${when(status.finished_at ?? status.started_at)}`, status.message,
-      status.backfill_remaining ? `${status.backfill_remaining} older day(s) left to backfill` : null].filter(Boolean).join(" · ");
+    : [`Nightly AI reviews: last run ${when(status.finished_at ?? status.started_at)}`, status.message].filter(Boolean).join(" · ");
   return <p role="status" aria-label="Nightly AI reviews" className={`rounded border px-3 py-2 text-xs ${problem ? "border-amber-500/50 text-amber-200" : "border-border text-muted-foreground"}`}>
     {text}{status?.state === "failed" && status.failed[0] && <span className="block">{status.failed[0].error}</span>}
   </p>;
