@@ -70,9 +70,13 @@ bash scripts/ux_sandbox.sh        # run in the background; ready in ~10 s
 - Its own seeded SQLite file (`backend/data/ux_sandbox/`) and its own ports:
   app at `http://127.0.0.1:3098`. Toggling studies, saving layouts, adding
   levels, drawings or plans changes only that file — never the user's
-  devices. Gmail, Webull, phone alerts and practice jobs are off.
-- It refuses to start in a checkout with its own `backend/.env` or `.env`
-  (use a worktree), or on busy ports, and stops itself unless the app's
+  devices. The servers start from an empty environment: no database URL,
+  Gmail, Webull, phone-alert, access or model settings reach them, from the
+  key file or from your shell, and the background jobs are off.
+- If you added fills by hand and the next start refuses to seed, delete
+  `backend/data/ux_sandbox/`.
+- It refuses to start in a checkout with its own `backend/.env`, `.env` or
+  Gmail credential files (use a worktree), or on busy ports, and stops itself unless the app's
   `/api/backend/health` reports `ux_sandbox.db`.
 - The first `/charts` load takes 15–30 s (dev compile plus provider fetch).
   Poll instead of waiting blind or screenshotting the spinner, e.g. run
