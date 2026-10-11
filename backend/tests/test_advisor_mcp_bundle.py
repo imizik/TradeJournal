@@ -1,11 +1,13 @@
 """Disabled bundle/control proof; never operates host users, systemd or ingress."""
 import importlib.util
+import base64
 import json
 import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 import uuid
 
@@ -101,6 +103,79 @@ def test_new_verified_wheel_modes_normalized_before_inventory(prepared, tmp_path
     assert (tmp_path / "host-python").stat().st_mode & 0o777 == 0o755
     with pytest.raises(ValueError, match="existing recorded runtime"):
         control.normalize_new_runtime("backend")
+
+
+def test_clean_child_factory_preserves_recorded_empty_import_directories(prepared, tmp_path, monkeypatch):
+    mock_host(tmp_path, monkeypatch)
+    monkeypatch.setattr(control, "preflight_install", lambda bundle: stage.validate(bundle))
+    control.install(prepared, approve_install=stage.digest(prepared / "manifest.json"))
+    config = json.loads((control.CONFIG / "config.json").read_text())
+    config.update(enabled=True, issuer_url="https://identity.fixture.invalid/", jwks_url="https://identity.fixture.invalid/keys",
+        resource_url="https://advisor.fixture.invalid/advisor/mcp", client_id="offline-factory-fixture",
+        backend_socket=str(control.RUN / "backend.sock"), jwks_file=str(control.CONFIG / "public-keys.json"))
+    config["profiles"][0].update(enabled=True, subject="offline-factory-fixture")
+    (control.CONFIG / "config.json").write_text(json.dumps(config))
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    numbers = rsa.generate_private_key(public_exponent=65537, key_size=2048).public_key().public_numbers()
+    def b64(number):
+        return base64.urlsafe_b64encode(number.to_bytes((number.bit_length() + 7) // 8, "big")).rstrip(b"=").decode()
+    now = int(time.time())
+    (control.CONFIG / "public-keys.json").write_text(json.dumps({"issuer_url": config["issuer_url"], "jwks_url": config["jwks_url"],
+        "fetched_at": now, "expires_at": now + 3600, "keys": [{"kid": "fixture", "kty": "RSA", "alg": "RS256", "use": "sig", "n": b64(numbers.n), "e": b64(numbers.e)}]}))
+    database = control.STATE / "fixture.db"
+    engine = create_engine("sqlite:///" + str(database))
+    with Session(engine) as db:
+        service.set_enabled(db, uuid.UUID(config["profiles"][0]["assignment_id"]), True)
+    engine.dispose()
+    before = control.runtime_inventory()
+    # Fresh subprocess actually imports the copied source, not pytest's already
+    # imported engine modules. Existing project deps are used, no pip/listener.
+    script = '''import os,sys,socket,ssl
+os.umask(0)
+original_socket=socket.socket
+class OfflineSocket(original_socket):
+    def __init__(self,family=socket.AF_INET,*args,**kwargs):
+        assert family not in (socket.AF_INET,socket.AF_INET6),"offline factory attempted IP"
+        super().__init__(family,*args,**kwargs)
+socket.socket=OfflineSocket
+from cloud_mcp_advisor_common import read_config
+from cloud_mcp_d0 import local_keys
+from cloud_mcp_advisor_bridge import create_app
+local_keys(read_config(sys.argv[1]))
+create_app(sys.argv[1],sys.argv[2])
+print("clean copied-source factory passed without IP/credentials/listener")
+'''
+    result = subprocess.run([sys.executable, "-B", "-c", script, str(control.CONFIG / "config.json"), str(database)],
+        cwd=control.ROOT / "backend", env={"PATH": "/usr/bin:/bin", "PYTHON_DOTENV_DISABLED": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert control.runtime_inventory() == before
+    control.installed()
+    data = control.ROOT / "backend/data"
+    assert {p.name for p in data.iterdir()} == {"alpaca_cache"}
+    assert list((data / "alpaca_cache").iterdir()) == []
+    assert not (control.ROOT / "adapter/data").exists()
+
+
+def test_factory_mutation_refuses_before_preflight_returns_approval(prepared, tmp_path, monkeypatch):
+    calls = mock_host(tmp_path, monkeypatch)
+    monkeypatch.setattr(control, "preflight_install", lambda bundle: stage.validate(bundle))
+    control.install(prepared, approve_install=stage.digest(prepared / "manifest.json"))
+    config = json.loads((control.CONFIG / "config.json").read_text())
+    config.update(enabled=True, resource_url="https://advisor.fixture.invalid/advisor/mcp",
+        issuer_url="https://identity.fixture.invalid/", client_id="approved-fixture",
+        backend_socket=str(control.RUN / "backend.sock"), jwks_file=str(control.CONFIG / "public-keys.json"))
+    config["profiles"][0].update(enabled=True, subject="approved-fixture")
+    (control.CONFIG / "config.json").write_text(json.dumps(config))
+    invoked = []
+    def mutating_factory(*args, **kwargs):
+        invoked.append(args)
+        (control.ROOT / "backend/unexpected-import.py").write_text("unexpected executable import output")
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(control.subprocess, "run", mutating_factory)
+    with pytest.raises(ValueError, match="runtime inventory changed"):
+        control.activation_identity()
+    assert len(invoked) == 1 and not any("start" in command for command in calls)
 
 
 @pytest.mark.parametrize("change", ["bytes", "mode", "extra", "missing", "symlink", "manifest_path"])

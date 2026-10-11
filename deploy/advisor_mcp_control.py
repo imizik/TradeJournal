@@ -183,6 +183,18 @@ def install(bundle, *, approve_install):
             packages = ["mcp==1.28.1", "PyJWT[crypto]==2.13.0"] if name == "adapter" else ["trade-journal-backend==0.1.0"]
             run(ROOT / name / ".venv/bin/python", "-B", "-m", "pip", "install", "--no-index", "--find-links",
                 bundle / "wheels", *packages)
+            if name == "backend":
+                # Shared pure engines import Alpaca's cache path constructor.
+                # Supply only empty readonly compatibility directories up front;
+                # no cache/provider files or writable runtime mounts are allowed.
+                data = ROOT / name / "data"
+                cache = data / "alpaca_cache"
+                if data.is_symlink() or cache.is_symlink():
+                    raise ValueError("New backend import directory symlink refused")
+                data.mkdir(mode=0o755, exist_ok=True)
+                cache.mkdir(mode=0o755, exist_ok=True)
+                if set(data.iterdir()) != {cache} or list(cache.iterdir()):
+                    raise ValueError("Only empty backend import directories are allowed")
             normalize_new_runtime(name)
         for name in ("config.json", "public-keys.json"):
             shutil.copyfile(bundle / "config" / name, CONFIG / name)
@@ -256,6 +268,7 @@ def activation_identity():
     subprocess.run([ROOT / "backend/.venv/bin/python", "-B", "-c", script, str(CONFIG / "config.json"), str(STATE / "fixture.db")],
         cwd=ROOT / "backend", env={"PATH": "/usr/bin:/bin", "PYTHON_DOTENV_DISABLED": "1"},
         capture_output=True, check=True)
+    installed()  # An unexpected import side effect cannot receive approval.
     return {"installation_sha256": digest(RECORD),
         "runtime_inventory_sha256": hashlib.sha256(json.dumps(record["runtime_inventory"], sort_keys=True).encode()).hexdigest(),
         "config_sha256": digest(CONFIG / "config.json"),

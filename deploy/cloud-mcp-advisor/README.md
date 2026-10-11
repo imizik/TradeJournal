@@ -102,6 +102,14 @@ post-install normalization: an existing installation record makes that helper
 refuse, and later mode/ownership drift still blocks preflight. Refusal diagnostics
 name the relative runtime entry and UID/mode without exposing binding contents.
 
+The backend also has two empty, root-owned0755 compatibility directories,
+`data` and `data/alpaca_cache`, created before normalization/inventory because
+the shared engines construct that path during import. They remain fully
+inventoried/read-only, contain no provider/cache files or database, and add no
+writable mount. The adapter has no corresponding data directory. Preflight
+rechecks the full runtime after the factory child and refuses unexpected import
+side effects before returning an approval hash.
+
 **Separate owner approval is required before creating any retained assignment
 or OAuth grants, publishing ingress/network settings, or starting retained
 services.** The staged disabled assignment is verification data, not a live
