@@ -37,7 +37,9 @@ export default function SymbolInfoPeers({ symbol, result, onSelect }: { symbol: 
   const shown = result?.symbol === symbol ? result : null;
   const data = shown?.data;
   const source = data ? `${data.source.label}${data.source.age_seconds != null ? `, read ${Math.round(data.source.age_seconds / 3600)} h ago` : ""}` : "";
-  return <Block name="peers" title="Peers"><div role="group" aria-label="Peers">
+  // A failed read or a stale list opens the block whatever was saved.
+  const problem = !!shown?.error || (!!data && (data.source.state === "stale" || (data.state === "ready" && data.quotes.state !== "ok") || (data.state !== "ready" && data.state !== "none")));
+  return <Block name="peers" title="Peers" forceOpen={problem}><div role="group" aria-label="Peers">
     {!shown ? <p role="status" className="text-xs text-slate-500">Loading peers…</p>
       : shown.error ? <p className="text-xs text-slate-500">Peers unavailable.</p>
       : data && data.state === "ready" ? <>

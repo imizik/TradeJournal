@@ -21,7 +21,7 @@ const range = (low: number, high: number) => `$${price(low)}–${price(high)}`;
 
 /** One dataset's block: its rows, or why there are none. The source line is the tab's single footer. */
 function Dataset({ name, title, block, unavailable, children }: { name: string; title: string; block: OverviewBlock; unavailable: string; children: ReactNode }) {
-  return <Block name={name} title={title}>
+  return <Block name={name} title={title} forceOpen={block.state !== "ready" && block.state !== "none" || !!block.message}>
     {block.state === "ready" ? children : <p className={block.state === "none" ? "text-slate-500" : "text-amber-300"}>{block.state === "none" ? unavailable : block.message ?? "Not loaded yet."}</p>}
     {block.state === "ready" && block.message && <p className="text-[10px] text-amber-300">{block.message} Showing the cached copy ({readAt(block.fetched_at)}).</p>}
   </Block>;

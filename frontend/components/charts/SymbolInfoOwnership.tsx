@@ -38,7 +38,7 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
   const footer: FooterSource[] = [...sources, ...(data ? [{ source: data.source, at: data.fetched_at, label: "Insiders" }] : [])];
 
   return <>
-  <Block name="ownership" title="Ownership"><div className="space-y-3">
+  <Block name="ownership" title="Ownership" forceOpen={(company.state !== "ready" && company.state !== "none") || !!shown?.error || !!data?.message || (!!data && data.state !== "ready" && data.state !== "none")}><div className="space-y-3">
     <div aria-label="13F institutional holders" role="group" className="space-y-1.5">
       <h4 className="text-slate-300">Institutions (13F){owners?.as_of ? <span className="font-normal text-slate-500"> · as of {owners.as_of}</span> : null}</h4>
       {company.state !== "ready" ? <p className={company.state === "none" ? "text-slate-500" : "text-amber-300"}>{company.state === "none" ? unavailable : company.message ?? "Not loaded yet."}</p>

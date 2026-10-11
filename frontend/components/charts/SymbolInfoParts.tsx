@@ -21,7 +21,7 @@ export function Row({ label, value, title, tone, hint, explain }: { label: strin
   const tip = [title ?? hint ?? label, explain].filter(Boolean).join("\n\n");
   return <div title={tip} className="flex flex-wrap items-baseline justify-between gap-x-2 py-0.5">
     <dt className="min-w-0 flex-1 truncate text-slate-500">{explain
-      ? <button type="button" aria-expanded={open} aria-controls={`${id}-why`} onClick={() => setOpen(!open)}
+      ? <button type="button" aria-expanded={open} aria-controls={open ? `${id}-why` : undefined} onClick={() => setOpen(!open)}
         className="max-w-full truncate text-left underline decoration-slate-600 decoration-dotted underline-offset-2 hover:text-slate-300">{label}</button>
       : label}</dt>
     <dd className={`shrink-0 whitespace-nowrap font-mono ${tone ?? "text-slate-200"}`}>{value}</dd>
@@ -32,15 +32,16 @@ export function Row({ label, value, title, tone, hint, explain }: { label: strin
 /**
  * One foldable block of a symbol-info tab: an edged box with its own header, so blocks read as
  * separate at a glance. The fold is remembered on this device only; until then `defaultOpen` decides.
+ * `forceOpen` (a stale copy, an error, a failed read inside) opens it whatever was saved, so a fold never hides a problem.
  */
-export function Block({ name, title, defaultOpen = true, side, children }: { name: string; title: string; defaultOpen?: boolean; side?: ReactNode; children: ReactNode }) {
+export function Block({ name, title, defaultOpen = true, forceOpen, side, children }: { name: string; title: string; defaultOpen?: boolean; forceOpen?: boolean; side?: ReactNode; children: ReactNode }) {
   const id = useId();
   const key = `tradejournal.charts.info.${name}.open.v1`;
   const [chosen, setChosen] = useState<boolean | null>(null);
   useEffect(() => {
     try { const saved = localStorage.getItem(key); if (saved === "1" || saved === "0") queueMicrotask(() => setChosen(saved === "1")); } catch { /* device storage is optional */ }
   }, [key]);
-  const open = chosen ?? defaultOpen;
+  const open = !!forceOpen || (chosen ?? defaultOpen);
   const toggle = () => {
     setChosen(!open);
     try { localStorage.setItem(key, open ? "0" : "1"); } catch { /* keep working without storage */ }
@@ -95,8 +96,8 @@ export const EXPLAIN = {
   shares: "Shares that exist. Watch it over time: a rising count dilutes holders (new stock, stock pay); a falling count means buybacks.",
   held: "Share of the stock owned by funds and institutions. High (>70%) means big money moves the price; low means it trades more on retail flow.",
   volume: "Average shares traded per day over 30 days. Compare today's volume with it: well above average means unusual interest; low volume makes moves less reliable and fills wider.",
-  pe: "Price ÷ the last 12 months' earnings per share: what you pay for $1 of profit. High means the market expects fast growth (or profits are temporarily low); low can mean value or trouble. Compare within the same industry. The S&P 500 has averaged about 16 over the long run and higher in recent years. Blank when earnings are negative.",
-  ps: "Market cap ÷ the last 12 months' revenue. Useful when there are no profits yet. Software and chip makers often trade above 10; retailers and industrials usually below 2.",
+  pe: "Price ÷ the last 12 months' earnings per share: what you pay for $1 of profit. High means the market expects fast growth (or profits are temporarily low); low can mean value or trouble. Compare within the same industry. The S&P 500 has averaged about 16 over the long run and higher in recent years. Blank when not reported or when earnings are negative.",
+  ps: "Market cap ÷ the last 12 months' revenue. Useful when there are no profits yet. Fast-growing software often trades above 10; retailers and industrials usually below 2.",
   pb: "Price ÷ book value (assets minus debts) per share. Near or below 1 says the market values the company at about what it owns; asset-light companies (software, brands) are naturally much higher.",
   evEbitda: "Enterprise value ÷ operating cash profit before interest, tax and depreciation. Compares companies regardless of debt. Around 10–15 is common for mature companies; well above means growth is priced in.",
   dividend: "Yearly dividend ÷ price. Most growth stocks pay little or none; a very high yield (>6%) can mean the price fell because the payout is at risk.",

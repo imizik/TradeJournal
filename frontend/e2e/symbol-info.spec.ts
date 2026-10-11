@@ -763,6 +763,11 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   await page.setViewportSize({ width: 1440, height: 2200 });
   await page.screenshot({ path: test.info().outputPath("dock-blocks-overview-desktop.png"), animations: "disabled" });
   await page.setViewportSize({ width: 1440, height: 900 });
+  // A block with a stale copy inside cannot be folded away: the disclosure stays visible.
+  const stats = info.getByRole("region", { name: "Key statistics" });
+  await stats.getByRole("button", { name: "Key statistics" }).click();
+  await expect(stats.getByRole("button", { name: "Key statistics" })).toHaveAttribute("aria-expanded", "true");
+  await expect(stats).toContainText("Tradier refresh failed (503)");
   // Folding Peers is kept on this device across a reload.
   const peersHeader = info.getByRole("region", { name: "Peers" }).getByRole("button", { name: "Peers" });
   await peersHeader.click();
