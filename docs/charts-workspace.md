@@ -17,7 +17,16 @@ access. Keys remain on the private backend.
 
 The section below the watchlist in the Watchlist dock tab follows the main
 chart's underlying. On a phone it lives inside the Watchlist bottom sheet. Its
-tabs keep their full names and wrap onto a second row in a narrow dock. Its
+tabs keep their full names on one row that scrolls sideways in a narrow dock
+(the chosen tab is kept in view). Every tab shows facts as one-line
+label-and-value rows and ends in one source line (sources read at the same
+time share the time; each block's source is in its hover title); stale,
+partial, estimated, inferred and unofficial notes stay inline where they apply.
+An absent value reads "—"; Tradier's all-zero 13F summary (it sends 0, not
+null, when it has none) reads "not reported", and "Held by institutions"
+appears once (in Ownership when 13F is reported, otherwise in Key statistics).
+News shows one "+N" ticker mark and "Sentiment: positive" (Polygon's, in the
+hover title). Its
 **You** tab reads all accounts' journal history through
 `GET /charts/symbol/{symbol}/you`, independently of candles or the stream.
 It shows completed-trade count, realized P&L, win rate, average stored hold
@@ -277,7 +286,13 @@ cd backend
   second row rather than hiding anything. Undo, redo and the drawing tools
   are a slim rail left of the charts. The dock on the right shows one panel at
   a time: the watchlist with the symbol info panel, the main symbol's levels
-  and latest fills under it, or the layers panel. Pressing the open tab's
+  and latest fills under it, or the layers panel. Those three sections are
+  one-line folds with their counts ("MU levels 0/30", "Alerts 0/20 active",
+  "On your journal"), an (i) for the first-use help and, for levels, a + that
+  opens the form; levels open when the symbol has any, alerts when one is
+  waiting or a phone message failed, the journal when it has fills, and the
+  person's own fold is remembered on the device. The "Phone alerts are not set
+  up" warning shows even when alerts are folded. Pressing the open tab's
   button closes the dock;
   whether it is open, and on which tab, is remembered on the device (a device
   that had left the C1.4 layers panel open opens it on Layers). A status strip

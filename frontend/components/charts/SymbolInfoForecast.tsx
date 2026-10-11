@@ -119,6 +119,7 @@ export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
         : reactions.state === "loading" || reactions.state === "unavailable" ? <p role="status" className="text-amber-300">{reactions.message ?? "Earnings reactions unavailable."}</p>
         : reactions.state === "none" ? <p className="text-slate-500">{reactions.message ?? "No past earnings history."}</p>
         : <>
+          <p className="text-[10px] text-slate-500">Each row: the inferred full-day reaction, then the reaction day and its opening gap.</p>
           <ul className="divide-y divide-slate-800">{reactions.rows.map((row) => <li key={row.report_date} className="py-2">
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-slate-300">{row.label ?? eventDay(row.report_date)} · report {eventDay(row.report_date).replace(/, \d{4}$/, "")}</span>
@@ -127,7 +128,7 @@ export default function SymbolInfoForecast({ data }: { data: SymbolForecast }) {
                 : <span className="shrink-0 text-amber-300">No number</span>}
             </div>
             <p className="mt-0.5 text-[10px] text-slate-500">{row.state === "ready" && row.reaction_date && row.gap_pct != null
-              ? `${eventDay(row.reaction_date)} gap ${row.gap_pct > 0 ? "+" : ""}${row.gap_pct.toFixed(1)}% · inferred full-day reaction`
+              ? `${eventDay(row.reaction_date)} · gap ${row.gap_pct > 0 ? "+" : ""}${row.gap_pct.toFixed(1)}%`
               : row.reason}</p>
             <details className="mt-1 text-[10px] text-slate-500"><summary className="min-h-6 cursor-pointer py-1">Show both candidate sessions</summary>
               <ul>{row.sessions.map((session) => <li key={session.date}>{eventDay(session.date)}: {session.state === "ready" && session.day_pct != null && session.gap_pct != null
