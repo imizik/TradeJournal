@@ -77,6 +77,32 @@ def test_git_trust_is_exact_checkout_command_only_and_admin_environment_is_clean
     control.run("groupadd", "--system", "fixture-name-never-executed")
 
 
+def test_new_verified_wheel_modes_normalized_before_inventory(prepared, tmp_path, monkeypatch):
+    mock_host(tmp_path, monkeypatch)
+    monkeypatch.setattr(control, "preflight_install", lambda bundle: stage.validate(bundle))
+    command = control.run
+    def wheel_modes(*args, **kwargs):
+        result = command(*args, **kwargs)
+        if "venv" in args:
+            venv = Path(args[-1])
+            (venv / "lib").chmod(0o775)
+            (venv / "lib/dependency.py").chmod(0o664)
+            (venv / "bin/wheel-tool").write_text("verified entry point fixture")
+            (venv / "bin/wheel-tool").chmod(0o775)
+        return result
+    monkeypatch.setattr(control, "run", wheel_modes)
+    control.install(prepared, approve_install=stage.digest(prepared / "manifest.json"))
+    for role in ("adapter", "backend"):
+        tree = control.ROOT / role
+        assert (tree / ".venv/lib").stat().st_mode & 0o777 == 0o755
+        assert (tree / ".venv/lib/dependency.py").stat().st_mode & 0o777 == 0o644
+        assert (tree / ".venv/bin/wheel-tool").stat().st_mode & 0o777 == 0o755
+        assert (tree / ".venv/bin/python").is_symlink()
+    assert (tmp_path / "host-python").stat().st_mode & 0o777 == 0o755
+    with pytest.raises(ValueError, match="existing recorded runtime"):
+        control.normalize_new_runtime("backend")
+
+
 @pytest.mark.parametrize("change", ["bytes", "mode", "extra", "missing", "symlink", "manifest_path"])
 def test_inventory_mode_path_tampering_refuses(prepared, tmp_path, change):
     copied = tmp_path / "copy"

@@ -100,9 +100,9 @@ def runtime_inventory():
         for path in (tree, *sorted(tree.rglob("*"))):
             relative = str(path.relative_to(ROOT))
             info = path.lstat()
-            mode = info.st_mode & 0o777
+            mode = info.st_mode & 0o7777
             if info.st_uid != 0 or (not path.is_symlink() and mode & 0o022):
-                raise ValueError("Advisor runtime ownership or writable mode changed")
+                raise ValueError(f"Advisor runtime ownership or writable mode changed: {relative} uid={info.st_uid} mode={mode:o}")
             entry = {"mode": mode, "uid": info.st_uid, "gid": info.st_gid}
             if path.is_symlink():
                 if ".venv" not in path.parts:
@@ -110,11 +110,11 @@ def runtime_inventory():
                 target = path.resolve(strict=True)
                 target_info = target.stat()
                 if target_info.st_uid != 0 or target_info.st_mode & 0o022:
-                    raise ValueError("Advisor runtime interpreter target is writable")
+                    raise ValueError(f"Advisor runtime interpreter target is writable: {relative} uid={target_info.st_uid} mode={target_info.st_mode & 0o7777:o}")
                 if target.is_dir() and not target.is_relative_to(tree):
                     raise ValueError("External runtime directory symlink refused")
                 entry.update(kind="symlink", link=os.readlink(path), target=str(target),
-                    target_mode=target_info.st_mode & 0o777, target_uid=target_info.st_uid,
+                    target_mode=target_info.st_mode & 0o7777, target_uid=target_info.st_uid,
                     target_gid=target_info.st_gid, target_sha256=digest(target) if target.is_file() else None)
             elif path.is_file():
                 entry.update(kind="file", sha256=digest(path))
@@ -126,6 +126,37 @@ def runtime_inventory():
         if not (tree / ".venv/bin/python").is_file():
             raise ValueError("Advisor runtime interpreter missing")
     return result
+
+
+def normalize_new_runtime(role):
+    """Only during a fresh exclusive install, before recording any approval.
+
+    Wheel/venv modes vary with the build and umask. Make new owned code read-only
+    to service identities, without touching a symlink target or installed drift.
+    """
+    if role not in {"adapter", "backend"} or RECORD.exists():
+        raise ValueError("Refuse normalizing an existing recorded runtime")
+    tree = exact(ROOT / role)
+    for path in (tree, *sorted(tree.rglob("*"))):
+        info = path.lstat()
+        relative = str(path.relative_to(ROOT))
+        if info.st_uid != 0:
+            raise ValueError(f"New advisor runtime not root-owned: {relative} uid={info.st_uid} mode={info.st_mode & 0o7777:o}")
+        if path.is_symlink():
+            continue  # Never follow/chmod the OS interpreter or directory alias.
+        if path.is_dir():
+            mode = 0o755
+        elif path.is_file():
+            mode = 0o755 if info.st_mode & 0o111 else 0o644
+        else:
+            raise ValueError("New advisor runtime special file refused: " + relative)
+        # O_NOFOLLOW is portable on the supported Ubuntu/macOS test hosts; the
+        # descriptor prevents a leaf symlink from redirecting the chmod.
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            os.fchmod(descriptor, mode)
+        finally:
+            os.close(descriptor)
 
 
 def install(bundle, *, approve_install):
@@ -152,6 +183,7 @@ def install(bundle, *, approve_install):
             packages = ["mcp==1.28.1", "PyJWT[crypto]==2.13.0"] if name == "adapter" else ["trade-journal-backend==0.1.0"]
             run(ROOT / name / ".venv/bin/python", "-B", "-m", "pip", "install", "--no-index", "--find-links",
                 bundle / "wheels", *packages)
+            normalize_new_runtime(name)
         for name in ("config.json", "public-keys.json"):
             shutil.copyfile(bundle / "config" / name, CONFIG / name)
             (CONFIG / name).chmod(0o640)

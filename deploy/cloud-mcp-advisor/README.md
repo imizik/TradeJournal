@@ -93,6 +93,15 @@ failure it removes only unit files it created, attempts socket/process stop,
 and keeps copied fixture/recovery/runtime/config for explicit private recovery.
 Collisions on a later attempt remain a refusal; there is no overwrite retry.
 
+Before recording the newly constructed runtime, the installer normalizes only
+its root-owned adapter/backend directories to0755 and regular files to0644
+(0755 for executable files). Wheel/venv group-write modes must not reach serving
+identities. Non-root ownership and special files refuse. Symlinks are skipped;
+OS interpreter targets/outside paths are never chmodded. There is no
+post-install normalization: an existing installation record makes that helper
+refuse, and later mode/ownership drift still blocks preflight. Refusal diagnostics
+name the relative runtime entry and UID/mode without exposing binding contents.
+
 **Separate owner approval is required before creating any retained assignment
 or OAuth grants, publishing ingress/network settings, or starting retained
 services.** The staged disabled assignment is verification data, not a live
