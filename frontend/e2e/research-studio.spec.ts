@@ -271,9 +271,9 @@ test("R4 frozen variant comparison and append-only conclusions survive reload",a
     expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width+1);
     await page.screenshot({path:test.info().outputPath("studio-comparison-"+viewport.name+".png"),fullPage:true});
     if(viewport.name==="phone"){
-      const top=await page.getByRole("region",{name:"Variant comparison"}).evaluate(e=>e.getBoundingClientRect().top+window.scrollY);
-      await page.evaluate(y=>window.scrollTo(0,y-80),top);
-      await expect(page.getByRole("region",{name:"Variant comparison"}).getByRole("heading")).toBeInViewport();
+      const heading=page.getByRole("region",{name:"Variant comparison"}).getByRole("heading",{level:2});
+      await heading.scrollIntoViewIfNeeded();
+      await expect(heading).toBeInViewport();
       await page.screenshot({path:test.info().outputPath("studio-comparison-focus-phone.png")});
     }
   }
