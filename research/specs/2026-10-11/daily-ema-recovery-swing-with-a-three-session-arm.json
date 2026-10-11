@@ -1,0 +1,13 @@
+{
+  "name": "Daily-EMA recovery swing with a three-session arm",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema",
+    "arm_sessions": 3
+  },
+  "window": [
+    1000,
+    1600
+  ],
+  "notes": "The same count problem from the other side: the arm that fires when price trades below the prior day's daily EMA lasts only two sessions, so any dip that needs longer than two sessions to stop falling and win the level back is never traded. Those slower recoveries are the same event the pattern is built on, and the forward evidence says this entry's edge accrues over one to two sessions after the fill rather than in the first minutes, which is the signature of a base that took time to form, not of a fast bounce. Extending the arm to three sessions should add trades of exactly the same kind without changing what is traded or how it is exited, and a quarter more trades at the same per-trade edge is enough to move the screen t from about 1.97 to above 2 and the confirmation t to near the bar. Because the change was not read off any result, a screen pass here would mean the entry itself is better than chance rather than that a slice of history was chosen well. Builds on re-a9765cdc93: One setting only: arm_sessions from 2 to 3, so an arm stays live for three sessions after price trades below the prior day's daily EMA. The trigger (daily-EMA reclaim clearing the prior three highs), the stop, the 2R target, the two-session hold and the 10:00 window start are unchanged. Note on fitting: the inherited 10:00 window start came from the discovery evidence; the change being tested here did not. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}

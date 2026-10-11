@@ -1,0 +1,34 @@
+{
+  "day": "2026-10-11",
+  "summary": "2 ideas judged, none passed (1 reached confirmation). Closest: Daily-EMA recovery swing triggered on the reclaim itself, not on a three-bar high (failed confirmation). The ledger holds 23 ideas; 13 have reached confirmation, so the next one there needs t >= 2.69.",
+  "passed": false,
+  "answer": {
+    "ideas": [
+      {
+        "title": "Daily-EMA recovery swing triggered on the reclaim itself, not on a three-bar high",
+        "hypothesis": "The daily-EMA reclaim is the only entry in the ledger that makes money before costs (+0.15 to +0.19R a trade over random), but at ~400-560 trades it cannot reach the confirmation bar: with about 500 trades in the confirmation window it needs roughly 0.2R a trade over random, and every filter tried so far bought a higher average by throwing trades away. Requiring the reclaim close to also clear the prior three highs does two harmful things: it discards arms where price wins the level back but never clears three bars' highs before the arm expires, and when it does trigger it does so further above the level, which inflates the distance to the stop under the last four lows so the same dollar recovery is worth fewer R. Triggering on the reclaim close that clears only the prior bar's high keeps the identical setup (price traded below the prior day's daily EMA, then closed back above it) while giving more trades and a smaller risk per trade, so the edge per trade should hold or improve and the t should rise through count rather than through a slice of history.",
+        "builds_on": "re-a9765cdc93",
+        "change": "The trigger's breakout requirement only: breakout_bars from 3 to 1, so the reclaim close need only exceed the prior bar's high. Trigger level (daily EMA), arming, the 0.1-ATR stop under the last four lows, the 2R target, the two-session hold and the 10:00 window start are all unchanged. Note on fitting: the inherited 10:00 window start came from the discovery evidence, but the change being tested here was not read off any result.",
+        "from_evidence": true,
+        "spec_json": "{\"family\": \"recovery_swing\", \"params\": {\"reclaim_level\": \"daily_ema\", \"breakout_bars\": 1}, \"window\": [1000, 1600]}"
+      },
+      {
+        "title": "Daily-EMA recovery swing with a three-session arm",
+        "hypothesis": "The same count problem from the other side: the arm that fires when price trades below the prior day's daily EMA lasts only two sessions, so any dip that needs longer than two sessions to stop falling and win the level back is never traded. Those slower recoveries are the same event the pattern is built on, and the forward evidence says this entry's edge accrues over one to two sessions after the fill rather than in the first minutes, which is the signature of a base that took time to form, not of a fast bounce. Extending the arm to three sessions should add trades of exactly the same kind without changing what is traded or how it is exited, and a quarter more trades at the same per-trade edge is enough to move the screen t from about 1.97 to above 2 and the confirmation t to near the bar. Because the change was not read off any result, a screen pass here would mean the entry itself is better than chance rather than that a slice of history was chosen well.",
+        "builds_on": "re-a9765cdc93",
+        "change": "One setting only: arm_sessions from 2 to 3, so an arm stays live for three sessions after price trades below the prior day's daily EMA. The trigger (daily-EMA reclaim clearing the prior three highs), the stop, the 2R target, the two-session hold and the 10:00 window start are unchanged. Note on fitting: the inherited 10:00 window start came from the discovery evidence; the change being tested here did not.",
+        "from_evidence": true,
+        "spec_json": "{\"family\": \"recovery_swing\", \"params\": {\"reclaim_level\": \"daily_ema\", \"arm_sessions\": 3}, \"window\": [1000, 1600]}"
+      }
+    ],
+    "lessons": "Nothing has passed yet, and two candidates have now reached confirmation and failed there, so the bar for everyone else is higher. The forward evidence settled three of the four patterns: the VWAP reclaim, the failed breakout and the opening range breakout barely move in our favour after the fill at any horizon, and what little they do move is smaller than the round-trip cost, so no change of target, hold or timeframe can rescue them. The only pattern that makes money before costs is the recovery swing triggered on the prior day's daily EMA, worth roughly 0.15 to 0.19R a trade over random entries, and its gain builds slowly over the following one to two sessions rather than in the first hour. That is why the two things tried on it both looked strong on the discovery period and then collapsed: cutting trades at one hour fights the slow build, and only taking the trade when SPY was up on the day removed trades that turned out to be fine out of sample. The arithmetic is now what binds: with about 500 trades in the confirmation window this entry needs close to 0.2R a trade over random to clear t = 2.67, so any filter that discards a quarter of the trades must lift the average by a third just to stand still. So this week stops slicing the existing trades and tests two ways to get more trades of the same kind out of the same reclaim, each of which would only pass the screen if the entry is genuinely better than chance.",
+    "wanted": [
+      "Daily-bar timeframes (or a multi-session swing family): every family is capped at 30-minute bars, yet the only live edge accrues over one to three sessions, so the stop, the trigger and the hold are all being measured on the wrong clock.",
+      "A dip-depth feature: how far below the prior day's daily EMA price traded during the arm, in daily ATR. This is the recovery swing's key latent variable and we currently cannot tell a shallow pullback from a falling knife.",
+      "A sessions-since-arm feature: how many sessions the stock spent below the level before the reclaim, so a slow base can be separated from a same-day V bounce without changing the arm window itself.",
+      "A non-coincident market regime feature (breadth, or VIX term structure): spy_day failed because it is the same day's market return, so it selects rallies rather than describing a regime.",
+      "An earnings-proximity flag, so multi-session holds can avoid holding an earnings report, which is pure gap risk uncorrelated with the signal.",
+      "A mean-reversion or exhaustion family (fade a multi-ATR extension back to VWAP or the daily EMA): all four catalog families are continuation patterns, and three of them are now dead, so the factory has never tested the opposite sign."
+    ]
+  }
+}

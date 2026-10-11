@@ -1,0 +1,13 @@
+{
+  "name": "Daily-EMA recovery swing triggered on the reclaim itself, not on a three-bar high",
+  "family": "recovery_swing",
+  "params": {
+    "reclaim_level": "daily_ema",
+    "breakout_bars": 1
+  },
+  "window": [
+    1000,
+    1600
+  ],
+  "notes": "The daily-EMA reclaim is the only entry in the ledger that makes money before costs (+0.15 to +0.19R a trade over random), but at ~400-560 trades it cannot reach the confirmation bar: with about 500 trades in the confirmation window it needs roughly 0.2R a trade over random, and every filter tried so far bought a higher average by throwing trades away. Requiring the reclaim close to also clear the prior three highs does two harmful things: it discards arms where price wins the level back but never clears three bars' highs before the arm expires, and when it does trigger it does so further above the level, which inflates the distance to the stop under the last four lows so the same dollar recovery is worth fewer R. Triggering on the reclaim close that clears only the prior bar's high keeps the identical setup (price traded below the prior day's daily EMA, then closed back above it) while giving more trades and a smaller risk per trade, so the edge per trade should hold or improve and the t should rise through count rather than through a slice of history. Builds on re-a9765cdc93: The trigger's breakout requirement only: breakout_bars from 3 to 1, so the reclaim close need only exceed the prior bar's high. Trigger level (daily EMA), arming, the 0.1-ATR stop under the last four lows, the 2R target, the two-session hold and the 10:00 window start are all unchanged. Note on fitting: the inherited 10:00 window start came from the discovery evidence, but the change being tested here was not read off any result. Drawn from the discovery evidence, so the screen is not an independent test of it."
+}
