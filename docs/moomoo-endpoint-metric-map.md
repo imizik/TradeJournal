@@ -24,7 +24,7 @@ endpoint-wide entitlement. Potential uses below are research hypotheses.
 
 | Endpoint/data | Potential metric or feature | Current comparison/source | Evidence and decision |
 | --- | --- | --- | --- |
-| [Historical candles](https://open.moomoo.com/api/quote/basic-data/history-kline): options | Option MFE/MAE, giveback, exit efficiency, peak-time and post-exit paths | `trade_path.py` calls Alpaca option history; fill minutes excluded, actual FIFO exposure and Decimal math retained | **N/P.** September NVDA OHLC matched on 390 shared minutes; SPY had one differing minute in 405. Adjusted UVXY zero-volume candles add no verified traded coverage. Keep Alpaca; no recomputation. |
+| [Historical candles](https://open.moomoo.com/api/quote/basic-data/history-kline): options | Option MFE/MAE, giveback, exit efficiency, peak-time and post-exit paths | `trade_path.py` calls Alpaca option history; fill minutes excluded, actual FIFO exposure and Decimal math retained | **N/P.** The [coverage study](moomoo-option-path-coverage.md) matched 150 finite fields across 18 hypothetical recent windows after the diagnostic timestamp shift; 12 fields jointly unavailable. Older December/March candidates returned cache-resolution errors while Alpaca supplied history. Extra zero-volume bars add no verified traded coverage. Keep Alpaca; saved metrics unchanged. |
 | Same endpoint: underlying minutes | Underlying MFE/MAE, move timing, ATR context and entry-price context | Alpaca minute paths; Polygon underlying price/context and independently computed indicators | **N/P.** Three additional sessions showed different OHLC/volume against IEX. Shared timestamps do not establish venue equivalence, fill-time availability or a better input. Keep current sources. |
 | Same endpoint: daily/other intervals | Indicators, RVOL and swing/event-study histories | Alpaca daily `all` adjustment; Polygon split-adjusted daily/hourly context; chart history has its own explicit basis | **N/P.** Native minute/five-minute volumes differ; raw/forward daily split sample compared. Adjustment modes are not interchangeable; no indicator or backtest was rerun. |
 | [Static profiles](https://open.moomoo.com/api/quote/basic-data/stock-basicinfo), [chains](https://open.moomoo.com/api/quote/derivatives/option-chain), [expirations](https://open.moomoo.com/api/quote/derivatives/option-expiration) | Contract resolution, expired-contract coverage, adjusted-root identity | Existing OCC mapping and Tradier chain contract model | **N** profiles/chains; **C** separate expiration endpoint. September history resolved despite chain failure; December candidate omitted. UVXY1 share size 20 is not its premium multiplier 100. Identity/deliverable semantics remain a gate. |
@@ -138,6 +138,11 @@ chain lookup, followed by correct instrument-session and adjusted-deliverable
 handling. None justifies replacing current sources. Sparse zero-volume bars
 are not proof of additional traded-price history, and more vendor model fields
 are not proof of more accurate fill-time Greeks.
+
+The later [historical-options coverage study](moomoo-option-path-coverage.md)
+confirmed recent hypothetical metric agreement after the diagnostic timestamp
+shift, but found no additional verified traded-price coverage. Four exact older
+Moomoo codes failed cache resolution while Alpaca returned their histories.
 
 Further bounded research could resolve older contract identities from independent
 reference data, compare common trade windows without touching saved metrics,
