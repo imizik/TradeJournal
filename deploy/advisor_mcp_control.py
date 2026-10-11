@@ -87,18 +87,19 @@ def stop():
         raise RuntimeError("Advisor shutdown command failed; both groups were attempted")
 
 
-def runtime_inventory():
+def runtime_inventory(*, root=None, roles=("adapter", "backend"), python_roles=("adapter", "backend")):
     """Hash all installed code/dependencies before invoking their interpreter.
 
     Nothing is ignored: installed bytecode and import hooks are code too. The
     read-only serving mounts cannot generate caches; preflight uses -B. OS
     interpreter symlink targets are pinned as well as the links themselves.
     """
+    root = ROOT if root is None else root
     result = {}
-    for role in ("adapter", "backend"):
-        tree = exact(ROOT / role)
+    for role in roles:
+        tree = exact(root / role)
         for path in (tree, *sorted(tree.rglob("*"))):
-            relative = str(path.relative_to(ROOT))
+            relative = str(path.relative_to(root))
             info = path.lstat()
             mode = info.st_mode & 0o7777
             if info.st_uid != 0 or (not path.is_symlink() and mode & 0o022):
@@ -123,23 +124,25 @@ def runtime_inventory():
             else:
                 raise ValueError("Advisor runtime special file refused")
             result[relative] = entry
-        if not (tree / ".venv/bin/python").is_file():
+        if role in python_roles and not (tree / ".venv/bin/python").is_file():
             raise ValueError("Advisor runtime interpreter missing")
     return result
 
 
-def normalize_new_runtime(role):
+def normalize_new_runtime(role, *, root=None, record=None):
     """Only during a fresh exclusive install, before recording any approval.
 
     Wheel/venv modes vary with the build and umask. Make new owned code read-only
     to service identities, without touching a symlink target or installed drift.
     """
-    if role not in {"adapter", "backend"} or RECORD.exists():
+    root = ROOT if root is None else root
+    record = RECORD if record is None else record
+    if role not in {"adapter", "backend", "frontend", "bin"} or record.exists():
         raise ValueError("Refuse normalizing an existing recorded runtime")
-    tree = exact(ROOT / role)
+    tree = exact(root / role)
     for path in (tree, *sorted(tree.rglob("*"))):
         info = path.lstat()
-        relative = str(path.relative_to(ROOT))
+        relative = str(path.relative_to(root))
         if info.st_uid != 0:
             raise ValueError(f"New advisor runtime not root-owned: {relative} uid={info.st_uid} mode={info.st_mode & 0o7777:o}")
         if path.is_symlink():

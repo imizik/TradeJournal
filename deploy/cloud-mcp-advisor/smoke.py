@@ -356,6 +356,8 @@ print("advisor native boundary positive" if positive else "advisor native bounda
     before = staging.digest(control.STATE / "fixture.db")
     control.stop()
     assert staging.digest(control.STATE / "fixture.db") == before
+    from trial_smoke import exercise as exercise_trial
+    exercise_trial(archive, scratch, run, context=context, token=token, identity=config, keys=keys, resource=RESOURCE, proxy=PROXY)
     control.rollback()
     assert staging.digest(control.STATE / "fixture.db") == before
     assert all(not (control.UNIT_DIR / u).exists() for u in control.UNITS)
