@@ -292,9 +292,9 @@ export const LAYOUT_PRESETS = [
   { id: "research", name: "Research", detail: "Balanced rows, side dock open", smallSize: "normal", dock: true },
 ] as const satisfies readonly { id: string; name: string; detail: string; smallSize: SmallChartSize; dock: boolean }[];
 export type LayoutPreset = (typeof LAYOUT_PRESETS)[number];
-/** A preset arranges the five charts and sets the chart sizes; intervals, held symbols and linked ranges stay as they are. */
+/** A preset arranges the five charts and sets the desktop split; intervals, held symbols, linked ranges and a phone's chart height stay as they are. */
 export const applyPreset = (settings: ChartSettings, preset: LayoutPreset): ChartSettings =>
-  ({ ...settings, layout: "multi", smallSize: preset.smallSize, proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
+  ({ ...settings, layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
 const thousandths = (value: number) => Math.round(value * 1000) / 1000;
 /**
  * Proportions from outside this code, kept to what the dividers can make: the
@@ -429,8 +429,9 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   session: "extended", layout: "multi",
   indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "compact", immersiveWatchlist: false, layouts: [],
-  proportions: null, layoutProportions: {},
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
+  proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -484,7 +485,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       panelStudies: cleanPanelStudies(value.panelStudies),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
-      smallSize: value.smallSize === "normal" || value.smallSize === "tall" ? value.smallSize : "compact",
+      smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
       immersiveWatchlist: value.immersiveWatchlist === true,
       layouts,
       proportions: cleanProportions(value.proportions),

@@ -1691,7 +1691,7 @@ test("named layouts save, switch, rename, update and delete without moving the s
   await saveLayout(page, "Names");
   await expect(layoutsButton(page)).toContainText("Names"); // the panels are arranged as this layout
   await expect.poll(() => layoutNames(server)).toEqual(["Names"]);
-  expect(layoutsOn(server)[0]).toMatchObject({ layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, "SPY", null, "QQQ"], smallSize: "compact", linkRange: false });
+  expect(layoutsOn(server)[0]).toMatchObject({ layout: "multi", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, "SPY", null, "QQQ"], smallSize: "normal", linkRange: false });
 
   // "Scalp": faster intervals on the traded name alone, tall charts, linked ranges.
   await followMain(page, "Panel 3", "MRVL");
@@ -1703,7 +1703,7 @@ test("named layouts save, switch, rename, update and delete without moving the s
   await expect(layoutsButton(page)).toHaveText("Layouts"); // edited: no saved layout matches
   await saveLayout(page, "Scalp");
   await expect.poll(() => layoutNames(server)).toEqual(["Names", "Scalp"]);
-  expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "compact", linkRange: true });
+  expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: true });
   // A layout's proportions sit beside the list, by its id, so an older tab keeps both (C7.4).
   expect(Object.keys(layoutsOn(server)[1]).sort()).toEqual(LAYOUT_KEYS);
   expect(proportionsOn(server, layoutsOn(server)[1].id)!.lower).toBeGreaterThan(0.4); // the default is 0.275
