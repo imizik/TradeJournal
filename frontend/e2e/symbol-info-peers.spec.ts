@@ -43,6 +43,9 @@ test("Peers chips show today's move and a click switches the chart like a watchl
     await route.fulfill({ json: peers(symbol) });
   });
   await page.goto("/charts");
+  // Peers sit in the Overview tab, not above every tab.
+  await expect(panel(page).getByRole("group", { name: "Peers" })).toHaveCount(0);
+  await panel(page).getByRole("tab", { name: "Overview" }).click();
   const strip = panel(page).getByRole("group", { name: "Peers" });
   await expect(strip.getByRole("button", { name: "Peer AMD" })).toContainText("-4.38%");
   await expect(strip.getByRole("button", { name: "Peer GOOGL" })).toContainText("+0.50%");
@@ -63,5 +66,6 @@ test("Peers says so when a symbol has none, like an ETF", async ({ page }) => {
   });
   await page.goto("/charts");
   await page.getByRole("button", { name: "Chart SPY", exact: true }).click();
+  await panel(page).getByRole("tab", { name: "Overview" }).click();
   await expect(panel(page).getByRole("group", { name: "Peers" })).toContainText("No related companies listed for SPY");
 });
