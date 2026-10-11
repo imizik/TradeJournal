@@ -54,7 +54,10 @@ The authoritative index is `ledger.sqlite3`, containing immutable run requests,
 separate attempts, append-only transitions, operation IDs and outcome exposures.
 SQLite opens only `:memory:`: Python3.11+ serialization loads/saves its image
 through bounded, no-follow files. A ledger kernel lock serializes short write
-transactions; atomic replacement and directory fsync publish the image. This
+transactions; atomic replacement and directory fsync publish the image.
+Application identity/schema checks refuse unrelated SQLite files before any
+schema/index write. Exact unmarked R2 indexes with the saved-version request
+schema remain readable and gain the namespace mark on a later explicit write. This
 avoids a path-following SQLite/WAL open or coupling to the app database. Explicit
 local single-host storage only; network filesystems and multi-host workers are
 unsupported. Prepared snapshots and results are bounded content-addressed files

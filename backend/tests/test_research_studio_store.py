@@ -316,3 +316,36 @@ def test_cached_results_reopen_with_saved_versions_but_old_jobs_cannot_recompute
     assert store.status(run)["status"] == "completed"
     assert store.work_once()["status"] == "failed"
     assert "code changed" in store.status(queued)["reason"]
+
+
+def test_unrelated_sqlite_image_is_not_adopted_or_modified(store, snapshot, definition):
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE journal_private (trade_id INTEGER PRIMARY KEY)")
+    db.execute("INSERT INTO journal_private VALUES(41)")
+    db.commit()
+    original = db.serialize()
+    db.close()
+    (store.root / "ledger.sqlite3").write_bytes(original)
+    with pytest.raises(ValueError, match="not a Research Studio"):
+        store.enqueue(snapshot, definition, operation())
+    assert (store.root / "ledger.sqlite3").read_bytes() == original
+    assert not any(p.is_dir() for p in store.root.iterdir())
+
+
+def test_known_unmarked_research_index_remains_readable_and_namespaced_on_next_write(store, snapshot, definition):
+    run = store.enqueue(snapshot, definition, operation())["run_id"]
+    store.work_once(compute=analyze)
+    original = store.result(run, operation())
+    import sqlite3
+    db = sqlite3.connect(":memory:")
+    db.deserialize((store.root / "ledger.sqlite3").read_bytes())
+    db.execute("PRAGMA application_id=0")
+    db.execute("PRAGMA user_version=0")
+    (store.root / "ledger.sqlite3").write_bytes(db.serialize())
+    db.close()
+    assert store.status(run)["status"] == "completed"
+    assert store.result(run, operation()) == original
+    with store._db() as db:
+        from app.engine.research_studio_store import APPLICATION_ID
+        assert db.execute("PRAGMA application_id").fetchone()[0] == APPLICATION_ID

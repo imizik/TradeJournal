@@ -29,6 +29,14 @@ from app.engine.research_studio_data import engine_fingerprint
 MAX_BYTES = 128 * 1024 * 1024
 RUN_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 MAX_ACTIVE = 4
+APPLICATION_ID = 0x52535432  # RST2; unrelated SQLite files are never adopted.
+TABLE_COLUMNS = {
+    "run": ("id", "request", "request_sha", "result_sha", "created"),
+    "attempt": ("run_id", "number", "state", "cancel_requested", "reason"),
+    "operation": ("id", "run_id", "action"),
+    "event": ("seq", "run_id", "attempt", "kind", "at", "detail"),
+    "exposure": ("seq", "run_id", "operation_id", "at"),
+}
 
 
 def code_identity() -> str:
@@ -185,8 +193,20 @@ class ResearchStore:
                 with self._root() as root:
                     try:
                         db.deserialize(self._read(root, "ledger.sqlite3"))
+                        existing = True
                     except FileNotFoundError:
-                        pass
+                        existing = False
+                if existing:
+                    objects = set(db.execute("SELECT type,name FROM sqlite_master WHERE type IN ('table','view','trigger') AND name!='sqlite_sequence'"))
+                    signature = {name: tuple(r[1] for r in db.execute(f"PRAGMA table_info({name})"))
+                                 for name in TABLE_COLUMNS}
+                    marker = db.execute("PRAGMA application_id").fetchone()[0]
+                    version = db.execute("PRAGMA user_version").fetchone()[0]
+                    if (objects != {("table", name) for name in TABLE_COLUMNS} or signature != TABLE_COLUMNS
+                            or marker not in (0, APPLICATION_ID) or version not in (0, 1)):
+                        raise ValueError("existing file is not a Research Studio V1 ledger")
+                    # Exact unmarked pre-release R2 indexes remain readable;
+                    # only a later explicit write publishes the namespace mark.
                 db.execute("PRAGMA foreign_keys=ON")
                 db.executescript("""
                     CREATE TABLE IF NOT EXISTS run (
@@ -205,6 +225,8 @@ class ResearchStore:
                       seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run(id),
                       operation_id TEXT NOT NULL UNIQUE REFERENCES operation(id), at TEXT NOT NULL);
                 """)
+                db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+                db.execute("PRAGMA user_version=1")
                 yield db
                 if write:
                     db.commit()
