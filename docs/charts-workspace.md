@@ -101,12 +101,16 @@ reads once on a 2.5 s budget with no retry and mutes itself for five minutes); e
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
 
-**News markers** (T3.5) put the same Focused headlines on the main chart: a small
-square floating about 26 px above the high of the candle that holds an article's
-publish time (clear of the candle and of a fill arrow on it), labelled "N" for
-one article or "N3" for three. They are their own marker set that the price
-scale ignores, so a marker above the frame is clipped, never a reason to
-shrink the candles; hover and click work on the marker where it is drawn. The **News markers** group of the Layers panel
+**News markers** (T3.5) put the same Focused headlines on the main chart as a
+quiet event strip along the bottom of the price pane, never on the candles: a
+small hollow slate ring under the candle that holds an article's publish time,
+and a larger ring with a count where stories on nearby candles join (markers
+within 30 px of each other at the current zoom are one, so the grouping follows
+the zoom). They are drawn by the marks layer (`frontend/lib/chartMarks.ts`), a
+series primitive the price scale ignores, so they never shrink the candles;
+hover and click work on the ring where it is drawn. Smaller charts show none
+unless **News on small charts** (in the same Layers group, saved as the
+`newsOnSmall` setting, off by default) is checked. The **News markers** group of the Layers panel
 (and the chart menu's layer list) hides them; it is on by default and saved with
 the other layers (a `newsHidden` settings field of its own, for the same reason
 as `autoLevelsHidden`). While the layer is on the chart reads the news endpoint
@@ -121,11 +125,11 @@ the next candle, because a 1D or 1W candle is a regular session, 09:30 to 16:00
 New York; after the last candle it sits on the last one, before the first
 loaded candle it has no marker, and one inside a hole in the loaded history
 (more than 5 days intraday, 10 for 1D, 21 for 1W) has none. Several articles on
-one candle are one marker. Hover (a mouse) lists up to five headlines, newest
+one candle are one marker, and a joined marker lists every member's headlines. Hover (a mouse) lists up to five headlines, newest
 first, then "+N more", with the candle's date and time; a click opens the dock
 on the News tab with that candle's articles highlighted for a few seconds. On a
 phone a tap pins the headlines in a popover whose **Read in News** button opens
-the Watchlist sheet on the News tab. Markers stack with fill arrows and earnings
+the Watchlist sheet on the News tab. News rings sit in their own strip, apart from fill chevrons and earnings
 dates without covering them, and a level or drawing under the pointer still wins
 a click. Historical chart mode shows only the articles whose candles are loaded.
 
@@ -2037,3 +2041,26 @@ Tradier latency or complete G0 market-session acceptance. REST budgets and
 cadences are unchanged; recovery gaps may request an exceptional refresh through
 that same budgeted cache. Connection pooling, recent-symbol caching, progressive
 loading and live studies remain separate work.
+
+
+## Fill, report and news marks (declutter)
+
+Fills, report dates and news are one series primitive, `MarkLayer` in
+`frontend/lib/chartMarks.ts`, replacing the library's arrow, circle and square
+markers (which cannot be slim, merge or stay out of the price fit). Fills merge
+to one slim open chevron per candle per side: a buy under the low, a sell over
+the high, five pixels off the wick, in the candles' up and down colors, with a
+small count beside it only when several merged (a crowded zoom with no room for
+the count stacks a second, fainter chevron instead). Nothing is hidden by
+merging: hover lists every fill in the candle (its label and candle time; the
+marker data carries no price), a click on a single fill opens its trade card and
+on a merged one pins a list whose rows each open their own trade. Report dates
+are a ring with an E (dashed when estimated), under the candle and its buy
+chevron. Smaller charts draw fills as tiny dots, never text.
+
+Text labels are off by default. **Layers, Journal, Fill labels** chooses Off,
+Latest trade or All (the shared `fillLabels` setting). Labels sit under a buy and
+over a sell and a crowded one is skipped, never overlapped; hover still lists it.
+The markers carry no trade id, so "Latest trade" labels the fills on the newest
+candle that has any. `e2e/chart-markers.spec.ts` holds the merge, hover, label,
+cluster and small-chart checks and the pictures.

@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, Eye, EyeOff, Info, Lock, LockOpen, Trash2, X } from "lucide-react";
 import Sheet from "./Sheet";
-import { OPTIONS_NEAREST } from "@/lib/charts";
-import type { OptionsLayer, OptionsMeasure, OptionsScope } from "@/lib/charts";
+import { FILL_LABELS, OPTIONS_NEAREST } from "@/lib/charts";
+import type { FillLabels, OptionsLayer, OptionsMeasure, OptionsScope } from "@/lib/charts";
 import { MEASURE_NAMES, SCOPE_NAMES } from "@/lib/optionsView";
 
 /** One level or drawing in the panel. `name` and `detail` ("Breakout", "256.00") name its buttons. */
@@ -12,7 +12,9 @@ export type LayerItem = { id: string; symbol: string; name: string; detail: stri
 export type ItemGroup = "levels" | "drawings";
 export type LayerGroup =
   | { key: ItemGroup; name: string; noun: string; hidden: boolean; items: LayerItem[] }
-  | { key: "journal" | "auto" | "ranges" | "news"; name: string; hidden: boolean; info: string; status?: string }
+  | { key: "auto" | "ranges"; name: string; hidden: boolean; info: string; status?: string }
+  | { key: "journal"; name: string; hidden: boolean; info: string; status?: string; labels: FillLabels }
+  | { key: "news"; name: string; hidden: boolean; info: string; status?: string; small: boolean }
   | { key: "options"; name: string; hidden: boolean; info: string; status?: string; filters: OptionsLayer }
   | { key: "indicators"; name: string; hidden: boolean; studies: { key: string; label: string; on: boolean }[] };
 
@@ -32,8 +34,9 @@ function readCollapsed(): string[] {
  * group; Options levels (C4.4) too, and carry their filters: what ranks the
  * strikes, which expirations count, how many each side and whether gamma is signed.
  */
-export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onGroupLock, onGroupDelete, onJump, onItem, onDelete, onStudy, onOptions }: {
+export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onGroupLock, onGroupDelete, onJump, onItem, onDelete, onStudy, onOptions, onLabels, onNewsSmall }: {
   groups: LayerGroup[]; sheet: boolean; onClose(): void; onOptions?(patch: Partial<OptionsLayer>): void;
+  onLabels?(labels: FillLabels): void; onNewsSmall?(on: boolean): void;
   onGroupHidden(key: LayerGroup["key"]): void; onGroupLock(key: ItemGroup): void; onGroupDelete(key: ItemGroup): void;
   onJump(group: ItemGroup, item: LayerItem): void; onItem(item: LayerItem, patch: { hidden?: boolean; locked?: boolean }): void;
   onDelete(item: LayerItem): void; onStudy(key: string): void;
@@ -114,6 +117,11 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
           })}
         </div>}
         {open && "filters" in group && <OptionFilters filters={group.filters} sheet={sheet} onChange={(patch) => onOptions?.(patch)} />}
+        {open && "labels" in group && <FillLabelChoice labels={group.labels} sheet={sheet} onChange={(labels) => onLabels?.(labels)} />}
+        {open && "small" in group && <label className={`flex items-center gap-2 px-3 pb-2 pl-5 text-[10px] text-slate-400 ${sheet ? "min-h-11" : ""}`}>
+          <input type="checkbox" checked={group.small} onChange={(event) => onNewsSmall?.(event.target.checked)} className="accent-sky-400" />
+          News on small charts
+        </label>}
         {"info" in group && <p id={`layer-info-${group.key}`} hidden={!explained.includes(group.key)} className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.info}</p>}
         {open && "status" in group && !!group.status && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.status}</p>}
         {open && "studies" in group && <div className="pb-1">
@@ -129,6 +137,19 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
 
   if (sheet) return <Sheet label="Layers" onClose={onClose}>{body}</Sheet>;
   return <section aria-label="Layers">{body}</section>;
+}
+
+/** Which fills get a text label on the main chart (Journal): never, the newest candle's, or every one. Saved with the workspace. */
+const LABEL_NAMES: Record<FillLabels, string> = { off: "Off", latest: "Latest trade", all: "All" };
+function FillLabelChoice({ labels, sheet, onChange }: { labels: FillLabels; sheet: boolean; onChange(labels: FillLabels): void }) {
+  const tall = sheet ? "min-h-11" : "min-h-6";
+  return <div className="space-y-1 px-3 pb-2 pl-5 text-[10px]">
+    <div className="text-slate-500">Fill labels</div>
+    <div role="group" aria-label="Fill labels" className="flex overflow-hidden rounded border border-slate-700/70">
+      {FILL_LABELS.map((mode) => <button key={mode} aria-pressed={labels === mode} onClick={() => onChange(mode)}
+        className={`flex-1 px-1 ${tall} ${labels === mode ? "bg-slate-800 text-slate-200" : "text-slate-500 hover:text-slate-300"}`}>{LABEL_NAMES[mode]}</button>)}
+    </div>
+  </div>;
 }
 
 /** The options layer's filters (C4.4), saved with the workspace. */
