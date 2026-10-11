@@ -56,12 +56,12 @@ def save_review(session: Session, day: date, review: dict, trade_count: int) -> 
     return record
 
 
-def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = None) -> tuple[DailyReviewRecord, dict]:
+def generate(session: Session, day: date, trade_ids: list[uuid.UUID] | None = None, backend: str | None = None) -> tuple[DailyReviewRecord, dict]:
     """Review the day (its own trades unless ids are given) and save it. Raises LookupError when there are no trades."""
     from app.ai.daily_reviewer import review_trading_day
 
     trades, fills_by_trade_id = load_trades(session, day_trade_ids(session, day) if trade_ids is None else trade_ids)
     if not trades:
         raise LookupError(f"No trades on {day.isoformat()}")
-    review = review_trading_day(day.isoformat(), trades, fills_by_trade_id, session)
+    review = review_trading_day(day.isoformat(), trades, fills_by_trade_id, session, backend=backend)
     return save_review(session, day, review, len(trades)), review

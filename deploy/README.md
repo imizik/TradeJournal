@@ -646,12 +646,12 @@ Turn it on once, after a release that contains it:
 
 1. On a computer signed in to the Claude plan, run `claude setup-token` and
    copy the token it prints.
-2. On the VPS, create the token file (paste the token when `cat` waits, then
-   press Ctrl-D):
+2. On the VPS, create the token file. `read -rs` waits for the token without
+   showing it; paste it and press Enter:
 
    ```bash
    sudo install -m 600 -o root -g root /dev/null /etc/tradejournal/claude-plan.env
-   printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$(cat)" | sudo tee /etc/tradejournal/claude-plan.env > /dev/null
+   read -rs TOKEN && printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$TOKEN" | sudo tee /etc/tradejournal/claude-plan.env > /dev/null; unset TOKEN
    sudo systemctl restart tradejournal-api
    ```
 
@@ -663,7 +663,9 @@ Turn it on once, after a release that contains it:
    sudo systemctl enable --now tradejournal-plan-reviews.timer
    ```
 
-An enabled timer survives releases; a release never enables it. To stop the
+An enabled timer survives releases; a release never enables it. A rollback to
+a release from before this feature removes the units, so after rolling forward
+again, enable the timer once more. To stop the
 nightly reviews, `sudo systemctl disable --now tradejournal-plan-reviews.timer`.
 The run uses the plan's usage like any Claude Code session; it stops after two
 failed calls in a row (most likely the plan's limit) and continues the next

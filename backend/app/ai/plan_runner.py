@@ -15,8 +15,9 @@ Settings (all optional except the token):
   ``bin/claude``, then ``claude`` on PATH, then ``~/.local/node/bin/claude``).
 - ``TJ_CLAUDE_CONFIG_DIR``: Claude Code's own state directory, which must be
   writable (production: ``/var/lib/tradejournal/claude``).
-- ``TJ_PLAN_REVIEW_MODEL`` (``sonnet``) and ``TJ_PLAN_REVIEW_TIMEOUT``
-  (300 seconds) for each call.
+- ``TJ_PLAN_REVIEW_MODEL`` (``sonnet``), ``TJ_PLAN_REVIEW_TIMEOUT``
+  (300 seconds) and ``TJ_PLAN_REVIEW_BUDGET_USD`` (2, the API-price ceiling
+  Claude Code enforces should a call ever bill an API key) for each call.
 """
 
 from __future__ import annotations
@@ -81,8 +82,14 @@ def plan_configured() -> bool:
     return bool(os.environ.get(TOKEN_ENV)) and Path(claude_binary()).is_file()
 
 
+# Only what Claude Code needs: the rest of the backend's environment (database
+# URL, provider keys) never reaches it.
+_PASSED = ("PATH", "HOME", "LANG", "LC_ALL", "TZ", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "NODE_EXTRA_CA_CERTS",
+           "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", TOKEN_ENV)
+
+
 def _child_env() -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items() if key not in _OUTRANKING}
+    env = {key: os.environ[key] for key in _PASSED if key in os.environ and key not in _OUTRANKING}
     config = os.environ.get("TJ_CLAUDE_CONFIG_DIR")
     if config:
         Path(config).mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -126,6 +133,7 @@ def ask(system: str, message: str, schema: dict, *, model: str | None = None, ti
     command = [binary, "-p", "--restricted", "--strict-mcp-config", "--tools", "",
                "--model", model, "--system-prompt", system, "--json-schema", json.dumps(schema),
                "--permission-mode", "dontAsk", "--permission-prompts", "none",
+               "--max-budget-usd", os.environ.get("TJ_PLAN_REVIEW_BUDGET_USD") or "2",
                "--no-session-persistence", "--output-format", "json"]
     try:
         result = subprocess.run(command, input=message, env=env, capture_output=True, text=True, timeout=limit)

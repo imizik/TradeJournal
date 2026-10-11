@@ -30,24 +30,43 @@ ANSWER = {"summary": "Two trades, +$60.", "day_grade": "B: sized to plan", "key_
 
 FAKE_CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
-log = os.environ["FAKE_CLAUDE_LOG"]
-with open(log, "a") as handle:
+fake = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake.json")))
+with open(fake["log"], "a") as handle:
     handle.write(json.dumps({"argv": sys.argv[1:], "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
                              "api_key": os.environ.get("ANTHROPIC_API_KEY"), "base_url": os.environ.get("ANTHROPIC_BASE_URL"),
-                             "config": os.environ.get("CLAUDE_CONFIG_DIR")}) + "\n")
+                             "database": os.environ.get("DATABASE_URL"), "config": os.environ.get("CLAUDE_CONFIG_DIR")}) + "\n")
 if sys.argv[1:3] == ["auth", "status"]:
-    print(json.dumps({"authMethod": os.environ.get("FAKE_AUTH", "oauth_token"), "apiProvider": "firstParty"}))
+    print(json.dumps({"authMethod": fake.get("auth", "oauth_token"), "apiProvider": "firstParty"}))
     sys.exit(0)
 message = sys.stdin.read()
-mode = os.environ.get("FAKE_MODE", "ok")
+mode = fake.get("mode", "ok")
 if mode == "error":
     print(json.dumps({"type": "result", "subtype": "error_max_turns", "is_error": True, "result": "usage limit reached"}))
     sys.exit(1)
-answer = json.loads(os.environ["FAKE_ANSWER"])
+answer = fake["answer"]
 print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "structured_output": answer,
                   "total_cost_usd": 0.0123, "duration_ms": 4200,
                   "modelUsage": {"claude-sonnet-5-5": {"inputTokens": 900, "outputTokens": 300, "cacheReadInputTokens": 100}}}))
 '''
+
+
+class Fake:
+    """The fake Claude Code's settings, in fake.json beside it."""
+
+    def __init__(self, folder: Path):
+        self.folder, self.log = folder, folder / "calls.jsonl"
+        self.settings = {"log": str(self.log), "answer": ANSWER}
+        self.save()
+
+    def save(self):
+        (self.folder / "fake.json").write_text(json.dumps(self.settings))
+
+    def set(self, **values):
+        self.settings.update(values)
+        self.save()
+
+    def __call__(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
 
 @pytest.fixture
@@ -55,18 +74,17 @@ def fake_claude(tmp_path, monkeypatch):
     binary = tmp_path / "claude"
     binary.write_text(FAKE_CLAUDE)
     binary.chmod(binary.stat().st_mode | stat.S_IEXEC)
-    log = tmp_path / "calls.jsonl"
+    fake = Fake(tmp_path)
     monkeypatch.setenv("TJ_CLAUDE_BIN", str(binary))
     monkeypatch.setenv("TJ_CLAUDE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("TJ_PLAN_REVIEW_DIR", str(tmp_path / "state"))
     monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "plan-token")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-reach-claude")
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://elsewhere.invalid")
-    monkeypatch.setenv("FAKE_CLAUDE_LOG", str(log))
-    monkeypatch.setenv("FAKE_ANSWER", json.dumps(ANSWER))
+    monkeypatch.setenv("DATABASE_URL", "postgresql://must-not-reach-claude")
     monkeypatch.delenv("AI_REVIEW_BACKEND", raising=False)
     plan_runner._checked.clear()
-    yield lambda: [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+    yield fake
     plan_runner._checked.clear()
 
 
@@ -108,18 +126,19 @@ def test_the_plan_token_reaches_claude_and_nothing_that_would_bill_or_redirect_i
     assert [call["argv"][:2] for call in calls] == [["auth", "status"], ["-p", "--restricted"]]
     for call in calls:
         assert call["token"] == "plan-token"
-        assert call["api_key"] is None and call["base_url"] is None
+        assert call["api_key"] is None and call["base_url"] is None and call["database"] is None
         assert call["config"].endswith("config")
     argv = calls[1]["argv"]
     assert argv[argv.index("--tools") + 1] == ""
     assert argv[argv.index("--model") + 1] == "sonnet"
+    assert argv[argv.index("--max-budget-usd") + 1] == "2"
     assert "plan-token" not in " ".join(argv)  # never an argument
     plan_runner.ask("system", "again", {"type": "object"})
     assert len(fake_claude()) == 3  # the sign-in is checked once per process
 
 
 def test_a_sign_in_other_than_the_plan_stops_before_any_question(fake_claude, monkeypatch):
-    monkeypatch.setenv("FAKE_AUTH", "api_key")
+    fake_claude.set(auth="api_key")
     with pytest.raises(plan_runner.PlanUnavailable, match="would not sign in with the plan token"):
         plan_runner.ask("system", "message", {"type": "object"})
     assert [call["argv"][0] for call in fake_claude()] == ["auth"]
@@ -137,7 +156,7 @@ def test_no_token_or_no_binary_is_unavailable_not_a_crash(fake_claude, monkeypat
 
 
 def test_an_error_answer_is_a_failed_call_with_its_reason(fake_claude, monkeypatch):
-    monkeypatch.setenv("FAKE_MODE", "error")
+    fake_claude.set(mode="error")
     with pytest.raises(plan_runner.PlanCallFailed, match="usage limit reached"):
         plan_runner.ask("system", "message", {})
 
@@ -181,7 +200,7 @@ def test_the_review_never_falls_back_to_the_api(fake_claude, engine, monkeypatch
     import types
 
     monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=lambda **_: pytest.fail("the API was called")))
-    monkeypatch.setenv("FAKE_AUTH", "api_key")
+    fake_claude.set(auth="api_key")
     add(engine, trade(1, datetime(2026, 9, 3, 9, 31), datetime(2026, 9, 3, 10, 0)))
     from app.ai import daily_review_service
 
@@ -217,13 +236,13 @@ def test_a_review_written_mid_session_is_redone_when_trades_were_added(fake_clau
 
 def test_two_failed_calls_in_a_row_stop_the_run_and_the_plan_being_unavailable_fails_it(fake_claude, engine, monkeypatch):
     add(engine, *[trade(day, datetime(2026, 9, day, 10, 0), datetime(2026, 9, day, 11, 0)) for day in range(1, 6)])
-    monkeypatch.setenv("FAKE_MODE", "error")
+    fake_claude.set(mode="error")
     with Session(engine) as session:
         status = plan_reviews.run(session, 10)
     assert status["state"] == "failed" and len(status["failed"]) == 2 and status["written"] == []
     assert "usage limit" in status["message"]
-    monkeypatch.setenv("FAKE_MODE", "ok")
-    monkeypatch.setenv("FAKE_AUTH", "api_key")
+    fake_claude.set(mode="ok")
+    fake_claude.set(auth="api_key")
     plan_runner._checked.clear()
     with Session(engine) as session:
         status = plan_reviews.run(session, 10)
@@ -243,7 +262,7 @@ def test_main_writes_the_status_and_exits_1_only_on_failure(fake_claude, engine,
     with Session(engine) as session:
         session.add(trade(2, datetime(2026, 9, 2, 10, 0), datetime(2026, 9, 2, 11, 0)))
         session.commit()
-    monkeypatch.setenv("FAKE_AUTH", "api_key")
+    fake_claude.set(auth="api_key")
     plan_runner._checked.clear()
     assert plan_reviews.main([]) == 1
     assert plan_reviews.read_status()["state"] == "failed"
@@ -281,3 +300,41 @@ def test_the_runner_status_route(fake_claude, client):
     state.mkdir(parents=True)
     (state / "status.json").write_text(json.dumps({"state": "ok", "written": []}))
     assert client.get("/daily-review/runner").json()["status"]["state"] == "ok"
+
+
+def test_the_nightly_run_stays_on_the_plan_even_when_the_button_is_set_to_the_api(fake_claude, engine, monkeypatch):
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(Anthropic=lambda **_: pytest.fail("the API was called")))
+    monkeypatch.setenv("AI_REVIEW_BACKEND", "api")
+    add(engine, trade(1, datetime(2026, 9, 1, 10, 0), datetime(2026, 9, 1, 11, 0)))
+    with Session(engine) as session:
+        status = plan_reviews.run(session, 10)
+    assert status["state"] == "ok"
+    assert status["model"].endswith("on the Claude plan")
+
+
+def test_a_run_stopped_midway_reads_as_interrupted_and_a_crash_leaves_a_failed_status(fake_claude, engine, monkeypatch):
+    plan_reviews._write_status({"state": "running", "started_at": "2026-09-01T00:00:00+00:00", "written": []})
+    assert plan_reviews.read_status()["state"] == "interrupted"
+    import app.database
+
+    monkeypatch.setattr(app.database, "engine", engine)
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(plan_reviews, "run", broken)
+    with pytest.raises(RuntimeError):
+        plan_reviews.main([])
+    status = plan_reviews.read_status()
+    assert status["state"] == "failed" and "database went away" in status["message"]
+
+
+def test_rules_from_an_old_review_carry_how_old_they_are(fake_claude, engine):
+    add(engine, trade(1, datetime(2026, 9, 30, 10, 0), datetime(2026, 9, 30, 11, 0)), review_record("2026-09-01", next_session_rules=["Old"]))
+    with Session(engine) as session:
+        history = daily_reviewer._history_context(datetime(2026, 9, 30).date(), session)
+    assert history["prior_reviews"][0]["days_before"] == 29
+    assert "more than 4" in daily_reviewer._SYSTEM_PROMPT

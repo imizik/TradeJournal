@@ -25,16 +25,19 @@ def review_trading_day(
     trades: list[Trade],
     fills_by_trade_id: dict[str, list[Fill]],
     session: Session,
+    backend: str | None = None,
 ) -> dict:
     """One day's review, from Claude on the owner's plan (app.ai.plan_runner).
 
     The Anthropic API is used only when ``AI_REVIEW_BACKEND=api`` is set
-    explicitly; nothing falls back to it.
+    explicitly and the caller does not pin ``backend="plan"`` (the nightly run
+    always does); nothing falls back to it.
     """
     context = _assemble_daily_context(day, trades, fills_by_trade_id, session)
     context["history"] = _history_context(date.fromisoformat(day), session)
     message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
-    if os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower() == "api":
+    chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
+    if chosen == "api":
         review = _review_with_api(message)
         review["generated_by"] = f"{os.environ.get('ANTHROPIC_MODEL', 'claude-opus-4-7')} through the Anthropic API"
     else:
@@ -81,8 +84,8 @@ def _history_context(review_day: date, session: Session) -> dict:
             saved = json.loads(record.review_json)
         except ValueError:
             continue
-        prior_reviews.append({"day": record.day.isoformat(), "day_grade": saved.get("day_grade"),
-                              "next_session_rules": saved.get("next_session_rules") or []})
+        prior_reviews.append({"day": record.day.isoformat(), "days_before": (review_day - record.day).days,
+                              "day_grade": saved.get("day_grade"), "next_session_rules": saved.get("next_session_rules") or []})
 
     # The trader's normal: the last BASELINE_DAYS days with trades before this one.
     window_start = review_day - timedelta(days=BASELINE_DAYS * 3)
@@ -403,7 +406,8 @@ from exit decisions.
   or there is no baseline.
 - Check the rules from the most recent entry in history.prior_reviews against today, one rules_check item per rule,
   with set_on as that review's day: "kept", "broken", "partly", or "not_tested" when today gave no chance to test it.
-  evidence names the trade(s) and the facts. Empty when there are no prior rules.
+  evidence names the trade(s) and the facts. Empty when there are no prior rules, or when that review's days_before is
+  more than 4 (its rules were not the ones in force for this day).
 - Every takeaway and pattern must point at evidence in the JSON: ticker and time, or the field and value. Never invent
   prices, levels, news or data that is not in the JSON. Fields are nullable; when missing data limits a judgement, say
   so in data_gaps (e.g. "No path metrics for 2 of 4 trades, so exit quality is unknown") instead of guessing.
@@ -422,7 +426,8 @@ no recommendation to buy or sell any security.
 
 ## history
 
-- prior_reviews: up to three earlier saved reviews, newest first: their day, grade and next_session_rules.
+- prior_reviews: up to three earlier saved reviews, newest first: their day, days_before (calendar days before this
+  one), grade and next_session_rules.
 - baseline: the trader's last trading days before this one (trading_days, trades_per_day, median_premium_per_trade,
   win_rate, avg_win, avg_loss, median_hold_mins, avg_day_pnl, worst_day_pnl). Null when there is no earlier trading.
 

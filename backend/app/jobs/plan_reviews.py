@@ -52,7 +52,24 @@ def read_status() -> dict | None:
         status = json.loads((state_dir() / "status.json").read_text())
     except (OSError, ValueError):
         return None
-    return status if isinstance(status, dict) else None
+    if not isinstance(status, dict):
+        return None
+    if status.get("state") == "running" and not _run_in_progress():
+        # Stopped mid-run (a deploy or a crash): what it wrote is kept, the rest waits for the next run.
+        status = {**status, "state": "interrupted", "message": "The last run stopped before it finished; the next run continues."}
+    return status
+
+
+def _run_in_progress() -> bool:
+    try:
+        with (state_dir() / "run.lock").open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(handle, fcntl.LOCK_UN)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    return False
 
 
 def _write_status(status: dict) -> None:
@@ -134,7 +151,8 @@ def run(session: Session, limit: int, dry_run: bool = False) -> dict:
     failures_in_row = 0
     for day, reason in picked:
         try:
-            _, review = daily_review_service.generate(session, day)
+            # Always the plan, whatever AI_REVIEW_BACKEND says: the nightly run never bills API credits.
+            _, review = daily_review_service.generate(session, day, backend="plan")
         except plan_runner.PlanUnavailable as exc:
             status["failed"].append({"day": day.isoformat(), "reason": reason, "error": str(exc)})
             status.update(state="failed", message=f"The Claude plan is not available: {exc}")
@@ -176,8 +194,16 @@ def main(argv: list[str] | None = None) -> int:
         if not alone:
             print("Another plan review run is in progress.")
             return 0
-        with Session(engine) as session:
-            status = run(session, max(1, args.max), args.dry_run)
+        try:
+            with Session(engine) as session:
+                status = run(session, max(1, args.max), args.dry_run)
+        except Exception as exc:  # a database or code failure still leaves a truthful status
+            status = {**(read_status() or {}), "state": "failed", "message": f"The run failed: {type(exc).__name__}: {str(exc)[:300]}",
+                      "finished_at": datetime.now(timezone.utc).isoformat()}
+            status.setdefault("started_at", status["finished_at"])
+            if not args.dry_run:
+                _write_status(status)
+            raise
         if not args.dry_run:
             _write_status(status)
     print(json.dumps(status, indent=2))
