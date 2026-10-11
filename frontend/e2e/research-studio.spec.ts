@@ -3,6 +3,8 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { eventEvidence, sameQuestion, disjointPeriods, sameCalculation } from "../components/research-studio/evidence";
+import type { Result } from "../components/research-studio/types";
 
 const backend=path.resolve(__dirname,"../../backend"), python=path.join(backend,".venv/bin/python");
 const executable=process.env.CI ? "python" : python;
@@ -31,6 +33,14 @@ test.beforeAll(async()=>{
   await startSidecar();
 });
 test.afterAll(async()=>{if(child && child.exitCode===null){child.kill("SIGTERM");await new Promise<void>(resolve=>{child.once("exit",()=>resolve());setTimeout(()=>{child.kill("SIGKILL");resolve();},3000);});}});
+
+test("event evidence uses valid endpoints, retains zeros and shows single-event sensitivity",()=>{
+  const result={events:[-2,0,1,5,null].map(v=>({outcomes:{"30m":{percent:v,prior_daily_atr14:v===null?null:v/2}}}))} as unknown as Result;
+  expect(eventEvidence(result,"30m","percent")).toEqual({n:4,positive:2,mean:1,median:0.5,spread:Math.sqrt(26/3),withoutLargest:-1/3,withoutSmallest:2});
+  expect(eventEvidence(result,"30m","prior_daily_atr14").mean).toBe(0.5);
+  expect(eventEvidence({events:[]} as unknown as Result,"30m","percent").mean).toBeNull();
+  expect(eventEvidence({events:[result.events[0]]} as unknown as Result,"30m","percent").withoutLargest).toBeNull();
+});
 
 test("question-start connects real preview, immutable run, views, exact bars and exposure reopen",async({page})=>{
   const leaked:string[]=[];page.on("request",r=>{if(/\/charts\/(history|stream)/.test(r.url()))leaked.push(r.url());});
@@ -427,3 +437,64 @@ test("fixed newer MU periods preserve discovery bounds, record exposure and fit 
     await expect(page.getByRole("alert",{name:"Research error"})).toContainText("discovery");
   } finally { await stopSidecar(); await startSidecar(); }
 });
+
+test("period comparison reveals frozen endpoints, preserves rules, and inspects the other period",async({page})=>{
+  await stopSidecar();await startSidecar(undefined,true);
+  try {
+    await page.goto("/research-studio");
+    await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+    const submitted=page.waitForResponse(r=>r.url().includes("/research-studio/command")&&r.request().postDataJSON()?.action==="enqueue");
+    await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+    const old=await (await submitted).json();
+    await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+    expect(old).toBeTruthy();
+    await page.getByLabel("Study period",{exact:true}).selectOption("2026-01-01");
+    await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+    await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+    await expect(page.getByRole("region",{name:"Event evidence",exact:true})).toHaveCount(0);
+    await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+    const evidence=page.getByRole("region",{name:"Event evidence",exact:true}).filter({hasText:"Frozen 2026-01-01 – 2026-10-09."});
+    await expect(evidence.getByRole("table",{name:"Event forward returns"})).toBeVisible();
+    await expect(evidence.locator("tbody tr")).toHaveCount(7);
+    await expect(evidence.getByLabel("Concentration check")).toContainText("Without the largest return");
+    await evidence.evaluate(el=>el.scrollIntoView({block:"start"}));
+    await page.screenshot({path:test.info().outputPath("studio-event-evidence-desktop.png")});
+    const pair=page.getByRole("region",{name:"Period comparison",exact:true});
+    await pair.getByLabel("Comparison period").selectOption(old.run_id);
+    const before=(await cmd("status",{run_id:old.run_id})).exposures;
+    const response=page.waitForResponse(r=>r.url().includes("/research-studio/command")&&r.request().postDataJSON()?.action==="result");
+    await pair.getByRole("button",{name:"Load period (records exposure)"}).click();
+    const oldResult=await (await response).json() as Result;
+    await expect(pair.getByRole("article")).toHaveCount(2);
+    expect((await cmd("status",{run_id:old.run_id})).exposures).toBe(before+1);
+    expect(sameQuestion(oldResult.population.definition,{...oldResult.population.definition,end:"2026-10-09",start:"2026-01-01",version:2})).toBe(true);
+    expect(disjointPeriods(oldResult.population.definition,{...oldResult.population.definition,start:"2026-01-01",end:"2026-10-09"})).toBe(true);
+    expect(sameCalculation(oldResult,{...oldResult,analysis_code_id:"different"})).toBe(false);
+    const expected=eventEvidence(oldResult,"30m","percent");
+    await expect(pair.getByRole("article",{name:"Period 2023-07-03"})).toContainText(expected.median!.toFixed(3)+"%");
+    const otherEvent=pair.locator("button[data-event-return-id]").first(), id=await otherEvent.getAttribute("data-event-return-id");
+    await otherEvent.click();await expect(page.getByTestId("selected-id")).toHaveText(id!);
+    await expect(page.getByLabel("MU historical five-minute candles")).toBeVisible();
+    await page.getByLabel("Return unit",{exact:true}).selectOption("prior_daily_atr14");
+    await expect(pair.getByRole("article",{name:"Period 2023-07-03"})).toContainText("Prior daily ATR(14)");
+    await pair.evaluate(el=>el.scrollIntoView({block:"start"}));await page.screenshot({path:test.info().outputPath("studio-period-comparison-desktop.png")});
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+    expect((await pair.getByLabel("Comparison period").boundingBox())!.width).toBeGreaterThan(300);
+    await pair.evaluate(el=>el.scrollIntoView({block:"start"}));await page.screenshot({path:test.info().outputPath("studio-period-comparison-phone.png")});
+    await evidence.evaluate(el=>el.scrollIntoView({block:"start"}));await page.screenshot({path:test.info().outputPath("studio-event-evidence-phone.png")});
+    await pair.getByLabel("Comparison period").selectOption("");
+    await expect(pair.getByRole("article")).toHaveCount(1);
+    let release:()=>void=()=>{},enter:()=>void=()=>{};
+    const gate=new Promise<void>(r=>release=r),entered=new Promise<void>(r=>enter=r);
+    await page.route("**/research-studio/command",async route=>{
+      if(route.request().postDataJSON().action==="result"&&route.request().postDataJSON().arguments.run_id===old.run_id){const response=await route.fetch();enter();await gate;await route.fulfill({response});}
+      else await route.continue();
+    });
+    await pair.getByLabel("Comparison period").selectOption(old.run_id);
+    await pair.getByRole("button",{name:"Load period (records exposure)"}).click();await entered;
+    await pair.getByLabel("Comparison period").selectOption("");release();
+    await expect(pair.getByRole("article")).toHaveCount(1);
+  } finally {await stopSidecar();await startSidecar();}
+});
+

@@ -1,0 +1,8 @@
+{
+  "name": "tradejournal-claude-code",
+  "private": true,
+  "description": "Claude Code, pinned, for the nightly plan reviews (deploy/build.py copies its binary to bin/claude).",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.278"
+  }
+}

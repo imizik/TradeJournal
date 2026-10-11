@@ -48,7 +48,8 @@ Things worth knowing before you touch a page:
   `/fills/{id}?returnTo=`. The trade detail page links nowhere.
 - The Sync Center's job types (`JOB_CONFIG` in `app/routers/sync.py`) are
   `gmail_sync`, `fill_import_check`, `trade_rebuild`, `polygon_enrich`,
-  `alpaca_enrich`, `trade_path`, `daily_review` and `gmail_push`;
+  `alpaca_enrich`, `trade_path` and `gmail_push` (`daily_review` is retired:
+  the opt-in nightly plan timer and the Daily Review button write reviews);
   `full_pipeline` and `resync_all` (`_EXTRA_JOB_CONFIG`) are the run types
   behind the pipeline button and the advanced resync, and
   `gmail_watch_renew` and `gmail_listener` are the run types the Gmail
@@ -123,7 +124,7 @@ you change it (`verification.md`, "What is NOT covered yet").
 | Live quotes | `app/engine/quotes.py` (provider seam), `app/engine/tradier.py`, `app/engine/occ.py`, `app/routers/quotes.py` | `GET /quotes?tickers=`, `POST /quotes/positions` | `test_quotes_provider.py` (dispatch, batching, fallback), `test_tradier.py`, `test_occ.py` — the live call itself is uncovered; `scripts/compare_quote_providers.py` is how it gets checked |
 | Market packets, reports, ticker analysis | `app/engine/packets.py`, `app/engine/analyzer.py`, `app/engine/news.py`, `prompts/market_report.md` | `GET /packets/report`, `/packets/analyze`, `/packets/news` | — (live Alpaca and yfinance) |
 | Scalp analysis | `app/engine/scalper.py` (`score_scalp()` is pure) | `GET /packets/scalp` | `test_scalper.py` |
-| AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py`, `app/routers/daily_review.py` | `POST /trades/{id}/review`; `GET /daily-review`, `/daily-review/{day}`, `POST /daily-review`; job `daily_review` | — (Anthropic) |
+| AI review | `app/ai/reviewer.py`, `app/ai/daily_reviewer.py` (prompt v2: process grade, the last review's rules checked, the trader's 20-day baseline, data gaps), `app/ai/daily_review_service.py`, `app/ai/plan_runner.py` (`claude -p` on the Claude plan), `app/jobs/plan_reviews.py` (nightly run, opt-in `tradejournal-plan-reviews.timer`), `app/routers/daily_review.py` | `POST /trades/{id}/review` (still the Anthropic API); `GET /daily-review`, `/daily-review/{day}`, `/daily-review/runner`, `POST /daily-review` (on the plan); the Sync Center `daily_review` job is retired (the nightly timer replaced it) | `tests/test_plan_reviews.py` (fake Claude Code: sign-in check, history, day choice, status), `frontend/e2e/daily-plan-review.spec.ts`; the live plan call is uncovered |
 | Webull | `app/engine/webull*.py`, `app/routers/webull.py` | `GET /webull/health`, `/webull/accounts`, `/webull/orders/recent`, `/webull/orders/{order_id}`, `/webull/events/status`; `POST /webull/events/test-ingest`, `/webull/events/start`, `/webull/events/stop`; job `webull_listener` | `test_webull_ingest.py`, `test_webull_events.py`, `test_webull_signer.py` |
 | Strategy Lab (kept readable, not extended since 2026-10-02: [what comes next](../strategy-factory.md#what-comes-next)) | `app/engine/strategy_lab.py`, `strategy_csv.py`, `strategy_metrics.py`, `app/routers/strategy_lab.py` | listed under the screen above | `test_strategy_lab_routes.py`, `test_strategy_import_routes.py`, `test_strategy_run_reads.py`, `test_strategy_csv.py`, `test_strategy_metrics.py` |
 | Isaac Market Map backtester | `app/engine/market_map.py` (pure historical strategy research rules), `app/engine/market_map_report.py` (cohorts, TradingView-shaped CSV, export parity), `scripts/backtest_market_map.py` (Alpaca bars, CLI) | — (`python scripts/backtest_market_map.py MU META --days 365`) | `test_market_map.py` (synthetic bars), `test_market_map_exports.py` (execution model vs the committed TradingView exports), `test_market_map_report.py`; entry parity on real bars is the script's `--parity` run, see `docs/pine/README.md` |
@@ -204,6 +205,13 @@ see the [prototype notes](../level2-synthetic-prototype.md) and
   `backend/app/routers/research_studio.py`, and the manually started
   `backend/scripts/research_studio_server.py` sidecar. The
   [R4](research-studio-r4.md) adds frozen-parent comparisons and append-only conclusions through the same owner workspace, with plain labels and separate finite comparison computation.
+  The [comparison extension](research-studio-comparison.md) adds every-event
+  endpoints, concentration checks and compatible saved-period summaries.
+  The [prospective MU study](research-studio-prospective-mu.md) is a separately
+  registered, scheduled cache/receipt workflow with a fixed formal review;
+  `backend/scripts/research_studio_prospective.py` and its explicit installer
+  `deploy/research_studio_prospective.py` own it. Future results stay separate
+  from the historical Studio UI and never enter Factory gates.
   [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
   boundaries; `backend/tests/test_research_studio_session.py` and
   `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.

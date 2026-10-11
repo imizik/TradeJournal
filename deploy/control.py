@@ -31,7 +31,11 @@ AUTOMATION_SERVICES = ["tradejournal-backup", "tradejournal-offsite-backup", "tr
 AUTODEPLOY = "tradejournal-autodeploy"
 TIMERS = [*[f"{name}.timer" for name in AUTOMATION_SERVICES], f"{AUTODEPLOY}.timer"]
 PRACTICE_UNITS = ["tradejournal-practice.service", "tradejournal-practice.timer"]
-OPTIONAL_UNITS = ["tradejournal-assistant.service", *PRACTICE_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
+# The nightly daily reviews on the Claude plan: opt-in like practice, enabled
+# once by the owner after /etc/tradejournal/claude-plan.env holds the token.
+PLAN_REVIEW_UNITS = ["tradejournal-plan-reviews.service", "tradejournal-plan-reviews.timer"]
+OPT_IN_TIMERS = ["tradejournal-practice.timer", "tradejournal-plan-reviews.timer"]
+OPTIONAL_UNITS = ["tradejournal-assistant.service", *PRACTICE_UNITS, *PLAN_REVIEW_UNITS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *TIMERS, f"{AUTODEPLOY}.service"]
 # The manual market-depth bridge is installed with releases but remains disabled
 # unless an operator provisions its config and enables it explicitly.
 MOOMOO_SERVICE = "tradejournal-moomoo.service"
@@ -127,7 +131,7 @@ def install(archive: Path, digest: str) -> Path:
         except KeyError:
             run("useradd", "--system", "--user-group", "--home-dir", STATE, "--shell", "/usr/sbin/nologin", "tradejournal")
             account = pwd.getpwnam("tradejournal")
-        for directory in (STATE, STATE / "data", STATE / "oauth", STATE / "job-locks", STATE / "frontend-cache", STATE / "frontend-cache" / destination.name):
+        for directory in (STATE, STATE / "data", STATE / "oauth", STATE / "job-locks", STATE / "claude", STATE / "plan-reviews", STATE / "frontend-cache", STATE / "frontend-cache" / destination.name):
             directory.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chown(directory, account.pw_uid, account.pw_gid)
         BACKUPS.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -185,7 +189,7 @@ def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
     # The bridge owns a provider socket and must stop before its frontend and
     # release target are replaced, including when rolling back old releases.
-    for service in [MOOMOO_SERVICE, "tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    for service in [MOOMOO_SERVICE, "tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *PLAN_REVIEW_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
@@ -244,11 +248,11 @@ def start_services(release: Path, confirmation: str) -> None:
         run("systemctl", "enable", "--now", *available_timers)
         run("systemctl", "is-active", *available_timers)
     # An explicitly enabled opt-in timer survives release restarts. Never enable it here.
-    practice_timer = "tradejournal-practice.timer"
-    if (release / "deploy/systemd" / practice_timer).is_file():
-        enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", practice_timer], check=False)
-        if enabled.returncode == 0:
-            run("systemctl", "start", practice_timer)
+    for opt_in_timer in OPT_IN_TIMERS:
+        if (release / "deploy/systemd" / opt_in_timer).is_file():
+            enabled = subprocess.run(["systemctl", "is-enabled", "--quiet", opt_in_timer], check=False)
+            if enabled.returncode == 0:
+                run("systemctl", "start", opt_in_timer)
     # A release never enables the capability. Only restart it when the
     # operator separately enabled the unit and explicitly opted in the
     # frontend configuration; absent files and disabled units are normal.

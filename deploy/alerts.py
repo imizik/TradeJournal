@@ -52,6 +52,9 @@ SERVICES = {
     "tradejournal-rvol-history.service": (
         "Relative volume history", "The morning relative-volume history couldn't be started, so chart RVol may be missing today."
     ),
+    "tradejournal-plan-reviews.service": (
+        "Nightly AI reviews", "Tonight's daily reviews on the Claude plan didn't run; the Daily page says why."
+    ),
 }
 TIMERS = {
     "tradejournal-backup.timer": "Nightly backup",
@@ -60,6 +63,10 @@ TIMERS = {
     "tradejournal-gmail-sync.timer": "Five-minute Gmail check",
     "tradejournal-options-snapshot.timer": "After-close options snapshot",
     "tradejournal-rvol-history.timer": "Morning relative volume history",
+}
+# Opt-in schedules: only one the owner enabled can be "switched off".
+OPT_IN_TIMERS = {
+    "tradejournal-plan-reviews.timer": "Nightly AI reviews",
 }
 
 
@@ -154,9 +161,9 @@ def unit_problems(units: dict[str, dict[str, str]]) -> dict[str, Problem | None]
         elif unit.get("Result") == "success" and unit.get("ExecMainExitTimestampMonotonic", "0") != "0":
             # Only a run since boot proves recovery; a reboot resets the result.
             observed[name] = None
-    for name, label in TIMERS.items():
+    for name, label in {**TIMERS, **OPT_IN_TIMERS}.items():
         unit = units.get(name, {})
-        if unit.get("LoadState") != "loaded":
+        if unit.get("LoadState") != "loaded" or (name in OPT_IN_TIMERS and unit.get("UnitFileState") != "enabled"):
             continue
         observed[name] = None if unit.get("ActiveState") == "active" else Problem(
             f"{label} is switched off",
@@ -169,8 +176,8 @@ def unit_problems(units: dict[str, dict[str, str]]) -> dict[str, Problem | None]
 
 def systemd_units() -> dict[str, dict[str, str]]:
     output = subprocess.run(
-        ["systemctl", "show", *SERVICES, *TIMERS,
-         "--property=Id,LoadState,ActiveState,Result,ExecMainExitTimestampMonotonic"],
+        ["systemctl", "show", *SERVICES, *TIMERS, *OPT_IN_TIMERS,
+         "--property=Id,LoadState,UnitFileState,ActiveState,Result,ExecMainExitTimestampMonotonic"],
         check=True, capture_output=True, text=True,
     ).stdout
     units = {}

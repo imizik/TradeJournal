@@ -94,6 +94,21 @@ def main() -> None:
         (public / "deployment.json").write_text(json.dumps({"release_id": args.release_id, "commit": commit}) + "\n")
         (release / "bin").mkdir()
         shutil.copy2(node, release / "bin/node")
+        # Claude Code for the nightly plan reviews, at the version deploy/claude-code pins.
+        # The platform package's native binary is copied as bin/claude; no install script runs.
+        claude_code = scratch / "claude-code"
+        shutil.copytree(source / "deploy/claude-code", claude_code)
+        run("npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund", cwd=claude_code, env=env)
+        pinned = json.loads((claude_code / "package.json").read_text())["dependencies"]["@anthropic-ai/claude-code"]
+        arch = {"x86_64": "x64", "aarch64": "arm64"}[platform.machine()]
+        native = claude_code / f"node_modules/@anthropic-ai/claude-code-linux-{arch}/claude"
+        shutil.copy2(native, release / "bin/claude")
+        (release / "bin/claude").chmod(0o755)
+        claude_version = run(release / "bin/claude", "--version", capture_output=True, text=True).stdout.strip()
+        if not claude_version.startswith(f"{pinned} "):
+            raise ValueError(f"Claude Code reports {claude_version!r}, not the pinned {pinned}")
+        metadata["claude_code"] = pinned
+        (release / "release.json").write_text(json.dumps(metadata, indent=2) + "\n")
         artifact = package(release, output)
         controller = output / "tradejournal-deploy.py"
         shutil.copyfile(release / "deploy/control.py", controller)

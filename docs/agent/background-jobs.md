@@ -175,6 +175,16 @@ with a packaged application and disposable Postgres; real-VPS reboot and live
 provider checks remain operator work. Those checks and Postgres-specific tests
 are separate from the local verification script.
 
+## Nightly plan reviews
+
+`app.jobs.plan_reviews` is a finite systemd oneshot
+(`tradejournal-plan-reviews.timer`, opt-in), not a `job_run` lane: it writes
+Daily Review rows directly, one day at a time, holds its own file lock in
+`TJ_PLAN_REVIEW_DIR` so two runs never overlap, and records its outcome in
+a status file in that directory (`GET /daily-review/runner`). It calls Claude
+only through `app.ai.plan_runner` (the Claude plan token); an interrupted run
+keeps the reviews it saved, and the next run picks up the rest.
+
 ## A3 finite daily preparation
 
 `practice_prepare` uses its own `practice` lane, separate from sync and capture.

@@ -9,6 +9,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tarfile
 from types import SimpleNamespace
@@ -500,6 +501,16 @@ def test_failed_units_and_stopped_timers_are_problems(alerts):
     assert "tradejournal-gmail-sync.timer" not in observed
 
 
+def test_the_opt_in_plan_review_schedule_is_a_problem_only_once_enabled(alerts):
+    name = "tradejournal-plan-reviews.timer"
+    assert name not in alerts.unit_problems({name: {"LoadState": "loaded", "UnitFileState": "disabled", "ActiveState": "inactive"}})
+    stopped = alerts.unit_problems({name: {"LoadState": "loaded", "UnitFileState": "enabled", "ActiveState": "inactive"}})
+    assert stopped[name].title == "Nightly AI reviews is switched off"
+    assert alerts.unit_problems({name: {"LoadState": "loaded", "UnitFileState": "enabled", "ActiveState": "active"}})[name] is None
+    failed = alerts.unit_problems({"tradejournal-plan-reviews.service": {"LoadState": "loaded", "ActiveState": "failed", "Result": "exit-code"}})
+    assert failed["tradejournal-plan-reviews.service"].title == "Nightly AI reviews failed"
+
+
 def test_job_failures_before_alerts_started_are_history(alerts):
     since = alerts.timestamp("2026-09-24T00:00:00Z")
     runs = [job_run("daily_review", "failed", "2026-09-23T12:00:00Z", "old news")]
@@ -776,6 +787,31 @@ def test_practice_timer_is_packaged_but_never_enabled_by_install():
     assert "app.jobs.practice_schedule" in service
     assert "TimeoutStartSec=5min" in service
     assert "EnvironmentFile=/etc/tradejournal/backend.env" in service
+
+
+def test_plan_reviews_are_packaged_opt_in_with_a_pinned_claude_code_and_the_token_file():
+    root = Path(__file__).resolve().parents[2]
+    systemd = root / "deploy/systemd"
+    control = load("control")
+    assert "tradejournal-plan-reviews.timer" not in control.TIMERS
+    assert {"tradejournal-plan-reviews.service", "tradejournal-plan-reviews.timer"} <= set(control.OPTIONAL_UNITS)
+    assert "tradejournal-plan-reviews.timer" in control.OPT_IN_TIMERS
+    service = (systemd / "tradejournal-plan-reviews.service").read_text()
+    assert "-m app.jobs.plan_reviews" in service
+    assert "EnvironmentFile=/etc/tradejournal/claude-plan.env" in service  # required: no token, no run
+    assert "TJ_CLAUDE_BIN=/opt/tradejournal/current/bin/claude" in service
+    assert "ReadWritePaths=/var/lib/tradejournal" in service and "ProtectHome=true" in service
+    timer = (systemd / "tradejournal-plan-reviews.timer").read_text()
+    assert "20:00:00 America/New_York" in timer and "Persistent=true" in timer
+    api = (systemd / "tradejournal-api.service").read_text()
+    assert "EnvironmentFile=-/etc/tradejournal/claude-plan.env" in api  # optional for the API
+    pinned = json.loads((root / "deploy/claude-code/package.json").read_text())["dependencies"]["@anthropic-ai/claude-code"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", pinned)
+    lock = json.loads((root / "deploy/claude-code/package-lock.json").read_text())
+    assert lock["packages"]["node_modules/@anthropic-ai/claude-code"]["version"] == pinned
+    assert "claude-code-linux-{arch}/claude" in (root / "deploy/build.py").read_text()
+    example = (root / "deploy/claude-plan.env.example").read_text()
+    assert "CLAUDE_CODE_OAUTH_TOKEN=\n" in example and "ANTHROPIC_API_KEY" not in example
 
 
 def test_moomoo_provisioning_preserves_existing_state_and_cleans_partial_creation(tmp_path, monkeypatch):

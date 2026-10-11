@@ -8,6 +8,8 @@ import { Copy, FlaskConical, ArrowRight } from "lucide-react";
 import QuestionEditor from "./QuestionEditor";
 import ResearchAnalysis from "./ResearchAnalysis";
 import ComparisonPanel from "./ComparisonPanel";
+import EventEvidence from "./EventEvidence";
+import PeriodComparison from "./PeriodComparison";
 import Conclusions from "./Conclusions";
 import { command, prepared } from "./transport";
 import { button, card, et, field, n as number, titles } from "./presentation";
@@ -174,6 +176,8 @@ export default function ResearchStudio() {
       <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Run identity and exposure history</summary><p className="mt-2 break-all"><code>{run.run_id}</code></p><p className="mt-1">{run.exposures} aggregate exposures · Cached reopen records another exposure.</p>{parent&&<p className="mt-1 break-all">Parent: {parent.run_id}</p>}</details>
     </section>}
     {result&&<ResearchAnalysis result={result} previous={previous} horizon={horizon} unit={unit} axis={axis} setHorizon={setHorizon} setUnit={setUnit} setAxis={setAxis} config={config} select={selectId}/>}
+    {result&&<EventEvidence result={result} previous={previous} horizon={horizon} unit={unit} select={selectId}/>}
+    {result&&<PeriodComparison key={result.run_id} result={result} runs={runs} horizon={horizon} unit={unit} inspect={(e,r)=>{void inspect(e,false,true,r);}} onSeen={markInformed}/>}
     {comparison&&<ComparisonPanel comparison={comparison} horizon={horizon} unit={unit} previous={previous} inspect={(e,r)=>{void inspect(e,false,true,r);}}/>}
     {comparison&&<Conclusions wide key={noteIds.join(":")} runIds={noteIds} horizon={horizon} unit={unit} onSeen={markInformed}/>}
     <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
