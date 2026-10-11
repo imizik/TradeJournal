@@ -18,6 +18,7 @@ const CHARTS_NAV_KEY = "tradejournal.charts.nav.v1";
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/access", label: "Assistant access", icon: FileText },
+  { href: "/advisor-review", label: "Advisor review", icon: ClipboardList },
   { href: "/charts", label: "Charts", icon: ChartCandlestick },
   { href: "/daily", label: "Daily Review", icon: ClipboardList },
   { href: "/trades", label: "Trades", icon: FileText },

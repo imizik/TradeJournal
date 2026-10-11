@@ -1,0 +1,34 @@
+[Unit]
+Description=Optional read-only isolated advisor owner ledger
+Requires=tradejournal-advisor-owner.socket
+After=tradejournal-advisor-owner.socket
+
+[Service]
+Type=exec
+User=tj-advisor-owner
+Group=tj-advisor-owner
+WorkingDirectory=/opt/tradejournal-advisor-owner/backend
+ExecStart=/opt/tradejournal-advisor-owner/backend/.venv/bin/python -B cloud_advisor_owner.py --config /etc/tradejournal-advisor-owner/config.json
+Environment=PYTHON_DOTENV_DISABLED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+UMask=0077
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro
+BindReadOnlyPaths=/opt/tradejournal-advisor-owner/backend /etc/tradejournal-advisor-owner /var/lib/tradejournal-advisor /run/tradejournal-advisor-owner
+InaccessiblePaths=-/srv -/mnt -/media
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+TasksMax=32
+MemoryMax=256M
+CPUQuota=50%
+TimeoutStopSec=10
+KillMode=control-group
+
+# All mounts are read-only, including the SQLite directory. No Restart/Install.

@@ -77,3 +77,62 @@ Stop and disable socket activation before replacing either process; disable the 
 `backend/tests/test_advisor_mcp_bundle.py` covers disabled migrated preparation, inventory/path/mode tampering, collisions, inactive install, partial failure, startup failure and receipt-preserving both-pair stop/rollback with fake host commands. Deployment CI adds `deploy/cloud-mcp-advisor/smoke.py`, guarded before mutation to the disposable Ubuntu runner, to exercise actual separate service UIDs/mounts/Unix activation/IP denial and exact TLS routes with generated tokens/invented data. It verifies independent bridge auth, cited save, uncertain-response read/retry/conflict, owner GET equality, process replacement, token/key expiry and config/assignment revocation, followed by both-pair shutdown and receipt-preserving rollback/cleanup. It does not contact an issuer, provider or Jo and is not a retained installer.
 
 Run scoped causal/static/docs checks followed by full verification or the [CI-backed path](verification.md#ci-backed-verification); exact revision/job/step results belong to the PR record. Native proof remains pending until the applicable actual CI step passes. Actual retained installation, separate OAuth consent, Jo catalog/read/save, exact receipt/UI/reopen/restart equality and observations of Jo's account/tool/data isolation remain later acceptance gates. Generated-token, local browser and disposable native fixtures establish neither actual Jo acceptance nor VPS/laptop-off operation. No real journal data, provider capture, order, arm, recurring schedule or production activation is authorized here.
+
+## Direct owner review in TradeJournal (dormant)
+
+`/advisor-review` retrieves the single isolated advisor request and exact saved
+receipt through `GET /api/advisor-owner`. It does not repoint the application
+database, import a snapshot, accept a file or expose another advisor MCP tool.
+The existing manual Practice receipt still uses the same pure receipt/citation
+component and retains its write/recovery flow and original receipt bytes.
+
+The Node BFF requires an explicitly configured `TJ_ACCESS_PROFILE=owner` and an
+uncached enabled owner session from the existing access backend before opening
+an operator-pinned Unix socket. Default `private_legacy` access is insufficient;
+assistant and anonymous access cannot retrieve the record. It revalidates that
+owner session after the bounded reader response, refusing revocation during the
+read. No browser cookie, owner token, gateway secret or advisor OAuth credential
+is forwarded to the reader. The BFF has no TCP, redirect, retry, alternate
+ledger or backend-proxy fallback. The explicit socket path/owner UID, private
+parent directories, file mode and inode are checked before and after the read.
+
+`cloud_advisor_owner.py` is a separate owner-only process, absent from the main
+backend and advisor OAuth bridge. Its only route is `GET /owner/advisor` without
+selectors, body or credentials. An inherited AF_UNIX listener supplies the
+kernel peer UID; only the reviewed frontend UID is accepted, including on each
+new connection. Configuration and socket drift fail closed before and after
+reads. No journal/practice/browser identity is accepted by that private route.
+The reader has a distinct dedicated `tj-advisor-owner` UID, so it cannot borrow
+the writer process namespace/file descriptors or signal authority. Its separately
+approved exact named-user Linux ACL grants only fixture-directory traverse and
+SQLite read, with group/other entries zero. Numeric `reader_uid` and matching
+advisor `owner_reader_uid` pin this grant; live file/directory ACL/mode drift or
+absence refuses, without mounting NSS metadata. No retained UID/ACL change is
+authorized by source merge. Original owner-only fixture behavior remains when
+that optional grant is absent. Both reader and bridge must first use a newly
+reviewed inventoried runtime; installed immutable source32 rejects this permission
+change. Read-only mounts remain necessary but do not replace UID separation.
+The reader uses the existing migrated invented SQLite through `mode=ro`,
+`query_only=ON` and one read transaction. It returns only the pinned immutable
+handoff, exact receipt, assignment recovery status and read time. Packet/request
+identity, receipt digest and original fact citations are checked against the
+ledger; no shadow choices, capability, human decisions or other assignments
+leave. Limits are 64 KiB per response, 16 KiB request headers, four concurrent
+reads, five seconds per BFF/read and two seconds of SQLite work/lock waiting.
+
+Owner recovery deliberately survives advisor assignment expiry/revocation and
+OAuth/key expiry. Owner-session authority is still required. An absent receipt
+is not proof a pending save failed; reload/reopen reads again and never submits
+an advisor retry. The view retains invented-demo, missing-input, advisor-first
+assisted-disclosure, provenance and independence-unverified labels. Model,
+usage, cost, factual interpretation and usefulness remain unverified.
+
+The optional owner units and disabled invalid-placeholder configuration live
+beside the advisor templates but are excluded from the existing four-unit
+stager/controller. Normal release packaging ships source; normal install and
+merge do not install, start, enable or mount the optional reader. The frontend
+route remains unavailable unless separately approved owner/socket settings are
+installed. See the [owner reader runbook](../../deploy/cloud-mcp-advisor/README.md#optional-direct-owner-reader)
+for the distinct runtime/UID approval and stop/rollback boundary. Disposable
+browser and Ubuntu native CI proof establish fixture behavior, not installed
+host activation or actual Jo acceptance.
