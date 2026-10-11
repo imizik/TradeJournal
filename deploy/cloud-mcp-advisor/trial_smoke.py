@@ -39,7 +39,9 @@ def exercise(archive, scratch, run, *, context, token, identity, keys, resource,
     # are already removed; remove only that fixture identity before installing
     # the independently guarded retained-safe optional installer.
     run("userdel", trial.READER_ACCOUNT)
-    run("groupdel", trial.READER_ACCOUNT)
+    if run("getent", "group", trial.READER_ACCOUNT, check=False).returncode == 0:
+        run("groupdel", trial.READER_ACCOUNT)
+    assert run("getent", "group", trial.READER_ACCOUNT, check=False).returncode != 0
     old.stop()
     FIXTURE.mkdir(mode=0o755)
     control.OWNER_ENV.parent.mkdir(mode=0o700)
@@ -103,6 +105,25 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         bundle = scratch / "trial-disabled"
         trial.prepare(bundle, archive=archive, archive_sha256=staging.digest(archive), wheels=scratch / "wheels", guards=guards)
         old_ledger = staging.digest(old.STATE / "fixture.db")
+        runtime_override = Path("/run/systemd/system") / (staging.UNITS[1] + ".d")
+        if runtime_override.exists():
+            raise ValueError("Refuse existing native runtime override")
+        runtime_override.mkdir()
+        (runtime_override / "fixture.conf").write_text("[Service]\nEnvironment=UNREVIEWED_FIXTURE=true\n")
+        try:
+            run("systemctl", "daemon-reload")
+            try:
+                control.preflight(bundle, staging.digest(bundle / "manifest.json"))
+            except ValueError as error:
+                assert "effective systemd" in str(error)
+            else:
+                raise AssertionError("Runtime systemd override accepted before install")
+            assert not control.ROOT.exists()
+        finally:
+            (runtime_override / "fixture.conf").unlink()
+            runtime_override.rmdir()
+            run("systemctl", "daemon-reload")
+        interrupted_install(bundle, run)
         record = control.install(bundle, staging.digest(bundle / "manifest.json"))
         assert staging.digest(old.STATE / "fixture.db") == old_ledger
         assert all(run("systemctl", "is-active", "--quiet", name, check=False).returncode != 0 for name in control.UNITS)
@@ -149,6 +170,12 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             metadata = cloud.get(resource.replace("/advisor/mcp", "/.well-known/oauth-protected-resource/advisor/mcp"))
             assert metadata.status_code == 200 and metadata.json()["resource"] == resource
             assert cloud.post(resource, json={}).status_code == 401
+            catalog = cloud.post(resource, headers={"Authorization": "Bearer " + token(), "Accept": "application/json"},
+                json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            assert catalog.status_code == 200
+            tools = catalog.json()["result"]["tools"]
+            assert sorted(t["name"] for t in tools) == ["get_advisor_request", "get_profile", "save_advisor_answer"]
+            assert len(tools) == 3
             read = rpc("get_advisor_request")
             opp = read["request"]["packet"]["opportunities"][0]
             fact = opp["price_facts"][0]
@@ -165,6 +192,20 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             assert rpc("get_advisor_request")["receipt"] == receipt
             assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).json()["receipt"] == receipt
         engine.dispose()
+        runtime_override.mkdir()
+        (runtime_override / "fixture.conf").write_text("[Service]\nEnvironment=UNREVIEWED_FIXTURE=true\n")
+        try:
+            run("systemctl", "daemon-reload")
+            try:
+                control.installed()
+            except ValueError as error:
+                assert "effective systemd" in str(error)
+            else:
+                raise AssertionError("Runtime systemd override accepted after install")
+        finally:
+            (runtime_override / "fixture.conf").unlink()
+            runtime_override.rmdir()
+            run("systemctl", "daemon-reload")
         dependency = control.ROOT / "frontend/server.js"
         original = dependency.read_bytes()
         dependency.write_bytes(original + b"\n// controlled drift\n")
@@ -199,3 +240,53 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         for account in (trial.READER_ACCOUNT, trial.WEB_ACCOUNT):
             run("userdel", account, check=False)
             run("groupdel", account, check=False)
+
+
+def interrupted_install(bundle, run):
+    """Actual root installer, actual prefix-write failure; disposable cleanup."""
+    before = {name: (old.UNIT_DIR / name).read_bytes() for name in staging.UNITS}
+    preserved = {path: staging.digest(path) for path in (old.RECORD, old.STATE / "fixture.db",
+        old.ROOT / "recovery/request.json", control.OWNER_ENV, control.API_ENV)}
+    copy = control.shutil.copyfile
+    fired = False
+    def interrupted(source, target, **kwargs):
+        nonlocal fired
+        target = Path(target)
+        if not fired and target.parent == old.UNIT_DIR and target.name.startswith("." + staging.UNITS[1] + "."):
+            target.write_bytes(Path(source).read_bytes()[:12])
+            fired = True
+            raise OSError("Disposable native interrupted unit-prefix copy")
+        return copy(source, target, **kwargs)
+    control.shutil.copyfile = interrupted
+    try:
+        try:
+            control.install(bundle, staging.digest(bundle / "manifest.json"))
+        except OSError as error:
+            assert "interrupted unit-prefix" in str(error)
+        else:
+            raise AssertionError("Native interrupted install did not fail")
+    finally:
+        control.shutil.copyfile = copy
+    assert fired and all((old.UNIT_DIR / name).read_bytes() == data for name, data in before.items())
+    assert not control.DROPIN.exists() and not control.DROPIN.parent.exists()
+    assert all(staging.digest(path) == digest for path, digest in preserved.items())
+    assert (control.STATE / "fixture.db").is_file() and (control.ROOT / "recovery/request.json").is_file()
+    assert json.loads((control.CONFIG / "advisor/config.json").read_text())["enabled"] is False
+    assert json.loads((control.CONFIG / "owner/config.json").read_text())["enabled"] is False
+    assert all(run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0 for unit in control.UNITS)
+    old.installed()
+    try:
+        control.install(bundle, staging.digest(bundle / "manifest.json"))
+    except ValueError as error:
+        assert "collision" in str(error)
+    else:
+        raise AssertionError("Native partial install permitted overwrite/retry")
+    print("Trial interrupted install native passed: actual prefix-write failure, exact old units/runtime/auth/ledger/recovery preserved, no frontend drop-in, new disabled resources retained and overwrite/retry refused")
+    # Explicit disposal of only resources this fixture just created. Retained
+    # installer deliberately does NOT perform this destructive cleanup.
+    for path in (control.ROOT, control.CONFIG, control.STATE):
+        shutil.rmtree(path)
+    for account in (trial.READER_ACCOUNT, trial.WEB_ACCOUNT):
+        run("userdel", account)
+        if run("getent", "group", account, check=False).returncode == 0:
+            run("groupdel", account)

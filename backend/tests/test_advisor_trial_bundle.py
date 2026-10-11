@@ -76,7 +76,13 @@ def host(tmp_path, monkeypatch, prepared):
         result = command(*args, **kwargs)
         if args[0] == "getent" or "cat" in args:
             result.returncode = 2
-        result.stdout = (str(old.UNIT_DIR / trial.FRONTEND) + "\n").encode() if "FragmentPath" in " ".join(map(str, args)) else b""
+        result.stdout = b""
+        if "--property=FragmentPath" in args:
+            unit = args[2]
+            path = old.UNIT_DIR / unit
+            result.stdout = ("FragmentPath=" + (str(path) if path.exists() else "") + "\nDropInPaths="
+                + (str(control.DROPIN) if unit == trial.FRONTEND and control.DROPIN.exists() else "")
+                + "\nLoadState=" + ("loaded" if path.exists() else "not-found") + "\n").encode()
         return result
     monkeypatch.setattr(old, "run", execute)
     monkeypatch.setattr(control.platform, "freedesktop_os_release", lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"})
@@ -142,24 +148,77 @@ def test_drift_and_collision_refuse_before_any_runtime_execution(prepared, tmp_p
     assert not any("venv" in command or "useradd" in command for command in calls)
 
 
-def test_partial_switch_failure_restores_only_owned_units_and_preserves_data(prepared, tmp_path, monkeypatch):
+@pytest.mark.parametrize("phase", ["unit-prefix", "unit-chmod", "unit-replace-before", "unit-replace-after",
+    "dropin-prefix", "dropin-chmod", "dropin-replace-before", "dropin-replace-after"])
+def test_partial_switch_failure_restores_only_owned_units_and_preserves_data(prepared, tmp_path, monkeypatch, phase):
     bundle, calls = host(tmp_path, monkeypatch, prepared)
     before = {name: (old.UNIT_DIR / name).read_bytes() for name in stage.UNITS}
     copy = control.shutil.copyfile
+    chmod = Path.chmod
+    replace = control.os.replace
+    selected = control.DROPIN if phase.startswith("dropin") else old.UNIT_DIR / stage.UNITS[1]
+    fired = False
+    def failure():
+        nonlocal fired
+        fired = True
+        raise OSError("Controlled switch failure after actual write")
+    def is_temporary(path):
+        return Path(path).parent == selected.parent and Path(path).name.startswith("." + selected.name + ".")
     def fail(source, target, **kwargs):
-        if Path(target) == old.UNIT_DIR / trial.OWNER_UNITS[0]:
-            raise OSError("Controlled switch failure")
+        if not fired and phase.endswith("prefix") and is_temporary(target):
+            Path(target).write_bytes(Path(source).read_bytes()[:12])
+            failure()
         return copy(source, target, **kwargs)
+    def fail_chmod(path, mode, **kwargs):
+        result = chmod(path, mode, **kwargs)
+        if not fired and phase.endswith("chmod") and is_temporary(path):
+            failure()
+        return result
+    def fail_replace(source, target):
+        if not fired and Path(target) == selected and phase.endswith("replace-before"):
+            failure()
+        result = replace(source, target)
+        if not fired and Path(target) == selected and phase.endswith("replace-after"):
+            failure()
+        return result
     monkeypatch.setattr(control.shutil, "copyfile", fail)
+    monkeypatch.setattr(Path, "chmod", fail_chmod)
+    monkeypatch.setattr(control.os, "replace", fail_replace)
     with pytest.raises(OSError, match="Controlled"):
         control.install(bundle, stage.digest(bundle / "manifest.json"))
     assert all((old.UNIT_DIR / name).read_bytes() == value for name, value in before.items())
     assert (control.STATE / "fixture.db").read_bytes() == (bundle / "state/fixture.db").read_bytes()
     assert (control.ROOT / "recovery/request.json").is_file()
+    assert not control.DROPIN.exists() and not control.DROPIN.parent.exists()
+    assert not list(old.UNIT_DIR.glob(".*"))
     old.installed()
     assert len([c for c in calls if "stop" in c]) == 2
     with pytest.raises(ValueError, match="collision"):
         control.install(bundle, stage.digest(bundle / "manifest.json"))
+
+
+@pytest.mark.parametrize("phase", ["pre-switch", "installed"])
+@pytest.mark.parametrize("override", ["runtime", "vendor", "generic", "fragment"])
+def test_effective_override_authority_refused(prepared, tmp_path, monkeypatch, phase, override):
+    bundle, calls = host(tmp_path, monkeypatch, prepared)
+    if phase == "installed":
+        control.install(bundle, stage.digest(bundle / "manifest.json"))
+    command = old.run
+    def drift(*args, **kwargs):
+        result = command(*args, **kwargs)
+        if "--property=DropInPaths" in args and args[2] == stage.UNITS[1]:
+            if override == "fragment":
+                result.stdout = result.stdout.replace(str(old.UNIT_DIR / stage.UNITS[1]).encode(), b"/usr/lib/systemd/system/unreviewed.service")
+            else:
+                path = {"runtime": "/run/systemd/system/" + stage.UNITS[1] + ".d/override.conf",
+                    "vendor": "/usr/lib/systemd/system/" + stage.UNITS[1] + ".d/override.conf",
+                    "generic": "/run/systemd/system/service.d/override.conf"}[override]
+                result.stdout = result.stdout.replace(b"DropInPaths=\n", ("DropInPaths=" + path + "\n").encode())
+        return result
+    monkeypatch.setattr(old, "run", drift)
+    with pytest.raises(ValueError, match="effective systemd"):
+        control.installed() if phase == "installed" else control.install(bundle, stage.digest(bundle / "manifest.json"))
+    assert not any("start" in command or "restart" in command for command in calls)
 
 
 @pytest.mark.parametrize("change", ["runtime", "node", "unit", "extra-dropin", "group"])

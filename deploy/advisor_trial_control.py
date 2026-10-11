@@ -8,10 +8,12 @@ from __future__ import annotations
 import argparse
 import grp
 import json
+import os
 from pathlib import Path
 import platform
 import pwd
 import shutil
+import tempfile
 
 import advisor_mcp_control as old
 import advisor_mcp_stage as stage
@@ -40,6 +42,51 @@ def runtime():
     return old.runtime_inventory(root=ROOT, roles=ROLES)
 
 
+def effective_units(*, installed=False):
+    """Ask systemd about effective authority, not only /etc leaf files."""
+    for unit in (*UNITS, trial.FRONTEND):
+        result = old.run("systemctl", "show", unit, "--property=FragmentPath", "--property=DropInPaths",
+            "--property=LoadState", check=False)
+        values = dict(line.split("=", 1) for line in result.stdout.decode().splitlines() if "=" in line)
+        present = installed or unit not in trial.OWNER_UNITS
+        fragment = str(old.UNIT_DIR / unit) if present else ""
+        dropins = str(DROPIN) if installed and unit == trial.FRONTEND else ""
+        if (set(values) != {"FragmentPath", "DropInPaths", "LoadState"}
+                or values["FragmentPath"] != fragment or values["DropInPaths"] != dropins
+                or values["LoadState"] != ("loaded" if present else "not-found")
+                or (present and result.returncode != 0)):
+            raise ValueError("Unreviewed effective systemd fragment/override: " + unit)
+
+
+def atomic_file(source, target, *, expected, committed=None, source_sha256=None):
+    """Validate a same-directory private temporary before atomic publication.
+
+    Track commit intent before replace: a replace wrapper can publish and then
+    raise. Cleanup may restore only the exact new bytes this attempt approved.
+    """
+    stage.exact(target.parent)
+    fd, name = tempfile.mkstemp(prefix="." + target.name + ".", dir=target.parent)
+    os.close(fd)
+    temporary = Path(name)
+    try:
+        shutil.copyfile(source, temporary)
+        temporary.chmod(0o644)
+        info = temporary.stat()
+        approved = stage.digest(source) if source_sha256 is None else source_sha256
+        if info.st_uid != 0 or info.st_mode & 0o7777 != 0o644 or stage.digest(temporary) != approved:
+            raise ValueError("Atomic unit temporary differs from reviewed source")
+        if expected is None:
+            if target.exists() or target.is_symlink():
+                raise ValueError("Atomic destination collision")
+        elif stage.digest(stage.exact(target)) != expected:
+            raise ValueError("Atomic destination drift")
+        if committed is not None:
+            committed[target] = approved
+        os.replace(temporary, target)
+    finally:
+        temporary.unlink(missing_ok=True)  # Only this exclusive temporary.
+
+
 def guards_current(guards):
     expected = {"old_record_sha256", "frontend_unit_sha256", "owner_env_sha256", "api_env_sha256"}
     if set(guards) != expected:
@@ -55,9 +102,7 @@ def guards_current(guards):
     frontend_dropins = old.UNIT_DIR / (trial.FRONTEND + ".d")
     if frontend_dropins.exists() or frontend_dropins.is_symlink():
         raise ValueError("Refuse pre-existing private owner frontend drop-ins")
-    result = old.run("systemctl", "show", trial.FRONTEND, "--property=FragmentPath", "--value")
-    if result.stdout.decode().strip() != str(old.UNIT_DIR / trial.FRONTEND):
-        raise ValueError("Owner frontend fragment differs from reviewed local unit")
+    effective_units()
     for unit in stage.UNITS:
         if old.run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0:
             raise ValueError("Old advisor must be stopped before replacement")
@@ -122,6 +167,7 @@ def installed():
     record = private_json(RECORD)
     if record.get("format") != "advisor-trial-installation-v1" or set(record["units"]) != set(UNITS):
         raise ValueError("Unknown trial installation")
+    effective_units(installed=True)
     for name, expected in record["units"].items():
         path = stage.exact(old.UNIT_DIR / name)
         if path.stat().st_uid != 0 or path.stat().st_mode & 0o022 or stage.digest(path) != expected or (old.UNIT_DIR / (name + ".d")).exists():
@@ -158,7 +204,8 @@ def install(bundle, approved):
     backups = {name: (old.UNIT_DIR / name).read_bytes() for name in stage.UNITS}
     preserved = {str(path): stage.digest(path) for path in (old.RECORD, old.STATE / "fixture.db",
         old.ROOT / "recovery/request.json", OWNER_ENV, API_ENV, old.UNIT_DIR / trial.FRONTEND)}
-    changed = []
+    changed = {}
+    dropin_directory_created = False
     try:
         ROOT.mkdir(mode=0o755)
         (ROOT / "previous-units").mkdir(mode=0o700)
@@ -214,12 +261,13 @@ def install(bundle, approved):
         # Recheck after slow offline installation, before switching any unit.
         guards_current(plan["guards"])
         for name in UNITS:
-            shutil.copyfile(bundle / "units" / name, old.UNIT_DIR / name)
-            (old.UNIT_DIR / name).chmod(0o644)
-            changed.append(name)
+            atomic_file(bundle / "units" / name, old.UNIT_DIR / name,
+                expected=old_record["units"].get(name), committed=changed,
+                source_sha256=manifest["inventory"]["units/" + name]["sha256"])
         DROPIN.parent.mkdir(mode=0o755)
-        shutil.copyfile(bundle / "units/frontend.conf", DROPIN)
-        DROPIN.chmod(0o644)
+        dropin_directory_created = True
+        atomic_file(bundle / "units/frontend.conf", DROPIN, expected=None, committed=changed,
+            source_sha256=manifest["inventory"]["units/frontend.conf"]["sha256"])
         record = {"format": "advisor-trial-installation-v1", "manifest_sha256": approved,
             "source_commit": manifest["source_commit"], "release": plan["release"], "enabled": False,
             "units": {name: stage.digest(old.UNIT_DIR / name) for name in UNITS},
@@ -232,18 +280,15 @@ def install(bundle, approved):
         return record  # No restart/start/enable/ACL/keys/grant/route operation.
     except BaseException:
         # Both socket/process groups attempted, even if systemctl itself fails.
-        old.run("systemctl", "stop", *[u for u in changed if u.endswith(".socket")], check=False)
-        old.run("systemctl", "stop", *[u for u in changed if u.endswith(".service")], check=False)
-        for name in changed:
-            path = old.UNIT_DIR / name
-            if path.exists() and stage.digest(path) == stage.digest(bundle / "units" / name):
-                if name in backups:
-                    path.write_bytes(backups[name])
-                    path.chmod(0o644)
+        old.run("systemctl", "stop", *[p.name for p in changed if p.name.endswith(".socket")], check=False)
+        old.run("systemctl", "stop", *[p.name for p in changed if p.name.endswith(".service")], check=False)
+        for path, approved in changed.items():
+            if path.exists() and not path.is_symlink() and stage.digest(path) == approved:
+                if path.name in backups:
+                    atomic_file(ROOT / "previous-units" / path.name, path, expected=approved)
                 else:
                     path.unlink()
-        if DROPIN.exists() and stage.digest(DROPIN) == stage.digest(bundle / "units/frontend.conf"):
-            DROPIN.unlink()
+        if dropin_directory_created and not any(DROPIN.parent.iterdir()):
             DROPIN.parent.rmdir()
         old.run("systemctl", "daemon-reload", check=False)
         raise
@@ -259,8 +304,7 @@ def rollback():
     for name in UNITS:
         path = old.UNIT_DIR / name
         if name in record["previous_units"]:
-            path.write_bytes((ROOT / "previous-units" / name).read_bytes())
-            path.chmod(0o644)
+            atomic_file(ROOT / "previous-units" / name, path, expected=record["units"][name])
         else:
             path.unlink()
     DROPIN.unlink()
