@@ -179,7 +179,7 @@ pass supports feasibility; it does not erase the load-sensitive budget miss or
 prove API/UI response times.
 No paid request, protected-period read or journal/Factory record write was used.
 
-## Frozen R2 specification — implementation not selected
+## Frozen R2 specification — subsequently selected
 
 Carry the existing roadmap/R0 choices into R2:
 
@@ -204,7 +204,7 @@ Carry the existing roadmap/R0 choices into R2:
 
 R2 must prove reference/endpoint semantics, matching weights, correlated-symbol
 uncertainty and null calibration on independent synthetic fixtures before
-showing results. These frozen parameters are not implemented or calibrated here.
+showing results. These parameters were frozen by R1. The subsequently selected [R2 contract](research-studio-r2.md) owns implementation and calibration.
 Persistence, append-only exposure records, jobs, cancellation and cached reopens
-remain R2; connected charts/editor/analysis remain R3. There is no permission
+belong to the selected R2 slice; connected charts/editor/analysis remain R3. There is no permission
 to weaken quality rules, fetch more history or enable Factory promotion.

@@ -7,7 +7,8 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | Document | Read it when |
 |---|---|
 | [cloud-mcp-journal-contract.md](cloud-mcp-journal-contract.md) | Separate journal coaching through a bounded approved export, exact statistics and offline OAuth; no production activation |
-| [research-studio-r1.md](research-studio-r1.md) | Bounded discovery source, stop-free event observations, quality masks, CLI preview and frozen unimplemented R2 analysis |
+| [research-studio-r2.md](research-studio-r2.md) | Selected reproducible analysis, research-only SQLite/artifacts, manual child worker, cancellation/retry and exposure evidence |
+| [research-studio-r1.md](research-studio-r1.md) | Bounded discovery source, stop-free event observations, quality masks, CLI preview and frozen R2 analysis parameters |
 | [research-studio-r0.md](research-studio-r0.md) | Selected R0 cache audit, temporary feasibility evidence and the original bounded R1 contract |
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
