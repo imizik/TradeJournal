@@ -83,6 +83,10 @@ def fake_claude(tmp_path, monkeypatch):
     monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://elsewhere.invalid")
     monkeypatch.setenv("DATABASE_URL", "postgresql://must-not-reach-claude")
     monkeypatch.delenv("AI_REVIEW_BACKEND", raising=False)
+    # The day's market context reads providers; tests/test_review_context.py covers it offline.
+    from app.ai import review_context
+
+    monkeypatch.setattr(review_context, "build", lambda session, day, trades: {"gaps": ["stubbed in tests"]})
     plan_runner._checked.clear()
     yield fake
     plan_runner._checked.clear()

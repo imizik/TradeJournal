@@ -15,7 +15,7 @@ load_dotenv(BACKEND_DIR.parent / ".env")
 
 
 REVIEW_FIELDS = ("summary", "day_grade", "key_takeaways", "best_trade", "worst_trade", "patterns", "next_session_rules")
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 BASELINE_DAYS = 20
 PRIOR_REVIEWS = 3
 
@@ -35,6 +35,9 @@ def review_trading_day(
     """
     context = _assemble_daily_context(day, trades, fills_by_trade_id, session)
     context["history"] = _history_context(date.fromisoformat(day), session)
+    from app.ai import review_context
+
+    context["day_context"] = review_context.build(session, date.fromisoformat(day), trades)
     message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
     chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
     if chosen == "api":
@@ -61,7 +64,7 @@ def _review_with_api(message: str) -> dict:
     client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     response = client.messages.create(
         model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
-        max_tokens=2400,
+        max_tokens=4000,
         system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
         messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(REVIEW_SCHEMA)}"}],
     )
@@ -367,7 +370,7 @@ _TRADE_PICK = {
 REVIEW_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
-    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps"],
+    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps", "market_read", "plan_vs_execution"],
     "properties": {
         "summary": {"type": "string"},
         "day_grade": {"type": "string"},
@@ -381,6 +384,11 @@ REVIEW_SCHEMA = {
             "properties": {"rule": {"type": "string"}, "set_on": {"type": "string"},
                            "result": {"enum": ["kept", "broken", "partly", "not_tested"]}, "evidence": {"type": "string"}}}},
         "vs_baseline": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+        "market_read": {"type": "string"},
+        "plan_vs_execution": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["ticker", "planned", "did", "result"],
+            "properties": {"ticker": {"type": "string"}, "planned": {"type": "string"}, "did": {"type": "string"},
+                           "result": {"enum": ["followed", "deviated", "partly", "no_plan"]}}}},
         "data_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
     },
 }
@@ -413,15 +421,40 @@ from exit decisions.
   so in data_gaps (e.g. "No path metrics for 2 of 4 trades, so exit quality is unknown") instead of guessing.
 - One-off observations are takeaways; patterns need two or more trades (today) or a repeat of a broken prior rule.
 
+## Using day_context
+
+day_context holds what was around the trades. Use it to judge decisions in their setting, not to explain P&L away:
+- plans: what the trader captured before entering (by_trade, with minutes_before_entry) and plans never traded
+  (not_traded). This is the most important input when present: compare each plan with what was done (instrument,
+  side, strike, size, timing) in plan_vs_execution, one item per traded plan; a traded position with no plan is
+  "no_plan" only when other trades that day had plans. Empty when there are no plans. A plan not traded is not a
+  mistake by itself; mention it only if it would have been the better trade by the facts given.
+- market: when partial_as_of is set the review ran during the session, so every market and ticker number is intraday
+  as of that time, not the close. The indexes' day (change, gap, close_in_range, range_vs_20d), SPY/QQQ intraday shape (trend_efficiency near
+  1 is a trend day, near 0 chop; close_vs_vwap_pct; when the high and low printed) and VIX / 10-year yield.
+  market_read is one or two sentences: what kind of day it was and whether the trader traded with it or against it
+  (e.g. buying calls into a chop day with VIX up). Say "Market context unavailable" when it is missing.
+- macro: FOMC, CPI and jobs releases that day or the next trading day, with New York times. Trades opened shortly before a
+  release, or held through one, carry event risk worth naming.
+- tickers: each underlying's move against SPY and its sector ETF (relative strength), earnings within a week
+  (days_before / days_after; a report on the day itself has no known time of day), the day's headlines (observed,
+  never proof of cause; a ticker without headlines had none found), option open-interest walls from the latest snapshot within five days (as_of_session; strikes
+  where open interest clusters near the price), your_alerts_fired (the trader's own
+  price alerts that day) and your_saved_levels_now (the trader's CURRENT saved levels: they may have been added or
+  moved after this day, so treat them as a hint, never as proof the level existed then).
+- tags: the trader's own labels on trades.
+- gaps: parts that were unavailable; carry the ones that limit a judgement into data_gaps.
+
 ## next_session_rules
 
-At most three. Each must be specific and checkable from the journal tomorrow, e.g. "No call entries when
-entry_day_range_used_pct > 80%" or "Max 2 contracts until 2 green trades". Prefer keeping or tightening a prior rule
+At most three. Each must be specific and checkable from the journal tomorrow, e.g. "No call entries after 80% of
+the day's range is used" or "Max 2 contracts until 2 green trades". Prefer keeping or tightening a prior rule
 that was broken over inventing a new one. No generic advice ("stay disciplined", "trust your plan").
 
 ## Style
 
-Plain, direct, short sentences. Write for the trader, second person. No hedging boilerplate, no motivational language,
+Plain, direct, short sentences. Write for the trader, second person, in trading words: say "a choppy day", "80% of
+the day's range", "below VWAP", never the JSON field names (trend_efficiency, close_in_range, ...); numbers are fine. No hedging boilerplate, no motivational language,
 no recommendation to buy or sell any security.
 
 ## history
@@ -485,6 +518,6 @@ that is a key coaching point. If trend_aligned_count is high and winners outperf
 ## Answer
 
 Answer in the given JSON schema only: summary (2-4 sentences, include the day's P&L and the one thing that mattered most),
-day_grade, key_takeaways (up to 3), best_trade, worst_trade, patterns (up to 4), next_session_rules (up to 3),
-rules_check, vs_baseline, data_gaps.
+day_grade, market_read, key_takeaways (up to 3), best_trade, worst_trade, patterns (up to 4), plan_vs_execution,
+next_session_rules (up to 3), rules_check, vs_baseline, data_gaps.
 """

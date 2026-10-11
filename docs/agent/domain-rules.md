@@ -345,6 +345,12 @@ is verifiable rather than hopeful.
   it has no review, gained trades since, or went stale) and never backfills:
   a past day gets a review from its own button. It stops on a sign-in other
   than the plan token.
+- The review's day context (`app/ai/review_context.py`) is read as of the
+  review day, except the trader's saved chart levels, which are their current
+  levels and are labelled so to the model. Every part degrades on its own into
+  the review's gaps; none may fail the review. `app/data/macro_calendar.json`
+  (FOMC, CPI, jobs reports, from the Fed and BLS) must be extended before its
+  `covers_through` date; after it, reviews report the calendar as a gap.
 - `webull_listener` is a persistent listener, not a finite sync job.
 
 ## Strategy Lab

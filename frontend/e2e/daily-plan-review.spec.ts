@@ -17,6 +17,11 @@ const review = {
   ],
   vs_baseline: ["Premium $640 per trade vs your usual $220.", "Loss $-160 vs your average loss $-95."],
   data_gaps: ["No path metrics for 1 of 3 trades, so its exit quality is unknown."],
+  market_read: "A chop day: SPY closed in the bottom 10% of its range with VIX up 2 points, the day before an FOMC decision. Your calls fought that tape.",
+  plan_vs_execution: [
+    { ticker: "QQQ", planned: "Calls on a VWAP reclaim, 2 contracts", did: "Bought 2 calls at the reclaim, 10:12", result: "followed" },
+    { ticker: "SPY", planned: "Calls only above 581", did: "Bought 4 calls at 579.80, 10:42", result: "deviated" },
+  ],
   generated_by: "claude-sonnet-5-5 through claude -p on the Claude plan",
 };
 
@@ -34,6 +39,11 @@ test("the calendar says whether nightly plan reviews are set up, and a plan revi
   const run = page.getByRole("button", { name: /Run Daily Analysis|Regenerate Analysis/ });
   await expect(page.getByText("on your Claude plan")).toBeVisible();
   await run.click();
+  await expect(page.getByText("The Market That Day")).toBeVisible();
+  const plans = page.getByLabel("Plan versus execution");
+  await expect(plans).toContainText("Followed");
+  await expect(plans).toContainText("Deviated");
+  await expect(plans).toContainText("Planned: Calls only above 581");
   const rules = page.getByLabel("Rules from the last review");
   await expect(rules).toContainText("Kept");
   await expect(rules).toContainText("Broken");

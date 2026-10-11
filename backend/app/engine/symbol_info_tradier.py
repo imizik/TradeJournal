@@ -103,6 +103,18 @@ class SymbolEvents:
         entry, meta = self._block("calendars", symbol, issue)
         return {**meta, **earnings_view(entry.rows if entry else [], today, None)}
 
+    def review_facts(self, symbols: list[str], today: date) -> dict[str, dict]:
+        """Sector and earnings for the Daily Review's tickers: one batched company and calendar read for all of
+        them (not the Events/Overview tabs' six reads per symbol), each with its state so a gap is never silent."""
+        issues = {dataset: self.refresh(dataset, symbols) for dataset in ("company", "calendars")}
+        out = {}
+        for symbol in symbols:
+            company, company_meta = self._block("company", symbol, issues["company"])
+            row = company.rows[0] if company and company.rows else {}
+            out[symbol] = {"sector": row.get("sector"), "sector_state": company_meta["state"],
+                           "earnings": {**self._earnings(symbol, today, REPORTS_SHOWN, issues["calendars"]), "time_note": TIME_NOTE}}
+        return out
+
     def events(self, symbol: str, today: date) -> dict:
         """Everything the Events tab shows for one symbol. Each block degrades on its own."""
         issues = {dataset: self.refresh(dataset, [symbol]) for dataset in EVENT_DATASETS}
