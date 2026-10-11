@@ -13,8 +13,8 @@ async function cmd(action:string,args:object={}) {
   const r=await fetch(origin+"/command",{method:"POST",headers:{"Content-Type":"application/json",authorization:"Bearer "+token},body:JSON.stringify({action,arguments:args})});
   const data=await r.json(); if(!r.ok)throw new Error(JSON.stringify(data)); return data;
 }
-async function startSidecar(script?: string) {
-  child=spawn(executable, script ? [script] : ["scripts/research_studio_server.py","--cache-root",path.join(root,"sip"),"--store-root",path.join(root,"store"),"--port",String(port)],{cwd:backend,env:{...process.env,TJ_RESEARCH_TOKEN:token},stdio:"pipe"});
+async function startSidecar(script?: string, allowNewer=false) {
+  child=spawn(executable, script ? [script] : ["scripts/research_studio_server.py","--cache-root",path.join(root,"sip"),"--store-root",path.join(root,"store"),"--port",String(port),...(allowNewer?["--allow-newer-mu"]:[])],{cwd:backend,env:{...process.env,TJ_RESEARCH_TOKEN:token},stdio:"pipe"});
   let failure="";child.stderr?.on("data",b=>{failure=(failure+String(b)).slice(-16000);});
   await expect.poll(async()=>{if(child.exitCode!==null)throw new Error(failure);try{return(await fetch(origin+"/config",{headers:{authorization:"Bearer "+token}})).status;}catch{return 0;}},{timeout:15000}).toBe(200);
 }
@@ -27,7 +27,7 @@ async function openConditions(page: Page) {
 }
 test.beforeAll(async()=>{
   root=path.join(mkdtempSync(path.join(os.tmpdir(),"tj-research-browser-")),"fixture");
-  execFileSync(executable,["scripts/seed_research_studio_fixture.py",root],{cwd:backend});
+  execFileSync(executable,["scripts/seed_research_studio_fixture.py",root,"--include-newer-mu"],{cwd:backend});
   await startSidecar();
 });
 test.afterAll(async()=>{if(child && child.exitCode===null){child.kill("SIGTERM");await new Promise<void>(resolve=>{child.once("exit",()=>resolve());setTimeout(()=>{child.kill("SIGKILL");resolve();},3000);});}});
@@ -375,4 +375,55 @@ test("R4 UI preserves R3 workflows with an earlier manual worker",async({page})=
   await expect(page.getByRole("button",{name:"Duplicate as variant",exact:true})).toHaveCount(0);
   await expect(page.getByRole("region",{name:"Conclusions"})).toHaveCount(0);
   await page.screenshot({path:test.info().outputPath("studio-earlier-worker-desktop.png"),fullPage:true});
+});
+
+
+test("fixed newer MU periods preserve discovery bounds, record exposure and fit desktop and phone",async({page})=>{
+  await stopSidecar(); await startSidecar(undefined,true);
+  try {
+    await page.goto("/research-studio");
+    await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");
+    await page.locator("button[data-occurrence-id]").first().click();
+    await expect(page.getByLabel("MU historical five-minute candles")).toBeVisible();
+    let releasePreview:()=>void=()=>{}, enterPreview:()=>void=()=>{};
+    const previewGate=new Promise<void>(resolve=>releasePreview=resolve), previewEntered=new Promise<void>(resolve=>enterPreview=resolve);
+    await page.route("**/research-studio/command",async route=>{
+      if(route.request().postDataJSON().action==="preview" && route.request().postDataJSON().arguments.raw.version===2){enterPreview();await previewGate;}
+      await route.continue();
+    });
+    await page.getByLabel("Study period",{exact:true}).selectOption("2026-01-01");
+    await previewEntered;
+    try {
+      await expect(page.locator("button[data-occurrence-id]")).toHaveCount(0,{timeout:1000});
+      await expect(page.getByRole("status").filter({hasText:"Preparing population"})).toBeVisible();
+      await expect(page.getByLabel("MU historical five-minute candles")).toHaveCount(0);
+    } finally { releasePreview(); }
+
+    await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");
+    await expect(page.getByText("2026-01-01 – 2026-10-09",{exact:true})).toBeVisible();
+    await expect(page.getByLabel("Fixed MU volume threshold")).toHaveValue("1.5");
+    await expect(page.getByRole("button",{name:"Edit conditions",exact:true})).toBeDisabled();
+    const scope=JSON.parse(readFileSync(path.join(root,"store","source-exposure.2026-10-09.json"),"utf8"));
+    expect(scope.source_end).toBe("2026-10-09");expect(scope.independent_validation).toBe(false);
+    await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+    await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+    await expect(page.getByTestId("analysis-count")).toContainText("N 7");
+    await page.getByRole("button",{name:"Duplicate as variant",exact:true}).click();
+    await page.getByLabel("Fixed MU volume threshold").selectOption("2");
+    await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+    await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+    await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+    await page.getByRole("button",{name:"Compare with parent (records exposures)",exact:true}).click();
+    await expect(page.getByRole("region",{name:"Variant comparison"})).toBeVisible();
+    await page.screenshot({path:test.info().outputPath("studio-newer-desktop.png"),fullPage:true});
+    await page.setViewportSize({width:390,height:844});
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(391);
+    await page.getByLabel("Study period",{exact:true}).scrollIntoViewIfNeeded();
+    await page.screenshot({path:test.info().outputPath("studio-newer-phone.png")});
+    await page.getByLabel("Study period",{exact:true}).selectOption("discovery");
+    await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");
+    await page.getByLabel("Chart date").fill("2026-01-02");
+    await page.getByRole("button",{name:"Inspect decision",exact:true}).click();
+    await expect(page.getByRole("alert",{name:"Research error"})).toContainText("discovery");
+  } finally { await stopSidecar(); await startSidecar(); }
 });
