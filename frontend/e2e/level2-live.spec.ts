@@ -13,6 +13,30 @@ async function enabledSession(page: Page, ndjson: string | ((route: import("@pla
   return () => posts;
 }
 
+async function trackPostAbort(page: Page) {
+  await page.addInitScript(() => {
+    const original = window.fetch.bind(window);
+    const records: { aborted: boolean }[] = [];
+    Object.assign(window, { level2SessionRequests: records });
+    window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : null;
+      const url = request?.url ?? String(input);
+      const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
+      const signal = init?.signal ?? request?.signal;
+      if (method === "POST" && url.includes("/api/level2-lab/session") && signal) {
+        const record = { aborted: signal.aborted };
+        records.push(record);
+        signal.addEventListener("abort", () => { record.aborted = true; }, { once: true });
+      }
+      return original(input, init);
+    }) as typeof window.fetch;
+  });
+}
+
+async function postAbortRecords(page: Page): Promise<{ aborted: boolean }[]> {
+  return page.evaluate(() => (window as unknown as { level2SessionRequests: { aborted: boolean }[] }).level2SessionRequests);
+}
+
 test("live session stays manually disabled when the local service is disabled", async ({ page }) => {
   let posts = 0;
   await page.route(sessionPath, route => {
@@ -30,6 +54,16 @@ test("live session stays manually disabled when the local service is disabled", 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("level2-live-disabled-phone.png"), fullPage: true });
   expect(posts).toBe(0);
+});
+
+test("hiding the tab before connecting leaves the manually enabled action available", async ({ page }) => {
+  await enabledSession(page, "");
+  await page.goto("/level2-lab");
+  const panel = page.getByTestId("live-depth-session");
+  await expect(panel.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await expect(panel.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
+  await expect(panel.getByText("No live session started.")).toBeVisible();
 });
 
 test("manual session renders acknowledgements and only the latest book with missing freshness", async ({ page }) => {
@@ -97,6 +131,7 @@ test("malformed and oversized NDJSON records are ignored without leaking raw tex
 });
 
 test("stop aborts the manual request and does not reconnect", async ({ page }) => {
+  await trackPostAbort(page);
   const posts = await enabledSession(page, async route => {
     await new Promise(resolve => setTimeout(resolve, 1200));
     await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: "" }).catch(() => undefined);
@@ -107,11 +142,13 @@ test("stop aborts the manual request and does not reconnect", async ({ page }) =
   await expect(panel.getByRole("button", { name: "Session running…" })).toBeVisible();
   await panel.getByRole("button", { name: "Stop" }).click();
   await expect(panel.getByRole("button", { name: "Reload to start again" })).toBeDisabled();
+  await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
   await page.waitForTimeout(1400);
   expect(posts()).toBe(1);
 });
 
-test("hidden tab and unmount cancel the stream without automatic reconnect", async ({ page }) => {
+test("hidden tab cancels the active stream without automatic reconnect", async ({ page }) => {
+  await trackPostAbort(page);
   const posts = await enabledSession(page, async route => {
     await new Promise(resolve => setTimeout(resolve, 1200));
     await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: "" }).catch(() => undefined);
@@ -121,7 +158,40 @@ test("hidden tab and unmount cancel the stream without automatic reconnect", asy
   await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
   await expect(panel.getByRole("button", { name: "Reload to start again" })).toBeDisabled();
-  await page.goto("/");
+  await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
   await page.waitForTimeout(1400);
   expect(posts()).toBe(1);
+  expect((await postAbortRecords(page))[0]?.aborted).toBe(true);
+});
+
+test("unmounting the panel aborts its active request", async ({ page }) => {
+  await trackPostAbort(page);
+  const posts = await enabledSession(page, async route => {
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: "" }).catch(() => undefined);
+  });
+  await page.goto("/level2-lab");
+  const panel = page.getByTestId("live-depth-session");
+  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await expect(panel.getByRole("button", { name: "Session running…" })).toBeVisible();
+  await page.getByRole("link", { name: "Dashboard" }).click();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
+  await page.waitForTimeout(1400);
+  expect(posts()).toBe(1);
+});
+
+test("the 40 second client safety timeout aborts the stream", async ({ page }) => {
+  await trackPostAbort(page);
+  await page.clock.install();
+  await enabledSession(page, async route => {
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: "" }).catch(() => undefined);
+  });
+  await page.goto("/level2-lab");
+  const panel = page.getByTestId("live-depth-session");
+  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await page.clock.fastForward(40_001);
+  await expect(panel.getByRole("button", { name: "Reload to start again" })).toBeDisabled();
+  await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
 });

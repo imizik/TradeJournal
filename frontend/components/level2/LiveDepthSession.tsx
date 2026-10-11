@@ -138,7 +138,9 @@ export default function LiveDepthSession() {
   }, []);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
+    const active = abortRef.current;
+    if (!active) return;
+    active.abort();
     abortRef.current = null;
     setStarted(true);
     setRunning(false);
@@ -147,9 +149,13 @@ export default function LiveDepthSession() {
   }, []);
 
   useEffect(() => {
-    const onVisibility = () => { if (document.hidden) stop(); };
+    const onVisibility = () => { if (document.hidden && abortRef.current) stop(); };
     document.addEventListener("visibilitychange", onVisibility);
-    return () => { document.removeEventListener("visibilitychange", onVisibility); stop(); };
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      abortRef.current?.abort();
+      abortRef.current = null;
+    };
   }, [stop]);
 
   const connect = async () => {

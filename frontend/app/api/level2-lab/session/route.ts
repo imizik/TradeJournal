@@ -7,12 +7,14 @@ async function handler(request: Request) {
     const config = accessConfig();
     if (config.profile === "assistant") return Response.json({ detail: "Not permitted" }, { status: 403 });
     const url = new URL(request.url);
-    const local = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+    const host = request.headers.get("host") ?? "";
+    const local = url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname)
+      && ["localhost", "127.0.0.1"].map(name => `${name}${url.port ? `:${url.port}` : ""}`).includes(host);
     const token = process.env.TJ_MOOMOO_LAB_TOKEN ?? "";
     if (!local || process.env.TJ_MOOMOO_LAB_ENABLED !== "true" || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
       return Response.json({ enabled: false }, { status: request.method === "GET" ? 200 : 503 });
     }
-    if (url.search || (request.method === "POST" && (request.headers.get("origin") !== url.origin ||
+    if (url.search || (request.method === "POST" && (request.headers.get("origin") !== `http://${host}` ||
       request.headers.get("content-type") !== "application/x-level2-start"))) {
       return Response.json({ detail: "Fixed local session required" }, { status: 400 });
     }

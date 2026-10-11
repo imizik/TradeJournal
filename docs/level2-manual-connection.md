@@ -66,14 +66,16 @@ export TJ_MOOMOO_LAB_TOKEN="$(backend/.venv/bin/python -c 'import secrets; print
 (cd backend && exec .venv/bin/python -m scripts.moomoo_lab_server) &
 TJ_LAB_BRIDGE_PID=$!
 trap 'kill "$TJ_LAB_BRIDGE_PID" 2>/dev/null; unset TJ_MOOMOO_LAB_TOKEN TJ_MOOMOO_LAB_ENABLED' EXIT INT TERM
-(cd frontend && npm run dev)
+(cd frontend && npm run dev -- --hostname 127.0.0.1)
 ```
 
-Open the frontend on its local HTTP origin (`http://localhost:3000` by default),
+Open the frontend on its local HTTP origin (`http://127.0.0.1:3000` by default),
 then **Level 2 lab → Connect for 30 seconds**. The command starts a passive
 bridge; it subscribes only after that click. Stop the frontend with Ctrl+C and
 exit that terminal to stop the bridge. Use one bridge process; port 8196 is
-fixed. Do not configure these flags in production or existing deployment files.
+fixed. Both services must bind exclusively to loopback. Do not omit the frontend
+hostname argument: a local URL or Origin header alone cannot authenticate the
+network peer. Do not configure these flags in production or deployment files.
 If credentials/whitelist are unavailable, inspect the sanitized status; no
 alternative signing formats or entitlement upgrades are attempted.
 

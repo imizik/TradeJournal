@@ -147,3 +147,43 @@ def test_observer_auth_failure_no_subscribe_and_cancel_cleanup():
         assert socket.close_code == 1000
         assert socket.sent[-1]["action"] == "unsubscribe"
     asyncio.run(scenario())
+
+
+def test_actual_asgi_http_disconnect_unsubscribes_before_session_release():
+    async def scenario():
+        socket = FakeSocket()
+        key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        async def runner(appkey, supplied_key, seconds, observer):
+            return await d.stream_probe(appkey, supplied_key, seconds, lambda *a, **k: socket, observer)
+        app = lab.create_app(token=TOKEN, loader=lambda: ("fixture", key), runner=runner)
+        disconnect = asyncio.Event()
+        first = True
+        async def receive():
+            nonlocal first
+            if first:
+                first = False
+                return {"type": "http.request", "body": b"", "more_body": False}
+            await disconnect.wait()
+            return {"type": "http.disconnect"}
+        async def send(message):
+            if message["type"] == "http.response.body" and message.get("body"):
+                # Wait until subscriptions actually exist, then disconnect the
+                # downstream HTTP client through the real ASGI channel.
+                while not any("ticker" in frame for frame in socket.sent):
+                    await asyncio.sleep(0)
+                disconnect.set()
+        scope = {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.3"},
+                 "method": "POST", "scheme": "http", "path": "/session", "raw_path": b"/session",
+                 "query_string": b"", "root_path": "", "http_version": "1.1",
+                 "client": ("127.0.0.1", 50000), "server": ("127.0.0.1", 8196),
+                 "headers": [(k.lower().encode(), v.encode()) for k, v in HEADERS.items()]}
+        await asyncio.wait_for(app(scope, receive, send), 2)
+        # Cancellation scopes may finish the HTTP response before the shielded
+        # provider cleanup finishes. The active-session gate holds meanwhile.
+        for _ in range(100):
+            if socket.close_code is not None:
+                break
+            await asyncio.sleep(0.01)
+        assert socket.close_code == 1000
+        assert socket.sent[-1]["action"] == "unsubscribe"
+    asyncio.run(scenario())
