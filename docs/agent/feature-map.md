@@ -272,6 +272,18 @@ reason, and ruff lints them without importing them.
   The golden snapshot reads the Alpaca cache; `test_seed_snapshot.py` points
   it at an empty directory so a developer's cache cannot leak into the result.
 
+## Open-position basis
+
+Dashboard and Daily Review share `frontend/lib/dashboard.ts` for remaining
+FIFO basis and unrealized P&L. Fill ordering matches reconstruction: ET wall
+time, opens before closes, then fill ID. The all-entry trade average remains
+historical; it is not the basis of lots left after a partial close. Missing or
+invalid lot evidence leaves basis/P&L unavailable. Option fill prices are per
+contract, so only quote marks are multiplied by 100. Pure browser-runner
+regressions in `frontend/e2e/dashboard-basis.spec.ts` cover partial FIFO closes,
+same-minute ordering, fractional shares and long/short option units. Backend
+`app/engine/chart_journal.py` remains the independent FIFO projection.
+
 ## A3 daily Practice routine
 
 Today and Daily Review mount `frontend/components/PracticeRoutine.tsx`: manual

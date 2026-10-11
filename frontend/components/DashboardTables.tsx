@@ -161,7 +161,7 @@ function getOpenSortVal(
     case "qty_left":
       return meta.qtyLeft;
     case "avg_cost":
-      return trade.avg_entry_premium;
+      return meta.avgCostLeft;
     case "cost_left":
       return meta.capitalLeft;
     case "current_price":
@@ -265,7 +265,7 @@ export function OpenPositionsTable({
             <Th {...thProps("option_type", true)}>Type</Th>
             <Th {...thProps("expiration", true)}>Expiry</Th>
             <Th {...thProps("qty_left")}>Qty Left</Th>
-            <Th {...thProps("avg_cost", true)}>Avg Cost</Th>
+            <Th {...thProps("avg_cost", true)}>Remaining Avg Cost</Th>
             <Th {...thProps("cost_left", true)}>Entry Value Left</Th>
             <Th {...thProps("current_price")}>Mark</Th>
             <Th {...thProps("underlying", true)}>Stock</Th>
@@ -319,7 +319,7 @@ export function OpenPositionsTable({
                     </span>
                   </div>
                 </Td>
-                <Td wide>{fmtMoney(trade.avg_entry_premium)}</Td>
+                <Td wide>{fmtMoney(meta.avgCostLeft)}</Td>
                 <Td wide>{fmtMoney(meta.capitalLeft)}</Td>
                 <Td>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">—</span>}</Td>
                 <Td wide>
