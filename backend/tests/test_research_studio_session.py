@@ -210,3 +210,40 @@ def test_thread_start_failure_releases_admission_without_claiming_work(session, 
         session.execute()
     assert not session.preparation.locked() and not session.execution.locked()
     assert session.store.status(run["run_id"])["status"] == "queued"
+
+
+def test_inner_thread_start_failure_reaps_real_child_and_allows_retry(session, definition, monkeypatch):
+    import subprocess
+    run = session.enqueue(definition.canonical(), op())
+    processes = []
+    original_popen, original_start = subprocess.Popen, threading.Thread.start
+
+    def capture_child(*args, **kwargs):
+        child = original_popen(*args, **kwargs)
+        processes.append(child)
+        return child
+
+    def refuse_communication(thread):
+        if thread._target.__name__ == "communicate":
+            raise RuntimeError("fixture communication thread refused")
+        return original_start(thread)
+
+    with monkeypatch.context() as patch:
+        patch.setattr("app.engine.research_studio_store.subprocess.Popen", capture_child)
+        patch.setattr(threading.Thread, "start", refuse_communication)
+        session.execute()
+        session.worker.join(5)
+        assert not session.worker.is_alive()
+
+    assert len(processes) == 1 and processes[0].poll() is not None
+    assert all(pipe.closed for pipe in (processes[0].stdin, processes[0].stdout, processes[0].stderr))
+    assert not session.preparation.locked() and not session.execution.locked()
+    state = session.store.status(run["run_id"])
+    assert state["status"] == "failed" and state["exposures"] == 0
+    assert session.store.recover() == {"recovered": []}
+    session.store.control(run["run_id"], "retry", op())
+    session.execute()
+    session.worker.join(15)
+    assert not session.worker.is_alive()
+    state = session.store.status(run["run_id"])
+    assert state["status"] == "completed" and state["attempt"] == 2 and state["exposures"] == 0

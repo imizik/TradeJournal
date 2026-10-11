@@ -402,9 +402,12 @@ class ResearchStore:
                 reply.append(process.communicate(envelope))
             except Exception as exc:
                 errors.append(exc)
-        thread = threading.Thread(target=communicate, daemon=True)
-        thread.start()
+        thread = None
+        thread_started = False
         try:
+            thread = threading.Thread(target=communicate, daemon=True)
+            thread.start()
+            thread_started = True
             if on_started is not None:
                 on_started()
             while thread.is_alive():
@@ -425,7 +428,11 @@ class ResearchStore:
             if process.poll() is None:
                 process.kill()
             process.wait()
-            thread.join(timeout=1)
+            if thread_started:
+                thread.join(timeout=1)
+            for pipe in (process.stdin, process.stdout, process.stderr):
+                if pipe is not None:
+                    pipe.close()
 
     @classmethod
     def _recover(cls, db):
