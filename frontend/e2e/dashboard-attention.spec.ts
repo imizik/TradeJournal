@@ -25,7 +25,7 @@ const mark = (mid: number | null, underlying: number | null = null): PositionQuo
   option_last_price: null, option_bid: null, option_ask: null, option_mid: mid, option_iv: null });
 const earnings = (date: string | null, state: Earnings["state"] = "ready"): Earnings => ({ state, source: "Tradier corporate calendar",
   fetched_at: 1, message: null, reports: [], next: date ? { date, status: "estimated", label: "Q3" } : null });
-const wait = (id: string, expiry: string, over: Partial<DecisionRecord> = {}): DecisionRecord => ({ id, decision: "wait", actor: "human",
+const wait = (id: string, expiry: string, over: Partial<DecisionRecord> = {}): DecisionRecord => ({ id, opportunity_id: `opp-${id}`, received_at: "2026-10-12T13:00:00Z", decision: "wait", actor: "human",
   symbol: "MU", wait_condition: "Reclaims VWAP on volume", wait_expiry: expiry, evidence: { packet: { sample_data: false } }, ...over } as DecisionRecord);
 const job = (job_type: string, status: SyncJob["status"], over: Partial<SyncJob> = {}): SyncJob => ({ job_type, label: job_type, status,
   error_summary: null, message: null, finished_at: "2026-10-12T13:00:00Z", updated_at: null, last_run_at: null, ...over } as SyncJob);
@@ -52,7 +52,10 @@ test("attention rules: each trigger, its non-trigger twin, priority order and st
     alerts: [fired("recent", 30), fired("old", 25 * 60), fired("active", 5, { state: "active" })],
     decisions: [wait("open", "2026-10-12T19:00:00Z"), wait("ended", "2026-10-12T14:00:00Z"),
       wait("sample", "2026-10-13T19:00:00Z", { evidence: { packet: { sample_data: true } } }),
-      wait("agent", "2026-10-13T19:00:00Z", { actor: "agent:dot" }), wait("skip", "2026-10-13T19:00:00Z", { decision: "skip" })],
+      wait("agent", "2026-10-13T19:00:00Z", { actor: "agent:dot" }), wait("skip", "2026-10-13T19:00:00Z", { decision: "skip" }),
+      wait("superseded", "2026-10-13T19:00:00Z", { opportunity_id: "opp-x" }),
+      wait("later-take", "2026-10-13T19:00:00Z", { opportunity_id: "opp-x", decision: "take", received_at: "2026-10-12T14:00:00Z" }),
+      wait("agent-later", "2026-10-13T19:00:00Z", { opportunity_id: "opp-open", actor: "agent:dot", received_at: "2026-10-12T14:30:00Z" })],
   }));
   expect(items.map((item) => item.id)).toEqual([
     "expired-open:expired", // integrity: expired records sort by expiry date, before ticker-keyed gaps
@@ -131,6 +134,9 @@ with Session(engine) as db:
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
     await panel.screenshot({ path: test.info().outputPath("dashboard-attention-phone.png"), animations: "disabled" });
+    await expect(panel).not.toContainText("Position checks cover");
+    await page.goto("/?account=roth_ira&type=option");
+    await expect(panel).toContainText("Position checks cover Roth IRA · options only");
     await page.goto("/?type=option&sync=open");
     await expect(page.getByRole("heading", { name: "Data Sync Center" })).toBeVisible();
     expect(new URL(page.url()).search).toBe("?type=option");

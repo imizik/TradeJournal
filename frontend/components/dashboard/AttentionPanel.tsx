@@ -17,7 +17,9 @@ const CUE: Record<AttentionPriority, string> = {
 
 /** Streams in after the rest of the Dashboard: its extra sources (alerts,
  * sync jobs, import health, earnings dates) must never delay the journal. */
-export default async function AttentionPanel({ rows, quotes, quoteError, today, decisions }: {
+export default async function AttentionPanel({ rows, quotes, quoteError, today, decisions, scope }: {
+  /** Set when Dashboard filters narrow the positions; import, sync, alerts and WAITs are never filtered. */
+  scope: string | null;
   rows: OpenPositionRow[]; quotes: Record<string, PositionQuote>; quoteError: boolean; today: string; decisions: DecisionRecord[];
 }) {
   const optionTickers = [...new Set(rows.filter(({ trade }) => trade.instrument_type === "option"
@@ -32,7 +34,7 @@ export default async function AttentionPanel({ rows, quotes, quoteError, today, 
     rows, quotes, quoteError, today, now: requestTime(), decisions, alerts, jobs, gmail,
     earnings: Object.fromEntries(optionTickers.map((ticker, index) => [ticker, events[index]])),
   });
-  return <AttentionCard items={items} unavailable={unavailable} />;
+  return <AttentionCard items={items} unavailable={unavailable} scope={scope} />;
 }
 
 function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
@@ -50,7 +52,7 @@ function AttentionRow({ item, index }: { item: AttentionItem; index: number }) {
   </li>;
 }
 
-export function AttentionCard({ items, unavailable }: { items: AttentionItem[]; unavailable: string[] }) {
+export function AttentionCard({ items, unavailable, scope = null }: { items: AttentionItem[]; unavailable: string[]; scope?: string | null }) {
   const count = <span className={`inline-grid min-w-5 place-items-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums ${items.length ? "bg-red-500/80 text-white" : "bg-secondary text-muted-foreground"}`}
     aria-label={`${items.length} item${items.length === 1 ? "" : "s"}`}>{items.length}</span>;
   return <DashboardCard title="Attention" action={count}>
@@ -63,6 +65,7 @@ export function AttentionCard({ items, unavailable }: { items: AttentionItem[]; 
       </summary>
       <ol className="space-y-0.5" start={SHOWN + 1}>{items.slice(SHOWN).map((item, index) => <AttentionRow key={item.id} item={item} index={index + SHOWN} />)}</ol>
     </details>}
+    {scope && <p className="mt-3 text-xs text-muted-foreground">Position checks cover {scope} only; clear the filters to check every position.</p>}
     {unavailable.length > 0 && <p className="mt-3 text-xs text-amber-300">Could not check: {unavailable.join("; ")}.</p>}
   </DashboardCard>;
 }

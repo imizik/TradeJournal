@@ -142,7 +142,8 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
     const at = job.finished_at ?? job.updated_at ?? job.last_run_at;
     items.push({ id: `job:${job.job_type}`, priority: "data", title: `${job.label} failed`,
       detail: job.error_summary || job.message || "The last run ended with an error.", when: at ? ago(now, Date.parse(at)) : "Last run",
-      href: "/?sync=open", sortKey: at ?? "" });
+      // Newest failure first; Gmail ("0"/"1") still leads the data tier.
+      href: "/?sync=open", sortKey: `2${String(1e13 - (at ? Date.parse(at) : 0)).padStart(14, "0")}` });
   }
 
   if (input.alerts == null) unavailable.push("Price alerts");
@@ -156,7 +157,15 @@ export function buildAttention(input: AttentionInputs): AttentionResult {
       sortKey: String(1e10 - event.event_at).padStart(11, "0") });
   }
 
+  // A later human choice on the same opportunity supersedes the WAIT.
+  const latestHuman = new Map<string, string>();
   for (const record of input.decisions) {
+    if (record.actor !== "human") continue;
+    const held = latestHuman.get(record.opportunity_id);
+    if (held == null || record.received_at > held) latestHuman.set(record.opportunity_id, record.received_at);
+  }
+  for (const record of input.decisions) {
+    if (latestHuman.get(record.opportunity_id) !== record.received_at) continue;
     if (record.decision !== "wait" || record.actor !== "human" || isPracticeSample(record) || !record.wait_expiry) continue;
     const ends = Date.parse(record.wait_expiry);
     if (!Number.isFinite(ends) || ends <= now) continue;

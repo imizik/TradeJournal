@@ -88,7 +88,9 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
           </div>
         </DashboardCard>
         <Suspense fallback={<AttentionLoading />}>
-          <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions} />
+          <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions}
+            scope={[params.account && params.account !== "all" ? accountOptions.find((a) => a.type === params.account)?.name ?? params.account : null,
+              params.type === "option" ? "options" : params.type === "stock" ? "stocks" : null].filter(Boolean).join(" · ") || null} />
         </Suspense>
         </div>
         <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>

@@ -85,7 +85,9 @@ owner as already known: overnight holdings, concentration, unfinished reviews.
 Added: Gmail import down/degraded, failed sync job, price alert fired within 24
 hours, and the owner's open WAIT choices (human, non-sample, expiry ahead). WAIT
 conditions are free text that nothing evaluates, so the panel lists an open WAIT
-with its condition and end time; it never claims a condition was met. No
+with its condition and end time; it never claims a condition was met. A later human TAKE/SKIP/WAIT on the same
+opportunity supersedes it. Position checks follow the Dashboard's account/type
+filters and say so; import, sync, alert and WAIT items are never filtered. No
 authoritative next-session calendar is available to the Dashboard, so upcoming
 expiration means within three calendar days, with the date shown. A failed
 quote request is disclosed once above the panel instead of once per position.
