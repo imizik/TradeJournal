@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 
-from app.engine.research_studio import CORE_UNIVERSE, DISCOVERY_END, DISCOVERY_START, FEATURE_UNITS, Observations, parse_definition
+from app.engine.research_studio import CORE_UNIVERSE, DISCOVERY_END, DISCOVERY_START, FEATURE_UNITS, NEWER_PERIODS, NEWER_PROTOCOL, WARMUP_START, Observations, parse_definition
 from app.engine.research_studio_analysis import canonical_bytes
 from app.engine.market_map import ET
 from app.engine.research_studio_store import decode_snapshot
@@ -43,21 +43,36 @@ class ResearchSession:
     def _observations(self, definition, *, fresh=False, parent_run_id=None):
         if parent_run_id:
             self.variants.definition(parent_run_id, definition)
-        key = (tuple(sorted(definition.universe)), definition.end, parent_run_id)
+        if definition.version == 2:
+            if not getattr(self.source, "allow_newer_mu", False):
+                raise ValueError("newer MU study is not operator-approved")
+            # Commit the source scope before reading newer bytes. This conservatively
+            # marks all loaded warm-up/analysis dates exposed for future research.
+            with self.store._root() as fd:
+                self.store._immutable(fd, f"source-exposure.{definition.end}.json", canonical_bytes({
+                    "protocol": NEWER_PROTOCOL, "symbols": ["MU", "SPY"],
+                    "source_start": str(WARMUP_START), "source_end": str(definition.end),
+                    "kind": "exploratory_source_exposure", "independent_validation": False}))
+        key = (definition.version, tuple(sorted(definition.universe)), definition.end, parent_run_id)
         if fresh or self.key != key:
             # Drop the old population before allocating a replacement.
             self.observations = None
             self.chart_snapshot = None
             self.key = None
-            snapshot = self._saved_snapshot(parent_run_id) if parent_run_id else self.source.snapshot(definition.universe, through=definition.end)
+            snapshot = self._saved_snapshot(parent_run_id) if parent_run_id else (self.source.snapshot(definition.universe, through=definition.end) if definition.version == 1 else self.source.snapshot(definition.universe, through=definition.end, version=2))
             self.observations = Observations(snapshot)
             self.chart_snapshot = self.observations.snapshot
             self.key = key
         return self.observations
 
     def config(self):
-        return {"universe": list(CORE_UNIVERSE), "start": str(DISCOVERY_START), "end": str(DISCOVERY_END),
+        result = {"universe": list(CORE_UNIVERSE), "start": str(DISCOVERY_START), "end": str(DISCOVERY_END),
                 "features": dict(FEATURE_UNITS), "enabled": True, "capabilities": ["variants", "conclusions"]}
+
+        if getattr(self.source, "allow_newer_mu", False):
+            result["newer_mu"] = {"protocol": NEWER_PROTOCOL,
+                "periods": [{"label": label, "start": str(start), "end": str(end)} for label, start, end in NEWER_PERIODS]}
+        return result
 
     def preview(self, raw, parent_run_id=None):
         definition = parse_definition(raw)

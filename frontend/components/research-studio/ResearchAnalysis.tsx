@@ -21,7 +21,7 @@ export default function ResearchAnalysis({result,previous,horizon,unit,axis,setH
     <div className="space-y-2 rounded-md bg-secondary/50 p-3 text-xs leading-relaxed">
       <p>The baseline is the mean at similar times for the same tickers, weighted to this event mix. It includes moments that meet your conditions. Reference: immediate next complete five-minute open; missing endpoints stay unavailable.</p>
       <p className={interval ? "" : "text-amber-300"}><strong>95% uncertainty for the difference:</strong> {interval ? interval.map(v=>returnValue(v,unit,true)).join(" to ") : "Unavailable · "+(summary.uncertainty.unavailable_reason==="insufficient_weeks" ? "not enough eligible calendar weeks" : "not enough valid joint draws")}. {summary.uncertainty.eligible_weeks} weeks · {summary.uncertainty.valid_draws} valid / {summary.uncertainty.invalid_draws} invalid draws.</p>
-      <p>Descriptive discovery research. Weeks are approximate blocks; adaptive choices remain exploratory. 30 minutes is primary. This is not a trading P&amp;L or independent validation.</p>
+      <p>Descriptive exploratory research. Weeks are approximate blocks; adaptive choices remain exploratory. 30 minutes is primary. This is not a trading P&amp;L or independent validation.</p>
     </div>
     <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">Endpoint exclusions and immutable identities</summary><pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words">{JSON.stringify({exclusions:summary.event_exclusions,data:result.population.data_id,code:result.analysis_code_id,specification:result.spec},null,2)}</pre></details>
     <div className="grid gap-5 lg:grid-cols-2">

@@ -103,7 +103,11 @@ placement nor actual coverage was verified. Recheck these facts in R0.
    indicators but cannot become research events. The boundary applies to
    source reads, workers, charts, exports and caches, not only UI controls.
    A submitted date or cursor must not bypass it. Confirmation/exam bars and
-   breakdowns are never available through this exploration surface.
+   breakdowns are never available through the version-1 exploration surface.
+   The owner selected a separate, fixed MU newer-data protocol on October 11,
+   2026; its [contract](agent/research-studio-newer-mu.md) bounds version-2
+   periods and rules, operator source approval and explicit exposure records.
+   This does not change Factory gates or make the inspected dates unseen.
 4. Preserve actual exposure history. Older data does not make an already
    inspected period unseen again. Existing hand-research exposure remains a
    limitation, including the Factory's documented prior holdout exposure.

@@ -223,4 +223,4 @@ def analyze(observations: Observations, definition: Definition, code_id: str, *,
             "analysis_code_id": code_id, "spec": SPEC, "numpy_version": np.__version__,
             "population": preview, "data_manifest": [list(entry) for entry in observations.snapshot.manifest],
             "horizons": results, "events": events,
-            "ordinary_qualifiers_included": True, "interpretation": "descriptive discovery research; no causal or execution claim"}
+            "ordinary_qualifiers_included": True, "interpretation": ("descriptive discovery research; no causal or execution claim" if definition.version == 1 else "fixed MU newer-period exploration; inspected source dates remain exposed; no validation or execution claim")}
