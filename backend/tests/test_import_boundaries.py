@@ -63,6 +63,9 @@ PURE_MODULES = {
     "app.engine.research_studio_data",  # explicit cache-only files; no provider/DB/environment
     "app.engine.research_studio_analysis",  # supplied discovery outcomes and joint blocks
     "app.engine.research_studio_store",  # operator-selected research files, no app DB/jobs/providers
+    "app.engine.research_studio_comparison",  # supplied frozen outcomes and paired weekly totals
+    "app.engine.research_studio_variants",  # research-owned lineage/notes; no app DB/providers
+    "app.engine.research_studio_session",  # explicit local adapters and finite calculation dispatch
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.

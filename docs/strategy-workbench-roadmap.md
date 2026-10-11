@@ -1,7 +1,7 @@
 # Strategy Workbench: Research Studio roadmap
 
 **Status: R0/R1 complete; R2 reproducible analysis implemented; verification/review gates recorded in its PR.**
-R3 selected: connected workspace implementation and acceptance are recorded in the [R3 contract](agent/research-studio-r3.md). R4 remains unselected. The [R2 contract](agent/research-studio-r2.md) records current work; the [R1 contract](agent/research-studio-r1.md) records
+R3 is implemented and manually activated. R4 was selected for variants, conclusions and UI clarity; the [R4 contract](agent/research-studio-r4.md) records implementation and pending human acceptance. The [R2 contract](agent/research-studio-r2.md) records current work; the [R1 contract](agent/research-studio-r1.md) records
 implementation and acceptance; R3 connects the owner app workspace; R2 provides outcomes and a manual local lifecycle; its contract records acceptance limits. The existing filename is retained so links remain stable.
 The product-aware review at `4c42018` supersedes the strategy-form-first
 proposal of 2026-10-07 as recorded below. Implementation requires selection
@@ -286,7 +286,7 @@ are established. Fetch occurrence chart windows lazily from the same manifest.
 ## Small delivery phases
 
 R0 probes and bounded R1 observations are complete with documented evidence
-limits; R2 is implemented with documented acceptance limits; R3 is selected for the connected workspace; R4 is **planned, not started**. V1 is complete only after R4.
+limits; R2 is implemented with documented acceptance limits; R3 is implemented for the connected workspace; R4 is **selected and implemented, human usefulness acceptance pending**. V1 is complete only after that acceptance.
 Each phase is separately selected and reviewed, with one bounded result; the
 plan does not authorize implementing the entire sequence at once.
 
@@ -312,7 +312,7 @@ The standard repository verification and review requirements still apply to
 each implementation change. Fixture correctness, browser behavior, actual
 cache coverage, performance and human usefulness are separate evidence layers.
 The R0/R1 reports distinguish observed acceptance from remaining later-phase
-proof; the complete connected Studio remains unbuilt.
+proof; the connected Studio is implemented; independent human usefulness acceptance remains pending.
 
 ## Later capabilities and reopening criteria
 
@@ -332,15 +332,14 @@ proof; the complete connected Studio remains unbuilt.
 
 ## Decisions still open
 
-- R0 and R1 were selected before further S1–S2 work; R2 was subsequently selected in this chat; R3 was selected after R2 merged; R4 requires separate selection.
+- R0 and R1 were selected before further S1–S2 work; R2 was subsequently selected in this chat; R3 was selected after R2 merged; R4 was selected subsequently for variants, conclusions and UI polish; human acceptance remains separate.
 - Approved cache host and component measurements are recorded in the
-  [R0 report](agent/research-studio-r0.md); end-to-end performance is still unproved.
+  [R0 report](agent/research-studio-r0.md); R3 records bounded cache/browser timing evidence, without claiming universal workload performance.
 - Data-quality masks and concrete uncertainty parameters are fixed in the
-  [R1 contract](agent/research-studio-r1.md). R2 must prove analysis/calibration
-  before displaying results.
+  [R1 contract](agent/research-studio-r1.md). R2 records analysis/calibration fixtures; R4 preserves those semantics and adds paired comparison evidence.
 - Whether a saved event merits Factory promotion and how that promotion uses
   the weekly budget: decide only when the later handoff slice is selected.
 
 R2 was selected after inspecting R1 coverage and correctness evidence; its
 [current contract](agent/research-studio-r2.md) owns acceptance. This selection
-did not authorize later phases; the subsequent user selection authorizes R3 only.
+did not authorize later phases; subsequent user selections authorized R3 and then R4, with human usefulness acceptance still separate.
