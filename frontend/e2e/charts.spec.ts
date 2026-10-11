@@ -3897,10 +3897,23 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(drawn(page, "main").locator("canvas").first()).toBeVisible();
   const rail = page.getByRole("navigation").filter({ has: page.getByRole("button", { name: "Expand navigation" }) });
   expect((await rail.boundingBox())!.width).toBeLessThanOrEqual(48);
+  await page.screenshot({ path: test.info().outputPath("navigation-rail-desktop.png") });
   // Every page is still a named link, the current one marked, with sync status and the Sync drawer reachable.
-  for (const name of ["Dashboard", "Daily Review", "Trades", "Analytics", "Fills", "Signals", "Strategy Lab", "Research"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
+  for (const name of ["Dashboard", "Daily Review", "Trades", "Analytics", "Fills", "Signals", "Strategy Lab", "Research Studio", "AI Buildout"]) await expect(rail.getByRole("link", { name, exact: true })).toBeVisible();
   await expect(rail.getByRole("link", { name: "Charts", exact: true })).toHaveAttribute("aria-current", "page");
   await expect(rail.getByTitle("Sync & enrichment status")).toBeVisible();
+  for (const name of ["Dashboard", "Charts", "Research Studio", "AI Buildout"]) {
+    await rail.getByRole("link", { name, exact: true }).hover();
+    await expect(page.getByRole("tooltip")).toHaveText(name);
+    expect((await page.getByRole("tooltip").boundingBox())!.x).toBeGreaterThan(48);
+  }
+  await page.screenshot({ path: test.info().outputPath("navigation-hover-desktop.png") });
+  await page.mouse.move(300, 100);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await rail.getByRole("link", { name: "Research Studio", exact: true }).focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Research Studio");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
   const narrow = (await drawn(page, "main").boundingBox())!.width;
   await rail.getByRole("button", { name: "Expand navigation" }).click();
   await expect(page.getByRole("button", { name: "Collapse navigation" })).toBeVisible();
@@ -3917,6 +3930,11 @@ test("on the charts page the journal navigation is a rail that expands and is re
   await expect(page).toHaveURL(/\/fills$/);
   await expect(page.getByRole("button", { name: "Expand navigation" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "Trade Journal", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "AI Buildout", exact: true })).toBeVisible();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Open menu" }).click();
+  await expect(page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: "AI Buildout", exact: true })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("navigation-menu-phone.png") });
 });
 
 test("dock, navigation and window resizes keep every chart, the selection, the scrolled-back view and the live stream, with no new requests", async ({ page, context }) => {
