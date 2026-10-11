@@ -41,6 +41,9 @@ NEWER_PERIODS = (
     ("2025", date(2025, 1, 1), date(2025, 12, 31)),
     ("2026 through October 9", date(2026, 1, 1), NEWER_END),
 )
+PROSPECTIVE_PROTOCOL = "mu-prospective-20261012-v1"
+PROSPECTIVE_START = date(2026, 10, 12)
+PROSPECTIVE_END = date(2027, 4, 9)
 # Published NYSE closures, including the Jan 9, 2025 mourning closure.
 NEWER_CLOSED = CLOSED_DATES | frozenset(date.fromisoformat(x) for x in (
     "2024-11-28", "2024-12-25",
@@ -49,10 +52,13 @@ NEWER_CLOSED = CLOSED_DATES | frozenset(date.fromisoformat(x) for x in (
     "2026-01-01", "2026-01-19", "2026-02-16", "2026-04-03", "2026-05-25",
     "2026-06-19", "2026-07-03", "2026-09-07",
 ))
+PROSPECTIVE_CLOSED = NEWER_CLOSED | frozenset(date.fromisoformat(x) for x in (
+    "2026-11-26", "2026-12-25", "2027-01-01", "2027-01-18", "2027-02-15", "2027-03-26",
+))
 
 
 def validate_source_version(version: int) -> None:
-    if type(version) is not int or version not in (1, 2):
+    if type(version) is not int or version not in (1, 2, 3):
         raise ValueError("unsupported source protocol")
 
 
@@ -85,7 +91,7 @@ def session_close(day: date) -> int:
 @lru_cache(maxsize=512)
 def session_dates(through: date = DISCOVERY_END, *, version: int = 1) -> tuple[date, ...]:
     validate_source_date(through, version=version)
-    closed = CLOSED_DATES if version == 1 else NEWER_CLOSED
+    closed = CLOSED_DATES if version == 1 else NEWER_CLOSED if version == 2 else PROSPECTIVE_CLOSED
     return tuple(WARMUP_START + timedelta(days=k) for k in range((through - WARMUP_START).days + 1)
                  if (WARMUP_START + timedelta(days=k)).weekday() < 5
                  and WARMUP_START + timedelta(days=k) not in closed)
@@ -93,7 +99,7 @@ def session_dates(through: date = DISCOVERY_END, *, version: int = 1) -> tuple[d
 
 def validate_source_date(day: date, *, version: int = 1) -> None:
     validate_source_version(version)
-    limit = DISCOVERY_END if version == 1 else NEWER_END
+    limit = DISCOVERY_END if version == 1 else NEWER_END if version == 2 else PROSPECTIVE_END
     if type(day) is not date or not WARMUP_START <= day <= limit:
         raise ValueError("source date outside approved warm-up/discovery interval")
 
@@ -145,7 +151,7 @@ class Definition:
     version: int = VERSION
 
     def __post_init__(self):
-        if type(self.version) is not int or self.version not in (VERSION, 2):
+        if type(self.version) is not int or self.version not in (VERSION, 2, 3):
             raise ValueError("unsupported event definition version")
         if type(self.predicates) is not tuple or not 1 <= len(self.predicates) <= 3:
             raise ValueError("one to three AND predicates required")
@@ -156,18 +162,19 @@ class Definition:
         for symbol in self.universe:
             validate_symbol(symbol)
         if (type(self.start) is not date or type(self.end) is not date
-                or not DISCOVERY_START <= self.start <= self.end <= (DISCOVERY_END if self.version == 1 else NEWER_END)):
+                or not DISCOVERY_START <= self.start <= self.end <= (DISCOVERY_END if self.version == 1 else NEWER_END if self.version == 2 else PROSPECTIVE_END)):
             raise ValueError("event dates must remain inside discovery")
         if (type(self.window_start) is not int or type(self.window_end) is not int
                 or not 575 <= self.window_start <= self.window_end <= 960
                 or self.window_start % 5 or self.window_end % 5):
             raise ValueError("window uses aligned completed-bar close minutes in RTH")
 
-        if self.version == 2:
+        if self.version in (2, 3):
             expected = {("move_15m_atr", None, -0.25), ("rvol", 1.5, None)}
             actual = {(p.feature, p.minimum, p.maximum) for p in self.predicates}
             variant = {("move_15m_atr", None, -0.25), ("rvol", 2.0, None)}
-            if (self.universe != ("MU",) or (self.start, self.end) not in {(a, b) for _, a, b in NEWER_PERIODS}
+            periods = {(a, b) for _, a, b in NEWER_PERIODS} if self.version == 2 else {(PROSPECTIVE_START, PROSPECTIVE_END)}
+            if (self.universe != ("MU",) or (self.start, self.end) not in periods
                     or (self.window_start, self.window_end) != (600, 690)
                     or len(self.predicates) != 2 or actual not in (expected, variant)):
                 raise ValueError("newer MU study requires a fixed period and the unchanged MU rules")
@@ -184,6 +191,9 @@ class Definition:
         if self.version == 2:
             result["protocol"] = NEWER_PROTOCOL
             result["exploratory_exposure"] = True
+        elif self.version == 3:
+            result["protocol"] = PROSPECTIVE_PROTOCOL
+            result["prospective_registration_required"] = True
         return result
 
     @property
@@ -197,6 +207,8 @@ def parse_definition(raw: dict) -> Definition:
                 "direction": "price_decline_negative", "feature_units": dict(FEATURE_UNITS)}
     if type(raw) is dict and raw.get("version") == 2:
         metadata.update(protocol=NEWER_PROTOCOL, exploratory_exposure=True)
+    elif type(raw) is dict and raw.get("version") == 3:
+        metadata.update(protocol=PROSPECTIVE_PROTOCOL, prospective_registration_required=True)
     if (type(raw) is not dict or set(raw) - allowed - metadata.keys()
             or "predicates" not in raw or "version" not in raw):
         raise ValueError("invalid event definition fields")
@@ -274,7 +286,7 @@ class Snapshot:
         names = [x.symbol for x in self.symbols]
         if len(set(names)) != len(names) or MARKET not in names:
             raise ValueError("distinct snapshot symbols and SPY required")
-        if self.source_version == 2 and set(names) != {"MU", MARKET}:
+        if self.source_version in (2, 3) and set(names) != {"MU", MARKET}:
             raise ValueError("newer source is bounded to MU and SPY")
         allowed_days = frozenset(session_dates(self.through, version=self.source_version))
         expected = {(name, str(day)) for name in names for day in session_dates(self.through, version=self.source_version)}
@@ -330,6 +342,8 @@ class Snapshot:
                       "hours": [[str(d), 570, session_close(d)] for d in session_dates(self.through, version=self.source_version)]}
         if self.source_version == 2:
             metadata.update(source_protocol=NEWER_PROTOCOL, roster="nyse-mu-20261009-v1")
+        elif self.source_version == 3:
+            metadata.update(source_protocol=PROSPECTIVE_PROTOCOL, roster="nyse-mu-20270409-v1")
         return _hash(metadata)
 
 
