@@ -81,7 +81,7 @@ export default function ResearchStudio() {
   async function inspect(e: Occurrence, reveal = false, saved = false) {
     const seq = ++chartSequence.current; setSelected(e); setSelectedSaved(saved); setChart(null); setChartLoading(true);
     try { const c = await prepared<Chart>("chart", {symbol: e.symbol, decision_time: e.decision_time, data_id: saved ? result?.population.data_id : population?.data_id, run_id: saved ? result?.run_id : null, reveal, operation_id: crypto.randomUUID()});
-      if (seq === chartSequence.current) { setChart(c); if (reveal) setInformed(true); }
+      if (seq === chartSequence.current) { setChart(c); setSelected({...e, occurrence_id: c.occurrence_id, decision_time: c.decision_time, features: c.features}); if (reveal) setInformed(true); }
     } catch (err) { if (seq === chartSequence.current) setError((err as Error).message); } finally { if (seq === chartSequence.current) setChartLoading(false); }
   }
   function edit(d: Definition) { currentRef.current = key(d); setLoading(true); setChartLoading(false); setDraft(d); ++chartSequence.current; setChart(null); setSelected(null); }

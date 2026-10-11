@@ -61,6 +61,8 @@ test("chart-start conditions use decision features and edits label prior results
   await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
   await page.getByRole("button",{name:"Inspect decision",exact:true}).click();
   await expect(page.getByRole("button",{name:"Use decision features as conditions"})).toBeVisible();
+  const engineId=await page.locator("button[data-occurrence-id]").first().getAttribute("data-occurrence-id");
+  await expect(page.getByTestId("selected-id")).toHaveText(engineId!);
   await page.getByRole("button",{name:"Use decision features as conditions"}).click();
   await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
   await page.getByRole("button",{name:"Run analysis",exact:true}).click();
