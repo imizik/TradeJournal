@@ -57,7 +57,44 @@ test("owner foundation has compact hierarchy, reachable details and phone layout
   await expect(performance.getByText("Avg Hold", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "Open practice workspace" }).click();
   await expect(page.getByRole("button", { name: "Prepare today", exact: true })).toBeInViewport();
+  const trades = await (await page.request.get("/api/backend/trades")).json() as Trade[];
+  const rnxt = trades.find((trade) => trade.ticker === "RNXT")!;
+  await page.goto(`/daily/${rnxt.opened_at.slice(0, 10)}`);
+  const rnxtRow = page.getByRole("row").filter({ has: page.getByRole("link", { name: "RNXT", exact: true }) });
+  await expect(rnxtRow.getByText("+$180.00", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("import freshness discloses initial failure, retained history and recovery on one shared poll", async ({ page }) => {
+  let unavailable = true;
+  let requests = 0;
+  await page.route("**/api/backend/gmail/health", async (route) => {
+    requests++;
+    if (unavailable) await route.fulfill({ status: 503, json: { detail: "Fixture health unavailable" } });
+    else await route.fulfill({ json: { status: "live", message: "Fixture listener healthy", action: null, listener_enabled: true,
+      last_import_at: "2026-10-09T14:32:00Z", last_notification_at: null, watch_expires_at: null, data_version: "fixture" } });
+  });
+  await page.goto("/");
+  const panel = page.getByLabel("Import freshness", { exact: true });
+  await expect(panel).toContainText("Import status could not load.");
+  await expect(panel).toContainText("Gmail: status unavailable");
+  expect(requests).toBe(1); // Nav, banner and Dashboard subscribe to one poll.
+  await panel.screenshot({ path: test.info().outputPath("dashboard-import-unavailable-desktop.png") });
+  unavailable = false;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(panel).toContainText("Gmail: live");
+  await expect(panel.getByRole("time")).toHaveAttribute("datetime", "2026-10-09T14:32:00Z");
+  unavailable = true;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(panel).toContainText("Showing historical import data; last status check");
+  await expect(panel).toContainText("Gmail: status unavailable");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await panel.screenshot({ path: test.info().outputPath("dashboard-import-historical-phone.png") });
+  unavailable = false;
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(panel).toContainText("Gmail: live");
+  await expect(panel).not.toContainText("Showing historical");
+  expect(requests).toBe(4);
 });
 
 test("filters retain scope, drill-down links work and history shows five latest closes", async ({ page, request }) => {
