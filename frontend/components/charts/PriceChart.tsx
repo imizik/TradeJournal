@@ -4,8 +4,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
 import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
-import { COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
 import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
 import { newsLabel, newsMarks, newsTip } from "@/lib/newsMarkers";
 import type { NewsMark } from "@/lib/newsMarkers";
@@ -24,14 +24,15 @@ import SelectionBar from "./SelectionBar";
 import ToolbarMenu from "./ToolbarMenu";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
+import { ZOOM_SPEEDS, readZoomSpeed } from "@/lib/zoomSpeed";
 
-const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
+const OVERLAYS = ["ema9", "ema20", "ema50", "ema200", "vwap"] as const;
 const tickFormats = {
   [TickMarkType.Year]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric" }),
   [TickMarkType.Month]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short" }),
   [TickMarkType.DayOfMonth]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }),
 };
-type Overlay = keyof typeof COLORS;
+type Overlay = typeof OVERLAYS[number];
 const MIN_BAR_SPACING = 2;
 const NO_DRAWINGS: Drawing[] = [];
 const NO_ALERTS: AlertMark[] = [];
@@ -49,6 +50,8 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
 }
 /** The range bands' VWAP bands (C2.7): VWAP plus and minus one and two of the session's standard deviations. */
 const VWAP_BANDS = [2, 1, -1, -2] as const;
+/** A VWAP band is the VWAP color at a faint alpha, the nearer bands stronger. */
+const bandColor = (vwap: string, k: number) => vwap + (Math.abs(k) === 1 ? "70" : "45");
 type VwapBand = typeof VWAP_BANDS[number];
 function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
   const b = bars[index];
@@ -136,8 +139,10 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  /** The studies' line colors (the user's choices over the defaults). */
+  colors?: Record<ColorKey, string>;
   /**
    * A smaller chart's own studies, from its header menu, already in `indicators`; null follows the workspace's,
    * slimmed while the chart is compact. `onStudies` sets them (null: follow again); `studiesHidden` is the Indicators group hidden everywhere.
@@ -210,6 +215,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onFill?(id: string): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const colorsRef = useRef(colors);
   const box = useRef<HTMLElement>(null);
   // A smaller chart under `COMPACT_PANEL` is compact; the ref is read where the chart opens or resets its view.
   const [compact, setCompact] = useState(false);
@@ -295,9 +301,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
     volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
     const lines = {} as Bundle["lines"];
-    for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    for (const name of OVERLAYS) lines[name] = chart.addSeries(LineSeries, { color: colorsRef.current[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const bands = {} as Bundle["bands"];
-    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: Math.abs(k) === 1 ? "#f5e6a170" : "#f5e6a145", lineWidth: 1,
+    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: bandColor(colorsRef.current.vwap, k), lineWidth: 1,
       lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     const markers = createSeriesMarkers(candles, []);
     const shade = new SessionShade(() => barsRef.current);
@@ -579,6 +585,19 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("touchend", onTouchEnd, true);
     element.addEventListener("touchcancel", onTouchEnd, true);
     element.addEventListener("contextmenu", onContextMenu, true);
+    // lightweight-charts zooms by deltaY / 100 per wheel event with no speed option, so a trackpad's small deltas crawl.
+    // Re-send the event with deltaY scaled by this device's Zoom speed; deltaX (the pan) and the cursor anchor are untouched.
+    const scaled = new WeakSet<Event>();
+    const onWheel = (event: WheelEvent) => {
+      const factor = ZOOM_SPEEDS[readZoomSpeed()];
+      if (scaled.has(event) || factor === 1 || event.deltaY === 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const again = new WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, view: window, clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+        deltaX: event.deltaX, deltaY: event.deltaY * factor, deltaZ: event.deltaZ, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey });
+      scaled.add(again);
+      (event.target as Element).dispatchEvent(again);
+    };
+    element.addEventListener("wheel", onWheel, { capture: true, passive: false });
     const unpin = () => { pinnedLive.current = false; };
     for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
     const newsAt = (x: number, y: number, slop: number) => {
@@ -740,6 +759,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
+      element.removeEventListener("wheel", onWheel, true);
       markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
@@ -749,7 +769,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const current = bundle.current;
     if (!current || indicators.rsi === !!current.rsi) return;
     if (current.rsi) { current.chart.removeSeries(current.rsi); current.rsi = undefined; return; }
-    const rsi = current.chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
+    const rsi = current.chart.addSeries(LineSeries, { color: colorsRef.current.rsi, lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
     // Keep 100 and 0 clear of the divider, so they never sit against the price pane's bottom label.
     rsi.priceScale().applyOptions({ scaleMargins: { top: 0.24, bottom: 0.18 } });
@@ -798,13 +818,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // follows the live edge only when the user is already looking at it.
       const last = bars.length - 1;
       if (change === "append") {
-        for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+        for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last - 1, name));
         for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last - 1, k));
       }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
       current.shade.update();
-      for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
+      for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last, name));
       for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
       return chartCommitted(symbol, live.store.get(symbol).ticks.at(-1), main);
@@ -822,7 +842,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     current.candles.setData(bars.map(candlePoint));
     current.volume.setData(bars.map(volumePoint));
     current.shade.update();
-    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
+    for (const name of OVERLAYS) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
     for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
@@ -842,8 +862,17 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const current = bundle.current;
     if (!current) return;
     current.volume.applyOptions({ visible: indicators.volume });
-    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
+    for (const name of OVERLAYS) current.lines[name].applyOptions({ visible: indicators[name] });
   }, [indicators]);
+  // A chosen color reaches the lines, the VWAP bands (at their own alpha) and the RSI line in place.
+  useEffect(() => {
+    colorsRef.current = colors;
+    const current = bundle.current;
+    if (!current) return;
+    for (const name of OVERLAYS) current.lines[name].applyOptions({ color: colors[name] });
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ color: bandColor(colors.vwap, k) });
+    current.rsi?.applyOptions({ color: colors.rsi });
+  }, [colors]);
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
@@ -1003,14 +1032,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         </div>
         {!main && timer}
         {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
-          {indicators.vwap && <span style={{ color: COLORS.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+          {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
           {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
           {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
-          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
+          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
           {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
-            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: COLORS[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
+            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
             <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
-              {emas.map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
+              {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
           </span>}
           {rvolValue}
           {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>

@@ -287,7 +287,19 @@ cd backend
   navigation and resizing the window keep every chart instance, the selection,
   a scrolled-back view and the stream, and fetch nothing. The Indicators menu
   is not modal (hotkeys keep working); Escape closes it before it puts a tool
-  away or leaves full screen. Below 1024px the page scrolls as before: the
+  away or leaves full screen. The menu also holds a color swatch for EMA 9,
+  20, 50, 200, VWAP and RSI 14 (the VWAP bands follow VWAP's color at their own
+  alpha; legend dots and values use the chosen colors), a **Reset colors**
+  action, and a **Zoom speed** choice of Slow, Normal or Fast. Chosen colors are
+  the shared `indicatorColors` setting (only colors that differ from the
+  defaults, `#rrggbb`; anything else is dropped on read, old documents without
+  it load unchanged, and the field is always sent so a reset clears it).
+  Zoom speed is per device (`localStorage`, `frontend/lib/zoomSpeed.ts`):
+  lightweight-charts zooms by deltaY / 100 per wheel event with no speed
+  option, so each chart's container re-sends a vertical wheel or pinch event
+  (`ctrlKey` wheel) with deltaY times 1, 3 (default) or 6 while deltaX, the
+  cursor anchor and the modifiers are kept; the library still caps one event's
+  zoom, so a mouse wheel's large steps change little. Below 1024px the page scrolls as before: the
   toolbar wraps into rows of 44px controls (the intervals scroll sideways in
   theirs), the drawing tools are a toolbar row, the link, pause, refresh and
   shortcut controls, the smaller charts' S/M/L height, the data note and the
