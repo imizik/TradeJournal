@@ -597,6 +597,21 @@ cd backend
   (`/charts/stream?symbols=…`). History, retries and day rollover are kept per
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
+- A smaller chart narrower than 360px or shorter than 260px (header included)
+  is **compact** (`COMPACT_PANEL` in `frontend/lib/charts.ts`): it opens on the
+  latest 40 candles instead of 65, its header buttons sit closer, and its
+  automatic levels are short marks at the right edge instead of bands across
+  the candles. Hovering a level gives a one-line tooltip; a click opens the
+  full card. While it follows the workspace's studies it draws only EMA 9 and
+  VWAP (as the Indicators menu sets them), with no slower averages, volume or
+  RSI. Dragging it bigger or maximizing it brings the full view back; the main
+  chart is never compact.
+- Each smaller chart's sliders button picks **its own studies**. Turning one
+  on or off starts from what the chart shows now; **Automatic** follows the
+  workspace again. The choice belongs to the box, not the interval: it stays put
+  through Focus and layout switches. It is saved with the workspace
+  (`panelStudies`, a top-level field, shared across devices). Fill arrows stay
+  workspace-wide, and hiding the Indicators group hides every chart's studies.
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. A premarket or after-hours price names its
   session and is measured from the previous close or the regular close, by the
@@ -611,7 +626,7 @@ cd backend
   the live stream remain Tradier; daily/weekly bars remain Tradier and page
   back through the symbol's whole daily history (see Daily and weekly depth).
 - When today's tail has fewer candles than the chart opens on (110 on the main
-  chart, 65 on a smaller one) — none before 04:00, on weekends and holidays; a
+  chart, 65 on a smaller one, compact or not) — none before 04:00, on weekends and holidays; a
   few early in the day; and always on 15m and coarser, whose whole session is
   64 candles or fewer — the panel loads the latest completed SIP sessions at
   once instead of waiting for a pan. Completed sessions come from the disk cache,
