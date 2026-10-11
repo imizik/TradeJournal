@@ -4789,6 +4789,11 @@ async function stubAutoLevels(page: Page, configure?: (data: ChartData) => void)
 }
 type AutoProbe = Map<string, { y(id: string): number | null }>;
 const registerAutoLevels = (page: Page) => page.addInitScript(() => { (window as typeof window & { __tjAutoLevels?: Map<string, unknown> }).__tjAutoLevels = new Map(); });
+// Fixes a chart's price range (as a drag on its axis would), for a level the automatic fit leaves just off the pane.
+const showPrices = (page: Page, panel: string, from: number, to: number) => page.evaluate(async ([key, low, high]) => {
+  (window as unknown as { __tjCharts: Map<string, import("lightweight-charts").IChartApi> }).__tjCharts.get(key)!.priceScale("right").setVisibleRange({ from: low, to: high });
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}, [panel, from, to] as const);
 const autoY = (page: Page, panel: string, id: string) => page.evaluate(([key, zone]) => (window as unknown as { __tjAutoLevels: AutoProbe }).__tjAutoLevels.get(key)!.y(zone)!, [panel, id] as const);
 
 test("level cards stay on the chart under the pointer through linked crosshair redraws and interval changes", async ({ page }) => {
@@ -5361,7 +5366,8 @@ test("an automatic level's menu sets a close-beyond alert on that chart's interv
   expect(server.posts[0]).toMatchObject({ symbol: "MRVL", price: 254.3, condition: "closes_beyond", interval: "5m", source_kind: "auto", source_id: zone.id, label: "PDH + 254" });
   await expect(alertsPanel(page)).toContainText("Phone alerts are not set up on this server");
   await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "254.30:active");
-  // A 15m chart offers its own candle.
+  // A 15m chart offers its own candle (its fit leaves the zone just below the pane).
+  await showPrices(page, "Panel 2", 252, 262);
   await rightClick(page, "Panel 2", { x: 120, y: await autoY(page, "Panel 2", zone.id) });
   await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Alert on a 15m close beyond" })).toBeVisible();
   await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Remove 5m close below 254.30" })).toBeVisible();
@@ -5660,6 +5666,7 @@ test("max pain always draws with the options levels, labelled inferred, with its
   // Far below the nearest strikes, and still drawn: like the walls, max pain is not ranked away.
   for (const panel of ALL_PANELS) await expect(drawn(page, panel)).toHaveAttribute("data-option-levels", `Max pain,${OI_LEVELS}`);
   const box = (await drawn(page, "main").boundingBox())!;
+  await showPrices(page, "main", 247, 263);
   await page.mouse.move(box.x + 300, box.y + await autoY(page, "main", "max_pain@248.5"));
   const card = page.getByRole("tooltip", { name: "Max pain level card" });
   await expect(card).toContainText("Max pain Max pain: least paid out at expiry248.50");
