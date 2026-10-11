@@ -12,7 +12,7 @@ export type SettingsStore = {
   saves: { base: number; data: Record<string, unknown>; status: number }[];
 };
 
-export async function fakeChartSettings(context: BrowserContext, store: Partial<SettingsStore> = {}): Promise<SettingsStore> {
+export async function fakeChartSettings(context: BrowserContext, store: Partial<SettingsStore> = {}, afterSave?: () => Promise<void>): Promise<SettingsStore> {
   const state: SettingsStore = { revision: 0, data: null, offline: false, saves: [], ...store };
   const copy = () => ({ revision: state.revision, data: state.data, updated_at: null });
   await context.route("**/api/backend/charts/settings", async (route) => {
@@ -27,7 +27,9 @@ export async function fakeChartSettings(context: BrowserContext, store: Partial<
     if (stale) return route.fulfill({ status: 409, json: { detail: { code: "revision_conflict", message: "Changed on another device.", current: copy() } } });
     state.revision += 1;
     state.data = { ...Object.fromEntries(Object.entries(state.data ?? {}).filter(([key]) => !(key in body.data))), ...body.data };
-    return route.fulfill({ json: copy() });
+    const saved = copy();
+    await afterSave?.(); // The server committed; its acknowledgement may still be in flight.
+    return route.fulfill({ json: saved });
   });
   return state;
 }

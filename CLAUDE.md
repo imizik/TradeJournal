@@ -78,6 +78,12 @@ change lands somewhere the suite does not cover — any frontend rendering, any
 live external integration — say so explicitly and describe what you did verify
 instead. `docs/agent/verification.md` lists the gaps honestly; use it.
 
+Use either the full local checks above or the
+[CI-backed path](docs/agent/verification.md#ci-backed-verification). The latter
+requires local causal/interaction proof for the change and every applicable
+full CI job and step passing on the exact final head; it avoids repeating that
+full suite locally. Never describe CI-backed coverage as a full local pass.
+
 The owner assigns checks to workers and ensures the full required verification
 is complete before reporting success. A worker's narrower checks do not replace
 that final obligation. Reuse evidence under

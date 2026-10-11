@@ -2,6 +2,7 @@
 
 Checked 2026-10-11 against the current official direct-API catalog, the
 [broader historical/options reads](moomoo-broader-history-options.md),
+[option-field validation](moomoo-option-field-validation.md),
 [Phase 1 connectivity](moomoo-phase1.md), and the current backend source.
 This is an explanatory research inventory. No feed, calculation, configuration,
 metric value or provider adapter changes follow from this table.
@@ -23,11 +24,11 @@ endpoint-wide entitlement. Potential uses below are research hypotheses.
 
 | Endpoint/data | Potential metric or feature | Current comparison/source | Evidence and decision |
 | --- | --- | --- | --- |
-| [Historical candles](https://open.moomoo.com/api/quote/basic-data/history-kline): options | Option MFE/MAE, giveback, exit efficiency, peak-time and post-exit paths | `trade_path.py` calls Alpaca option history; fill minutes excluded, actual FIFO exposure and Decimal math retained | **N/P.** September NVDA OHLC matched on 390 shared minutes; SPY had one differing minute in 405. Adjusted UVXY zero-volume candles add no verified traded coverage. Keep Alpaca; no recomputation. |
+| [Historical candles](https://open.moomoo.com/api/quote/basic-data/history-kline): options | Option MFE/MAE, giveback, exit efficiency, peak-time and post-exit paths | `trade_path.py` calls Alpaca option history; fill minutes excluded, actual FIFO exposure and Decimal math retained | **N/P.** The [coverage study](moomoo-option-path-coverage.md) matched 150 finite fields across 18 hypothetical recent windows after the diagnostic timestamp shift; 12 fields jointly unavailable. Older December/March candidates returned cache-resolution errors while Alpaca supplied history. Extra zero-volume bars add no verified traded coverage. Keep Alpaca; saved metrics unchanged. |
 | Same endpoint: underlying minutes | Underlying MFE/MAE, move timing, ATR context and entry-price context | Alpaca minute paths; Polygon underlying price/context and independently computed indicators | **N/P.** Three additional sessions showed different OHLC/volume against IEX. Shared timestamps do not establish venue equivalence, fill-time availability or a better input. Keep current sources. |
 | Same endpoint: daily/other intervals | Indicators, RVOL and swing/event-study histories | Alpaca daily `all` adjustment; Polygon split-adjusted daily/hourly context; chart history has its own explicit basis | **N/P.** Native minute/five-minute volumes differ; raw/forward daily split sample compared. Adjustment modes are not interchangeable; no indicator or backtest was rerun. |
 | [Static profiles](https://open.moomoo.com/api/quote/basic-data/stock-basicinfo), [chains](https://open.moomoo.com/api/quote/derivatives/option-chain), [expirations](https://open.moomoo.com/api/quote/derivatives/option-expiration) | Contract resolution, expired-contract coverage, adjusted-root identity | Existing OCC mapping and Tradier chain contract model | **N** profiles/chains; **C** separate expiration endpoint. September history resolved despite chain failure; December candidate omitted. UVXY1 share size 20 is not its premium multiplier 100. Identity/deliverable semantics remain a gate. |
-| [Option screen](https://open.moomoo.com/api/quote/screening/option-screen) | Spread/liquidity context, current Greeks/IV, OI or contract filtering | Tradier quotes/ORATS Greeks; Alpaca indicative snapshots; local fill-premium-based Black-Scholes | **P/D.** Earlier bid/ask and Greeks were observed; bid/ask sizes and OI were absent in sampled rows. No per-contract quote/Greek time was established. Current snapshots cannot replace historical `*_at_fill` values. |
+| [Option screen](https://open.moomoo.com/api/quote/screening/option-screen) | Spread/liquidity context, current Greeks/IV, OI or contract filtering | Tradier quotes/ORATS Greeks; Alpaca indicative snapshots; local fill-premium-based Black-Scholes | **N/P/D.** The field study decoded integer-string sizes/OI and matched Tradier for four NVDA/SPY contracts. Earlier numeric-only summaries did not establish missing fields or a permission restriction. Quote/Greek clocks, size units and model conventions remain unresolved; no historical `*_at_fill` replacement. |
 | [Option volatility](https://open.moomoo.com/api/quote/derivatives/option-volatility) | Daily IV/HV context, IV premium and later IV-crush research | Existing local IV/Greeks; no historical vendor-IV comparison completed | **N/P.** SPY returned 31 daily points, not a year of coverage despite a one-year query. Documented percentages; publication/model/as-of rules unknown. An expiry-day IV spike is not independently validated. No historical overwrite. |
 | [Exercise probability](https://open.moomoo.com/api/quote/derivatives/option-exercise-probability) | Potential model-context feature for option research | Local pricing/calculation models; no direct benchmark in this study | **D.** Documented percentage series supports US option categories and bounded limit; no model/calibration or API access test. This evidence does not equate it with realized assignment probability or historical fill-time delta. |
 | [Strategy lists](https://open.moomoo.com/api/quote/derivatives/option-strategy), [spread definitions](https://open.moomoo.com/api/quote/derivatives/option-strategy-spread), [package quotes](https://open.moomoo.com/api/quote/derivatives/combo-option-quote) | Potential spread valuation and scenario comparison | Existing per-contract quotes and user-defined research semantics | **C** lists/spreads, **D** quote schema. Package quote is documented market data, not execution evidence. Read-only quote access, quote times, leg identity and pricing conventions remain untested. No order endpoint is included. |
@@ -90,7 +91,7 @@ are included for completeness and do not represent additional data products.
 | [Combo Option Quote](https://open.moomoo.com/api/quote/derivatives/combo-option-quote) | Contract/model/strategy context; payoff and timestamp validation needed | D — market-data package quote; untested access/times |
 | [Stock Screen](https://open.moomoo.com/api/quote/screening/stock-screen) | Candidate discovery or bounded contract selection | C — catalog only; schema and account access untested |
 | [Warrant Screen](https://open.moomoo.com/api/quote/screening/warrant-screen) | Warrant candidate; outside the selected US stock/options cohort | C — catalog only; schema and account access untested |
-| [Option Screen](https://open.moomoo.com/api/quote/screening/option-screen) | Candidate discovery or bounded contract selection | P/D — selected closed-market fields; size/OI/time gaps |
+| [Option Screen](https://open.moomoo.com/api/quote/screening/option-screen) | Candidate discovery or bounded contract selection | N/P/D — four quote/size/OI matches after typed decoding; clocks/model conventions unresolved |
 | [IPO List](https://open.moomoo.com/api/quote/ipo/ipo-list) | Candidate listing-age/event cohort context | C — catalog only; schema and account access untested |
 | [Get User Security](https://open.moomoo.com/api/quote/watchlist/user-security) | User-specific watchlist state, outside market-data-only scope | E — not called or requested |
 | [Get User Security Group](https://open.moomoo.com/api/quote/watchlist/user-security-group) | User-specific watchlist state, outside market-data-only scope | E — not called or requested |
@@ -138,15 +139,24 @@ handling. None justifies replacing current sources. Sparse zero-volume bars
 are not proof of additional traded-price history, and more vendor model fields
 are not proof of more accurate fill-time Greeks.
 
+The later [historical-options coverage study](moomoo-option-path-coverage.md)
+confirmed recent hypothetical metric agreement after the diagnostic timestamp
+shift, but found no additional verified traded-price coverage. Four exact older
+Moomoo codes failed cache resolution while Alpaca returned their histories.
+
 Further bounded research could resolve older contract identities from independent
 reference data, compare common trade windows without touching saved metrics,
-clarify publication/revision and adjustment conventions, and verify missing
-bid/ask sizes, OI and quote/Greek timestamps. Any potential replacement remains
+clarify publication/revision and adjustment conventions, and establish physical
+size units, OI dates and quote/Greek timestamps. Any potential replacement remains
 metric-specific and would need demonstrated coverage/correctness benefit,
 provenance, fallback and rollback; this inventory authorizes none of those changes.
 
 Maximum concurrent subscriptions, actual named depth licenses and private
 non-display/ML recording rights remain unresolved in the Phase 1 evidence.
+The [depth rights audit](moomoo-depth-permissions-rights-audit.md) checked direct
+quota rules and public broker/exchange policies; Market Quote alone does not
+resolve those questions, and the revised 2026 Nasdaq AI-policy text remains
+unretrieved. A prepared clarification request is saved; no vendor message was sent.
 Historical Level 2 was not established by the catalog or these candle reads.
 A later historical Workbench dataset cannot be reconstructed from candlesticks.
 No vendor messages were sent. Market-hours verification remains separately deferred.

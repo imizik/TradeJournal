@@ -17,6 +17,41 @@ FIXTURE = json.loads((Path(__file__).parent / "fixtures/moomoo/history_compariso
 RFC_SEED = bytes.fromhex("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60")
 
 
+def test_moomoo_quantity_strings_fixture_preserves_price_and_greek_units():
+    row = json.loads((Path(__file__).parent / "fixtures/moomoo/option_quote_fields.json").read_text())
+    result = probe.quote_fields(row, "moomoo")
+    assert {k: result[k] for k in ("bid_volume", "ask_volume", "open_interest", "volume")} == {
+        "bid_volume": 12, "ask_volume": 7, "open_interest": 400, "volume": 90,
+    }
+    assert result["price"] == 5.15
+    assert result["bid_price"] == 5.1
+    assert result["implied_volatility"] == 24.5
+    assert result["delta"] == 0.52
+    assert result["source_time_ms"] is None
+    assert row["bid_volume"] == "12"
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("0", 0), (0, 0), (0.0, 0), ("12", 12), (12.0, 12),
+    (2**63 - 1, 2**63 - 1), (str(2**63 - 1), 2**63 - 1),
+    (None, None), (True, None), (False, None), (-1, None), ("-1", None),
+    ("+1", None), (" 1", None), ("1.0", None), ("1e2", None),
+    (1.5, None), (float("nan"), None), (float("inf"), None),
+    (float(2**53), None), (2**63, None), (str(2**63), None),
+    ("9" * 100, None), ("secret-reflection", None), ([], None), ({}, None),
+])
+def test_option_quantity_decoder_is_bounded(value, expected):
+    assert probe.option_quantity(value) == expected
+
+
+def test_missing_quantity_stays_unavailable_and_zero_stays_zero():
+    result = probe.quote_fields({"bid_volume": "0", "open_interest": "bad"}, "moomoo")
+    assert result["bid_volume"] == 0
+    assert result["ask_volume"] is None
+    assert result["open_interest"] is None
+    assert "bad" not in json.dumps(result)
+
+
 def reader(handler):
     return probe.Reader(httpx.Client(transport=httpx.MockTransport(handler)), probe.DEFAULT_DAY,
                         "public-test-appkey", Ed25519PrivateKey.from_private_bytes(RFC_SEED))

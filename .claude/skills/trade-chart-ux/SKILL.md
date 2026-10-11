@@ -111,8 +111,9 @@ visibly works. In BUILD mode:
 5. **Loop** steps 2–4 until every criterion passes. After three loops that
    do not converge, stop and show the user the pictures and the blocker
    instead of spending more.
-6. Only then run the full `bash scripts/verify.sh`, commit, and follow
-   `docs/agent/pr-review.md`. Hand the reviewer the base/head, the gate
+6. Only then complete full local verification or the
+   [CI-backed path](../../../docs/agent/verification.md#ci-backed-verification),
+   commit, and follow `docs/agent/pr-review.md`. Hand the reviewer the base/head, the gate
    results with their commit, and the before/after picture paths so it
    judges rather than re-runs.
 
