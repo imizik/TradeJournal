@@ -34,8 +34,9 @@ separate from agent schedules, assignments and trading automation.
    journal's proven publisher pattern (`tradejournal-journal-real-keys` and its
    network unit under `deploy/cloud-mcp-journal/`). A dedicated advisor key UID
    runs a oneshot every 15 minutes, writing only the advisor snapshot under
-   `/var/lib/tradejournal-advisor/public-keys/`. Its UID-specific nftables table
-   allows DNS and public HTTPS to the configured issuer origin only, with
+   `/var/lib/tradejournal-advisor-v2-keys/`. Its UID-specific nftables table
+   allows DNS to the named resolvers and HTTPS to public addresses only (the
+   journal publisher's rules; narrowing to the issuer's addresses is not built), with
    private/loopback/Tailscale/host addresses denied; it cannot read the advisor
    config, fixture SQLite, sockets or any journal/production path. The serving
    processes keep `PrivateNetwork`, AF_UNIX only, and read the snapshot
@@ -79,7 +80,7 @@ the new UID-specific one.
   status reports each state without secrets; owner session and CSRF rules hold;
   desktop and 390px status rendering.
 - **Disposable Ubuntu (deployment CI):** timer advances the snapshot; network
-  policy denies private API/frontend and non-issuer hosts for the key UID;
+  policy denies private API/frontend, private and host addresses for the key UID;
   stopping the timer leads to refusal after expiry and status shows it;
   restarting recovers; host reboot of the units preserves receipts.
 - **Observed on the VPS, after step 1 is accepted:** an actual Jo read and save

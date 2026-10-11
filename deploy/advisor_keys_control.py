@@ -15,6 +15,7 @@ import os
 from pathlib import Path
 import pwd
 import shutil
+import stat
 import sys
 import tempfile
 import time
@@ -36,10 +37,34 @@ SERVING = ("tradejournal-advisor-mcp.service", "tradejournal-advisor-backend.ser
 BUNDLE_FILES = ("cloud_mcp_d0_refresh.py", *[f"units/{name}" for name in KEY_UNITS])
 RECORD_NAME = "keys-installation.json"
 FRESH_MARGIN = 15 * 60
+MAX_SNAPSHOT = 64 * 1024
 
 
 def record_path():
     return RUNTIME / RECORD_NAME
+
+
+def read_snapshot(path, *, owner=None):
+    """Read a public snapshot without following links or blocking on special files.
+
+    The key UID owns the maintained directory, so root must not trust its leaf:
+    require a small regular file (owned by the key UID when given) that parses.
+    """
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode) or (owner is not None and info.st_uid != owner):
+            raise ValueError("Public-key snapshot must be a regular file owned by its publisher")
+        body = os.read(descriptor, MAX_SNAPSHOT + 1)
+    finally:
+        os.close(descriptor)
+    if len(body) > MAX_SNAPSHOT:
+        raise ValueError("Public-key snapshot is too large")
+    snapshot = json.loads(body)
+    if (not isinstance(snapshot, dict) or set(snapshot) != {"issuer_url", "jwks_url", "fetched_at", "expires_at", "keys"}
+            or not isinstance(snapshot["keys"], list)):
+        raise ValueError("Not a public-key snapshot")
+    return body, snapshot
 
 
 def bundle_sources():
@@ -122,7 +147,7 @@ def snapshot_state(config, *, now=None):
     """Public freshness facts only; never key material."""
     now = time.time() if now is None else now
     try:
-        snapshot = json.loads(Path(config["jwks_file"]).read_text())
+        _, snapshot = read_snapshot(config["jwks_file"])
         expires = int(snapshot["expires_at"])
         matches = snapshot["issuer_url"] == config["issuer_url"] and snapshot["jwks_url"] == config["jwks_url"]
     except (OSError, ValueError, KeyError, TypeError):
@@ -186,7 +211,7 @@ def install(bundle, approved, *, dns_servers, host_ips):
         write_file(SETTINGS / "network.nft", policy, mode=0o644)
         KEYS.mkdir(mode=0o750)
         os.chown(KEYS, key_uid, reader_gid)
-        write_file(snapshot, Path(config["jwks_file"]).read_bytes(), mode=0o640, uid=key_uid, gid=reader_gid)
+        write_file(snapshot, read_snapshot(config["jwks_file"])[0], mode=0o640, uid=key_uid, gid=reader_gid)
         for name in KEY_UNITS:
             write_file(old.UNIT_DIR / name, (bundle / "units" / name).read_bytes(), mode=0o644)
             switched[name] = None
@@ -225,6 +250,8 @@ def install(bundle, approved, *, dns_servers, host_ips):
                 write_file(old.UNIT_DIR / name, data, mode=0o644, expected=stage.digest(old.UNIT_DIR / name))
         if trial.RECORD.exists() and json.loads(trial.RECORD.read_text())["units"] != record["units"]:
             trial.write_private(trial.RECORD, record)
+        if "config" in switched and record_path().exists():
+            record_path().unlink()  # Written only by this attempt; nothing it describes remains.
         old.run("systemctl", "daemon-reload", check=False)
         raise
 
@@ -269,37 +296,47 @@ def check():
 def remove():
     keys_record = installed()
     advisor_stopped()
+    record = trial.private_json(trial.RECORD)
+    config_path = advisor_config_path()
+    # Verify every preserved input before the first write, so a refusal leaves
+    # the installed state intact and retryable.
+    saved_config = stage.exact(RUNTIME / "previous/config.json")
+    if stage.digest(saved_config) != keys_record["config_before_sha256"]:
+        raise ValueError("Preserved advisor config changed")
+    saved_units = {}
+    for name in SERVING:
+        saved = stage.exact(RUNTIME / "previous" / name)
+        if stage.digest(saved) != keys_record["serving_units_before"][name]:
+            raise ValueError("Preserved serving unit changed")
+        saved_units[name] = saved.read_bytes()
+    previous = json.loads(saved_config.read_text())
+    original = stage.exact(Path(previous["jwks_file"]))
+    latest, _ = read_snapshot(keys_record["snapshot"], owner=keys_record["key_uid"])
     old.run("systemctl", "disable", "--now", KEY_UNITS[2], check=False)
     old.run("systemctl", "stop", KEY_UNITS[1], KEY_UNITS[0], check=False)
     for unit in KEY_UNITS:
         if old.run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0:
             raise RuntimeError("Key upkeep shutdown incomplete")
-    record = trial.private_json(trial.RECORD)
-    config_path = advisor_config_path()
-    previous = json.loads(stage.exact(RUNTIME / "previous/config.json").read_text())
-    if stage.digest(RUNTIME / "previous/config.json") != keys_record["config_before_sha256"]:
-        raise ValueError("Preserved advisor config changed")
     # Carry the latest maintained public snapshot back to the original path, so
     # the advisor stays usable until it expires normally. Old bytes are kept.
-    original = Path(previous["jwks_file"])
+    keep = RUNTIME / "previous/original-public-keys.json"
+    if not keep.exists():
+        write_file(keep, read_snapshot(original)[0], mode=0o600)
     info = original.stat()
-    shutil.copyfile(original, RUNTIME / "previous/original-public-keys.json")
-    write_file(original, Path(keys_record["snapshot"]).read_bytes(), mode=info.st_mode & 0o777,
-        uid=info.st_uid, gid=info.st_gid, expected=stage.digest(original))
+    write_file(original, latest, mode=info.st_mode & 0o777, uid=info.st_uid, gid=info.st_gid,
+        expected=stage.digest(original))
+    units = dict(record["units"])
+    for name in SERVING:
+        write_file(old.UNIT_DIR / name, saved_units[name], mode=0o644, expected=record["units"][name])
+        units[name] = stage.digest(old.UNIT_DIR / name)
+        trial.write_private(trial.RECORD, {**record, "units": units})  # Keep the record matching each switch.
+    # Config last: until it switches, a failed remove is retryable as installed.
     current = json.loads(config_path.read_text())
     info = config_path.stat()
     write_file(config_path, (json.dumps({**current, "jwks_file": previous["jwks_file"]}, indent=2) + "\n").encode(),
         mode=info.st_mode & 0o777, uid=info.st_uid, gid=info.st_gid, expected=stage.digest(config_path))
-    units = dict(record["units"])
-    for name in SERVING:
-        saved = stage.exact(RUNTIME / "previous" / name)
-        if stage.digest(saved) != keys_record["serving_units_before"][name]:
-            raise ValueError("Preserved serving unit changed")
-        write_file(old.UNIT_DIR / name, saved.read_bytes(), mode=0o644, expected=record["units"][name])
-        units[name] = stage.digest(old.UNIT_DIR / name)
     for name in KEY_UNITS:
-        (old.UNIT_DIR / name).unlink()
-    trial.write_private(trial.RECORD, {**record, "units": units})
+        (old.UNIT_DIR / name).unlink(missing_ok=True)
     record_path().rename(RUNTIME / ("removed-" + str(int(time.time())) + "-" + RECORD_NAME))
     old.run("systemctl", "daemon-reload")
     trial.installed()
@@ -320,8 +357,8 @@ def main():
         stage_bundle(args.bundle)
         print(json.dumps({"manifest_sha256": stage.digest(args.bundle / "manifest.json"), "started": False}))
     elif args.action == "install":
-        if not args.bundle or not args.dns:
-            parser.error("install requires --bundle and at least one --dns")
+        if not args.bundle or not args.dns or not args.host_ip:
+            parser.error("install requires --bundle, at least one --dns and this host's --host-ip")
         install(args.bundle, args.approve_install, dns_servers=args.dns, host_ips=args.host_ip)
         print(json.dumps({"installed": True, "started": False, "enabled": False}))
     elif args.action == "check":

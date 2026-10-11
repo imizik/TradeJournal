@@ -289,7 +289,14 @@ root-private copy of the reviewed source revision.
 5. `remove` (advisor stopped) disables the timer, stops both key units, copies
    the latest maintained snapshot back to the original path (keeping the old one
    under `previous/`), restores the original config and serving-unit bytes and
-   removes the three key units. The UID, directories and snapshots remain.
+   removes the three key units. The UID, directories and snapshots remain, so a
+   later reinstall first needs a reviewed manual removal of those leftovers.
+
+Run `remove` before the trial's own `rollback`; trial rollback refuses while key
+upkeep is installed so it cannot leave the timer and network table running.
+Root never follows the publisher-owned snapshot: `check` and `remove` open it
+without following links and `remove` requires a regular, bounded snapshot file
+owned by the key UID before copying it back.
 
 The publisher reads only the public URLs and writes only its snapshot directory;
 the advisor config, fixture, sockets, owner files and journal/production paths
