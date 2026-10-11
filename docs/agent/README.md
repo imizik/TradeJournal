@@ -7,6 +7,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | Document | Read it when |
 |---|---|
 | [cloud-mcp-journal-contract.md](cloud-mcp-journal-contract.md) | Separate journal coaching through a bounded approved export, exact statistics and offline OAuth; no production activation |
+| [research-studio-r3.md](research-studio-r3.md) | Owner app workspace, manually connected local research sidecar, linked views, immutable chart inspections and browser evidence |
 | [research-studio-r2.md](research-studio-r2.md) | Selected reproducible analysis, research-only SQLite/artifacts, manual child worker, cancellation/retry and exposure evidence |
 | [research-studio-r1.md](research-studio-r1.md) | Bounded discovery source, stop-free event observations, quality masks, CLI preview and frozen R2 analysis parameters |
 | [research-studio-r0.md](research-studio-r0.md) | Selected R0 cache audit, temporary feasibility evidence and the original bounded R1 contract |

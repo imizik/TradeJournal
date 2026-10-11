@@ -34,6 +34,12 @@ analysis and a separate operator-selected research SQLite image/artifact store.
 Its finite parent/child worker holds a separate execution lock, never uses app
 `job_run`/sync, and installs no service or timer; see the [R2 contract](research-studio-r2.md).
 
+Selected R3 adds the owner `/research-studio` workspace and two owner-only
+forwarding routes to a manually started bearer-authenticated loopback research
+sidecar. Cache preparation and R2 computation remain outside the app API/sync
+process. No deployment unit or startup hook is installed; see the
+[R3 contract](research-studio-r3.md).
+
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.
 `app.engine.metric_reference` is checked as pure too: Decimal event ledgers and

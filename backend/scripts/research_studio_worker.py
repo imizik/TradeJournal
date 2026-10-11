@@ -36,8 +36,10 @@ def main():
         snapshot = decode_snapshot(base64.b64decode(raw["snapshot"], validate=True))
         if snapshot.engine_fingerprint != engine_fingerprint() or snapshot.identity != request["data_id"]:
             raise ValueError("worker snapshot identity changed")
+        parent = raw["parent"]
+        del envelope, raw
         result = analyze(Observations(snapshot), definition, request["code_id"],
-                         cancel=lambda: cancelled or os.getppid() != raw["parent"])
+                         cancel=lambda: cancelled or os.getppid() != parent)
         rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         metrics = {"elapsed_seconds": time.perf_counter() - started,
                    "peak_rss_bytes": rss * 1024 if sys.platform.startswith("linux") else rss}

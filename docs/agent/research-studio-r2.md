@@ -1,8 +1,7 @@
 # Research Studio R2: reproducible discovery analysis
 
 **R2 selected and implemented in this chat after R1. Review and final verification gates are recorded in the PR.**
-R3/R4, app screens, Factory promotion, provider fetching and deployment/activation
-are not selected. [R1](research-studio-r1.md) remains the observation/source
+R3 was subsequently selected for app screens; see the [R3 contract](research-studio-r3.md). R4, Factory promotion, provider fetching and deployment/activation remain unselected. [R1](research-studio-r1.md) remains the observation/source
 contract; [the roadmap](../strategy-workbench-roadmap.md) owns later phases.
 
 ## Computation
@@ -116,7 +115,7 @@ RUN_ID` inspects state; `result --run-id RUN_ID --operation-id NEW_UUID` records
 and returns an outcome exposure; `cancel` and `retry` accept the same run/operation
 arguments. Submission and worker output contain status only. Definitions and
 source snapshots are frozen at submission; retries use those exact inputs.
-No app page exists until R3. No production service or private API is exposed.
+The subsequently selected R3 connects an owner app page. No production service or private API is exposed.
 
 ## Acceptance evidence and remaining limits
 
