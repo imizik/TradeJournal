@@ -736,3 +736,41 @@ test("Events and You each end in one source line", async ({ page }) => {
   await expect(info.getByRole("region", { name: "Next earnings" })).toBeVisible();
   await expect(info.locator("[data-source-footer]")).toHaveCount(1);
 });
+
+test("Overview blocks are edged and foldable, Peers sit last and stay folded, and a tap explains P/E", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  quoteExtra = { last: 1029, change: -6.84, change_percentage: -0.66, day_low: 1017, day_high: 1036.4, week_52_low: 186.25, week_52_high: 1255 };
+  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: micron() }));
+  await page.route("**/api/backend/charts/symbol/*/insiders", (route) => route.fulfill({ json: INSIDERS }));
+  const source = { provider: "polygon", label: "Polygon related companies", state: "ok", fetched_at: 1_790_000_000, age_seconds: 7200, message: null };
+  await page.route("**/api/backend/charts/symbol/*/peers", (route) => route.fulfill({ json: { symbol: "MU", as_of: "2026-10-08T15:00:00Z", state: "ready", source, quotes: { ...source, provider: "tradier", label: "Tradier quotes", age_seconds: null },
+    peers: [{ symbol: "WDC", name: "Western Digital", last: 120.5, change_percentage: 1.2 }, { symbol: "STX", name: "Seagate", last: 98.1, change_percentage: -0.4 }] } }));
+  await page.goto("/charts");
+  const info = panel(page);
+  await info.getByRole("tab", { name: "Overview", exact: true }).click();
+  await expect(info.getByRole("group", { name: "Peers" }).getByRole("button", { name: "Peer WDC" })).toBeVisible();
+  // Every block has its own edged header; Peers is the last block, after Ownership, above the one source line.
+  const order = await info.getByRole("tabpanel").evaluate((tab) => [...tab.querySelectorAll("section[aria-label]")].map((section) => section.getAttribute("aria-label")));
+  expect(order).toEqual(["Price and range", "Company", "Key statistics", "Valuation", "Ownership", "Peers"]);
+  const peersBox = (await info.getByRole("region", { name: "Peers" }).boundingBox())!;
+  expect(peersBox.y).toBeGreaterThan((await info.getByRole("region", { name: "Ownership" }).boundingBox())!.y);
+  expect(peersBox.y).toBeLessThan((await info.locator("[data-source-footer]").boundingBox())!.y);
+  // A tap on a valuation label explains the number; the value stays on its row.
+  const valuation = info.getByRole("region", { name: "Valuation" });
+  await valuation.getByRole("button", { name: "P/E", exact: true }).click();
+  await expect(valuation.locator("[data-explain]")).toContainText("what you pay for $1 of profit");
+  await expect(valuation).toContainText("52.5");
+  await page.setViewportSize({ width: 1440, height: 2200 });
+  await page.screenshot({ path: test.info().outputPath("dock-blocks-overview-desktop.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  // Folding Peers is kept on this device across a reload.
+  const peersHeader = info.getByRole("region", { name: "Peers" }).getByRole("button", { name: "Peers" });
+  await peersHeader.click();
+  await expect(peersHeader).toHaveAttribute("aria-expanded", "false");
+  await expect(info.getByRole("group", { name: "Peers" })).toHaveCount(0);
+  await page.reload();
+  await expect(info.getByRole("region", { name: "Valuation" })).toBeVisible();
+  await expect(info.getByRole("region", { name: "Peers" }).getByRole("button", { name: "Peers" })).toHaveAttribute("aria-expanded", "false");
+  // Nothing pushes the dock sideways.
+  expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
+});

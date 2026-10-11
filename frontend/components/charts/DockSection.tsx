@@ -31,8 +31,8 @@ export default function DockSection({ name, ariaLabel, title, count, defaultOpen
     try { localStorage.setItem(key, next ? "1" : "0"); } catch { /* keep working without storage */ }
   };
   const tap = narrow ? "h-11 w-11" : "h-6 w-6";
-  return <section className="border-t border-slate-700/40" aria-label={ariaLabel}>
-    <div className={`flex items-center gap-0.5 pl-2 pr-1.5 ${narrow ? "" : "min-h-8"}`}>
+  return <section className="border-t border-slate-700/70" aria-label={ariaLabel}>
+    <div className={`flex items-center gap-0.5 bg-slate-800/30 pl-2 pr-1.5 ${narrow ? "" : "min-h-8"}`}>
       <h2 className="min-w-0 flex-1 text-xs font-medium text-slate-200">
         <button aria-expanded={open} aria-controls={`${id}-body`} onClick={toggle} className={`flex w-full min-w-0 items-center gap-1 text-left ${narrow ? "min-h-11" : "min-h-8"}`}>
           {open ? <ChevronDown size={12} className="shrink-0 text-slate-500" aria-hidden /> : <ChevronRight size={12} className="shrink-0 text-slate-500" aria-hidden />}
@@ -43,8 +43,8 @@ export default function DockSection({ name, ariaLabel, title, count, defaultOpen
         className={`inline-flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 hover:text-slate-200 ${explained ? "bg-slate-800 text-sky-300" : ""} ${tap}`}><Info size={12} /></button>}
       {action?.(() => setRevealed(true))}
     </div>
-    {status && <div className="px-3 pb-2">{status}</div>}
+    {status && <div className="px-3 py-2">{status}</div>}
     {info && explained && <p id={`${id}-info`} className="px-3 pb-2 text-[11px] leading-5 text-slate-400">{info}</p>}
-    {open && <div id={`${id}-body`} className="px-3 pb-3">{children}</div>}
+    {open && <div id={`${id}-body`} className="px-3 pb-3 pt-2">{children}</div>}
   </section>;
 }

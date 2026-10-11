@@ -3,18 +3,22 @@
 import { useEffect, useState } from "react";
 import { fetchSymbolPeers } from "@/lib/symbolInfo";
 import type { SymbolPeers } from "@/lib/symbolInfo";
+import { Block } from "./SymbolInfoParts";
 
 const REFRESH_MS = 60_000;
 
-/**
- * The Peers strip (T3.4): Polygon's related companies for the active symbol, each with today's
- * change. One request per symbol (after it settles for 300 ms), read again each minute while the
- * page is visible; a chip click goes through the same handler a watchlist row uses.
- */
-export default function SymbolInfoPeers({ symbol, onSelect }: { symbol: string; onSelect(symbol: string): void }) {
-  const [result, setResult] = useState<{ symbol: string; data?: SymbolPeers; error?: boolean } | null>(null);
+export type PeersResult = { symbol: string; data?: SymbolPeers; error?: boolean } | null;
 
+/**
+ * The Peers read (T3.4): Polygon's related companies for the active symbol, each with today's
+ * change. One request per symbol (after it settles for 300 ms), read again each minute while the
+ * page is visible. It lives in the symbol info panel, not in the block, so moving the block (it
+ * sits last in Overview) never reads again.
+ */
+export function usePeers(symbol: string, enabled: boolean): PeersResult {
+  const [result, setResult] = useState<PeersResult>(null);
   useEffect(() => {
+    if (!enabled) return;
     const controller = new AbortController();
     let active = true;
     const run = (quiet: boolean) => {
@@ -24,13 +28,16 @@ export default function SymbolInfoPeers({ symbol, onSelect }: { symbol: string; 
     const timer = setTimeout(() => run(false), 300);
     const again = setInterval(() => { if (!document.hidden) run(true); }, REFRESH_MS);
     return () => { active = false; clearTimeout(timer); clearInterval(again); controller.abort(); };
-  }, [symbol]);
+  }, [symbol, enabled]);
+  return result;
+}
 
+/** The Peers block: chips with today's move; a chip click goes through the same handler a watchlist row uses. */
+export default function SymbolInfoPeers({ symbol, result, onSelect }: { symbol: string; result: PeersResult; onSelect(symbol: string): void }) {
   const shown = result?.symbol === symbol ? result : null;
   const data = shown?.data;
   const source = data ? `${data.source.label}${data.source.age_seconds != null ? `, read ${Math.round(data.source.age_seconds / 3600)} h ago` : ""}` : "";
-  return <div role="group" aria-label="Peers" className="mb-3 border-b border-slate-700/40 pb-3">
-    <p className="mb-1 text-[10px] uppercase tracking-wider text-slate-600">Peers</p>
+  return <Block name="peers" title="Peers"><div role="group" aria-label="Peers">
     {!shown ? <p role="status" className="text-xs text-slate-500">Loading peers…</p>
       : shown.error ? <p className="text-xs text-slate-500">Peers unavailable.</p>
       : data && data.state === "ready" ? <>
@@ -49,5 +56,5 @@ export default function SymbolInfoPeers({ symbol, onSelect }: { symbol: string; 
       </>
       : data && data.state === "none" ? <p className="text-xs text-slate-500">No related companies listed for {symbol} (funds and ETFs have none).</p>
       : <p className="text-xs text-slate-500">{data?.source.message ?? "Peers unavailable."}</p>}
-  </div>;
+  </div></Block>;
 }
