@@ -13,7 +13,7 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 
 ## Current delivery board
 
-Checkpoint: October 11, 2026, against merged source through PR #250 and the
+Checkpoint: October 11, 2026, against merged source through PR #253 and the
 operational evidence below. PR and host state can change; verify them before
 acting. Built means merged implementation, activated means enabled in the
 named environment, observed means the actual path ran, and accepted means the

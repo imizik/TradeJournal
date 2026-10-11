@@ -28,7 +28,7 @@ slice; the detailed contracts continue to own implementation and acceptance.
    shadow only after the advisor foundation is useful and dependable.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
-   open at this checkpoint), retain its activation gates, and observe one
+   now merged), close its remaining activation/operational gates, and observe one
    independent user research journey. Collect prospective evidence under its
    frozen protocol once activated; do not use the waiting period to justify
    more research features.

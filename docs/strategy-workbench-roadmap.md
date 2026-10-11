@@ -8,12 +8,15 @@ usefulness. The fixed newer-MU comparison landed in
 [recorded exploratory results](research-studio-mu-period-comparison.md).
 
 The owner has now selected [Dots functionality first](product-roadmap.md#selected-priorities--october-11-2026).
-Finish the already-selected event/period comparison and prospective MU slice
-([PR #252](https://github.com/imizik/TradeJournal/pull/252), open at this checkpoint),
-then close V1 user acceptance and defer new Studio expansion. PR #252 reports
-preregistration for October 12, 2026–April 9, 2027; the collector remains inactive
-at this checkpoint. Merge, activation, actual collection and final review are
-separate states. Sparse events may leave the final result inconclusive.
+The event/period comparison and prospective MU implementation are now merged in
+[PR #252](https://github.com/imizik/TradeJournal/pull/252); their
+[comparison](agent/research-studio-comparison.md) and
+[prospective study](agent/research-studio-prospective-mu.md) contracts own the detail.
+Close remaining activation/operational gates and V1 user acceptance, then defer
+new Studio expansion. PR #252 records preregistration for October 12, 2026–April 9,
+2027; collector activation was still pending at the recorded pre-merge checkpoint.
+Merge does not establish activation, actual collection or final review. Sparse
+events may leave the final result inconclusive.
 
 This is an independent event lab, not an executable strategy or Factory
 validation. The existing filename is retained for stable links. The revised
