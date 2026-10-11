@@ -344,7 +344,9 @@ is verifiable rather than hopeful.
   the Anthropic API. The nightly run reviews only the latest trading day (when
   it has no review, gained trades since, or went stale) and never backfills:
   a past day gets a review from its own button. It stops on a sign-in other
-  than the plan token.
+  than the plan token. One trade's review (`app/ai/reviewer.py`, the trade
+  page's button) follows the same rule and reads the same day context for the
+  trade's New York open date.
 - The monthly review (`app/ai/monthly_reviewer.py`) counts a trade in the month
   it closed (New York), the dashboard's rule. The nightly run writes last
   month's review on its first run of a new month, and again later only if the
@@ -355,7 +357,10 @@ is verifiable rather than hopeful.
   levels and are labelled so to the model. Every part degrades on its own into
   the review's gaps; none may fail the review. `app/data/macro_calendar.json`
   (FOMC, CPI, jobs reports, from the Fed and BLS) must be extended before its
-  `covers_through` date; after it, reviews report the calendar as a gap.
+  `covers_through` date; after it, reviews report the calendar as a gap. Its
+  `market_closed` NYSE holidays make "next trading day" skip closures; a
+  release on a closed day (the BLS publishes on Good Friday) is shown as
+  landing before the next open.
 - `webull_listener` is a persistent listener, not a finite sync job.
 
 ## Strategy Lab

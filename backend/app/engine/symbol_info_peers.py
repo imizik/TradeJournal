@@ -9,10 +9,17 @@ array for several, listing unknown symbols under ``unmatched_symbols`` instead o
 The quote's ``average_volume`` is deliberately not read (it is not the volume average you expect).
 """
 
+import json
 import math
+from pathlib import Path
 import re
+from statistics import median
 
 MAX_PEERS = 10
+GROUPS_FILE = Path(__file__).resolve().parent.parent / "data" / "peer_groups.json"
+# The Valuation block's comparisons. A loss-maker's P/E or EV/EBITDA is not a multiple, so only positive values count.
+COMPARED = ("pe", "price_to_sales", "price_to_book", "ev_to_ebitda")
+MIN_PEERS = 3  # a median of one or two companies is a quote, not a norm
 _TICKER = re.compile(r"[A-Z][A-Z0-9.-]{0,9}")
 
 
@@ -25,6 +32,29 @@ def normalize_related(body: object, symbol: str) -> list[str]:
         if _TICKER.fullmatch(ticker) and ticker != symbol and ticker not in out:
             out.append(ticker)
     return out[:MAX_PEERS]
+
+
+def load_groups(path: Path = GROUPS_FILE) -> dict[str, tuple[str, list[str]]]:
+    """Symbol -> (group name, its peers in order). A symbol in several groups keeps its first.
+    No file (bundles that leave out ``data`` folders) means no groups: every symbol uses Polygon."""
+    out: dict[str, tuple[str, list[str]]] = {}
+    if not path.is_file():
+        return out
+    for group in json.loads(path.read_text())["groups"]:
+        members = [str(m).upper() for m in group["members"]]
+        for symbol in members:
+            out.setdefault(symbol, (str(group["name"]), [m for m in members if m != symbol][:MAX_PEERS]))
+    return out
+
+
+def valuation(rows: dict[str, dict], peers: list[str]) -> dict:
+    """The peers' median of each compared ratio, from the peers whose value is positive, and how many counted."""
+    out: dict = {"median": {}, "counted": {}}
+    for field in COMPARED:
+        values = [v for v in (_number(rows.get(peer, {}).get(field)) for peer in peers) if v is not None and v > 0]
+        out["counted"][field] = len(values)
+        out["median"][field] = round(median(values), 2) if len(values) >= MIN_PEERS else None
+    return out
 
 
 def _number(value: object) -> float | None:

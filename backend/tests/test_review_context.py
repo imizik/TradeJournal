@@ -163,13 +163,24 @@ def test_the_macro_calendar_names_release_days_and_refuses_days_it_does_not_cove
     assert review_context.macro_events(date(2026, 10, 9))["events"] == []
     assert [event["when"] for event in review_context.macro_events(date(2026, 10, 13))["events"]] == ["next trading day"]
     assert [event["kind"] for event in review_context.macro_events(date(2026, 9, 11))["events"]] == ["cpi"]
+    # Holidays are skipped (Jan 9 2025 was a closure), and a release while the market is shut lands on the next open.
+    assert [event["when"] for event in review_context.macro_events(date(2025, 1, 8))["events"]] == ["next trading day"]
+    assert [event["when"] for event in review_context.macro_events(date(2026, 4, 2))["events"]] == ["before the next trading day (market closed)"]
+    assert [event["kind"] for event in review_context.macro_events(date(2027, 1, 7))["events"]] == ["jobs"]
+    assert [event["event"] for event in review_context.macro_events(date(2027, 1, 12))["events"]] == ["CPI (Dec 2026)"]
+    assert review_context.macro_events(date(2027, 3, 25))["events"] == []
     with pytest.raises(LookupError):
-        review_context.macro_events(date(2027, 2, 1))
+        review_context.macro_events(date(2028, 1, 3))
     with pytest.raises(LookupError):
         review_context.macro_events(date(2024, 12, 31))
     calendar = json.loads(review_context.MACRO_FILE.read_text())
     dates = [event["date"] for event in calendar["events"]]
     assert dates == sorted(dates) and all(event["kind"] in {"fomc", "cpi", "jobs"} for event in calendar["events"])
+    closed = calendar["market_closed"]
+    assert closed == sorted(closed)
+    assert all(date.fromisoformat(day).weekday() < 5 for day in closed)
+    for kind in ("fomc", "cpi", "jobs"):
+        assert len([day for day in dates if day.startswith("2027") and calendar["events"][dates.index(day)]["kind"] == kind]) >= 8
 
 
 def test_semis_compare_with_smh_funds_have_no_sector_and_others_follow_their_sector():

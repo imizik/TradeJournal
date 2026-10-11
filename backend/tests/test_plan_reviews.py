@@ -351,3 +351,40 @@ def test_rules_from_an_old_review_carry_how_old_they_are(fake_claude, engine):
         history = daily_reviewer._history_context(datetime(2026, 9, 30).date(), session)
     assert history["prior_reviews"][0]["days_before"] == 29
     assert "more than 4" in daily_reviewer._SYSTEM_PROMPT
+
+
+# ---- one trade's review (the Review button on a trade) ----
+
+TRADE_ANSWER = {"strategy": "Long Call (bullish directional)", "flags": ["good_entry"], "summary": "Bought the reclaim.",
+                "entry_quality": "Good: waited for the reclaim.", "exit_quality": "Fair: sold into strength early.",
+                "suggestions": ["Hold half to the first wall"], "market_read": "Trend day; traded with it.",
+                "plan_check": None, "data_gaps": []}
+
+
+def test_a_trade_review_runs_on_the_plan_with_the_days_context_and_says_when_it_is_not_set_up(fake_claude, engine, monkeypatch):
+    from app.ai import review_context
+    from app.routers.trades import router as trades_router
+
+    days = []
+    monkeypatch.setattr(review_context, "build", lambda session, day, trades: days.append((day, [t.id for t in trades])) or {"gaps": []})
+    fake_claude.set(answer=TRADE_ANSWER)
+    add(engine, trade(1, datetime(2026, 9, 1, 10, 0), datetime(2026, 9, 1, 11, 0)))
+
+    def override():
+        with Session(engine) as session:
+            yield session
+
+    app = FastAPI()
+    app.include_router(trades_router, prefix="/trades")
+    app.dependency_overrides[get_session] = override
+    with TestClient(app) as test_client:
+        response = test_client.post(f"/trades/{UUID(int=101)}/review")
+        assert response.status_code == 200, response.text
+        review = json.loads(response.json()["ai_review"])
+        assert review["generated_by"].endswith("on the Claude plan") and review["market_read"] and review["prompt_version"] == 2
+        assert days == [(datetime(2026, 9, 1).date(), [UUID(int=101)])]
+        question = [call for call in fake_claude() if call["argv"][0] != "auth"]
+        assert len(question) == 1 and question[0]["api_key"] is None  # the plan, never the API key
+        monkeypatch.delenv("CLAUDE_CODE_OAUTH_TOKEN")
+        response = test_client.post(f"/trades/{UUID(int=101)}/review")
+        assert response.status_code == 503 and "not set up on the Claude plan" in response.json()["detail"]

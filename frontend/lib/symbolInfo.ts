@@ -273,6 +273,13 @@ export type SymbolPeers = {
   /** `none`: Polygon lists no related companies (an ETF); `unavailable`: no list could be read. */
   state: "ready" | "none" | "unavailable";
   source: PeerSource; quotes: PeerSource; peers: Peer[];
+  /** The peers' median of each ratio, from peers with a positive value; null with fewer than three. */
+  valuation?: PeerValuation;
+};
+export type PeerRatio = "pe" | "price_to_sales" | "price_to_book" | "ev_to_ebitda";
+export type PeerValuation = {
+  source: string; state: "ready" | "none" | "unavailable"; fetched_at: number | null; message: string | null;
+  median: Partial<Record<PeerRatio, number | null>>; counted: Partial<Record<PeerRatio, number>>;
 };
 
 export async function fetchSymbolPeers(symbol: string, signal: AbortSignal): Promise<SymbolPeers> {

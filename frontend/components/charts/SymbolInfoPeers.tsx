@@ -54,6 +54,7 @@ export default function SymbolInfoPeers({ symbol, result, onSelect }: { symbol: 
             </button>;
           })}
         </div>
+        {data.source.provider === "curated" && <p className="mt-1 text-[10px] text-slate-500">{data.source.label}</p>}
         {(data.source.state === "stale" || data.quotes.state !== "ok") && <p className="mt-1 text-[10px] text-amber-300">{data.quotes.state !== "ok" ? `Quotes: ${data.quotes.message ?? "unavailable"}` : data.source.message}</p>}
       </>
       : data && data.state === "none" ? <p className="text-xs text-slate-500">No related companies listed for {symbol} (funds and ETFs have none).</p>

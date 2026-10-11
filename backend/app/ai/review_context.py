@@ -317,10 +317,15 @@ def macro_events(day: date) -> dict:
     calendar = json.loads(MACRO_FILE.read_text())
     if not calendar["covers_from"] <= day.isoformat() <= calendar["covers_through"]:
         raise LookupError("the macro calendar does not cover this day")
+    closed = set(calendar["market_closed"])
     following = day + timedelta(days=1)
-    while following.weekday() >= 5:  # a Friday's next session is Monday
+    while following.weekday() >= 5 or following.isoformat() in closed:  # weekends and NYSE holidays
         following += timedelta(days=1)
     window = {day.isoformat(): "today", following.isoformat(): "next trading day"}
+    between = day + timedelta(days=1)
+    while between < following:  # a release while the market is shut (the BLS publishes on Good Friday) lands on the next open
+        window[between.isoformat()] = "before the next trading day (market closed)"
+        between += timedelta(days=1)
     events = [{"when": window[event["date"]], "time_et": event["time"], "event": event["name"], "kind": event["kind"]}
               for event in calendar["events"] if event["date"] in window]
     return {"events": events, "calendar": "FOMC, CPI and jobs reports only"}
