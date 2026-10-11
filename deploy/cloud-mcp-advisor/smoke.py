@@ -204,7 +204,9 @@ print("advisor native boundary positive" if positive else "advisor native bounda
         account = control.ACCOUNT if "-mcp." in unit else control.BACKEND_ACCOUNT
         uid = int(run("id", "-u", account).stdout)
         status = Path(f"/proc/{pid}/status").read_text()
-        assert next(line for line in status.splitlines() if line.startswith("Uid:")).split()[1:] == [str(uid)] * 4
+        observed = next(line for line in status.splitlines() if line.startswith("Uid:")).split()[1:]
+        print(f"Advisor native identity: unit={unit} pid={pid} expected_uid={uid} observed_uids={observed}", flush=True)
+        assert observed == [str(uid)] * 4
         mounts = Path(f"/proc/{pid}/mountinfo").read_text()
         assert (str(control.STATE) in mounts) == (account == control.BACKEND_ACCOUNT)
         assert Path(f"/proc/{pid}/ns/net").stat().st_ino != Path("/proc/1/ns/net").stat().st_ino

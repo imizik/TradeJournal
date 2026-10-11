@@ -4,6 +4,7 @@ Requires=tradejournal-advisor-backend.socket
 After=tradejournal-advisor-backend.socket
 
 [Service]
+Type=exec
 User=tj-advisor-backend
 Group=tj-advisor
 WorkingDirectory=/opt/tradejournal-advisor/backend

@@ -72,6 +72,9 @@ The adapter does not import application storage. The bridge independently
 verifies the same bearer and live config/assignment for its two fixed routes;
 no service credential substitutes. Serving inherits one listening Unix FD,
 never TCP. Original 64KiB body/output, concurrency and deadline limits remain.
+Both services use `Type=exec`: startup waits for executable and credential setup
+before activation checks the running process. Native CI records the expected
+and observed process UIDs and requires all four to match the dedicated account.
 
 ## Installation and activation are separate approval gates
 

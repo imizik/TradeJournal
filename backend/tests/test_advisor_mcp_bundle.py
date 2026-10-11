@@ -223,6 +223,8 @@ def test_templates_exact_identity_mounts_routes_limits_and_dormant_release():
         assert "[Install]" not in text and "WantedBy=" not in text and "EnvironmentFile=" not in text
     adapter = (directory / "tradejournal-advisor-mcp.service").read_text()
     backend = (directory / "tradejournal-advisor-backend.service").read_text()
+    # Activation must wait for exec/credential setup, before checking MainPID.
+    assert "Type=exec\n" in adapter and "Type=exec\n" in backend
     for text in (adapter, backend):
         assert "RestrictAddressFamilies=AF_UNIX" in text and "PrivateNetwork=true" in text
         assert "TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro" in text
