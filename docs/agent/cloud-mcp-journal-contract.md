@@ -4,6 +4,39 @@
 verification do not authorize sharing Isaac's journal, deploying the gateway,
 registering OAuth scopes, creating a database role or enabling a schedule.
 
+## Observed continuous journal acceptance
+
+**Accepted October 10, 2026 ET (October 11 UTC), following merged PRs
+[#208](https://github.com/imizik/TradeJournal/pull/208) and
+[#213](https://github.com/imizik/TradeJournal/pull/213).** The separately approved
+activation completed; the original planning warning above is not a claim that
+the existing journal connection is still dormant.
+
+The recorded scope is one approved Roth account, closed/expired stock and
+option trades over 30 inclusive Eastern dates, with exactly eight shared fields:
+ID, ticker, instrument type, quantity, realized P&L, status, opened and closed
+times. Publication and public-key maintenance run about every 15 minutes;
+these are maintenance timers, not automatic Jo coaching or D3 follow-through.
+
+The retained operator acceptance record observed 27 projected rows matching an
+independent scoped SQL read, restricted-role/catalog denials, actual signed-in
+Jo summary/pagination equality, timer advancement, stopped-socket refusal,
+restart persistence, profile revocation/recovery, public-key expiry/recovery and
+stale-export refusal followed by genuine refresh. Login/refresh exchanges were
+observed; the full configured seven-day idle/thirty-day maximum lifetimes and
+refresh-token reuse attack were not tested. Existing unrelated boundaries were
+checked at those checkpoints. This is past operational evidence, not a current
+health assertion or a new authorization to activate or broaden anything.
+
+The owner then requested one actual coaching review in the journal integration
+chat. Jo used fresh shared-trade reads and returned a concentration/expiry
+observation and one question. That closes the first bounded coaching observation;
+it does not establish lasting benefit, the user's intent, broker completeness or
+trading edge. Writing trade notes is optional and does not reopen integration
+acceptance. Raw trade exports, credentials and private operational receipts stay
+outside the repository. The [Dots board](dots-integration.md#current-delivery-board)
+tracks next work separately from this completed slice.
+
 ## Boundary
 
 The independent Practice reader and historical demo stay unchanged. This is a
@@ -196,5 +229,7 @@ windows/rows/bytes, hash/freshness/time checks, SQL role refusal and parameteriz
 account filtering, signed OAuth scope/identity/audience/client denial, pinned
 scope changes, revocation during export loading, read-only tool discovery,
 pagination and unknown/write arguments. Existing D0/D1/D2/historical tests must
-remain green. Native PostgreSQL privilege enforcement, installed isolation and
-actual Jo real-data acceptance remain separate deployment gates.
+remain green. Native PostgreSQL privilege enforcement, installed isolation and actual Jo
+real-data checks were separately observed for the bounded continuous activation
+above. New deployments or scope changes retain their own applicable gates;
+fixture results alone do not establish them.

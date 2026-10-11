@@ -1,49 +1,80 @@
-# Future Dots integration
+# Dots integration: delivery status and direction
 
-This is a handoff for connecting a future Dots client to TradeJournal. Official
-documentation now describes Dots plugins and ChatGPT custom MCP connections;
-the [cloud MCP scope](cloud-mcp-integration-scope.md) records those sources,
-the selected direct HTTPS/OAuth transport and unverified account/runtime gates.
-No MCP connection to this installation is established. Keep TradeJournal as the
-owner of decision records, frozen market context and paper outcomes.
+**Owner priority: Dots functionality first, selected October 11, 2026.**
+TradeJournal should be the place Isaac requests help, controls what Jo sees,
+and reviews her saved work. The [product priorities](../product-roadmap.md#selected-priorities--october-11-2026)
+own cross-roadmap order. This board owns the Dots sequence; linked contracts
+own permissions, implementation and acceptance. Planning is not activation.
 
-**Direction updated 2026-10-08; design only.** Dot owns bounded preparation,
-explanation and follow-through. TradeJournal owns durable evidence, objective
-monitoring, validation and calculations. Codex implements selected changes;
-Isaac owns priorities and consequential approvals. No integration, schedule,
-new permission or implementation is activated by this document.
+Dot owns bounded preparation, explanation and follow-through. TradeJournal
+owns durable evidence, calculations and deterministic monitoring. Codex builds
+selected changes; Isaac owns priorities and consequential approvals. The
+personal coach/advisor is not the independent Shadow Isaac comparator.
 
-**Cloud browser direction selected 2026-10-08; isolated sample sign-in reported 2026-10-09.** Isaac wants the
-Dot to use the actual UI with his laptop closed, while keeping his own
-Tailscale entrance without another login. The
-[cloud-browser access contract](cloud-browser-auth-contract.md) defines the opt-in
-separate authenticated assistant entrance, backend-enforced permissions and
-a sample-data browser trial before any live exposure. Isaac subsequently reported Trader Jo using the isolated sample UI. The
-[first saved sample decision contract](dot-decision-trial-contract.md) owns the
-next selected browser permission increment. Production remains private; this
-sample observation does not establish a connector or independent runner. The
-personal Dot's app inspection remains separate from independent Shadow Isaac.
+## Current delivery board
 
-**Combined access direction scoped 2026-10-08.** Use a connected app for exact
-records and supported operations, and browser access for visual inspection and
-workflow feedback. The [cloud connector scope](cloud-mcp-integration-scope.md)
-defines the initial read catalog, OAuth boundary, routing guidance and D0–D3
-sequence. It adds no active connection or permission.
+Checkpoint: October 11, 2026, against merged source through PR #253 and the
+operational evidence below. PR and host state can change; verify them before
+acting. Built means merged implementation, activated means enabled in the
+named environment, observed means the actual path ran, and accepted means the
+slice's stated exit criteria were met. None implies trading edge.
 
-**Connector spending constraint selected 2026-10-09.** Use ChatGPT plan usage
-with no API credits. The selected D0 package uses Server URL + OAuth, local
-public keys and a network-disabled Unix-socket service with no model keys or
-model-call tools. The [runbook](cloud-mcp-d0-runbook.md) distinguishes that
-enforced service boundary from account-level allowances/extra-credit settings
-and pending actual Dot acceptance. Later UI/MCP grants must also deny paid
-model-job triggers; connecting a plugin does not change the current browser grant.
+| Capability | Delivered evidence | Remaining boundary |
+|---|---|---|
+| D0/D1 connection and sample reads | Actual synthetic OAuth call and assigned sample tool/UI comparison recorded in the [connector scope](cloud-mcp-integration-scope.md); Mac-asleep synthetic result was owner-reported | This does not prove laptop-off acceptance for every later role or write path |
+| D2/historical sample choices | Scoped own-choice/receipt implementation exists; [D2](cloud-mcp-d2-contract.md) and [historical contract](cloud-mcp-historical-contract.md) retain their evidence requirements | Do not infer every live save/UI/restart gate passed from code or an earlier sample; reconcile actual receipts for a selected exercise |
+| Journal coach | **Initial integration accepted.** Continuous scoped read-only publication and actual Jo reads passed October 10 ET; one actual coaching review followed. [Durable acceptance summary](cloud-mcp-journal-contract.md#observed-continuous-journal-acceptance) | Eight approved fields over closed/expired Roth trades; no open positions, intentions or automatic coaching. Repeated usefulness and current health are separate questions |
+| Advisor handoff | [PR #214](https://github.com/imizik/TradeJournal/pull/214) records an owner-supplied Jo answer saved/reopened against an invented packet; MCP, disabled bundle and direct owner view merged in #219/#234/#247 | Actual connected Jo trial with matching in-app receipt/reopen/restart remains open; updater [PR #251](https://github.com/imizik/TradeJournal/pull/251) is in progress at this checkpoint |
+| Shadow and A3 | Manual fixture assignments/choices and disclosure records implemented; A1/A2 infrastructure exists and A2 has one observed live operational lifecycle | Actual cloud-runner isolation, forward comparison and A3 human-timed acceptance remain unproven; latest A3 record is 0/3 sessions, not a current production-data audit |
+| D3 follow-through | Bounded design exists | No accepted user-facing subscription/scheduled follow-through. Journal export/key maintenance timers do not establish D3 |
 
-OpenAI documents ongoing responsibilities, selective memory, delegation and
-event monitoring where a connected service supports it in
-[Tasks and memory](https://learn.chatgpt.com/docs/dots/tasks-and-memory).
-These product capabilities do not establish this installation's transport,
-authentication, event support or availability. Verify those at connection time.
-Agent memory is not a complete transcript or the authority for saved state.
+### Functionality sequence
+
+These are product outcomes, not authorization to implement every row at once.
+Reuse existing OAuth, receipts, host and UI where their contracts permit.
+Resolve an actual blocked user action before adding another infrastructure slice.
+
+| Order | Outcome | Completion evidence |
+|---|---|---|
+| **1 — Current: connected advisor trial** | Finish the existing advisor chat's one invented-data end-to-end trial | Actual Jo reads the frozen request, saves a cited answer, and the owner sees the identical receipt in TradeJournal after reload and service restart; existing isolation/activation gates remain applicable |
+| **2 — Next: repeatable advisor questions** | Owner creates, assigns, revokes and reopens questions through the app | A second distinct assignment works without OAuth edits or service restart; answers bind to the correct immutable request, and prior answers remain recoverable. Write a bounded assignment-management contract first |
+| **3 — Dependable connection** | Routine use survives normal credential/key lifecycle and service maintenance | Supported refresh/reconnect, health/failure visibility and recovery are observed; connection maintenance stays separate from agent schedules and trading automation. Reuse proven journal patterns where suitable |
+| **4 — Useful approved real-data advisor** | Move beyond invented packets to a narrowly selected real question and data scope | Separately approved fields/sources, frozen provenance, stale/missing-input handling and actual useful answer; do not call the fixture advisor the live AV0 Go/Wait/Pass product |
+| **5 — Coach in the same workspace** | Request/review coaching without extra setup or copy/paste | Preserve the completed read-only journal connector and link displayed work to its approved snapshot. Define saved-result scope explicitly; UI unification is not broader data access |
+| **6 — Bounded independent shadow** | Obtain a separately formed decision for comparison | Separate role/context, observed input isolation and commitment/reveal rules, then applicable forward/paper and A3 gates. Reuse the working advisor operations without sharing human/advisor inputs |
+
+After these bounded outcomes, select one follow-through capability only when a
+real recurring need justifies it. Do not build a general agent platform, widen
+journaling obligations, or require profitable research as an integration gate.
+Independent shadow acceptance does not block the already accepted coach.
+
+### Coordination and acceptance
+
+The existing advisor/shadow chat owns the current advisor trial and its
+successor contract; the journal chat owns journal refresh/coaching. Research
+retains its already-selected comparison/prospective slice and user acceptance,
+then yields new feature priority to Dots. Other chats should consult this board
+and the product priorities before starting adjacent work.
+
+Each handoff should identify the user action being enabled, current status,
+linked evidence, exact remaining exit gate and next eligible slice. Carry
+unchanged evidence as the repository workflow permits; do not repeat a completed
+integration trial merely to satisfy a new roadmap label. A conversational success
+claim is not a durable receipt, and recorded past acceptance is not current health.
+
+## Existing architecture and later scope
+
+The [cloud MCP scope](cloud-mcp-integration-scope.md) owns structured access;
+the [browser contract](cloud-browser-auth-contract.md) owns the separate assistant
+UI entrance. Browser login and connector OAuth are distinct. The synthetic,
+practice, journal and advisor roles have different grants and acceptance; no
+broad local stdio adapter is suitable for an independent runner.
+
+The selected connector route uses ChatGPT plan reasoning with no API-credit
+model path. Keep the production private API private. Existing role contracts,
+backend authorization and separate activation gates remain authoritative.
+The sections below retain the A1 and proposed shadow/follow-through design;
+they are not statements that the accepted journal connector is absent.
 
 ## Current A1 interface
 
@@ -84,11 +115,14 @@ and transport boundaries apply to both roles.
    MCP catalog is not access control. Legacy private mode has no authentication
    and accepts a caller-supplied actor. Optional authenticated mode has browser
    principals and named service capabilities; decision writes derive the actor
-   for owner/manual MCP identities. Neither mode implements the proposed cloud
-   OAuth and per-agent ownership boundary yet.
+   for owner/manual MCP identities. The scoped cloud services have their own
+   OAuth and ownership contracts;
+   the broad local adapter is not a substitute for those services or proof of
+   independent shadow isolation.
 4. If Dots is remote, design a separately scoped gateway/identity on the private
-   host. The cloud scope proposes testing Secure MCP Tunnel only to a new
-   restricted MCP service. Do not expose or tunnel ports 8080/8000, do not give
+   host. The cloud scope selects direct HTTPS/OAuth to a
+   restricted MCP service with named operations. Do not expose or tunnel ports
+   8080/8000, do not give
    the agent raw HTTP or shell access, and do not add a proxy that forwards
    arbitrary API routes. Public access requires a new reviewed security design.
 5. Test allowlisted tool discovery, denied journal reads/writes at the service

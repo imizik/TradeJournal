@@ -7,16 +7,33 @@ three reasons that decided it. Every check is frozen before the outcome is
 known, so after a few weeks the journal can show when the advisor was right,
 when the user was, and what overriding it cost.
 
-**Planning date:** 2026-10-09. **Status:** future. Activate after the current
-shadow work ([agentic practice](agentic-trading-roadmap.md) A2/A3 and the Dot
-D-series contracts) settles; this document does not interrupt those boards.
-No feature is implemented by this document. When the user selects a
+**Planning date:** 2026-10-09. **AV0–AV6 status:** future; the October 11
+Dots-first selection below owns current advisor ordering. The existing fixture
+advisor must not be mistaken for the live check specified here. When the user selects a
 milestone, write a bounded implementation contract and deliver one slice.
 
 The advisor is decision support over the user's own records and market data.
 It never places, sizes or amends orders, and its verdict is a check on the
 user's thinking, not evidence of an edge until its saved verdicts carry
 outcomes.
+
+## Current relationship to Dots — October 11, 2026
+
+The owner selected [Dots functionality first](product-roadmap.md#selected-priorities--october-11-2026).
+The [Dots delivery board](agent/dots-integration.md#current-delivery-board) is the
+active advisor sequence. Its invented-packet manual roundtrip is observed;
+MCP and the direct owner answer view are merged, while actual connected trial
+acceptance remains open. Next come repeatable questions and dependable
+connection upkeep, followed by a bounded approved real-data advisor slice.
+
+Those delivered pieces are an evidence-linked advisor handoff, **not AV0–AV3
+completion**: the live Go/Wait/Pass endpoint, history cohorts, capture links and
+grading specified here are still future. Do not build a second advisor store or
+start AV0 merely because the fixture advisor exists. When real-data advice is
+selected, reconcile its bounded contract with this roadmap and reuse the
+existing request/receipt and capture foundations where their semantics fit.
+The original instruction to wait for all shadow work to settle is superseded
+for the selected Dots advisor sequence; shadow follows the usable advisor.
 
 ## Where the advisor sits among the agent roles
 

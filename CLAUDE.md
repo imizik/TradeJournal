@@ -1,167 +1,87 @@
-# CLAUDE.md
+# Working agreement
 
-Working agreement for coding agents in this repository — Claude Code, Codex,
-anything else. `AGENTS.md` points here instead of restating it, so there is
-one copy of the agreement and no second one to drift. Durable knowledge about
-the system lives in `docs/agent/`; this file says how to work here, not what
-the system is.
+Shared by Codex, Claude Code and other coding agents. `AGENTS.md` points here.
+TradeJournal is a single-user trade journal, reconciliation system, charting
+workspace and bounded research/practice environment. The repository is the
+source of truth; fix relevant documentation when behavior changes.
 
-## What this is
+## Current product priority
 
-A local-first trade journal and reconciliation system for Robinhood and Webull
-trading history. It ingests fills, rebuilds FIFO trades, tracks open positions,
-enriches fills and trades with market context, supports AI review, and produces
-reconciliation and market-report artifacts. It also carries two separate
-domains: Strategy Lab (version-controlled Pine research) and a TradingView
-live-alert loop. Stocks and options, multiple accounts, no auth, single user.
+The owner selected **Dots functionality first on October 11, 2026**. Before
+selecting new roadmap work, read [the shared priorities](docs/product-roadmap.md#selected-priorities--october-11-2026)
+and [Dots delivery board](docs/agent/dots-integration.md#current-delivery-board).
+Finish the selected advisor connection, then make questions repeatable and
+connection upkeep dependable. Already-selected Research Studio work may close;
+new adjacent expansion follows Dots. Detailed feature contracts still own scope
+and acceptance; this priority does not activate services or broaden grants.
 
-## Read before changing things
+## Work directly; look up only what you need
 
-| File | For |
-|---|---|
-| `docs/agent/architecture.md` | Processes, data flow, persistence, cost constraints |
-| `docs/agent/domain-rules.md` | Invariants — read before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView, the strategy factory, chart price basis |
-| `docs/agent/verification.md` | How to prove a change works |
-| `docs/agent/pr-review.md` | Native pre-PR reviewers, risk/model selection, bounded repairs and CI readiness |
-| `docs/agent/codex-workflow.md` | Sol-led substantial work, bounded Luna assignments, escalation, and completion reports |
-| `docs/agent/environments.md` | Which database you are on; destructive-operation rules |
-| `docs/agent/background-jobs.md` | Job ownership, worker processes, restart recovery |
-| `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
-| `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
-| `docs/agent/delegation.md` | Claude Code on Opus: what to hand to the Sonnet `engineer` and `reviewer` subagents, the brief, escalation and review tiers |
-| `docs/product-roadmap.md` | Future trading-improvement workflow: reflections, weekly commitments, playbooks, planned risk and evidence-gated experiments; preserves active feature-roadmap priorities |
-| `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
-| `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
-| `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
-| `docs/agent/cloud-mcp-advisor-contract.md` | Dormant advisor-only MCP fixture catalog, separate offline OAuth/Unix boundary, immutable cited receipts and later activation gates |
-| `docs/agent/advisor-shadow-contract.md` | Manual fixture advisor/shadow assignment, packet/receipt isolation, disclosure order and later cloud/forward gates |
-| `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
-| `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
-| `docs/agent/cloud-mcp-integration-scope.md` | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
-| `docs/agent/cloud-mcp-d0-runbook.md` | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
-| `docs/agent/cloud-mcp-d1-contract.md` | First useful connector reads: one assigned simulated MU/NBIS run, independent backend OAuth checks, private Unix bridge and manual activation/rollback |
-| `docs/agent/cloud-mcp-d2-contract.md` | Opt-in demo choice tools: own immutable TAKE/WAIT/SKIP, retry/recovery receipts, independent write-scope checks and remaining live acceptance |
-| `docs/agent/cloud-mcp-journal-contract.md` | Separate read-only journal coach: approved closed-trade export, bounded exact statistics, offline OAuth and production activation gates |
-| `docs/agent/cloud-browser-auth-contract.md` | Browser authentication and permissions: preserve owner Tailscale access, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, Dot cloud sign-in reported; simulated decision-writing contract is the next increment |
-| `docs/agent/dot-decision-trial-contract.md` | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
-| `docs/agent/dot-sample-replay-contract.md` | Jo’s own bounded sample TAKE replay: hidden continuation, scoped start permission, isolated event ledger and acceptance gates |
-| `docs/agent/dot-market-decision-contract.md` | Jo real-market handoff: bounded private VPS capture, isolated decision-only MU/NBIS session and own-record browser permissions |
-| `docs/agent/dot-historical-replay-contract.md` | Weekend historical replay: retrospective raw bars, separate clocks, sealed continuation and own simulated paper outcomes |
-| `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
-| `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
-| `docs/swing-strategy-roadmap.md` | Swing families (1–16 sessions) in the factory, the after-close practice loop (signal, phone, Take/Skip, shadow trade), the setups board and confluence scan, macro/news/earnings as-of rules, stages from research to live |
-| `docs/strategy-workbench-roadmap.md` | Research Studio plan: connected event exploration on discovery data, exposure history, bounded phases and later Factory handoff |
+Read the affected code and tests first. Use [the documentation index](docs/agent/README.md)
+only to find a relevant contract or unfamiliar subsystem; it is not a reading
+checklist. Read the relevant domain rules before changing financial semantics,
+and environment/deployment guidance before acting on real data or services.
 
-Read what the task needs. The repository is the source of truth;
-if a document disagrees with the code, the code wins and the document gets
-fixed in the same change.
+Do the work yourself unless independent pieces clearly justify delegation.
+No automatic Sol/Luna handoff, model escalation, new chat or completion template.
+The current owner remains responsible for scope and completion; use the user's
+selected model. [Codex](docs/agent/codex-workflow.md) and
+[Claude](docs/agent/delegation.md) have short optional delegation notes.
 
-In Codex, prefer Sol as the main agent for substantial features, refactors,
-difficult debugging, and deployment changes. Sol owns scope, consequential
-decisions, integration, and final verification; delegate clear, bounded work to
-Luna when it helps. Use Luna directly for small tasks with clear requirements.
-Delegation is optional: Sol can complete a feature itself. Follow
-[`docs/agent/codex-workflow.md`](docs/agent/codex-workflow.md), including its
-fallback when a substantial task has already started on Luna.
+## Choose the process by consequence
 
-## Verification is not optional
+Classify the actual behavior and blast radius, not file count or the fact this
+is a trading app. [Review policy](docs/agent/pr-review.md) supplies the detail.
 
-```bash
-bash scripts/setup.sh           # clean clone -> runnable
-bash scripts/verify.sh --fast   # while working
-bash scripts/verify.sh          # before saying it works
-bash startdev.sh                # run the app
-```
+- **Ordinary, bounded work:** localized fixes, UI tweaks, routine tests and
+  documentation. Make the smallest change, run focused checks, push/update the
+  PR. No mandatory subagent, independent review or full local suite. CI may
+  finish asynchronously; report pending checks honestly, not as merge-ready.
+- **Broad work:** cross-system features or refactors need relevant integration
+  coverage and one independent reviewer. Broader tests follow affected behavior,
+  not every layer in the system.
+- **Consequential work:** money/FIFO/fills/account correctness, destructive or
+  real-data mutation, auth/security, migrations, deployment, and verification,
+  review or CI policy/tooling retain the stronger review and full applicable
+  verification in the shared guides. Small diffs are not an exemption here.
 
-Do not report a change as working on the strength of reading the diff. If a
-change lands somewhere the suite does not cover — any frontend rendering, any
-live external integration — say so explicitly and describe what you did verify
-instead. `docs/agent/verification.md` lists the gaps honestly; use it.
+For changed UI, inspect the affected screen in a running app and exercise any
+changed interaction. For a bug, use a focused reproducer/regression when useful.
+Do not prove unrelated providers, deployments or user habits. Preserve applicable
+feature-specific safety and acceptance gates; fixture proof is not live proof.
+[Verification](docs/agent/verification.md) is a reference, not a mandatory read.
 
-Use either the full local checks above or the
-[CI-backed path](docs/agent/verification.md#ci-backed-verification). The latter
-requires local causal/interaction proof for the change and every applicable
-full CI job and step passing on the exact final head; it avoids repeating that
-full suite locally. Never describe CI-backed coverage as a full local pass.
+## Keep the change small
 
-The owner assigns checks to workers and ensures the full required verification
-is complete before reporting success. A worker's narrower checks do not replace
-that final obligation. Reuse evidence under
-[verification ownership](docs/agent/verification.md#verification-ownership);
-do not rerun a check merely because another agent ran it.
+- Prefer the existing pattern and the most straightforward fix.
+- No new abstraction, config flag, dependency, contract document or speculative
+  future-proofing unless requested or necessary for the current outcome. Explain
+  a necessary addition briefly; do not add it just to anticipate future work.
+- No adjacent cleanup or workflow redesign. After repeated failed fixes, revisit
+  the diagnosis instead of adding layers or restarting the same repair loop.
+- Batch independent reads/checks. Reuse passing evidence when inputs are unchanged.
+- Freeze a complete candidate before CI. Do not catch up to unrelated main changes
+  unless conflicts, changed dependencies or branch requirements make it necessary.
+- Communicate meaningful findings, blockers and completion briefly. Skip routine
+  command narration and repeated unchanged waiting updates.
 
-CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
-the local verification script does not run those checks.
+## Delivery
 
-A Claude Code cloud session starts from a bare clone with no `backend/.venv`
-or `frontend/node_modules`. Run `bash scripts/setup.sh` before any check, or
-every check fails on missing tools rather than on the change.
+Develop on a branch, never directly on `main`. Pushes, PR updates and bounded
+repairs are authorized; the user alone merges. Never merge or enable auto-merge.
+CI remains enabled for every PR; only call work merge-ready after required checks
+pass on its final head and any required review is complete. Ordinary work may
+be handed back earlier with CI explicitly pending. Do not rerun a failure until
+it passes without diagnosing it, weaken tests, or conceal missing proof.
 
-**Merging to `main` deploys to production.** Once CI and the Deployment
-package pass on the merge commit, the VPS installs it by itself within about
-10 minutes. On weekdays between 09:25 and 16:15 New York time it waits for the
-close unless the PR carries the `deploy-now` label. Schema changes wait for a
-person unless `AUTODEPLOY_AUTO_MIGRATE=true`; when enabled, the deployer verifies
-a fresh backup before migrating, and a backup or migration failure stops the
-release. A PR is ready to merge only when it is ready to go live; see
-[automatic deployment](deploy/README.md#automatic-deployment).
+Use `bash scripts/setup.sh` when dependencies are missing, `bash startdev.sh`
+to run the app, and the focused commands in the verification reference for
+ordinary work. Full `bash scripts/verify.sh` is for broad/consequential coverage
+when appropriate; CI can provide that coverage without duplicating it locally.
 
-## Independent review and completion
-
-Follow the [native pre-PR review workflow](docs/agent/pr-review.md) before
-publishing ready work. The owner classifies the full diff, invokes a fresh
-reviewer in the same client, receives its findings directly, repairs valid
-issues and obtains review of the final candidate. Most changes get one
-reviewer. A change that could alter a tier-2 area of the guide's table (money
-correctness, destructive or real-data changes, auth/permissions/security,
-migrations, deployment, or CI, branch protection, or the verification or review
-policy and tooling), including a refactor meant to preserve behavior, gets a
-stronger general reviewer and a focused reviewer. Use the
-explicit model profiles in the guide, not the default implementation worker.
-Reviewers do not invoke reviewers themselves.
-
-The agent may skip only genuinely explanatory, non-agent documentation, with
-a reason in the PR. Other changes require review unless the user explicitly
-requests a skip. CI always runs. At most three rounds are automatic; timeouts,
-quota errors, missing results and unresolved findings are incomplete, never a
-pass. Keep the owner active until review completes and current-head CI
-passes, or report a specific blocker and leave the PR draft. Do not call
-another provider's CLI or wait for GitHub comments as the normal review path.
-
-The user authorizes branch pushes, PR updates and bounded review repairs as the
-normal workflow. The user alone merges; never merge or enable auto-merge.
-
-## Operating style
-
-- Read only what the task needs. Use these docs to orient rather than
-  exploring.
-- Batch searches, file reads, and cheap checks instead of many tiny commands.
-- Avoid repeated `git status`, broad tree walks, and unrelated spelunking.
-- Find the root cause first, then make the smallest safe fix.
-- Do not ask obvious follow-ups when the fix is local and low-risk.
-- Keep narration minimal; do not explain routine shell and file operations.
-- Prefer cheap targeted validation unless the blast radius requires more.
-- Avoid unrelated refactors, formatting churn, and duplicated UI/table logic.
-- Final summaries stay brief: what changed, what was verified, what risk remains.
-- In a Claude Code session on Opus, act as the lead and work directly by
-  default; hand work to the Sonnet `engineer` subagent only when it clearly
-  pays, and keep judgment, high-risk review and pushes
-  (`docs/agent/delegation.md`).
-
-## Extra care required
-
-PnL math, FIFO reconstruction, Gmail/email parsing, fill dedupe, account
-identity, reconciliation outputs, nullable enrichment fields, and frontend
-data-fetch patterns that can create N+1 calls. When PnL looks wrong, start at
-`backend/app/engine/reconstructor.py` and the fill history — not at the UI.
-
-## Parallel work
-
-Develop on a branch, never directly on `main`. Generated artifacts
-(`.next/`, `*.tsbuildinfo`, `next-env.d.ts`, `backend/data/`) are gitignored so
-parallel branches do not fight over them. Alembic revisions are the one place
-parallel work collides: two branches each adding a revision creates two heads,
-and `test_schema_migrations.py` fails on that deliberately.
+**Merging to main can deploy to production.** See
+[automatic deployment](deploy/README.md#automatic-deployment) before release or
+schema work. Preserve its backup, migration and market-hours safeguards.
 
 ## Hard constraints
 

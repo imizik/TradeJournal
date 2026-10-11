@@ -1,12 +1,18 @@
 # Agent documentation
 
 Durable, shared context for anyone — human or agent — working in this
-repository. `CLAUDE.md` is the working agreement for every coding agent and
+repository. This is an on-demand lookup, not a required reading list.
+`CLAUDE.md` is the working agreement for every coding agent and
 points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
+
+**Current selection:** [Dots functionality first](../product-roadmap.md#selected-priorities--october-11-2026).
+The [Dots delivery board](dots-integration.md#current-delivery-board) distinguishes
+completed journal coaching from pending connected advisor/shadow work and owns
+the next-work sequence. Check it before starting another roadmap slice.
 
 | Document | Read it when |
 |---|---|
-| [cloud-mcp-journal-contract.md](cloud-mcp-journal-contract.md) | Separate journal coaching through a bounded approved export, exact statistics and offline OAuth; no production activation |
+| [cloud-mcp-journal-contract.md](cloud-mcp-journal-contract.md) | Separate journal coaching through a bounded approved export, exact statistics, offline OAuth and recorded continuous-access acceptance |
 | [research-studio-newer-mu.md](research-studio-newer-mu.md) | Owner-selected fixed MU comparison through October 2026, source approval and protected-period exposure |
 | [research-studio-r4.md](research-studio-r4.md) | Frozen-parent variants, paired comparisons, append-only conclusions, UI clarity and pending human usefulness acceptance |
 | [research-studio-r3.md](research-studio-r3.md) | Owner app workspace, manually connected local research sidecar, linked views, immutable chart inspections and browser evidence |
@@ -17,13 +23,13 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [research-studio-prospective-mu.md](research-studio-prospective-mu.md) | Frozen future MU study, bounded collection, immutable runtime and separate operator activation |
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
-| [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
-| [pr-review.md](pr-review.md) | Native pre-PR review; risk-based model selection, direct findings, bounded fixes and required CI |
-| [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
+| [verification.md](verification.md) | Focused-check selection and on-demand coverage reference |
+| [pr-review.md](pr-review.md) | Risk classification: ordinary work needs no reviewer; broad/consequential review and CI readiness |
+| [codex-workflow.md](codex-workflow.md) | Optional bounded delegation; direct work with the selected model is the default |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [advisor-shadow-contract.md](advisor-shadow-contract.md) | Manual invented advisor/shadow session, atomic A3 assignment, disclosure/provenance and separate cloud/forward gates |
 | [cloud-mcp-advisor-contract.md](cloud-mcp-advisor-contract.md) | Dormant separate advisor OAuth catalog, singleton Unix backend binding, immutable cited receipt and later activation gates |
-| [dots-integration.md](dots-integration.md) | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
+| [dots-integration.md](dots-integration.md) | Current Dots delivery status and functionality priorities; accepted coach, advisor/shadow acceptance and scoped follow-through |
 | [cloud-mcp-integration-scope.md](cloud-mcp-integration-scope.md) | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
 | [cloud-mcp-d0-runbook.md](cloud-mcp-d0-runbook.md) | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
 | [cloud-mcp-d1-contract.md](cloud-mcp-d1-contract.md) | Two assigned sample Practice reads, backend OAuth checks, Unix bridge and manual activation/rollback |
@@ -37,7 +43,7 @@ points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 | [delegation.md](delegation.md) | You are a Claude Code session on Opus deciding what to hand to a Sonnet worker, or you are that worker |
 | [environments.md](environments.md) | You need to know which database you are on, or are about to run something destructive |
 | [background-jobs.md](background-jobs.md) | You are touching queued work: the worker lanes, job ownership, or restart recovery |
-| [../product-roadmap.md](../product-roadmap.md) | You want the future trading-improvement workflow and its usage gates, without changing active feature-roadmap priorities |
+| [../product-roadmap.md](../product-roadmap.md) | You need the current Dots-first cross-roadmap priorities or the future journal learning workflow |
 | [../agentic-trading-roadmap.md](../agentic-trading-roadmap.md) | You want the proposed frozen-decision, alert and paper-review loop, grounded factory/thesis design, first three slices and 30-day evidence goals; planning only |
 | [../charts-roadmap.md](../charts-roadmap.md) | You are working on `/charts`: execution order, dependencies, acceptance gate, provider evidence and the not-building list |
 | [../charts-deep-history.md](../charts-deep-history.md) | You need C0.0's implemented SIP cache, pagination, warmup, budget and test contract |

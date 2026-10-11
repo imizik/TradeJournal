@@ -91,37 +91,23 @@ invented one, and defend existing decisions that are already good.
 
 ## The UI gate: before any review
 
-Review costs far more than a look. Do not ask for a reviewer until the change
-visibly works. In BUILD mode:
+Scale verification to the affected behavior under `CLAUDE.md`:
 
-1. **Before editing:** write the acceptance criteria as things a picture or
-   a DOM check can show ("at 390px the dock is a bottom sheet; no label
-   overlaps the price axis"). Capture **baseline pictures** of the target
-   surface and copy them out of `frontend/test-results/` (it is wiped on
-   every run).
-2. **Fast checks** (seconds): `cd frontend && npm run typecheck && npm run lint`.
-3. **Targeted browser test** for the touched area only, e.g.
-   `npx playwright test e2e/charts.spec.ts -g "<test name>"` (about 30 s
-   including the build); batch several specs into one run, since each run
-   rebuilds the app.
-4. **Look.** Open the after-pictures beside the baseline, desktop and phone.
-   Check each acceptance criterion, overlaps, clipped text, console errors.
-   For hover, drag or menu behavior a still cannot show, drive the UX
-   sandbox (`scripts/ux_sandbox.sh`) once.
-5. **Loop** steps 2–4 until every criterion passes. After three loops that
-   do not converge, stop and show the user the pictures and the blocker
-   instead of spending more.
-6. Only then complete full local verification or the
-   [CI-backed path](../../../docs/agent/verification.md#ci-backed-verification),
-   commit, and follow `docs/agent/pr-review.md`. Hand the reviewer the base/head, the gate
-   results with their commit, and the before/after picture paths so it
-   judges rather than re-runs.
+- Inspect the changed screen in a running app at the affected viewports. Use
+  before/after pictures for visual changes; exercise changed interactions.
+- Run relevant typecheck/lint and focused browser coverage. Reuse existing
+  fixtures; add a regression for meaningful behavior, not every copy edit.
+- Check clipping, overlaps, errors and trading-meaning invariants where affected.
+  Gesture fixes retain the measured comparison in the gesture lens; a screenshot
+  is not evidence of trackpad feel.
+- Commit and follow the shared [review policy](../../../docs/agent/pr-review.md).
+  Ordinary UI fixes need no independent reviewer or full local suite. Broader
+  or consequential changes retain their applicable checks and review.
+- If repairs repeatedly fail, revisit the cause instead of adding scope. Report
+  concrete missing visual/device proof without claiming it passed.
 
-Any new visual state you add gets a screenshot saved with
-`test.info().outputPath("<name>-desktop.png")` in its e2e test: CI then posts
-it in the PR's picture comment, where the user sees it without running
-anything. Gesture changes also end with a short list of what only the user
-can feel on the real trackpad (`references/gesture-lens.md`).
+Retain useful pictures with the existing test output convention. Do not create
+new tests solely to generate a screenshot or make the user re-prove unrelated flows.
 
 ## Report
 
@@ -144,8 +130,6 @@ hard for them to judge.
 
 ## Handoff
 
-For another agent, use the brief in `docs/agent/delegation.md` (The brief).
-With no roadmap item, CONTRACT is the user's request plus this audit's
-acceptance criteria; VERIFY is the UI gate above, then the full suite. Add: baseline picture paths, viewports and data state, the
-picture/DOM acceptance criteria, the e2e spec that will hold the new
-screenshots, and the trading-meaning invariants that the change touches.
+Delegate only if it helps. Give the outcome, owned files, constraints and
+focused checks, plus relevant pictures/viewports and the trading-meaning
+invariants. No mandatory handoff form or full-suite default.

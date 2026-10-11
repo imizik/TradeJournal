@@ -18,6 +18,23 @@ For the immediate assignment queue, jump to the
 [30-day sequence](#16-proposed-first-30-days). The preceding sections explain
 the reuse decisions, evidence limits and contracts those slices depend on.
 
+## Current priority and evidence — October 11, 2026
+
+The [Dots-first product selection](product-roadmap.md#selected-priorities--october-11-2026)
+supersedes this proposal's cross-roadmap ordering. The
+[Dots board](agent/dots-integration.md#current-delivery-board) prioritizes a useful,
+repeatable advisor before independent shadow expansion. Journal coaching's
+bounded integration and first actual review are accepted separately; A3 usage
+is not a prerequisite for calling that integration complete.
+
+A1/A2 implementation and the recorded A2 operational lifecycle remain delivered.
+A3 is implemented, including subsequent manual fixture/disclosure work, but its
+latest documented human-timed acceptance remains 0/3 real sessions. That is the
+recorded evidence limit, not a fresh production audit. Forward routine/shadow
+claims still need their existing isolation, timing and session acceptance; no
+fixture or historical replay substitutes for them. Broader thesis, swing and
+Workbench proposals here are not an active parallel queue.
+
 ## How to work from this roadmap
 
 This is the proposed **Agentic Practice** track, alongside the existing
@@ -46,7 +63,7 @@ If this track is selected, start with A1, then A2, then A3. Assign and review
    `built` means code landed; `done` requires that row's stated verification,
    including human/provider evidence where specified. Mark unknown evidence
    explicitly rather than treating a fixture as a live result.
-4. After A3, run the observation period before selecting one Phase C topic.
+4. Within this practice track, after A3 run the observation period before selecting one Phase C topic. The separately owner-selected Research Studio work follows its own roadmap and the current Dots-first priorities.
    Phase C and D rows are **decision gates**, not ready-made implementation
    contracts. Write a bounded contract only for the selected follow-up.
 
@@ -55,7 +72,7 @@ If this track is selected, start with A1, then A2, then A3. Assign and review
 | P0 | Set the first practice policy, universe and schedule | Selection of this track | selected in [P0 v1](agent/practice-policy.md); synthetic plan/outcome and real read-only source-time check recorded; forward use awaits A1/A2 operational gates |
 | A1 | Freeze and retrieve a human or agent decision | P0 | [PR #143](https://github.com/imizik/TradeJournal/pull/143) merged; merged CI including Postgres parity passed; 390px automated WAIT save/reopen and a provider-backed human TAKE save/reopen observed; human comprehension timing remains unobserved; A1 decisions stay immutable and A2 arming is separate |
 | A2 | Watch, alert and paper-track a fixed-rule plan | A1 | live operational lifecycle observed 2026-10-08 after deployed [PR #147](https://github.com/imizik/TradeJournal/pull/147) and [PR #152](https://github.com/imizik/TradeJournal/pull/152): user-confirmed phone receipt and exact-card deep link, accepted SPY paper entry, API restart while open preserving the entry, then one stop exit with independently checked base/3× cost outcomes and no duplicate event keys; this late-session operational probe is outside the on-time strategy cohort; [evidence and remaining boundaries](agent/practice-policy.md#a2-live-operational-observation-2026-10-08) |
-| A3 | Run the short daily routine and compare independent choices | A2 | proposed third build; exit: three observed sessions with honest run status, paired choices and review timing |
+| A3 | Run the short daily routine and compare independent choices | A2 | implemented; latest recorded live acceptance 0/3 sessions in the [A3 contract](agent/a3-implementation-contract.md); actual isolated runner/forward use remains gated, with new expansion behind the Dots advisor sequence |
 | B | Use the same policy for forward observation | A3, or manual preparation using A1/A2 | proposed observation; exit: at least ten eligible sessions with coverage and attention results |
 | C | Select one research or thesis improvement | B review and a named recurring obstacle | conditional decision gate; write one new scoped contract after choosing the obstacle |
 | D | Evaluate a frozen policy prospectively | Specific C contract and parity/evidence gates | conditional decision gate; inconclusive is an acceptable result |
@@ -383,11 +400,11 @@ existing plans continues and new plans remain absent.
 
 ## 7. Strategy Workbench and slower swing research
 
-The newer [Workbench roadmap](strategy-workbench-roadmap.md) owns its
-implementation order and UI, and the [swing roadmap](swing-strategy-roadmap.md)
-owns S1–S2. The analysis here records constraints for a later shared design;
-it is not a second Workbench or swing implementation queue. Reconcile any
-different protocol choices with those owning roadmaps before coding them.
+The [Research Studio roadmap](strategy-workbench-roadmap.md) supersedes the
+strategy-form-first Workbench design below for the implemented event lab. These
+older catalog/Freeze/Validate proposals are historical strategy-design context,
+not R0–R4 requirements or a second implementation queue. The [swing roadmap](swing-strategy-roadmap.md)
+owns S1–S2; both tracks follow current Dots-first product priority.
 
 ### Workbench: extend the existing catalog
 
