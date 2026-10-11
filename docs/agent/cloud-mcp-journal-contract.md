@@ -104,6 +104,16 @@ and Eastern date bound and narrows the previous source-table grant. The ninth
 column is account filtering only and never appears in the export. Do not give the
 export role ownership, membership, base-table SELECT or write access.
 
+Private input files normally require mode 0400 or 0600. Systemd may instead
+present `LoadCredential` files as root:root 0440 in a root:root 0550 directory.
+Accept that mode only directly inside the service's `CREDENTIALS_DIRECTORY`
+under `/run/credentials/`, with those exact owners/modes and a read-only
+filesystem verified on the opened descriptor. Ordinary group-readable files,
+mutable mounts, symlinks and oversized inputs still refuse. This does not
+change source credential permissions or grant the gateway credential access.
+The disposable journal smoke tests this real systemd delivery with invented
+scope/credential bytes and no database connection or publication.
+
 The manually installed export service permits only the local database endpoint
 and writes only its publication directory. A separate nftables unit affects only
 the two dedicated publisher UIDs: export connects only to localhost TCP 5432;

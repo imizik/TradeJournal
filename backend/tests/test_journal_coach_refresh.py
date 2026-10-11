@@ -4,8 +4,10 @@ import json
 import importlib
 import os
 import sys
+import stat
 from datetime import date, datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -138,6 +140,59 @@ def test_refresh_accepts_systemd_owner_readonly_credential(tmp_path, monkeypatch
     monkeypatch.setattr(refresh_module, "publish_snapshot", lambda *args: {"snapshot_sha256": "c" * 64})
     result = refresh_module.refresh(cfg, cred, now=datetime(2026, 10, 10, 12, tzinfo=timezone.utc))
     assert result["trade_count"] == 0
+
+
+@pytest.mark.parametrize("mode", [0o440, 0o640, 0o644])
+def test_group_readable_inputs_refuse_before_export_even_with_credential_environment(tmp_path, monkeypatch, mode):
+    clean_db_env(monkeypatch)
+    cfg = config_file(tmp_path)
+    cred = private_file(tmp_path / "credential", b"invented-no-secret")
+    cred.chmod(mode)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(script_exporter, "export_snapshot", lambda *args, **kwargs: pytest.fail("export ran"))
+    with pytest.raises(refresh_module.RefreshError, match="owner-only mode"):
+        refresh_module.refresh(cfg, cred)
+
+
+@pytest.mark.parametrize("violation", [
+    None, "unset_directory", "different_directory", "outside_run", "file_owner",
+    "file_group", "file_mode", "directory_owner", "directory_group",
+    "directory_writable", "directory_not_directory", "writable_mount",
+])
+def test_systemd_exception_requires_root_owned_readonly_credential_boundary(monkeypatch, violation):
+    # Stat fixtures cover inaccessible root-only mount metadata on non-root hosts;
+    # the native smoke separately exercises real LoadCredential files as a service UID.
+    path = Path("/run/credentials/journal-test.service/database-url")
+    parent = SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFDIR | 0o550)
+    info = SimpleNamespace(st_uid=0, st_gid=0, st_mode=stat.S_IFREG | 0o440)
+    flags = os.ST_RDONLY
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(path.parent))
+    if violation == "unset_directory":
+        monkeypatch.delenv("CREDENTIALS_DIRECTORY")
+    elif violation == "different_directory":
+        monkeypatch.setenv("CREDENTIALS_DIRECTORY", "/run/credentials/other.service")
+    elif violation == "outside_run":
+        path = Path("/tmp/credentials/journal-test.service/database-url")
+        monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(path.parent))
+    elif violation == "file_owner":
+        info.st_uid = 1000
+    elif violation == "file_group":
+        info.st_gid = 1000
+    elif violation == "file_mode":
+        info.st_mode = stat.S_IFREG | 0o444
+    elif violation == "directory_owner":
+        parent.st_uid = 1000
+    elif violation == "directory_group":
+        parent.st_gid = 1000
+    elif violation == "directory_writable":
+        parent.st_mode = stat.S_IFDIR | 0o770
+    elif violation == "directory_not_directory":
+        parent.st_mode = stat.S_IFREG | 0o550
+    elif violation == "writable_mount":
+        flags = 0
+    monkeypatch.setattr(Path, "stat", lambda self: parent)
+    monkeypatch.setattr(os, "fstatvfs", lambda fd: SimpleNamespace(f_flag=flags))
+    assert refresh_module._systemd_readonly_credential(path, 123, info) is (violation is None)
 
 
 @pytest.mark.parametrize("bad_config", [

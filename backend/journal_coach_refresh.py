@@ -22,6 +22,22 @@ class RefreshError(Exception):
     """Expected safe refresh refusal."""
 
 
+def _systemd_readonly_credential(path: Path, fd: int, info: os.stat_result) -> bool:
+    """Accept root-owned 0440 only in systemd's read-only credential mount."""
+    directory = os.environ.get("CREDENTIALS_DIRECTORY")
+    if not directory or str(path.parent) != directory or not directory.startswith("/run/credentials/"):
+        return False
+    parent = path.parent.stat()
+    return (
+        stat.S_IMODE(info.st_mode) == 0o440
+        and info.st_uid == 0 and info.st_gid == 0
+        and stat.S_ISDIR(parent.st_mode)
+        and parent.st_uid == 0 and parent.st_gid == 0
+        and stat.S_IMODE(parent.st_mode) == 0o550
+        and bool(os.fstatvfs(fd).f_flag & os.ST_RDONLY)
+    )
+
+
 def _regular_private_file(path: str | Path, limit: int, label: str) -> bytes:
     p = Path(path)
     if not p.is_absolute() or ".." in p.parts or os.path.normpath(str(p)) != str(p):
@@ -36,7 +52,10 @@ def _regular_private_file(path: str | Path, limit: int, label: str) -> bytes:
         fd = os.open(p, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0))
         try:
             info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) not in (0o400, 0o600):
+            if not stat.S_ISREG(info.st_mode) or (
+                stat.S_IMODE(info.st_mode) not in (0o400, 0o600)
+                and not _systemd_readonly_credential(p, fd, info)
+            ):
                 raise RefreshError(f"{label} file must be regular and owner-only mode 0400 or 0600")
             if info.st_size > limit:
                 raise RefreshError(f"{label} file is oversized")
