@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -20,6 +20,10 @@ async function startSidecar(script?: string) {
 }
 async function stopSidecar(signal: "SIGTERM" | "SIGKILL" = "SIGTERM") {
   if(child && child.exitCode===null){const exit=new Promise<void>(resolve=>child.once("exit",()=>resolve()));child.kill(signal);await exit;}
+}
+async function openConditions(page: Page) {
+  const edit=page.getByRole("button",{name:"Edit conditions",exact:true});
+  if(await edit.isVisible())await edit.click();
 }
 test.beforeAll(async()=>{
   root=path.join(mkdtempSync(path.join(os.tmpdir(),"tj-research-browser-")),"fixture");
@@ -52,8 +56,8 @@ test("question-start connects real preview, immutable run, views, exact bars and
   await page.getByRole("button",{name:`Inspect ${id}`,exact:true}).click();
   await expect(page.getByTestId("selected-id")).toHaveText(id!);
   const saved=await cmd("runs"), runId=saved.runs[0].run_id, before=(await cmd("status",{run_id:runId})).exposures;
-  await page.reload();await expect(page.getByRole("button",{name:new RegExp(runId)})).toBeVisible();
-  await page.getByRole("button",{name:new RegExp(runId)}).click();
+  await page.reload();await expect(page.getByRole("button",{name:new RegExp(runId.slice(0,8))})).toBeVisible();
+  await page.getByRole("button",{name:new RegExp(runId.slice(0,8))}).click();
   await expect(page.getByTestId("analysis-count")).toContainText("N 7");
   expect((await cmd("status",{run_id:runId})).exposures).toBe(before+1);
   expect(leaked).toEqual([]);
@@ -75,9 +79,10 @@ test("chart-start conditions use decision features and edits label prior results
   await expect(page.getByRole("button",{name:"Reveal analysis (records exposure)"})).toBeVisible();
   await page.getByRole("button",{name:"Reveal analysis (records exposure)"}).click();
   await expect(page.getByTestId("analysis-count")).toBeVisible();
+  await openConditions(page);
   await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.6");
   await expect(page.getByText(/Previous result — draft changed/)).toBeVisible();
-  await expect(page.getByText(/outcome-informed/)).toBeVisible();
+  await expect(page.getByText(/outcome-informed/i)).toBeVisible();
 });
 
 test("late preview cannot replace newer threshold; invalid input disables Run",async({page})=>{
@@ -88,18 +93,22 @@ test("late preview cannot replace newer threshold; invalid input disables Run",a
     const body=route.request().postDataJSON();
     if(body.action==="preview" && body.arguments.raw.predicates[1].minimum===123){entered();await gate;await route.fulfill({json:{event_count:999}}).catch(()=>{});}else await route.continue();
   });
+  await openConditions(page);
   await page.getByLabel("Condition 2 minimum",{exact:true}).fill("123");await started;
+  await openConditions(page);
   await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.7");
   await expect(page.getByRole("status").filter({hasText:"Preview:"})).not.toContainText("999");
   await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();release();
   await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("events");
-  await page.getByLabel("Window start").fill("601");
+  await openConditions(page);
+  await page.getByLabel("Window start").fill("10:01");
   await expect(page.getByRole("alert",{name:"Research error"})).toContainText("aligned");
   await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeDisabled();
 });
 
 test("queued cancellation and explicit retry preserve logical run and attempt history",async({page})=>{
   await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await openConditions(page);
   await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.8");await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
   let hold=true;await page.route("**/research-studio/command",async route=>{if(hold && route.request().postDataJSON().action==="execute")await route.fulfill({json:{status:"dispatched"}});else await route.continue();});
   await page.getByRole("button",{name:"Run analysis",exact:true}).click();
@@ -129,6 +138,7 @@ test("delayed result and chart responses cannot replace newer run or selection",
     if(hold && route.request().postDataJSON().action==="result") {hold=false;const response=await route.fetch();entered();await gate;await route.fulfill({response}).catch(()=>{});}else await route.continue();
   });
   await page.getByRole("button",{name:"Reveal analysis (records exposure)"}).click();await started;
+  await openConditions(page);
   await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.9");await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
   await page.getByRole("button",{name:"Run analysis",exact:true}).click();release();
   await expect(page.getByRole("button",{name:"Reveal analysis (records exposure)"})).toBeVisible();await expect(page.getByTestId("analysis-count")).toHaveCount(0);
@@ -145,6 +155,7 @@ test("delayed result and chart responses cannot replace newer run or selection",
 
 test("warm edit feedback and loading meet bounded fixture budgets",async({page})=>{
   await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await openConditions(page);
   const feedback:number[]=[], loading:number[]=[];
   for(let i=1;i<=20;i++) {
     await page.evaluate(() => {
@@ -164,6 +175,7 @@ test("warm edit feedback and loading meet bounded fixture budgets",async({page})
         observer.observe(target,{childList:true,characterData:true,subtree:true});
       });
     });
+  await openConditions(page);
     await page.getByLabel("Condition 2 minimum",{exact:true}).fill(String(1.50+i*.002));
     const measured=await page.evaluate(()=>(window as unknown as {r3Feedback:Promise<{feedback:number;loading:number}>}).r3Feedback);
     feedback.push(measured.feedback);loading.push(measured.loading);
@@ -177,6 +189,7 @@ test("late previous-run chart is rejected when a changed draft starts another ru
   await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
   await page.getByRole("button",{name:"Run analysis",exact:true}).click();await expect(page.getByRole("button",{name:"Reveal analysis (records exposure)"})).toBeVisible();
   await page.getByRole("button",{name:"Reveal analysis (records exposure)"}).click();await expect(page.getByTestId("analysis-count")).toBeVisible();
+  await openConditions(page);
   await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.84");await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
   let release:()=>void=()=>{}, entered:()=>void=()=>{};const gate=new Promise<void>(r=>release=r), started=new Promise<void>(r=>entered=r);let held=true;
   await page.route("**/research-studio/command",async route=>{if(held && route.request().postDataJSON().action==="chart"){held=false;const response=await route.fetch();entered();await gate;await route.fulfill({response}).catch(()=>{});}else await route.continue();});
@@ -199,6 +212,7 @@ test("sidecar crash with surviving child refuses early recovery then retries exa
   let ownedPid:number|null=null;
   try {
     await startSidecar(pausedSidecar);await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await openConditions(page);
     await page.getByLabel("Condition 2 minimum",{exact:true}).fill("1.83");await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
     await page.getByRole("button",{name:"Run analysis",exact:true}).click();
     await expect.poll(()=>{try{return readFileSync(ready,"utf8");}catch{return "";}}).not.toBe("");ownedPid=Number(readFileSync(ready,"utf8"));
@@ -206,7 +220,7 @@ test("sidecar crash with surviving child refuses early recovery then retries exa
     const runId=(await cmd("runs")).runs[0].run_id;
     await stopSidecar("SIGKILL");await startSidecar();
     const before=await cmd("runs");expect(before.runs.filter((r:{status:string})=>r.status==="queued")).toHaveLength(0);
-    await page.reload();await expect(page.getByRole("button",{name:new RegExp(runId)})).toBeVisible();await page.getByRole("button",{name:new RegExp(runId)}).click();
+    await page.reload();await expect(page.getByRole("button",{name:new RegExp(runId.slice(0,8))})).toBeVisible();await page.getByRole("button",{name:new RegExp(runId.slice(0,8))}).click();
     await page.getByRole("button",{name:"Check worker / recover interrupted run"}).click();
     await expect(page.getByRole("alert",{name:"Research error"})).toContainText("already active");
     expect((await cmd("status",{run_id:runId})).status).toBe("running");
@@ -217,4 +231,138 @@ test("sidecar crash with surviving child refuses early recovery then retries exa
     await page.getByRole("button",{name:"Retry frozen run"}).click();await expect(page.getByRole("button",{name:"Reveal analysis (records exposure)"})).toBeVisible();
     const final=await cmd("status",{run_id:runId});expect(final.attempt).toBe(2);expect(final.status).toBe("completed");expect(final.exposures).toBe(0);
   } finally { if(ownedPid!==null){try{process.kill(ownedPid,"SIGCONT");process.kill(ownedPid,"SIGTERM");}catch{}} }
+});
+
+test("R4 frozen variant comparison and append-only conclusions survive reload",async({page})=>{
+  const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+  await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toContainText("7 events");
+  await openConditions(page);
+  await expect(page.getByLabel("Window start")).toHaveValue("10:00");
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  await expect(page.getByTestId("analysis-count")).toContainText("N 7");
+  await page.getByRole("button",{name:"Duplicate as variant",exact:true}).click();
+  await openConditions(page);
+  await expect(page.getByLabel("Targets")).toBeDisabled();
+  await openConditions(page);
+  await expect(page.getByLabel("Window start")).toBeDisabled();
+  await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeDisabled();
+  await openConditions(page);
+  await page.getByLabel("Condition 2 minimum",{exact:true}).fill("2");
+  await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  const reply=page.waitForResponse(r=>r.url().includes("/research-studio/command")&&r.request().postDataJSON()?.action==="compare");
+  await page.getByRole("button",{name:"Compare with parent (records exposures)",exact:true}).click();
+  const comparison=await(await reply).json();
+  await expect(page.getByRole("region",{name:"Variant comparison"})).toBeVisible();
+  expect(comparison.sets.retained.length).toBeGreaterThan(0);expect(comparison.sets.removed.length).toBeGreaterThan(0);
+  expect(comparison.retained_outcomes_identical).toBe(true);
+  expect(comparison.parent_result.population.data_id).toBe(comparison.variant_result.population.data_id);
+  await page.getByRole("button",{name:/^Removed/}).click();
+  const removed=page.locator("button[data-compare-occurrence]").first(),id=await removed.getAttribute("data-compare-occurrence");
+  await removed.click();await expect(page.getByTestId("selected-id")).toHaveText(id!);
+  await expect(page.getByText("Completed prices through decision only",{exact:false})).toBeVisible();
+  const reason="Higher volume did not clearly separate recoveries. Two weeks are too little evidence.";
+  await page.getByLabel("Conclusion reason").fill(reason);await page.getByRole("button",{name:"Save conclusion",exact:true}).click();
+  await expect(page.getByTestId("conclusion-history")).toContainText(reason);
+  for(const viewport of [{width:1280,height:900,name:"desktop"},{width:957,height:720,name:"medium"},{width:390,height:844,name:"phone"}]){
+    await page.setViewportSize(viewport);
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width+1);
+    await page.screenshot({path:test.info().outputPath("studio-comparison-"+viewport.name+".png"),fullPage:true});
+    if(viewport.name==="phone"){
+      const top=await page.getByRole("region",{name:"Variant comparison"}).evaluate(e=>e.getBoundingClientRect().top+window.scrollY);
+      await page.evaluate(y=>window.scrollTo(0,y-80),top);
+      await expect(page.getByRole("region",{name:"Variant comparison"}).getByRole("heading")).toBeInViewport();
+      await page.screenshot({path:test.info().outputPath("studio-comparison-focus-phone.png")});
+    }
+  }
+  await page.setViewportSize({width:1280,height:900});await page.reload();
+  await page.getByRole("button",{name:new RegExp(comparison.variant_run_id.slice(0,8))}).click();
+  await expect(page.getByTestId("analysis-count")).toBeVisible();
+  await page.getByRole("button",{name:"Compare with parent (records exposures)",exact:true}).click();
+  await expect(page.getByTestId("conclusion-history")).toContainText(reason);
+  const second="No clear separation in this exploratory comparison.";
+  await page.getByLabel("Conclusion verdict").selectOption("Rejected");
+  await page.getByLabel("Conclusion reason").fill(second);await page.getByRole("button",{name:"Save conclusion",exact:true}).click();
+  await expect(page.getByTestId("conclusion-history").locator("li")).toHaveCount(2);
+  await expect(page.getByTestId("conclusion-history")).toContainText(reason);
+  const notes=(await cmd("notes",{run_ids:[comparison.parent_run_id,comparison.variant_run_id]})).notes;
+  expect(notes.map((n:{reason:string})=>n.reason)).toEqual([reason,second]);
+  expect(notes[0].comparison_id).toBe(comparison.comparison_id);
+  await page.screenshot({path:test.info().outputPath("studio-conclusion-reload-desktop.png"),fullPage:true});
+  await page.getByRole("region",{name:"Variant comparison"}).screenshot({path:test.info().outputPath("studio-comparison-focus-desktop.png")});
+  expect(errors).toEqual([]);
+});
+
+test("R4 later same-session replacements are added and removed",async({page})=>{
+  await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await openConditions(page);
+  await page.getByLabel("Condition 1",{exact:true}).selectOption("minutes");
+  await openConditions(page);
+  await page.getByLabel("Condition 1 maximum",{exact:true}).fill("");
+  await openConditions(page);
+  await page.getByLabel("Condition 1 minimum",{exact:true}).fill("30");
+  await page.getByRole("button",{name:"Remove condition 2",exact:true}).click();
+  await openConditions(page);
+  await page.getByLabel("Window end").fill("10:10");
+  await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  await page.getByRole("button",{name:"Duplicate as variant",exact:true}).click();
+  await openConditions(page);
+  await page.getByLabel("Condition 1 minimum",{exact:true}).fill("35");
+  await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  const reply=page.waitForResponse(r=>r.url().includes("/research-studio/command")&&r.request().postDataJSON()?.action==="compare");
+  await page.getByRole("button",{name:"Compare with parent (records exposures)",exact:true}).click();
+  const comparison=await(await reply).json();
+  expect(comparison.sets.retained).toEqual([]);expect(comparison.sets.removed).toHaveLength(7);expect(comparison.sets.added).toHaveLength(7);
+  expect(comparison.sets.removed.every((id:string)=>id.includes("T14:00:00"))).toBe(true);
+  expect(comparison.sets.added.every((id:string)=>id.includes("T14:05:00"))).toBe(true);
+  await page.getByRole("button",{name:/^Added/}).click();
+  const first=page.locator("button[data-compare-occurrence]").first(),id=await first.getAttribute("data-compare-occurrence");
+  await first.click();await expect(page.getByTestId("selected-id")).toHaveText(id!);
+  await page.screenshot({path:test.info().outputPath("studio-replacement-desktop.png"),fullPage:true});
+});
+
+test("R4 a delayed comparison cannot replace a new question",async({page})=>{
+  await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  await page.getByRole("button",{name:"Duplicate as variant",exact:true}).click();
+  await openConditions(page);
+  await page.getByLabel("Condition 2 minimum",{exact:true}).fill("2.4");
+  await expect(page.getByRole("button",{name:"Run analysis",exact:true})).toBeEnabled();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  let release:()=>void=()=>{},entered:()=>void=()=>{};
+  const gate=new Promise<void>(r=>release=r),started=new Promise<void>(r=>entered=r);
+  await page.route("**/research-studio/command",async route=>{
+    if(route.request().postDataJSON().action==="compare"){const response=await route.fetch();entered();await gate;await route.fulfill({response}).catch(()=>{});}
+    else await route.continue();
+  });
+  await page.getByRole("button",{name:"Compare with parent (records exposures)",exact:true}).click();await started;
+  await expect(page.getByRole("button",{name:"Comparing frozen populations…",exact:true})).toBeDisabled();
+  await page.screenshot({path:test.info().outputPath("studio-comparison-loading-desktop.png"),fullPage:true});
+  await page.getByRole("button",{name:"Start a new question",exact:true}).click();release();
+  await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await expect(page.getByRole("region",{name:"Variant comparison"})).toHaveCount(0);
+  await openConditions(page);
+  await expect(page.getByTestId("analysis-count")).toHaveCount(0);await expect(page.getByLabel("Targets")).toBeEnabled();
+});
+
+test("R4 UI preserves R3 workflows with an earlier manual worker",async({page})=>{
+  await page.route("**/research-studio/config",async route=>{
+    const response=await route.fetch(),config=await response.json();delete config.capabilities;await route.fulfill({json:config});
+  });
+  await page.goto("/research-studio");await expect(page.getByRole("status").filter({hasText:"Preview:"})).toBeVisible();
+  await expect(page.getByText(/Connected to an earlier research worker/)).toBeVisible();
+  await page.getByRole("button",{name:"Run analysis",exact:true}).click();
+  await page.getByRole("button",{name:"Reveal analysis (records exposure)",exact:true}).click();
+  await expect(page.getByTestId("analysis-count")).toContainText("N 7");
+  await expect(page.getByRole("button",{name:"Duplicate as variant",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("region",{name:"Conclusions"})).toHaveCount(0);
+  await page.screenshot({path:test.info().outputPath("studio-earlier-worker-desktop.png"),fullPage:true});
 });

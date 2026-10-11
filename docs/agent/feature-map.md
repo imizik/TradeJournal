@@ -188,10 +188,11 @@ you change it (`verification.md`, "What is NOT covered yet").
   cancel/retry; parent-owned research SQLite/artifacts and a pure calculation
   child, no app route/service/provider or journal/Factory writes. The
   [R2 contract](research-studio-r2.md) owns semantics, exposure and acceptance.
-  Selected R3 connects **Research Studio** (`/research-studio`) through
+  R3 connects **Research Studio** (`/research-studio`) through
   `frontend/components/research-studio/ResearchStudio.tsx`, its static chart,
   `backend/app/routers/research_studio.py`, and the manually started
   `backend/scripts/research_studio_server.py` sidecar. The
+  [R4](research-studio-r4.md) adds frozen-parent comparisons and append-only conclusions through the same owner workspace, with plain labels and separate finite comparison computation.
   [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
   boundaries; `backend/tests/test_research_studio_session.py` and
   `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.
