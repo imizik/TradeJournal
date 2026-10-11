@@ -43,6 +43,47 @@ Required CI still passes on the exact final pushed head, and the
 [review coverage rules](pr-review.md#owner-sequence), including proof-pending
 and catch-up requirements, remain unchanged.
 
+## CI-backed verification
+
+Use this path when the change's required full automated checks run in CI and
+its environment-specific acceptance can be established locally. The default
+full local `verify.sh` remains available, including for offline work or checks
+that CI does not cover. This changes where proof runs, not which proof is needed.
+
+1. Diagnose known failures and run the changed area's causal regressions locally.
+   Batch browser scenarios in one invocation. For frontend changes, run whole
+   frontend typecheck and lint, and the specified interaction/DOM acceptance.
+   A prior failure is not closed by an unexplained retry. Preserve its evidence
+   and show that the repair addresses its cause with the original assertions.
+2. Freeze the candidate and record its revision, changed-file/harness hashes,
+   commands, environment and results. Reuse unchanged evidence under
+   [verification ownership](#verification-ownership); invalidate affected proof
+   when code, dependencies, configuration or relevant environment changes.
+3. Push a draft once local acceptance passes. Native review and the existing full
+   CI checks may run in parallel. Review may be `clean, proof pending` until
+   the exact named CI proof arrives; the existing review rules still apply.
+4. Before reporting verified work, confirm the final pushed head and inspect
+   actual job/step outcomes. Backend tests, frontend typecheck/lint/build, both
+   ordinary browser shards, authenticated and sample browser tests, Postgres
+   checks and deployment packaging must have executed and passed when applicable.
+   A green aggregate does not prove steps that were skipped or cancelled. A
+   documentation-only exception is limited to the existing CI scope contract.
+
+Do not additionally launch a full local backend/browser suite merely because
+review or CI is pending. Run extra local checks only for a concrete missing
+boundary, a new failure, an affected dependency or an acceptance criterion CI
+cannot establish. Repair failures and rerun affected checks; do not rerun an
+unchanged CI failure until it happens to pass. Known unresolved local failures
+remain findings even when CI passes; repair proof must close them or the user
+must explicitly decide them.
+
+Report local targeted, full-local, CI and human acceptance separately. A quick
+human visual check can supplement automated interaction evidence; it cannot
+replace delayed-response, persistence, authorization or other required checks.
+Keep progress updates to new results, decisions and blockers. Record actual
+check/pipeline elapsed times when evaluating this path; do not infer model
+resource savings from elapsed time alone.
+
 ## What each check covers
 
 | Check | Command | Catches |

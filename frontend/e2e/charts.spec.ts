@@ -3417,6 +3417,64 @@ const layerGroup = (page: Page, name: string) => layersPanel(page).getByRole("gr
 const paneCount = (page: Page, id: string) => page.evaluate((key) => (window as unknown as { __tjCharts: Map<string, { panes(): unknown[] }> }).__tjCharts.get(key)!.panes().length, id);
 const ALL_PANELS = ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"];
 
+// Returning to the previously acknowledged state must still save after an in-flight deletion commits.
+for (const width of [1440, 390]) test(`Undo during a delayed deletion acknowledgement persists through reload at ${width}px`, async ({ page, context }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const deletion = holdHistoryResponse();
+  let hold = false;
+  const server = await fakeChartSettings(context, {}, async () => { if (hold) await deletion.released; });
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await addLevel(page, "Breakout", "256.00");
+  await addLevel(page, "Far", "280.00");
+  await expect(syncStatus(page)).toContainText("Saved");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const panel = width === 390 ? page.getByRole("dialog", { name: "Layers" }) : layersPanel(page);
+  const levels = panel.getByRole("group", { name: "My levels" });
+  await expect(levels).toContainText("Breakout");
+  await page.screenshot({ path: test.info().outputPath(`layers-ready-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  const savesBefore = server.saves.length;
+  hold = true;
+  await levels.getByRole("button", { name: "Delete all levels" }).click();
+  await levels.getByRole("alert").getByRole("button", { name: "Delete" }).click();
+  await expect.poll(() => savedLevels(server).length).toBe(0); // committed server-side, response held
+  if (width === 390) {
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Show drawing tools" }).click();
+  }
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveAttribute("title", /^Undo deleting 2 levels/);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  if (width === 390) await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(levels).toContainText("Breakout");
+  await expect(levels).toContainText("Far");
+  await page.screenshot({ path: test.info().outputPath(`layers-undo-pending-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  if (width === 1440) {
+    // Another device changes an unrelated field while this ACK is delayed.
+    server.data = { ...server.data, indicators: { ...(server.data!.indicators as Record<string, boolean>), ema9: false } };
+    server.revision++;
+  }
+  hold = false;
+  deletion.release();
+  await expect.poll(() => savedLevels(server).map((level) => level.label)).toEqual(["Breakout", "Far"]);
+  await expect(syncStatus(page)).toHaveText(width === 1440 ? "Merged with changes from another device" : "Saved");
+  expect(server.saves.slice(savesBefore).map((save) => save.status)).toEqual(width === 1440 ? [200, 409, 200] : [200, 200]);
+  if (width === 1440) expect((server.data!.indicators as Record<string, boolean>).ema9).toBe(false);
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  if (width === 390) await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(levels).toContainText("Breakout");
+  await expect(levels).toContainText("Far");
+  await page.screenshot({ path: test.info().outputPath(`layers-undo-reopened-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  expect(errors).toEqual([]);
+});
+
 test("the layers panel hides, locks and deletes by group and by item, and a click brings an item into view", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const server = await fakeChartSettings(context);
@@ -5761,6 +5819,46 @@ test("a chart image that failed to upload keeps its Retry after its plan is dism
 test.describe("voice plans", () => {
   test.use({ permissions: ["microphone"] });
 
+  for (const width of [1440, 390]) test(`microphone startup does not count as recorded time at ${width}px`, { tag: "@captures" }, async ({ page, request }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.addInitScript(() => {
+      const media = navigator.mediaDevices;
+      const open = media.getUserMedia.bind(media);
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      Object.assign(window, { __releaseMicrophone: release });
+      media.getUserMedia = async (constraints) => { await gate; return open(constraints); };
+    });
+    await captureSetup(request);
+    await page.route("**/api/backend/charts/workspace?**", async (route) => {
+      const data = fixture(route.request().url());
+      await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+    });
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy calls" }).click();
+    const mic = sheet.getByRole("button", { name: "Record voice plan" });
+    const at = (await mic.boundingBox())!;
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+    await page.mouse.down();
+    await expect(sheet).toContainText("Allow the microphone…");
+    await page.screenshot({ path: test.info().outputPath(`voice-microphone-pending-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toHaveCount(0);
+    await page.evaluate(() => (window as typeof window & { __releaseMicrophone(): void }).__releaseMicrophone());
+    const timer = sheet.getByRole("timer", { name: "Recording time" });
+    await expect(timer).toBeVisible();
+    await expect(timer).toHaveText(/^0:0[1-9] \/ 0:30$/);
+    await page.screenshot({ path: test.info().outputPath(`voice-recording-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+    await page.mouse.up();
+    await expect(sheet).toHaveCount(0);
+    const row = (await savedCaptures(request))[0];
+    expect(row.audio!.ms!).toBeGreaterThan(1000);
+    expect(row.audio?.type).toBe("audio/webm");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+
   test("hold to record and release saves the recording; with no speech engine it says so and plays back", { tag: "@captures" }, async ({ page, request }) => {
     await captureSetup(request);
     await stub(page);
@@ -5778,7 +5876,7 @@ test.describe("voice plans", () => {
     await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
     await page.mouse.down();
     await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
-    await page.waitForTimeout(1500);
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toHaveText(/^0:0[1-9] \/ 0:30$/);
     await page.mouse.up();
     await expect(sheet).toHaveCount(0);
     await expect(page.getByLabel("Chart notice")).toHaveText("Recording saved");

@@ -230,6 +230,16 @@ import boundaries, frontend typecheck/lint and production build. Disposable
 ports avoided an existing test-port listener without stopping it. The paired
 opportunity arm guard additionally passed the complete backend recheck.
 
+Selecting a saved run records that intent before its detail request returns.
+While it loads, the previous run's choices and revision actions are hidden;
+its existing attention timer keeps its original run identity. Stale list or
+detail responses cannot replace a later selection or an acknowledged timing
+write. A session change invalidates previous-session responses; explicit
+historical run deep-links remain readable and reopen their frozen choices and
+advisor receipts. The entry link is consumed once; it cannot override a later
+requested session. Historical runs still refuse current-facts assisted revisions.
+Queued-run polling waits for its current read to finish.
+
 A final focused browser check covers the attention timer staying on its
 original run and surviving a failed write, alongside phone capture/reload and
 independent commit/reveal. All browser and timing evidence is synthetic. No

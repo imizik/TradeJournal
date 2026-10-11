@@ -395,7 +395,9 @@ cd backend
   Ctrl+Shift+Z, or the Undo and Redo buttons beside **Draw price level**, whose
   hover text names the step. Undo is per tab, 100 steps, and replays item by
   item onto the levels as they are now, so another device's levels are left
-  alone. Levels are still saved in the same `levels` shape, so a tab running
+  alone. Undo made before an earlier save responds is saved after that
+  acknowledgement too, including when it restores the last confirmed levels.
+  Levels are still saved in the same `levels` shape, so a tab running
   an older build keeps reading and merging them.
 - **Drawing tools (C1.2).** Beside Undo and Redo: price level, horizontal ray,
   trend line, rectangle zone and text note, then **Magnet**. A tool arms the
@@ -1530,7 +1532,8 @@ never recommends a trade and never sends an order.
 - **Voice.** Choose the side, then press and hold **Hold to record**. Release
   saves the clip. A short press, the keyboard, or a microphone prompt that
   took the press switches to **Stop & save**. The browser asks for the
-  microphone only then. Clips stop at 30 seconds and offer **Save recording**
+  microphone only then. The recording timer appears after the microphone opens
+  and recording starts; permission or device startup time is excluded. Clips stop at 30 seconds and offer **Save recording**
   or **Discard**. A cancelled press, a hidden tab or a lost device does the
   same. Closing the sheet discards an unsaved clip. A template is optional. A
   denied or missing microphone leaves the click path working.
