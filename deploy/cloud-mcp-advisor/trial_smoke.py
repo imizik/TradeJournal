@@ -18,6 +18,32 @@ import advisor_trial_stage as trial
 
 FIXTURE = Path("/opt/tradejournal-advisor-ci-owner-transition")
 API = "tradejournal-advisor-ci-owner-api.service"
+SESSION_PATH = "/api/access/me"
+GENERIC_SESSION_PATH = "/api/backend/access/me"
+
+
+def diagnosis(run, *, path, status=None, transport=None, detail=None):
+    """Public status/categories only: never cookies, keys, env or raw logs."""
+    allowed = {"Not found", "Authentication request rejected", "Backend unavailable", "Authentication required"}
+    print(json.dumps({"native_owner_probe": {"path": path, "status": status, "transport": transport,
+        "body_category": detail if isinstance(detail, str) and detail in allowed else "redacted"}}), flush=True)
+    for unit in (API, trial.FRONTEND):
+        state = run("systemctl", "show", unit, "--property=ActiveState", "--property=SubState",
+            "--property=Result", "--property=MainPID", "--property=ExecMainStatus", check=False).stdout.decode()
+        values = dict(line.split("=", 1) for line in state.splitlines() if "=" in line)
+        print(json.dumps({"unit": unit, "public_state": {k: values.get(k) for k in
+            ("ActiveState", "SubState", "Result", "MainPID", "ExecMainStatus")}}), flush=True)
+        journal = run("journalctl", "-u", unit, "--no-pager", "-n", "30", "-o", "json", check=False).stdout.decode()
+        categories = []
+        for line in journal.splitlines():
+            try:
+                message = json.loads(line).get("MESSAGE", "")
+            except (ValueError, TypeError):
+                continue
+            categories.extend(name for name in ("Traceback", "EACCES", "ENOENT", "ECONNREFUSED", "Permission denied",
+                "Application startup failed", "Application startup complete", "address already in use", "Failed", "Ready in")
+                if name in message)
+        print(json.dumps({"unit": unit, "journal_categories": categories}), flush=True)
 
 
 def exercise(archive, scratch, run, *, context, token, identity, keys, resource, proxy):
@@ -83,21 +109,55 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         run("systemctl", "daemon-reload")
         run("systemctl", "start", API, trial.FRONTEND)
         client = httpx.Client(base_url="http://127.0.0.1:18860", trust_env=False, timeout=5)
+        private_client = httpx.Client(base_url="http://127.0.0.1:18860", trust_env=False, timeout=5)
+        bootstrap_access = None
         def authenticated():
             deadline = time.monotonic() + 20
+            last_status, last_transport, last_detail = None, None, None
             while True:
                 try:
-                    response = client.get("/api/backend/access/me", cookies={"tj_session": cookie})
+                    response = client.get(SESSION_PATH, cookies={"tj_session": cookie})
+                    last_status, last_transport = response.status_code, None
                     if response.status_code == 200:
                         return response.json()
-                except httpx.TransportError:
-                    pass
+                    try:
+                        last_detail = response.json().get("detail")
+                    except (ValueError, AttributeError):
+                        last_detail = None
+                    if response.status_code in (401, 403, 404):
+                        diagnosis(run, path=SESSION_PATH, status=last_status, detail=last_detail)
+                        raise AssertionError("Native owner session route refused fixture authentication")
+                except httpx.TransportError as error:
+                    last_transport = type(error).__name__
                 if time.monotonic() >= deadline:
+                    diagnosis(run, path=SESSION_PATH, status=last_status, transport=last_transport, detail=last_detail)
                     raise AssertionError("Native owner frontend did not become authenticated")
                 time.sleep(.1)  # Bounded readiness, never assertion retry.
         before = authenticated()
         assert before["owner"] is True and before["identifier"] == "owner" and before["grants"] == {}
-        assert client.get("/api/backend/access/me").status_code == 401
+        def access_boundaries():
+            nonlocal bootstrap_access
+            # The trusted PRIVATE owner entrance intentionally bootstraps its
+            # owner session. Anonymous denial belongs to the API without that
+            # gateway, not to a request already admitted to the private app.
+            with httpx.Client(trust_env=False, timeout=5) as fresh:
+                assert fresh.get("http://127.0.0.1:18861/access/me").status_code == 401
+                wrong = fresh.get("http://127.0.0.1:18861/access/me", headers={"x-tj-gateway": "a" * 43},
+                    cookies={"tj_session": cookie})
+                assert wrong.status_code == 401  # Owner cookie is not assistant authority.
+            # Reuse the separately bootstrapped cookie. Repeated fresh sessions
+            # would legitimately prune the original cookie under the existing
+            # owner-session cap, invalidating the identity-preservation probe.
+            private = private_client.get(SESSION_PATH)
+            assert private.status_code == 200
+            assert private.json()["owner"] is True and private.json()["identifier"] == before["identifier"]
+            assert private.json()["grants"] == before["grants"]
+            if bootstrap_access is None:
+                bootstrap_access = private.json()
+            else:
+                assert private.json() == bootstrap_access
+        access_boundaries()
+        assert client.get(GENERIC_SESSION_PATH, cookies={"tj_session": cookie}).status_code == 404
         dynamic = run("systemctl", "show", trial.FRONTEND, "--property=DynamicUser", "--value").stdout.decode().strip()
         assert dynamic == "yes"
         guards = {"old_record_sha256": staging.digest(old.RECORD), "frontend_unit_sha256": staging.digest(old.UNIT_DIR / trial.FRONTEND),
@@ -130,7 +190,8 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         # Explicit disposable-only restart, absent from the retained installer.
         run("systemctl", "restart", trial.FRONTEND)
         assert authenticated() == before  # Same cookie, principal, CSRF, roles.
-        assert client.get("/api/backend/access/me").status_code == 401
+        access_boundaries()
+        assert client.get(GENERIC_SESSION_PATH, cookies={"tj_session": cookie}).status_code == 404
         assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).status_code == 503
         pid = int(run("systemctl", "show", trial.FRONTEND, "--property=MainPID", "--value").stdout)
         observed = Path(f"/proc/{pid}").stat().st_uid
@@ -187,7 +248,11 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             for _ in range(2):
                 owner = client.get("/api/advisor-owner", cookies={"tj_session": cookie})
                 assert owner.status_code == 200 and owner.json()["receipt"] == receipt and owner.json()["request"] == read["request"]
-            assert client.get("/api/advisor-owner").status_code == 401
+            bootstrapped = private_client.get("/api/advisor-owner")
+            assert bootstrapped.status_code == 200 and bootstrapped.json()["receipt"] == receipt
+            with httpx.Client(transport=httpx.HTTPTransport(uds=trial.OWNER_RUN + "/owner.sock"), timeout=5) as wrong_peer:
+                assert wrong_peer.get("http://owner/owner/advisor").status_code == 403
+            access_boundaries()
             run("systemctl", "restart", *[u for u in control.UNITS if u.endswith(".service")])
             assert rpc("get_advisor_request")["receipt"] == receipt
             assert client.get("/api/advisor-owner", cookies={"tj_session": cookie}).json()["receipt"] == receipt
@@ -228,7 +293,8 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         assert staging.digest(old.STATE / "fixture.db") == old_ledger and staging.digest(control.STATE / "fixture.db") == new_ledger
         old.installed()
         client.close()
-        print("Trial upgrade native passed: disabled side-by-side install, old ledger/runtime/auth preservation, existing owner DynamicUser to dedicated UID with same session/roles/CSRF, v2 HTTPS metadata/read/cited save/uncertain recovery/exact retries, real owner BFF equality/reopen/restart, anonymous/dormant denial, executable drift refusal, six-unit stop, receipt-preserving rollback and explicit frontend identity restoration")
+        private_client.close()
+        print("Trial upgrade native passed: disabled side-by-side install, old ledger/runtime/auth preservation, existing private owner DynamicUser to dedicated UID with same session/roles/CSRF and existing bootstrap behavior, direct API anonymous/wrong-audience and reader wrong-peer denial, v2 HTTPS metadata/read/cited save/uncertain recovery/exact retries, real owner BFF equality/reopen/restart, dormant denial, executable drift refusal, six-unit stop, receipt-preserving rollback and explicit frontend identity restoration")
     finally:
         run("systemctl", "stop", trial.FRONTEND, API, *control.UNITS, check=False)
         for unit in (trial.FRONTEND, API, *trial.OWNER_UNITS):
