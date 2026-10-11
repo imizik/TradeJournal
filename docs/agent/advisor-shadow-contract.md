@@ -68,9 +68,10 @@ body reception, concurrent writes, restart/reopen, advisor-first disclosure and
 generic A3 reveal routes. Run focused tests, fast/full verification, a real-backend
 browser walkthrough and tier-2 native general/focused review, then exact-head CI.
 
-The gateway is manual-only and absent from normal service packaging. Stop it to
-roll back; disable its persisted grant before restart. Prior demo records remain
-in the isolated file. The private API remains private. This adds no OAuth grants,
+The gateway is manual-only, with no installed service unit or activation. Its
+tracked source ships in normal release artifacts. Stop it to roll back and
+disable its persisted grant before restart. Prior demo records remain in the
+isolated file. The private API remains private. This adds no OAuth grants,
 production activation, live captures, real journal changes or schedules.
 
 The existing bounded trial source updater includes the owner router/engine and
@@ -218,3 +219,8 @@ receipt equality across a real reopen, and account/tool isolation observations
 remain separate Phase-2 acceptance gates. No credential handling, OAuth grants,
 external transmission, live capture, real journal change, order, arm, schedule or
 production activation is authorized by this implementation.
+
+
+## Dormant advisor-only MCP transport
+
+The separate [advisor MCP contract](cloud-mcp-advisor-contract.md) adds an offline-tested three-tool advisor catalog and restricted standalone Unix backend. The original owner export and legacy manual receipts remain unchanged; fresh MCP answer receipts and UI labels identify OAuth transport. The advisor modules ship as dormant source in ordinary release artifacts; no advisor units, socket mounts or ingress are added. This slice does not activate advisor services, connect Jo, create credentials/grants, transmit packets or change any journal boundary. Actual separate identity/consent and Jo read/save/UI/restart acceptance remain later approval gates.

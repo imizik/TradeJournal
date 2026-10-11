@@ -116,7 +116,11 @@ research.
 The separately selected [historical/options diagnostic](moomoo-history-options-diagnostic.md)
 on 2026-10-10 established access to one recently expired NVDA option and found
 matching option OHLCV inputs after a diagnostic timestamp shift. It recommended
-keeping current metric sources; broader endpoint evaluation remains future work.
+keeping current metric sources. The subsequent
+[broader historical/options comparison](moomoo-broader-history-options.md)
+and [endpoint-to-metric inventory](moomoo-endpoint-metric-map.md) record additional
+bounded research and unresolved access/semantics. They add no production adapter
+or metric replacement; further endpoint evaluation remains future work.
 
 | Candidate data | Potential journal or research use | Comparison question |
 |---|---|---|

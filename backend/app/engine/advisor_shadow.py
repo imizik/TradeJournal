@@ -349,7 +349,10 @@ def validate_handoff_answer(body, packet):
         raise decisions.DecisionError("Advisor citations must reference original frozen facts")
 
 
-def advisor_import(db, run_id, body):
+def advisor_import(db, run_id, body, *, transport="manual-paste", authorize=None):
+    # Transport and authorization are server-only arguments, never envelope fields.
+    if transport not in {"manual-paste", "oauth-mcp"}:
+        raise decisions.DecisionError("Unsupported advisor transport")
     lock(db)
     try:
         call = demo_call(db, run_id)
@@ -357,6 +360,8 @@ def advisor_import(db, run_id, body):
         advisor = config.get("advisor")
         if not advisor or advisor.get("version") != HANDOFF_VERSION:
             raise decisions.DecisionError("Export a versioned advisor handoff before importing its answer")
+        if authorize is not None:
+            authorize(call, config, packet, advisor)
         bounded(body)
         exported = advisor["export"]
         keys = ("version", "assignment_id", "run_id", "packet_sha256", "request_sha256")
@@ -373,7 +378,7 @@ def advisor_import(db, run_id, body):
         active_assignment(config)
         received_at = practice.iso(practice.now_utc())
         saved = {**{k: exported[k] for k in keys}, "received_at": received_at, "submitted_output": body,
-            "transport": "manual-paste", "runner_provenance": "caller unverified", "independence": "independence-unverified",
+            "transport": transport, "runner_provenance": "caller unverified", "independence": "independence-unverified",
             "model": "unavailable", "usage": "unavailable", "cost": "unavailable", "demo_only": True}
         saved["receipt_sha256"] = digest(saved)
         advisor["receipt"] = saved
@@ -383,6 +388,8 @@ def advisor_import(db, run_id, body):
         db.add(call)
         result = bounded(owner_view(db, run_id))
         active_assignment(config)
+        if authorize is not None:
+            authorize(call, config, packet, advisor)
         db.commit()
         return result
     except Exception:
