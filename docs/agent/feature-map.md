@@ -204,6 +204,13 @@ see the [prototype notes](../level2-synthetic-prototype.md) and
   `backend/app/routers/research_studio.py`, and the manually started
   `backend/scripts/research_studio_server.py` sidecar. The
   [R4](research-studio-r4.md) adds frozen-parent comparisons and append-only conclusions through the same owner workspace, with plain labels and separate finite comparison computation.
+  The [comparison extension](research-studio-comparison.md) adds every-event
+  endpoints, concentration checks and compatible saved-period summaries.
+  The [prospective MU study](research-studio-prospective-mu.md) is a separately
+  registered, scheduled cache/receipt workflow with a fixed formal review;
+  `backend/scripts/research_studio_prospective.py` and its explicit installer
+  `deploy/research_studio_prospective.py` own it. Future results stay separate
+  from the historical Studio UI and never enter Factory gates.
   [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
   boundaries; `backend/tests/test_research_studio_session.py` and
   `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.

@@ -320,6 +320,13 @@ proof; the connected Studio is implemented; independent human usefulness accepta
 
 ## Later capabilities and reopening criteria
 
+The owner subsequently selected an [event/period comparison UI](agent/research-studio-comparison.md)
+after inspecting the fixed 2026 MU outcomes, then a [prospective MU study](agent/research-studio-prospective-mu.md).
+These are bounded extensions: existing frozen historical results remain
+exploratory; the future study has its own registration, fixed rules, separate
+storage and scheduled review. Neither selection authorizes Factory promotion,
+optimization, a general date bypass or claims of independent trading validation.
+
 | Capability | Why deferred; what would justify revisiting |
 |---|---|
 | Factory handoff, possibly `condition_event` | V1 events lack stops/exits. Revisit after saved useful hypotheses need simulation; require canonical predicate parity, execution/stop semantics, stable old IDs/trades, lineage, budget decision and unchanged gates before offering validation. Do not assume every event is an executable trade. |
