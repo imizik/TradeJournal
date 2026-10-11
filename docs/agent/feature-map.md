@@ -148,7 +148,12 @@ you change it (`verification.md`, "What is NOT covered yet").
   `/fills`, `/analytics`, `/daily`, `/strategy-lab` against a seeded backend
   and assert the values from `EXPECTED` in `scripts/seed_dev_data.py`. Then
   open the route on the dev server (`bash startdev.sh`, port 3000) and say
-  what you saw.
+  what you saw. For a chart picture a person will judge, use the
+  market-shaped candles in `frontend/e2e/fixtures/realisticBars.ts`; to try
+  the UI on real candles without touching real records or synced chart
+  settings, `bash scripts/ux_sandbox.sh` (port 3098, its own seeded SQLite).
+  The `trade-chart-ux` skill (`.claude/skills/trade-chart-ux/SKILL.md`)
+  covers UI review and the picture checks before review.
 - **A route with no test:** call it and paste the response.
   `curl -s localhost:8080/health` tells you which database you are on first.
 
