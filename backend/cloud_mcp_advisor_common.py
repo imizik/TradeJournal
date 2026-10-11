@@ -1,6 +1,8 @@
 """Separate offline advisor identity; never imports journal/application storage."""
 import os
 from pathlib import Path
+import stat
+import struct
 from typing import Literal
 from urllib.parse import urlsplit
 import uuid
@@ -49,6 +51,9 @@ class AdvisorConfig(Strict):
     client_claim: Literal["client_id", "azp"] = "client_id"
     profiles: list[AdvisorProfile] = Field(min_length=1, max_length=1)
     backend_socket: str
+    # Optional, explicitly reviewed named-UID read grant for the owner process.
+    # None preserves the existing 0600-only fixture permission contract.
+    owner_reader_uid: int | None = Field(default=None, ge=1)
 
     @field_validator("advisor_only", mode="before")
     @classmethod
@@ -89,13 +94,52 @@ def read_config(path):
     return AdvisorConfig.model_validate_json(body)
 
 
+def fixture_acl(uid, *, directory=False):
+    """Linux POSIX ACL: one named UID, no group/other access, never write."""
+    undefined = 0xFFFFFFFF
+    permission = 1 if directory else 4
+    entries = ((1, 7 if directory else 6, undefined), (2, permission, uid),
+        (4, 0, undefined), (16, permission, undefined), (32, 0, undefined))
+    return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+
+
+def private_fixture(path, *, owner_reader_uid=None):
+    """Validate original private mode or an exact separately approved UID ACL.
+
+    The ACL mask appears as group mode bits. Its group entry remains zero;
+    changing membership does not grant anyone else read/traverse permission.
+    Unsupported/missing xattrs refuse when an owner grant is configured.
+    """
+    path = Path(path)
+    info = path.stat()
+    if not stat.S_ISREG(info.st_mode) or path.suffix != ".db":
+        raise ValueError("Require a private existing fixture SQLite file")
+    mode = stat.S_IMODE(info.st_mode)
+    if owner_reader_uid is None:
+        if mode & 0o077:
+            raise ValueError("Require a private existing fixture SQLite file")
+        return  # Preserve the original owner-only mode contract (normally 0600).
+    if owner_reader_uid is None or info.st_uid == owner_reader_uid or mode != 0o640:
+        raise ValueError("Require the exact separately approved read-only owner UID grant")
+    parent = path.parent
+    if not hasattr(os, "getxattr"):
+        raise ValueError("Platform cannot verify the named-UID fixture ACL")
+    parent_info = parent.stat()
+    if (not stat.S_ISDIR(parent_info.st_mode) or stat.S_IMODE(parent_info.st_mode) != 0o710
+            or parent_info.st_uid != info.st_uid
+            or os.getxattr(path, "system.posix_acl_access") != fixture_acl(owner_reader_uid)
+            or os.getxattr(parent, "system.posix_acl_access") != fixture_acl(owner_reader_uid, directory=True)):
+        raise ValueError("Owner read-only UID ACL changed")
+
+
 class AdvisorVerifier(JWKSVerifier):
     def __init__(self, path):
         super().__init__(path, config_reader=read_config)
 
     def active_config(self):
         current = super().active_config()
-        if current is None or current.backend_socket != self.config.backend_socket:
+        if (current is None or current.backend_socket != self.config.backend_socket
+                or current.owner_reader_uid != self.config.owner_reader_uid):
             return None
         initial = self.config.profiles[0].model_dump(exclude={"enabled"})
         return current if current.profiles[0].model_dump(exclude={"enabled"}) == initial else None

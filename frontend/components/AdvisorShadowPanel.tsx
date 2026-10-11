@@ -2,13 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { apiUrl } from "@/lib/api";
+import AdvisorReceiptView, { type AdvisorAnswer as Answer, type AdvisorReceipt } from "./AdvisorReceiptView";
 
-type Fact = { name?: string; fact_name?: string; value?: unknown; unit?: string; source?: string; formed_at?: string; observed_at?: string };
-type PacketOpportunity = { id?: string; opportunity_id?: string; symbol?: string; price_facts?: Fact[]; context?: { price_facts?: Fact[] } };
-type Answer = { summary: string; interpretation: string; risks: unknown; conditions: unknown; gaps: unknown; references: { opportunity_id: string; fact_name: string }[] };
 type AdvisorRequest = { question: string; user_plan: string };
 type ImportEnvelope = { version: string; assignment_id: string; run_id: string; packet_sha256: string; request_sha256: string; answer: Answer };
-type AdvisorReceipt = { version: string; assignment_id: string; run_id: string; packet_sha256: string; request_sha256: string; received_at: string; transport: string; receipt_sha256: string; submitted_output: ImportEnvelope };
 type AdvisorState = {
   version?: string;
   export?: ExportedPacket;
@@ -60,7 +57,6 @@ async function request<T>(path: string, body?: unknown): Promise<T> {
 
 const pretty = (value: unknown) => JSON.stringify(value, null, 2);
 const stamp = (value?: string | null) => value ? `${new Date(value).toLocaleString("en-US", { timeZone: "America/New_York" })} ET` : "Unavailable";
-const listText = (value: unknown) => typeof value === "string" ? value : pretty(value);
 
 function validateAnswer(value: unknown): Answer {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Answer must be a JSON object.");
@@ -92,18 +88,6 @@ function exactContent(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(exactContent).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${exactContent(item)}`).join(",")}}`;
   return JSON.stringify(value);
-}
-
-function citations(packet: Record<string, unknown>, references: Answer["references"]) {
-  const opportunities = Array.isArray(packet.opportunities) ? packet.opportunities as PacketOpportunity[] : [];
-  return references.map((reference, index) => {
-    const opportunity = opportunities.find((item) => (item.id ?? item.opportunity_id) === reference.opportunity_id);
-    const facts = opportunity?.price_facts ?? opportunity?.context?.price_facts ?? [];
-    const fact = facts.find((item) => (item.name ?? item.fact_name) === reference.fact_name);
-    return <li key={`${reference.opportunity_id}-${reference.fact_name}-${index}`} className="break-words">
-      {opportunity && fact ? <><strong>{opportunity.symbol ?? reference.opportunity_id}</strong> · {reference.fact_name}: {String(fact.value ?? "value unavailable")} {fact.unit ?? ""} · {fact.source ?? "source unavailable"} · formed {stamp(fact.formed_at)} · observed {stamp(fact.observed_at)}</> : <span className="text-amber-700">Unresolved packet citation: {reference.opportunity_id} · {reference.fact_name}</span>}
-    </li>;
-  });
 }
 
 export default function AdvisorShadowPanel({ runId, onRefresh }: { runId: string; onRefresh: () => Promise<unknown> }) {
@@ -226,7 +210,7 @@ export default function AdvisorShadowPanel({ runId, onRefresh }: { runId: string
         <textarea required maxLength={65536} value={answerJson} onChange={(event) => setAnswerJson(event.target.value)} rows={10} placeholder={exported ? "Paste Jo’s complete JSON envelope matching answer_contract, including identity and answer." : "Paste the original Phase-1 structured answer JSON."} className="w-full rounded border bg-background p-2 font-mono text-xs" />
         <button type="submit" disabled={busy || !snapshot.advisor || !answerJson.trim()} className="w-fit rounded border px-3 py-2 text-sm disabled:opacity-50">{busy ? "Saving…" : "Save advisor response"}</button>
       </form>
-      {snapshot.advisor && <article className="space-y-2 rounded border p-3" data-testid="advisor-saved-answer"><h4 className="font-semibold">Saved advisor response · requested {stamp(snapshot.advisor.requested_at)} · received {stamp(snapshot.advisor.received_at)}</h4><p className="text-xs">Question: {snapshot.advisor.request.question}</p><p className="text-xs">User plan: {snapshot.advisor.request.user_plan}</p>{snapshot.advisor.receipt && <details><summary className="cursor-pointer text-sm">Exact saved advisor receipt</summary><pre data-testid="advisor-receipt" className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 text-xs">{pretty(snapshot.advisor.receipt)}</pre></details>}{snapshot.advisor.response ? <><p className="text-xs font-semibold text-amber-800">Advisor interpretation · {snapshot.advisor.receipt?.transport ?? "manual-local"} · caller unverified</p><p><strong>Summary:</strong> {snapshot.advisor.response.summary}</p><p><strong>Interpretation:</strong> {snapshot.advisor.response.interpretation}</p><div><strong>Risks</strong><pre className="whitespace-pre-wrap text-sm">{listText(snapshot.advisor.response.risks)}</pre></div><div><strong>Proposed conditions</strong><pre className="whitespace-pre-wrap text-sm">{listText(snapshot.advisor.response.conditions)}</pre></div><div><strong>Gaps</strong><pre className="whitespace-pre-wrap text-sm">{listText(snapshot.advisor.response.gaps)}</pre></div><div><strong>Source citations</strong><ul className="list-disc space-y-1 pl-5 text-sm">{citations(snapshot.packet, snapshot.advisor.response.references)}</ul></div></> : <p className="text-sm">No advisor response has been received.</p>}</article>}
+      {snapshot.advisor && <AdvisorReceiptView packet={snapshot.packet} question={snapshot.advisor.request.question} userPlan={snapshot.advisor.request.user_plan} requestedAt={snapshot.advisor.requested_at} receivedAt={snapshot.advisor.received_at} receipt={snapshot.advisor.receipt} answer={snapshot.advisor.response} />}
     </>}
   </section>;
 }

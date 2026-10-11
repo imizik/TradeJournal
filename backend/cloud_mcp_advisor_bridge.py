@@ -23,7 +23,7 @@ from app.engine import advisor_shadow as service, decisions
 from app.models import PracticeAgentCall
 from app.schema import ensure_current
 from cloud_mcp_advisor_common import (AdvisorVerifier, PROFILE_SCOPE, READ_SCOPE,
-    WRITE_SCOPE, READ_PATH, WRITE_PATH, REQUEST_KEYS, SCHEMA, reject_credentials)
+    WRITE_SCOPE, READ_PATH, WRITE_PATH, REQUEST_KEYS, SCHEMA, private_fixture, read_config, reject_credentials)
 from cloud_mcp_d0 import RequestLimits, activated_socket
 
 PATHS = frozenset({("GET", READ_PATH), ("POST", WRITE_PATH)})
@@ -84,6 +84,11 @@ def build_app(engine, config_path):
         return headers[0][7:]
 
     def authorize(token, write=False):
+        if verifier.config.owner_reader_uid is not None:
+            try:
+                private_fixture(engine.url.database, owner_reader_uid=verifier.config.owner_reader_uid)
+            except (ValueError, OSError):
+                raise HTTPException(503, UNAVAILABLE) from None
         checked = asyncio.run(verifier.verify_token(token))
         needed = {PROFILE_SCOPE, READ_SCOPE, *([WRITE_SCOPE] if write else [])}
         if checked is None or not needed <= set(checked.scopes):
@@ -157,8 +162,9 @@ def create_app(config_path, database_path):
     if os.environ.get("PYTHON_DOTENV_DISABLED") != "1":
         raise ValueError("Advisor backend requires disabled dotenv loading")
     path = Path(database_path)
-    if not path.is_absolute() or str(path) != str(database_path) or ".." in path.parts or not path.is_file() or path.suffix != ".db" or path.stat().st_mode & 0o077:
+    if not path.is_absolute() or str(path) != str(database_path) or ".." in path.parts or not path.is_file():
         raise ValueError("Require an existing private isolated fixture SQLite file")
+    private_fixture(path, owner_reader_uid=read_config(config_path).owner_reader_uid)
     engine = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False, "timeout": 2})
     ensure_current(engine)
     verifier = AdvisorVerifier(config_path)
