@@ -1,12 +1,13 @@
 import { test, expect } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
 
 const root = path.resolve(__dirname, "../..");
 const directory = `${process.env.ADVISOR_OWNER_TEST_DIR}/managed`;
-const python = `${root}/backend/.venv/bin/python`;
+const python = existsSync(`${root}/backend/.venv/bin/python`)
+  ? `${root}/backend/.venv/bin/python` : process.env.PYTHON || "python3";
 const args = ["-B", "-m", "tests.advisor_assignment_fixture"];
 const env = { NODE_ENV: "test" as const, PATH: process.env.PATH, PYTHON_DOTENV_DISABLED: "1" };
 const origin = `http://127.0.0.1:${process.env.AUTH_OWNER_PORT ?? 3129}`;
