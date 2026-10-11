@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { Trade } from "../lib/api";
@@ -6,6 +7,8 @@ import { closedInPeriod, recentCloses, weekStart } from "../lib/dashboardSummary
 
 const API = `http://127.0.0.1:${Number(process.env.E2E_BACKEND_PORT || 8099)}`;
 const backend = path.resolve(__dirname, "../../backend");
+const venvPython = path.join(backend, ".venv/bin/python");
+const python = existsSync(venvPython) ? venvPython : "python3";
 
 test("summary uses ET calendar dates, Monday weeks, complete P&L and close ordering", () => {
   const trade = (id: string, closed_at: string | null, realized_pnl: number | null, status: Trade["status"] = "closed") => ({ id, closed_at, realized_pnl, status } as Trade);
@@ -98,7 +101,7 @@ test("import freshness discloses initial failure, retained history and recovery 
 });
 
 test("filters retain scope, drill-down links work and history shows five latest closes", async ({ page, request }) => {
-  const ids = execFileSync(path.join(backend, ".venv/bin/python"), ["-c", `
+  const ids = execFileSync(python, ["-c", `
 import json,uuid
 from datetime import datetime,timedelta
 from sqlmodel import Session,select
@@ -142,7 +145,7 @@ print(json.dumps(ids))
     await expect(page.getByRole("heading", { name: "Analytics", exact: true })).toBeVisible();
     await expect(page.getByRole("combobox", { name: "Instrument", exact: true })).toHaveValue("option");
   } finally {
-    execFileSync(path.join(backend, ".venv/bin/python"), ["-c", `
+    execFileSync(python, ["-c", `
 import json,sys,uuid
 from sqlmodel import Session
 from app.database import engine
