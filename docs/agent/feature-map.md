@@ -141,10 +141,16 @@ you change it (`verification.md`, "What is NOT covered yet").
 
 ## Getting evidence for a change
 
-The isolated **Level 2 lab** (`/level2-lab`, owner navigation) is a frontend-only
-synthetic replay prototype: `frontend/components/level2/Level2Lab.tsx` and
-`frontend/lib/level2Replay.ts`, covered by `frontend/e2e/level2-lab.spec.ts`.
-It uses no provider or saved metrics; see the [prototype notes](../level2-synthetic-prototype.md).
+The isolated **Level 2 lab** (`/level2-lab`, owner navigation) keeps its synthetic replay in
+`frontend/components/level2/Level2Lab.tsx` and `frontend/lib/level2Replay.ts`,
+covered by `frontend/e2e/level2-lab.spec.ts`. A separate manual provider section
+(`frontend/components/level2/LiveDepthSession.tsx`) uses the disabled-by-default
+`frontend/app/api/level2-lab/session/route.ts` and an explicitly started
+`backend/scripts/moomoo_lab_server.py` loopback bridge. Its tests are
+`frontend/e2e/level2-live.spec.ts`, `frontend/e2e/level2-route.spec.ts` and
+`backend/tests/test_moomoo_lab.py`. It changes no chart feed or saved metrics;
+see the [prototype notes](../level2-synthetic-prototype.md) and
+[manual connection contract](../level2-manual-connection.md).
 
 - **Engine or router change:** the test module in the table, or drive the
   route through `TestClient(app)` the way `test_fill_import.py` does.

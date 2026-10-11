@@ -368,7 +368,50 @@ def push_summary(message: dict, received_ms: int, offset_ms: float | None) -> di
     return result
 
 
-async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect) -> dict:
+def display_book(message: dict, received_ms: int, offset_ms: float | None) -> dict:
+    """Allowlisted latest-book view, never infer venue from MPID or missing time.
+
+    No delta merging: each push is displayed independently. Partial sides stay
+    empty rather than borrowing levels from a previous message.
+    """
+    data = message.get("data")
+    if message.get("symbol") != SYMBOL or message.get("type") != "ORDER_BOOK" or not isinstance(data, dict):
+        raise DiagnosticError("Unexpected lab book message.")
+    books = data.get("books", [data])
+    if not isinstance(books, list) or len(books) > 10:
+        raise DiagnosticError("Book count exceeds the lab bound.")
+    output = []
+    for book in books:
+        if not isinstance(book, dict):
+            raise DiagnosticError("Book is malformed.")
+        clock = freshness(book.get("exchange_data_time_ms", data.get("data_time_ms")), received_ms, offset_ms)
+        entry = {"exchange": book.get("exchange") if book.get("exchange") in ("ARCA", "NASDAQ", "") else "UNKNOWN",
+                 "source_time_ms": clock["source_time_ms"], "estimated_age_ms": clock["estimated_age_ms"],
+                 "order_volume_precision": number(book.get("order_volume_precision"))}
+        for source, target in (("bid", "bids"), ("ask", "asks")):
+            levels = book.get(source + "_list", [])
+            if not isinstance(levels, list) or len(levels) > 60:
+                raise DiagnosticError("Book level count exceeds the lab bound.")
+            entry[target] = []
+            flag = book.get(source + "_flag")
+            if flag is not None and (isinstance(flag, bool) or flag != 1):
+                continue
+            for level in levels:
+                if not isinstance(level, dict):
+                    raise DiagnosticError("Book level is malformed.")
+                price, volume = number(level.get("price")), number(level.get("volume"))
+                if price is None or price <= 0 or volume is None or volume < 0:
+                    raise DiagnosticError("Book price or size is unavailable.")
+                count = number(level.get("order_count"))
+                mpid = level.get("mpid")
+                entry[target].append({"price": price, "volume": volume,
+                    "order_count": count if isinstance(count, int) and count >= 0 else None,
+                    "mpid": mpid if isinstance(mpid, str) and re.fullmatch(r"[A-Z0-9]{1,8}", mpid) else None})
+        output.append(entry)
+    return {"event": "book", "symbol": SYMBOL, "received_ms": received_ms, "books": output}
+
+
+async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None) -> dict:
     # No reusable long-lived connection: the hard cap is well below the
     # documented ten-minute auth refresh limit (recommended cycle five minutes).
     if not 1 <= seconds <= 60:
@@ -384,6 +427,10 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
     deadline = started + seconds
     socket = None
 
+    def notify(event):
+        if observer is not None:
+            observer(event)
+
     def capture(message):
         nonlocal offset
         try:
@@ -397,6 +444,8 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             saved = report["samples"].setdefault(kind, {})
             saved.setdefault("first", sample)
             saved["last"] = sample
+            if kind == "ORDER_BOOK" and observer is not None and report.get("authentication", {}).get("status") == "success":
+                notify(display_book(message, time.time_ns() // 1_000_000, offset))
 
     async def receive_until(request_id: str, timeout: float) -> dict:
         until = time.perf_counter() + timeout
@@ -421,6 +470,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             capture(message)
 
     try:
+        notify({"event": "status", "phase": "connecting"})
         # Independent silent logger prevents wire logging of signed auth frames.
         logger = logging.Logger("moomoo.diagnostic", level=logging.CRITICAL)
         async with connector(WS_URL, proxy=None, open_timeout=min(10, seconds), close_timeout=5,
@@ -433,8 +483,10 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                 report["authentication"] = protocol_summary(auth)
                 if not auth.get("session_id") or report["authentication"]["error_present"]:
                     report["authentication"]["status"] = "failed"
+                    notify({"event": "status", "phase": "failed", "code": report["authentication"]["code"]})
                     return report
                 report["authentication"]["status"] = "success"
+                notify({"event": "status", "phase": "authenticated"})
                 server_us = number(auth.get("server_time"))
                 if server_us and server_us > 0:
                     offset = server_us / 1000 - (auth_start_ms + time.time_ns() / 1e6) / 2
@@ -447,6 +499,8 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                     result = protocol_summary(ack)
                     result["status"] = "success" if result["code"] == 0 and not result["error_present"] else "failed"
                     report["subscriptions"][kind] = result
+                    notify({"event": "status", "phase": "subscribed" if result["status"] == "success" else "failed",
+                            "kind": kind, "code": result["code"]})
                 while time.perf_counter() < deadline:
                     try:
                         message = json.loads(await asyncio.wait_for(socket.recv(), deadline - time.perf_counter()))
