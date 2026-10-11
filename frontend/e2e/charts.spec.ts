@@ -6292,3 +6292,130 @@ test("a small chart goes compact, and each smaller chart can choose its own stud
   await expect.poll(async () => { const range = await logicalRange(page, "Panel 2"); return range ? Math.round(range.to - range.from) : 0; }).toBe(69);
   expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
 });
+
+/** One wheel event as a trackpad pinch sends it (ctrlKey, small deltas) over a chart's plot, at a fraction of its width. */
+const wheelOver = (page: Page, id: string, at: number, init: { deltaX?: number; deltaY?: number; ctrlKey?: boolean }) => page.evaluate(({ id, at, init }) => {
+  const host = document.querySelector<HTMLElement>(`[data-testid="canvas-${id}"]`)!;
+  const box = host.getBoundingClientRect();
+  const target = document.elementFromPoint(box.left + box.width * at, box.top + 120)!;
+  target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, clientX: box.left + box.width * at, clientY: box.top + 120, deltaX: 0, deltaY: 0, deltaMode: 0, ...init }));
+}, { id, at, init });
+const spanOf = async (page: Page, id: string) => { const r = (await logicalRange(page, id))!; return { from: r.from, span: r.to - r.from }; };
+/** The bar index under a point `at` of the way across the chart. */
+const barUnder = (page: Page, id: string, at: number) => page.evaluate(({ id, at }) => {
+  const host = document.querySelector<HTMLElement>(`[data-testid="canvas-${id}"]`)!;
+  const x = host.getBoundingClientRect().width * at;
+  return (window as unknown as { __tjCharts: Map<string, { timeScale(): { coordinateToLogical(x: number): number | null } }> }).__tjCharts.get(id)!.timeScale().coordinateToLogical(x);
+}, { id, at });
+
+test("zoom speed scales a pinch's vertical delta, keeps the pan and the cursor's candle", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await registerCharts(page);
+  await stub(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect.poll(() => logicalRange(page, "main")).not.toBeNull();
+  const pick = async (name: string) => { await indicator(page, "RSI 14"); await page.getByRole("group", { name: "Zoom speed" }).getByRole("button", { name }).click(); await page.keyboard.press("Escape"); };
+  const pinch = async (id: string, ctrl = true) => {
+    await page.getByRole("button", { name: "Latest candles main" }).click();
+    await page.waitForTimeout(100);
+    const before = await spanOf(page, id);
+    const anchor = await barUnder(page, id, 0.3);
+    for (let i = 0; i < 10; i++) await wheelOver(page, id, 0.3, { deltaY: -10, ctrlKey: ctrl });
+    await page.waitForTimeout(150);
+    const after = await spanOf(page, id);
+    return { shrink: (before.span - after.span) / before.span, anchorMoved: Math.abs((await barUnder(page, id, 0.3))! - anchor!) };
+  };
+  const results: Record<string, number> = {};
+  for (const name of ["Slow", "Normal", "Fast"]) {
+    await pick(name);
+    const { shrink, anchorMoved } = await pinch("main");
+    results[name] = shrink;
+    expect(anchorMoved, `${name}: the bar under the cursor stays under it`).toBeLessThanOrEqual(1);
+  }
+  expect(results.Slow).toBeGreaterThan(0.005);
+  expect(results.Normal / results.Slow).toBeGreaterThan(2.4);
+  expect(results.Normal / results.Slow).toBeLessThan(3.6);
+  expect(results.Fast / results.Slow).toBeGreaterThan(4.5);
+  expect(results.Fast / results.Slow).toBeLessThan(7.5);
+
+  // Panning (deltaX) is the same at every speed.
+  const shifts: number[] = [];
+  for (const name of ["Slow", "Normal"]) {
+    await pick(name);
+    const before = await spanOf(page, "main");
+    await wheelOver(page, "main", 0.5, { deltaX: 30 });
+    await page.waitForTimeout(100);
+    shifts.push((await spanOf(page, "main")).from - before.from);
+  }
+  expect(Math.abs(shifts[0])).toBeGreaterThan(0.5);
+  expect(shifts[1]).toBeCloseTo(shifts[0], 3);
+  // It is a choice of this device, remembered in the browser and not in the shared settings.
+  expect(await page.evaluate(() => localStorage.getItem("tradejournal.charts.zoomSpeed.v1"))).toBe("normal");
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await indicator(page, "RSI 14");
+  await expect(page.getByRole("group", { name: "Zoom speed" }).getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
+  expect(errors).toEqual([]);
+});
+
+test("indicator colors change the lines and legend, persist, reject bad values and reset", async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context, { revision: 1, data: { indicatorColors: { ema9: "red", ema50: "#12345", ema200: "#00ff00", unknown: "#123456" } } });
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const lineColors = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { panes(): { getSeries(): { options(): { color?: string } }[] }[] }> })
+    .__tjCharts.get("main")!.panes().flatMap((pane) => pane.getSeries().map((series) => series.options().color)).filter(Boolean));
+  const dots = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>("[aria-label='MRVL 5m chart'] span[aria-hidden][style*='background']")].map((el) => el.style.backgroundColor));
+  // Bad saved values fall back to the defaults; a good one is used.
+  await expect.poll(lineColors).toContain("#00ff00");
+  expect(await lineColors()).toContain("#67d5eb");
+  expect(await lineColors()).not.toContain("red");
+  expect(await lineColors()).toContain("#f5e6a1");
+
+  await indicator(page, "EMA 20");
+  const menu = page.getByRole("group", { name: "Chart indicators" });
+  for (const name of ["EMA 9", "EMA 20", "EMA 50", "EMA 200", "RTH VWAP", "RSI 14"]) await expect(menu.getByLabel(`${name} color`)).toBeVisible();
+  await expect(menu.getByLabel("Volume color")).toHaveCount(0);
+  await menu.getByLabel("EMA 20 color").fill("#ff0000");
+  await expect.poll(lineColors).toContain("#ff0000");
+  await expect.poll(dots).toContain("rgb(255, 0, 0)");
+  await expect.poll(() => server.data?.indicatorColors).toEqual({ ema20: "#ff0000", ema200: "#00ff00" });
+  await menu.getByLabel("RTH VWAP color").fill("#00ccff");
+  await menu.getByLabel("RSI 14 color").fill("#ff8800");
+  await expect.poll(lineColors).toContain("#ff8800");
+  await page.screenshot({ path: test.info().outputPath("indicator-colors-desktop.png"), animations: "disabled" });
+  await page.keyboard.press("Escape");
+
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect.poll(lineColors).toContain("#ff0000");
+  await expect.poll(dots).toContain("rgb(255, 0, 0)");
+
+  await indicator(page, "EMA 20");
+  await menu.getByRole("button", { name: "Reset colors" }).click();
+  await expect.poll(lineColors).toContain("#f4c66b");
+  expect(await lineColors()).not.toContain("#ff0000");
+  await expect.poll(() => server.data?.indicatorColors).toEqual({});
+  await expect(menu.getByRole("button", { name: "Reset colors" })).toBeDisabled();
+  expect(errors).toEqual([]);
+
+  // On a phone the same menu keeps 44px targets and fits the screen.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  const panel = page.getByRole("group", { name: "Chart indicators" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toBeInViewport({ ratio: 1 });
+  await panel.getByRole("button", { name: "Reset colors" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("indicator-colors-phone.png"), animations: "disabled" });
+});
