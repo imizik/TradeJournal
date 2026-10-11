@@ -153,6 +153,10 @@ provenance, fallback and rollback; this inventory authorizes none of those chang
 
 Maximum concurrent subscriptions, actual named depth licenses and private
 non-display/ML recording rights remain unresolved in the Phase 1 evidence.
+The [depth rights audit](moomoo-depth-permissions-rights-audit.md) checked direct
+quota rules and public broker/exchange policies; Market Quote alone does not
+resolve those questions, and the revised 2026 Nasdaq AI-policy text remains
+unretrieved. A prepared clarification request is saved; no vendor message was sent.
 Historical Level 2 was not established by the catalog or these candle reads.
 A later historical Workbench dataset cannot be reconstructed from candlesticks.
 No vendor messages were sent. Market-hours verification remains separately deferred.
