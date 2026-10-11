@@ -302,11 +302,15 @@ cd backend
   of the charts they sit between) and use the arrow keys (Shift for steps of
   10%, or 64px for the dock), Home and End for its limits; Enter or a
   double-click resets it, and Escape during a drag puts it back without
-  saving. **Reset chart sizes** in the Layouts menu resets all of them. A
+  saving. **Reset chart sizes** in the Layouts menu resets all of them. The menu's
+  built-in **Active** (compact smaller row, dock closed) and **Research**
+  (37.8% smaller row, dock open) presets apply like a saved layout without
+  being stored as one; on a phone they leave the sheet as it is. A
   drag moves the boxes directly, re-rendering no chart, and is saved once
   when the button is released. The main chart and the smaller row share the
-  height by the smaller row's share (15% to 60%; 37.8% by default, which is
-  C7.3's medium height in a 1440×900 window), the smaller charts the row's
+  height by the smaller row's share (15% to 60%; 27.5% by default, C7.3's
+  compact height, so the main chart dominates; settings saved with another
+  height keep it), the smaller charts the row's
   width by four shares (none under 10%), and on screen the main chart keeps
   at least 320px, each smaller chart at least 180px with its header and
   160px of width; a row too narrow for four of those (a 1024px window with

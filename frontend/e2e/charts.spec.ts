@@ -351,6 +351,51 @@ test("realistic candles render on every chart for desktop and phone pictures", a
   expect(errors).toEqual([]);
 });
 
+test("Active layout preset makes the main chart dominant and Research restores the balance", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const heights = async () => ({ main: (await page.getByTestId("canvas-main").boundingBox())!.height, lower: (await section(page, "Panel 2")).height });
+  const fresh = await heights(); // a new setup already opens with the compact lower row
+  const usePreset = async (name: "Active" | "Research") => {
+    const dialog = await openLayouts(page);
+    await dialog.getByRole("button", { name: `Use ${name} preset`, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  };
+  await usePreset("Active");
+  await expect(sidePanel(page)).toHaveCount(0);
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  const active = await heights();
+  console.log(`main canvas height: new setup ${Math.round(fresh.main)}, Active ${Math.round(active.main)}; section ${Math.round((await section(page, "main")).height)}`);
+  expect(Math.abs(active.lower - fresh.lower)).toBeLessThanOrEqual(2);
+  await expect(layoutsButton(page)).toHaveText("Layouts"); // a preset is not a saved layout
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: test.info().outputPath("charts-active-desktop.png"), animations: "disabled" });
+
+  await usePreset("Research");
+  await expect(sidePanel(page)).toBeVisible();
+  await expect.poll(async () => (await section(page, "Panel 2")).height).toBeGreaterThan(active.lower + 60);
+  const research = await heights();
+  console.log(`main canvas height: Research ${Math.round(research.main)}`);
+  expect(active.main).toBeGreaterThan(research.main + 60); // Active gives the main chart about a fifth more height
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+
+  await usePreset("Active");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("charts-active-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
+});
+
 test("VWAP draws inside the session without painting through an extended-hours gap", async ({ page }) => {
   // Keep the whole main canvas in view so locator screenshots cannot scroll
   // the page between comparisons of the chart-relative gap strip.
@@ -1661,8 +1706,8 @@ test("named layouts save, switch, rename, update and delete without moving the s
   expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: true });
   // A layout's proportions sit beside the list, by its id, so an older tab keeps both (C7.4).
   expect(Object.keys(layoutsOn(server)[1]).sort()).toEqual(LAYOUT_KEYS);
-  expect(proportionsOn(server, layoutsOn(server)[1].id)!.lower).toBeGreaterThan(0.4); // the default is 0.378
-  expect(proportionsOn(server, layoutsOn(server)[0].id)).toEqual({ lower: 0.378, columns: [0.25, 0.25, 0.25, 0.25] });
+  expect(proportionsOn(server, layoutsOn(server)[1].id)!.lower).toBeGreaterThan(0.4); // the default is 0.275
+  expect(proportionsOn(server, layoutsOn(server)[0].id)).toEqual({ lower: 0.275, columns: [0.25, 0.25, 0.25, 0.25] });
 
   // Switching back restores intervals, symbol groups, chart height and range linking.
   await useLayout(page, "Names");
@@ -1670,7 +1715,7 @@ test("named layouts save, switch, rename, update and delete without moving the s
   await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
   await expect(page.getByRole("region", { name: "QQQ 1m chart" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Link time ranges" })).toHaveAttribute("aria-pressed", "false");
-  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "73");
   await expect(layoutsButton(page)).toContainText("Names");
 
   // The main symbol, levels and watchlist belong to the workspace, not to a layout.
@@ -3988,26 +4033,26 @@ test("the divider above the smaller charts drags, steps by keyboard, stops at it
   await stub(page);
   await page.goto("/charts");
   await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
-  // The defaults reproduce C7.3's geometry: smaller charts 311px tall with their headers.
-  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
-  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  // The compact default: smaller charts 226px tall with their headers.
+  expect(near((await section(page, "Panel 2")).height, 226)).toBe(true);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "73");
   await expect(rowDivider(page)).toHaveAttribute("aria-orientation", "horizontal");
   await page.screenshot({ path: test.info().outputPath("dividers-default-1440.png") });
 
-  // A drag up 120px gives the smaller charts 120px and saves their share once.
+  // A drag up 120px gives the smaller charts 120px more and saves their share once.
   await dragDivider(page, rowDivider(page), 0, -120);
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431)).toBe(true);
-  expect(near((await section(page, "main")).height, ROWS_1440 - 431)).toBe(true);
-  await expect.poll(() => proportionsOn(server)?.lower).toBeCloseTo(431 / ROWS_1440, 2);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 346)).toBe(true);
+  expect(near((await section(page, "main")).height, ROWS_1440 - 346)).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.lower).toBeCloseTo(346 / ROWS_1440, 2);
   expect(proportionsOn(server)?.columns).toEqual([0.25, 0.25, 0.25, 0.25]);
   await page.screenshot({ path: test.info().outputPath("dividers-dragged-1440.png") });
 
   // Keyboard: Down gives the main chart 2% more, Shift+Down 10%; Home and End are the limits; Enter resets.
   await rowDivider(page).focus();
   await page.keyboard.press("ArrowDown");
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431 - 0.02 * ROWS_1440)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 346 - 0.02 * ROWS_1440)).toBe(true);
   await page.keyboard.press("Shift+ArrowDown");
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431 - 0.12 * ROWS_1440)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 346 - 0.12 * ROWS_1440)).toBe(true);
   await page.keyboard.press("Home");
   await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "40");
   await expect.poll(async () => near((await section(page, "Panel 2")).height, 0.6 * ROWS_1440)).toBe(true);
@@ -4019,28 +4064,28 @@ test("the divider above the smaller charts drags, steps by keyboard, stops at it
   expect((await section(page, "main")).height).toBeGreaterThanOrEqual(MAIN_MIN);
   await rowDivider(page).focus();
   await page.keyboard.press("Enter");
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 311)).toBe(true);
-  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 226)).toBe(true);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "73");
   // End did not jump every chart to its latest candle, and Enter typed no interval: the divider kept those keys.
   await expect(page.getByRole("status", { name: "Interval entry" })).toHaveCount(0);
-  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.378);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.275);
 
   // A double-click resets it too.
   await dragDivider(page, rowDivider(page), 0, 80);
   await expect.poll(() => proportionsOn(server)?.lower).toBeLessThan(0.3);
   const bar = (await rowDivider(page).boundingBox())!;
   await page.mouse.dblclick(bar.x + bar.width / 2, bar.y + bar.height / 2);
-  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.378);
-  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.275);
+  expect(near((await section(page, "Panel 2")).height, 226)).toBe(true);
 
   // Escape during a drag puts the divider back and saves nothing; the Escape goes no further.
   await page.waitForTimeout(600);
   const saves = server.saves.length;
   await dragDivider(page, rowDivider(page), 0, -90, false);
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 401)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 316)).toBe(true);
   await page.keyboard.press("Escape");
   await page.mouse.up();
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 226)).toBe(true);
   await page.waitForTimeout(800);
   expect(server.saves.length).toBe(saves);
 });
@@ -4117,8 +4162,8 @@ test("the dividers between the smaller charts and the dock's edge resize, stop a
   await menu.getByRole("button", { name: "Reset chart sizes" }).click();
   await expect(menu).toHaveCount(0);
   await expect.poll(dock).toBe(256);
-  await expect.poll(() => proportionsOn(server)).toEqual({ lower: 0.378, columns: [0.25, 0.25, 0.25, 0.25] });
-  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect.poll(() => proportionsOn(server)).toEqual({ lower: 0.275, columns: [0.25, 0.25, 0.25, 0.25] });
+  expect(near((await section(page, "Panel 2")).height, 226)).toBe(true);
 });
 
 test("a divider drag re-renders no chart while it moves, saves once when released, and fetches nothing", async ({ page, context }) => {

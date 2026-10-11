@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Check, Pencil, RefreshCw, RotateCcw, Trash2, X } from "lucide-react";
-import { LAYOUT_NAME_MAX, MAX_LAYOUTS, layoutName, layoutSummary, nameTaken, sameArrangement } from "@/lib/charts";
-import type { Arrangement, SavedLayout } from "@/lib/charts";
+import { LAYOUT_NAME_MAX, LAYOUT_PRESETS, MAX_LAYOUTS, layoutName, layoutSummary, nameTaken, sameArrangement } from "@/lib/charts";
+import type { Arrangement, LayoutPreset, SavedLayout } from "@/lib/charts";
 
 const small = "inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-slate-400 hover:bg-slate-800 hover:text-slate-100 disabled:opacity-30 disabled:hover:bg-transparent sm:h-8 sm:w-8";
 const field = "h-9 min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] px-2 text-xs text-slate-100 outline-none focus:border-sky-600";
@@ -15,10 +15,10 @@ const field = "h-9 min-w-0 flex-1 rounded border border-slate-700 bg-[#10151e] p
  * linked ranges); symbols, levels and the watchlist are untouched by every
  * action. On a wide screen it also puts the dividers back (C7.4).
  */
-export default function LayoutMenu({ layouts, current, onApply, onSave, onRename, onUpdate, onDelete, onResetSizes, onClose }: {
+export default function LayoutMenu({ layouts, current, onApply, onPreset, onSave, onRename, onUpdate, onDelete, onResetSizes, onClose }: {
   /** Each with its proportions, so the one in use is found by its chart sizes too. */
   layouts: (SavedLayout & Arrangement)[]; current: Arrangement;
-  onApply(id: string): void; onSave(name: string): void; onRename(id: string, name: string): void;
+  onApply(id: string): void; onPreset(preset: LayoutPreset): void; onSave(name: string): void; onRename(id: string, name: string): void;
   onUpdate(id: string): void; onDelete(id: string): void; onResetSizes?(): void; onClose(): void;
 }) {
   const [name, setName] = useState("");
@@ -67,6 +67,14 @@ export default function LayoutMenu({ layouts, current, onApply, onSave, onRename
           <button className={small} aria-label="Close layouts" onClick={onClose}><X size={14} /></button>
         </div>
 
+        <ul aria-label="Built-in layouts" className="border-b border-slate-700/60 py-1">
+          {LAYOUT_PRESETS.map((preset) => <li key={preset.id} className="px-2">
+            <button onClick={() => onPreset(preset)} aria-label={`Use ${preset.name} preset`} className="flex min-h-11 w-full flex-col justify-center rounded-md px-2 py-1.5 text-left hover:bg-slate-800/60">
+              <span className="text-xs font-medium text-slate-100">{preset.name}</span>
+              <span className="truncate text-[10px] text-slate-500">{preset.detail}</span>
+            </button>
+          </li>)}
+        </ul>
         {layouts.length > MAX_LAYOUTS && <p className="border-b border-slate-700/60 px-4 py-2 text-[11px] leading-4 text-amber-300">Two devices each saved a layout at the limit, so both are kept. Delete one before saving another.</p>}
         <ul aria-label="Saved layouts list" className="py-1">
           {layouts.map((layout) => {
