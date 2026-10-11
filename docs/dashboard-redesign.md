@@ -79,6 +79,17 @@ and unfinished reviews. No trading prescriptions or historical-correlation rules
 | Concentration | Complete marked-position coverage; share of gross marked exposure, never equity | Context; exposure detail | No account-equity % or alarm threshold is invented; incomplete coverage cannot support concentration |
 | Unfinished reviews | `/daily-review` saved/stale states and completed trading dates | Follow-up; `/daily/{day}` | Missing review state differs from not reviewed; no paid review job starts automatically |
 
+**Owner selection (2026-10-11), as built.** Kept: expired-but-recorded-open,
+missing quote/basis, upcoming expiration, earnings before expiry. Dropped by the
+owner as already known: overnight holdings, concentration, unfinished reviews.
+Added: Gmail import down/degraded, failed sync job, price alert fired within 24
+hours, and the owner's open WAIT choices (human, non-sample, expiry ahead). WAIT
+conditions are free text that nothing evaluates, so the panel lists an open WAIT
+with its condition and end time; it never claims a condition was met. No
+authoritative next-session calendar is available to the Dashboard, so upcoming
+expiration means within three calendar days, with the date shown. A failed
+quote request is disclosed once above the panel instead of once per position.
+
 Each item must carry its input observation time, calculation time, stable record
 IDs, scope and a working action. Integrity comes before imminent events, then
 descriptive context and review follow-up; sort deterministically within each

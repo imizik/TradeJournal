@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Account, DecisionRecord, PositionQuote, Stats, Trade } from "@/lib/api";
 import type { OpenPositionRow } from "@/lib/dashboard";
 import { getPositionMarketValue } from "@/lib/dashboard";
@@ -9,6 +10,7 @@ import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import DataFreshness from "./DataFreshness";
+import AttentionPanel, { AttentionLoading } from "./AttentionPanel";
 import { DashboardCard, SummaryFigure, dashboardLink, pnlTone } from "./DashboardCard";
 
 type Params = { account?: string; type?: string; decision?: string; practice_run?: string };
@@ -75,8 +77,9 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
     {quoteError && <p role="alert" className="rounded-md border border-amber-500/30 px-4 py-3 text-sm text-amber-300">Some position quotes could not load. Unavailable marks are shown as —. Reload to retry.</p>}
     <div className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
       <div className="min-w-0 space-y-4">
+        <div className="grid min-w-0 gap-4 xl:grid-cols-2">
         <DashboardCard title="Today's Session" action={<a className={dashboardLink} href={`/daily/${today}`}>Review today →</a>}>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 text-xs text-muted-foreground">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4 xl:grid-cols-2 text-xs text-muted-foreground">
             <div>Trades opened<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{openedToday}</p></div>
             <div>Trades closed<p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{todayClosed.count}</p></div>
             <div className="col-span-2"><p>{openedToday || todayClosed.count ? "Journal activity for this ET date." : "No trades opened or closed today."}</p>
@@ -84,6 +87,10 @@ export default function OwnerDashboard({ trades, accounts, stats, rows, quotes, 
               <a className={`${dashboardLink} mt-2`} href={tradesHref}>View trades →</a></div>
           </div>
         </DashboardCard>
+        <Suspense fallback={<AttentionLoading />}>
+          <AttentionPanel rows={rows} quotes={quotes} quoteError={quoteError} today={today} decisions={decisions} />
+        </Suspense>
+        </div>
         <DashboardCard title="Active Options" action={<span className="text-xs text-muted-foreground">{options.length} positions · {coverage(options)}</span>}>
           {options.length ? <OpenPositionsTable rows={options} accountMap={accountMap} quotes={quotes} today={today} compact /> : <p className="text-sm text-muted-foreground">No open options in this scope.</p>}
         </DashboardCard>
