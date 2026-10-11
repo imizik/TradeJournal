@@ -271,3 +271,21 @@ def test_remove_retries_after_failure_between_unit_restores(prepared, tmp_path, 
     keys.remove()
     trial.installed()
     trial.rollback()
+
+
+def test_remove_resumes_when_interrupted_after_config_switch(prepared, tmp_path, monkeypatch):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    install(key_bundle)
+    unlink = Path.unlink
+    def fail(path, *args, **kwargs):
+        if path.name == keys.KEY_UNITS[0]:
+            raise OSError("Controlled interruption after config switch")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", fail)
+    with pytest.raises(OSError, match="Controlled"):
+        keys.remove()
+    monkeypatch.setattr(Path, "unlink", unlink)
+    keys.remove()
+    assert not keys.record_path().exists()
+    assert not any((old.UNIT_DIR / name).exists() for name in keys.KEY_UNITS)
+    trial.rollback()

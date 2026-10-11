@@ -293,7 +293,29 @@ def check():
     return result
 
 
+def finish_removal():
+    """Retire the leftover key units and record once everything else is restored."""
+    for name in KEY_UNITS:
+        (old.UNIT_DIR / name).unlink(missing_ok=True)
+    record_path().rename(RUNTIME / ("removed-" + str(int(time.time())) + "-" + RECORD_NAME))
+    old.run("systemctl", "daemon-reload")
+    trial.installed()
+
+
+def interrupted_after_config_switch():
+    keys_record = trial.private_json(record_path())
+    previous = json.loads(stage.exact(RUNTIME / "previous/config.json").read_text())
+    if json.loads(advisor_config_path().read_text())["jwks_file"] != previous["jwks_file"]:
+        return False
+    return all(stage.digest(old.UNIT_DIR / name) == keys_record["serving_units_before"][name] for name in SERVING)
+
+
 def remove():
+    old.root_only()
+    if record_path().exists() and interrupted_after_config_switch():
+        advisor_stopped()
+        trial.installed()  # Units and record already restored; only leftovers remain.
+        return finish_removal()
     keys_record = installed()
     advisor_stopped()
     record = trial.private_json(trial.RECORD)
@@ -330,16 +352,13 @@ def remove():
         write_file(old.UNIT_DIR / name, saved_units[name], mode=0o644, expected=record["units"][name])
         units[name] = stage.digest(old.UNIT_DIR / name)
         trial.write_private(trial.RECORD, {**record, "units": units})  # Keep the record matching each switch.
-    # Config last: until it switches, a failed remove is retryable as installed.
+    # Config last: before it switches a failed remove retries as installed; after
+    # it, remove() resumes at finish_removal().
     current = json.loads(config_path.read_text())
     info = config_path.stat()
     write_file(config_path, (json.dumps({**current, "jwks_file": previous["jwks_file"]}, indent=2) + "\n").encode(),
         mode=info.st_mode & 0o777, uid=info.st_uid, gid=info.st_gid, expected=stage.digest(config_path))
-    for name in KEY_UNITS:
-        (old.UNIT_DIR / name).unlink(missing_ok=True)
-    record_path().rename(RUNTIME / ("removed-" + str(int(time.time())) + "-" + RECORD_NAME))
-    old.run("systemctl", "daemon-reload")
-    trial.installed()
+    finish_removal()  # Re-runnable if interrupted from here on.
     # The key UID, directories, snapshots and preserved files remain.
 
 
