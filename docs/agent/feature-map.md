@@ -188,6 +188,13 @@ you change it (`verification.md`, "What is NOT covered yet").
   cancel/retry; parent-owned research SQLite/artifacts and a pure calculation
   child, no app route/service/provider or journal/Factory writes. The
   [R2 contract](research-studio-r2.md) owns semantics, exposure and acceptance.
+  Selected R3 connects **Research Studio** (`/research-studio`) through
+  `frontend/components/research-studio/ResearchStudio.tsx`, its static chart,
+  `backend/app/routers/research_studio.py`, and the manually started
+  `backend/scripts/research_studio_server.py` sidecar. The
+  [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
+  boundaries; `backend/tests/test_research_studio_session.py` and
+  `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.
 - `strategy_factory.py` — judges a strategy spec through the factory's gates
   and appends the result to `research/ledger.jsonl`; `prepare` fetches the SIP
   minute bars it needs (the only step that calls Alpaca); `week` is the weekly

@@ -1,8 +1,8 @@
 # Strategy Workbench: Research Studio roadmap
 
 **Status: R0/R1 complete; R2 reproducible analysis implemented; verification/review gates recorded in its PR.**
-R3/R4 remain unselected. The [R2 contract](agent/research-studio-r2.md) records current work; the [R1 contract](agent/research-studio-r1.md) records
-implementation and acceptance; no Studio UI exists; R2 provides outcomes and a manual local lifecycle; its contract records acceptance limits. The existing filename is retained so links remain stable.
+R3 selected: connected workspace implementation and acceptance are recorded in the [R3 contract](agent/research-studio-r3.md). R4 remains unselected. The [R2 contract](agent/research-studio-r2.md) records current work; the [R1 contract](agent/research-studio-r1.md) records
+implementation and acceptance; R3 connects the owner app workspace; R2 provides outcomes and a manual local lifecycle; its contract records acceptance limits. The existing filename is retained so links remain stable.
 The product-aware review at `4c42018` supersedes the strategy-form-first
 proposal of 2026-10-07 as recorded below. Implementation requires selection
 of one bounded phase; this update authorizes no data purchase, protocol
@@ -286,7 +286,7 @@ are established. Fetch occurrence chart windows lazily from the same manifest.
 ## Small delivery phases
 
 R0 probes and bounded R1 observations are complete with documented evidence
-limits; R2 is implemented with documented acceptance limits; R3/R4 are **planned, not started**. V1 is complete only after R4.
+limits; R2 is implemented with documented acceptance limits; R3 is selected for the connected workspace; R4 is **planned, not started**. V1 is complete only after R4.
 Each phase is separately selected and reviewed, with one bounded result; the
 plan does not authorize implementing the entire sequence at once.
 
@@ -332,7 +332,7 @@ proof; the complete connected Studio remains unbuilt.
 
 ## Decisions still open
 
-- R0 and R1 were selected before further S1–S2 work; R2 was subsequently selected in this chat; R3/R4 require separate selection.
+- R0 and R1 were selected before further S1–S2 work; R2 was subsequently selected in this chat; R3 was selected after R2 merged; R4 requires separate selection.
 - Approved cache host and component measurements are recorded in the
   [R0 report](agent/research-studio-r0.md); end-to-end performance is still unproved.
 - Data-quality masks and concrete uncertainty parameters are fixed in the
@@ -343,4 +343,4 @@ proof; the complete connected Studio remains unbuilt.
 
 R2 was selected after inspecting R1 coverage and correctness evidence; its
 [current contract](agent/research-studio-r2.md) owns acceptance. This selection
-does not authorize R3/R4.
+did not authorize later phases; the subsequent user selection authorizes R3 only.

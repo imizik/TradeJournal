@@ -582,10 +582,14 @@ export default function ChartWorkspace() {
     const view = parsePastView(window.location.search);
     if (view) setPast({ ...view, started: false });
   }, []);
+  // The symbol on screen before a past trade took over; Back to live returns to it.
+  const beforePast = useRef<string | null>(null);
   // Once the shared settings are in, chart the trade's symbol (the symbol on screen is this device's own).
   useEffect(() => {
-    if (ready && past && !past.started && settings.symbol !== past.symbol)
+    if (ready && past && !past.started && settings.symbol !== past.symbol) {
+      beforePast.current = settings.symbol;
       setSettings((s) => s.symbol === past.symbol ? s : ({ ...s, symbol: past.symbol, recent: [s.symbol, ...s.recent.filter((r) => r !== s.symbol && r !== past.symbol)].slice(0, 8) }));
+    }
   }, [ready, past, settings.symbol, setSettings]);
   // With its candles on screen: load the stored history page that holds the trade into every
   // chart of the symbol, centre each on the trade's arrows, and open the trade's card.
@@ -624,6 +628,9 @@ export default function ChartWorkspace() {
     liveAgain.current = true;
     setPast(null);
     window.history.replaceState(null, "", "/charts");
+    const previous = beforePast.current;
+    beforePast.current = null;
+    if (previous && previous !== past?.symbol) setSettings((s) => s.symbol === past?.symbol ? { ...s, symbol: previous } : s);
   };
   // Back to the latest candles once the charts have dropped the trade's pages (their effects run before this one).
   const liveAgain = useRef(false);
