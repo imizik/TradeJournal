@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import { fetchSymbolInsiders, readAt } from "@/lib/symbolInfo";
 import type { OverviewCompany, SymbolInsiders } from "@/lib/symbolInfo";
-import { HEADING, Row, Rows, SourceFooter } from "./SymbolInfoParts";
+import { Block, EXPLAIN, Row, Rows, SourceFooter } from "./SymbolInfoParts";
 import type { FooterSource } from "./SymbolInfoParts";
 
 const count = (value: number | null | undefined) => value == null ? "—" : value.toLocaleString("en-US", { maximumFractionDigits: 0 });
@@ -21,7 +22,7 @@ export const ownersReported = (owners: OverviewCompany["ownership"]): owners is 
 const WHY_ZERO = "Tradier sent 0 for the holder count; that cannot be real for a listed stock, so it is not reported here.";
 
 /** 13F summary from the Overview payload (no request of its own) and 90-day insider activity from one Yahoo-backed request. */
-export default function SymbolInfoOwnership({ symbol, company, fund, unavailable, sources }: { symbol: string; company: OverviewCompany; fund: boolean; unavailable: string; sources: FooterSource[] }) {
+export default function SymbolInfoOwnership({ symbol, company, fund, unavailable, sources, children }: { symbol: string; company: OverviewCompany; fund: boolean; unavailable: string; sources: FooterSource[]; children?: ReactNode }) {
   const [insiders, setInsiders] = useState<{ symbol: string; data?: SymbolInsiders; error?: string } | null>(null);
   useEffect(() => {
     if (fund) return;
@@ -37,8 +38,7 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
   const footer: FooterSource[] = [...sources, ...(data ? [{ source: data.source, at: data.fetched_at, label: "Insiders" }] : [])];
 
   return <>
-  <section aria-label="Ownership" className="space-y-3">
-    <h3 className={HEADING}>Ownership</h3>
+  <Block name="ownership" title="Ownership" forceOpen={(company.state !== "ready" && company.state !== "none") || !!shown?.error || !!data?.message || (!!data && data.state !== "ready" && data.state !== "none")}><div className="space-y-3">
     <div aria-label="13F institutional holders" role="group" className="space-y-1.5">
       <h4 className="text-slate-300">Institutions (13F){owners?.as_of ? <span className="font-normal text-slate-500"> · as of {owners.as_of}</span> : null}</h4>
       {company.state !== "ready" ? <p className={company.state === "none" ? "text-slate-500" : "text-amber-300"}>{company.state === "none" ? unavailable : company.message ?? "Not loaded yet."}</p>
@@ -46,7 +46,7 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
         : !ownersReported(owners) ? <p className="text-slate-500">13F summary not reported by Tradier for this symbol.</p>
         : <Rows>
           <Row label="Holders" value={owners.holders ? count(owners.holders) : "—"} title={owners.holders ? label : `${WHY_ZERO} ${label}`} />
-          <Row label="Held by institutions" value={percent(owners.percent_held)} title={label} />
+          <Row label="Held by institutions" value={percent(owners.percent_held)} title={label} explain={EXPLAIN.held} />
           <Row label="Existing holders buying" value={count(owners.buyers)} title={label} />
           <Row label="Existing holders selling" value={count(owners.sellers)} title={label} />
           <Row label="New holders" value={count(owners.new_holders)} title={label} />
@@ -87,7 +87,8 @@ export default function SymbolInfoOwnership({ symbol, company, fund, unavailable
         </>
         : <p className={data.state === "none" ? "text-slate-500" : "text-amber-300"}>{data.message ?? "Insider activity is unavailable."}</p>}
     </div>
-  </section>
+  </div></Block>
+  {children}
   <SourceFooter items={footer} />
   </>;
 }

@@ -142,7 +142,14 @@ the Watchlist sheet on the News tab. News rings sit in their own strip, apart fr
 dates without covering them, and a level or drawing under the pointer still wins
 a click. Historical chart mode shows only the articles whose candles are loaded.
 
-A **Peers** strip (T3.4) sits at the top of the **Overview** tab:
+The **Overview** tab is a stack of edged, foldable blocks (Price and range,
+Company, Key statistics, Valuation, Ownership, Peers); each block's fold is
+kept on the device. Key numbers (52-week range, market cap, enterprise value,
+shares, institutional ownership, average volume and the valuation ratios) have
+a dotted label: a tap shows what the number means and what it is usually
+compared with, as general context rather than a verdict on the symbol.
+
+A **Peers** block (T3.4) is the last block of the **Overview** tab:
 Polygon's related companies for the active symbol as chips, each with today's
 percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
 seven days on disk, read through the enricher's limiter the way the News feed
@@ -154,7 +161,8 @@ without a quote keeps its chip with "—". Funds and ETFs (SPY) have no related
 companies: the strip says so. Clicking a chip runs the watchlist row's handler
 (chart switches, and the phone sheet closes), so it does not add the peer to
 the watchlist. The strip fetches once after the ticker settles for 300 ms and
-again each minute while the page is visible, independent of the open tab.
+again each minute while the page is visible and Overview is open; the read
+lives in the panel, so folding or moving the block does not read again.
 
 Its **Financials** tab (T3.2) reads `GET /charts/symbol/{symbol}/financials`:
 the last eight fiscal quarters of revenue, gross margin, operating margin, net
