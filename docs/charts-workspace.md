@@ -1477,8 +1477,9 @@ except the option mark, which is asked for from a card.
   trade with its arrows, and open the card. Candles come from the same deep
   history as scrolling back (C0.0): Alpaca SIP minutes for intraday charts,
   Tradier's daily bars for 1D/1W, never Alpaca IEX. A banner names the dates
-  with **Back to live**, which drops the trade's pages and returns every chart
-  to its latest candles; choosing another symbol also ends the mode. A gap
+  with **Back to live**, which drops the trade's pages, returns to the symbol
+  that was on screen before the trade opened (UX-C) and brings every chart to
+  its latest candles; choosing another symbol also ends the mode. A gap
   between the trade's page and today fills from the side in view, one page at
   a time, as the user scrolls toward the present. A malformed link is ignored.
   Starting another page load preserves candles, fill markers and source metadata
