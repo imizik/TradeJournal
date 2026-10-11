@@ -58,3 +58,13 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Quiet chart chrome (UX-B): a smaller chart's header controls rest invisible on a hovering desktop
+   and return while the pointer is over the chart or focus is inside it. They stay rendered and
+   focusable; touch devices and phone widths never hide them. */
+@media (hover: hover) and (min-width: 768px) {
+  [data-quiet-chrome] [data-quiet-controls] { opacity: 0; transition: opacity 120ms; }
+  [data-quiet-chrome]:hover [data-quiet-controls],
+  [data-quiet-chrome]:focus-within [data-quiet-controls],
+  [data-quiet-controls]:has([aria-expanded="true"]) { opacity: 1; }
+}

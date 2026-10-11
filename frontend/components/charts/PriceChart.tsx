@@ -946,6 +946,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
       RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
     : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
+  const emas = (["ema9", "ema20", "ema50", "ema200"] as const).filter((key) => indicators[key]);
+  // Why a candle has no VWAP, from how the backend builds it (chart_math.chart_bars): regular-session minutes only, never daily or weekly.
+  const vwapWhy = interval === "1D" || interval === "1W" ? "VWAP is an intraday study: daily and weekly candles have none."
+    : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
+    : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
   const chosenLevel = selected ? levels.find((level) => level.id === selected) : undefined;
   const chosenDrawing = selected ? drawings.find((drawing) => drawing.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
@@ -956,7 +961,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   return (
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
-    <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
+    <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} data-quiet-chrome={main ? undefined : ""} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
         {/* A narrow chart (C7.4's dividers allow 160px) clips its symbol and interval, never its buttons. */}
         <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs">{onPickSymbol
@@ -974,6 +979,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
             className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
+          <span data-quiet-controls={main ? undefined : ""} className={`flex items-center ${compact ? "gap-0" : "gap-1"}`}>
           {onStudies && <ToolbarMenu floating label={`${id} studies`} title={ownStudies ? "This chart's own studies" : compact ? "Studies: slimmed while this chart is small" : "Studies: same as every chart"}
             className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${ownStudies ? "text-sky-300" : "text-slate-500"}`}
             content={() => <div className="flex w-52 flex-col gap-0.5 text-[11px]">
@@ -987,22 +993,28 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
           {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
           {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><Expand size={13} /></button>}
+          </span>
         </div>
       </div>
-      <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
+      <div className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1" : "h-6"}`}>
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
         {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
           {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
+        {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
+          {indicators.vwap && <span style={{ color: COLORS.vwap }} title={bar?.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+          {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
+          {emas.length > 0 && <span tabIndex={0} aria-label="EMA values" className="group relative cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60">
+            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: COLORS[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
+            <span role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
+              {emas.map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
+          </span>}
+          {rvolValue}
+          {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
+            {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
+        </div>}
       </div>
-      {main && <div aria-label={`${id} study values`} className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
-        {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
-        {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
-        {rvolValue}
-        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
-          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
-      </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
