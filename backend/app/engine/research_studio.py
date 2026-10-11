@@ -476,7 +476,7 @@ class Observations:
         return _Grid(names, tuple(moments), examined, tuple(sorted(exclusions.items())),
                      tuple(sorted(unavailable.items())), MappingProxyType(coverage))
 
-    def preview(self, definition: Definition) -> dict:
+    def _grid(self, definition: Definition) -> _Grid:
         if definition.end > self.snapshot.through or set(definition.universe) - self._quality.keys():
             raise ValueError("definition exceeds snapshot dates or symbols")
         names = tuple(sorted({p.feature for p in definition.predicates}))
@@ -488,6 +488,14 @@ class Observations:
             grid = self._prepare_grid(definition)
             # One bounded in-memory feature grid; never shared across snapshots.
             self._grid_cache["latest"] = (key, grid)
+        return grid
+
+    def eligible_moments(self, definition: Definition) -> tuple[_Moment, ...]:
+        """Outcome-free ordinary population, using the preview's exact masks."""
+        return self._grid(definition).moments
+
+    def preview(self, definition: Definition) -> dict:
+        grid = self._grid(definition)
         columns = tuple((grid.names.index(p.feature), p.minimum, p.maximum) for p in definition.predicates)
         selected, dates, weeks, events = set(), Counter(), set(), []
         qualifying = 0

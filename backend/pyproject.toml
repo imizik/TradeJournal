@@ -25,6 +25,7 @@ dependencies = [
     # verified on 0.113.0.
     "anthropic>=0.113.0",
     "scipy>=1.12.0",
+    "numpy>=1.23.5,<3",  # Research Studio's version-recorded PCG64 joint-week analysis.
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "websockets>=15.0,<18.0",
