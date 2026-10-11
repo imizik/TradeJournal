@@ -1164,20 +1164,17 @@ export default function ChartWorkspace() {
   const layerGroups: LayerGroup[] = [
     { key: "levels", name: "My levels", noun: "levels", hidden: settings.hiddenGroups.levels, items: levelItems },
     { key: "drawings", name: "Drawings", noun: "drawings", hidden: settings.hiddenGroups.drawings, items: drawingItems },
-    { key: "auto", name: "Auto levels", hidden: settings.autoLevelsHidden, note: [
-      "Prior day and week, premarket, overnight, opening ranges, daily swings and round numbers; nearby ones merge into zones. The nearest three above and below price show. Hover or tap one for its card.",
-      ...Object.values(feedFor(symbol)?.auto_levels?.missing ?? {}).filter((reason) => !reason.startsWith("Forms at")).map((reason) => `Not shown for ${symbol}: ${reason}`),
-    ].join(" ") },
-    { key: "options", name: "Options levels", hidden: settings.optionsLayer.hidden, filters: settings.optionsLayer, note: [
-      "The call and put walls (most open interest, or most traded in volume mode) and the strikes ranked by the measure, from Tradier option chains; a strike near another level joins its zone. Hover or tap one for its card. Panels holding their own symbol show its nearest expiration.",
-      ...(optionsOn ? [optionsStatus(symbol)] : []),
-    ].filter(Boolean).join(" ") },
-    { key: "ranges", name: "Range bands", hidden: settings.rangeBandsHidden, note: [
-      "Expected move: today's (0DTE) and Friday's at-the-money straddle, priced five minutes after the open and drawn above and below the price then, fixed for the session. VWAP ±1σ (dashed) and ±2σ (dotted) on intraday charts. Hover or tap an expected-move level for its card.",
-      ...(rangesOn ? [rangesStatus(symbol)] : []),
-    ].filter(Boolean).join(" ") },
-    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, note: "Your fills as arrows on the candles they fall in (click one for its trade), and open positions as lines: a stock at its average cost, an option at the underlying price when it was bought." },
-    { key: "news", name: "News markers", hidden: settings.newsHidden, note: "A marker on the main chart's candle where each Focused headline for the symbol was published (articles tagging more than three symbols are left out). An article published when the market is closed sits on the next candle. Hover for the headlines; click to read them in the News tab." },
+    { key: "auto", name: "Auto levels", hidden: settings.autoLevelsHidden,
+      info: "Prior day and week, premarket, overnight, opening ranges, daily swings and round numbers; nearby ones merge into zones. The nearest three above and below price show; only the nearest one each side is shaded, the rest are lines. Names sit in clear space on the main chart; a name with no room is dropped, never the level. Hover or tap one for its card.",
+      status: Object.values(feedFor(symbol)?.auto_levels?.missing ?? {}).filter((reason) => !reason.startsWith("Forms at")).map((reason) => `Not shown for ${symbol}: ${reason}`).join(" ") },
+    { key: "options", name: "Options levels", hidden: settings.optionsLayer.hidden, filters: settings.optionsLayer,
+      info: "The call and put walls (most open interest, or most traded in volume mode) and the strikes ranked by the measure, from Tradier option chains; a strike near another level joins its zone. Hover or tap one for its card. Panels holding their own symbol show its nearest expiration.",
+      status: optionsOn ? optionsStatus(symbol) || undefined : undefined },
+    { key: "ranges", name: "Range bands", hidden: settings.rangeBandsHidden,
+      info: "Expected move: today's (0DTE) and Friday's at-the-money straddle, priced five minutes after the open and drawn above and below the price then, fixed for the session. VWAP ±1σ (dashed) and ±2σ (dotted) on intraday charts. Hover or tap an expected-move level for its card.",
+      status: rangesOn ? rangesStatus(symbol) || undefined : undefined },
+    { key: "journal", name: "Journal", hidden: !settings.indicators.fills, info: "Your fills as arrows on the candles they fall in (click one for its trade), and open positions as lines: a stock at its average cost, an option at the underlying price when it was bought." },
+    { key: "news", name: "News markers", hidden: settings.newsHidden, info: "A marker on the main chart's candle where each Focused headline for the symbol was published (articles tagging more than three symbols are left out). An article published when the market is closed sits on the next candle. Hover for the headlines; click to read them in the News tab." },
     { key: "indicators", name: "Indicators", hidden: settings.studiesHidden,
       studies: INDICATORS.filter(([key]) => (STUDIES as readonly string[]).includes(key)).map(([key, label]) => ({ key, label, on: indicators[key] })) },
   ];

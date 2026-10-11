@@ -1,4 +1,4 @@
-import type { IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, SeriesType, Time } from "lightweight-charts";
+import type { IChartApi, CandlestickData, IPrimitivePaneRenderer, IPrimitivePaneView, ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, SeriesType, Time } from "lightweight-charts";
 import type { AutoLevel, AutoLevels, AutoZone, LevelInteraction } from "./charts";
 import { etTime, price } from "./charts";
 
@@ -158,27 +158,48 @@ const TAG_GAP = 2;
 /** A compact chart's level mark at its right edge, in CSS pixels. */
 const TICK_WIDTH = 10;
 
+/**
+ * The left edge for a tag `width` wide in the row `top`..`bottom`: the right end
+ * of the rightmost gap that no candle's high-low span crosses (the clear space
+ * past the last bar when there is some), or null when no gap is wide enough.
+ */
+function clearLeft(candles: { x: number; half: number; top: number; bottom: number }[], top: number, bottom: number, width: number, paneWidth: number): number | null {
+  const margin = 4;
+  const blocked = candles.filter((box) => box.top <= bottom && box.bottom >= top).map((box) => [box.x - box.half, box.x + box.half] as const).sort((a, b) => a[0] - b[0]);
+  // Walk the gaps from the right edge leftwards.
+  let edge = paneWidth - margin;
+  for (let index = blocked.length - 1; index >= -1; index--) {
+    const stop = index >= 0 ? blocked[index][1] + margin : margin;
+    if (edge - stop >= width) return edge - width;
+    if (index >= 0) edge = Math.min(edge, blocked[index][0] - margin);
+  }
+  return null;
+}
+
 export class AutoLevelLayer implements ISeriesPrimitive<Time> {
   private zones: AutoZone[] = [];
   private labels = false;
   private ticks = false;
   private at: number | undefined;
-  private drawnTags: { text: string; top: number; bottom: number }[] = [];
+  private drawnTags: { text: string; top: number; bottom: number; left: number; right: number }[] = [];
   private hovered: string | null = null;
   private placed: Placed[] = [];
   private highlight: { price: number; y: number | null } | null = null;
   private series: ISeriesApi<SeriesType, Time> | null = null;
+  private chart: IChartApi | null = null;
   private requestUpdate: (() => void) | null = null;
   private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
   private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "bottom", renderer: () => this.renderer }];
 
-  attached({ series, requestUpdate }: SeriesAttachedParameter<Time>) {
+  attached({ series, chart, requestUpdate }: SeriesAttachedParameter<Time>) {
     this.series = series;
+    this.chart = chart as IChartApi;
     this.requestUpdate = requestUpdate;
   }
 
   detached() {
     this.series = null;
+    this.chart = null;
     this.requestUpdate = null;
   }
 
@@ -212,7 +233,26 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
   shown(): string[] { return this.zones.map((zone) => zone.id); }
 
   /** The tags last drawn, their text and their top and bottom in CSS pixels; browser tests read it. */
-  tags(): { text: string; top: number; bottom: number }[] { return this.drawnTags; }
+  tags(): { text: string; top: number; bottom: number; left: number; right: number }[] { return this.drawnTags; }
+
+  /** The candles drawn now as pixel boxes (x centre and half width, high and low y), for keeping tags off them; browser tests read it. */
+  candleBoxes(): { x: number; half: number; top: number; bottom: number }[] {
+    const [series, chart] = [this.series, this.chart];
+    const range = chart?.timeScale().getVisibleLogicalRange();
+    if (!series || !chart || !range) return [];
+    const data = series.data() as readonly CandlestickData<Time>[];
+    const first = Math.max(0, Math.floor(range.from) - 1), last = Math.min(data.length - 1, Math.ceil(range.to) + 1);
+    const scale = chart.timeScale();
+    const boxes: { x: number; half: number; top: number; bottom: number }[] = [];
+    const [a, b] = [scale.logicalToCoordinate(first as never), scale.logicalToCoordinate((first + 1) as never)];
+    const half = a !== null && b !== null ? Math.max(1, Math.abs(b - a) * 0.4) : 2;
+    for (let index = first; index <= last; index++) {
+      const bar = data[index];
+      const [x, top, bottom] = [scale.logicalToCoordinate(index as never), series.priceToCoordinate(bar.high), series.priceToCoordinate(bar.low)];
+      if (x !== null && top !== null && bottom !== null) boxes.push({ x, half, top, bottom });
+    }
+    return boxes;
+  }
 
   /** Where a zone's middle is drawn, in pixels from the top of the pane, or null when it is off the scale. */
   y(id: string): number | null {
@@ -247,44 +287,70 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
   }
 
   /**
-   * Each zone's name on a solid tag just above its upper edge, at the left: the
-   * user's own levels label theirs at the right. Tags never overlap: the zone
-   * whose card is open wins, then the zones nearest the price; a tag that would
-   * cover another is left out, and its zone still has its card on hover.
+   * Each zone's name on a solid tag just above its upper edge (or just below
+   * its lower edge when that is taken), kept off the candles: it sits in the
+   * rightmost gap of the row that no candle's high-low range crosses, which is
+   * the clear space past the last bar when there is some. A name with no clear
+   * gap collapses to a short mark at the right edge; the level itself is
+   * always drawn and its card is on hover. Tags never overlap vertically: the
+   * zone whose card is open wins, then the zones nearest the price.
    */
-  private drawTags(context: CanvasRenderingContext2D, height: number, h: number, v: number) {
+  private drawTags(context: CanvasRenderingContext2D, bitmapWidth: number, height: number, h: number, v: number) {
     const at = this.at;
     const distance = ({ zone }: Placed) => at === undefined ? 0 : zone.low > at ? zone.low - at : zone.high < at ? at - zone.high : 0;
     const order = [...this.placed].sort((a, b) => Number(b.zone.id === this.hovered) - Number(a.zone.id === this.hovered) || distance(a) - distance(b));
+    const candles = this.candleBoxes();
+    const paneWidth = bitmapWidth / h;
     const taken: [number, number][] = [];
     this.drawnTags = [];
     context.font = `${Math.round(10 * v)}px ${FONT}`;
     context.textAlign = "left";
     context.textBaseline = "middle";
+    const collapsed: Placed[] = [];
     for (const placed of order) {
-      const bottom = placed.top - 1;
-      const top = bottom - TAG_HEIGHT;
-      if (top < 0 || bottom * v > height) continue; // a tag cut by the pane's edge would read as a different name
-      if (taken.some(([a, b]) => top < b + TAG_GAP && bottom > a - TAG_GAP)) continue;
-      taken.push([top, bottom]);
       const text = chartLabel(placed.zone);
-      this.drawnTags.push({ text, top, bottom });
+      const width = Math.ceil(context.measureText(text).width / h + 8);
+      let spot: { top: number; bottom: number; left: number } | null = null;
+      // Above the band first, then below it.
+      for (const bottom of [placed.top - 1, placed.bottom + 1 + TAG_HEIGHT]) {
+        const top = bottom - TAG_HEIGHT;
+        if (top < 0 || bottom * v > height) continue; // a tag cut by the pane's edge would read as a different name
+        if (taken.some(([a, b]) => top < b + TAG_GAP && bottom > a - TAG_GAP)) continue;
+        const left = clearLeft(candles, top, bottom, width, paneWidth);
+        if (left === null) continue;
+        spot = { top, bottom, left };
+        break;
+      }
+      if (!spot) { collapsed.push(placed); continue; }
+      taken.push([spot.top, spot.bottom]);
+      this.drawnTags.push({ text, top: spot.top, bottom: spot.bottom, left: spot.left, right: spot.left + width });
       const hovered = placed.zone.id === this.hovered;
-      const [x, width] = [Math.round(4 * h), Math.ceil(context.measureText(text).width + 8 * h)];
+      const x = Math.round(spot.left * h);
       context.globalAlpha = 0.9;
       context.fillStyle = TAG_BACKGROUND;
       context.beginPath();
-      context.roundRect(x, Math.round(top * v), width, Math.round(TAG_HEIGHT * v), Math.round(3 * h));
+      context.roundRect(x, Math.round(spot.top * v), Math.round(width * h), Math.round(TAG_HEIGHT * v), Math.round(3 * h));
       context.fill();
       context.globalAlpha = 1;
       context.fillStyle = hovered ? HOVER : tint(placed.zone);
-      context.fillText(text, x + Math.round(4 * h), Math.round((top + TAG_HEIGHT / 2) * v));
+      context.fillText(text, x + Math.round(4 * h), Math.round((spot.top + TAG_HEIGHT / 2) * v));
+    }
+    // A zone whose name found no clear room still shows where it is, at the right edge.
+    for (const { zone, top, bottom } of collapsed) {
+      const x = bitmapWidth - Math.round(TICK_WIDTH * h);
+      const [upper, lower] = [Math.round(top * v), Math.round(bottom * v)];
+      context.globalAlpha = 0.85;
+      context.fillStyle = tint(zone);
+      if (lower - upper >= 3 * v) context.fillRect(x, upper, bitmapWidth - x, lower - upper);
+      else context.fillRect(x, Math.round((upper + lower) / 2) - Math.max(1, Math.floor(v)), bitmapWidth - x, Math.max(2, 2 * Math.floor(v)));
     }
   }
 
   private draw(target: Target) {
     target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
       context.save();
+      // Only the zones nearest the price (the one it is inside, else one above and one below) are shaded; the rest are lines.
+      const shaded = new Set(nearestZones(this.zones, this.at, 1).map((zone) => zone.id));
       for (const { zone, top, bottom } of this.placed) {
         const [upper, lower] = [Math.round(top * v), Math.round(bottom * v)];
         if (lower < -2 * v || upper > bitmapSize.height + 2 * v) continue;
@@ -301,7 +367,7 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
           else context.fillRect(x, Math.round((upper + lower) / 2) - Math.max(1, Math.floor(v)), bitmapSize.width - x, Math.max(2, 2 * Math.floor(v)));
           continue;
         }
-        if (band) {
+        if (band && (hovered || shaded.has(zone.id))) {
           context.globalAlpha = hovered ? 0.2 : 0.1;
           context.fillStyle = base;
           context.fillRect(0, upper, bitmapSize.width, lower - upper);
@@ -319,7 +385,7 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
         context.stroke();
         context.setLineDash([]);
       }
-      if (this.labels) this.drawTags(context, bitmapSize.height, h, v);
+      if (this.labels) this.drawTags(context, bitmapSize.width, bitmapSize.height, h, v);
       else this.drawnTags = [];
       const marked = this.highlight;
       if (marked && marked.y !== null) {
