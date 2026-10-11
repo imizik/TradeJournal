@@ -277,11 +277,21 @@ test("R4 frozen variant comparison and append-only conclusions survive reload",a
       await page.screenshot({path:test.info().outputPath("studio-comparison-focus-phone.png")});
     }
   }
+  const retriedOperations:string[]=[];
+  await page.route("**/research-studio/command",async route=>{
+    const data=route.request().postDataJSON();
+    if(data.action==="compare"){
+      retriedOperations.push(data.arguments.operation_id);
+      if(retriedOperations.length===1){await route.fulfill({status:409,json:{detail:"Research preparation is busy; retry shortly"}});return;}
+    }
+    await route.continue();
+  });
   await page.setViewportSize({width:1280,height:900});await page.reload();
   await page.getByRole("button",{name:new RegExp(comparison.variant_run_id.slice(0,8))}).click();
   await expect(page.getByTestId("analysis-count")).toBeVisible();
   await page.getByRole("button",{name:"Compare with parent (records exposures)",exact:true}).click();
   await expect(page.getByTestId("conclusion-history")).toContainText(reason);
+  expect(retriedOperations.length).toBeGreaterThanOrEqual(2);expect(new Set(retriedOperations).size).toBe(1);
   const second="No clear separation in this exploratory comparison.";
   await page.getByLabel("Conclusion verdict").selectOption("Rejected");
   await page.getByLabel("Conclusion reason").fill(second);await page.getByRole("button",{name:"Save conclusion",exact:true}).click();

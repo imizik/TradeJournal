@@ -65,7 +65,7 @@ claimed perfectly measurable.
 R4 artifacts live only in the existing research root. Parent links, operation
 receipts, comparisons and conclusions use R2 no-follow bounded immutable opens.
 Their SHA256 digests are appended in the existing research ledger's event
-table; reads refuse changed/uncommitted files. The R2 schema, analytical semantics, existing immutable requests/results and worker code remain unchanged. The storage admission refactor advances the normal R2 execution code fingerprint: queued/retried older-version work refuses, and new variants need a parent run on the updated execution version. Earlier completed results remain readable. No app/Postgres migration
+table; reads refuse changed, missing committed or uncommitted files. Conclusion history is enumerated from committed ledger records, so deletion cannot hide a note or reuse its sequence. Fresh-question and variant submissions refuse cross-action UUID reuse in both directions. The R2 schema, analytical semantics, existing immutable requests/results and worker code remain unchanged. The storage admission refactor advances the normal R2 execution code fingerprint: queued/retried older-version work refuses, and new variants need a parent run on the updated execution version. Earlier completed results remain readable. No app/Postgres migration
 or journal/Factory write is required. Operation UUID retries preserve the same
 request; conflicting reuse refuses. A cached comparison preserves its own
 comparison code/method identity and records fresh parent and variant result
@@ -135,3 +135,5 @@ exceeded512MiB; those failed receipts are retained. The memory repair reuses
 parent bytes and streams weekly totals; it does not change predicate/outcome
 semantics. These are bounded local receipts, not a universal workload,
 concurrent-load, VPS, real-phone or trading-edge guarantee.
+
+A manual comparison waits through preparation-busy conflicts for at most 65 seconds using the original operation UUID; changing run/question or leaving the page aborts that wait. Other failures remain visible. The browser fixture forces a busy response on comparison reopen and requires saved conclusion history, preserving the same operation ID.

@@ -248,3 +248,51 @@ def test_variant_retry_keeps_original_provenance_after_parent_is_exposed(session
     assert provenance["outcome_informed"] is False
     with pytest.raises(ValueError,match="conflicts"):
         session.variant(raw,parent["run_id"],operation,outcome_informed=True)
+
+
+@pytest.mark.parametrize("action", ["notes", "new_note", "retry_note"])
+def test_deleted_committed_conclusion_refuses_without_reusing_sequence(session, definition, action):
+    parent = completed(session, definition)
+    ids = [parent["run_id"]]
+    operation = op()
+    note = session.variants.conclude(ids, "Unclear", "Original reason.", "30m", "percent", operation)
+    (session.store.root / f"conclusion.{operation}.json").unlink()
+    with pytest.raises(ValueError, match="committed R4 artifact is missing"):
+        if action == "notes":
+            session.variants.notes(ids)
+        else:
+            session.variants.conclude(ids, "Unclear", "Original reason.", "30m", "percent",
+                                     operation if action == "retry_note" else op())
+    assert note["sequence"] == 1
+    assert not list(session.store.root.glob("conclusion.*.json"))
+    assert session.store.status(parent["run_id"])["exposures"] == 0
+
+
+@pytest.mark.parametrize("action", ["describe", "runs", "variant", "compare"])
+def test_deleted_committed_parent_link_refuses(session, definition, action):
+    parent, child = pair(session, definition)
+    (session.store.root / f'parent.{child["run_id"]}.json').unlink()
+    with pytest.raises(ValueError, match="committed R4 artifact is missing"):
+        if action == "describe":
+            session.describe(child["run_id"])
+        elif action == "runs":
+            session.runs()
+        elif action == "variant":
+            session.variant(replace(definition, window_end=610).canonical(), child["run_id"], op())
+        else:
+            session.compare(parent["run_id"], child["run_id"], op())
+    assert [session.store.status(r["run_id"])["exposures"] for r in (parent, child)] == [0, 0]
+
+
+@pytest.mark.parametrize("first", ["variant", "question"])
+def test_variant_question_uuid_reuse_refuses_both_directions(session, definition, first):
+    parent = completed(session, definition)
+    raw = replace(definition, predicates=(replace(definition.predicates[0], minimum=29),)).canonical()
+    operation = op()
+    actions = {"variant": lambda: session.variant(raw, parent["run_id"], operation),
+               "question": lambda: session.enqueue(raw, operation)}
+    initial = actions[first]()
+    assert actions[first]()["run_id"] == initial["run_id"]
+    with pytest.raises(ValueError, match="operation id reused"):
+        actions["question" if first == "variant" else "variant"]()
+    assert session.store.status(parent["run_id"])["exposures"] == 0

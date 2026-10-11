@@ -27,7 +27,8 @@ export default function ResearchStudio() {
   const [selectedContext, setSelectedContext] = useState<Result | null>(null);
   const markInformed = useCallback(() => setInformed(true), []);
   const current = (parent?.run_id || "") + "|" + key(draft), currentRef = useRef(current); useEffect(() => { currentRef.current = current; }, [current]);
-  const chartSequence = useRef(0), runSequence = useRef(0);
+  const chartSequence = useRef(0), runSequence = useRef(0), comparisonAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => comparisonAbort.current?.abort(), []);
   useEffect(() => { fetch(apiUrl("/research-studio/config"), {cache: "no-store"}).then(async r => { const c = await r.json(); if (!r.ok) throw new Error(c.detail); setConfig(c); }).catch(e => setError(String(e.message))); }, []);
   const parentId=parent?.run_id;
   useEffect(() => {
@@ -47,7 +48,7 @@ export default function ResearchStudio() {
     return () => { active = false; clearInterval(id); };
   }, [run]);
   async function start() {
-    const frozen = current, seq = ++runSequence.current; ++chartSequence.current; setChart(null); setSelected(null); setChartLoading(false); setResult(null); setComparison(null); setSelectedContext(null); setComparing(false); setSubmitting(true); setError("");
+    const frozen = current, seq = ++runSequence.current; comparisonAbort.current?.abort(); ++chartSequence.current; setChart(null); setSelected(null); setChartLoading(false); setResult(null); setComparison(null); setSelectedContext(null); setComparing(false); setSubmitting(true); setError("");
     try { const s = await command<Status>(parent ? "variant" : "enqueue", {raw: draft, ...(parent ? {parent_run_id: parent.run_id} : {}), operation_id: crypto.randomUUID(), outcome_informed: informed});
       if (seq !== runSequence.current) return;
       ++chartSequence.current; setChart(null); setSelected(null); setChartLoading(false);
@@ -57,7 +58,7 @@ export default function ResearchStudio() {
     } catch (e) { setError((e as Error).message); } finally { if (seq === runSequence.current) setSubmitting(false); }
   }
   async function reopen(s: Status) {
-    const seq = ++runSequence.current; ++chartSequence.current;
+    const seq = ++runSequence.current; comparisonAbort.current?.abort(); ++chartSequence.current;
     setSubmitting(false); setComparing(false); setComparison(null); setResult(null); setChart(null); setSelected(null); setSelectedContext(null); setChartLoading(false); setError("");
     try {
       const ancestor = s.parent_run_id ? await command<Status>("describe", {run_id:s.parent_run_id}) : null;
@@ -72,21 +73,22 @@ export default function ResearchStudio() {
   }
   function duplicate() {
     if(!run || !result)return;
-    ++runSequence.current; ++chartSequence.current;
+    ++runSequence.current; comparisonAbort.current?.abort(); ++chartSequence.current;
     const definition=result.population.definition;
     setParent({...run,definition}); setDraft(definition); setEditing(true);
     currentRef.current=run.run_id+"|"+key(definition);
     setRun(null); setResult(null); setComparison(null); setChart(null); setSelected(null); setSelectedContext(null); setChartLoading(false); setSubmitting(false); setComparing(false); setLoading(true);
   }
   function resetQuestion() {
-    ++runSequence.current; ++chartSequence.current; setParent(null); setRun(null); setResult(null); setComparison(null); setChart(null); setSelected(null); setSelectedContext(null); setSubmitting(false); setComparing(false); setChartLoading(false); setLoading(true);
+    ++runSequence.current; comparisonAbort.current?.abort(); ++chartSequence.current; setParent(null); setRun(null); setResult(null); setComparison(null); setChart(null); setSelected(null); setSelectedContext(null); setSubmitting(false); setComparing(false); setChartLoading(false); setLoading(true);
     currentRef.current="|"+key(draft);
   }
   async function compareParent() {
     if(!parent || !run)return;
-    const seq=runSequence.current; setComparing(true); setError("");
+    const seq=runSequence.current, abort=new AbortController(); comparisonAbort.current?.abort(); comparisonAbort.current=abort; setComparing(true); setError("");
     try {
-      const pair=await command<Comparison>("compare",{parent_run_id:parent.run_id,variant_run_id:run.run_id,operation_id:crypto.randomUUID()});
+      const pair=await prepared<Comparison>("compare",{parent_run_id:parent.run_id,variant_run_id:run.run_id,operation_id:crypto.randomUUID()},abort.signal);
+      if(abort.signal.aborted || seq!==runSequence.current)return;
       const latest=await command<Status>("status",{run_id:pair.variant_run_id});
       if(seq===runSequence.current){setComparison(pair);setInformed(true);setRun(prior=>prior?.run_id===latest.run_id?{...prior,...latest}:prior);}
       await history();

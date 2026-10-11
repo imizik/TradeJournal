@@ -28,15 +28,17 @@ class Variants:
             return self.store._request(db, run_id)
 
     def _artifact(self, name):
-        with self.store._root() as fd:
-            try:
-                raw = self.store._read(fd, name)
-            except FileNotFoundError:
-                return None
         with self.store._db() as db:
             hashes = [json.loads(r[0])["sha256"] for r in db.execute(
                 "SELECT detail FROM event WHERE kind='r4_artifact'")
                 if json.loads(r[0])["artifact"] == name]
+        with self.store._root() as fd:
+            try:
+                raw = self.store._read(fd, name)
+            except FileNotFoundError:
+                if hashes:
+                    raise ValueError("committed R4 artifact is missing") from None
+                return None
         if hashes != [hashlib.sha256(raw).hexdigest()]:
             raise ValueError("immutable R4 artifact changed or was not committed")
         return json.loads(raw)
@@ -192,10 +194,16 @@ class Variants:
             return {**result, "parent_result": parent, "variant_result": variant}
 
     def _notes(self):
+        with self.store._db() as db:
+            names = {json.loads(r[0])["artifact"] for r in db.execute(
+                "SELECT detail FROM event WHERE kind='r4_artifact'")
+                if NOTE_NAME.fullmatch(json.loads(r[0])["artifact"])}
         with self.store._root() as fd:
-            names = [name for name in os.listdir(fd) if NOTE_NAME.fullmatch(name)]
+            present = {name for name in os.listdir(fd) if NOTE_NAME.fullmatch(name)}
             if len(names) > 1000:
                 raise ValueError("conclusion history exceeds the bounded limit")
+            if present - names:
+                raise ValueError("conclusion artifact was not committed")
         return [self._artifact(name) for name in names]
 
     def notes(self, run_ids):

@@ -71,13 +71,19 @@ class ResearchSession:
         if type(outcome_informed) is not bool or str(uuid.UUID(operation_id)) != operation_id:
             raise ValueError("canonical operation UUID and boolean provenance required")
         with self._prepare():
-            obs = self._observations(definition, fresh=True)
-            status = self.store.enqueue(obs.snapshot, definition, operation_id)
-            self.last_submission = {"run_id": status["run_id"], "data_id": status["data_id"]}
-            with self.store._root() as fd:
-                self.store._immutable(fd, f"submission.{operation_id}.json", canonical_bytes(
-                    {"run_id": status["run_id"], "outcome_informed": outcome_informed}))
-            return {**status, "definition": definition.canonical()}
+            with self.store._lock("variants.lock", nonblocking=True):
+                if self.variants._artifact(f"r4-operation.{operation_id}.json") is not None:
+                    raise ValueError("operation id reused for another research action")
+                return self._enqueue_question(definition, operation_id, outcome_informed)
+
+    def _enqueue_question(self, definition, operation_id, outcome_informed):
+        obs = self._observations(definition, fresh=True)
+        status = self.store.enqueue(obs.snapshot, definition, operation_id)
+        self.last_submission = {"run_id": status["run_id"], "data_id": status["data_id"]}
+        with self.store._root() as fd:
+            self.store._immutable(fd, f"submission.{operation_id}.json", canonical_bytes(
+                {"run_id": status["run_id"], "outcome_informed": outcome_informed}))
+        return {**status, "definition": definition.canonical()}
 
     def variant(self, raw, parent_run_id, operation_id, outcome_informed=False):
         definition = parse_definition(raw)
