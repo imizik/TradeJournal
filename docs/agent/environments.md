@@ -7,6 +7,7 @@ Which database a process talks to, how to tell, and what is safe where.
 | Environment | Database | Credentials | Safe to destroy |
 |---|---|---|---|
 | **Worktree** (default) | `backend/data/trade_journal.db` (SQLite) | none | yes — it is a file |
+| **UX sandbox** (`scripts/ux_sandbox.sh`) | `backend/data/ux_sandbox/ux_sandbox.db` (seeded SQLite) | market-data keys only, read from the main checkout's `backend/.env` | yes — delete the folder |
 | **CI** | ephemeral SQLite; a `postgres:16` container for parity tests | none | yes — thrown away every run |
 | **Dev** | a hosted branch you point a worktree at | that branch's role | yes — that is what it is for |
 | **Production** | PostgreSQL on the Ubuntu VPS, `127.0.0.1:5432/tradejournal` | restricted `tj_app` role | **no** |
