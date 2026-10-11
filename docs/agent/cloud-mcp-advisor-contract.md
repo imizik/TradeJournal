@@ -102,7 +102,17 @@ selectors, body or credentials. An inherited AF_UNIX listener supplies the
 kernel peer UID; only the reviewed frontend UID is accepted, including on each
 new connection. Configuration and socket drift fail closed before and after
 reads. No journal/practice/browser identity is accepted by that private route.
-The reader uses an existing private migrated invented SQLite through `mode=ro`,
+The reader has a distinct dedicated `tj-advisor-owner` UID, so it cannot borrow
+the writer process namespace/file descriptors or signal authority. Its separately
+approved exact named-user Linux ACL grants only fixture-directory traverse and
+SQLite read, with group/other entries zero. Numeric `reader_uid` and matching
+advisor `owner_reader_uid` pin this grant; live file/directory ACL/mode drift or
+absence refuses, without mounting NSS metadata. No retained UID/ACL change is
+authorized by source merge. Original owner-only fixture behavior remains when
+that optional grant is absent. Both reader and bridge must first use a newly
+reviewed inventoried runtime; installed immutable source32 rejects this permission
+change. Read-only mounts remain necessary but do not replace UID separation.
+The reader uses the existing migrated invented SQLite through `mode=ro`,
 `query_only=ON` and one read transaction. It returns only the pinned immutable
 handoff, exact receipt, assignment recovery status and read time. Packet/request
 identity, receipt digest and original fact citations are checked against the

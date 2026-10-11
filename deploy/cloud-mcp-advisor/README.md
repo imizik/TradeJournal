@@ -243,7 +243,28 @@ and placeholder binding; it is not a working config or grant. Reader binding
 pins the same frozen request; advisor binding enablement is not required for
 owner recovery. Only the top-level owner reader enable flag authorizes reads.
 
-The new service uses the existing unprivileged `tj-advisor-backend` identity but
+Before the optional owner grant, upgrade the advisor bridge/common runtime to
+this separately reviewed candidate and record the new complete runtime inventory.
+The old installed source32 rejects the new ACL mask/mode and must not receive
+that permission change or launch a newer unrecorded module. The four-unit default
+installation still keeps its original private fixture mode and no owner UID.
+Only a later approval may add `owner_reader_uid=<exact new UID>` to advisor config
+and matching `reader_uid=<exact new UID>` to owner config, create the new nologin
+identity and grant that named UID fixture directory traverse and SQLite read.
+This is an explicit isolated-advisor permission change, not a journal grant.
+The Linux POSIX ACL must exactly contain owner rw (directory rwx), one named
+owner-reader UID r (directory x), original group zero, mask r (directory x) and
+other zero. Modes become0640/0710 because of the ACL mask; they do not grant
+existing group members access. No other named entry, write bit or group/other
+permission is accepted. Absence of the configured grant, changed UID/ACL/mode,
+unsupported ACL metadata or directory drift refuses; normal unconfigured
+owner-only fixtures retain their old permission behavior. Both services verify
+these live xattrs without mounting passwd/group/NSS metadata. The bridge's UID
+pin cannot change in a running grant. Root must inventory/review these exact
+numeric identities and ACL bytes before any retained application of them.
+
+The new service requires a separately approved nologin `tj-advisor-owner` UID
+and private primary group, distinct from the writer and frontend UIDs, with
 an independent read-only mount namespace, exposing only its reviewed runtime,
 owner config, isolated advisor state directory and inherited owner socket. All
 four mounts are read-only; there is no writable database directory, journal
@@ -251,7 +272,10 @@ mount, IP family, OAuth/grant/key dependency or startup dependency on the MCP
 services. `tradejournal-advisor-owner.socket` grants its filesystem access to
 the reviewed owner frontend group (template `tradejournal`), while the process
 checks the exact configured frontend **UID** from the connected Unix socket.
-Root or another group member is denied by that UID check. No forwarded token,
+Root or another socket-group member is denied by that UID check. The distinct
+reader UID also prevents writer `/proc/<pid>/root`/fd access and signal authority;
+read-only mounts alone were insufficient when both processes shared a UID.
+No forwarded token,
 header, browser/assistant session or claimed UID substitutes for kernel identity.
 The retained platform is Linux/systemd; macOS `getpeereid` is supported only for
 disposable local acceptance. The app transport requires a Node frontend server
@@ -260,7 +284,8 @@ cannot activate this route without a separately reviewed architecture change.
 
 Before a later approved start, validate the complete owner runtime inventory
 before invoking its interpreter, pin configuration/unit/runtime/state hashes,
-verify the private existing migrated fixture and unchanged exported identity,
+verify the exact named-UID file/directory ACL and existing migrated fixture with
+unchanged exported identity,
 and confirm frontend profile/session, Unix directory/mode/group and exact UID.
 Frontend configuration requires `TJ_ACCESS_PROFILE=owner`, existing valid owner
 access settings, and these additional separately approved settings:
@@ -304,6 +329,8 @@ approved.
 
 The existing disposable Ubuntu advisor smoke additionally constructs only a
 fresh optional owner runtime/config/pair, proves native read-only mounts and
-SQLite/IP denial, exact peer/worker UIDs, receipt recovery/restart, disabled
-config, stop of both optional units and receipt-preserving unit rollback. It
+SQLite/IP denial, distinct exact peer/owner/writer UIDs, writer proc-root/fd/signal
+denial, exact named-UID-only ACL and live grant removal refusal, legitimate
+advisor read/save after the grant, receipt recovery/restart, disabled config,
+stop of both optional units and receipt-preserving unit rollback. It
 cleans its own temporary resources and is not an operator installer.

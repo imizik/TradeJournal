@@ -195,7 +195,9 @@ def test_corrupt_identity_receipt_or_original_fact_citation_refused(
             advisor["receipt"]["receipt_sha256"] = service.digest(
                 {k: v for k, v in advisor["receipt"].items() if k != "receipt_sha256"}
             )
-        db.execute("UPDATE practice_agent_call SET config_json=?", (json.dumps(config),))
+        db.execute(
+            "UPDATE practice_agent_call SET config_json=?", (json.dumps(config),)
+        )
     with pytest.raises(Exception):
         reader.create_app(directory / "owner.json")
 
@@ -224,6 +226,8 @@ def test_owner_templates_are_dormant_readonly_and_outside_four_unit_installer():
         and "PrivateNetwork=true" in unit
         and "RestrictAddressFamilies=AF_UNIX" in unit
     )
+    assert "User=tj-advisor-owner" in unit and "Group=tj-advisor-owner" in unit
+    assert "User=tj-advisor-backend" not in unit
     assert (
         "BindReadOnlyPaths=" in unit
         and "ReadWritePaths=" not in unit
@@ -247,3 +251,78 @@ def test_owner_templates_are_dormant_readonly_and_outside_four_unit_installer():
 
     assert len(UNITS) == 4 and not any("owner" in name for name in UNITS)
     assert "cloud_advisor_owner.py" not in BACKEND_FILES
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "valid",
+        "uid",
+        "write",
+        "group",
+        "extra",
+        "directory",
+        "mode",
+        "absent",
+        "unsupported",
+    ],
+)
+def test_named_uid_acl_is_exact_live_and_not_a_group_read_relaxation(
+    tmp_path, monkeypatch, mutation
+):
+    from cloud_mcp_advisor_common import fixture_acl, private_fixture
+
+    directory = tmp_path.resolve()
+    database = directory / "fixture.db"
+    database.write_bytes(b"invented only")
+    database.chmod(0o640)
+    directory.chmod(0o710)
+    uid = os.getuid() + 10000  # Different dedicated reader, never the writer UID.
+    file_acl = fixture_acl(uid)
+    dir_acl = fixture_acl(uid, directory=True)
+    if mutation == "uid":
+        file_acl = fixture_acl(uid + 1)
+    if mutation == "write":
+        file_acl = file_acl[:14] + b"\x06\x00" + file_acl[16:]
+    if mutation == "group":
+        file_acl = file_acl[:22] + b"\x04\x00" + file_acl[24:]
+    if mutation == "extra":
+        file_acl += file_acl[12:20]
+    if mutation == "directory":
+        dir_acl = fixture_acl(uid + 1, directory=True)
+    if mutation == "mode":
+        database.chmod(0o660)
+
+    def attrs(path, name):
+        assert name == "system.posix_acl_access"
+        if mutation == "absent":
+            raise OSError("ACL not supported/present")
+        return file_acl if Path(path) == database else dir_acl
+
+    if mutation == "unsupported":
+        monkeypatch.delattr(os, "getxattr", raising=False)
+    else:
+        monkeypatch.setattr(os, "getxattr", attrs, raising=False)
+    # Even an apparently readable group mode is denied unless an exact named
+    # UID grant was separately configured; group membership is irrelevant.
+    with pytest.raises(ValueError):
+        private_fixture(database)
+    if mutation == "valid":
+        private_fixture(database, owner_reader_uid=uid)
+        with pytest.raises(ValueError):
+            private_fixture(database, owner_reader_uid=os.getuid())
+    else:
+        with pytest.raises((ValueError, OSError)):
+            private_fixture(database, owner_reader_uid=uid)
+
+
+def test_reader_config_uid_requires_actual_process_and_acl_grant(owner_fixture):
+    directory, value = owner_fixture
+    value["config"]["reader_uid"] = os.getuid() + 1
+    (directory / "owner.json").write_text(json.dumps(value["config"]))
+    with pytest.raises(ValueError, match="dedicated UID"):
+        reader.create_app(directory / "owner.json")
+    value["config"]["reader_uid"] = os.getuid()
+    (directory / "owner.json").write_text(json.dumps(value["config"]))
+    with pytest.raises(ValueError, match="read-only owner UID grant"):
+        reader.create_app(directory / "owner.json")

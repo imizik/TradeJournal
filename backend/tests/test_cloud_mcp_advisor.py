@@ -23,6 +23,15 @@ RESOURCE = "https://advisor.example.test/advisor/mcp"
 SCOPES = "advisor:profile advisor:read advisor:write"
 
 
+def test_owner_read_uid_binding_cannot_change_during_advisor_grant(linked):
+    config = json.loads(linked.config.read_text())
+    config["owner_reader_uid"] = 999999
+    linked.config.write_text(json.dumps(config))
+    assert linked.backend.get(READ_PATH).status_code == 401
+    assert linked.backend.post(WRITE_PATH, json=linked.answer).status_code == 401
+    assert owner_receipt(linked) is None
+
+
 @pytest.fixture
 def linked(fixture, signing_key, tmp_path, monkeypatch):
     engine, run_id, call_id, _, shadow, owner = fixture

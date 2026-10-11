@@ -134,13 +134,16 @@ def serve(directory):
     os.dup2(listener.fileno(), 3, inheritable=True)
     # Keep the listener open even when dup2's source already was descriptor 3.
     os.set_inheritable(3, True)
+    # Disposable same-UID local fixture uses the actual app/protocol directly;
+    # retained CLI requires the distinct UID/ACL proven by native Ubuntu smoke.
+    script = "from cloud_advisor_owner import create_app,read_config,listening_fd,OwnerProtocol; import uvicorn,sys; p=sys.argv[1]; uvicorn.run(create_app(p),fd=listening_fd(read_config(p)),http=OwnerProtocol,access_log=False,proxy_headers=False)"
     os.execve(
         sys.executable,
         [
             sys.executable,
             "-B",
-            "cloud_advisor_owner.py",
-            "--config",
+            "-c",
+            script,
             str(directory / "owner.json"),
         ],
         {

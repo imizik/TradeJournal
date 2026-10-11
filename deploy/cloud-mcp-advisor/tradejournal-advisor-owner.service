@@ -5,8 +5,8 @@ After=tradejournal-advisor-owner.socket
 
 [Service]
 Type=exec
-User=tj-advisor-backend
-Group=tj-advisor
+User=tj-advisor-owner
+Group=tj-advisor-owner
 WorkingDirectory=/opt/tradejournal-advisor-owner/backend
 ExecStart=/opt/tradejournal-advisor-owner/backend/.venv/bin/python -B cloud_advisor_owner.py --config /etc/tradejournal-advisor-owner/config.json
 Environment=PYTHON_DOTENV_DISABLED=1

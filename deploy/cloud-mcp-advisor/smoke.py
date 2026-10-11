@@ -34,6 +34,7 @@ MARKER = Path("/opt/tradejournal/.advisor-ci-public-read-control")
 OWNER_ROOT = Path("/opt/tradejournal-advisor-owner")
 OWNER_CONFIG = Path("/etc/tradejournal-advisor-owner")
 OWNER_RUN = Path("/run/tradejournal-advisor-owner")
+OWNER_ACCOUNT = "tj-advisor-owner"
 OWNER_UNITS = ("tradejournal-advisor-owner.socket", "tradejournal-advisor-owner.service")
 
 
@@ -57,7 +58,7 @@ def guard():
                  *[control.UNIT_DIR / (u + ".d") for u in (*control.UNITS, PROXY)]):
         if path.exists() or path.is_symlink():
             raise ValueError("Refuse a pre-existing advisor native-smoke resource")
-    for account in (control.ACCOUNT, control.BACKEND_ACCOUNT):
+    for account in (control.ACCOUNT, control.BACKEND_ACCOUNT, OWNER_ACCOUNT):
         for database in ("passwd", "group"):
             if run("getent", database, account, check=False).returncode == 0:
                 raise ValueError("Refuse a pre-existing advisor native-smoke identity")
@@ -331,7 +332,24 @@ print("advisor native boundary positive" if positive else "advisor native bounda
         assert rpc("save_advisor_answer", body).json()["result"]["isError"]
         with Session(engine) as db:
             assert service.owner_view(db, run_id)["advisor"]["receipt"] == receipt
-    exercise_owner(config["profiles"][0], original_export, receipt)
+        def bridge_owner_grant(uid):
+            config["owner_reader_uid"] = uid
+            write(control.CONFIG / "config.json", config)
+            with Session(engine) as db:
+                service.set_enabled(db, assignment, True)
+            run("systemctl", "restart", *control.SERVICES)
+            assert rpc("get_advisor_request").json()["result"]["structuredContent"]["receipt"] == receipt
+            assert rpc("save_advisor_answer", body).json()["result"]["structuredContent"]["receipt"] == receipt
+            with Session(engine) as db:
+                service.set_enabled(db, assignment, False)
+            def revoked_acl_refused():
+                transport = httpx.HTTPTransport(uds=str(control.RUN / "backend.sock"))
+                with httpx.Client(transport=transport, trust_env=False, timeout=10) as bridge:
+                    headers = {"Authorization": "Bearer " + token()}
+                    assert bridge.get("http://backend/cloud-mcp/advisor/request", headers=headers).status_code == 503
+                    assert bridge.post("http://backend/cloud-mcp/advisor/answer", headers=headers, json=body).status_code == 503
+            return revoked_acl_refused
+        exercise_owner(config["profiles"][0], original_export, receipt, bridge_owner_grant)
     for unit in control.SERVICES:
         shutil.rmtree(control.UNIT_DIR / (unit + ".d"))
     run("systemctl", "daemon-reload")
@@ -346,24 +364,57 @@ print("advisor native boundary positive" if positive else "advisor native bounda
     print("Advisor native smoke passed: disabled install, distinct UIDs, private mounts/AF_UNIX, exact TLS routes/catalog, independent OAuth, invented cited save/uncertain recovery/retry/conflict, owner equality, restart, expiry/revocation, stop BOTH socket/process pairs and receipt-preserving rollback")
 
 
-def exercise_owner(binding, request, receipt):
+def exercise_owner(binding, request, receipt, bridge_owner_grant):
     """Actual optional owner units, never the normal retained installer."""
     import pwd
     frontend = pwd.getpwnam("tradejournal")
     backend = pwd.getpwnam(control.BACKEND_ACCOUNT)
+    run("useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", OWNER_ACCOUNT)
+    owner = pwd.getpwnam(OWNER_ACCOUNT)
+    assert len({owner.pw_uid, backend.pw_uid, frontend.pw_uid}) == 3
+    from cloud_mcp_advisor_common import fixture_acl, private_fixture
+    os.setxattr(control.STATE, "system.posix_acl_access", fixture_acl(owner.pw_uid, directory=True))
+    os.setxattr(control.STATE / "fixture.db", "system.posix_acl_access", fixture_acl(owner.pw_uid))
+    private_fixture(control.STATE / "fixture.db", owner_reader_uid=owner.pw_uid)
+    revoked_acl_refused = bridge_owner_grant(owner.pw_uid)  # Legitimate read/save still works after ACL grant.
+    bridge_pid = int(run("systemctl", "show", "tradejournal-advisor-backend.service", "--property=MainPID", "--value").stdout)
+    bridge_fd = next(p.name for p in Path(f"/proc/{bridge_pid}/fd").iterdir()
+        if os.readlink(p) == str(control.STATE / "fixture.db"))
     OWNER_ROOT.mkdir(mode=0o755)
     shutil.copytree(control.ROOT / "backend", OWNER_ROOT / "backend", symlinks=True)
     shutil.copyfile(REPO / "backend/cloud_advisor_owner.py", OWNER_ROOT / "backend/cloud_advisor_owner.py")
     (OWNER_ROOT / "backend/cloud_advisor_owner.py").chmod(0o644)
     OWNER_CONFIG.mkdir(mode=0o750)
-    run("chown", "root:tj-advisor", OWNER_CONFIG)
-    config = {"enabled": True, "peer_uid": frontend.pw_uid, "socket_uid": 0,
+    run("chown", "root:" + OWNER_ACCOUNT, OWNER_CONFIG)
+    config = {"enabled": True, "peer_uid": frontend.pw_uid, "socket_uid": 0, "reader_uid": owner.pw_uid,
         "socket_path": str(OWNER_RUN / "owner.sock"), "database_path": str(control.STATE / "fixture.db"), "binding": binding}
     write(OWNER_CONFIG / "config.json", config)
+    run("chown", "root:" + OWNER_ACCOUNT, OWNER_CONFIG / "config.json")
     probe = OWNER_CONFIG / "boundary.py"
-    probe.write_text('''import errno,os,socket,sqlite3
+    probe.write_text('''import errno,os,socket,sqlite3,sys
 from pathlib import Path
-assert os.geteuid()!=0
+expected_uid,writer_pid,writer_fd=map(int,sys.argv[1:])
+assert os.geteuid()==expected_uid
+for name in (f"/proc/{writer_pid}/root/var/lib/tradejournal-advisor/fixture.db",f"/proc/{writer_pid}/fd/{writer_fd}"):
+    try:
+        descriptor=os.open(name,os.O_WRONLY)
+    except OSError as error:
+        assert error.errno in (errno.EPERM,errno.EACCES,errno.ENOENT)
+    else:
+        os.close(descriptor)
+        raise AssertionError("Owner escaped readonly mount through writer proc namespace/fd")
+try:
+    os.listdir(f"/proc/{writer_pid}/fd")
+except OSError as error:
+    assert error.errno in (errno.EPERM,errno.EACCES,errno.ENOENT)
+else:
+    raise AssertionError("Owner can enumerate writer file descriptors")
+try:
+    os.kill(writer_pid,0)
+except OSError as error:
+    assert error.errno in (errno.EPERM,errno.EACCES)
+else:
+    raise AssertionError("Owner has signal authority over writer")
 for family in (socket.AF_INET,socket.AF_INET6):
     try:
         socket.socket(family,socket.SOCK_STREAM)
@@ -400,7 +451,7 @@ print("Owner native readonly mounts and IP denial passed")
         unit_hashes[name] = staging.digest(target)
     dropin = control.UNIT_DIR / (OWNER_UNITS[1] + ".d")
     dropin.mkdir()
-    (dropin / "boundary.conf").write_text("[Service]\nExecStartPre=/opt/tradejournal-advisor-owner/backend/.venv/bin/python -B /etc/tradejournal-advisor-owner/boundary.py\n")
+    (dropin / "boundary.conf").write_text(f"[Service]\nExecStartPre=/opt/tradejournal-advisor-owner/backend/.venv/bin/python -B /etc/tradejournal-advisor-owner/boundary.py {owner.pw_uid} {bridge_pid} {bridge_fd}\n")
     run("systemctl", "daemon-reload")
     for unit in OWNER_UNITS:
         assert run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0
@@ -409,7 +460,7 @@ print("Owner native readonly mounts and IP denial passed")
     run("systemctl", "start", *OWNER_UNITS)
     pid = int(run("systemctl", "show", OWNER_UNITS[1], "--property=MainPID", "--value").stdout)
     uid = int(Path(f"/proc/{pid}/status").read_text().split("Uid:", 1)[1].split()[0])
-    assert uid == backend.pw_uid, f"Owner expected UID={backend.pw_uid}, observed PID={pid} UID={uid}"
+    assert uid == owner.pw_uid, f"Owner expected UID={owner.pw_uid}, observed PID={pid} UID={uid}"
     client = "import httpx,json,sys; t=httpx.HTTPTransport(uds=sys.argv[1]); c=httpx.Client(transport=t); r=c.get('http://owner/owner/advisor'); print(json.dumps({'status':r.status_code,'value':r.json()}))"
     python = Path("/opt/tradejournal/current/backend/.venv/bin/python")
     def read_as(account):
@@ -423,8 +474,15 @@ print("Owner native readonly mounts and IP denial passed")
     assert read_as("root")["status"] == 403  # OS access alone is not the selected frontend identity.
     run("systemctl", "restart", OWNER_UNITS[1])
     assert read_as("tradejournal")["value"]["receipt"] == receipt
+    os.removexattr(control.STATE / "fixture.db", "system.posix_acl_access")
+    (control.STATE / "fixture.db").chmod(0o600)
+    assert read_as("tradejournal")["status"] == 503
+    revoked_acl_refused()
+    os.setxattr(control.STATE / "fixture.db", "system.posix_acl_access", fixture_acl(owner.pw_uid))
+    assert read_as("tradejournal")["value"]["receipt"] == receipt
     config["enabled"] = False
     write(OWNER_CONFIG / "config.json", config)
+    run("chown", "root:" + OWNER_ACCOUNT, OWNER_CONFIG / "config.json")
     assert read_as("tradejournal")["status"] == 503
     run("systemctl", "stop", OWNER_UNITS[0])
     run("systemctl", "stop", OWNER_UNITS[1])
@@ -437,7 +495,7 @@ print("Owner native readonly mounts and IP denial passed")
     shutil.rmtree(dropin)
     run("systemctl", "daemon-reload")
     assert staging.digest(control.STATE / "fixture.db") == before
-    print("Owner native smoke passed: exact frontend/backend UID, readonly mounts/SQLite, AF_UNIX, wrong-peer denial, exact original request/receipt recovery after advisor revocation, restart, disabled config, BOTH socket/process stop and receipt-preserving unit rollback")
+    print("Owner native smoke passed: distinct exact frontend/owner/writer UIDs, named-UID-only ACL, writer proc-root/fd/signal denial, readonly mounts/SQLite, AF_UNIX, wrong-peer/ACL-drift denial, exact original request/receipt recovery after advisor revocation, restart, disabled config, BOTH socket/process stop and receipt-preserving unit rollback")
 
 
 def cleanup():
@@ -458,9 +516,12 @@ def cleanup():
     for path in (control.ROOT, control.CONFIG, control.STATE, control.RUN, OWNER_ROOT, OWNER_CONFIG, OWNER_RUN):
         shutil.rmtree(path, ignore_errors=True)
     MARKER.unlink(missing_ok=True)
-    for account in (control.BACKEND_ACCOUNT, control.ACCOUNT):
+    for account in (OWNER_ACCOUNT, control.BACKEND_ACCOUNT, control.ACCOUNT):
         run("userdel", account, check=False)
     run("groupdel", control.ACCOUNT, check=False)
+    run("groupdel", OWNER_ACCOUNT, check=False)
+    assert run("getent", "passwd", OWNER_ACCOUNT, check=False).returncode != 0
+    assert run("getent", "group", OWNER_ACCOUNT, check=False).returncode != 0
 
 
 def main():

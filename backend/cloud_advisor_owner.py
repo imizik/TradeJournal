@@ -28,18 +28,18 @@ from uvicorn.protocols.http.h11_impl import H11Protocol
 from app.engine import advisor_shadow as service, decisions, practice
 from app.models import PracticeAgentCall
 from app.schema import ensure_current
-from cloud_mcp_advisor_common import AdvisorProfile, REQUEST_KEYS, reject_credentials
+from cloud_mcp_advisor_common import AdvisorProfile, REQUEST_KEYS, private_fixture, reject_credentials
 from cloud_mcp_d0 import MAX_BYTES, Strict
 
 READ_PATH = "/owner/advisor"
 
 
-def private_path(value, *, file=False):
+def private_path(value, *, file=False, reader_uid=None):
     path = Path(value)
     if not path.is_absolute() or str(path) != value or ".." in path.parts or any(p.is_symlink() for p in (path, *path.parents)):
         raise ValueError("Require an exact operator-owned path without symlinks")
-    if file and (not path.is_file() or path.suffix != ".db" or path.stat().st_mode & 0o077):
-        raise ValueError("Require a private existing fixture SQLite file")
+    if file:
+        private_fixture(path, owner_reader_uid=reader_uid)
     return path
 
 
@@ -48,6 +48,7 @@ class OwnerConfig(Strict):
     peer_uid: int = Field(ge=1)
     socket_path: str
     socket_uid: int = Field(ge=0)
+    reader_uid: int | None = Field(default=None, ge=1)
     database_path: str
     binding: AdvisorProfile
 
@@ -78,9 +79,9 @@ def socket_identity(config):
     return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode)
 
 
-def readonly_engine(path):
+def readonly_engine(path, *, reader_uid=None):
     def connect():
-        private_path(str(path), file=True)
+        private_path(str(path), file=True, reader_uid=reader_uid)
         connection = sqlite3.connect(f"file:{quote(str(path))}?mode=ro", uri=True, timeout=2,
             check_same_thread=False)
         connection.execute("PRAGMA query_only=ON")
@@ -143,8 +144,10 @@ def create_app(config_path):
         raise ValueError("Owner reader requires disabled dotenv loading")
     initial = read_config(config_path)
     initial_socket = socket_identity(initial)
-    path = private_path(initial.database_path, file=True)
-    engine = readonly_engine(path)
+    if initial.reader_uid is not None and initial.reader_uid != os.geteuid():
+        raise ValueError("Owner reader requires its exact dedicated UID")
+    path = private_path(initial.database_path, file=True, reader_uid=initial.reader_uid)
+    engine = readonly_engine(path, reader_uid=initial.reader_uid)
     ensure_current(engine)
     project(engine, initial.binding)
     app = FastAPI(openapi_url=None, docs_url=None, redoc_url=None)
@@ -156,6 +159,7 @@ def create_app(config_path):
             raise ValueError("Owner reader disabled or changed")
         if socket_identity(config) != initial_socket:
             raise ValueError("Owner socket changed")
+        private_path(config.database_path, file=True, reader_uid=config.reader_uid)
         return config
 
     @app.middleware("http")
@@ -239,5 +243,7 @@ if __name__ == "__main__":
     config = read_config(args.config)
     if not config.enabled:
         raise ValueError("Owner reader is disabled")
+    if config.reader_uid is None:
+        raise ValueError("Retained owner command requires an exact dedicated read-only UID grant")
     uvicorn.run(create_app(args.config), fd=listening_fd(config), http=OwnerProtocol,
         access_log=False, proxy_headers=False, limit_concurrency=8, timeout_keep_alive=2)

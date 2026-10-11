@@ -2,6 +2,7 @@
   "enabled": false,
   "peer_uid": "REQUIRES-EXACT-REVIEWED-OWNER-FRONTEND-UID",
   "socket_uid": 0,
+  "reader_uid": "REQUIRES-EXACT-NEW-DEDICATED-OWNER-UID",
   "socket_path": "/run/tradejournal-advisor-owner/owner.sock",
   "database_path": "/var/lib/tradejournal-advisor/fixture.db",
   "binding": {

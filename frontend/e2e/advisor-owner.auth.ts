@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import path from "node:path";
 import http from "node:http";
 
@@ -9,7 +9,7 @@ const publicOrigin = `http://127.0.0.1:${process.env.AUTH_ASSISTANT_PORT ?? 3130
 const root = path.resolve(__dirname, "../..");
 const directory = process.env.ADVISOR_OWNER_TEST_DIR!;
 test.describe.configure({ mode: "serial" });
-const python = `${root}/backend/.venv/bin/python`;
+const python = existsSync(`${root}/backend/.venv/bin/python`) ? `${root}/backend/.venv/bin/python` : process.env.PYTHON || "python3";
 const fixture = ["-B", "-m", "tests.advisor_owner_fixture"];
 const clean = { PATH: process.env.PATH, NODE_ENV: "test" as const, PYTHON_DOTENV_DISABLED: "1" };
 let child: ChildProcess;
