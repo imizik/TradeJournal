@@ -54,6 +54,8 @@ class AdvisorConfig(Strict):
     # Optional, explicitly reviewed named-UID read grant for the owner process.
     # None preserves the existing 0600-only fixture permission contract.
     owner_reader_uid: int | None = Field(default=None, ge=1)
+    assignment_management: bool = False
+    owner_peer_uid: int | None = Field(default=None, ge=1)
 
     @field_validator("advisor_only", mode="before")
     @classmethod
@@ -76,6 +78,8 @@ class AdvisorConfig(Strict):
 
     @model_validator(mode="after")
     def isolated_audience(self):
+        if self.assignment_management and self.owner_peer_uid is None:
+            raise ValueError("Managed questions require the dedicated owner frontend UID")
         issuer, keys = urlsplit(self.issuer_url), urlsplit(self.jwks_url)
         if (issuer.scheme, issuer.netloc) != (keys.scheme, keys.netloc):
             raise ValueError("Keys must match the advisor issuer")
@@ -139,7 +143,9 @@ class AdvisorVerifier(JWKSVerifier):
     def active_config(self):
         current = super().active_config()
         if (current is None or current.backend_socket != self.config.backend_socket
-                or current.owner_reader_uid != self.config.owner_reader_uid):
+                or current.owner_reader_uid != self.config.owner_reader_uid
+                or current.assignment_management != self.config.assignment_management
+                or current.owner_peer_uid != self.config.owner_peer_uid):
             return None
         initial = self.config.profiles[0].model_dump(exclude={"enabled"})
         return current if current.profiles[0].model_dump(exclude={"enabled"}) == initial else None

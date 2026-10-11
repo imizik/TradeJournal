@@ -13,7 +13,7 @@ personal coach/advisor is not the independent Shadow Isaac comparator.
 
 ## Current delivery board
 
-Checkpoint: October 11, 2026, against merged source through PR #253 and the
+Checkpoint: October 11, 2026, against merged source through PRs #251 and #254 and the
 operational evidence below. PR and host state can change; verify them before
 acting. Built means merged implementation, activated means enabled in the
 named environment, observed means the actual path ran, and accepted means the
@@ -24,7 +24,8 @@ slice's stated exit criteria were met. None implies trading edge.
 | D0/D1 connection and sample reads | Actual synthetic OAuth call and assigned sample tool/UI comparison recorded in the [connector scope](cloud-mcp-integration-scope.md); Mac-asleep synthetic result was owner-reported | This does not prove laptop-off acceptance for every later role or write path |
 | D2/historical sample choices | Scoped own-choice/receipt implementation exists; [D2](cloud-mcp-d2-contract.md) and [historical contract](cloud-mcp-historical-contract.md) retain their evidence requirements | Do not infer every live save/UI/restart gate passed from code or an earlier sample; reconcile actual receipts for a selected exercise |
 | Journal coach | **Initial integration accepted.** Continuous scoped read-only publication and actual Jo reads passed October 10 ET; one actual coaching review followed. [Durable acceptance summary](cloud-mcp-journal-contract.md#observed-continuous-journal-acceptance) | Eight approved fields over closed/expired Roth trades; no open positions, intentions or automatic coaching. Repeated usefulness and current health are separate questions |
-| Advisor handoff | [PR #214](https://github.com/imizik/TradeJournal/pull/214) records an owner-supplied Jo answer saved/reopened against an invented packet; MCP, disabled bundle and direct owner view merged in #219/#234/#247 | Actual connected Jo trial with matching in-app receipt/reopen/restart remains open; updater [PR #251](https://github.com/imizik/TradeJournal/pull/251) is in progress at this checkpoint |
+| Advisor handoff | [PR #214](https://github.com/imizik/TradeJournal/pull/214) records an owner-supplied Jo answer saved/reopened against an invented packet; MCP, disabled bundle and direct owner view merged in #219/#234/#247 | Actual connected Jo trial with matching in-app receipt/reopen/restart remains open; updater [PR #251](https://github.com/imizik/TradeJournal/pull/251) is merged, with full CI and disposable Ubuntu service proof passing at `22e98cf`; retained activation and actual Jo acceptance remain paused in the existing advisor chat |
+| Repeatable advisor questions | This branch implements the [bounded assignment contract](advisor-assignment-contract.md): owner create/assign/list/reopen/revoke, one selected invented request and preserved cited receipts | Local generated-token two-question proof and desktop/390px authenticated UI create/reopen/revoke/restart passed; native/current-head CI tracked in the implementation PR. Not merged, retained-activated or actual Jo accepted |
 | Shadow and A3 | Manual fixture assignments/choices and disclosure records implemented; A1/A2 infrastructure exists and A2 has one observed live operational lifecycle | Actual cloud-runner isolation, forward comparison and A3 human-timed acceptance remain unproven; latest A3 record is 0/3 sessions, not a current production-data audit |
 | D3 follow-through | Bounded design exists | No accepted user-facing subscription/scheduled follow-through. Journal export/key maintenance timers do not establish D3 |
 
@@ -50,8 +51,10 @@ Independent shadow acceptance does not block the already accepted coach.
 
 ### Coordination and acceptance
 
-The existing advisor/shadow chat owns the current advisor trial and its
-successor contract; the journal chat owns journal refresh/coaching. Research
+The existing advisor/shadow chat (“Implement advisor shadow handoff”) owns the
+current connected trial and its prepared grouped activation packet. The owner
+assigned the repeatable-question contract/implementation to “Build repeatable
+advisor assignments”; the journal chat owns journal refresh/coaching. Research
 retains its already-selected comparison/prospective slice and user acceptance,
 then yields new feature priority to Dots. Other chats should consult this board
 and the product priorities before starting adjacent work.

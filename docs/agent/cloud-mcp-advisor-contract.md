@@ -136,3 +136,23 @@ installed. See the [owner reader runbook](../../deploy/cloud-mcp-advisor/README.
 for the distinct runtime/UID approval and stop/rollback boundary. Disposable
 browser and Ubuntu native CI proof establish fixture behavior, not installed
 host activation or actual Jo acceptance.
+
+
+## Bounded repeatable questions (dormant successor)
+
+The [assignment-management contract](advisor-assignment-contract.md) describes
+an explicitly enabled successor using the same three-tool catalog and OAuth
+identity. Its pinned original fixture is the immutable scope anchor; each new
+question is stored alongside it with its own assignment ID/hash and receipt.
+The adapter still takes no request selector. Only the owner frontend's kernel
+Unix UID can reach the new fixed management routes on the isolated bridge;
+OAuth cannot create, enumerate or revoke questions. Disabled/default operation
+retains the single-request behavior described above. The read-only owner service
+and original export/receipt remain unchanged and accessible at `/advisor-review`.
+The new flow is `/advisor-review/questions`, linked only when enabled.
+
+The #251 prepared installer/activation packet does not activate this successor.
+Source merge does not authorize new socket grants, mounts or configuration.
+Fixture tests and disposable native proof are separate from actual Jo use and
+retained host permission review. Keep its remaining connected trial acceptance
+with the existing advisor chat.
