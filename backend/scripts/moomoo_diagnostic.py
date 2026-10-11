@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+from contextlib import suppress
 from datetime import datetime, timezone
 from getpass import GetPassWarning, getpass
 import hashlib
@@ -52,6 +53,27 @@ class NoRedirectConnect(connect):
 
 class DiagnosticError(Exception):
     """Only fixed, credential-free messages may reach this exception."""
+
+
+async def bounded_await(awaitable, timeout: float):
+    """Bound an operation without Python 3.11 wait_for's cancellation race.
+
+    asyncio.wait never treats downstream cancellation as a completed result.
+    Always cancel/await a pending child so no receive remains on the socket.
+    """
+    child = asyncio.create_task(awaitable)
+    try:
+        done, _ = await asyncio.wait({child}, timeout=timeout)
+        if not done:
+            raise asyncio.TimeoutError
+        return child.result()
+    finally:
+        if not child.done():
+            child.cancel()
+            with suppress(asyncio.CancelledError, Exception):
+                await child
+        elif not child.cancelled():
+            child.exception()  # Retrieve any raced error without wire logging.
 
 
 def secure_read(path: Path) -> bytes:
@@ -453,7 +475,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             remaining = until - time.perf_counter()
             if remaining <= 0:
                 raise asyncio.TimeoutError
-            message = json.loads(await asyncio.wait_for(socket.recv(), remaining))
+            message = json.loads(await bounded_await(socket.recv(), remaining))
             if not isinstance(message, dict):
                 raise DiagnosticError("WebSocket protocol message is malformed.")
             if message.get("id") == request_id:
@@ -503,7 +525,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                             "kind": kind, "code": result["code"]})
                 while time.perf_counter() < deadline:
                     try:
-                        message = json.loads(await asyncio.wait_for(socket.recv(), deadline - time.perf_counter()))
+                        message = json.loads(await bounded_await(socket.recv(), deadline - time.perf_counter()))
                     except asyncio.TimeoutError:
                         break
                     if not isinstance(message, dict):

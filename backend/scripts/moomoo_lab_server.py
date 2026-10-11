@@ -111,7 +111,7 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
                     if await request.is_disconnected():
                         break
                     try:
-                        event = await asyncio.wait_for(control.get(), 0.25)
+                        event = await diagnostic.bounded_await(control.get(), 0.25)
                     except asyncio.TimeoutError:
                         event = latest
                         latest = None

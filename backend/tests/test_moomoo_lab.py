@@ -187,3 +187,26 @@ def test_actual_asgi_http_disconnect_unsubscribes_before_session_release():
         assert socket.close_code == 1000
         assert socket.sent[-1]["action"] == "unsubscribe"
     asyncio.run(scenario())
+
+
+def test_bounded_wait_preserves_cancel_when_child_completes_and_cleans_timeout():
+    async def scenario():
+        ready = asyncio.Event()
+        async def immediate():
+            ready.set()
+            return "ready"
+        parent = asyncio.create_task(d.bounded_await(immediate(), 1))
+        await ready.wait()
+        parent.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await parent
+        stopped = asyncio.Event()
+        async def pending():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+        with pytest.raises(asyncio.TimeoutError):
+            await d.bounded_await(pending(), 0.001)
+        assert stopped.is_set()
+    asyncio.run(scenario())
