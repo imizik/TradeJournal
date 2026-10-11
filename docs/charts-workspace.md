@@ -733,7 +733,9 @@ source/price basis, markers, warmup state and retryable issue. Its opaque
 continuation is bound to the request and expires after 10 minutes in the
 single API process. A cold batch uses at most eight Alpaca HTTP attempts and
 10 seconds; the frontend resumes pending batches. History errors leave today's
-Tradier countdown and already displayed bars intact.
+Tradier countdown and already displayed bars intact. A failed request blocks
+automatic scroll-back callbacks even before React commits the error; explicit
+Retry history and targeted gap reads can start another request.
 
 `backend/app/engine/chart_history.py` keeps complete 04:00–20:00 New York
 sessions in `backend/data/chart_history/v1/stocks/1Min/sip/raw/`, under the

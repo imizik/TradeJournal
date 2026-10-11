@@ -14,7 +14,7 @@ records Take or Skip, and tracks the rules' own trade forward.
 **Status:** proposal, 2026-10-07. Nothing here is built. The user selected
 [Research Studio R0](agent/research-studio-r0.md) ahead of further S1–S2 work
 on 2026-10-10. The user subsequently selected [R1 observations](agent/research-studio-r1.md);
-R2 remains unselected. This plan otherwise retains priority
+[R2 reproducible analysis](agent/research-studio-r2.md) was subsequently selected; R3/R4 remain unselected. This plan otherwise retains priority
 over the [Research Studio / Workbench](strategy-workbench-roadmap.md).
 The revised event-first plan starts with R0 feasibility when selected; the
 retired Workbench W0 is not a technical prerequisite for S1–S2. This is a

@@ -29,7 +29,10 @@ bounded session roster into immutable in-memory snapshots. `research_studio`
 uses shared Factory features plus availability masks to select first-per-session
 observations; its CLI preview has no provider, DB, ledger, outcome or UI path.
 Both modules are protected by the pure import graph. See the
-[R1 contract](research-studio-r1.md).
+[R1 contract](research-studio-r1.md). Selected R2 adds supplied-snapshot outcome
+analysis and a separate operator-selected research SQLite image/artifact store.
+Its finite parent/child worker holds a separate execution lock, never uses app
+`job_run`/sync, and installs no service or timer; see the [R2 contract](research-studio-r2.md).
 
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.

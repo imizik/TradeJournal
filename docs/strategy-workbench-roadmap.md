@@ -1,8 +1,8 @@
 # Strategy Workbench: Research Studio roadmap
 
-**Status: R0 complete; R1 event observations implemented 2026-10-10.**
-R2–R4 remain unselected. The [R1 contract](agent/research-studio-r1.md) records
-implementation and acceptance; no Studio UI or outcome engine exists. The existing filename is retained so links remain stable.
+**Status: R0/R1 complete; R2 reproducible analysis implemented; verification/review gates recorded in its PR.**
+R3/R4 remain unselected. The [R2 contract](agent/research-studio-r2.md) records current work; the [R1 contract](agent/research-studio-r1.md) records
+implementation and acceptance; no Studio UI exists; R2 provides outcomes and a manual local lifecycle; its contract records acceptance limits. The existing filename is retained so links remain stable.
 The product-aware review at `4c42018` supersedes the strategy-form-first
 proposal of 2026-10-07 as recorded below. Implementation requires selection
 of one bounded phase; this update authorizes no data purchase, protocol
@@ -286,7 +286,7 @@ are established. Fetch occurrence chart windows lazily from the same manifest.
 ## Small delivery phases
 
 R0 probes and bounded R1 observations are complete with documented evidence
-limits; R2–R4 are **planned, not started**. V1 is complete only after R4.
+limits; R2 is implemented with documented acceptance limits; R3/R4 are **planned, not started**. V1 is complete only after R4.
 Each phase is separately selected and reviewed, with one bounded result; the
 plan does not authorize implementing the entire sequence at once.
 
@@ -332,7 +332,7 @@ proof; the complete connected Studio remains unbuilt.
 
 ## Decisions still open
 
-- R0 and R1 were selected before further S1–S2 work; R2 requires a separate selection.
+- R0 and R1 were selected before further S1–S2 work; R2 was subsequently selected in this chat; R3/R4 require separate selection.
 - Approved cache host and component measurements are recorded in the
   [R0 report](agent/research-studio-r0.md); end-to-end performance is still unproved.
 - Data-quality masks and concrete uncertainty parameters are fixed in the
@@ -341,5 +341,6 @@ proof; the complete connected Studio remains unbuilt.
 - Whether a saved event merits Factory promotion and how that promotion uses
   the weekly budget: decide only when the later handoff slice is selected.
 
-The next planning decision is whether to select R2 after inspecting R1
-coverage and correctness evidence. R1 does not authorize R2.
+R2 was selected after inspecting R1 coverage and correctness evidence; its
+[current contract](agent/research-studio-r2.md) owns acceptance. This selection
+does not authorize R3/R4.
