@@ -818,3 +818,33 @@ def test_moomoo_provisioning_preserves_existing_state_and_cleans_partial_creatio
     assert frontend["TJ_MOOMOO_WEB_ORIGIN"] == "https://fixture.tail000.ts.net"
     assert config.FRONTEND_ENV.stat().st_mode & 0o777 == 0o600
     assert config.CREDENTIALS.stat().st_mode & 0o777 == 0o700
+
+
+def test_moomoo_native_readiness_wait_is_bounded_and_rejects_auth_and_invalid_status(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "deploy"))
+    smoke = load("smoke")
+    clock = [0.0]
+    monkeypatch.setattr(smoke.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(smoke.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay))
+    calls = []
+    def starting(request, timeout):
+        calls.append(request)
+        if len(calls) == 1:
+            raise smoke.urllib.error.URLError("connection refused fixture")
+        return io.BytesIO(b'{"enabled":true}')
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", starting)
+    assert smoke.moomoo_status("fixture-token") == {"enabled": True}
+    assert len(calls) == 2
+    def refused(*args, **kwargs):
+        raise smoke.urllib.error.URLError("connection refused fixture")
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", refused)
+    with pytest.raises(RuntimeError, match="readiness timed out"):
+        smoke.moomoo_status("fixture-token", timeout=0.2)
+    def unauthorized(*args, **kwargs):
+        raise smoke.urllib.error.HTTPError("fixture", 403, "denied", {}, None)
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", unauthorized)
+    with pytest.raises(smoke.urllib.error.HTTPError):
+        smoke.moomoo_status("fixture-token")
+    monkeypatch.setattr(smoke.urllib.request, "urlopen", lambda *args, **kwargs: io.BytesIO(b'{"enabled":false}'))
+    with pytest.raises(ValueError, match="Unexpected bridge readiness"):
+        smoke.moomoo_status("fixture-token")

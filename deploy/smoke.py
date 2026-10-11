@@ -16,6 +16,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 
 import control
@@ -131,13 +132,25 @@ def autodeploy_pass():
     return json.loads(state.read_text()) if state.exists() else {}
 
 
-def moomoo_status(token):
+def moomoo_status(token, timeout=15):
     request = urllib.request.Request(
         "http://127.0.0.1:8196/status",
         headers={"Authorization": f"Bearer {token}"},
     )
-    with urllib.request.urlopen(request, timeout=5) as response:
-        return json.load(response)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=3) as response:
+                status = json.load(response)
+            if status != {"enabled": True}:
+                raise ValueError("Unexpected bridge readiness status")
+            return status
+        except urllib.error.HTTPError:
+            raise  # Authentication/configuration errors are not startup races.
+        except OSError:
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Bridge readiness timed out") from None
+            time.sleep(0.1)
 
 
 def assert_moomoo_credentials_are_loaded_as_service_user():
