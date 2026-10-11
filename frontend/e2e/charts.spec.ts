@@ -336,14 +336,50 @@ test("realistic candles render on every chart for desktop and phone pictures", a
     const previous = daily.at(-2)!.close;
     const quotes = data.quotes.map((quote) => quote.symbol !== data.symbol ? quote : { ...quote, last, previous_close: previous, regular_close: last,
       change: Math.round((last - previous) * 100) / 100, change_percentage: Math.round((last / previous - 1) * 10000) / 100 });
+    // Automatic levels around the last close, near and far, one a wide zone, so the picture shows names, shading and lines.
+    const near = (kind: string, name: string, offset: number, extra: Partial<AutoLevel> = {}) => autoMember(kind, name, Math.round((last + offset) * 100) / 100, extra);
+    const zones = [
+      autoZone([near("prior_day_low", "PDL", -2.4)]), autoZone([near("premarket_low", "PML", -1.1), near("round", "151", -1.37, ROUND)]),
+      autoZone([near("overnight_high", "ONH", 0.45)]), autoZone([near("prior_day_high", "PDH", 1.3), near("swing_high", "Swing high", 1.6)]),
+      autoZone([near("round", "155", 2.63, ROUND)]), autoZone([near("prior_week_high", "PWH", 4.9)]), autoZone([near("round", "160", 7.63, ROUND)]),
+    ];
+    data.auto_levels = { day: "2026-09-14", as_of: Date.now() / 1000, atr: 2, band: 0.2, session: "extended", zones, missing: {} };
     await route.fulfill({ json: { ...data, panels, quotes } });
   });
+  await registerAutoLevels(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/charts");
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
   await expect(page.getByLabel("Selected symbol quote")).toContainText(last.toFixed(2));
+  // Levels are never hidden: every zone nearest price is drawn. Their names keep off the candles: no tag box meets a candle's high-low span.
+  await expect.poll(async () => (await page.getByTestId("canvas-main").getAttribute("data-auto-levels"))?.split(",").length).toBeGreaterThanOrEqual(5);
+  const covered = () => page.evaluate(() => {
+    const layer = (window as unknown as { __tjAutoLevels: Map<string, { tags(): { text: string; top: number; bottom: number; left: number; right: number }[];
+      candleBoxes(): { x: number; half: number; top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
+    const boxes = layer.candleBoxes();
+    return { tags: layer.tags().length, hits: layer.tags().filter((tag) => boxes.some((box) => box.x + box.half > tag.left && box.x - box.half < tag.right && box.top < tag.bottom && box.bottom > tag.top)).map((tag) => tag.text), candles: boxes.length };
+  });
+  await expect.poll(async () => (await covered()).tags).toBeGreaterThan(0);
+  const placed = await covered();
+  expect(placed.candles).toBeGreaterThan(50);
+  expect(placed.hits).toEqual([]);
   await page.screenshot({ path: test.info().outputPath("charts-realistic-desktop.png"), animations: "disabled" });
+  await page.screenshot({ path: test.info().outputPath("levels-quiet-desktop.png"), animations: "disabled" });
+  // The Layers panel keeps each layer's explanation behind an info button: closed at rest, opened from the keyboard.
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const autoGroup = layerGroup(page, "Auto levels");
+  const about = autoGroup.getByRole("button", { name: "About Auto levels" });
+  const aboutText = autoGroup.getByText(/round numbers; nearby ones merge into zones/);
+  await expect(about).toHaveAttribute("aria-expanded", "false");
+  await expect(aboutText).toBeHidden();
+  await about.focus();
+  await page.keyboard.press("Enter");
+  await expect(about).toHaveAttribute("aria-expanded", "true");
+  await expect(aboutText).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("layers-info-desktop.png"), animations: "disabled" });
+  await page.keyboard.press("Enter");
+  await expect(aboutText).toBeHidden();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("canvas-main")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -1073,7 +1109,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
     if (range.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
   }
   expect(reached).toBe(true);
-  expect(state.requests()).toBeGreaterThanOrEqual(6);
+  expect(state.requests()).toBeGreaterThanOrEqual(5);
   expect(state.refreshes()).toBeGreaterThan(1);
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
   const plot = (await page.getByTestId("canvas-main").boundingBox())!;

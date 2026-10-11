@@ -486,17 +486,23 @@ cd backend
   the studies that were on come back with it. **Auto levels** (C2.3) sits
   between Drawings and Journal: it hides the automatic levels on every chart
   (an `autoLevelsHidden` field of its own, for the same reason) and lists any
-  levels the main symbol is missing and why. Options join when their layer
+  levels the main symbol is missing and why. Each layer's explanation sits
+  behind a small info button on its row (`aria-expanded`, closed at rest and
+  not remembered); status text, such as what is missing, always shows. Options join when their layer
   exists (C4.4).
 - **Automatic levels (C2.3).** Every chart draws the
   [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
   dimmer than the user's own: a lone level as a thin dotted line, a confluence
-  zone as a shaded band, named at the left on the main chart on a solid tag:
+  zone as a shaded band, named on the main chart on a solid tag, in clear space (UX-D: the rightmost gap of its row that no candle's high-low span crosses, which is the room past the last bar when there is some):
   its most telling member (option landmarks, then the expected move, prior day
   and week, session ranges, swings, round numbers, ranked strikes) and how many
   more it holds ("Max pain +2"; a round number reads "Round 223"). Tags never
-  overlap: the open card's zone wins, then the zones nearest the price, and a
-  tag that would cover another or be cut by the pane's edge is left out. Only
+  overlap: the open card's zone wins, then the zones nearest the price; a tag
+  that would cover another tries below the band, and one with no clear gap, or
+  that would be cut by the pane's edge, collapses to a short mark at the right
+  edge. Levels are never hidden, only names move or collapse. Only the zone
+  price is inside, else the nearest one above and one below, is shaded; the
+  others draw as their two dotted edge lines. Only
   the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
