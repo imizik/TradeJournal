@@ -28,6 +28,8 @@ DROPIN = old.UNIT_DIR / (trial.FRONTEND + ".d") / "advisor-trial.conf"
 OWNER_ENV = Path("/etc/tradejournal-dot-trial/access-owner.env")
 API_ENV = Path("/etc/tradejournal-dot-trial/access-backend.env")
 ROLES = ("adapter", "backend", "frontend", "bin", "operator")
+# Optional key upkeep (advisor_keys_control.py) must be removed before rollback.
+KEYS_RECORD = Path("/opt/tradejournal-advisor-v2-keys/keys-installation.json")
 
 
 def private_json(path):
@@ -296,6 +298,8 @@ def install(bundle, approved):
 
 def rollback():
     stop()  # Drift never prevents shutting down all advisor entrances.
+    if KEYS_RECORD.exists() or KEYS_RECORD.is_symlink():
+        raise ValueError("Run advisor_keys_control.py remove before trial rollback")
     record = installed()
     for name, expected in record["previous_units"].items():
         previous = stage.exact(ROOT / "previous-units" / name)
