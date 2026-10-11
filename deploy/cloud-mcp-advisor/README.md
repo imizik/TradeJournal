@@ -75,6 +75,9 @@ never TCP. Original 64KiB body/output, concurrency and deadline limits remain.
 Both services use `Type=exec`: startup waits for executable and credential setup
 before activation checks the running process. Native CI records the expected
 and observed process UIDs and requires all four to match the dedicated account.
+The public MCP middleware returns401 for invalid identity/audience/expired
+tokens and403 `insufficient_scope` for a valid token lacking `advisor:profile`;
+the independent backend still refuses missing read/write scopes with401.
 
 ## Installation and activation are separate approval gates
 

@@ -262,8 +262,13 @@ print("advisor native boundary positive" if positive else "advisor native bounda
                 json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args or {}}})
             return response
         assert client.post(RESOURCE, json={}).status_code == 401
-        for bearer in (token(sub="owner"), token(aud="https://journal.invalid/mcp"), token(scope="journal:read d0:profile"), token(iat=1, exp=2)):
-            assert rpc("get_advisor_request", bearer=bearer).status_code == 401
+        for case, bearer, expected in (("subject", token(sub="owner"), 401),
+                ("audience", token(aud="https://journal.invalid/mcp"), 401),
+                ("scope", token(scope="journal:read d0:profile"), 403), ("expiry", token(iat=1, exp=2), 401)):
+            denied = rpc("get_advisor_request", bearer=bearer)
+            print(f"Advisor native token denial: case={case} expected={expected} observed={denied.status_code}", flush=True)
+            assert denied.status_code == expected
+            assert ('error="insufficient_scope"' if expected == 403 else 'error="invalid_token"') in denied.headers["www-authenticate"]
         listing = client.post(RESOURCE, headers={"Authorization": "Bearer " + token(), "Accept": "application/json"},
             json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}}).json()
         assert {t["name"] for t in listing["result"]["tools"]} == {"get_profile", "get_advisor_request", "save_advisor_answer"}

@@ -61,6 +61,22 @@ def owner_receipt(linked):
     return linked.owner.get(f"/advisor-shadow/runs/{linked.run_id}").json()["advisor"]["receipt"]
 
 
+@pytest.mark.parametrize("change,status", [
+    ({"subject": "owner"}, 401), ({"audience": "https://journal.invalid/mcp"}, 401),
+    ({"scope": "journal:read d0:profile"}, 403), ({"now": 1}, 401),
+])
+def test_public_mcp_token_denial_status_and_no_receipt(linked, change, status):
+    token = _token(linked.signer, **{"audience": RESOURCE, "subject": "jo-advisor",
+        "client_id": "advisor-client", "scope": SCOPES, **change})
+    server = create_server(linked.config, backend_transport=httpx.ASGITransport(app=linked.app))
+    with TestClient(server.streamable_http_app()) as client:
+        response = client.post(RESOURCE, headers={"Accept": "application/json", "Authorization": "Bearer " + token},
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "get_advisor_request", "arguments": {}}})
+        assert response.status_code == status, response.text
+        assert ('error="insufficient_scope"' if status == 403 else 'error="invalid_token"') in response.headers["www-authenticate"]
+    assert owner_receipt(linked) is None
+
+
 def test_catalog_frozen_request_cited_save_owner_reload_and_legacy_origin(linked):
     before_shadow = linked.shadow.get("/receipt").json()
     server = create_server(linked.config, backend_transport=httpx.ASGITransport(app=linked.app))
