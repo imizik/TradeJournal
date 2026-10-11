@@ -7,9 +7,9 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
 import time
+from pathlib import Path
 
 import advisor_mcp_control as old
 import advisor_mcp_stage as staging
@@ -49,11 +49,12 @@ def diagnosis(run, *, path, status=None, transport=None, detail=None):
 def exercise(archive, scratch, run, *, context, token, identity, keys, resource, proxy):
     if os.geteuid() != 0 or os.environ.get("GITHUB_ACTIONS") != "true" or os.environ.get("TJ_DISPOSABLE_RUNNER") != "1":
         raise ValueError("Owner transition proof requires explicitly disposable CI")
-    import httpx
     import uuid
-    from sqlmodel import Session, create_engine
+
+    import httpx
     from app.engine import advisor_shadow as service
     from cloud_mcp_advisor_common import fixture_acl
+    from sqlmodel import Session, create_engine
     for path in (FIXTURE, control.ROOT, control.CONFIG, control.STATE, control.OWNER_ENV.parent,
             old.UNIT_DIR / trial.FRONTEND, old.UNIT_DIR / API, control.DROPIN.parent):
         if path.exists() or path.is_symlink():
@@ -74,7 +75,12 @@ def exercise(archive, scratch, run, *, context, token, identity, keys, resource,
     access_db = FIXTURE / "access.db"
     shutil.copyfile(old.STATE / "fixture.db", access_db)
     access_db.chmod(0o600)
-    env = {"PATH": old.ADMIN_PATH, "PYTHON_DOTENV_DISABLED": "1", "PYTHONDONTWRITEBYTECODE": "1",
+    backend_source = old.ROOT / "backend"
+    # Use the inventoried source, whose empty data directory already exists.
+    # Importing app from the dependency wheel creates site-packages/data and
+    # correctly trips the immutable-runtime guard, even with DATABASE_URL set.
+    env = {"PATH": old.ADMIN_PATH, "PYTHONPATH": str(backend_source),
+        "PYTHON_DOTENV_DISABLED": "1", "PYTHONDONTWRITEBYTECODE": "1",
         "DATABASE_URL": "sqlite:///" + str(access_db), "TJ_ACCESS_ENABLED": "true", "TJ_ACCESS_SAMPLE_DATA": "true",
         "TJ_ACCESS_ALLOW_LOCAL_HTTP": "true", "TJ_OWNER_GATEWAY_KEY": "o" * 43, "TJ_ASSISTANT_GATEWAY_KEY": "a" * 43,
         "TJ_OWNER_ORIGIN": "http://127.0.0.1:18860", "TJ_ASSISTANT_ORIGIN": "http://127.0.0.1:18862"}
@@ -84,7 +90,9 @@ def exercise(archive, scratch, run, *, context, token, identity, keys, resource,
         'token,row=access.issue_session(db,p,"owner"); db.commit(); print(token)')
     python = old.ROOT / "backend/.venv/bin/python"
     # The generated fixture cookie stays in memory; no credential/log output.
-    cookie = run(python, "-B", "-c", seed, env=env).stdout.decode().strip()
+    old.installed()
+    cookie = run(python, "-B", "-c", seed, env=env, cwd=backend_source).stdout.decode().strip()
+    old.installed()
     (FIXTURE / "fixture_api.py").write_text('''from fastapi import FastAPI
 from app.routers.access import router
 from app.access_middleware import AccessMiddleware
@@ -135,6 +143,7 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
                 time.sleep(.1)  # Bounded readiness, never assertion retry.
         before = authenticated()
         assert before["owner"] is True and before["identifier"] == "owner" and before["grants"] == {}
+        old.installed()  # The separate API must not mutate the old runtime either.
         def access_boundaries():
             nonlocal bootstrap_access
             # The trusted PRIVATE owner entrance intentionally bootstraps its
