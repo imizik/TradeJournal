@@ -102,8 +102,11 @@ reads once on a 2.5 s budget with no retry and mutes itself for five minutes); e
 Polygon failure.
 
 **News markers** (T3.5) put the same Focused headlines on the main chart: a small
-square above the candle that holds an article's publish time, labelled "N" for
-one article or "N3" for three. The **News markers** group of the Layers panel
+square floating about 26 px above the high of the candle that holds an article's
+publish time (clear of the candle and of a fill arrow on it), labelled "N" for
+one article or "N3" for three. They are their own marker set that the price
+scale ignores, so a marker above the frame is clipped, never a reason to
+shrink the candles; hover and click work on the marker where it is drawn. The **News markers** group of the Layers panel
 (and the chart menu's layer list) hides them; it is on by default and saved with
 the other layers (a `newsHidden` settings field of its own, for the same reason
 as `autoLevelsHidden`). While the layer is on the chart reads the news endpoint
@@ -287,7 +290,19 @@ cd backend
   navigation and resizing the window keep every chart instance, the selection,
   a scrolled-back view and the stream, and fetch nothing. The Indicators menu
   is not modal (hotkeys keep working); Escape closes it before it puts a tool
-  away or leaves full screen. Below 1024px the page scrolls as before: the
+  away or leaves full screen. The menu also holds a color swatch for EMA 9,
+  20, 50, 200, VWAP and RSI 14 (the VWAP bands follow VWAP's color at their own
+  alpha; legend dots and values use the chosen colors), a **Reset colors**
+  action, and a **Zoom speed** choice of Slow, Normal or Fast. Chosen colors are
+  the shared `indicatorColors` setting (only colors that differ from the
+  defaults, `#rrggbb`; anything else is dropped on read, old documents without
+  it load unchanged, and the field is always sent so a reset clears it).
+  Zoom speed is per device (`localStorage`, `frontend/lib/zoomSpeed.ts`):
+  lightweight-charts zooms by deltaY / 100 per wheel event with no speed
+  option, so each chart's container re-sends a vertical wheel or pinch event
+  (`ctrlKey` wheel) with deltaY times 1, 3 (default) or 6 while deltaX, the
+  cursor anchor and the modifiers are kept; the library still caps one event's
+  zoom, so a mouse wheel's large steps change little. Below 1024px the page scrolls as before: the
   toolbar wraps into rows of 44px controls (the intervals scroll sideways in
   theirs), the drawing tools are a toolbar row, the link, pause, refresh and
   shortcut controls, the smaller charts' S/M/L height, the data note and the
@@ -486,17 +501,23 @@ cd backend
   the studies that were on come back with it. **Auto levels** (C2.3) sits
   between Drawings and Journal: it hides the automatic levels on every chart
   (an `autoLevelsHidden` field of its own, for the same reason) and lists any
-  levels the main symbol is missing and why. Options join when their layer
+  levels the main symbol is missing and why. Each layer's explanation sits
+  behind a small info button on its row (`aria-expanded`, closed at rest and
+  not remembered); status text, such as what is missing, always shows. Options join when their layer
   exists (C4.4).
 - **Automatic levels (C2.3).** Every chart draws the
   [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
   dimmer than the user's own: a lone level as a thin dotted line, a confluence
-  zone as a shaded band, named at the left on the main chart on a solid tag:
+  zone as a shaded band, named on the main chart on a solid tag, in clear space (UX-D: the rightmost gap of its row that no candle's high-low span crosses, which is the room past the last bar when there is some):
   its most telling member (option landmarks, then the expected move, prior day
   and week, session ranges, swings, round numbers, ranked strikes) and how many
   more it holds ("Max pain +2"; a round number reads "Round 223"). Tags never
-  overlap: the open card's zone wins, then the zones nearest the price, and a
-  tag that would cover another or be cut by the pane's edge is left out. Only
+  overlap: the open card's zone wins, then the zones nearest the price; a tag
+  that would cover another tries below the band, and one with no clear gap, or
+  that would be cut by the pane's edge, collapses to a short mark at the right
+  edge. Levels are never hidden, only names move or collapse. Only the zone
+  price is inside, else the nearest one above and one below, is shaded; the
+  others draw as their two dotted edge lines. Only
   the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
@@ -712,6 +733,15 @@ cd backend
   the interval buttons, the watchlist's up/down arrows and each chart's
   latest-candles button (which now also restores the automatic price scale)
   do the same things.
+- **Candle room and the Auto chip.** The price pane leaves 10% above (so a level just past the highs stays in view) and 12% below
+  the fitted prices (`CANDLE_MARGINS` in `PriceChart.tsx`), volume is a thin strip
+  along the bottom (from 88% down, a little under the lowest candles) and the main
+  chart's RSI pane is 64 px, which gives the candles at least 20% more pixel height on
+  the realistic 1440x900 picture than before (202 px; the browser test checks it).
+  Dragging a price axis (or a jump that widens it) turns the automatic fit off;
+  while it is off an **Auto** button sits at the bottom of that chart's candle
+  price axis (TradingView's "A"), and clicking it, or Alt+R, fits the candles
+  again and hides it.
 - **Link time ranges** (off by default) makes panning or zooming one chart set
   the same visible *time* window on the other four. Coarser charts keep at least
   a dozen candles around that moment; finer charts that cannot fit the span at

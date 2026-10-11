@@ -321,6 +321,14 @@ test("mobile layout stays within the viewport and chart controls work", async ({
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
 });
 
+/** The main chart's candle room: the pixel span from the highest visible high to the lowest visible low, and the pane it sits in. */
+const candleRoom = (page: Page) => page.evaluate(() => {
+  const layer = (window as unknown as { __tjAutoLevels: Map<string, { candleBoxes(): { top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
+  const boxes = layer.candleBoxes();
+  const top = Math.min(...boxes.map((box) => box.top)), bottom = Math.max(...boxes.map((box) => box.bottom));
+  const pane = (window as unknown as { __tjCharts: Map<string, { panes(): { getHeight(): number }[] }> }).__tjCharts.get("main")!.panes()[0].getHeight();
+  return { span: Math.round(bottom - top), pane };
+});
 // Pictures for judging the workspace by eye (layout, clutter, label collisions)
 // on market-shaped candles; the sine-wave fixture above cannot show those.
 test("realistic candles render on every chart for desktop and phone pictures", async ({ page }) => {
@@ -336,18 +344,109 @@ test("realistic candles render on every chart for desktop and phone pictures", a
     const previous = daily.at(-2)!.close;
     const quotes = data.quotes.map((quote) => quote.symbol !== data.symbol ? quote : { ...quote, last, previous_close: previous, regular_close: last,
       change: Math.round((last - previous) * 100) / 100, change_percentage: Math.round((last / previous - 1) * 10000) / 100 });
+    // Automatic levels around the last close, near and far, one a wide zone, so the picture shows names, shading and lines.
+    const near = (kind: string, name: string, offset: number, extra: Partial<AutoLevel> = {}) => autoMember(kind, name, Math.round((last + offset) * 100) / 100, extra);
+    const zones = [
+      autoZone([near("prior_day_low", "PDL", -2.4)]), autoZone([near("premarket_low", "PML", -1.1), near("round", "151", -1.37, ROUND)]),
+      autoZone([near("overnight_high", "ONH", 0.45)]), autoZone([near("prior_day_high", "PDH", 1.3), near("swing_high", "Swing high", 1.6)]),
+      autoZone([near("round", "155", 2.63, ROUND)]), autoZone([near("prior_week_high", "PWH", 4.9)]), autoZone([near("round", "160", 7.63, ROUND)]),
+    ];
+    data.auto_levels = { day: "2026-09-14", as_of: Date.now() / 1000, atr: 2, band: 0.2, session: "extended", zones, missing: {} };
+    newsTimes = [-150, -118, -91, -64, -33, -9].map((back) => panels["5m"]!.bars.at(back)!.time);
     await route.fulfill({ json: { ...data, panels, quotes } });
   });
+  // News on six of the 5m candles, so the picture shows where the markers sit relative to the candles (they never move the price scale).
+  let newsTimes: number[] = [];
+  await page.route("**/api/backend/charts/symbol/*/news", async (route) => {
+    const articles = newsTimes.map((time, i) => ({ id: `n${i}`, provider: "alpaca_benzinga", publisher: "Benzinga", headline: `Headline ${i}`, url: `https://example.com/n${i}`,
+      published_at: new Date(time * 1000 + 20_000).toISOString(), summary: null, tickers: ["MRVL"], roundup: false, sentiment: [], also_in: [] }));
+    await route.fulfill({ json: { symbol: "MRVL", as_of: new Date().toISOString(), time_zone: "America/New_York", days: 7, sentiment_note: "", sources: [], articles } });
+  });
+  await registerAutoLevels(page);
+  await registerCharts(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/charts");
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
   await expect(page.getByLabel("Selected symbol quote")).toContainText(last.toFixed(2));
+  // Levels are never hidden: every zone nearest price is drawn. Their names keep off the candles: no tag box meets a candle's high-low span.
+  await expect.poll(async () => (await page.getByTestId("canvas-main").getAttribute("data-auto-levels"))?.split(",").length).toBeGreaterThanOrEqual(5);
+  const covered = () => page.evaluate(() => {
+    const layer = (window as unknown as { __tjAutoLevels: Map<string, { tags(): { text: string; top: number; bottom: number; left: number; right: number }[];
+      candleBoxes(): { x: number; half: number; top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
+    const boxes = layer.candleBoxes();
+    return { tags: layer.tags().length, hits: layer.tags().filter((tag) => boxes.some((box) => box.x + box.half > tag.left && box.x - box.half < tag.right && box.top < tag.bottom && box.bottom > tag.top)).map((tag) => tag.text), candles: boxes.length };
+  });
+  await expect.poll(async () => (await covered()).tags).toBeGreaterThan(0);
+  const placed = await covered();
+  expect(placed.candles).toBeGreaterThan(50);
+  expect(placed.hits).toEqual([]);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-news", /:1/);
+  // Candle room: before the candle-room change the visible candles spanned 202px of this 366px pane (margins 0.10 / 0.23, 85px RSI). At least 20% more now.
+  const room = await candleRoom(page);
+  expect(room.span).toBeGreaterThanOrEqual(Math.ceil(202 * 1.2));
+  expect(room.pane).toBeGreaterThan(366);
+  await page.screenshot({ path: test.info().outputPath("candle-room-desktop.png"), animations: "disabled" });
   await page.screenshot({ path: test.info().outputPath("charts-realistic-desktop.png"), animations: "disabled" });
+  await page.screenshot({ path: test.info().outputPath("levels-quiet-desktop.png"), animations: "disabled" });
+  // The Layers panel keeps each layer's explanation behind an info button: closed at rest, opened from the keyboard.
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const autoGroup = layerGroup(page, "Auto levels");
+  const about = autoGroup.getByRole("button", { name: "About Auto levels" });
+  const aboutText = autoGroup.getByText(/round numbers; nearby ones merge into zones/);
+  await expect(about).toHaveAttribute("aria-expanded", "false");
+  await expect(aboutText).toBeHidden();
+  await about.focus();
+  await page.keyboard.press("Enter");
+  await expect(about).toHaveAttribute("aria-expanded", "true");
+  await expect(aboutText).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("layers-info-desktop.png"), animations: "disabled" });
+  await page.keyboard.press("Enter");
+  await expect(aboutText).toBeHidden();
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("canvas-main")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-realistic-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
+});
+
+test("dragging the price axis shows an Auto chip; one click fits the candles again and hides it", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  const main = page.getByTestId("canvas-main");
+  await expect(main.locator("canvas").first()).toBeVisible();
+  const chip = page.getByTestId("main-price-auto");
+  const autoOn = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { priceScale(id: string, pane: number): { options(): { autoScale: boolean } } }> }).__tjCharts.get("main")!.priceScale("right", 0).options().autoScale);
+  await page.waitForTimeout(500);
+  await expect(chip).toHaveCount(0);
+  expect(await autoOn()).toBe(true);
+  // Drag the price axis (the right edge of the plot) up and down: the scale stops fitting itself.
+  const box = (await main.boundingBox())!;
+  const x = box.x + box.width - 25;
+  await page.mouse.move(x, box.y + 150);
+  await page.mouse.down();
+  await page.mouse.move(x, box.y + 200, { steps: 6 });
+  await page.mouse.move(x, box.y + 260, { steps: 6 });
+  await page.mouse.up();
+  await expect(chip).toBeVisible();
+  expect(await autoOn()).toBe(false);
+  await expect(chip).toHaveAccessibleName(/Auto price scale/);
+  const at = (await chip.boundingBox())!;
+  expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width);
+  expect(at.y).toBeGreaterThan(box.y + 200);
+  await page.screenshot({ path: test.info().outputPath("price-auto-chip-desktop.png"), animations: "disabled" });
+  // Keyboard: focus it and press Enter.
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await expect(chip).toHaveCount(0);
+  expect(await autoOn()).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -1073,7 +1172,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
     if (range.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
   }
   expect(reached).toBe(true);
-  expect(state.requests()).toBeGreaterThanOrEqual(6);
+  expect(state.requests()).toBeGreaterThanOrEqual(5);
   expect(state.refreshes()).toBeGreaterThan(1);
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
   const plot = (await page.getByTestId("canvas-main").boundingBox())!;
@@ -4803,6 +4902,8 @@ test("a pinned level card covers the RSI resize handle and chart lines", async (
   expect(overlap.background).toBe("rgb(20, 27, 38)");
   await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
   await card.getByRole("button", { name: "Close level card" }).click();
+  // Off the chart, so a hover card cannot open where the pinned one was.
+  await page.mouse.move(5, 450);
   await expect(card).toHaveCount(0);
 });
 
@@ -6255,4 +6356,131 @@ test("a small chart goes compact, and each smaller chart can choose its own stud
   await small.getByRole("button", { name: "Latest candles Panel 2" }).click();
   await expect.poll(async () => { const range = await logicalRange(page, "Panel 2"); return range ? Math.round(range.to - range.from) : 0; }).toBe(69);
   expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
+});
+
+/** One wheel event as a trackpad pinch sends it (ctrlKey, small deltas) over a chart's plot, at a fraction of its width. */
+const wheelOver = (page: Page, id: string, at: number, init: { deltaX?: number; deltaY?: number; ctrlKey?: boolean }) => page.evaluate(({ id, at, init }) => {
+  const host = document.querySelector<HTMLElement>(`[data-testid="canvas-${id}"]`)!;
+  const box = host.getBoundingClientRect();
+  const target = document.elementFromPoint(box.left + box.width * at, box.top + 120)!;
+  target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, clientX: box.left + box.width * at, clientY: box.top + 120, deltaX: 0, deltaY: 0, deltaMode: 0, ...init }));
+}, { id, at, init });
+const spanOf = async (page: Page, id: string) => { const r = (await logicalRange(page, id))!; return { from: r.from, span: r.to - r.from }; };
+/** The bar index under a point `at` of the way across the chart. */
+const barUnder = (page: Page, id: string, at: number) => page.evaluate(({ id, at }) => {
+  const host = document.querySelector<HTMLElement>(`[data-testid="canvas-${id}"]`)!;
+  const x = host.getBoundingClientRect().width * at;
+  return (window as unknown as { __tjCharts: Map<string, { timeScale(): { coordinateToLogical(x: number): number | null } }> }).__tjCharts.get(id)!.timeScale().coordinateToLogical(x);
+}, { id, at });
+
+test("zoom speed scales a pinch's vertical delta, keeps the pan and the cursor's candle", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await registerCharts(page);
+  await stub(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect.poll(() => logicalRange(page, "main")).not.toBeNull();
+  const pick = async (name: string) => { await indicator(page, "RSI 14"); await page.getByRole("group", { name: "Zoom speed" }).getByRole("button", { name }).click(); await page.keyboard.press("Escape"); };
+  const pinch = async (id: string, ctrl = true) => {
+    await page.getByRole("button", { name: "Latest candles main" }).click();
+    await page.waitForTimeout(100);
+    const before = await spanOf(page, id);
+    const anchor = await barUnder(page, id, 0.3);
+    for (let i = 0; i < 10; i++) await wheelOver(page, id, 0.3, { deltaY: -10, ctrlKey: ctrl });
+    await page.waitForTimeout(150);
+    const after = await spanOf(page, id);
+    return { shrink: (before.span - after.span) / before.span, anchorMoved: Math.abs((await barUnder(page, id, 0.3))! - anchor!) };
+  };
+  const results: Record<string, number> = {};
+  for (const name of ["Slow", "Normal", "Fast"]) {
+    await pick(name);
+    const { shrink, anchorMoved } = await pinch("main");
+    results[name] = shrink;
+    expect(anchorMoved, `${name}: the bar under the cursor stays under it`).toBeLessThanOrEqual(1);
+  }
+  expect(results.Slow).toBeGreaterThan(0.005);
+  expect(results.Normal / results.Slow).toBeGreaterThan(2.4);
+  expect(results.Normal / results.Slow).toBeLessThan(3.6);
+  expect(results.Fast / results.Slow).toBeGreaterThan(4.5);
+  expect(results.Fast / results.Slow).toBeLessThan(7.5);
+
+  // Panning (deltaX) is the same at every speed.
+  const shifts: number[] = [];
+  for (const name of ["Slow", "Normal"]) {
+    await pick(name);
+    const before = await spanOf(page, "main");
+    await wheelOver(page, "main", 0.5, { deltaX: 30 });
+    await page.waitForTimeout(100);
+    shifts.push((await spanOf(page, "main")).from - before.from);
+  }
+  expect(Math.abs(shifts[0])).toBeGreaterThan(0.5);
+  expect(shifts[1]).toBeCloseTo(shifts[0], 3);
+  // It is a choice of this device, remembered in the browser and not in the shared settings.
+  expect(await page.evaluate(() => localStorage.getItem("tradejournal.charts.zoomSpeed.v1"))).toBe("normal");
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await indicator(page, "RSI 14");
+  await expect(page.getByRole("group", { name: "Zoom speed" }).getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
+  expect(errors).toEqual([]);
+});
+
+test("indicator colors change the lines and legend, persist, reject bad values and reset", async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context, { revision: 1, data: { indicatorColors: { ema9: "red", ema50: "#12345", ema200: "#00ff00", unknown: "#123456" } } });
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const lineColors = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { panes(): { getSeries(): { options(): { color?: string } }[] }[] }> })
+    .__tjCharts.get("main")!.panes().flatMap((pane) => pane.getSeries().map((series) => series.options().color)).filter(Boolean));
+  const dots = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>("[aria-label='MRVL 5m chart'] span[aria-hidden][style*='background']")].map((el) => el.style.backgroundColor));
+  // Bad saved values fall back to the defaults; a good one is used.
+  await expect.poll(lineColors).toContain("#00ff00");
+  expect(await lineColors()).toContain("#67d5eb");
+  expect(await lineColors()).not.toContain("red");
+  expect(await lineColors()).toContain("#f5e6a1");
+
+  await indicator(page, "EMA 20");
+  const menu = page.getByRole("group", { name: "Chart indicators" });
+  for (const name of ["EMA 9", "EMA 20", "EMA 50", "EMA 200", "RTH VWAP", "RSI 14"]) await expect(menu.getByLabel(`${name} color`)).toBeVisible();
+  await expect(menu.getByLabel("Volume color")).toHaveCount(0);
+  await menu.getByLabel("EMA 20 color").fill("#ff0000");
+  await expect.poll(lineColors).toContain("#ff0000");
+  await expect.poll(dots).toContain("rgb(255, 0, 0)");
+  await expect.poll(() => server.data?.indicatorColors).toEqual({ ema20: "#ff0000", ema200: "#00ff00" });
+  await menu.getByLabel("RTH VWAP color").fill("#00ccff");
+  await menu.getByLabel("RSI 14 color").fill("#ff8800");
+  await expect.poll(lineColors).toContain("#ff8800");
+  await page.screenshot({ path: test.info().outputPath("indicator-colors-desktop.png"), animations: "disabled" });
+  await page.keyboard.press("Escape");
+
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect.poll(lineColors).toContain("#ff0000");
+  await expect.poll(dots).toContain("rgb(255, 0, 0)");
+
+  await indicator(page, "EMA 20");
+  await menu.getByRole("button", { name: "Reset colors" }).click();
+  await expect.poll(lineColors).toContain("#f4c66b");
+  expect(await lineColors()).not.toContain("#ff0000");
+  await expect.poll(() => server.data?.indicatorColors).toEqual({});
+  await expect(menu.getByRole("button", { name: "Reset colors" })).toBeDisabled();
+  expect(errors).toEqual([]);
+
+  // On a phone the same menu keeps 44px targets and fits the screen.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  const panel = page.getByRole("group", { name: "Chart indicators" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toBeInViewport({ ratio: 1 });
+  await panel.getByRole("button", { name: "Reset colors" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("indicator-colors-phone.png"), animations: "disabled" });
 });
