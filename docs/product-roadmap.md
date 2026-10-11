@@ -10,10 +10,52 @@ moomoo metric-source evaluation added 2026-10-10. This document records future d
 product discussion. No new feature is implemented by this document, and no
 production data was audited to write it.
 
+## Selected priorities — October 11, 2026
+
+The owner selected **Dots functionality as the top product priority** after
+reviewing delivered work and remaining acceptance. The outcome is that Isaac
+can request help, understand its evidence, and reopen Jo's saved answer in
+TradeJournal with little setup. Coaching, advice and independent shadow remain
+distinct roles within that experience.
+
+The [Dots delivery board](agent/dots-integration.md#current-delivery-board)
+is the shared status and next-work sequence. Use it before selecting another
+slice; the detailed contracts continue to own implementation and acceptance.
+
+1. **Dots first:** finish the actual connected advisor trial, then repeatable
+   assignments, dependable connection upkeep and approved real-data advice.
+   Bring the existing coach into the same workspace and expand independent
+   shadow only after the advisor foundation is useful and dependable.
+2. **Close the selected Research Studio work:** finish the existing event/period
+   comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
+   open at this checkpoint), retain its activation gates, and observe one
+   independent user research journey. Collect prospective evidence under its
+   frozen protocol once activated; do not use the waiting period to justify
+   more research features.
+3. **Defer new adjacent expansion:** additional Level 2/provider work, chart
+   polish, Dashboard expansion, broad research features and swing S1–S2 follow
+   Dots unless a concrete defect blocks ordinary use or the selected Dots flow.
+   Existing authorized bounded work may close; this is not a request to abandon
+   another chat's changes or disable existing features/services.
+
+This priority selection supersedes older cross-roadmap ordering below and on
+other boards. It does not mark unobserved acceptance complete or authorize a
+new implementation, data grant, service activation or trading capability.
+Future Dots steps need bounded contracts under the existing review/activation
+rules. Keep the current advisor and research chats as owners of their selected
+work; avoid duplicate implementations. Record built, activated, observed and
+accepted separately, with dated evidence; an open PR is not a delivered feature.
+
+Journal coaching's completed integration does not depend on Isaac writing
+trade notes or adopting a daily habit. Repeated usefulness is a separate product
+question. A3's real-session acceptance remains required for claims about that
+routine, not a gate on unrelated coaching completion.
+
 ## Ownership and priority
 
-This is the product direction for the journal's learning workflow. Existing
-plans retain their implementation scope and execution order:
+This is the product direction for the journal's learning workflow. The selected
+priorities above own cross-roadmap order; existing plans retain their feature
+scope and acceptance criteria:
 
 | Document | Owns |
 |---|---|
@@ -26,8 +68,8 @@ plans retain their implementation scope and execution order:
 | [Pre-trade advisor roadmap](advisor-roadmap.md) | Future on-the-spot Go/Wait/Pass check on the user's idea, attached to captures and graded; separate from the shadow |
 | This document | Structured reflection, weekly improvement, personal playbooks, planned risk and prospective experiments |
 
-This plan does not interrupt the active `next` rows in those boards. The
-milestones below are **future** or **conditional**, not a second active queue.
+The milestones below are **future** or **conditional**, not a second active
+queue. Their former recommendations do not override the Dots-first selection.
 When the user selects one, write a bounded implementation contract and deliver
 one slice. Advance status only with implementation and verification evidence.
 
@@ -71,7 +113,7 @@ the milestone statuses here.
 | ID | Deliverable | Depends on | Status |
 |---|---|---|---|
 | D0 | Read-only data audit and broad personal-pattern analysis | Existing journal data; explicit selection of the analysis task | future research |
-| M0 | Explore moomoo market-data endpoints and evaluate selective metric-source replacement | Phase 1 diagnostic; separately approved bounded comparisons with existing sources | future research; no integration authorized |
+| M0 | Explore moomoo market-data endpoints and evaluate selective metric-source replacement | Phase 1 diagnostic; separately approved bounded comparisons with existing sources | Read-only diagnostics/comparisons delivered; manual Level 2 connection landed in PRs #241/#248. This is not metric-source replacement; new expansion follows Dots |
 | J1 | Short post-trade reflection and review bookmarks | Existing trade detail; durable user-record design | future; recommended first product slice |
 | J2 | Weekly review with one commitment and a follow-up | J1; existing Daily Review and Analytics | future |
 | J3 | Personal setup playbook with winning and losing examples | J1; C3.4 for pre-trade template selection | future |

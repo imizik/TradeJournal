@@ -1,12 +1,25 @@
 # Strategy Workbench: Research Studio roadmap
 
-**Status: R0/R1 complete; R2 reproducible analysis implemented; verification/review gates recorded in its PR.**
-R3 is implemented and manually activated. R4 was selected for variants, conclusions and UI clarity; the [R4 contract](agent/research-studio-r4.md) records implementation and pending human acceptance. The [R2 contract](agent/research-studio-r2.md) records current work; the [R1 contract](agent/research-studio-r1.md) records
-implementation and acceptance; R3 connects the owner app workspace; R2 provides outcomes and a manual local lifecycle; its contract records acceptance limits. The existing filename is retained so links remain stable.
-The product-aware review at `4c42018` supersedes the strategy-form-first
-proposal of 2026-10-07 as recorded below. Implementation requires selection
-of one bounded phase; this update authorizes no data purchase, protocol
-migration, deployment or Factory run.
+**October 11, 2026: R0–R4 implemented; independent V1 user acceptance remains
+open.** R0/R1/R2/R3/R4 landed in PRs #205/#210/#215/#221/#238. R3 was manually
+activated; R4 fixture/performance evidence does not establish independent
+usefulness. The fixed newer-MU comparison landed in
+[PR #242](https://github.com/imizik/TradeJournal/pull/242), with
+[recorded exploratory results](research-studio-mu-period-comparison.md).
+
+The owner has now selected [Dots functionality first](product-roadmap.md#selected-priorities--october-11-2026).
+Finish the already-selected event/period comparison and prospective MU slice
+([PR #252](https://github.com/imizik/TradeJournal/pull/252), open at this checkpoint),
+then close V1 user acceptance and defer new Studio expansion. PR #252 reports
+preregistration for October 12, 2026–April 9, 2027; the collector remains inactive
+at this checkpoint. Merge, activation, actual collection and final review are
+separate states. Sparse events may leave the final result inconclusive.
+
+This is an independent event lab, not an executable strategy or Factory
+validation. The existing filename is retained for stable links. The revised
+R0–R4 plan supersedes the retired strategy-form-first W0–W10 proposal; its
+history is recorded below. No deployment or new data access is performed by
+this roadmap update.
 
 ## Product direction
 
@@ -32,15 +45,19 @@ or first-release requirements. The Studio does not establish profitability.
 
 ## Sequencing and ownership
 
-The user selected **R0, then R1** on 2026-10-10 ahead of further S1–S2 work.
-[R0 evidence](agent/research-studio-r0.md) and the
-[R1 contract](agent/research-studio-r1.md) record the results.
-S1–S2 otherwise retain their priority; this does not select R2 or change another
-board's active item. That order is a product
-priority, **not a technical dependency**: an independent event lab needs
-neither a swing family nor the practice loop. If repeated one-off research
-questions justify earlier Studio work, explicitly select R0 and record the
-priority change before starting it.
+The owner selected R0 and then the subsequent R1–R4 phases, followed by the
+fixed newer-MU study and the current comparison/prospective slice. The earlier
+R0-then-R1-only selection and S1–S2-first recommendation are historical, not the
+active queue. Current cross-roadmap order is owned by the
+[product priorities](product-roadmap.md#selected-priorities--october-11-2026).
+
+The existing research chat finishes its selected slice; other chats should not
+start parallel Studio features or a second prospective study. The remaining
+V1 acceptance is one independent question → run → variant → inspect → saved
+conclusion journey, with the understanding and feedback specified in
+[R4](agent/research-studio-r4.md#acceptance-and-evidence-limits). Repair observed
+friction; do not expand features merely because forward evidence takes time.
+Factory handoff, ML, more datasets/symbols and richer predicates stay conditional.
 
 The old Workbench W0 is not a prerequisite for S1–S2 or the event lab. Its
 store extraction may be useful, but its strategy catalog/normalize/explore
@@ -302,9 +319,9 @@ plan does not authorize implementing the entire sequence at once.
 | **R3 — Connected workspace** | Chart, conditions, population preview, analysis and common inspector | Browser fixtures complete both chart-start and question-start paths. Counts agree with engine observations; every view selects identical occurrence IDs/bars. Highlighting leaves N/statistics unchanged. Editing inputs and out-of-order responses cannot mislabel old results. Outcome reveals and cached reopens are recorded. Measured feedback/loading/cancellation behavior meets R0 targets. No live feed or protected data leaks through research navigation. |
 | **R4 — Variants, conclusions and usefulness** | Parent comparison, saved conclusions, user acceptance | Fixtures cover later replacement events in the same session, all three event sets and identical retained outcomes. Reload restores exact runs and append-only note history. User independently completes the sharp-decline journey and explains N, baseline, stale state and uncertainty. Record real unanswered questions/fallbacks and actual usage before approving expansion. No requirement that exploratory results be profitable. |
 
-### First slice
+### Original first slice — completed
 
-When implementation is selected, start with **R0**, not the retired W0. The
+The original implementation started with **R0**, not the retired W0. The
 smallest useful evidence is a read-only inventory and timings on the existing
 approved discovery cache, plus a temporary static fixture in the chart
 foundation. Keep generated probe output in temporary storage, not the research

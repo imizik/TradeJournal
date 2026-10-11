@@ -1,5 +1,10 @@
 # Charts epic: roadmap
 
+**October 11, 2026 priority:** [Dots functionality comes first](product-roadmap.md#selected-priorities--october-11-2026).
+Existing authorized bounded chart work may close and blocking defects may be
+fixed. New chart polish, Level 2/provider expansion and optional overlays defer
+to that selection; phase order below applies when chart work is selected.
+
 **The goal: replace TradingView.** This app becomes the user's primary charting
 environment for stocks and ETFs. The chart has to be as good to use as
 TradingView's, with this journal's own knowledge drawn on and beside it. Not a

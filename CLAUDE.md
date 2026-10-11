@@ -15,6 +15,16 @@ reconciliation and market-report artifacts. It also carries two separate
 domains: Strategy Lab (version-controlled Pine research) and a TradingView
 live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 
+## Current product priority
+
+The owner selected **Dots functionality first on October 11, 2026**. Before
+selecting new roadmap work, read [the shared priorities](docs/product-roadmap.md#selected-priorities--october-11-2026)
+and [Dots delivery board](docs/agent/dots-integration.md#current-delivery-board).
+Finish the selected advisor connection, then make questions repeatable and
+connection upkeep dependable. Already-selected Research Studio work may close;
+new adjacent expansion follows Dots. Detailed feature contracts still own scope
+and acceptance; this priority does not activate services or broaden grants.
+
 ## Read before changing things
 
 | File | For |
@@ -29,19 +39,19 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `deploy/README.md` | Ubuntu services, private access, release installation and rollback |
 | `docs/agent/feature-map.md` | Which file owns a feature, how to reach it in the UI, what proves it |
 | `docs/agent/delegation.md` | Claude Code on Opus: what to hand to the Sonnet `engineer` and `reviewer` subagents, the brief, escalation and review tiers |
-| `docs/product-roadmap.md` | Future trading-improvement workflow: reflections, weekly commitments, playbooks, planned risk and evidence-gated experiments; preserves active feature-roadmap priorities |
+| `docs/product-roadmap.md` | Current Dots-first cross-roadmap priorities; future reflections, commitments, playbooks, planned risk and evidence-gated experiments |
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 | `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
 | `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
 | `docs/agent/cloud-mcp-advisor-contract.md` | Dormant advisor-only MCP fixture catalog, separate offline OAuth/Unix boundary, immutable cited receipts and later activation gates |
 | `docs/agent/advisor-shadow-contract.md` | Manual fixture advisor/shadow assignment, packet/receipt isolation, disclosure order and later cloud/forward gates |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
-| `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
+| `docs/agent/dots-integration.md` | Current Dots delivery board and functionality sequence; accepted journal coach, pending advisor/shadow evidence, role boundaries and follow-through |
 | `docs/agent/cloud-mcp-integration-scope.md` | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
 | `docs/agent/cloud-mcp-d0-runbook.md` | D0 direct HTTPS/OAuth probe, offline public keys and no model/API spending path, manual trial setup and pending actual Dot acceptance |
 | `docs/agent/cloud-mcp-d1-contract.md` | First useful connector reads: one assigned simulated MU/NBIS run, independent backend OAuth checks, private Unix bridge and manual activation/rollback |
 | `docs/agent/cloud-mcp-d2-contract.md` | Opt-in demo choice tools: own immutable TAKE/WAIT/SKIP, retry/recovery receipts, independent write-scope checks and remaining live acceptance |
-| `docs/agent/cloud-mcp-journal-contract.md` | Separate read-only journal coach: approved closed-trade export, bounded exact statistics, offline OAuth and production activation gates |
+| `docs/agent/cloud-mcp-journal-contract.md` | Separate read-only journal coach: scoped export, exact statistics, offline OAuth and recorded continuous-access acceptance |
 | `docs/agent/cloud-browser-auth-contract.md` | Browser authentication and permissions: preserve owner Tailscale access, restricted assistant login, isolated HTTPS sample trial and live exposure gates; production assistant access disabled, Dot cloud sign-in reported; simulated decision-writing contract is the next increment |
 | `docs/agent/dot-decision-trial-contract.md` | First saved Dot decision: scoped sample writer, frozen MU/NBIS evidence, chart/review fixes and acceptance boundaries |
 | `docs/agent/dot-sample-replay-contract.md` | Jo’s own bounded sample TAKE replay: hidden continuation, scoped start permission, isolated event ledger and acceptance gates |
