@@ -77,6 +77,7 @@ test("five charts render, symbols link, and levels survive reload", async ({ pag
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
   await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
   await expect(page.getByLabel("Selected symbol quote")).toContainText("262.66");
+  await openLevelForm(page);
   await page.getByLabel("Level label").fill("Breakout");
   await page.getByLabel("Level price", { exact: true }).fill("263.50");
   await page.getByRole("button", { name: "Save price level" }).click();
@@ -1459,11 +1460,16 @@ test("Cmd/Ctrl+K and the watchlist switch symbols by keyboard and keep timeframe
 // ---- Server-saved settings: shared levels and layout, revision conflicts, offline copy ----
 
 const levelsPanel = (page: Page) => page.getByRole("region", { name: "Saved price levels" });
+/** The levels section starts folded when the symbol has none: its header's + opens the form. */
+async function openLevelForm(page: Page) {
+  if (!(await page.getByLabel("Level label").isVisible())) await page.getByRole("button", { name: "Add level" }).click();
+}
 const syncStatus = (page: Page) => page.getByRole("status", { name: "Chart settings" });
 /** Save a level from the watchlist's level form, opening the dock first when it is closed (on a phone, a sheet it then closes). */
 async function addLevel(page: Page, label: string, value: string) {
-  const opened = !(await page.getByLabel("Level label").isVisible());
+  const opened = !(await levelsPanel(page).isVisible());
   if (opened) await page.getByRole("button", { name: "Watchlist", exact: true }).click();
+  await openLevelForm(page);
   await page.getByLabel("Level label").fill(label);
   await page.getByLabel("Level price", { exact: true }).fill(value);
   await page.getByRole("button", { name: "Save price level" }).click();
@@ -2516,6 +2522,7 @@ test("H, 4, D and W switch the main chart at once; hotkeys stay off in fields an
   await chartedSymbol(page).click();
   await page.keyboard.type("hd 15");
   await expect(chartedSymbol(page)).toHaveValue("HD 15");
+  await openLevelForm(page);
   await page.getByLabel("Level label").click();
   await page.keyboard.type("4 W");
   await expect(page.getByLabel("Level label")).toHaveValue("4 W");
@@ -5326,6 +5333,9 @@ test("a level's menu sets an alert, its bell turns gray once it fires, and the l
   const server = await stubAlerts(page);
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(alertsPanel(page)).toContainText("0/20 active");
+  await expect(alertsPanel(page).getByRole("button", { name: /^Alerts/ })).toHaveAttribute("aria-expanded", "false"); // nothing active: folded
+  await alertsPanel(page).getByRole("button", { name: "About Alerts" }).click();
   await expect(alertsPanel(page)).toContainText("Right-click (long-press on a phone) a level");
   await addLevel(page, "Breakout", "256.00");
   const onLevel = async () => ({ x: 220, y: await levelY(page, "main", 256) });
@@ -5357,6 +5367,8 @@ test("a level's menu sets an alert, its bell turns gray once it fires, and the l
     level: 256, price: 255.98, source: "stream", event_at: at("12:01"), detected_at: at("12:01"), delivery: "sent", attempts: 1, delivered_at: at("12:01"), error: null } })) };
   await page.reload();
   await expect(drawn(page, "main")).toHaveAttribute("data-alerts", "256.00:fired");
+  await expect(alertsPanel(page)).toContainText("0/20 active");
+  await alertsPanel(page).getByRole("button", { name: /^Alerts/ }).click(); // a fired alert whose phone message went is not urgent: folded until asked
   const fired = alertsPanel(page).getByRole("listitem", { name: "MRVL Crosses below 256.00, fired" });
   await expect(fired).toContainText("Fired Sep 14, 2026 12:01 PM ET at 255.98 · Sent to phone 12:01 PM ET");
   await page.screenshot({ path: test.info().outputPath("alert-fired.png") });
@@ -5394,6 +5406,46 @@ test("an automatic level's menu sets a close-beyond alert on that chart's interv
   await rightClick(page, "Panel 2", { x: 120, y: await autoY(page, "Panel 2", zone.id) });
   await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Alert on a 15m close beyond" })).toBeVisible();
   await expect(itemMenu(page, "Auto level").getByRole("menuitem", { name: "Remove 5m close below 254.30" })).toBeVisible();
+});
+
+test("the dock's levels, alerts and journal sections are one-line headers that keep their counts, fold, and remember the fold", async ({ page, context }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await fakeChartSettings(context);
+  await registerCharts(page);
+  await stubAlerts(page, false);
+  await page.goto("/charts");
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  const levelsHead = levelsPanel(page).getByRole("button", { name: /^MRVL levels/ });
+  const alertsHead = alertsPanel(page).getByRole("button", { name: /^Alerts/ });
+  const journalHead = page.getByRole("region", { name: "Journal executions" }).getByRole("button", { name: /^On your journal/ });
+  // Nothing saved yet: all three are folded, counts and the add action stay on the header line, help is behind (i).
+  await expect(levelsHead).toHaveText(/MRVL levels\s*0\/30/);
+  await expect(alertsHead).toHaveText(/Alerts\s*0\/20 active/);
+  for (const head of [levelsHead, alertsHead, journalHead]) await expect(head).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByLabel("Level label")).toHaveCount(0);
+  await expect(levelsPanel(page)).not.toContainText("Save support, resistance");
+  await expect(alertsPanel(page)).toContainText("Phone alerts are not set up on this server"); // status is not folded away
+  await levelsPanel(page).getByRole("button", { name: "About MRVL levels" }).click();
+  await expect(levelsPanel(page)).toContainText("Save support, resistance");
+  // + opens the form with the price ready to type.
+  await levelsPanel(page).getByRole("button", { name: "Add level" }).click();
+  await expect(levelsHead).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByLabel("Level price", { exact: true })).toBeFocused();
+  await page.getByLabel("Level label").fill("Breakout");
+  await page.getByLabel("Level price", { exact: true }).fill("263.50");
+  await page.getByRole("button", { name: "Save price level" }).click();
+  await expect(levelsHead).toHaveText(/MRVL levels\s*1\/30/);
+  await page.screenshot({ path: test.info().outputPath("dock-tidy-sections-desktop.png"), animations: "disabled" });
+  // Folding keeps the count, and the choice is remembered on this device.
+  await levelsHead.click();
+  await expect(levelsHead).toHaveAttribute("aria-expanded", "false");
+  await expect(levelsHead).toHaveText(/1\/30/);
+  await expect(page.getByLabel("Level label")).toHaveCount(0);
+  await page.reload();
+  await expect(drawn(page, "main")).toHaveAttribute("data-bars", "240");
+  await expect(levelsHead).toHaveAttribute("aria-expanded", "false");
+  await levelsHead.click();
+  await expect(levelsPanel(page)).toContainText("Breakout");
 });
 
 test.describe("phone alerts list", () => {

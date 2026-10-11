@@ -97,6 +97,16 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     try { localStorage.setItem(TAB_KEY, tab); } catch { /* keep working without storage */ }
   }
 
+  // The tab row scrolls sideways at a narrow width: bring the chosen tab into it (sideways only, so the dock itself does not jump).
+  useEffect(() => {
+    if (!view.expanded) return;
+    const tab = document.getElementById(`${id}-${view.tab}`);
+    const list = tab?.parentElement;
+    if (!tab || !list) return;
+    if (tab.offsetLeft < list.scrollLeft) list.scrollLeft = tab.offsetLeft;
+    else if (tab.offsetLeft + tab.offsetWidth > list.scrollLeft + list.clientWidth) list.scrollLeft = tab.offsetLeft + tab.offsetWidth - list.clientWidth;
+  }, [id, view.tab, view.expanded]);
+
   const news = useSymbolNews(symbol, view.ready && view.expanded && view.tab === "News");
   const shown = view.tab === "News" ? (news.data ? { key: `News|${symbol}`, data: news.data } : news.error ? { key: `News|${symbol}`, error: news.error } : null)
     : result?.key === `${view.tab}|${symbol}` ? result : null;
@@ -105,13 +115,13 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
     {view.expanded && <div id={`${id}-content`}>
-      {/* Names never squeeze into each other: a narrow dock wraps the tabs onto a second row. */}
-      <div role="tablist" aria-label="Symbol info tabs" className="flex flex-wrap border-y border-slate-700/40">
+      {/* One row. Names never squeeze into each other: a narrow dock scrolls the row sideways, and the chosen tab is kept in view. */}
+      <div role="tablist" aria-label="Symbol info tabs" className="relative flex overflow-x-auto border-y border-slate-700/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {
             const next = event.key === "ArrowRight" ? (index + 1) % TABS.length : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
             if (next != null) { event.preventDefault(); event.stopPropagation(); select(TABS[next]); document.getElementById(`${id}-${TABS[next]}`)?.focus(); }
-          }} className={`min-h-11 flex-auto whitespace-nowrap px-2 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
+          }} className={`min-h-11 flex-auto whitespace-nowrap border-b-2 px-2.5 py-2.5 text-[11px] lg:min-h-0 ${view.tab === tab ? "border-sky-400 bg-sky-400/5 text-sky-300" : "border-transparent text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
         {/* Peers live in the Overview tab rather than above every tab. */}

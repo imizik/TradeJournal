@@ -26,8 +26,8 @@ function Article({ article, symbol, minute, lit, first }: { article: NewsArticle
     <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-slate-500">
       <time dateTime={article.published_at} title={newYorkTime(article.published_at)}>{ago(article.published_at, minute * 60_000)}</time>
       <span>{article.publisher ?? "Unknown source"}</span>
-      {more > 0 && <span title={article.tickers.join(", ")} className="rounded border border-slate-700 px-1.5 py-0.5">+{more} tickers</span>}
-      {mine && <span title={`Polygon's sentiment for ${symbol}, not ours${mine.reasoning ? `: ${mine.reasoning}` : ""}`} className={`rounded border border-slate-700 px-1.5 py-0.5 ${TONE[mine.sentiment]}`}>Polygon: {mine.sentiment}</span>}
+      {more > 0 && <span title={`Tagged tickers: ${article.tickers.join(", ")}`}>+{more}</span>}
+      {mine && <span title={`Polygon's sentiment for ${symbol}, not ours${mine.reasoning ? `: ${mine.reasoning}` : ""}`} className={TONE[mine.sentiment]}>Sentiment: {mine.sentiment}</span>}
     </p>
     {open && <div className="space-y-1 text-slate-300">
       <p>{article.summary ?? "No summary from the provider."}</p>

@@ -2,6 +2,7 @@ import { Bell, BellOff, RotateCcw, Trash2 } from "lucide-react";
 import { alertText, deliveryText } from "@/lib/alerts";
 import type { AlertsPayload, LevelAlert } from "@/lib/alerts";
 import { etTime, price } from "@/lib/charts";
+import DockSection from "./DockSection";
 
 const MAX_ACTIVE = 20;
 
@@ -20,10 +21,12 @@ export default function AlertsPanel({ data, prices, moved, narrow, onRearm, onRe
   const alerts = data?.alerts ?? [];
   const active = alerts.filter((alert) => alert.state === "active").length;
   const icon = `inline-flex shrink-0 items-center justify-center rounded text-slate-500 hover:bg-slate-800 ${narrow ? "h-11 w-11" : "h-6 w-6"}`;
-  return <section className="border-t border-slate-700/40 p-3" aria-label="Price alerts">
-    <div className="mb-2 flex items-center justify-between"><h2 className="text-xs font-medium text-slate-200">Alerts</h2>
-      <span className="text-[10px] text-slate-600">{active}/{MAX_ACTIVE} active</span></div>
-    {data && !data.phone && <p className="mb-2 text-[10px] leading-4 text-amber-300">Phone alerts are not set up on this server, so alerts show here only.</p>}
+  // Open for an alert that is waiting, or one whose phone message did not go: that is status, not first-use help.
+  const undelivered = alerts.some((alert) => alert.event && alert.event.delivery !== "sent");
+  const attention = active > 0 || undelivered;
+  return <DockSection name="alerts" ariaLabel="Price alerts" title="Alerts" count={`${active}/${MAX_ACTIVE} active`} defaultOpen={attention} forceOpen={undelivered} narrow={narrow}
+    info="Right-click (long-press on a phone) a level, a horizontal ray or an automatic level to set an alert. It reaches your phone with this page closed."
+    status={data && !data.phone ? <p className="text-[10px] leading-4 text-amber-300">Phone alerts are not set up on this server, so alerts show here only.</p> : undefined}>
     {alerts.length ? <ul className="space-y-2">{alerts.map((alert) => {
       const shown = prices.get(alert.id) ?? alert.price;
       const text = `${alert.symbol} ${alertText(alert, shown)}`;
@@ -41,6 +44,6 @@ export default function AlertsPanel({ data, prices, moved, narrow, onRearm, onRe
           Fired {etTime(event.event_at, true)} {etTime(event.event_at)} ET at {price(event.price)}{event.source === "minute_bars" ? " (1-minute bar)" : ""} · <span
             className={event.delivery === "sent" ? "text-emerald-400" : "text-amber-300"} title={event.error ?? undefined}>{deliveryText(event, !!data?.phone)}</span></p>}
       </li>;
-    })}</ul> : <p className="text-[11px] leading-5 text-slate-500">Right-click (long-press on a phone) a level, a horizontal ray or an automatic level to set an alert. It reaches your phone with this page closed.</p>}
-  </section>;
+    })}</ul> : <p className="text-[11px] leading-5 text-slate-500">No alerts yet.</p>}
+  </DockSection>;
 }
