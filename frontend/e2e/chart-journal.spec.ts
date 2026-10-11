@@ -148,18 +148,20 @@ for (const arrival of ["together", "main first", "main last"]) {
   test(`a trade opened from its page shows its months-old candles and arrows, its card, and goes back to live (${arrival})`, async ({ page }) => {
     await registerCharts(page);
     const now = Math.floor(Date.now() / 1000);
-    const history: { interval: string; before: number }[] = [];
+    const history: { symbol: string; interval: string; before: number }[] = [];
     const firstPages = new Set<string>();
     await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: workspace(route.request().url(), now) }));
     await page.route("**/api/backend/charts/history?**", async (route) => {
       const query = new URL(route.request().url()).searchParams;
+      const symbol = query.get("symbol")!;
       const interval = query.get("interval") as Interval;
       const before = Number(query.get("before"));
-      history.push({ interval, before });
+      history.push({ symbol, interval, before });
       // The panels load independently. Exercise either side of the focus race,
       // without relaxing the entry/exit, marker or back-to-live assertions.
-      if (!firstPages.has(interval)) {
-        firstPages.add(interval);
+      const key = `${symbol}:${interval}`;
+      if (!firstPages.has(key)) {
+        firstPages.add(key);
         if (arrival !== "together" && (interval === "5m") !== (arrival === "main first")) await new Promise((resolve) => setTimeout(resolve, 750));
       }
       const step = STEP[interval];
@@ -180,7 +182,7 @@ for (const arrival of ["together", "main first", "main last"]) {
     await expect(banner).toContainText("Showing NVDA Jul 14, 2026, 9:40 AM–10:20 AM ET");
     await expect(page.getByRole("region", { name: /NVDA 5m chart/ })).toHaveCount(1);
     // The 5m page ends at the close of that day's extended session (20:00 New York), not today.
-    await expect.poll(() => history.find((h) => h.interval === "5m")?.before).toBe(Date.parse("2026-07-15T01:00:00Z") / 1000);
+    await expect.poll(() => history.find((h) => h.symbol === "NVDA" && h.interval === "5m")?.before).toBe(Date.parse("2026-07-15T01:00:00Z") / 1000);
     // The main chart is centred on the trade, with its arrow on the entry candle.
     await expect.poll(async () => { const range = await visible(page); return !!range && range.from <= ENTRY && range.to >= EXIT; }).toBe(true);
     await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
