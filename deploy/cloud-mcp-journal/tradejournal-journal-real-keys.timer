@@ -1,0 +1,12 @@
+[Unit]
+Description=Maintain the journal coach public verification keys every 15 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Unit=tradejournal-journal-real-keys.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,7 @@
+{
+  "fixture_note": "Public RFC 8032 test key; no real credential. Four-field payload from official Chinese moomoo auth documentation.",
+  "timestamp_ms": 1782357937000,
+  "nonce": "offline_nonce",
+  "payload": "1782357937000\noffline_nonce\nWEBSOCKET\nws/auth",
+  "signature_base64": "Iv9s33Mq/zXLkYW1Hyb+fk+lrXIx7alp1qs6i6ln0aAjtMLVX12ufbXiCKyTBiueSbeJSdocAs1DVrVlSX+LAg=="
+}

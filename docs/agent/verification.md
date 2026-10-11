@@ -27,6 +27,63 @@ a private temporary directory; successful runs remove them.
 On Windows, run these through Git Bash or WSL. `startdev.ps1` remains the
 native PowerShell launcher for the app itself.
 
+## Verification ownership
+
+The owner assigns checks and remains responsible for the full verification
+required by `CLAUDE.md` and the feature's acceptance criteria. Workers may run
+focused checks for their assigned scope; they report the tested revision,
+any uncommitted changes, command, environment and result. Their report must
+identify which required checks remain for the owner to complete.
+
+Reuse a passing result when the tested code, dependencies, configuration and
+relevant environment are unchanged. Record the tested revision and why later
+changes do not affect the check; if that cannot be established, rerun it.
+Neither an agent handoff nor a new SHA alone invalidates local evidence.
+Required CI still passes on the exact final pushed head, and the
+[review coverage rules](pr-review.md#owner-sequence), including proof-pending
+and catch-up requirements, remain unchanged.
+
+## CI-backed verification
+
+Use this path when the change's required full automated checks run in CI and
+its environment-specific acceptance can be established locally. The default
+full local `verify.sh` remains available, including for offline work or checks
+that CI does not cover. This changes where proof runs, not which proof is needed.
+
+1. Diagnose known failures and run the changed area's causal regressions locally.
+   Batch browser scenarios in one invocation. For frontend changes, run whole
+   frontend typecheck and lint, and the specified interaction/DOM acceptance.
+   A prior failure is not closed by an unexplained retry. Preserve its evidence
+   and show that the repair addresses its cause with the original assertions.
+2. Freeze the candidate and record its revision, changed-file/harness hashes,
+   commands, environment and results. Reuse unchanged evidence under
+   [verification ownership](#verification-ownership); invalidate affected proof
+   when code, dependencies, configuration or relevant environment changes.
+3. Push a draft once local acceptance passes. Native review and the existing full
+   CI checks may run in parallel. Review may be `clean, proof pending` until
+   the exact named CI proof arrives; the existing review rules still apply.
+4. Before reporting verified work, confirm the final pushed head and inspect
+   actual job/step outcomes. Backend tests, frontend typecheck/lint/build, both
+   ordinary browser shards, authenticated and sample browser tests, Postgres
+   checks and deployment packaging must have executed and passed when applicable.
+   A green aggregate does not prove steps that were skipped or cancelled. A
+   documentation-only exception is limited to the existing CI scope contract.
+
+Do not additionally launch a full local backend/browser suite merely because
+review or CI is pending. Run extra local checks only for a concrete missing
+boundary, a new failure, an affected dependency or an acceptance criterion CI
+cannot establish. Repair failures and rerun affected checks; do not rerun an
+unchanged CI failure until it happens to pass. Known unresolved local failures
+remain findings even when CI passes; repair proof must close them or the user
+must explicitly decide them.
+
+Report local targeted, full-local, CI and human acceptance separately. A quick
+human visual check can supplement automated interaction evidence; it cannot
+replace delayed-response, persistence, authorization or other required checks.
+Keep progress updates to new results, decisions and blockers. Record actual
+check/pipeline elapsed times when evaluating this path; do not infer model
+resource savings from elapsed time alone.
+
 ## What each check covers
 
 | Check | Command | Catches |
@@ -177,7 +234,11 @@ How a run works:
 
 1. `backend/scripts/seed_dev_data.py` builds a throwaway database
    (`backend/data/e2e_seed.db`) from fixed fills.
-2. The backend starts against it on port 8099, the frontend is rebuilt and
+2. Each ordinary, authenticated and sample Playwright configuration assigns
+   a fresh temporary `TJ_MANUAL_FILLS_BACKUP` path to the seeding and server
+   processes. Startup restore and `POST /fills` therefore avoid the
+   developer's default `backend/data/manual_fills.json`. The backend starts
+   against its fixture on port 8099, the frontend is rebuilt and
    started on 3099. Dedicated ports so a dev session on 8080/3000 is untouched.
 3. Tests assert that seeded values reach the DOM.
 
@@ -473,11 +534,11 @@ Be honest about this when reporting work:
   The strategy factory's weekly run is tested with a stub idea model, stub
   bars and a throwaway git repository with a bare remote; the Claude call, the
   Alpaca fetch, the push to GitHub, the ntfy message and launchd itself are
-  proved only by a real weekly run. The documentation drift routine
-  (`scripts/docs_drift_week.sh`) is tested the same way, with stub `claude`,
-  `gh` and `curl`. Whether Claude's pass is any good is judged in review of
-  the pull request it opens. `scripts/review_carry.sh`, which lets a clean
-  review survive integrating main, is tested against a throwaway repository
+  proved only by a real weekly run. The documentation drift routine runs in
+  Anthropic's cloud and has no test here; whether its pass is any good is
+  judged in review of the pull request it opens.
+  `scripts/review_carry.sh`, which lets a clean review survive integrating
+  main, is tested against a throwaway repository
   (`test_review_carry_script.py`). It proves only that the feature's own patch
   is unchanged; whether main's incoming changes alter what the feature relies
   on is the owner's recorded judgment plus current-head CI.

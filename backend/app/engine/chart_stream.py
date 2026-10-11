@@ -3,7 +3,7 @@
 Only validated trade prices cross the browser-facing event stream. REST candles
 remain the authority for volume, studies, and recovery after a missed event.
 Level alerts (C5.1) add their symbols to the same subscription and see every
-validated trade before the one-second coalescing; the stream records when it
+validated trade before the 250 ms coalescing; the stream records when it
 covered each symbol, so the alert sweep judges only the minutes it did not.
 """
 
@@ -23,6 +23,8 @@ from app.engine.chart_math import ET, INTERVALS, session_part
 
 
 _log = logging.getLogger(__name__)
+RELAY_SECONDS = 0.25
+
 _INTRADAY = {name: width for name, width in INTERVALS.items() if name not in ("1D", "1W")}
 
 
@@ -61,6 +63,16 @@ def trade_event(row: dict, *, now: float | None = None, calendar: Callable[[date
         }
     return {"type": "tick", "symbol": symbol, "at": at, "price": price, "open": price, "high": price, "low": price,
             "minute": buckets["1m"]["time"], "session": part[0], "buckets": buckets}
+
+
+def merge_ticks(first: dict, last: dict) -> dict:
+    """Same symbol/minute only: preserve the first open and every extreme."""
+    merged = {**last, "open": first["open"], "high": max(first["high"], last["high"]),
+              "low": min(first["low"], last["low"])}
+    for field in ("received_at", "_received_mono"):
+        if field in first:
+            merged[field] = first[field]
+    return merged
 
 
 class ChartMarketStream:
@@ -138,9 +150,32 @@ class ChartMarketStream:
         for symbols, queue in self._clients.values():
             if event["type"] == "tick" and event["symbol"] not in symbols:
                 continue
-            if queue.full():
-                queue.get_nowait()
-            queue.put_nowait(event)
+            if not queue.full():
+                queue.put_nowait(event)
+                continue
+            # A slow browser may still need an earlier minute's high/low.
+            # Compact identical buckets before considering a bounded eviction.
+            ticks: dict[tuple[str, int], dict] = {}
+            status = None
+            resync = False
+            backlog = [queue.get_nowait() for _ in range(queue.qsize())] + [event]
+            for item in backlog:
+                if item["type"] == "status":
+                    status = item
+                    resync |= item.get("resync", False)
+                else:
+                    key = (item["symbol"], item["minute"])
+                    ticks[key] = merge_ticks(ticks[key], item) if key in ticks else item
+            ordered = sorted(ticks.values(), key=lambda tick: tick["at"])
+            if len(ordered) + int(status is not None) > queue.maxsize:
+                resync = True
+            if resync:
+                status = {"type": "status", "state": "fallback", "resync": True}
+            if status is not None:
+                queue.put_nowait(status)
+            available = queue.maxsize - int(status is not None)
+            for item in ordered[-available:] if available else []:
+                queue.put_nowait(item)
 
     def _receive(self, message: str | bytes) -> None:
         if isinstance(message, bytes):
@@ -164,15 +199,15 @@ class ChartMarketStream:
             self._latest_at[symbol] = tick["at"]
             if self._alerts is not None:
                 self._alerts.on_tick(tick)
+            tick["received_at"] = self._clock()
+            tick["provider_ms"] = (tick["received_at"] - tick["at"]) * 1000
+            tick["_received_mono"] = time.monotonic()
             key = (symbol, tick["minute"])
             pending = self._pending.get(key)
             if pending is None:
                 self._pending[key] = tick
             else:
-                pending["high"] = max(pending["high"], tick["price"])
-                pending["low"] = min(pending["low"], tick["price"])
-                pending["at"] = tick["at"]
-                pending["price"] = tick["price"]
+                self._pending[key] = merge_ticks(pending, tick)
 
     def _wanted(self) -> set[str]:
         viewers = set().union(*(symbols for symbols, _ in self._clients.values()))
@@ -182,6 +217,8 @@ class ChartMarketStream:
         pending = sorted(self._pending.values(), key=lambda tick: tick["at"])
         self._pending.clear()
         for event in pending:
+            received = event.pop("_received_mono", None)
+            event["relay_ms"] = (time.monotonic() - received) * 1000 if received is not None else None
             self._publish(event)
 
     async def _session(self) -> tuple[str, str]:
@@ -223,12 +260,12 @@ class ChartMarketStream:
                                 self._cover(subscribed)
                                 self._publish({"type": "status", "state": "connected"})
                             try:
-                                message = await asyncio.wait_for(socket.recv(), timeout=1)
+                                message = await asyncio.wait_for(socket.recv(), timeout=max(0.001, RELAY_SECONDS - (time.monotonic() - last_flush)))
                             except asyncio.TimeoutError:
                                 message = None
                             if message is not None:
                                 self._receive(message)
-                            if time.monotonic() - last_flush >= 1:
+                            if time.monotonic() - last_flush >= RELAY_SECONDS:
                                 self._flush()
                                 last_flush = time.monotonic()
                         self._flush()

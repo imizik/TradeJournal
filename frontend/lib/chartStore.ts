@@ -1,5 +1,5 @@
-import { useMemo, useSyncExternalStore } from "react";
-import { applyTicks, intradayInterval, MAX_HELD_SYMBOLS } from "@/lib/charts";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { applyTicks, intradayInterval } from "@/lib/charts";
 import type { ChartPanelData, ChartStreamTick, Interval, TickScope } from "@/lib/charts";
 
 /**
@@ -12,26 +12,84 @@ import type { ChartPanelData, ChartStreamTick, Interval, TickScope } from "@/lib
 type Listener = () => void;
 
 export type StreamStatus = "connecting" | "connected" | "fallback";
-/** `seq` counts every tick ever published, so a panel can apply only the ticks it has not seen. */
+/** Each symbol has its own immutable, bounded minute-bucket snapshot. */
 export type StreamState = { key: string; status: StreamStatus; ticks: ChartStreamTick[]; seq: number };
-const IDLE: StreamState = { key: "", status: "fallback", ticks: [], seq: 0 };
 const NO_TICKS: ChartStreamTick[] = [];
 
 export function createStreamStore() {
-  let state = IDLE;
-  const listeners = new Set<Listener>();
-  const publish = (next: StreamState) => { state = next; listeners.forEach((fn) => fn()); };
+  let key = "", status: StreamStatus = "fallback";
+  const states = new Map<string, StreamState>();
+  const listeners = new Map<string, Set<Listener>>();
+  const pending = new Map<string, ChartStreamTick[]>();
+  let frame: number | undefined;
+  let recover = () => {};
+  const get = (symbol: string) => {
+    let state = states.get(symbol);
+    if (!state) { state = { key, status, ticks: [], seq: 0 }; states.set(symbol, state); }
+    return state;
+  };
+  const notify = (symbol: string) => listeners.get(symbol)?.forEach((fn) => fn());
+  const flush = () => {
+    if (frame !== undefined) window.cancelAnimationFrame(frame);
+    frame = undefined;
+    for (const [symbol, incoming] of pending) {
+      const state = get(symbol);
+      // Per-symbol minute buckets: a burst must keep its open, high and low,
+      // including the previous minute when a frame straddles a boundary.
+      const ticks = state.ticks.filter((tick) => tick.at > Date.now() / 1000 - 120);
+      for (const tick of incoming) {
+        const previous = ticks.at(-1);
+        if (previous && tick.at < previous.at) continue;
+        if (previous?.minute === tick.minute) ticks[ticks.length - 1] = {
+          ...tick, open: previous.open, high: Math.max(previous.high, tick.high), low: Math.min(previous.low, tick.low),
+        };
+        else ticks.push(tick);
+      }
+      states.set(symbol, { key, status, ticks: ticks.slice(-64), seq: state.seq + 1 });
+      notify(symbol);
+    }
+    pending.clear();
+  };
   return {
-    get: () => state,
-    subscribe(fn: Listener) { listeners.add(fn); return () => { listeners.delete(fn); }; },
-    status(key: string, status: StreamStatus) {
-      if (state.key === key && state.status === status) return;
-      publish(state.key === key ? { ...state, status } : { key, status, ticks: [], seq: state.seq });
+    get,
+    flush,
+    onGap(fn: () => void) { recover = fn; },
+    subscribe(symbol: string, fn: Listener) {
+      const group = listeners.get(symbol) ?? new Set<Listener>();
+      listeners.set(symbol, group); group.add(fn);
+      return () => { group.delete(fn); if (!group.size) listeners.delete(symbol); };
     },
-    /** Keeps the last two minutes across three chart symbols and 30 watchlist symbols. */
-    tick(key: string, tick: ChartStreamTick) {
-      const kept = state.key === key ? state.ticks.filter((old) => old.at > Date.now() / 1000 - 120) : [];
-      publish({ key, status: "connected", ticks: [...kept, tick].slice(-120 * (MAX_HELD_SYMBOLS + 31)), seq: state.seq + 1 });
+    retain(symbols: string[]) {
+      const wanted = new Set(symbols);
+      for (const symbol of states.keys()) if (!wanted.has(symbol)) states.delete(symbol);
+      for (const symbol of pending.keys()) if (!wanted.has(symbol)) pending.delete(symbol);
+    },
+    status(nextKey: string, nextStatus: StreamStatus) {
+      if (key === nextKey && status === nextStatus) return;
+      if (key !== nextKey) { states.clear(); pending.clear(); }
+      key = nextKey; status = nextStatus;
+      for (const [symbol, state] of states) {
+        states.set(symbol, { ...state, key, status }); notify(symbol);
+      }
+      for (const symbol of listeners.keys()) if (!states.has(symbol)) notify(symbol);
+    },
+    tick(nextKey: string, tick: ChartStreamTick) {
+      if (key !== nextKey || status !== "connected") this.status(nextKey, "connected");
+      const ticks = pending.get(tick.symbol) ?? [];
+      // Merge before the frame as well, bounding work during a large burst.
+      const previous = ticks.at(-1);
+      if (previous && tick.at < previous.at) return;
+      if (previous?.minute === tick.minute) ticks[ticks.length - 1] = {
+        ...tick, open: previous.open, high: Math.max(previous.high, tick.high), low: Math.min(previous.low, tick.low),
+      };
+      else ticks.push(tick);
+      if (ticks.length > 64) recover();
+      pending.set(tick.symbol, ticks.slice(-64));
+      if (frame === undefined) frame = window.requestAnimationFrame(flush);
+    },
+    dispose() {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+      frame = undefined; pending.clear(); states.clear();
     },
   };
 }
@@ -41,8 +99,9 @@ export type LiveFeed = TickScope & { store: StreamStore; key: string };
 
 /** Read one derived value of the stream. `select` must return a primitive or an object the state already holds. */
 export function useStream<T>(live: LiveFeed, select: (ticks: ChartStreamTick[], state: StreamState) => T): T {
-  const read = () => { const state = live.store.get(); return select(state.key === live.key ? state.ticks : NO_TICKS, state); };
-  return useSyncExternalStore(live.store.subscribe, read, read);
+  const subscribe = useCallback((fn: Listener) => live.store.subscribe(live.symbol, fn), [live.store, live.symbol]);
+  const read = () => { const state = live.store.get(live.symbol); return select(state.key === live.key ? state.ticks : NO_TICKS, state); };
+  return useSyncExternalStore(subscribe, read, read);
 }
 
 /**
@@ -56,15 +115,15 @@ function panelSelector(interval: Interval) {
   return (state: StreamState, feed: LiveFeed, rest: ChartPanelData | undefined) => {
     if (!rest || !intradayInterval(interval)) return rest;
     const ticks = state.key === feed.key ? state.ticks : NO_TICKS;
-    const scope = `${feed.key}|${feed.fetched}`;
+    const scope = `${feed.key}|${feed.symbol}|${feed.session}|${feed.fetched}`;
     if (memo && memo.rest === rest && memo.scope === scope) {
       if (memo.ticks === ticks) return memo.panel;
-      const fresh = state.seq - memo.seq;
-      if (ticks !== NO_TICKS && fresh >= 0 && fresh <= ticks.length) {
-        const bars = applyTicks(memo.panel.bars, ticks.slice(ticks.length - fresh), interval, feed);
-        memo = { ...memo, ticks, seq: state.seq, panel: bars === memo.panel.bars ? memo.panel : { ...memo.panel, bars } };
-        return memo.panel;
-      }
+      // Unchanged minute objects were already applied. Replaying them can
+      // temporarily rewind a larger candle's close and cause a needless render.
+      const changed = ticks.filter((tick) => !memo!.ticks.includes(tick));
+      const bars = applyTicks(memo.panel.bars, changed, interval, feed);
+      memo = { ...memo, ticks, seq: state.seq, panel: bars === memo.panel.bars ? memo.panel : { ...memo.panel, bars } };
+      return memo.panel;
     }
     const bars = applyTicks(rest.bars, ticks, interval, feed);
     memo = { rest, scope, ticks, seq: state.seq, panel: bars === rest.bars ? rest : { ...rest, bars } };
@@ -75,8 +134,9 @@ function panelSelector(interval: Interval) {
 /** One panel's candles with the streamed trades applied; `rest` is its REST candles plus older history. */
 export function useLivePanel(live: LiveFeed, interval: Interval, rest: ChartPanelData | undefined): ChartPanelData | undefined {
   const select = useMemo(() => panelSelector(interval), [interval]);
-  const read = () => select(live.store.get(), live, rest);
-  return useSyncExternalStore(live.store.subscribe, read, () => rest);
+  const subscribe = useCallback((fn: Listener) => live.store.subscribe(live.symbol, fn), [live.store, live.symbol]);
+  const read = () => select(live.store.get(live.symbol), live, rest);
+  return useSyncExternalStore(subscribe, read, () => rest);
 }
 
 // One shared timer for every clock reader, running only while one is mounted.

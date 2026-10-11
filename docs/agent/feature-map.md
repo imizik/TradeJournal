@@ -88,8 +88,9 @@ you change it (`verification.md`, "What is NOT covered yet").
 |---|---|---|---|
 | Charts workspace | `app/engine/chart_feed.py`, `app/engine/chart_history.py`, `app/engine/chart_calendar.py`, `app/engine/chart_splits.py`, `app/engine/chart_adjust.py`, `app/engine/chart_daily.py`, `app/engine/chart_stream.py`, `app/engine/chart_math.py`, `app/routers/charts.py`; `frontend/components/charts/`, `frontend/lib/charts.ts`, `frontend/lib/chartStore.ts`, `frontend/lib/chartSync.ts`, `frontend/lib/drawings.ts` | private `GET /charts/workspace`, `/charts/history`, `/charts/stream`, `GET`/`PUT /charts/settings`; `/charts` page | `tests/test_charts.py`, `tests/test_chart_history.py`, `tests/test_chart_calendar.py`, `tests/test_chart_splits.py`, `tests/test_chart_daily_history.py`, `tests/test_chart_stream.py`, `frontend/e2e/charts.spec.ts`; live access probes `scripts/check_chart_feed.py`, `scripts/check_chart_splits.py` and a read-only SIP session request; [provider decision and boundaries](../charts-workspace.md) |
 | Symbol info / You (T1.1) | `app/routers/symbol_info.py`, `app/engine/symbol_info_journal.py` (two read-only queries), `app/engine/symbol_info.py` (pure summary); `frontend/components/charts/SymbolInfo.tsx`, `frontend/components/charts/SymbolInfoYou.tsx` | private `GET /charts/symbol/{symbol}/you`; `/charts` side column | `tests/test_symbol_info.py`, `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
+| Chart news markers (T3.5) | `frontend/lib/newsMarkers.ts` (candle alignment: pure), `frontend/lib/newsFeed.ts` (the one news read the News tab and the layer share), `frontend/components/charts/PriceChart.tsx` (series markers, hover headlines, click, touch popover), `ChartWorkspace.tsx` (the `newsHidden` layer, click-through to the dock), `SymbolInfo.tsx` / `SymbolInfoNews.tsx` (opens on and lights the clicked articles) | the private news endpoint above, unchanged; `/charts` main chart, Layers → News markers | `frontend/e2e/news-markers.spec.ts` (alignment unit tests and stubbed browser tests); [behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / News (T1.2) | `app/engine/symbol_info_news.py` (pure normalizers, merge, dedupe, Focused flag), `app/engine/symbol_info_news_feed.py` (Alpaca 60 s memory cache, Polygon 15 min disk cache, limiter, 429 fallback); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoNews.tsx` | private `GET /charts/symbol/{symbol}/news`; `/charts` side column, News tab | `tests/test_symbol_info_news.py`, `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
-| Symbol info / Peers strip (T3.4) | `app/engine/symbol_info_peers.py` (pure: related tickers, chips), `app/engine/symbol_info_peers_feed.py` (Polygon 7-day disk cache, limiter, 429 fallback; one batched Tradier quote call via the chart feed); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoPeers.tsx` | private `GET /charts/symbol/{symbol}/peers`; `/charts` side column, above the tabs | `tests/test_symbol_info_peers.py` (recorded Polygon and Tradier fixtures), `frontend/e2e/symbol-info-peers.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
+| Symbol info / Peers strip (T3.4) | `app/engine/symbol_info_peers.py` (pure: related tickers, chips), `app/engine/symbol_info_peers_feed.py` (Polygon 7-day disk cache, limiter, 429 fallback; one batched Tradier quote call via the chart feed); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoPeers.tsx` | private `GET /charts/symbol/{symbol}/peers`; `/charts` side column, top of the Overview tab | `tests/test_symbol_info_peers.py` (recorded Polygon and Tradier fixtures), `frontend/e2e/symbol-info-peers.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / Financials (T3.2) | `app/engine/symbol_info_financials.py` (pure: quarter selection by 80-105 day span, comparatives, calculated margins, year-over-year, Q4 gaps), `app/engine/symbol_info_financials_feed.py` (SEC EDGAR reads, `SEC_USER_AGENT`, ticker map and normalized-only disk cache, pacing, failure fallback); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoFinancials.tsx` | private `GET /charts/symbol/{symbol}/financials`; `/charts` side column, Financials tab | `tests/test_symbol_info_financials.py` (recorded NVDA and NBIS companyfacts in `tests/fixtures/sec/`), `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / Short (T3.1) | `app/engine/symbol_info_short.py` (pure normalizers and view), `app/engine/symbol_info_short_feed.py` (Polygon short interest, short volume and ticker details plus Tradier easy-to-borrow list, one-day disk caches, limiter, 429 fallback); `app/routers/symbol_info.py`; `frontend/components/charts/SymbolInfoShort.tsx` | private `GET /charts/symbol/{symbol}/short`; `/charts` side column, Short tab | `tests/test_symbol_info_short.py` (recorded fixtures in `tests/fixtures/symbol_info_short/`), `frontend/e2e/symbol-info.spec.ts`; [panel behavior](../charts-workspace.md#symbol-info-panel) |
 | Symbol info / Events (T1.4) and chart earnings (C2.5) | `app/engine/symbol_info_tradier.py` (Tradier fundamentals: budget, cache, background refresh), `app/engine/symbol_info_events.py` (pure normalizers); `app/routers/symbol_info.py`, `app/routers/charts.py` (`earnings` in the workspace); `frontend/components/charts/SymbolInfoEvents.tsx`, `frontend/components/charts/EarningsBadge.tsx`, `earningsMarks` in `frontend/lib/charts.ts` | private `GET /charts/symbol/{symbol}/events`, `GET /charts/workspace`; `/charts` side column and chart headers | `tests/test_symbol_info_events.py`, `frontend/e2e/symbol-info.spec.ts`, `frontend/e2e/charts.spec.ts`; [earnings](../charts-workspace.md#earnings-c25) |
@@ -147,7 +148,12 @@ you change it (`verification.md`, "What is NOT covered yet").
   `/fills`, `/analytics`, `/daily`, `/strategy-lab` against a seeded backend
   and assert the values from `EXPECTED` in `scripts/seed_dev_data.py`. Then
   open the route on the dev server (`bash startdev.sh`, port 3000) and say
-  what you saw.
+  what you saw. For a chart picture a person will judge, use the
+  market-shaped candles in `frontend/e2e/fixtures/realisticBars.ts`; to try
+  the UI on real candles without touching real records or synced chart
+  settings, `bash scripts/ux_sandbox.sh` (port 3098, its own seeded SQLite).
+  The `trade-chart-ux` skill (`.claude/skills/trade-chart-ux/SKILL.md`)
+  covers UI review and the picture checks before review.
 - **A route with no test:** call it and paste the response.
   `curl -s localhost:8080/health` tells you which database you are on first.
 
@@ -174,6 +180,21 @@ you change it (`verification.md`, "What is NOT covered yet").
   bars: cohort report in R, Strategy Lab CSVs, `--parity` against exports
 - `imm_export_cohorts.py`, `playbook_cohorts.py` — the cohort evidence
   `docs/pine/README.md` cites
+- `research_studio.py` — explicit-root cache-only discovery population preview;
+  no UI, provider, database, outcomes or Factory execution. Shared stop-free
+  features and strict masks live in `app/engine/research_studio.py`;
+  [R1 contract](research-studio-r1.md) owns source/identity and acceptance.
+- `research_studio_run.py` — explicit local R2 enqueue/work-once/status/result/
+  cancel/retry; parent-owned research SQLite/artifacts and a pure calculation
+  child, no app route/service/provider or journal/Factory writes. The
+  [R2 contract](research-studio-r2.md) owns semantics, exposure and acceptance.
+  Selected R3 connects **Research Studio** (`/research-studio`) through
+  `frontend/components/research-studio/ResearchStudio.tsx`, its static chart,
+  `backend/app/routers/research_studio.py`, and the manually started
+  `backend/scripts/research_studio_server.py` sidecar. The
+  [R3 contract](research-studio-r3.md) owns setup and inspection/exposure
+  boundaries; `backend/tests/test_research_studio_session.py` and
+  `frontend/e2e/research-studio.spec.ts` prove the fixture workflows.
 - `strategy_factory.py` — judges a strategy spec through the factory's gates
   and appends the result to `research/ledger.jsonl`; `prepare` fetches the SIP
   minute bars it needs (the only step that calls Alpaca); `week` is the weekly
@@ -193,23 +214,17 @@ reason, and ruff lints them without importing them.
   reconciled to. `tests/test_docs_freshness.py` counts code commits past it
   and fails at 30; `tests/test_docs_links.py` checks names and anchors. The
   judgement half is `.claude/skills/docs-drift/SKILL.md`. It runs unattended
-  every Saturday: launchd on the development Mac starts
-  `scripts/docs_drift_week.sh` in `/Users/user/TradeJournal-docs`, a checkout
-  kept at `main`. From 20 code commits on, the script has Claude run the pass
-  headless on the Claude plan, with the `claude setup-token` token as
-  `CLAUDE_CODE_OAUTH_TOKEN` in the main checkout's `backend/.env` and a $20
-  usage cap. It never bills API credits: the API key, auth token, base URL,
-  socket and provider switches that would outrank or receive the token are
-  removed for the run, and it stops before Claude starts unless the token is
-  there and `claude auth status` reports it as the sign-in. (It billed the API key until
-  2026-10-10, when one pass spent about $14.)
-  Claude may edit only documentation, and anything needing permission is
-  refused rather than waiting for a person. The script then checks the
-  changes and the marker, runs the docs tests, pushes `docs/drift-<date>` and
-  opens a pull request. The phone hears about the pull request, one still
-  waiting for review, or a failure. Proof: `tests/test_docs_drift_script.py`.
-  The desktop scheduled task that ran it before stalled on a permission prompt
-  on its first run (2026-09-26) and is disabled.
+  every Saturday as a Claude Code routine in Anthropic's cloud ("Weekly docs
+  drift pass" at claude.ai/code/routines), on the Claude plan rather than API
+  credits, so it needs no token, no Mac and no launchd job. From 20 code
+  commits on, and only when no earlier `claude/docs-drift-*` pull request is
+  still open, it runs the pass on a fresh clone of `main`, edits only
+  documentation, moves the marker, runs the docs tests and opens a pull
+  request on `claude/docs-drift-<date>`. It never merges. Its instructions
+  live in the routine, not the repository; each run's log is on its routine
+  page. (Until 2026-10-10 a launchd script on the development Mac ran it
+  with `claude -p`; before that, a desktop scheduled task stalled on a
+  permission prompt on its first run, 2026-09-26.)
 
 ## Reference documents
 
@@ -312,3 +327,19 @@ Code: `backend/cloud_mcp_d1.py`, `backend/cloud_mcp_d1_common.py`, backend
 existing restricted sample projection. Proof: `backend/tests/test_cloud_mcp_d1.py`
 and `deploy/cloud-mcp-d1/smoke.py` on disposable Ubuntu; live OAuth/tool/UI evidence
 is a separate gate. Normal releases keep the templates disabled.
+
+## Manual advisor/shadow fixture
+
+The owner-only panel on Today is shown only for an operator-created invented
+assignment. `backend/app/engine/advisor_shadow.py` owns the allowlisted packet,
+immutable manual assignment/receipt and assistance boundary;
+`backend/advisor_shadow_demo.py` is its separate loopback-only three-operation
+shadow gateway. `backend/scripts/advisor_shadow_demo.py` creates a fresh migrated
+SQLite fixture or revokes it. Owner advisor export/answer routes live in
+`backend/app/routers/advisor_shadow.py`; `frontend/components/AdvisorShadowPanel.tsx`
+displays the exact packet, explicit question/plan, manually supplied answer and
+resolved fact citations. Existing Practice controls retain paired choice/reveal
+and paper review. Checks are `backend/tests/test_advisor_shadow.py`,
+`backend/tests/test_advisor_shadow_cli.py`, the owner-route refusals in
+`backend/tests/test_browser_access.py` and `frontend/e2e/advisor-shadow.spec.ts`.
+See the [contract and activation boundaries](advisor-shadow-contract.md).

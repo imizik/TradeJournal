@@ -92,15 +92,44 @@ on hover), headline, publisher, a "+N tickers" chip, the summary on expand and
 the link out. **Focused** (default on) hides articles that tag more than three
 symbols. Polygon's per-ticker sentiment, when present, is labelled as Polygon's
 opinion. New headlines wait behind an "N new" button. The tab reads again each
-minute only while it is open and the page is visible. Polygon shares the free
-plan's 5 calls a minute with fill enrichment, so it is read only for this tab,
+minute only while it is open (or the chart's news layer is on, below) and the
+page is visible. Polygon shares the free plan's 5 calls a minute with fill
+enrichment, so it is read only for this tab and the news layer,
 through the enricher's limiter, never retried, and a 429 or failure serves the
 cached copy with its age and mutes Polygon for five minutes (Alpaca news likewise
 reads once on a 2.5 s budget with no retry and mutes itself for five minutes); each source's state
 (`ok`, `stale`, `failed`, `not_configured`) is shown and Alpaca news survives a
 Polygon failure.
 
-A **Peers** strip (T3.4) sits above the tabs whenever the panel is expanded:
+**News markers** (T3.5) put the same Focused headlines on the main chart: a small
+square floating about 26 px above the high of the candle that holds an article's
+publish time (clear of the candle and of a fill arrow on it), labelled "N" for
+one article or "N3" for three. They are their own marker set that the price
+scale ignores, so a marker above the frame is clipped, never a reason to
+shrink the candles; hover and click work on the marker where it is drawn. The **News markers** group of the Layers panel
+(and the chart menu's layer list) hides them; it is on by default and saved with
+the other layers (a `newsHidden` settings field of its own, for the same reason
+as `autoLevelsHidden`). While the layer is on the chart reads the news endpoint
+for the main symbol after the symbol settles and then each minute while the page
+is visible; the News tab uses the same read when it is also open, so the two
+never ask twice, and no read happens with the layer off and the tab closed. Only
+the main symbol's main chart draws them, and only Focused articles (roundups of
+more than three tagged symbols are never marked). An article sits on the candle
+whose time bucket holds its publish time; one published when the market is
+closed (overnight, a weekend, a holiday, outside the displayed session) sits on
+the next candle, because a 1D or 1W candle is a regular session, 09:30 to 16:00
+New York; after the last candle it sits on the last one, before the first
+loaded candle it has no marker, and one inside a hole in the loaded history
+(more than 5 days intraday, 10 for 1D, 21 for 1W) has none. Several articles on
+one candle are one marker. Hover (a mouse) lists up to five headlines, newest
+first, then "+N more", with the candle's date and time; a click opens the dock
+on the News tab with that candle's articles highlighted for a few seconds. On a
+phone a tap pins the headlines in a popover whose **Read in News** button opens
+the Watchlist sheet on the News tab. Markers stack with fill arrows and earnings
+dates without covering them, and a level or drawing under the pointer still wins
+a click. Historical chart mode shows only the articles whose candles are loaded.
+
+A **Peers** strip (T3.4) sits at the top of the **Overview** tab:
 Polygon's related companies for the active symbol as chips, each with today's
 percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
 seven days on disk, read through the enricher's limiter the way the News feed
@@ -139,7 +168,7 @@ email) in the server's `backend.env`; the tab says so when SEC refuses.
 Overview is a placeholder for the
 [symbol info roadmap](symbol-info-roadmap.md). The chosen tab is remembered
 on this device. Only an expanded Overview, You, News, Events, Forecast or Financials tab
-fetches, once after the ticker settles for 300 ms; old requests are cancelled.
+fetches, once after the ticker settles for 300 ms; old requests are cancelled. The News tab's read is the one the chart's news markers share.
 Overview shows price, change, day range and a 52-week range from the chart's
 existing quote, so it does not make a second quote request; the company name
 comes from that quote too, because Tradier's fundamentals carry none. Three
@@ -261,7 +290,19 @@ cd backend
   navigation and resizing the window keep every chart instance, the selection,
   a scrolled-back view and the stream, and fetch nothing. The Indicators menu
   is not modal (hotkeys keep working); Escape closes it before it puts a tool
-  away or leaves full screen. Below 1024px the page scrolls as before: the
+  away or leaves full screen. The menu also holds a color swatch for EMA 9,
+  20, 50, 200, VWAP and RSI 14 (the VWAP bands follow VWAP's color at their own
+  alpha; legend dots and values use the chosen colors), a **Reset colors**
+  action, and a **Zoom speed** choice of Slow, Normal or Fast. Chosen colors are
+  the shared `indicatorColors` setting (only colors that differ from the
+  defaults, `#rrggbb`; anything else is dropped on read, old documents without
+  it load unchanged, and the field is always sent so a reset clears it).
+  Zoom speed is per device (`localStorage`, `frontend/lib/zoomSpeed.ts`):
+  lightweight-charts zooms by deltaY / 100 per wheel event with no speed
+  option, so each chart's container re-sends a vertical wheel or pinch event
+  (`ctrlKey` wheel) with deltaY times 1, 3 (default) or 6 while deltaX, the
+  cursor anchor and the modifiers are kept; the library still caps one event's
+  zoom, so a mouse wheel's large steps change little. Below 1024px the page scrolls as before: the
   toolbar wraps into rows of 44px controls (the intervals scroll sideways in
   theirs), the drawing tools are a toolbar row, the link, pause, refresh and
   shortcut controls, the smaller charts' S/M/L height, the data note and the
@@ -276,11 +317,15 @@ cd backend
   of the charts they sit between) and use the arrow keys (Shift for steps of
   10%, or 64px for the dock), Home and End for its limits; Enter or a
   double-click resets it, and Escape during a drag puts it back without
-  saving. **Reset chart sizes** in the Layouts menu resets all of them. A
+  saving. **Reset chart sizes** in the Layouts menu resets all of them. The menu's
+  built-in **Active** (compact smaller row, dock closed) and **Research**
+  (37.8% smaller row, dock open) presets apply like a saved layout without
+  being stored as one; on a phone they leave the sheet as it is. A
   drag moves the boxes directly, re-rendering no chart, and is saved once
   when the button is released. The main chart and the smaller row share the
-  height by the smaller row's share (15% to 60%; 37.8% by default, which is
-  C7.3's medium height in a 1440×900 window), the smaller charts the row's
+  height by the smaller row's share (15% to 60%; 27.5% by default, C7.3's
+  compact height, so the main chart dominates; settings saved with another
+  height keep it), the smaller charts the row's
   width by four shares (none under 10%), and on screen the main chart keeps
   at least 320px, each smaller chart at least 180px with its header and
   160px of width; a row too narrow for four of those (a 1024px window with
@@ -369,7 +414,9 @@ cd backend
   Ctrl+Shift+Z, or the Undo and Redo buttons beside **Draw price level**, whose
   hover text names the step. Undo is per tab, 100 steps, and replays item by
   item onto the levels as they are now, so another device's levels are left
-  alone. Levels are still saved in the same `levels` shape, so a tab running
+  alone. Undo made before an earlier save responds is saved after that
+  acknowledgement too, including when it restores the last confirmed levels.
+  Levels are still saved in the same `levels` shape, so a tab running
   an older build keeps reading and merging them.
 - **Drawing tools (C1.2).** Beside Undo and Redo: price level, horizontal ray,
   trend line, rectangle zone and text note, then **Magnet**. A tool arms the
@@ -404,7 +451,7 @@ cd backend
   at** and **Copy price** for the price under the pointer (to the cent; the
   magnet applies, as it does to a placed level), **Reset chart scale** for that
   chart alone, and **Layers**: show or hide My levels, Drawings, Auto levels,
-  My fills and each study on every chart, plus a **Show** for each of the symbol's items
+  News markers, My fills and each study on every chart, plus a **Show** for each of the symbol's items
   hidden one by one. On a price scale, a time scale or the RSI pane there is no
   price, so only the reset and Layers appear. On a level or drawing it selects
   the item and offers its label (a level's name, a note's text) and color
@@ -454,17 +501,23 @@ cd backend
   the studies that were on come back with it. **Auto levels** (C2.3) sits
   between Drawings and Journal: it hides the automatic levels on every chart
   (an `autoLevelsHidden` field of its own, for the same reason) and lists any
-  levels the main symbol is missing and why. Options join when their layer
+  levels the main symbol is missing and why. Each layer's explanation sits
+  behind a small info button on its row (`aria-expanded`, closed at rest and
+  not remembered); status text, such as what is missing, always shows. Options join when their layer
   exists (C4.4).
 - **Automatic levels (C2.3).** Every chart draws the
   [automatic levels](#automatic-levels-c21) of its symbol behind the candles,
   dimmer than the user's own: a lone level as a thin dotted line, a confluence
-  zone as a shaded band, named at the left on the main chart on a solid tag:
+  zone as a shaded band, named on the main chart on a solid tag, in clear space (UX-D: the rightmost gap of its row that no candle's high-low span crosses, which is the room past the last bar when there is some):
   its most telling member (option landmarks, then the expected move, prior day
   and week, session ranges, swings, round numbers, ranked strikes) and how many
   more it holds ("Max pain +2"; a round number reads "Round 223"). Tags never
-  overlap: the open card's zone wins, then the zones nearest the price, and a
-  tag that would cover another or be cut by the pane's edge is left out. Only
+  overlap: the open card's zone wins, then the zones nearest the price; a tag
+  that would cover another tries below the band, and one with no clear gap, or
+  that would be cut by the pane's edge, collapses to a short mark at the right
+  edge. Levels are never hidden, only names move or collapse. Only the zone
+  price is inside, else the nearest one above and one below, is shaded; the
+  others draw as their two dotted edge lines. Only
   the nearest three zones above and below the latest
   price show, plus any price is inside; they follow the price as it streams.
   Hovering one (not on the user's own level or drawing) opens its card beside
@@ -514,8 +567,12 @@ cd backend
   stays closed while it is open. Layouts make no provider calls
   beyond the workspace request the new intervals and symbols need.
 - One private API-owned Tradier WebSocket market stream serves all visible chart
-  tabs. Valid trade prices are batched to at most one event per second and sent
-  to each tab through private server-sent events. Symbol changes update that
+  tabs. Valid trade prices are coalesced per symbol and minute every 250 ms and sent
+  to each tab through private server-sent events. Each batch preserves open,
+  high, low and last; alerts see each validated trade before this batching.
+  A slow client’s bounded queue merges identical minute buckets; if distinct
+  buckets exceed capacity it reports a recovery gap rather than silently
+  discarding extremes. The browser requests a REST recovery snapshot. Symbol changes update that
   single upstream subscription. It carries up to three chart symbols plus the
   30-symbol watchlist, so watchlist prices update without per-symbol streams or
   extra REST polling. A watchlist tick is shown as live for at most 45 seconds;
@@ -536,8 +593,11 @@ cd backend
   move the selected intraday candles between refreshes; volume and studies may
   lag by up to one refresh. Daily and weekly candles stay on REST history.
 - Streamed trades and the one-second clock stay out of the workspace's React
-  state. `frontend/lib/chartStore.ts` holds the stream for the current
-  request, and each chart applies the new trades to its own panel
+  state. `frontend/lib/chartStore.ts` holds per-symbol minute buckets across
+  symbol switches and batches notifications to one browser frame. Watchlist
+  updates continue while new candles load; changes to the subscription union
+  reconnect without clearing retained symbols. Only the affected symbol’s
+  subscribers receive a tick notification, and each chart applies trades to its own panel
   (`applyTicks` in `lib/charts.ts`). A trade re-renders only the charts whose
   candles it moved, plus the quote. The countdowns, the status dot and the
   price age read a shared one-second clock themselves, so a second passing
@@ -564,6 +624,34 @@ cd backend
   (`/charts/stream?symbols=…`). History, retries and day rollover are kept per
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
+- **Quiet chrome (UX-B).** On a device that hovers and at 768px or wider, a
+  smaller chart's header shows only its symbol and interval at rest. Its
+  studies, crosshair-reset, Maximize and Focus controls (`data-quiet-controls`,
+  `app/globals.css`) fade in while the pointer is over that chart, focus is
+  inside it or one of its menus is open; they stay rendered, in the tab order
+  and with the same names. Touch devices and phone widths always show them.
+  The main chart's legend is one row at 1440px: O/H/L/C, **VWAP**, **RSI**, one
+  **EMA** item (a dot per EMA that is on; EMA 9/20/50/200 values open on hover or
+  keyboard focus), then RVol. A candle with no VWAP reads "VWAP —", whose
+  tooltip says why: daily and weekly candles have none, extended-hours candles
+  have none (the backend builds VWAP from regular-session minutes only), and a
+  forming candle with no regular-session trade yet has none. A phone wraps the
+  row.
+- A smaller chart narrower than 360px or shorter than 260px (header included)
+  is **compact** (`COMPACT_PANEL` in `frontend/lib/charts.ts`): it opens on the
+  latest 40 candles instead of 65, its header buttons sit closer, and its
+  automatic levels are short marks at the right edge instead of bands across
+  the candles. Hovering a level gives a one-line tooltip; a click opens the
+  full card. While it follows the workspace's studies it draws only EMA 9 and
+  VWAP (as the Indicators menu sets them), with no slower averages, volume or
+  RSI. Dragging it bigger or maximizing it brings the full view back; the main
+  chart is never compact.
+- Each smaller chart's sliders button picks **its own studies**. Turning one
+  on or off starts from what the chart shows now; **Automatic** follows the
+  workspace again. The choice belongs to the box, not the interval: it stays put
+  through Focus and layout switches. It is saved with the workspace
+  (`panelStudies`, a top-level field, shared across devices). Fill arrows stay
+  workspace-wide, and hiding the Indicators group hides every chart's studies.
 - The selected price says whether it is a streamed trade, an extended-hours
   candle, or a Tradier quote. A premarket or after-hours price names its
   session and is measured from the previous close or the regular close, by the
@@ -578,7 +666,7 @@ cd backend
   the live stream remain Tradier; daily/weekly bars remain Tradier and page
   back through the symbol's whole daily history (see Daily and weekly depth).
 - When today's tail has fewer candles than the chart opens on (110 on the main
-  chart, 65 on a smaller one) — none before 04:00, on weekends and holidays; a
+  chart, 65 on a smaller one, compact or not) — none before 04:00, on weekends and holidays; a
   few early in the day; and always on 15m and coarser, whose whole session is
   64 candles or fewer — the panel loads the latest completed SIP sessions at
   once instead of waiting for a pan. Completed sessions come from the disk cache,
@@ -645,6 +733,15 @@ cd backend
   the interval buttons, the watchlist's up/down arrows and each chart's
   latest-candles button (which now also restores the automatic price scale)
   do the same things.
+- **Candle room and the Auto chip.** The price pane leaves 10% above (so a level just past the highs stays in view) and 12% below
+  the fitted prices (`CANDLE_MARGINS` in `PriceChart.tsx`), volume is a thin strip
+  along the bottom (from 88% down, a little under the lowest candles) and the main
+  chart's RSI pane is 64 px, which gives the candles at least 20% more pixel height on
+  the realistic 1440x900 picture than before (202 px; the browser test checks it).
+  Dragging a price axis (or a jump that widens it) turns the automatic fit off;
+  while it is off an **Auto** button sits at the bottom of that chart's candle
+  price axis (TradingView's "A"), and clicking it, or Alt+R, fits the candles
+  again and hides it.
 - **Link time ranges** (off by default) makes panning or zooming one chart set
   the same visible *time* window on the other four. Coarser charts keep at least
   a dozen candles around that moment; finer charts that cannot fit the span at
@@ -685,7 +782,9 @@ source/price basis, markers, warmup state and retryable issue. Its opaque
 continuation is bound to the request and expires after 10 minutes in the
 single API process. A cold batch uses at most eight Alpaca HTTP attempts and
 10 seconds; the frontend resumes pending batches. History errors leave today's
-Tradier countdown and already displayed bars intact.
+Tradier countdown and already displayed bars intact. A failed request blocks
+automatic scroll-back callbacks even before React commits the error; explicit
+Retry history and targeted gap reads can start another request.
 
 `backend/app/engine/chart_history.py` keeps complete 04:00–20:00 New York
 sessions in `backend/data/chart_history/v1/stocks/1Min/sip/raw/`, under the
@@ -1326,7 +1425,7 @@ again from the current price.
   Trendlines, rectangles and notes take no alert.
 - **When it fires.** *Touches*: a trade at the level or beyond it.
   *Crosses*: a trade beyond it by any amount. Both are judged on each trade
-  the stream validates, before the browser's one-second coalescing. *Closes
+  the stream validates, before the 250 ms display coalescing. *Closes
   beyond*: a candle of the chosen interval, closing after the alert was made,
   closes beyond the level. A candle is judged 30 seconds after it closes, on
   the close Tradier's 1-minute bars then hold; a later correction is not
@@ -1423,10 +1522,13 @@ except the option mark, which is asked for from a card.
   trade with its arrows, and open the card. Candles come from the same deep
   history as scrolling back (C0.0): Alpaca SIP minutes for intraday charts,
   Tradier's daily bars for 1D/1W, never Alpaca IEX. A banner names the dates
-  with **Back to live**, which drops the trade's pages and returns every chart
-  to its latest candles; choosing another symbol also ends the mode. A gap
+  with **Back to live**, which drops the trade's pages, returns to the symbol
+  that was on screen before the trade opened (UX-C) and brings every chart to
+  its latest candles; choosing another symbol also ends the mode. A gap
   between the trade's page and today fills from the side in view, one page at
   a time, as the user scrolls toward the present. A malformed link is ignored.
+  Starting another page load preserves candles, fill markers and source metadata
+  from responses already queued, even before those responses have rendered.
 
 ### Pre-trade capture (C3.4, C3.5)
 
@@ -1478,7 +1580,8 @@ never recommends a trade and never sends an order.
 - **Voice.** Choose the side, then press and hold **Hold to record**. Release
   saves the clip. A short press, the keyboard, or a microphone prompt that
   took the press switches to **Stop & save**. The browser asks for the
-  microphone only then. Clips stop at 30 seconds and offer **Save recording**
+  microphone only then. The recording timer appears after the microphone opens
+  and recording starts; permission or device startup time is excluded. Clips stop at 30 seconds and offer **Save recording**
   or **Discard**. A cancelled press, a hidden tab or a lost device does the
   same. Closing the sheet discards an unsaved clip. A template is optional. A
   denied or missing microphone leaves the click path working.
@@ -1903,3 +2006,34 @@ runtime, raw tick tape, fibonacci or other geometry tools, replay, volume profil
 or server-side chart alerts. The existing
 TradingView-to-Signals loop still runs separately. Keep TradingView while
 comparing the required indicators and sessions side by side.
+
+
+### Live delivery measurements
+
+Enable local diagnostics in the browser console with
+`localStorage.setItem("tj:chart-performance", "1")`, then reload `/charts`.
+`window.__tjChartPerformance.summary()` reports count, p50, p95 and last sample
+for a bounded 120-sample window per metric. Remove the localStorage key and
+reload to disable. Nothing is uploaded and diagnostics make no provider calls.
+
+- `provider_to_backend_estimate`: latest provider timestamp to backend receipt;
+  includes provider delay and host clock skew.
+- `backend_relay`: monotonic backend wait from the first trade in a batch to
+  relay publication. A slow-client queue adds time after this measurement.
+- `backend_to_browser_estimate`: first backend receipt in a merged batch to
+  browser receipt; includes batching, queueing, transport and clock skew.
+- `sse_to_browser_estimate`: SSE serialization to browser receipt, also subject
+  to host clock skew. Negative estimates are retained so skew is visible.
+- `quote_receipt_to_paint_opportunity` / `candle_receipt_to_paint_opportunity`:
+  browser-local monotonic receipt through a committed update and two animation
+  frames. These provide a paint opportunity, not a pixel-level paint timestamp.
+- `symbol_to_usable_chart`: symbol selection to the main chart’s first committed
+  nonempty candles plus two animation frames. This PR adds no recent-symbol cache.
+
+Compare 250 ms against 100 ms during a desktop and phone market session before
+changing the default again. Check symbol switches, reconnect recovery, slow
+clients and intraday candle extremes. Fixture tests do not establish live
+Tradier latency or complete G0 market-session acceptance. REST budgets and
+cadences are unchanged; recovery gaps may request an exceptional refresh through
+that same budgeted cache. Connection pooling, recent-symbol caching, progressive
+loading and live studies remain separate work.

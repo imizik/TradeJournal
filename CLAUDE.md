@@ -33,6 +33,8 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/charts-roadmap.md` | The Charts epic: what to build next on `/charts`, in order, and what not to build |
 | `docs/agentic-trading-roadmap.md` | Proposed agentic practice track: frozen decisions, alerts, paper outcomes, daily routine and later research gates; first three bounded slices |
 | `docs/agent/a3-implementation-contract.md` | A3 daily routine, isolation, benchmark, disabled scheduling and live acceptance gates |
+| `docs/agent/cloud-mcp-advisor-contract.md` | Dormant advisor-only MCP fixture catalog, separate offline OAuth/Unix boundary, immutable cited receipts and later activation gates |
+| `docs/agent/advisor-shadow-contract.md` | Manual fixture advisor/shadow assignment, packet/receipt isolation, disclosure order and later cloud/forward gates |
 | `docs/agent/practice-policy.md` | Selected P0 practice contract, synthetic plan/outcome, and observed source time/units |
 | `docs/agent/dots-integration.md` | Future Dots handoff: local A1 tools, scoped roles and independent-runner isolation, proposed follow-through capabilities, authentication gates and the private API boundary |
 | `docs/agent/cloud-mcp-integration-scope.md` | Dots cloud connector scope: direct HTTPS with ChatGPT plan usage, OAuth identity, selected reads, UI/tool routing and bounded D0–D3 slices |
@@ -48,7 +50,7 @@ live-alert loop. Stocks and options, multiple accounts, no auth, single user.
 | `docs/charts-deep-history.md` | C0.0's history/cache/API/warmup contract and its required evidence (shipped; the code and `docs/charts-workspace.md` are current) |
 | `docs/symbol-info-roadmap.md` | The symbol info panel beside the chart (news, earnings, stats, forecast): probed data sources, budgets, build order |
 | `docs/swing-strategy-roadmap.md` | Swing families (1–16 sessions) in the factory, the after-close practice loop (signal, phone, Take/Skip, shadow trade), the setups board and confluence scan, macro/news/earnings as-of rules, stages from research to live |
-| `docs/strategy-workbench-roadmap.md` | A later interactive page over the factory: explore on discovery data only, the exploration log, freezing candidates |
+| `docs/strategy-workbench-roadmap.md` | Research Studio plan: connected event exploration on discovery data, exposure history, bounded phases and later Factory handoff |
 
 Read what the task needs. The repository is the source of truth;
 if a document disagrees with the code, the code wins and the document gets
@@ -76,6 +78,18 @@ change lands somewhere the suite does not cover — any frontend rendering, any
 live external integration — say so explicitly and describe what you did verify
 instead. `docs/agent/verification.md` lists the gaps honestly; use it.
 
+Use either the full local checks above or the
+[CI-backed path](docs/agent/verification.md#ci-backed-verification). The latter
+requires local causal/interaction proof for the change and every applicable
+full CI job and step passing on the exact final head; it avoids repeating that
+full suite locally. Never describe CI-backed coverage as a full local pass.
+
+The owner assigns checks to workers and ensures the full required verification
+is complete before reporting success. A worker's narrower checks do not replace
+that final obligation. Reuse evidence under
+[verification ownership](docs/agent/verification.md#verification-ownership);
+do not rerun a check merely because another agent ran it.
+
 CI also checks Postgres migration paths/roles and the native Ubuntu deployment;
 the local verification script does not run those checks.
 
@@ -87,7 +101,9 @@ every check fails on missing tools rather than on the change.
 package pass on the merge commit, the VPS installs it by itself within about
 10 minutes. On weekdays between 09:25 and 16:15 New York time it waits for the
 close unless the PR carries the `deploy-now` label. Schema changes wait for a
-person. A PR is ready to merge only when it is ready to go live; see
+person unless `AUTODEPLOY_AUTO_MIGRATE=true`; when enabled, the deployer verifies
+a fresh backup before migrating, and a backup or migration failure stops the
+release. A PR is ready to merge only when it is ready to go live; see
 [automatic deployment](deploy/README.md#automatic-deployment).
 
 ## Independent review and completion
@@ -127,9 +143,10 @@ normal workflow. The user alone merges; never merge or enable auto-merge.
 - Prefer cheap targeted validation unless the blast radius requires more.
 - Avoid unrelated refactors, formatting churn, and duplicated UI/table logic.
 - Final summaries stay brief: what changed, what was verified, what risk remains.
-- In a Claude Code session on Opus, act as the lead: hand bounded execution to
-  the Sonnet `engineer` subagent and keep judgment, high-risk review and pushes
-  (`docs/agent/delegation.md`). Do small, sequential work directly.
+- In a Claude Code session on Opus, act as the lead and work directly by
+  default; hand work to the Sonnet `engineer` subagent only when it clearly
+  pays, and keep judgment, high-risk review and pushes
+  (`docs/agent/delegation.md`).
 
 ## Extra care required
 

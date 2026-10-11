@@ -23,6 +23,23 @@ role are preserved pending an explicit operator decision.
 The import-boundary tests now protect pure engine modules from reaching the
 network or database engine.
 
+Research Studio R1 is a separate discovery-only, stop-free event path.
+`research_studio_data` reads only an explicit approved SIP root and a fixed
+bounded session roster into immutable in-memory snapshots. `research_studio`
+uses shared Factory features plus availability masks to select first-per-session
+observations; its CLI preview has no provider, DB, ledger, outcome or UI path.
+Both modules are protected by the pure import graph. See the
+[R1 contract](research-studio-r1.md). Selected R2 adds supplied-snapshot outcome
+analysis and a separate operator-selected research SQLite image/artifact store.
+Its finite parent/child worker holds a separate execution lock, never uses app
+`job_run`/sync, and installs no service or timer; see the [R2 contract](research-studio-r2.md).
+
+Selected R3 adds the owner `/research-studio` workspace and two owner-only
+forwarding routes to a manually started bearer-authenticated loopback research
+sidecar. Cache preparation and R2 computation remain outside the app API/sync
+process. No deployment unit or startup hook is installed; see the
+[R3 contract](research-studio-r3.md).
+
 `app.engine.metric_versions` is also checked as pure: it defines calculation
 identities and exposure direction, with no data fetching or database access.
 `app.engine.metric_reference` is checked as pure too: Decimal event ledgers and
@@ -70,8 +87,8 @@ migrations require an explicit server setting and a fresh verified backup.
 Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
-Two scheduled processes run off the server, both started by launchd on the
-development Mac and neither touching a database:
+Two scheduled processes run off the server, neither touching a database (the
+first is started by launchd on the development Mac):
 
 - The strategy factory's weekly run (`scripts/factory_week.sh`, in a checkout
   on branch `factory/ledger`). It reads the local market-data cache, calls
@@ -79,11 +96,13 @@ development Mac and neither touching a database:
   on the Claude plan token, never API credits, and writes only to that
   branch, which is never merged (`docs/strategy-factory.md`). The direct
   Anthropic API call remains only behind an explicit `--use-api`.
-- The weekly documentation drift pass (`scripts/docs_drift_week.sh`, in a
-  checkout kept at `main`). Once 20 code commits have landed since the docs
-  were reconciled, Claude runs the `docs-drift` skill headless, allowed to
-  edit only documentation. The script checks the result, pushes a branch and
-  opens a pull request for review. It never merges.
+- The weekly documentation drift pass, a Claude Code routine in Anthropic's
+  cloud on the Claude plan (claude.ai/code/routines, "Weekly docs drift
+  pass"), started every Saturday from a fresh clone of `main`. Once 20 code
+  commits have landed since the docs were reconciled, it runs the
+  `docs-drift` skill, editing only documentation, runs the docs tests and
+  opens a pull request on `claude/docs-drift-<date>` for review. It never
+  merges.
 
 ## Data flow
 

@@ -134,8 +134,10 @@ concrete options and keep dependent work paused.
 
 Run deterministic checks before any separate review. Follow
 [`verification.md`](verification.md) and the selected feature's acceptance
-criteria; use `scripts/verify.sh --fast` during work and the normal full suite
-before reporting completion when required by the repository agreement. A
+criteria; use focused checks or `scripts/verify.sh --fast` during work, then
+the full local suite or the [CI-backed path](verification.md#ci-backed-verification).
+Freeze once local acceptance passes and let review and full CI run in parallel;
+do not repeat unchanged checks merely while waiting. A
 frontend interaction needs its specified browser evidence. A fixture, browser,
 live-provider, deployment and user-observed result are separate evidence
 layers; report only the layers actually observed. Never replace a required

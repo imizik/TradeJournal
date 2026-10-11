@@ -28,6 +28,7 @@ from cloud_mcp_d0 import (
     reject_model_credentials,
 )
 from journal_coach_snapshot import load_snapshot, summary
+from journal_coach_publication import publication_digest, read_publication, rolling_window
 
 JOURNAL_SCOPE = "journal:read"
 UNAVAILABLE = "The approved journal export is unavailable or outside your grant; contact the owner"
@@ -43,10 +44,12 @@ class JournalConfig(Strict):
     client_id: str = Field(min_length=1, max_length=200)
     client_claim: Literal["client_id", "azp"] = "client_id"
     profiles: list[ProfileGrant] = Field(min_length=1, max_length=1)
-    snapshot_file: str
-    snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    start_day: date
-    end_day: date
+    snapshot_file: str | None = None
+    snapshot_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    start_day: date | None = None
+    end_day: date | None = None
+    publication_file: str | None = None
+    rolling_days: int | None = Field(default=None, strict=True, ge=1, le=31)
     sample_data: bool
 
     @field_validator("journal_only", mode="before")
@@ -61,9 +64,11 @@ class JournalConfig(Strict):
     def https(cls, value):
         return OAuthConfig.https_url(value)
 
-    @field_validator("jwks_file", "snapshot_file")
+    @field_validator("jwks_file", "snapshot_file", "publication_file")
     @classmethod
     def absolute_file(cls, value):
+        if value is None:
+            return value
         if (
             not Path(value).is_absolute()
             or str(Path(value)) != value
@@ -79,7 +84,16 @@ class JournalConfig(Strict):
             raise ValueError("Public keys must match the selected issuer")
         if urlsplit(self.resource_url).path != "/mcp":
             raise ValueError("Use a dedicated resource ending in /mcp")
-        if not 0 <= (self.end_day - self.start_day).days <= 30:
+        if self.publication_file is not None:
+            if self.rolling_days is None or any(value is not None for value in (
+                self.snapshot_file, self.snapshot_sha256, self.start_day, self.end_day
+            )):
+                raise ValueError("Rolling publication requires one pinned day count, not a fixed export")
+        elif self.rolling_days is not None or any(value is None for value in (
+            self.snapshot_file, self.snapshot_sha256, self.start_day, self.end_day
+        )):
+            raise ValueError("Require a complete fixed export or a rolling publication")
+        elif not 0 <= (self.end_day - self.start_day).days <= 30:
             raise ValueError("Share at most 31 days")
         return self
 
@@ -102,10 +116,26 @@ class JournalVerifier(JWKSVerifier):
             return None
         # A new export digest may refresh data. Identity, file, window and data
         # class cannot silently change in a running process.
-        fields = ("profiles", "snapshot_file", "start_day", "end_day", "sample_data")
+        fields = ("profiles", "snapshot_file", "start_day", "end_day", "sample_data",
+                  "publication_file", "rolling_days")
         if any(getattr(current, key) != getattr(self.config, key) for key in fields):
             return None
         return current
+
+
+def approved_snapshot(config, *, now=None):
+    """Read only a fixed grant or its separately published rolling export."""
+    now = now or datetime.now(timezone.utc)
+    if config.publication_file:
+        value, digest = read_publication(config.publication_file, now=now)
+        expected = rolling_window(now, config.rolling_days)
+    else:
+        value = load_snapshot(config.snapshot_file, config.snapshot_sha256, now=now)
+        digest = config.snapshot_sha256
+        expected = (config.start_day, config.end_day)
+    if (value.start_day, value.end_day) != expected or value.sample_data != config.sample_data:
+        raise ValueError("Export outside grant")
+    return value, digest
 
 
 class JournalMCP(FastMCP):
@@ -196,13 +226,7 @@ def create_server(config_path):
         if active is None:
             raise ToolError(UNAVAILABLE)
         try:
-            value = load_snapshot(active.snapshot_file, active.snapshot_sha256)
-            if (
-                value.start_day != active.start_day
-                or value.end_day != active.end_day
-                or value.sample_data != active.sample_data
-            ):
-                raise ValueError("Export outside grant")
+            value, digest = approved_snapshot(active)
         except (OSError, ValueError):
             raise ToolError(UNAVAILABLE) from None
         # Recheck expiry and revocation after reading data, before returning it.
@@ -213,6 +237,11 @@ def create_server(config_path):
             or verifier.active_config() != active
         ):
             raise ToolError(UNAVAILABLE)
+        try:
+            if active.publication_file and publication_digest(active.publication_file) != digest:
+                raise ValueError("Publication changed during read")
+        except (OSError, ValueError):
+            raise ToolError(UNAVAILABLE) from None
         envelope = {
             "schema_version": "journal-coach-read-v1",
             "read_only": True,
@@ -222,14 +251,14 @@ def create_server(config_path):
             "start_day": value.start_day.isoformat(),
             "end_day": value.end_day.isoformat(),
             "display_timezone": "America/New_York",
-            "snapshot_sha256": active.snapshot_sha256,
+            "snapshot_sha256": digest,
             "source": value.source,
         }
         return value, envelope
 
     @server.tool(annotations=hints)
     async def get_journal_summary() -> dict:
-        """Statistics for all closed trades in the fixed shared date window."""
+        """Statistics for all closed trades in the owner's shared date window."""
         value, envelope = await snapshot()
         return {**envelope, "summary": summary(value)}
 

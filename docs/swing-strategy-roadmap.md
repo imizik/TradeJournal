@@ -11,10 +11,16 @@ learns to judge swing trades held 1 to 16 sessions. **Practice**: the same
 family code runs on each day's completed bars, sends the signal to the phone,
 records Take or Skip, and tracks the rules' own trade forward.
 
-**Status:** proposal, 2026-10-07. Nothing here is built. This plan takes
-priority over the [Strategy Workbench](strategy-workbench-roadmap.md), whose
-W0 remains a useful later step, and is weighed against Charts at the
-[end](#first-slice-and-why-it-beats-more-charts).
+**Status:** proposal, 2026-10-07. Nothing here is built. The user selected
+[Research Studio R0](agent/research-studio-r0.md) ahead of further S1–S2 work
+on 2026-10-10. The user subsequently selected [R1 observations](agent/research-studio-r1.md);
+[R2 reproducible analysis](agent/research-studio-r2.md) was subsequently selected; R3/R4 remain unselected. This plan otherwise retains priority
+over the [Research Studio / Workbench](strategy-workbench-roadmap.md).
+The revised event-first plan starts with R0 feasibility when selected; the
+retired Workbench W0 is not a technical prerequisite for S1–S2. This is a
+product priority, not an event-lab dependency, and an earlier Studio start
+requires an explicit priority decision. Swing work is weighed against Charts
+at the [end](#first-slice-and-why-it-beats-more-charts).
 
 ## The one design choice that makes this small
 

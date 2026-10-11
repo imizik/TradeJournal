@@ -312,6 +312,16 @@ def test_non_ascii_forged_csrf_is_a_denial_not_a_server_error(boundary):
     assert boundary.public.post("/access/logout", headers=headers).status_code == 403
 
 
+def test_assistant_cannot_reach_owner_advisor_shadow_routes(boundary):
+    assert signin(boundary).status_code == 200
+    run_id = uuid.uuid4()
+    assert boundary.public.get(f"/advisor-shadow/runs/{run_id}").status_code == 403
+    assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/advisor-packet", json={"question": "forged", "user_plan": "forged"}).status_code == 403
+    assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/advisor-output", json={}).status_code == 403
+    for action in ("advisor-handoff", "advisor-import"):
+        assert boundary.public.post(f"/advisor-shadow/runs/{run_id}/{action}", json={}).status_code == 403
+
+
 def test_stream_revalidation_does_not_spend_request_budget(boundary):
     assert signin(boundary).status_code == 200
     from app.models import AccessLoginLimit

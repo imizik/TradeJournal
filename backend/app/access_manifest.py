@@ -1,6 +1,13 @@
 """Reviewed route inventory. New routes require explicit classification."""
 
 DOMAIN_ROUTES = frozenset({
+    "GET /research-studio/config",
+    "POST /research-studio/command",
+    'GET /advisor-shadow/runs/{run_id}',
+    'POST /advisor-shadow/runs/{run_id}/advisor-packet',
+    'POST /advisor-shadow/runs/{run_id}/advisor-output',
+    'POST /advisor-shadow/runs/{run_id}/advisor-handoff',
+    'POST /advisor-shadow/runs/{run_id}/advisor-import',
     'GET /cloud-mcp/practice/runs',
     'GET /cloud-mcp/practice/runs/{run_id}',
     'GET /cloud-mcp/practice/opportunities/{opportunity_id}/choice',

@@ -89,8 +89,12 @@ patterns that can create N+1 calls.
 - Worthless expiration subtracts remaining long-option cost basis but credits
   remaining short-option premium. Previously realized partial closes retain
   their result in both cases.
-- Manual fills are backed up to `backend/data/manual_fills.json` and restored
-  on startup and after a destructive resync.
+- Manual fills default to `backend/data/manual_fills.json` and are restored on
+  startup and after a destructive resync. `TJ_MANUAL_FILLS_BACKUP` explicitly
+  overrides that path for isolated tests; backup and restore use the same
+  configured path. Pytest and each Playwright browser configuration provide a
+  disposable location so startup restore and `POST /fills` cannot consume or
+  replace the developer's backup.
 - The FIFO sort key is
   `(executed_at, opens-before-closes, str(fill.id))`. Opens must sort before
   closes at equal timestamps, or a close is orphaned and its entry lots get
@@ -284,7 +288,8 @@ is verifiable rather than hopeful.
   this same limiter but off the enrichment path: it only reserves a slot
   (never waits more than two seconds, never retries), caches 15 minutes under
   `backend/data/symbol_info/v1/polygon/`, and a 429 there calls `note_refusal`
-  like any other, so it also slows enrichment. Keep it behind the News tab.
+  like any other, so it also slows enrichment. Keep it behind the News tab and the
+  chart's news layer (T3.5), which share one read per symbol.
 - The Short tab (T3.1) reads three more Polygon endpoints (`/stocks/v1/short-interest`,
   `/stocks/v1/short-volume`, `/v3/reference/tickers/{t}`) the same way, cached one
   day per symbol, only when that tab asks.
@@ -514,3 +519,13 @@ and missing cost provenance remain explicit. The shared regular-session
 underlying benchmark requires complete minute and no-split coverage, never
 substitutes actor paper fills or actual journal P&L. See
 [the complete A3 contract](a3-implementation-contract.md).
+
+The [manual advisor/shadow fixture](advisor-shadow-contract.md) exclusively
+occupies the existing A3 agent slot in a disposable demo database. It shares
+the full-batch validator, retains an exact neutral projection and submission,
+and exposes no provider/model or arm operation. Its capability is local-only,
+expiring/revocable and checked under the SQLite writer lock after body reception.
+Fixture prices cannot support a P0 TAKE. Advisor export before all five human
+commitments durably marks the run assisted; manual inference provenance always
+remains independence-unverified. Advisor text/grant digests never enter the
+shadow packet, own receipt or ordinary Practice configuration projection.

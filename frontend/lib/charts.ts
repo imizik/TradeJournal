@@ -193,6 +193,9 @@ export type ChartData = SymbolPanels & {
 export type ChartStreamTick = {
   type: "tick"; symbol: string; at: number; price: number; open: number; high: number; low: number;
   minute: number; session: "pre" | "regular" | "post";
+  received_at?: number; provider_ms?: number; relay_ms?: number; sent_at?: number;
+  /** Browser-local monotonic receipt, never supplied by the backend. */
+  receivedMono?: number;
   buckets: Partial<Record<Interval, { time: number; end_time: number; extended: boolean }>>;
 };
 /**
@@ -238,6 +241,43 @@ export const STUDIES = ["ema9", "ema20", "ema50", "ema200", "vwap", "volume", "r
 /** What the charts draw: with the Indicators group hidden every study is off, and each one's own setting is kept for when it shows again. */
 export const shownIndicators = (indicators: Indicators, groupHidden: boolean): Indicators =>
   groupHidden ? { ...indicators, ...Object.fromEntries(STUDIES.map((key) => [key, false])) } : indicators;
+export type Study = typeof STUDIES[number];
+/** The line colors of the studies that draw one; the Indicators menu lets each be changed. */
+export const INDICATOR_COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1", rsi: "#b494f5" } as const;
+export type ColorKey = keyof typeof INDICATOR_COLORS;
+/** Only the colors that differ from `INDICATOR_COLORS`, so a changed default still reaches a chart that never chose. */
+export type IndicatorColors = Partial<Record<ColorKey, string>>;
+/** Saved colors from outside this code: known studies with a #rrggbb value that is not already the default. */
+export function cleanIndicatorColors(value: unknown): IndicatorColors {
+  const out: IndicatorColors = {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return out;
+  for (const key of Object.keys(INDICATOR_COLORS) as ColorKey[]) {
+    const color = (value as Record<string, unknown>)[key];
+    if (typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color) && color.toLowerCase() !== INDICATOR_COLORS[key]) out[key] = color.toLowerCase();
+  }
+  return out;
+}
+/** Every study's color: the chosen one, else its default. */
+export const indicatorColors = (chosen: IndicatorColors): Record<ColorKey, string> => ({ ...INDICATOR_COLORS, ...chosen });
+export const INDICATOR_NAMES: Record<keyof Indicators, string> = { ema9: "EMA 9", ema20: "EMA 20", ema50: "EMA 50", ema200: "EMA 200", vwap: "RTH VWAP", volume: "Volume", rsi: "RSI 14", fills: "My fills" };
+/** A smaller chart's own studies, chosen from its header; null follows the workspace's. */
+export type PanelStudies = Record<Study, boolean>;
+/**
+ * A smaller chart narrower or shorter than this, in CSS pixels with its header,
+ * is compact: it opens on fewer candles, draws automatic levels as ticks at its
+ * right edge, and, while it follows the workspace's studies, leaves out the
+ * slower averages, volume and RSI. A maximized or main chart never is.
+ */
+export const COMPACT_PANEL = { width: 360, height: 260 } as const;
+/** What a compact chart that follows the workspace's studies draws: EMA 9 and VWAP as set, nothing else. */
+export const slimIndicators = (indicators: Indicators): Indicators => ({ ...indicators, ema20: false, ema50: false, ema200: false, volume: false, rsi: false });
+const NO_PANEL_STUDIES: (PanelStudies | null)[] = [null, null, null, null, null];
+/** Per-panel studies from outside this code, aligned with `intervals`; the main panel always follows. */
+export function cleanPanelStudies(value: unknown): (PanelStudies | null)[] {
+  if (!Array.isArray(value) || value.length !== 5) return NO_PANEL_STUDIES;
+  return value.map((row, index) => index && row && typeof row === "object" && !Array.isArray(row)
+    ? Object.fromEntries(STUDIES.map((key) => [key, (row as Record<string, unknown>)[key] === true])) as PanelStudies : null);
+}
 export type SmallChartSize = "compact" | "normal" | "tall";
 /**
  * How a wide screen shares the chart grid (C7.4): the smaller row's share of
@@ -261,7 +301,17 @@ export const COLUMN_MIN_PX = 160;
  */
 export const SMALL_SHARES: Record<SmallChartSize, number> = { compact: 0.275, normal: 0.378, tall: 0.518 };
 const EQUAL_COLUMNS = [0.25, 0.25, 0.25, 0.25];
-export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.normal, columns: EQUAL_COLUMNS };
+/** New setups start with the compact lower row, so the main chart gets about 72% of the grid; saved settings keep their own size. */
+export const DEFAULT_PROPORTIONS: Proportions = { lower: SMALL_SHARES.compact, columns: EQUAL_COLUMNS };
+/** The two built-in layout presets (not stored as user layouts): the main chart dominant, or the earlier balance. `dock` is applied per device. */
+export const LAYOUT_PRESETS = [
+  { id: "active", name: "Active", detail: "Main chart large, lower row compact, side dock closed", smallSize: "compact", dock: false },
+  { id: "research", name: "Research", detail: "Balanced rows, side dock open", smallSize: "normal", dock: true },
+] as const satisfies readonly { id: string; name: string; detail: string; smallSize: SmallChartSize; dock: boolean }[];
+export type LayoutPreset = (typeof LAYOUT_PRESETS)[number];
+/** A preset arranges the five charts and sets the desktop split; intervals, held symbols, linked ranges and a phone's chart height stay as they are. */
+export const applyPreset = (settings: ChartSettings, preset: LayoutPreset): ChartSettings =>
+  ({ ...settings, layout: "multi", proportions: { lower: SMALL_SHARES[preset.smallSize], columns: EQUAL_COLUMNS } });
 const thousandths = (value: number) => Math.round(value * 1000) / 1000;
 /**
  * Proportions from outside this code, kept to what the dividers can make: the
@@ -325,7 +375,9 @@ export type ChartSettings = {
   symbol: string; intervals: Interval[]; watchlist: string[]; session: "regular" | "extended";
   /** Per panel, aligned with `intervals`: a symbol the panel holds, or null to follow `symbol`. The main panel always follows. */
   panelSymbols: (string | null)[];
-  layout: "multi" | "single"; indicators: Indicators; levels: Record<string, PriceLevel[]>;
+  layout: "multi" | "single"; indicators: Indicators;
+  /** Line colors the user chose for studies, shared with every device; empty means all defaults. */
+  indicatorColors: IndicatorColors; levels: Record<string, PriceLevel[]>;
   /** Rays, trend lines, zones and notes per symbol (C1.2). */
   drawings: Record<string, Drawing[]>;
   /** The style each drawing tool last used, so the next one starts there. */
@@ -346,6 +398,10 @@ export type ChartSettings = {
   optionsLayer: OptionsLayer;
   /** The range bands (C2.7): expected-move levels and VWAP ±1σ/±2σ, off until shown; a field of its own like `autoLevelsHidden`. */
   rangeBandsHidden: boolean;
+  /** The main chart's news markers (T3.5) hidden; on by default, and a field of its own like `autoLevelsHidden`. */
+  newsHidden: boolean;
+  /** Each smaller chart's own studies, aligned with `intervals`; null follows the workspace's (slimmed while compact). A field of its own like `newsHidden`. */
+  panelStudies: (PanelStudies | null)[];
   recent: string[]; linkRange: boolean; smallSize: SmallChartSize;
   /**
    * Full screen's dock as C7.3 shared it. Since C7.4 each device keeps its own
@@ -390,10 +446,11 @@ export const DEFAULT_SETTINGS: ChartSettings = {
   symbol: "MRVL", intervals: ["5m", "15m", "1h", "1D", "1m"], panelSymbols: [null, null, null, null, null],
   watchlist: ["SPY", "QQQ", "MRVL", "NVDA", "AMD", "AAPL", "META", "MSFT"],
   session: "extended", layout: "multi",
-  indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true },
+  indicators: { ema9: true, ema20: true, ema50: true, ema200: false, vwap: true, volume: true, rsi: true, fills: true }, indicatorColors: {},
   levels: {}, drawings: {}, toolStyles: DEFAULT_TOOL_STYLES, magnet: false, hiddenGroups: { levels: false, drawings: false }, studiesHidden: false, autoLevelsHidden: false,
-  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
-  proportions: null, layoutProportions: {},
+  optionsLayer: DEFAULT_OPTIONS_LAYER, rangeBandsHidden: true, newsHidden: false, panelStudies: NO_PANEL_STUDIES, recent: [], linkRange: false, smallSize: "normal", immersiveWatchlist: false, layouts: [],
+  // New setups start with the main chart dominant on desktop; a phone's stacked charts keep their S/M/L height.
+  proportions: DEFAULT_PROPORTIONS, layoutProportions: {},
 };
 export const SMALL_HEIGHTS: Record<SmallChartSize, number> = { compact: 160, normal: 245, tall: 360 };
 export const STORAGE_KEY = "tradejournal.charts.v1";
@@ -434,6 +491,7 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       session: value.session === "regular" ? "regular" : "extended",
       layout: value.layout === "single" ? "single" : "multi",
       indicators: Object.fromEntries(Object.entries(DEFAULT_SETTINGS.indicators).map(([key, fallback]) => [key, typeof value.indicators?.[key] === "boolean" ? value.indicators[key] : fallback])) as Indicators,
+      indicatorColors: cleanIndicatorColors(value.indicatorColors),
       levels,
       drawings: cleanDrawings(value.drawings, validSymbol),
       toolStyles: cleanToolStyles(value.toolStyles),
@@ -443,6 +501,8 @@ export function sanitizeSettings(input: unknown): ChartSettings {
       autoLevelsHidden: value.autoLevelsHidden === true,
       optionsLayer: cleanOptionsLayer(value.optionsLayer),
       rangeBandsHidden: value.rangeBandsHidden !== false,
+      newsHidden: value.newsHidden === true,
+      panelStudies: cleanPanelStudies(value.panelStudies),
       recent: Array.isArray(value.recent) ? [...new Set<string>(value.recent.filter((s: unknown): s is string => typeof s === "string" && validSymbol(s)))].slice(0, 8) : [],
       linkRange: value.linkRange === true,
       smallSize: value.smallSize === "compact" || value.smallSize === "tall" ? value.smallSize : "normal",
@@ -854,6 +914,8 @@ export const countdown = (seconds: number) => {
 /** Candles a chart opens on: the main chart, and each smaller panel. */
 export const OPENING_BARS = 110;
 export const PANEL_OPENING_BARS = 65;
+/** A compact smaller chart (`COMPACT_PANEL`) opens closer in. */
+export const COMPACT_OPENING_BARS = 40;
 export function barChange(prev: ChartBar[], next: ChartBar[]): "same" | "last" | "append" | "reset" {
   if (!prev.length || !next.length) return prev.length === next.length ? "same" : "reset";
   const appended = next.length === prev.length + 1;

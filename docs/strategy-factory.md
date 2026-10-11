@@ -130,8 +130,7 @@ call". `FACTORY_CLAUDE_BUDGET_USD` (10) and `FACTORY_CLAUDE_TIME_LIMIT`
 format stops the week before anything is judged.
 
 The run uses the plan token from `claude setup-token`, `CLAUDE_CODE_OAUTH_TOKEN`
-in `backend/.env`, exactly as the [docs drift pass](agent/architecture.md#processes)
-does: the token goes in as an environment prefix, never an argument; the API
+in `backend/.env`: the token goes in as an environment prefix, never an argument; the API
 keys, key file descriptors, auth token, base URL, socket and `CLAUDE_CODE_USE_*` provider switches
 that would outrank or receive it are removed for the call; and before
 anything else, `claude auth status` must report `oauth_token`/`firstParty`

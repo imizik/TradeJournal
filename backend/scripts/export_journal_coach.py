@@ -32,13 +32,22 @@ TRADE_QUERY = text("""
     ORDER BY closed_at, id
     LIMIT :row_limit
 """).bindparams(bindparam("account_ids", expanding=True))
+SCOPED_TRADE_QUERY = text("""
+    SELECT id, account_id, ticker, instrument_type, contracts, realized_pnl, status, opened_at, closed_at
+    FROM public.journal_coach_export_trade
+    WHERE account_id IN :account_ids
+      AND closed_at >= :start_at
+      AND closed_at < :after_end_at
+    ORDER BY closed_at, id
+    LIMIT :row_limit
+""").bindparams(bindparam("account_ids", expanding=True))
 
 
 class ExportError(Exception):
     """Expected safe-to-display export failure."""
 
 
-def _validate_role(connection) -> None:
+def _validate_role(connection, *, scoped_view: bool = False) -> None:
     role = connection.execute(text("""
         SELECT rolsuper, rolbypassrls, rolcreatedb, rolcreaterole
         FROM pg_roles
@@ -100,6 +109,32 @@ def _validate_role(connection) -> None:
     """)).first()
     if writable:
         raise ExportError("database role has write privileges")
+    if scoped_view:
+        expected_columns = {"id", "account_id", "ticker", "instrument_type", "contracts", "realized_pnl", "status", "opened_at", "closed_at"}
+        views = connection.execute(text("""
+            SELECT c.oid, a.attname, has_column_privilege(current_user, c.oid, a.attnum, 'SELECT'), c.reloptions
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            LEFT JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+            WHERE n.nspname = 'public' AND c.relname = 'journal_coach_export_trade' AND c.relkind = 'v'
+            ORDER BY a.attnum
+        """)).all()
+        granted = {row[1] for row in views if row[2]}
+        if (not views or granted != expected_columns or
+                any("security_barrier=true" not in (row[3] or []) for row in views)):
+            raise ExportError("database role does not have the exact scoped view read grant")
+        other_reads = connection.execute(text("""
+            SELECT c.relname
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              AND NOT (n.nspname = 'public' AND c.relname = 'journal_coach_export_trade')
+              AND (has_table_privilege(current_user, c.oid, 'SELECT') OR
+                   has_any_column_privilege(current_user, c.oid, 'SELECT'))
+            LIMIT 1
+        """)).first()
+        if other_reads:
+            raise ExportError("database role can read outside the scoped view")
 
 
 def _safe_output(path: Path, content: bytes, replace_existing: bool) -> None:
@@ -137,7 +172,7 @@ def _safe_output(path: Path, content: bytes, replace_existing: bool) -> None:
             pass
 
 
-def export_snapshot(database_url: str, account_ids: list[UUID], start_day: date, end_day: date) -> JournalCoachSnapshot:
+def export_snapshot(database_url: str, account_ids: list[UUID], start_day: date, end_day: date, *, scoped_view: bool = False) -> JournalCoachSnapshot:
     parsed = urlparse(database_url)
     if parsed.scheme != "postgresql+psycopg" or not parsed.hostname:
         raise ExportError("JOURNAL_EXPORT_DATABASE_URL must be a PostgreSQL psycopg URL")
@@ -156,8 +191,8 @@ def export_snapshot(database_url: str, account_ids: list[UUID], start_day: date,
             transaction = connection.begin()
             try:
                 connection.exec_driver_sql("SET TRANSACTION READ ONLY")
-                _validate_role(connection)
-                rows = connection.execute(TRADE_QUERY, {
+                _validate_role(connection, scoped_view=scoped_view)
+                rows = connection.execute(SCOPED_TRADE_QUERY if scoped_view else TRADE_QUERY, {
                     "account_ids": [str(account_id) for account_id in account_ids],
                     "start_at": datetime.combine(start_day, time.min),
                     "after_end_at": datetime.combine(end_day + timedelta(days=1), time.min),
@@ -244,5 +279,26 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
 
+def refresh_main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Refresh the approved journal-coach publication")
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--database-url-file", required=True, type=Path)
+    args = parser.parse_args(argv)
+    try:
+        from journal_coach_refresh import refresh
+        result = refresh(args.config, args.database_url_file)
+        print(json.dumps({
+            "sha256": result["snapshot_sha256"],
+            "generated_at": result["generated_at"],
+            "trade_count": result["trade_count"],
+        }, separators=(",", ":")))
+        return 0
+    except Exception:
+        print("error: journal snapshot refresh failed", file=sys.stderr)
+        return 2
+
+
 if __name__ == "__main__":
+    if "--config" in sys.argv[1:] or "--database-url-file" in sys.argv[1:]:
+        raise SystemExit(refresh_main())
     raise SystemExit(main())

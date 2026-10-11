@@ -9,7 +9,7 @@ below the level, ``down`` when above.
 - **closes_beyond**: a closed candle of the alert's interval closes beyond it.
 
 Trades are judged one by one as the stream validates them, before the
-browser's one-second coalescing (``chart_stream.trade_event``). Where the
+250 ms display coalescing (``chart_stream.trade_event``). Where the
 stream was not connected, 1-minute bars stand in: their high or low says a
 trade reached the level, and the event says it was seen on bars. A candle is
 final ``LATENESS`` seconds after it closes; its close is what Tradier's

@@ -142,6 +142,209 @@ with Session(engine) as db:
   await expect(reopened.getByRole("button", { name: "Save frozen choice" })).toHaveCount(0);
 });
 
+for (const stage of ["list", "detail"] as const) for (const failure of [false, true]) test(`an initial historical ${stage} ${failure ? "failure" : "held response"} survives Reload`, async ({ page, request }) => {
+  const width = stage === "list" ? 1440 : 390;
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  const today = new Date();
+  const format = (date: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+  const historical = new Date(today);
+  historical.setDate(historical.getDate() - 1);
+  const archived = seedNoProviderRun(format(historical));
+  const current = seedNoProviderRun(format(today));
+  const list = await (await request.get(`${API}/practice/runs?day=${format(today)}`)).json();
+  const detail = await (await request.get(`${API}/practice/runs/${archived.runId}`)).json();
+  let calls = 0;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const url = stage === "list" ? "**/api/backend/practice/runs?**" : `**/api/backend/practice/runs/${archived.runId}`;
+  await page.route(url, async (route) => {
+    const call = ++calls;
+    if (call === 1) {
+      if (failure) return route.fulfill({ status: 503, json: { detail: "Temporary initial read failure" } });
+      await held;
+      return route.fulfill({ status: 503, json: { detail: "Stale initial read failure" } });
+    }
+    await route.fulfill({ json: stage === "list" ? list : detail });
+  });
+  await page.goto(`/?practice_run=${archived.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect.poll(() => calls).toBe(1);
+  if (failure) await expect(routine).toContainText("Temporary initial read failure");
+  await routine.getByRole("button", { name: "Reload run" }).click();
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(archived.oppId);
+  // Reloading the accepted historical selection never chooses the day-list's first row.
+  await routine.getByRole("button", { name: "Reload run" }).click();
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(archived.oppId);
+  await expect(routine.getByLabel("Saved run")).toHaveValue(archived.runId);
+  // A later explicit selection wins even though the entry URL still names the archive.
+  await routine.getByLabel("Saved run").selectOption(current.runId);
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(current.oppId);
+  if (!failure) {
+    const stale = page.waitForResponse(url);
+    release();
+    await stale;
+    await expect(routine.getByTestId("practice-opportunity")).toContainText(current.oppId);
+    await expect(routine).not.toContainText("Stale initial read failure");
+  }
+  await routine.getByRole("button", { name: "Reload run" }).click();
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(current.oppId);
+});
+
+for (const operation of ["Reload", "Prepare"] as const) test(`${operation} failure settles a superseded selection and preserves its original timer`, async ({ page, request }) => {
+  const width = operation === "Reload" ? 1440 : 390;
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const original = seedNoProviderRun(day);
+  const other = seedNoProviderRun(day);
+  await page.goto(`/?practice_run=${original.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(original.oppId);
+  await routine.getByRole("button", { name: "Start morning timing" }).click();
+  const otherBody = await (await request.get(`${API}/practice/runs/${other.runId}`)).json();
+  let asked = 0, writes = 0;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**/api/backend/practice/runs/${other.runId}`, async (route) => { asked++; await held; await route.fulfill({ json: otherBody }); });
+  await page.route("**/api/backend/practice/runs/*/timing", (route) => { writes++; return route.continue(); });
+  await routine.getByLabel("Saved run").selectOption(other.runId);
+  await expect.poll(() => asked).toBe(1);
+  await expect(routine.getByTestId("practice-opportunity")).toHaveCount(0);
+  const failureUrl = operation === "Reload" ? "**/api/backend/practice/runs?**" : "**/api/backend/practice/prepare";
+  await page.route(failureUrl, (route) => route.fulfill({ status: 503, json: { detail: `Temporary ${operation} failure` } }));
+  await routine.getByRole("button", { name: operation === "Reload" ? "Reload run" : "Prepare today" }).click();
+  await expect(routine).toContainText(`Temporary ${operation} failure`);
+  await page.screenshot({ path: test.info().outputPath(`practice-${operation.toLowerCase()}-failed-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  await expect(routine).not.toContainText("Loading selected run…");
+  await expect(routine.getByLabel("Saved run")).toHaveValue(original.runId);
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(original.oppId);
+  const stale = page.waitForResponse(`**/api/backend/practice/runs/${other.runId}`);
+  release();
+  await stale;
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(original.oppId);
+  expect(writes).toBe(0);
+  await page.unroute(failureUrl);
+  await routine.getByRole("button", { name: "Save morning time" }).click();
+  await expect(routine.getByRole("button", { name: "Save morning time" })).toHaveCount(0);
+  expect(writes).toBe(1);
+  expect((await (await request.get(`${API}/practice/runs/${original.runId}`)).json()).timings.morning.seconds).toBeGreaterThan(0);
+  expect((await (await request.get(`${API}/practice/runs/${other.runId}`)).json()).timings).toEqual({});
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+});
+
+for (const width of [1440, 390]) test(`pending run selection and delayed reload preserve the timer origin at ${width}px`, async ({ page, request }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const original = seedNoProviderRun(day);
+  const other = seedNoProviderRun(day);
+  await page.goto(`/?practice_run=${original.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(original.oppId);
+  await routine.getByRole("button", { name: "Start morning timing" }).click();
+  await page.screenshot({ path: test.info().outputPath(`practice-timer-ready-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  let releaseOld: () => void = () => {};
+  const oldGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+  let releaseOther: () => void = () => {};
+  const otherGate = new Promise<void>((resolve) => { releaseOther = resolve; });
+  let oldAsked = 0, otherAsked = 0, writes = 0;
+  let oldReadGate = oldGate;
+  const oldBody = await (await request.get(`${API}/practice/runs/${original.runId}`)).json();
+  const otherBody = await (await request.get(`${API}/practice/runs/${other.runId}`)).json();
+  await page.route(`**/api/backend/practice/runs/${original.runId}`, async (route) => {
+    oldAsked++;
+    await oldReadGate;
+    await route.fulfill({ json: oldBody });
+  });
+  await page.route(`**/api/backend/practice/runs/${other.runId}`, async (route) => {
+    otherAsked++;
+    await otherGate;
+    await route.fulfill({ json: otherBody });
+  });
+  await page.route("**/api/backend/practice/runs/*/timing", (route) => { writes++; return route.continue(); });
+  await routine.getByRole("button", { name: "Reload run" }).click();
+  await expect.poll(() => oldAsked).toBeGreaterThan(0);
+  await routine.getByLabel("Saved run").selectOption(other.runId);
+  await expect.poll(() => otherAsked).toBe(1);
+  await expect(routine.getByLabel("Saved run")).toHaveValue(other.runId);
+  await expect(routine.getByTestId("practice-opportunity")).toHaveCount(0);
+  await expect(routine.getByRole("button", { name: "Start morning timing" })).toBeDisabled();
+  await expect(routine.getByRole("button", { name: "Save frozen choice" })).toHaveCount(0);
+  await routine.getByRole("button", { name: "Save morning time" }).click();
+  await page.screenshot({ path: test.info().outputPath(`practice-selection-pending-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  await expect(routine).toContainText("Select the run where this timer began");
+  expect(writes).toBe(0);
+  releaseOther();
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(other.oppId);
+  const oldReply = page.waitForResponse(`**/api/backend/practice/runs/${original.runId}`);
+  releaseOld();
+  await oldReply;
+  await expect(routine.getByLabel("Saved run")).toHaveValue(other.runId);
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(other.oppId);
+  await routine.getByRole("button", { name: "Save morning time" }).click();
+  await expect(routine).toContainText("Select the run where this timer began");
+  expect(writes).toBe(0);
+  expect((await (await request.get(`${API}/practice/runs/${other.runId}`)).json()).timings).toEqual({});
+  await routine.getByLabel("Saved run").selectOption(original.runId);
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(original.oppId);
+  let releaseSaved: () => void = () => {};
+  const savedGate = new Promise<void>((resolve) => { releaseSaved = resolve; });
+  let committed = false;
+  await page.route(`**/api/backend/practice/runs/${original.runId}/timing`, async (route) => {
+    writes++;
+    const response = await route.fetch(); // Actual fixture write committed, receipt held.
+    committed = true;
+    await savedGate;
+    await route.fulfill({ response });
+  });
+  let releaseStale: () => void = () => {};
+  oldReadGate = new Promise<void>((resolve) => { releaseStale = resolve; });
+  await routine.getByRole("button", { name: "Save morning time" }).click();
+  await expect.poll(() => committed).toBe(true);
+  const readsBefore = oldAsked;
+  await routine.getByRole("button", { name: "Reload run" }).click();
+  await expect.poll(() => oldAsked).toBeGreaterThan(readsBefore);
+  releaseSaved();
+  await expect(routine.getByRole("button", { name: "Save morning time" })).toHaveCount(0);
+  expect(writes).toBe(1);
+  const saved = (await (await request.get(`${API}/practice/runs/${original.runId}`)).json()).timings.morning.seconds;
+  expect(saved).toBeGreaterThan(0);
+  await expect(routine).toContainText(`Timing: morning ${saved}s`);
+  const staleReply = page.waitForResponse(`**/api/backend/practice/runs/${original.runId}`);
+  releaseStale();
+  await staleReply;
+  await expect(routine).toContainText(`Timing: morning ${saved}s`);
+  await expect(routine.getByLabel("Saved run")).toHaveValue(original.runId);
+  await page.screenshot({ path: test.info().outputPath(`practice-timer-saved-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+});
+
+test("a slow queued-run refresh completes before polling again", async ({ page, request }) => {
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const fixture = seedNoProviderRun(day);
+  const body = await (await request.get(`${API}/practice/runs/${fixture.runId}`)).json();
+  let calls = 0;
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route(`**/api/backend/practice/runs/${fixture.runId}`, async (route) => {
+    calls++;
+    if (calls > 1) await gate;
+    await route.fulfill({ json: { ...body, status: calls === 1 ? "queued" : "failed" } });
+  });
+  await page.goto(`/?practice_run=${fixture.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect(routine.getByTestId("practice-run")).toContainText("QUEUED");
+  await page.clock.install();
+  await page.clock.fastForward(2000);
+  await expect.poll(() => calls).toBe(2);
+  await expect(routine).toContainText("Loading selected run…");
+  await page.clock.fastForward(6000);
+  expect(calls).toBe(2);
+  release();
+  await expect(routine.getByTestId("practice-run")).toContainText("FAILED");
+  await expect(routine).not.toContainText("Loading selected run…");
+  await page.clock.fastForward(6000);
+  expect(calls).toBe(2);
+});
+
 test("attention timing stays with its original run and a failed save preserves the timer", async ({ page, request }) => {
   const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
   const original = seedNoProviderRun(day);
@@ -171,6 +374,39 @@ test("attention timing stays with its original run and a failed save preserves t
   await expect(routine.getByRole("button", { name: "Save morning time" })).toHaveCount(0);
   const recorded = await request.get(`${API}/practice/runs/${original.runId}`);
   expect((await recorded.json()).timings.morning.seconds).toBeGreaterThan(0);
+});
+
+test("an explicit historical run deep-link reopens its frozen choices without overriding a later session", async ({ page, request }) => {
+  const historical = new Date();
+  historical.setDate(historical.getDate() - 1);
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(historical);
+  const fixture = seedNoProviderRun(day);
+  await page.goto(`/?practice_run=${fixture.runId}`);
+  const routine = page.getByTestId("practice-routine");
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(fixture.oppId);
+  await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
+  await routine.getByLabel("Rationale").fill("Historical fixture choice preserves its frozen context");
+  await routine.getByRole("button", { name: "Save frozen choice" }).click();
+  await expect(routine).toContainText("Human: SKIP");
+  await page.reload();
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(fixture.oppId);
+  await expect(routine).toContainText("Human: SKIP");
+  await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
+  await routine.getByRole("button", { name: "Start morning timing" }).click();
+  const next = new Date();
+  next.setDate(next.getDate() + 1);
+  const nextDay = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(next);
+  const nextFixture = seedNoProviderRun(nextDay);
+  let writes = 0;
+  await page.route("**/api/backend/practice/runs/*/timing", (route) => { writes++; return route.continue(); });
+  // Navigate to an explicitly requested day using the real daily-review route.
+  await page.goto(`/daily/${nextDay}`);
+  await expect(routine.getByTestId("practice-opportunity")).toContainText(nextFixture.oppId);
+  await expect(routine).not.toContainText(fixture.oppId);
+  await expect(routine.getByRole("button", { name: "Save morning time" })).toHaveCount(0);
+  await expect(routine.getByRole("button", { name: "Prepare assisted revision" })).toHaveCount(0);
+  expect(writes).toBe(0);
+  expect((await (await request.get(`${API}/practice/runs/${nextFixture.runId}`)).json()).timings).toEqual({});
 });
 
 test("historical runs do not offer current-facts assisted revisions", async ({ page }) => {

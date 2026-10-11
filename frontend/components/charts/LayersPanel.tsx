@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, Eye, EyeOff, Lock, LockOpen, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, EyeOff, Info, Lock, LockOpen, Trash2, X } from "lucide-react";
 import Sheet from "./Sheet";
 import { OPTIONS_NEAREST } from "@/lib/charts";
 import type { OptionsLayer, OptionsMeasure, OptionsScope } from "@/lib/charts";
@@ -12,8 +12,8 @@ export type LayerItem = { id: string; symbol: string; name: string; detail: stri
 export type ItemGroup = "levels" | "drawings";
 export type LayerGroup =
   | { key: ItemGroup; name: string; noun: string; hidden: boolean; items: LayerItem[] }
-  | { key: "journal" | "auto" | "ranges"; name: string; hidden: boolean; note: string }
-  | { key: "options"; name: string; hidden: boolean; note: string; filters: OptionsLayer }
+  | { key: "journal" | "auto" | "ranges" | "news"; name: string; hidden: boolean; info: string; status?: string }
+  | { key: "options"; name: string; hidden: boolean; info: string; status?: string; filters: OptionsLayer }
   | { key: "indicators"; name: string; hidden: boolean; studies: { key: string; label: string; on: boolean }[] };
 
 const COLLAPSED_KEY = "tradejournal.charts.layers.collapsed.v1";
@@ -40,6 +40,9 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
 }) {
   const [collapsed, setCollapsed] = useState<string[]>(readCollapsed);
   const [confirming, setConfirming] = useState<ItemGroup | null>(null);
+  // Which groups' explanations are open; they start closed and are not remembered.
+  const [explained, setExplained] = useState<string[]>([]);
+  const explain = (key: string) => setExplained((keys) => keys.includes(key) ? keys.filter((other) => other !== key) : [...keys, key]);
   const fold = (key: string) => setCollapsed((keys) => {
     const next = keys.includes(key) ? keys.filter((other) => other !== key) : [...keys, key];
     try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(next)); } catch { /* folding still works for this visit */ }
@@ -75,6 +78,8 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
           {"items" in group && !!items.length && <button aria-label={`${allLocked ? "Unlock" : "Lock"} all ${group.noun}`} aria-pressed={allLocked}
             title={allLocked ? `Let every ${group.noun.replace(/s$/, "")} drag again` : `Keep every ${group.noun.replace(/s$/, "")} from being dragged`}
             onClick={() => onGroupLock(group.key)} className={`${button} ${allLocked ? "text-amber-300" : ""}`}>{allLocked ? <Lock size={icon} /> : <LockOpen size={icon} />}</button>}
+          {"info" in group && <button aria-label={`About ${group.name}`} title={`About ${group.name}`} aria-expanded={explained.includes(group.key)} aria-controls={`layer-info-${group.key}`}
+            onClick={() => explain(group.key)} className={`${button} ${explained.includes(group.key) ? "bg-slate-800 text-sky-300" : ""}`}><Info size={icon} /></button>}
           <button aria-label={`${group.hidden ? "Show" : "Hide"} ${group.name}`} aria-pressed={group.hidden} title={group.hidden ? `Show ${group.name} on every chart` : `Hide ${group.name} on every chart`}
             onClick={() => onGroupHidden(group.key)} className={`${button} ${group.hidden ? "text-amber-300" : ""}`}>{group.hidden ? <EyeOff size={icon} /> : <Eye size={icon} />}</button>
           {"items" in group && !!items.length && <button aria-label={`Delete all ${group.noun}`} title={`Delete every ${group.noun.replace(/s$/, "")} listed here`}
@@ -109,7 +114,8 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
           })}
         </div>}
         {open && "filters" in group && <OptionFilters filters={group.filters} sheet={sheet} onChange={(patch) => onOptions?.(patch)} />}
-        {open && "note" in group && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.note}</p>}
+        {"info" in group && <p id={`layer-info-${group.key}`} hidden={!explained.includes(group.key)} className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.info}</p>}
+        {open && "status" in group && !!group.status && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.status}</p>}
         {open && "studies" in group && <div className="pb-1">
           {group.studies.map((study) => <div key={study.key} className={`${row} pl-5 ${group.hidden ? "opacity-60" : ""}`}>
             <span className={`min-w-0 flex-1 truncate text-[11px] ${study.on ? "text-slate-300" : "text-slate-600"}`}>{study.label}</span>

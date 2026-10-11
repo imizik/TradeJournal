@@ -150,8 +150,9 @@ follow [the repository workflow](codex-workflow.md). Sol owns consequential
 semantics, integration, security and final/live verification. One writer per
 shared subsystem; avoid gratuitous delegation or nested workers.
 
-Ask before pushing, opening a PR, merging/deploying, making paid calls or
-turning on the scheduled runtime. Earlier VPS approval applied to the A2
+Follow `CLAUDE.md` for authorized normal branch pushes and PR creation; the
+user alone merges. Deployment activation, paid calls and scheduled runtime
+require their concrete approved scope. Earlier VPS approval applied to the A2
 release, not automatic A3 enablement. While an approval-dependent gate is
 pending, finish independent implementation and deterministic verification.
 Report code-ready, deployed and live-accepted states separately. Stop at A3.
@@ -213,8 +214,11 @@ without the agent. Source-less news and premarket RVOL/ORB remain unavailable.
 User-reported phone receipt remains separate from A2 delivery acceptance.
 
 Code readiness is subject to local verification and separate Postgres/Ubuntu CI.
-No A3 push, PR, deployment, paid call or live schedule is authorized by this
-implementation. AC10 remains **unobserved (0/3 A3 sessions)**: fixture/browser
+At that observation no A3 push, PR, deployment, paid call or live schedule had
+been authorized by that implementation request. The later selected
+[manual advisor/shadow slice](advisor-shadow-contract.md) authorizes its own
+normal implementation/review/PR process without enabling paid/scheduled runtime.
+AC10 was **unobserved (0/3 A3 sessions)** at this observation: fixture/browser
 checks cannot satisfy human routine timing or scheduled/independent live gates.
 
 ### Local verification evidence
@@ -225,6 +229,21 @@ checks cannot satisfy human routine timing or scheduled/independent live gates.
 import boundaries, frontend typecheck/lint and production build. Disposable
 ports avoided an existing test-port listener without stopping it. The paired
 opportunity arm guard additionally passed the complete backend recheck.
+
+Selecting a saved run records that intent before its detail request returns.
+While it loads, the previous run's choices and revision actions are hidden;
+its existing attention timer keeps its original run identity. Stale list or
+detail responses cannot replace a later selection or an acknowledged timing
+write. A session change invalidates previous-session responses; explicit
+historical run deep-links remain readable and reopen their frozen choices and
+advisor receipts. The entry link remains pending through failed or superseded
+reads until a current detail response applies it; a later explicit selection or
+session change discards it. The selector includes an accepted historical run
+outside the current day's list. Failed reload/preparation settles superseded
+loading back to the last accepted run in the same requested session, preserving
+its timer; stale errors cannot cancel a newer selection. The entry link cannot
+override a later requested session. Historical runs still refuse current-facts assisted revisions.
+Queued-run polling waits for its current read to finish.
 
 A final focused browser check covers the attention timer staying on its
 original run and surviving a failed write, alongside phone capture/reload and

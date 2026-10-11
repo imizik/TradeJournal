@@ -138,7 +138,8 @@ async def stream(request: Request, symbol: str = Query("", max_length=15), symbo
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
                     continue
-                yield f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
+                payload = json.dumps({**event, "sent_at": time.time()}, separators=(",", ":"))
+                yield f"event: {event['type']}\ndata: {payload}\n\n"
         finally:
             market.unsubscribe(client_id)
 

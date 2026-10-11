@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
@@ -16,6 +17,7 @@ import path from "node:path";
 const ROOT = path.resolve(__dirname, "..");
 const BACKEND = path.join(ROOT, "backend");
 const E2E_DB = path.join(BACKEND, "data", "e2e_seed.db");
+const MANUAL_FILLS_BACKUP = path.join(mkdtempSync(path.join(os.tmpdir(), "tj-e2e-manual-fills-")), "manual_fills.json");
 
 const BACKEND_PORT = Number(process.env.E2E_BACKEND_PORT || 8099);
 const FRONTEND_PORT = Number(process.env.E2E_FRONTEND_PORT || 3099);
@@ -92,6 +94,10 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         DATABASE_URL: `sqlite:///${E2E_DB}`,
+        // Invented Research Studio sidecar is started only by its browser suite.
+        TJ_RESEARCH_TOKEN: "research-browser-fixture-token-000000000000",
+        TJ_RESEARCH_PORT: process.env.E2E_RESEARCH_PORT || "19097",
+        TJ_MANUAL_FILLS_BACKUP: MANUAL_FILLS_BACKUP,
         // Also keep direct-API development requests on the correct origin.
         FRONTEND_PUBLIC_URL: `http://127.0.0.1:${FRONTEND_PORT}`,
         // Background workers would make runs nondeterministic and reach for

@@ -53,7 +53,7 @@ after them, clearly labelled.
 | T3.2 | Financials: last eight quarters of revenue, margins and EPS (SEC EDGAR) | 3 Depth | done ([PR #155](https://github.com/imizik/TradeJournal/pull/155)) |
 | T3.3 | Ownership and insider activity | 3 Depth | built ([PR #158](https://github.com/imizik/TradeJournal/pull/158)); insiders from Yahoo, unofficial |
 | T3.4 | Peers strip: related tickers with today's move, one click to switch | 3 Depth | done ([PR #154](https://github.com/imizik/TradeJournal/pull/154)) |
-| T3.5 | News markers on the chart | 3 Depth | todo (needs Charts C1.3) |
+| T3.5 | News markers on the chart | 3 Depth | done ([PR #202](https://github.com/imizik/TradeJournal/pull/202)) |
 | T3.6 | EDGAR 8-K and Form 4 as a third News source | 3 Depth | todo, not built (needs a probe from the VPS) |
 | T3.7 | Economic calendar from FRED release dates | 3 Depth | todo, not built (needs a free FRED key) |
 
@@ -154,8 +154,8 @@ these keys.
 | Provider | Shared with | Budget for this panel | How |
 |---|---|---|---|
 | Tradier (120/min per token) | Chart feed (60/min cap), options positioning (30/min), position quotes (under 10/min) | **At most 10/min** | Fundamentals cached 24 h per symbol, calendar 12 h, batched by `symbols=`. A cold symbol costs three calls (company, ratios, calendar); a warm one costs none |
-| Alpaca (free data plan) | Enrichment, reports, scalp packets | At most 2/min | News cached 60 s per symbol on the server; the browser polls once a minute only while the News tab is open and the page is visible |
-| Polygon Basic (5/min) | Fill enrichment, which paces itself from Polygon's first 429 | **At most one call per symbol per dataset per day**, never on the hot path. **News is the one exception: one call per symbol per 15 minutes**, and only while the News tab is requested | Disk cache; on a 429 or any failure, serve the cached copy with its age and do not retry (and stay quiet for five minutes). News goes through the enricher's adaptive limiter and never waits for a slot: a slot more than two seconds out counts as busy, serves the cache and claims nothing (`reserve_within`), so enrichment is not pushed back; a nearer slot is slept before the call. No other Polygon call in Phase 1 |
+| Alpaca (free data plan) | Enrichment, reports, scalp packets | At most 2/min | News cached 60 s per symbol on the server; the browser polls once a minute only while the News tab is open or the chart's news layer is on, and the page is visible, with one read shared between the two |
+| Polygon Basic (5/min) | Fill enrichment, which paces itself from Polygon's first 429 | **At most one call per symbol per dataset per day**, never on the hot path. **News is the one exception: one call per symbol per 15 minutes**, and only while the News tab or the chart's news layer is requested | Disk cache; on a 429 or any failure, serve the cached copy with its age and do not retry (and stay quiet for five minutes). News goes through the enricher's adaptive limiter and never waits for a slot: a slot more than two seconds out counts as busy, serves the cache and claims nothing (`reserve_within`), so enrichment is not pushed back; a nearer slot is slept before the call. No other Polygon call in Phase 1 |
 | Yahoo (`yfinance`) | Quote fallback, report gauges | One fetch per symbol per day | Disk cache; any failure shows "Yahoo unavailable" and the cached copy if one exists |
 | Anthropic | AI reviews | Zero by default | Nothing in this plan calls a model automatically |
 
@@ -226,8 +226,8 @@ articles tagging more than three symbols, which removes most mega-cap
 roundups; the response carries the newest 20 plus the newest 20 non-roundups,
 so Focused still fills a list. New articles since the tab was opened show as
 "N new" at the top instead of shifting the list; the tab reads again each
-minute while it is open and the page is visible. Polygon is read only when the
-tab is requested, never retried, and a failure or 429 degrades only itself:
+minute while it is open or the chart's news layer (T3.5) is on, and the page is visible, from one read shared by both. Polygon is read only when the
+tab or the chart's news layer is requested, never retried, and a failure or 429 degrades only itself:
 the response lists each source as `ok`, `stale` (older copy, with its age),
 `failed` or `not_configured`, and Alpaca news still shows. An empty feed
 says "No news in the last 7 days". *Done when:* a fixture with mixed tagging
@@ -373,10 +373,39 @@ peer click behaves exactly like a watchlist click.
 
 **T3.5 News markers on the chart.** Small markers on the candle where each
 Focused article was published, for the main symbol; hover shows the headline,
-click opens it in the News tab. Built on the Charts drawing primitives and
-context menu, so it waits for **C1.3**. This replaces the "News markers"
-bullet in the charts roadmap's Later list. *Done when:* markers align to the
-right candle on 1m and 1D in a browser test, and a layer toggle hides them.
+click opens it in the News tab. Built on the chart's series-marker primitive
+(the one the fill arrows and earnings dates use) and its layers panel. This
+replaces the "News markers" bullet in the charts roadmap's Later list. *Done
+when:* markers align to the right candle on 1m and 1D in a browser test, and a
+layer toggle hides them.
+
+*Built.* The main chart reads the same `GET /charts/symbol/{symbol}/news` as the
+tab, with no new route and no new provider call. While the layer is on
+(default; the **News markers** group in Layers, saved with the other layers),
+the chart reads news after the symbol settles for 300 ms and then each minute
+while the page is visible. The tab and the markers share one read per symbol
+(`lib/newsFeed.ts`), so opening the tab beside the layer adds no request, and
+turning the layer off with the tab closed stops the reads. Only Focused
+articles are marked (more than three tagged symbols is a roundup, never
+marked), for the main symbol's main chart only. An article sits on the candle
+whose bucket holds its publish time (`lib/newsMarkers.ts`). A 1D or 1W candle
+is a regular session, 09:30 to 16:00 New York, so after the close, on a weekend
+or on a holiday it sits on the next session; intraday, a gap (overnight, the
+weekend, outside the displayed session) sends it to the next candle, when the
+market could react. After the last candle it sits on the last candle; before
+the first loaded candle it has no marker. A gap wider than the chart's ordinary
+step (5 days intraday, 10 for 1D, 21 for 1W, the same limit that asks for
+older history) is a hole in the loaded history, not a closed market, so an
+article in one has no marker and a stale last candle never collects a week of
+news. Candles carry their own epoch times, so the New York time change needs
+no calendar arithmetic. Articles on one candle make one marker labelled "N" or
+"N3"; hover lists up to five headlines, newest first, then "+N more". A click
+opens the dock's symbol info on the News tab with that candle's articles lit
+for a few seconds (and scrolled to the newest), letting in an article held
+back behind "N new"; on a phone a tap pins the headlines, whose **Read in
+News** button opens the Watchlist sheet on the News tab. A tap finds its marker
+by where it is drawn, because the chart library reports no hovered marker for a
+touch.
 
 ## Later
 

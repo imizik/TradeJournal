@@ -28,8 +28,10 @@ import pytest
 
 # --- policy ------------------------------------------------------------------
 
-# Modules with no network, no database engine and no credentials. Ordered
+# Modules with no network, no application database engine and no credentials. Ordered
 # roughly by how much depends on them.
+# Explicit Studio source/store adapters may access operator-selected local
+# files; the R2 store uses only in-memory stdlib SQLite plus guarded image I/O.
 PURE_MODULES = {
     "app.models",
     "app.engine.reconstructor",
@@ -57,6 +59,10 @@ PURE_MODULES = {
     "app.engine.factory_model",
     "app.engine.factory_gates",
     "app.engine.factory_brief",
+    "app.engine.research_studio",  # stop-free supplied-snapshot observations
+    "app.engine.research_studio_data",  # explicit cache-only files; no provider/DB/environment
+    "app.engine.research_studio_analysis",  # supplied discovery outcomes and joint blocks
+    "app.engine.research_studio_store",  # operator-selected research files, no app DB/jobs/providers
     # OCC symbol conversion. Pure by construction (stdlib only), and listed
     # here so it stays that way: it is imported by the vendor clients, which is
     # exactly the direction a network import would travel.
@@ -84,7 +90,7 @@ PURE_MODULES = {
 # through another app module, is what "not pure" means here. pandas is present
 # because it computes on data it is handed — it opens no socket and reads no
 # credential.
-PURE_MAY_USE = {"sqlmodel", "sqlalchemy", "pydantic", "pandas"}
+PURE_MAY_USE = {"sqlmodel", "sqlalchemy", "pydantic", "pandas", "numpy"}
 
 # Not pure today, and worth knowing why when you touch them:
 #   app.engine.trade_path  -> app.engine.alpaca   live minute-bar fetch

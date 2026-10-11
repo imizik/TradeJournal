@@ -1,16 +1,17 @@
 "use client";
 
 import { useAppAccess } from "@/components/AccessProvider";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 import PracticePaperPlan from "@/components/PracticePaperPlan";
 import SampleDecisionRoutine from "@/components/SampleDecisionRoutine";
+import AdvisorShadowPanel from "@/components/AdvisorShadowPanel";
 
 type Source = { url: string; label: string; formed_at?: string | null; observed_at?: string | null };
 type Decision = { id: string; decision: "take" | "wait" | "skip"; rationale: string; policy_version?: string; policy_hash?: string; wait_condition?: string | null; wait_expiry?: string | null; plan?: Record<string, unknown> };
 type Context = { captured_at?: string; provider?: string; context_sha256?: string; price_facts?: { name: string; value: number; unit: string; source: string; formed_at: string; observed_at: string }[]; packet?: Record<string, unknown> };
 type Opportunity = { id: string; symbol: string; context: Context | null; human: Decision | null; agent: Decision | null; revealed: boolean; comparison_status: string; benchmark: { status?: string; reason?: string; [key: string]: unknown }; paper: { status?: string } | null; agent_paper?: { status?: string } | null; feedback: { rating: string; phone_received: boolean | null } };
-type Run = { market_data?: boolean; id: string; day: string; revision?: number; parent_id?: string | null; status: string; result: string | null; error?: string | null; mode: string; comparison: string; late: boolean; created_at: string; finished_at: string | null; deadline: string | null; calendar: { status?: string; [key: string]: unknown }; policy_version: string; policy_hash: string; brief: { title: string; text: string; sources: Source[] }[]; agent: { status: string; error?: string | null; model?: string | null; usage?: Record<string, unknown> | null; cost?: number | null; cost_provenance?: string }; timings: { morning?: { seconds: number; reason?: string }; review?: { seconds: number; reason?: string } }; scheduling_configured?: boolean; counts?: Record<string, number>; opportunities: Opportunity[] };
+type Run = { market_data?: boolean; manual_shadow?: boolean; independence?: string; id: string; day: string; revision?: number; parent_id?: string | null; status: string; result: string | null; error?: string | null; mode: string; comparison: string; late: boolean; created_at: string; finished_at: string | null; deadline: string | null; calendar: { status?: string; [key: string]: unknown }; policy_version: string; policy_hash: string; brief: { title: string; text: string; sources: Source[] }[]; agent: { status: string; error?: string | null; model?: string | null; usage?: Record<string, unknown> | null; cost?: number | null; cost_provenance?: string }; timings: { morning?: { seconds: number; reason?: string }; review?: { seconds: number; reason?: string } }; scheduling_configured?: boolean; counts?: Record<string, number>; opportunities: Opportunity[] };
 
 async function request<T>(path: string, body?: unknown): Promise<T> {
   const response = await fetch(apiUrl(path), { method: body === undefined ? "GET" : "POST", cache: "no-store", headers: body === undefined ? undefined : { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -43,53 +44,104 @@ function ReadPracticeRoutine({ day }: { day?: string | null }) {
   const [reviewFilter, setReviewFilter] = useState("all");
   const [timingReason, setTimingReason] = useState("");
   const activeRunId = active?.id;
+  const selectedRun = useRef<string | null>(null);
+  const linkedEntry = useRef<{ id: string; session: string } | null | undefined>(undefined);
+  const requestedSession = useRef<string | null>(null);
+  const currentRun = useRef<Run | null>(null);
+  const currentRunSession = useRef<string | null>(null);
+  const readVersion = useRef(0);
+  const [loadingRun, setLoadingRun] = useState<string | null>(null);
+  const [runSession, setRunSession] = useState<string | null>(null);
+  // A historical deep-link is intentional; the request's session, not the
+  // returned run's day, determines whether a later session made it stale.
+  const showRun = useCallback((run: Run | null) => { currentRun.current = run; currentRunSession.current = selectedDay; setActive(run); setRunSession(selectedDay); }, [selectedDay]);
+  const restoreSelection = useCallback(() => {
+    selectedRun.current = currentRunSession.current === selectedDay ? currentRun.current?.id ?? null : null;
+    setLoadingRun(null);
+  }, [selectedDay]);
 
-  const loadRun = useCallback(async (id: string) => {
-    const run = await request<Run>(`/practice/runs/${encodeURIComponent(id)}`);
-    setActive(run);
-    return run;
-  }, []);
+  const loadRun = useCallback(async (id: string, explicit = true) => {
+    if (explicit) linkedEntry.current = null;
+    selectedRun.current = id; // Selection intent precedes its network response.
+    const version = ++readVersion.current;
+    setLoadingRun(id);
+    try {
+      const run = await request<Run>(`/practice/runs/${encodeURIComponent(id)}`);
+      if (version !== readVersion.current) return;
+      if (linkedEntry.current?.id === id && linkedEntry.current.session === selectedDay) linkedEntry.current = null;
+      showRun(run);
+      setLoadingRun(null);
+    } catch (err) {
+      if (version !== readVersion.current) return;
+      restoreSelection();
+      setError(err instanceof Error ? err.message : "Could not load practice run.");
+    }
+  }, [selectedDay, showRun, restoreSelection]);
   const load = useCallback(async () => {
+    const version = ++readVersion.current;
+    const intended = selectedRun.current;
+    if (linkedEntry.current === undefined) {
+      const id = new URLSearchParams(window.location.search).get("practice_run");
+      linkedEntry.current = id ? { id, session: selectedDay } : null;
+    }
+    const linkedRunId = linkedEntry.current?.id;
     setError("");
     try {
       const data = await request<{ runs: Run[] }>(`/practice/runs?day=${encodeURIComponent(selectedDay)}`);
+      if (version !== readVersion.current) return;
       setRuns(data.runs);
-      const linkedRunId = new URLSearchParams(window.location.search).get("practice_run");
-      if (!activeRunId && linkedRunId) await loadRun(linkedRunId);
-      else if (activeRunId && data.runs.some((run) => run.id === activeRunId)) await loadRun(activeRunId);
-      else if (data.runs[0]) await loadRun(data.runs[0].id);
-      else setActive(null);
-    } catch (err) { setError(err instanceof Error ? err.message : "Could not load practice runs."); }
-  }, [selectedDay, activeRunId, loadRun]);
-  // The run selection is restored by a network response; state updates happen after that response resolves.
+      if (linkedRunId && (!intended || intended === linkedRunId)) await loadRun(linkedRunId, false);
+      else if (intended) await loadRun(intended, false);
+      else if (data.runs[0]) await loadRun(data.runs[0].id, false);
+      else { selectedRun.current = null; showRun(null); setLoadingRun(null); }
+    } catch (err) { if (version === readVersion.current) { restoreSelection(); setError(err instanceof Error ? err.message : "Could not load practice runs."); } }
+  }, [selectedDay, loadRun, showRun, restoreSelection]);
+  // Reload on session changes, not on each returned run. Stale reads cannot select a run.
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (requestedSession.current !== selectedDay) {
+      requestedSession.current = selectedDay;
+      selectedRun.current = null;
+      if (linkedEntry.current && linkedEntry.current.session !== selectedDay) linkedEntry.current = null;
+    }
+    void load();
+    return () => { readVersion.current++; };
+  }, [load, selectedDay]);
   const activeStatus = active?.status;
   useEffect(() => {
-    if (!activeRunId || !["queued", "preparing"].includes(activeStatus ?? "")) return;
-    const id = window.setInterval(() => { void loadRun(activeRunId).catch((err) => setError(err.message)); }, 2000);
+    if (!activeRunId || loadingRun || !["queued", "preparing"].includes(activeStatus ?? "")) return;
+    const id = window.setInterval(() => { if (selectedRun.current === activeRunId) void loadRun(activeRunId, false); }, 2000);
     return () => window.clearInterval(id);
-  }, [activeRunId, activeStatus, loadRun]);
+  }, [activeRunId, activeStatus, loadingRun, loadRun]);
 
   async function prepare() {
     setBusy(true); setError("");
-    try { const run = await request<Run>("/practice/prepare", { mode: "manual", comparison }); setActive(run); setRuns((prior) => [run, ...prior.filter((item) => item.id !== run.id)]); }
-    catch (err) { setError(err instanceof Error ? err.message : "Preparation failed."); }
+    const version = ++readVersion.current;
+    try { const run = await request<Run>("/practice/prepare", { mode: "manual", comparison });
+      if (version === readVersion.current) { linkedEntry.current = null; selectedRun.current = run.id; showRun(run); setLoadingRun(null); }
+      setRuns((prior) => [run, ...prior.filter((item) => item.id !== run.id)]);
+    }
+    catch (err) { if (version === readVersion.current) { restoreSelection(); setError(err instanceof Error ? err.message : "Preparation failed."); } }
     finally { setBusy(false); }
   }
   async function retryRevision() {
-    if (!active) return;
+    if (!active || loadingRun || selectedRun.current !== active.id || runSession !== selectedDay) return;
     if (active.day !== localDay()) return setError("Historical sessions cannot be prepared again with current market facts.");
     setBusy(true); setError("");
+    const version = ++readVersion.current;
     try {
       const run = await request<Run>("/practice/prepare", { mode: "manual", comparison: "assisted", revision: (active.revision ?? 0) + 1, parent_id: active.parent_id ?? active.id });
-      setActive(run); setRuns((prior) => [run, ...prior.filter((item) => item.id !== run.id)]);
-    } catch (err) { setError(err instanceof Error ? err.message : "Revision could not be prepared."); }
+      if (version === readVersion.current) { linkedEntry.current = null; selectedRun.current = run.id; showRun(run); setLoadingRun(null); }
+      setRuns((prior) => [run, ...prior.filter((item) => item.id !== run.id)]);
+    } catch (err) { if (version === readVersion.current) { restoreSelection(); setError(err instanceof Error ? err.message : "Revision could not be prepared."); } }
     finally { setBusy(false); }
   }
-  async function update(next: Run) { setActive(next); setRuns((prior) => prior.map((run) => run.id === next.id ? next : run)); }
+  async function update(next: Run) {
+    if (selectedRun.current === next.id) { readVersion.current++; showRun(next); setLoadingRun(null); }
+    setRuns((prior) => prior.map((run) => run.id === next.id ? next : run));
+  }
   async function submitChoice(opp: Opportunity, form: FormData) {
-    if (!active) return;
+    if (!active || loadingRun || selectedRun.current !== active.id || runSession !== selectedDay) return;
     setBusy(true); setError("");
     const decision = String(form.get("decision")) as Decision["decision"];
     let plan: Record<string, unknown> | undefined;
@@ -105,15 +157,17 @@ function ReadPracticeRoutine({ day }: { day?: string | null }) {
     } catch (err) { setError(err instanceof Error ? err.message : "Choice could not be saved."); }
     finally { setBusy(false); }
   }
-  async function action(path: string, body: unknown) { if (!active) return false; setBusy(true); setError(""); try { await update(await request<Run>(path, body)); return true; } catch (err) { setError(err instanceof Error ? err.message : "Action failed."); return false; } finally { setBusy(false); } }
+  async function action(path: string, body: unknown) { if (!active || loadingRun || selectedRun.current !== active.id || runSession !== selectedDay) return false; setBusy(true); setError(""); try { await update(await request<Run>(path, body)); return true; } catch (err) { setError(err instanceof Error ? err.message : "Action failed."); return false; } finally { setBusy(false); } }
   async function reveal(opp: Opportunity) { await action(`/practice/opportunities/${encodeURIComponent(opp.id)}/reveal`, {}); }
   async function timing() {
     if (!active || !timer) return;
-    if (active.id !== timer.runId) return setError("Select the run where this timer began before saving its time.");
+    if (selectedRun.current !== timer.runId) return setError("Select the run where this timer began before saving its time.");
+    if (active.id !== timer.runId || loadingRun) return setError("Wait for the selected run to load before saving its time.");
     const seconds = Math.max(0, Math.round(performance.now() - timer.started) / 1000);
     const saved = await action(`/practice/runs/${encodeURIComponent(active.id)}/timing`, { phase: timer.phase, seconds, ...(timingReason.trim() ? { reason: timingReason.trim() } : {}) });
     if (saved) { setTimer(null); setTimingReason(""); }
   }
+  const selectableRuns = active && !runs.some((run) => run.id === active.id) ? [active, ...runs] : runs;
   const visibleAgentCounts = active ? Object.fromEntries(["take", "wait", "skip"].map((decision) => [
     decision,
     active.opportunities.filter((opp) => (active.comparison === "assisted" || opp.revealed) && opp.agent?.decision === decision).length,
@@ -128,18 +182,20 @@ function ReadPracticeRoutine({ day }: { day?: string | null }) {
     <div className="flex flex-wrap items-center gap-2">
       <label className="grid min-w-0 max-w-full gap-1 text-sm">Comparison <select aria-label="Comparison mode" value={comparison} onChange={(e) => setComparison(e.target.value as typeof comparison)} className="block w-full min-w-0 max-w-full rounded border bg-background p-2 sm:inline-block sm:w-auto"><option value="independent">Independent (verdict hidden until both commit)</option><option value="assisted">Assisted</option></select></label>
       <button type="button" disabled={busy} onClick={prepare} className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50">{busy ? "Working…" : "Prepare today"}</button>
-      {active && <><button type="button" disabled={!!timer} onClick={() => setTimer({ phase: "morning", started: performance.now(), runId: active.id })} className="rounded border px-3 py-2 text-sm">Start morning timing</button><button type="button" disabled={!!timer} onClick={() => setTimer({ phase: "review", started: performance.now(), runId: active.id })} className="rounded border px-3 py-2 text-sm">Start review timing</button>{timer && <><label className="min-w-0 text-sm">Reason if over five minutes<input value={timingReason} onChange={(event) => setTimingReason(event.target.value)} className="mt-1 w-full rounded border bg-background p-2" /></label><button type="button" onClick={timing} className="rounded border px-3 py-2 text-sm">Save {timer.phase} time</button></>}</>}
+      {active && <><button type="button" disabled={!!timer || !!loadingRun || runSession !== selectedDay} onClick={() => setTimer({ phase: "morning", started: performance.now(), runId: active.id })} className="rounded border px-3 py-2 text-sm">Start morning timing</button><button type="button" disabled={!!timer || !!loadingRun || runSession !== selectedDay} onClick={() => setTimer({ phase: "review", started: performance.now(), runId: active.id })} className="rounded border px-3 py-2 text-sm">Start review timing</button>{timer && <><label className="min-w-0 text-sm">Reason if over five minutes<input value={timingReason} onChange={(event) => setTimingReason(event.target.value)} className="mt-1 w-full rounded border bg-background p-2" /></label><button type="button" onClick={timing} className="rounded border px-3 py-2 text-sm">Save {timer.phase} time</button></>}</>}
     </div>
       <p className="text-xs text-muted-foreground">08:50 scheduling is {active?.scheduling_configured ? "configured; timer execution remains unobserved" : "disabled"}. Arming a paper plan remains explicit.</p>
     {error && <p role="alert" className="break-words text-sm text-red-600">{error}</p>}
-    {runs.length > 1 && <label className="text-sm">Saved run <select aria-label="Saved run" value={active?.id ?? ""} onChange={(e) => void loadRun(e.target.value)} className="block w-full min-w-0 max-w-full rounded border bg-background p-2">{runs.map((run) => <option key={run.id} value={run.id}>{run.id} · {run.status} · {stamp(run.created_at)}</option>)}</select></label>}
+    {selectableRuns.length > 1 && <label className="text-sm">Saved run <select aria-label="Saved run" value={loadingRun ?? active?.id ?? ""} onChange={(e) => void loadRun(e.target.value)} className="block w-full min-w-0 max-w-full rounded border bg-background p-2">{selectableRuns.map((run) => <option key={run.id} value={run.id}>{run.id} · {run.status} · {stamp(run.created_at)}</option>)}</select></label>}
+    {loadingRun && <p role="status" className="text-sm text-muted-foreground">Loading selected run…</p>}
     {!active && !error && <p className="text-sm text-muted-foreground">{owner ? "No run prepared for this session." : "No practice runs are shared with this assistant for this day."}</p>}
-    {active && <div className="space-y-4" data-testid="practice-run">
+    {active && (!loadingRun || loadingRun === active.id) && runSession === selectedDay && <div className="space-y-4" data-testid="practice-run">
       <div className="rounded border p-3 text-sm"><p><strong>{active.status.toUpperCase()}</strong> · {active.result ?? "result pending"}{active.late ? " · LATE" : ""}</p><p>Created {stamp(active.created_at)} · finished {stamp(active.finished_at)} · deadline {stamp(active.deadline)}</p><p>Calendar {active.calendar?.status ?? "unavailable"} · policy {active.policy_version} · hash {active.policy_hash}</p><p>Revision {active.revision ?? 0}{active.parent_id ? ` · revises ${active.parent_id}` : " · original run"}</p><p>Agent {active.agent?.status ?? "disabled"}{active.agent?.error ? ` · ${active.agent.error}` : ""} · model {active.agent?.model ?? "unavailable"} · cost {active.agent?.cost == null ? "unavailable" : active.agent.cost} ({active.agent?.cost_provenance ?? "cost provenance unavailable"})</p><details><summary>Agent usage</summary><pre className="overflow-auto">{active.agent?.usage ? objText(active.agent.usage) : "unavailable"}</pre></details>{active.error && <p role="status" className="break-words text-amber-700">Preparation issue: {active.error}</p>}<details><summary>Agent runtime and cost provenance</summary><pre className="overflow-auto whitespace-pre-wrap text-xs">{objText(active.agent)}</pre></details><p>Human choices: TAKE {active.counts?.take ?? 0} · WAIT {active.counts?.wait ?? 0} · SKIP {active.counts?.skip ?? 0} · nonresponse {active.opportunities?.filter((o) => !o.human).length ?? 0}</p><p>Visible agent choices: TAKE {visibleAgentCounts.take} · WAIT {visibleAgentCounts.wait} · SKIP {visibleAgentCounts.skip}</p><p>Timing: morning {active.timings?.morning ? `${active.timings.morning.seconds}s${active.timings.morning.reason ? ` (${active.timings.morning.reason})` : ""}` : "unrecorded"}; review {active.timings?.review ? `${active.timings.review.seconds}s${active.timings.review.reason ? ` (${active.timings.review.reason})` : ""}` : "unrecorded"}</p>{((active.timings?.morning?.seconds ?? 0) + (active.timings?.review?.seconds ?? 0)) > 300 && <p className="text-amber-700">Morning and review together exceeded five minutes. Keep the recorded time and add a reason if helpful.</p>}</div>
       {["queued", "preparing"].includes(active.status) === false && (active.revision ?? 0) < 10 && active.day === localDay() && <button type="button" disabled={busy} onClick={() => void retryRevision()} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Prepare assisted revision</button>}
       {!["queued", "preparing"].includes(active.status) && <button type="button" disabled={busy} onClick={() => void action(`/practice/runs/${encodeURIComponent(active.id)}/benchmark`, {})} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Refresh underlying benchmark</button>}
       <div className="grid gap-2 md:grid-cols-3">{["MARKET TAPE", "IMPORTANT NEWS", "SETUP BOARD"].map((title) => { const item = active.brief?.find((part) => part.title.toUpperCase() === title); return <article key={title} className="min-w-0 rounded border p-3"><h3 className="font-semibold">{title}</h3><p className="mt-2 whitespace-pre-wrap break-words text-sm">{item?.text ?? "Unavailable in this run."}</p>{item?.sources?.map((source) => { const symbol = source.label.split(" ")[0]; const opportunity = active.opportunities?.find((candidate) => candidate.symbol === symbol); const localPath = `${day ? `/daily/${day}` : "/"}#practice-opportunity-${opportunity?.id ?? ""}`; return <p key={source.url} className="mt-2 break-words text-xs"><a href={opportunity ? localPath : source.url.startsWith("/") ? apiUrl(source.url) : source.url} className="underline">{source.label}</a> · formed {stamp(source.formed_at)} · observed {stamp(source.observed_at)}</p>; })}</article>; })}</div>
       {active.opportunities?.length === 0 && <p className="rounded border p-3 text-sm">No setups for this run. No choice is implied.</p>}
+      {owner && active.manual_shadow && <AdvisorShadowPanel key={active.id} runId={active.id} onRefresh={async () => { if (selectedRun.current === active.id) await loadRun(active.id, false); }} />}
       <label className="block text-sm">Review records <select aria-label="Review records" value={reviewFilter} onChange={(e) => setReviewFilter(e.target.value)} className="block w-full min-w-0 max-w-full rounded border bg-background p-2 sm:inline-block sm:w-auto"><option value="all">All opportunities</option><option value="take">TAKE</option><option value="wait">WAIT</option><option value="skip">SKIP</option><option value="nonresponse">Nonresponse</option><option value="coverage">Missing benchmark coverage</option><option value="useful">Alerts rated useful</option><option value="not_useful">Alerts rated not useful</option><option value="unrated">Unrated alerts</option><option value="unarmed">Unarmed TAKE</option><option value="armed">Unfilled / armed</option><option value="triggered">Triggered, entry pending</option><option value="expired">Expired</option><option value="missed">Missed trigger</option><option value="rejected">Rejected entry</option><option value="open">Open paper</option><option value="closed">Closed paper</option><option value="unresolved">Unresolved paper</option></select></label>
       <div className="space-y-3">{active.opportunities?.filter((opp) => reviewFilter === "all" || (reviewFilter === "nonresponse" ? !opp.human : reviewFilter === "coverage" ? opp.benchmark?.status !== "complete" : ["useful", "not_useful", "unrated"].includes(reviewFilter) ? opp.feedback?.rating === reviewFilter : ["unarmed", "armed", "triggered", "expired", "missed", "rejected", "open", "closed", "unresolved"].includes(reviewFilter) ? opp.paper?.status === reviewFilter || opp.agent_paper?.status === reviewFilter : opp.human?.decision === reviewFilter || ((active.comparison === "assisted" || opp.revealed) && opp.agent?.decision === reviewFilter))).map((opp) => <article key={opp.id} id={`practice-opportunity-${opp.id}`} className="min-w-0 space-y-3 rounded border p-3" data-testid="practice-opportunity">
         <div className="flex flex-wrap justify-between gap-2"><h3 className="font-semibold">{opp.symbol} <span className="text-xs font-normal text-muted-foreground">Opportunity {opp.id}</span></h3><span className="text-xs">{opp.comparison_status}</span></div>
@@ -151,7 +207,7 @@ function ReadPracticeRoutine({ day }: { day?: string | null }) {
           <label className="text-sm sm:col-span-2">TAKE plan JSON (must satisfy A1 validation)<textarea name="plan" rows={4} placeholder='{"trigger_level":...,"stop":...,"target":...}' className="mt-1 w-full min-w-0 rounded border bg-background p-2 font-mono text-xs" /></label>
           <button disabled={busy} className="w-fit rounded border px-3 py-2 text-sm disabled:opacity-50">Save frozen choice</button>
         </form>}
-        {(opp.revealed || active.comparison === "assisted") && <div className="rounded border border-sky-500/30 p-2 text-sm"><strong>Agent choice: {opp.agent?.decision?.toUpperCase() ?? "Unavailable"}</strong>{opp.agent && <><p>{opp.agent.rationale}</p><p>Frozen decision {opp.agent.id} · policy {opp.agent.policy_version ?? "unavailable"} · hash {opp.agent.policy_hash ?? "unavailable"}</p></>}</div>}
+        {(opp.revealed || active.comparison === "assisted") && <div className="rounded border border-sky-500/30 p-2 text-sm"><strong>Agent choice: {opp.agent?.decision?.toUpperCase() ?? "Unavailable"}</strong>{opp.agent && <><p>{opp.agent.rationale}</p><p>Frozen decision {opp.agent.id} · policy {opp.agent.policy_version ?? "unavailable"} · hash {opp.agent.policy_hash ?? "unavailable"}</p>{opp.human && <p className="font-medium">{opp.human.decision === opp.agent.decision ? "Agreement" : "Disagreement"}: human {opp.human.decision.toUpperCase()} · agent {opp.agent.decision.toUpperCase()}</p>}{opp.agent.wait_condition && <p>Agent WAIT condition: {opp.agent.wait_condition} · expires {stamp(opp.agent.wait_expiry)}</p>}{opp.agent.decision === "take" && opp.agent.plan && <details><summary>Original agent TAKE plan</summary><pre className="overflow-auto">{objText(opp.agent.plan)}</pre></details>}</>}</div>}
         {!opp.revealed && active.comparison === "independent" && <button type="button" disabled={busy || !opp.human} onClick={() => void reveal(opp)} className="rounded border px-3 py-2 text-sm disabled:opacity-50">Reveal agent choice after both commit</button>}
         <details className="rounded bg-muted p-2 text-xs"><summary className="cursor-pointer">Outcome, coverage gaps, and paper status</summary><div className="mt-2 space-y-1 break-words"><p>Benchmark {opp.benchmark?.status ?? "unavailable"}{opp.benchmark?.reason ? ` · ${opp.benchmark.reason}` : ""}</p><pre className="overflow-auto">{objText(opp.benchmark)}</pre><p>Human paper {opp.paper?.status ?? (opp.human?.decision === "take" ? "unarmed" : "none")}</p>{opp.paper && <details><summary>Human paper timeline and base/3× cost outcomes</summary><pre className="overflow-auto">{objText(opp.paper)}</pre></details>}<p>Agent paper {opp.agent_paper?.status ?? (opp.agent?.decision === "take" ? "unavailable" : "none")}</p>{opp.agent_paper && <details><summary>Agent paper timeline and base/3× cost outcomes</summary><pre className="overflow-auto">{objText(opp.agent_paper)}</pre></details>}{opp.context?.price_facts?.length === 0 && <p className="text-amber-700">Coverage gap: no frozen price facts; WAIT/SKIP remain available, TAKE validation may refuse.</p>}{!opp.context && <p className="text-amber-700">Coverage gap: no frozen context.</p>}</div></details>
         {opp.human?.decision === "take" && <PracticePaperPlan recordId={opp.human.id} />}

@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
+import { realisticPanels } from "./fixtures/realisticBars";
 import type { Earnings } from "../lib/symbolInfo";
 import type { AlertsPayload, LevelAlert } from "../lib/alerts";
 import type { Capture, CaptureSetup } from "../lib/captures";
@@ -318,6 +319,255 @@ test("mobile layout stays within the viewport and chart controls work", async ({
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
+});
+
+/** The main chart's candle room: the pixel span from the highest visible high to the lowest visible low, and the pane it sits in. */
+const candleRoom = (page: Page) => page.evaluate(() => {
+  const layer = (window as unknown as { __tjAutoLevels: Map<string, { candleBoxes(): { top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
+  const boxes = layer.candleBoxes();
+  const top = Math.min(...boxes.map((box) => box.top)), bottom = Math.max(...boxes.map((box) => box.bottom));
+  const pane = (window as unknown as { __tjCharts: Map<string, { panes(): { getHeight(): number }[] }> }).__tjCharts.get("main")!.panes()[0].getHeight();
+  return { span: Math.round(bottom - top), pane };
+});
+// Pictures for judging the workspace by eye (layout, clutter, label collisions)
+// on market-shaped candles; the sine-wave fixture above cannot show those.
+test("realistic candles render on every chart for desktop and phone pictures", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let last = 0;
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    const intervals = Object.keys(data.panels) as Interval[];
+    const panels = realisticPanels(intervals);
+    const daily = realisticPanels(["1D"])["1D"]!.bars;
+    last = daily.at(-1)!.close;
+    const previous = daily.at(-2)!.close;
+    const quotes = data.quotes.map((quote) => quote.symbol !== data.symbol ? quote : { ...quote, last, previous_close: previous, regular_close: last,
+      change: Math.round((last - previous) * 100) / 100, change_percentage: Math.round((last / previous - 1) * 10000) / 100 });
+    // Automatic levels around the last close, near and far, one a wide zone, so the picture shows names, shading and lines.
+    const near = (kind: string, name: string, offset: number, extra: Partial<AutoLevel> = {}) => autoMember(kind, name, Math.round((last + offset) * 100) / 100, extra);
+    const zones = [
+      autoZone([near("prior_day_low", "PDL", -2.4)]), autoZone([near("premarket_low", "PML", -1.1), near("round", "151", -1.37, ROUND)]),
+      autoZone([near("overnight_high", "ONH", 0.45)]), autoZone([near("prior_day_high", "PDH", 1.3), near("swing_high", "Swing high", 1.6)]),
+      autoZone([near("round", "155", 2.63, ROUND)]), autoZone([near("prior_week_high", "PWH", 4.9)]), autoZone([near("round", "160", 7.63, ROUND)]),
+    ];
+    data.auto_levels = { day: "2026-09-14", as_of: Date.now() / 1000, atr: 2, band: 0.2, session: "extended", zones, missing: {} };
+    newsTimes = [-150, -118, -91, -64, -33, -9].map((back) => panels["5m"]!.bars.at(back)!.time);
+    await route.fulfill({ json: { ...data, panels, quotes } });
+  });
+  // News on six of the 5m candles, so the picture shows where the markers sit relative to the candles (they never move the price scale).
+  let newsTimes: number[] = [];
+  await page.route("**/api/backend/charts/symbol/*/news", async (route) => {
+    const articles = newsTimes.map((time, i) => ({ id: `n${i}`, provider: "alpaca_benzinga", publisher: "Benzinga", headline: `Headline ${i}`, url: `https://example.com/n${i}`,
+      published_at: new Date(time * 1000 + 20_000).toISOString(), summary: null, tickers: ["MRVL"], roundup: false, sentiment: [], also_in: [] }));
+    await route.fulfill({ json: { symbol: "MRVL", as_of: new Date().toISOString(), time_zone: "America/New_York", days: 7, sentiment_note: "", sources: [], articles } });
+  });
+  await registerAutoLevels(page);
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText(last.toFixed(2));
+  // Levels are never hidden: every zone nearest price is drawn. Their names keep off the candles: no tag box meets a candle's high-low span.
+  await expect.poll(async () => (await page.getByTestId("canvas-main").getAttribute("data-auto-levels"))?.split(",").length).toBeGreaterThanOrEqual(5);
+  const covered = () => page.evaluate(() => {
+    const layer = (window as unknown as { __tjAutoLevels: Map<string, { tags(): { text: string; top: number; bottom: number; left: number; right: number }[];
+      candleBoxes(): { x: number; half: number; top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
+    const boxes = layer.candleBoxes();
+    return { tags: layer.tags().length, hits: layer.tags().filter((tag) => boxes.some((box) => box.x + box.half > tag.left && box.x - box.half < tag.right && box.top < tag.bottom && box.bottom > tag.top)).map((tag) => tag.text), candles: boxes.length };
+  });
+  await expect.poll(async () => (await covered()).tags).toBeGreaterThan(0);
+  const placed = await covered();
+  expect(placed.candles).toBeGreaterThan(50);
+  expect(placed.hits).toEqual([]);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-news", /:1/);
+  // Candle room: before the candle-room change the visible candles spanned 202px of this 366px pane (margins 0.10 / 0.23, 85px RSI). At least 20% more now.
+  const room = await candleRoom(page);
+  expect(room.span).toBeGreaterThanOrEqual(Math.ceil(202 * 1.2));
+  expect(room.pane).toBeGreaterThan(366);
+  await page.screenshot({ path: test.info().outputPath("candle-room-desktop.png"), animations: "disabled" });
+  await page.screenshot({ path: test.info().outputPath("charts-realistic-desktop.png"), animations: "disabled" });
+  await page.screenshot({ path: test.info().outputPath("levels-quiet-desktop.png"), animations: "disabled" });
+  // The Layers panel keeps each layer's explanation behind an info button: closed at rest, opened from the keyboard.
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const autoGroup = layerGroup(page, "Auto levels");
+  const about = autoGroup.getByRole("button", { name: "About Auto levels" });
+  const aboutText = autoGroup.getByText(/round numbers; nearby ones merge into zones/);
+  await expect(about).toHaveAttribute("aria-expanded", "false");
+  await expect(aboutText).toBeHidden();
+  await about.focus();
+  await page.keyboard.press("Enter");
+  await expect(about).toHaveAttribute("aria-expanded", "true");
+  await expect(aboutText).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("layers-info-desktop.png"), animations: "disabled" });
+  await page.keyboard.press("Enter");
+  await expect(aboutText).toBeHidden();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("charts-realistic-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
+});
+
+test("dragging the price axis shows an Auto chip; one click fits the candles again and hides it", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  const main = page.getByTestId("canvas-main");
+  await expect(main.locator("canvas").first()).toBeVisible();
+  const chip = page.getByTestId("main-price-auto");
+  const autoOn = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { priceScale(id: string, pane: number): { options(): { autoScale: boolean } } }> }).__tjCharts.get("main")!.priceScale("right", 0).options().autoScale);
+  await page.waitForTimeout(500);
+  await expect(chip).toHaveCount(0);
+  expect(await autoOn()).toBe(true);
+  // Drag the price axis (the right edge of the plot) up and down: the scale stops fitting itself.
+  const box = (await main.boundingBox())!;
+  const x = box.x + box.width - 25;
+  await page.mouse.move(x, box.y + 150);
+  await page.mouse.down();
+  await page.mouse.move(x, box.y + 200, { steps: 6 });
+  await page.mouse.move(x, box.y + 260, { steps: 6 });
+  await page.mouse.up();
+  await expect(chip).toBeVisible();
+  expect(await autoOn()).toBe(false);
+  await expect(chip).toHaveAccessibleName(/Auto price scale/);
+  const at = (await chip.boundingBox())!;
+  expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width);
+  expect(at.y).toBeGreaterThan(box.y + 200);
+  await page.screenshot({ path: test.info().outputPath("price-auto-chip-desktop.png"), animations: "disabled" });
+  // Keyboard: focus it and press Enter.
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await expect(chip).toHaveCount(0);
+  expect(await autoOn()).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("quiet chart chrome: small-chart controls appear on hover or focus, the legend is one row, EMAs fold, VWAP says why", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const small = page.getByRole("region", { name: "MRVL 15m chart" });
+  const controls = small.locator("[data-quiet-controls]");
+  const opacity = () => controls.evaluate((el) => Number(getComputedStyle(el).opacity));
+  // At rest only the symbol and the interval show; studies, crosshair, maximize and focus are quiet but still rendered.
+  await page.mouse.move(2, 2);
+  await expect.poll(opacity).toBe(0);
+  expect(await controls.locator("button").count()).toBeGreaterThanOrEqual(3);
+  const header = small.locator("div").first();
+  expect(await header.locator("button, select").evaluateAll((els) => els.filter((el) => Number(getComputedStyle(el.closest("[data-quiet-controls]") ?? el).opacity) > 0).length)).toBeLessThanOrEqual(2);
+  await page.screenshot({ path: test.info().outputPath("charts-quiet-desktop.png"), animations: "disabled" });
+  // The main chart's header is not quiet.
+  await expect(page.getByRole("button", { name: "Plan trade" })).toBeVisible();
+  // Pointer over the chart brings them back.
+  const box = (await small.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect.poll(opacity).toBe(1);
+  await page.screenshot({ path: test.info().outputPath("charts-quiet-hover-desktop.png"), animations: "disabled" });
+  // Keyboard focus inside the chart brings them back too, and the quiet controls stay in the tab order.
+  await page.mouse.move(2, 2);
+  await expect.poll(opacity).toBe(0);
+  await small.locator("select").focus();
+  await page.keyboard.press("Tab");
+  await expect(small.getByRole("button", { name: /studies/ })).toBeFocused();
+  await expect.poll(opacity).toBe(1);
+  await page.keyboard.press("Tab");
+  await expect(small.getByLabel(/^Latest candles/)).toBeFocused();
+
+  // The main legend: one row, EMAs folded into one item that shows its values on hover and focus.
+  await page.mouse.move(2, 2);
+  const values = page.getByLabel("main candle values"), studies = page.getByLabel("main study values");
+  const [v, s] = [(await values.boundingBox())!, (await studies.boundingBox())!];
+  expect(Math.abs(v.y + v.height / 2 - (s.y + s.height / 2))).toBeLessThan(4);
+  expect(s.height).toBeLessThan(16);
+  expect(v.height).toBeLessThan(16);
+  await expect(studies).toContainText("VWAP");
+  await expect(studies).toContainText("RSI");
+  const ema = studies.getByLabel("EMA values");
+  const tip = ema.locator("[data-ema-values]");
+  await expect(tip).toBeHidden();
+  await ema.hover();
+  for (const name of ["EMA9", "EMA20", "EMA50"]) await expect(tip).toContainText(name);
+  await page.mouse.move(2, 2);
+  await expect(tip).toBeHidden();
+  await ema.focus();
+  await expect(tip).toContainText("EMA20");
+  await ema.blur();
+  // Assistive tech hears the values: the folded item is described by its tooltip.
+  await expect(ema).toHaveAccessibleDescription(/EMA9 .*EMA20 .*EMA50/);
+
+  // A daily candle has no VWAP, and the legend says why.
+  await page.getByLabel("Main interval").selectOption("1D");
+  await expect(studies.getByText(/^VWAP —/)).toHaveAttribute("title", /intraday study/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  await page.mouse.move(2, 2);
+  expect(await opacity()).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  // A phone keeps the EMA values in the row rather than behind hover.
+  await expect(studies.getByText(/^EMA20 /).filter({ visible: true })).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath("charts-quiet-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
+});
+
+test("Active layout preset makes the main chart dominant and Research restores the balance", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const heights = async () => ({ main: (await page.getByTestId("canvas-main").boundingBox())!.height, lower: (await section(page, "Panel 2")).height });
+  const fresh = await heights(); // a new setup already opens with the compact lower row
+  const usePreset = async (name: "Active" | "Research") => {
+    const dialog = await openLayouts(page);
+    await dialog.getByRole("button", { name: `Use ${name} preset`, exact: true }).click();
+    await expect(dialog).toHaveCount(0);
+  };
+  await usePreset("Active");
+  await expect(sidePanel(page)).toHaveCount(0);
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  const active = await heights();
+  console.log(`main canvas height: new setup ${Math.round(fresh.main)}, Active ${Math.round(active.main)}; section ${Math.round((await section(page, "main")).height)}`);
+  expect(Math.abs(active.lower - fresh.lower)).toBeLessThanOrEqual(2);
+  await expect(layoutsButton(page)).toHaveText("Layouts"); // a preset is not a saved layout
+  await page.mouse.move(1, 1);
+  await page.screenshot({ path: test.info().outputPath("charts-active-desktop.png"), animations: "disabled" });
+
+  await usePreset("Research");
+  await expect(sidePanel(page)).toBeVisible();
+  await expect.poll(async () => (await section(page, "Panel 2")).height).toBeGreaterThan(active.lower + 60);
+  const research = await heights();
+  console.log(`main canvas height: Research ${Math.round(research.main)}`);
+  expect(active.main).toBeGreaterThan(research.main + 60); // Active gives the main chart about a fifth more height
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+
+  await usePreset("Active");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("charts-active-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
 });
 
 test("VWAP draws inside the session without painting through an extended-hours gap", async ({ page }) => {
@@ -716,10 +966,12 @@ test("a tick re-renders only the charts whose candles moved, and the clock re-re
 
   // The fixture's newest candles end at 10:32:45 in every interval (5m main, 15m, 1h, 1D, 1m).
   const end = TUESDAY_1032 + 30;
-  const send = (at: number, value: number, nextMinute = false) => page.evaluate((tick) => (window as RenderWindow).__chartTick!(tick), {
+  const send = async (at: number, value: number, nextMinute = false) => { await page.evaluate((tick) => (window as RenderWindow).__chartTick!(tick), {
     type: "tick", symbol: "MRVL", at, minute: Math.floor(at / 60) * 60, session: "regular", price: value, open: value, high: value, low: value,
     buckets: Object.fromEntries((["1m", "3m", "5m", "15m", "30m", "1h", "4h"] as const).map((interval) => [interval,
       nextMinute && interval === "1m" ? { time: end, end_time: end + 60, extended: false } : { time: end - STEP[interval], end_time: end, extended: false }])) });
+    await page.clock.runFor(32); // deliver the frame-batched store notification
+  };
   const intraday = ["main", "Panel 2", "Panel 3", "Panel 5"];
 
   // A new price moves every intraday candle; the daily chart is untouched.
@@ -771,8 +1023,18 @@ async function deepHistoryStub(page: Page, months = 6) {
   await page.route("**/api/backend/charts/workspace?**", (route) => {
     refreshes++;
     const data = currentFixture(route.request().url(), base);
-    const main = data.panels["5m"];
-    if (main) main.bars = main.bars.map((bar) => ({ ...bar, source: "tradier" }));
+    const seeds = fixture(route.request().url()).panels;
+    // This fixture tests user-driven scroll-back. Every panel needs its normal
+    // 240-bar window: even a secondary chart's 65-bar opening range starts
+    // inside the history threshold when its tail contains only 100 candles.
+    // Short-tail auto-fill is tested separately.
+    for (const [interval, panel] of Object.entries(data.panels) as [Interval, NonNullable<ChartData["panels"][Interval]>][]) {
+      const seed = seeds[interval]!.bars;
+      const step = STEP[interval];
+      panel.bars = seed.map((bar, index) => ({ ...bar, source: "tradier",
+        time: base + 30 - step * (seed.length - index),
+        end_time: base + 30 - step * (seed.length - index - 1) }));
+    }
     return route.fulfill({ json: data });
   });
   await page.route("**/api/backend/charts/history?**", (route) => {
@@ -857,9 +1119,10 @@ test("a chart that opens on a few premarket candles takes its usual zoom when th
   release();
   await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(1000);
   const width = async (id: string) => { const range = await logicalRange(page, id); return range ? Math.round(range.to - range.from) : 0; };
-  // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one.
+  // The opening zoom: 110 candles and the right margin on the main chart, 65 on a smaller one, 40 on a compact one (as here).
   await expect.poll(() => width("main")).toBe(114);
-  await expect.poll(() => width("Panel 2")).toBe(69);
+  await expect(page.locator("section", { has: page.getByTestId("canvas-Panel 2") })).toHaveAttribute("data-compact", "true");
+  await expect.poll(() => width("Panel 2")).toBe(44);
 });
 
 test("5m scroll-back crosses six months without moving the viewport during pages, ticks, or REST", async ({ page }) => {
@@ -879,9 +1142,10 @@ test("5m scroll-back crosses six months without moving the viewport during pages
   });
   const state = await deepHistoryStub(page);
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   // A range change within 60 ms of a data reset reads as programmatic and loads nothing.
   await page.waitForTimeout(120);
+  expect(state.requests()).toBe(0);
   let reached = false;
   for (let index = 0; index < 15; index++) {
     const count = state.requests();
@@ -889,7 +1153,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
     await page.waitForTimeout(180); // Lightweight Charts publishes its visible time range on the next frame.
     if ((await visibleRange(page, "main"))!.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
     await expect.poll(() => state.requests()).toBeGreaterThan(count);
-    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100 + index * 1000);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(240 + index * 1000);
     const range = (await visibleRange(page, "main"))!;
     const logical = (await logicalRange(page, "main"))!;
     expect(logical.to - logical.from).toBeCloseTo(50, 2);
@@ -908,7 +1172,7 @@ test("5m scroll-back crosses six months without moving the viewport during pages
     if (range.from <= state.bars[0].time + 86400 * 5) { reached = true; break; }
   }
   expect(reached).toBe(true);
-  expect(state.requests()).toBeGreaterThanOrEqual(6);
+  expect(state.requests()).toBeGreaterThanOrEqual(5);
   expect(state.refreshes()).toBeGreaterThan(1);
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-markers", "1");
   const plot = (await page.getByTestId("canvas-main").boundingBox())!;
@@ -972,7 +1236,7 @@ test("history retention stays under 12,000, refills a newer gap, and returns to 
   await registerCharts(page);
   const state = await deepHistoryStub(page, 9);
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   let previous = 0;
   let previousReset = await resets(page);
   for (let index = 0; index < 25; index++) {
@@ -1002,7 +1266,7 @@ test.describe("phone deep history", () => {
     await registerCharts(page);
     const state = await deepHistoryStub(page);
     await page.goto("/charts");
-    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+    await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
     await page.getByTestId("canvas-main").scrollIntoViewIfNeeded();
     await page.waitForTimeout(250);
     const box = (await page.getByTestId("canvas-main").boundingBox())!;
@@ -1015,7 +1279,7 @@ test.describe("phone deep history", () => {
     }
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
     await expect.poll(() => state.requests()).toBeGreaterThan(0);
-    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(100);
+    await expect.poll(async () => Number(await page.getByTestId("canvas-main").getAttribute("data-bars"))).toBeGreaterThan(240);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await page.screenshot({ path: test.info().outputPath("deep-history-phone.png"), fullPage: true });
   });
@@ -1394,7 +1658,10 @@ async function mockStreams(page: Page) {
       constructor(url: string) {
         target.__streams.push(new URL(url, location.href).searchParams.get("symbols") ?? "");
         MockEventSource.current = this;
-        queueMicrotask(() => this.emit("status", { state: "connected" }));
+        queueMicrotask(() => {
+          this.emit("status", { state: "connecting" });
+          this.emit("status", { state: "connected" });
+        });
       }
       addEventListener(type: string, listener: EventListenerOrEventListenerObject) { this.listeners.set(type, listener as Listener); }
       emit(type: string, value: unknown) { if (!this.closed) this.listeners.get(type)?.({ data: JSON.stringify(value) } as MessageEvent); }
@@ -1483,7 +1750,7 @@ test("panels hold SPY and QQQ beside the traded name through symbol switches, st
   await trade(page, "SPY", 705);
   await expect(values(page, "Panel 3")).toContainText("C 702.50");
   await page.getByRole("button", { name: "Resume chart updates" }).click();
-  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(3);
+  await expect.poll(() => page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBeGreaterThanOrEqual(2);
   await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
   await trade(page, "SPY", 706.5);
   await expect(values(page, "Panel 3")).toContainText("C 706.50");
@@ -1613,8 +1880,8 @@ test("named layouts save, switch, rename, update and delete without moving the s
   expect(layoutsOn(server)[1]).toMatchObject({ layout: "multi", intervals: ["1m", "3m", "5m", "15m", "30m"], panelSymbols: [null, null, null, null, null], smallSize: "normal", linkRange: true });
   // A layout's proportions sit beside the list, by its id, so an older tab keeps both (C7.4).
   expect(Object.keys(layoutsOn(server)[1]).sort()).toEqual(LAYOUT_KEYS);
-  expect(proportionsOn(server, layoutsOn(server)[1].id)!.lower).toBeGreaterThan(0.4); // the default is 0.378
-  expect(proportionsOn(server, layoutsOn(server)[0].id)).toEqual({ lower: 0.378, columns: [0.25, 0.25, 0.25, 0.25] });
+  expect(proportionsOn(server, layoutsOn(server)[1].id)!.lower).toBeGreaterThan(0.4); // the default is 0.275
+  expect(proportionsOn(server, layoutsOn(server)[0].id)).toEqual({ lower: 0.275, columns: [0.25, 0.25, 0.25, 0.25] });
 
   // Switching back restores intervals, symbol groups, chart height and range linking.
   await useLayout(page, "Names");
@@ -1622,7 +1889,7 @@ test("named layouts save, switch, rename, update and delete without moving the s
   await expect(page.getByRole("region", { name: "SPY 1h chart" })).toBeVisible();
   await expect(page.getByRole("region", { name: "QQQ 1m chart" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Link time ranges" })).toHaveAttribute("aria-pressed", "false");
-  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "73");
   await expect(layoutsButton(page)).toContainText("Names");
 
   // The main symbol, levels and watchlist belong to the workspace, not to a layout.
@@ -1893,6 +2160,15 @@ test.describe("phone layouts", () => {
 });
 
 // ---- C0.6: one split-adjusted price basis ----
+// A 100-bar fixture is shorter than the main chart's 110-bar opening range,
+// so the product correctly requests history during mount, before any test pan.
+// Hold only the mocked response until the exact initial candles are asserted.
+function holdHistoryResponse() {
+  let release: () => void = () => {};
+  const released = new Promise<void>((resolve) => { release = resolve; });
+  return { released, release };
+}
+
 const NVDA_SPLIT: PriceAdjustment = { ...ADJUSTED, splits: [{ ex_date: "2024-06-10", ratio: 10, label: "10-for-1" }] };
 async function stubAdjustment(page: Page, adjustment: PriceAdjustment) {
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...fixture(route.request().url()), adjustment } }));
@@ -1939,10 +2215,12 @@ test("missing split data says so on the chart instead of guessing", async ({ pag
 test("a history page on a different split basis than the candles on screen is refused, not mixed in", async ({ page }) => {
   await registerCharts(page);
   const base = Math.floor(Date.now() / 1000);
+  const history = holdHistoryResponse();
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: { ...currentFixture(route.request().url(), base), adjustment: NVDA_SPLIT } }));
   let asked = 0;
-  await page.route("**/api/backend/charts/history?**", (route) => {
+  await page.route("**/api/backend/charts/history?**", async (route) => {
     asked++;
+    await history.released;
     const query = new URL(route.request().url()).searchParams;
     const before = Number(query.get("before"));
     const template = fixture(route.request().url()).panels["5m"]!.bars[0];
@@ -1954,8 +2232,12 @@ test("a history page on a different split basis than the candles on screen is re
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
-  await page.waitForTimeout(120);
+  await expect.poll(() => asked).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")?.timeScale().getVisibleLogicalRange() ?? null
+  )).not.toBeNull();
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  history.release();
   await expect(page.getByRole("button", { name: "Retry history" }).first()).toBeVisible();
   expect(asked).toBeGreaterThan(0);
   await expect(page.getByText("A split was recorded while these charts were open").first()).toBeVisible();
@@ -1965,9 +2247,13 @@ test("a history page on a different split basis than the candles on screen is re
 test("a possible unrecorded split in older candles is noted on its panel without shifting the page banner", async ({ page }) => {
   await registerCharts(page);
   const base = Math.floor(Date.now() / 1000);
+  const history = holdHistoryResponse();
   const jump = "Price jumps 10x between 2024-06-07 and 2024-06-10, like a forward split that is not in the split data. Prices there are not adjusted.";
   await page.route("**/api/backend/charts/workspace?**", (route) => route.fulfill({ json: currentFixture(route.request().url(), base) }));
-  await page.route("**/api/backend/charts/history?**", (route) => {
+  let asked = 0;
+  await page.route("**/api/backend/charts/history?**", async (route) => {
+    asked++;
+    await history.released;
     const query = new URL(route.request().url()).searchParams;
     const before = Number(query.get("before"));
     const template = fixture(route.request().url()).panels["5m"]!.bars[0];
@@ -1978,8 +2264,13 @@ test("a possible unrecorded split in older candles is noted on its panel without
   });
   await page.goto("/charts");
   await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
-  await page.waitForTimeout(120);
+  await expect.poll(() => asked).toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")?.timeScale().getVisibleLogicalRange() ?? null
+  )).not.toBeNull();
   await page.evaluate(() => (window as unknown as { __tjCharts: Registry }).__tjCharts.get("main")!.timeScale().setVisibleLogicalRange({ from: 10, to: 60 }));
+  history.release();
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "1300");
   await expect(page.getByRole("region", { name: "MRVL 5m chart" }).getByRole("status")).toContainText("Price jumps 10x between 2024-06-07 and 2024-06-10");
   await expect(page.getByRole("status", { name: "Price basis warning" })).toHaveCount(0);
 });
@@ -2125,7 +2416,7 @@ test.describe("phone daily history", () => {
 // ---- Hotkeys (C0.5): typed and immediate intervals, watchlist steps, view resets, cheat sheet ----
 
 type ScaleRegistry = Map<string, { priceScale(id: string, pane?: number): { applyOptions(o: { autoScale: boolean }): void; options(): { autoScale: boolean } };
-  timeScale(): { setVisibleLogicalRange(r: { from: number; to: number }): void } }>;
+  timeScale(): { setVisibleLogicalRange(r: { from: number; to: number }): void }; panes(): unknown[] }>;
 const mainInterval = (page: Page) => page.getByLabel("Main interval", { exact: true });
 const intervalEntry = (page: Page) => page.getByRole("status", { name: "Interval entry" });
 const chartedSymbol = (page: Page) => page.getByLabel("Chart symbol");
@@ -2144,7 +2435,7 @@ async function moveAway(page: Page, id: string, range: { from: number; to: numbe
 }
 const autoScaled = (page: Page, id: string) => page.evaluate((id) => {
   const chart = (window as unknown as { __tjCharts: ScaleRegistry }).__tjCharts.get(id)!;
-  return [0, 1].map((pane) => chart.priceScale("right", pane).options().autoScale);
+  return chart.panes().map((_, pane) => chart.priceScale("right", pane).options().autoScale);
 }, id);
 const roundedRange = async (page: Page, id: string) => { const range = await logicalRange(page, id); return range && { from: Math.round(range.from), to: Math.round(range.to) }; };
 
@@ -2354,7 +2645,7 @@ test("Alt+R resets every chart's scales and End returns every chart to its lates
   await expect.poll(() => roundedRange(page, "main")).toEqual(opened.main);
   await expect.poll(() => roundedRange(page, "Panel 2")).toEqual(opened.panel);
   expect(await autoScaled(page, "main")).toEqual([true, true]);
-  expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
+  expect(await autoScaled(page, "Panel 2")).toEqual([true]); // compact here: no RSI pane
 
   // With linked time ranges, each chart still goes to its own latest candle.
   await page.getByRole("button", { name: "Link time ranges" }).click();
@@ -2903,9 +3194,16 @@ test("a drawing made before a recorded split moves with the candles, and a drag 
   await page.goto("/charts");
   await expect(drawn(page, "main")).toHaveAttribute("data-drawings", "zone");
   // Drawn at a tenth of its saved prices, as the candles are; the saved record is untouched.
-  const corners = (await anchorsOf(page, "main", "old-zone"))!;
-  expect(Math.abs(corners[0]!.y - await levelY(page, "main", 250))).toBeLessThan(1);
-  expect(Math.abs(corners[1]!.y - await levelY(page, "main", 256))).toBeLessThan(1);
+  // Sample anchors and expected prices together: autoscale can change between
+  // separate browser evaluations while the chart finishes laying out.
+  const { corners, expectedY } = await page.evaluate(() => {
+    const probe = window as unknown as { __tjDrawings: LayerProbe; __tjCharts: PaneRegistry };
+    const candles = probe.__tjCharts.get("main")!.panes()[0].getSeries().find((series) => series.seriesType() === "Candlestick")!;
+    return { corners: probe.__tjDrawings.get("main")!.anchors("old-zone")!, expectedY: [250, 256].map((price) => candles.priceToCoordinate(price)) };
+  });
+  expect(expectedY.every((y) => y !== null)).toBe(true);
+  expect(Math.abs(corners[0]!.y - expectedY[0]!)).toBeLessThan(1);
+  expect(Math.abs(corners[1]!.y - expectedY[1]!)).toBeLessThan(1);
   expect(drawingsOf(server)[0]).toEqual(zone);
   const inside = { x: (corners[0]!.x + corners[1]!.x) / 2, y: (corners[0]!.y + corners[1]!.y) / 2 };
   await dragChart(page, "main", inside, { x: inside.x, y: inside.y - 20 });
@@ -3055,7 +3353,7 @@ test("right-click on the chart adds a level at the price, copies it, resets that
   await expect.poll(() => roundedRange(page, "main")).toEqual({ from: 130, to: 244 });
   expect(await autoScaled(page, "main")).toEqual([true, true]);
   expect(await roundedRange(page, "Panel 2")).toEqual({ from: 150, to: 170 });
-  expect(await autoScaled(page, "Panel 2")).toEqual([false, false]);
+  expect(await autoScaled(page, "Panel 2")).toEqual([false]); // compact here: no RSI pane
 
   // On the price scale there is no price to add or copy; the rest of the menu is there.
   await rightClick(page, "main", { x: (await plotWidth(page)) + 20, y: EMPTY.y });
@@ -3338,6 +3636,64 @@ const layerGroup = (page: Page, name: string) => layersPanel(page).getByRole("gr
 const paneCount = (page: Page, id: string) => page.evaluate((key) => (window as unknown as { __tjCharts: Map<string, { panes(): unknown[] }> }).__tjCharts.get(key)!.panes().length, id);
 const ALL_PANELS = ["main", "Panel 2", "Panel 3", "Panel 4", "Panel 5"];
 
+// Returning to the previously acknowledged state must still save after an in-flight deletion commits.
+for (const width of [1440, 390]) test(`Undo during a delayed deletion acknowledgement persists through reload at ${width}px`, async ({ page, context }) => {
+  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const deletion = holdHistoryResponse();
+  let hold = false;
+  const server = await fakeChartSettings(context, {}, async () => { if (hold) await deletion.released; });
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await addLevel(page, "Breakout", "256.00");
+  await addLevel(page, "Far", "280.00");
+  await expect(syncStatus(page)).toContainText("Saved");
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  const panel = width === 390 ? page.getByRole("dialog", { name: "Layers" }) : layersPanel(page);
+  const levels = panel.getByRole("group", { name: "My levels" });
+  await expect(levels).toContainText("Breakout");
+  await page.screenshot({ path: test.info().outputPath(`layers-ready-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  const savesBefore = server.saves.length;
+  hold = true;
+  await levels.getByRole("button", { name: "Delete all levels" }).click();
+  await levels.getByRole("alert").getByRole("button", { name: "Delete" }).click();
+  await expect.poll(() => savedLevels(server).length).toBe(0); // committed server-side, response held
+  if (width === 390) {
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Show drawing tools" }).click();
+  }
+  await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveAttribute("title", /^Undo deleting 2 levels/);
+  await page.getByRole("button", { name: "Undo", exact: true }).click();
+  if (width === 390) await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(levels).toContainText("Breakout");
+  await expect(levels).toContainText("Far");
+  await page.screenshot({ path: test.info().outputPath(`layers-undo-pending-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  if (width === 1440) {
+    // Another device changes an unrelated field while this ACK is delayed.
+    server.data = { ...server.data, indicators: { ...(server.data!.indicators as Record<string, boolean>), ema9: false } };
+    server.revision++;
+  }
+  hold = false;
+  deletion.release();
+  await expect.poll(() => savedLevels(server).map((level) => level.label)).toEqual(["Breakout", "Far"]);
+  await expect(syncStatus(page)).toHaveText(width === 1440 ? "Merged with changes from another device" : "Saved");
+  expect(server.saves.slice(savesBefore).map((save) => save.status)).toEqual(width === 1440 ? [200, 409, 200] : [200, 200]);
+  if (width === 1440) expect((server.data!.indicators as Record<string, boolean>).ema9).toBe(false);
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  if (width === 390) await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await expect(levels).toContainText("Breakout");
+  await expect(levels).toContainText("Far");
+  await page.screenshot({ path: test.info().outputPath(`layers-undo-reopened-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  expect(errors).toEqual([]);
+});
+
 test("the layers panel hides, locks and deletes by group and by item, and a click brings an item into view", async ({ page, context }) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
   const server = await fakeChartSettings(context);
@@ -3463,7 +3819,7 @@ test("a click on a drawing older than the loaded candles loads pages back to it"
     color: "#67d5eb", width: 2, drawn_on: "2026-07-01", extendLeft: false, extendRight: false };
   await fakeChartSettings(context, { revision: 1, data: { drawings: { MRVL: [old] } } });
   await page.goto("/charts");
-  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "100");
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-bars", "240");
   await page.getByRole("button", { name: "Layers", exact: true }).click();
   await layerGroup(page, "Drawings").getByRole("button", { name: /^Go to Trend line/ }).click();
   // Two pages of 1,200 candles reach it; the view then centres on it, and it is selected.
@@ -3851,26 +4207,26 @@ test("the divider above the smaller charts drags, steps by keyboard, stops at it
   await stub(page);
   await page.goto("/charts");
   await expect(drawn(page, "Panel 5").locator("canvas").first()).toBeVisible();
-  // The defaults reproduce C7.3's geometry: smaller charts 311px tall with their headers.
-  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
-  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  // The compact default: smaller charts 226px tall with their headers.
+  expect(near((await section(page, "Panel 2")).height, 226)).toBe(true);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "73");
   await expect(rowDivider(page)).toHaveAttribute("aria-orientation", "horizontal");
   await page.screenshot({ path: test.info().outputPath("dividers-default-1440.png") });
 
-  // A drag up 120px gives the smaller charts 120px and saves their share once.
+  // A drag up 120px gives the smaller charts 120px more and saves their share once.
   await dragDivider(page, rowDivider(page), 0, -120);
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431)).toBe(true);
-  expect(near((await section(page, "main")).height, ROWS_1440 - 431)).toBe(true);
-  await expect.poll(() => proportionsOn(server)?.lower).toBeCloseTo(431 / ROWS_1440, 2);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 346)).toBe(true);
+  expect(near((await section(page, "main")).height, ROWS_1440 - 346)).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.lower).toBeCloseTo(346 / ROWS_1440, 2);
   expect(proportionsOn(server)?.columns).toEqual([0.25, 0.25, 0.25, 0.25]);
   await page.screenshot({ path: test.info().outputPath("dividers-dragged-1440.png") });
 
   // Keyboard: Down gives the main chart 2% more, Shift+Down 10%; Home and End are the limits; Enter resets.
   await rowDivider(page).focus();
   await page.keyboard.press("ArrowDown");
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431 - 0.02 * ROWS_1440)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 346 - 0.02 * ROWS_1440)).toBe(true);
   await page.keyboard.press("Shift+ArrowDown");
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 431 - 0.12 * ROWS_1440)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 346 - 0.12 * ROWS_1440)).toBe(true);
   await page.keyboard.press("Home");
   await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "40");
   await expect.poll(async () => near((await section(page, "Panel 2")).height, 0.6 * ROWS_1440)).toBe(true);
@@ -3882,28 +4238,28 @@ test("the divider above the smaller charts drags, steps by keyboard, stops at it
   expect((await section(page, "main")).height).toBeGreaterThanOrEqual(MAIN_MIN);
   await rowDivider(page).focus();
   await page.keyboard.press("Enter");
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 311)).toBe(true);
-  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "62");
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 226)).toBe(true);
+  await expect(rowDivider(page)).toHaveAttribute("aria-valuenow", "73");
   // End did not jump every chart to its latest candle, and Enter typed no interval: the divider kept those keys.
   await expect(page.getByRole("status", { name: "Interval entry" })).toHaveCount(0);
-  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.378);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.275);
 
   // A double-click resets it too.
   await dragDivider(page, rowDivider(page), 0, 80);
   await expect.poll(() => proportionsOn(server)?.lower).toBeLessThan(0.3);
   const bar = (await rowDivider(page).boundingBox())!;
   await page.mouse.dblclick(bar.x + bar.width / 2, bar.y + bar.height / 2);
-  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.378);
-  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect.poll(() => proportionsOn(server)?.lower).toBe(0.275);
+  expect(near((await section(page, "Panel 2")).height, 226)).toBe(true);
 
   // Escape during a drag puts the divider back and saves nothing; the Escape goes no further.
   await page.waitForTimeout(600);
   const saves = server.saves.length;
   await dragDivider(page, rowDivider(page), 0, -90, false);
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 401)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 316)).toBe(true);
   await page.keyboard.press("Escape");
   await page.mouse.up();
-  await expect.poll(async () => near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect.poll(async () => near((await section(page, "Panel 2")).height, 226)).toBe(true);
   await page.waitForTimeout(800);
   expect(server.saves.length).toBe(saves);
 });
@@ -3980,8 +4336,8 @@ test("the dividers between the smaller charts and the dock's edge resize, stop a
   await menu.getByRole("button", { name: "Reset chart sizes" }).click();
   await expect(menu).toHaveCount(0);
   await expect.poll(dock).toBe(256);
-  await expect.poll(() => proportionsOn(server)).toEqual({ lower: 0.378, columns: [0.25, 0.25, 0.25, 0.25] });
-  expect(near((await section(page, "Panel 2")).height, 311)).toBe(true);
+  await expect.poll(() => proportionsOn(server)).toEqual({ lower: 0.275, columns: [0.25, 0.25, 0.25, 0.25] });
+  expect(near((await section(page, "Panel 2")).height, 226)).toBe(true);
 });
 
 test("a divider drag re-renders no chart while it moves, saves once when released, and fetches nothing", async ({ page, context }) => {
@@ -4083,7 +4439,7 @@ test("maximize and restore each chart: the same instances, view, selection and s
   await page.getByRole("button", { name: "Chart MRVL", exact: true }).click();
   await expect(page.getByRole("region", { name: "MRVL 5m chart" })).toBeVisible();
   expect(await sameCharts(page)).toBe(true);
-  expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams + 2); // two symbol switches, nothing else
+  expect(await page.evaluate(() => (window as LiveWindow).__streams)).toBe(streams); // both symbols already belong to the subscribed watchlist
   // Maximizing and restoring fetched nothing: only the two symbol and two interval switches, and the regular refresh.
   await expect.poll(() => requests.length - before).toBeGreaterThanOrEqual(4);
   expect(requests.length - before - 4).toBeLessThanOrEqual(Math.floor((Date.now() - started) / 15_000));
@@ -4546,6 +4902,8 @@ test("a pinned level card covers the RSI resize handle and chart lines", async (
   expect(overlap.background).toBe("rgb(20, 27, 38)");
   await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
   await card.getByRole("button", { name: "Close level card" }).click();
+  // Off the chart, so a hover card cannot open where the pinned one was.
+  await page.mouse.move(5, 450);
   await expect(card).toHaveCount(0);
 });
 
@@ -4594,11 +4952,17 @@ test("automatic levels draw the nearest three each side, a hover shows each one'
 
   // A daily chart draws the same levels; how price met them is read on intraday charts.
   const daily = (await drawn(page, "Panel 4").boundingBox())!;
-  await page.mouse.move(daily.x + 100, daily.y + await autoY(page, "Panel 4", AUTO_ZONES[4].id));
+  // That chart is compact here: a hover names the level on one line, and a click opens its card.
+  const onlyY = daily.y + await autoY(page, "Panel 4", AUTO_ZONES[4].id);
+  // Left of the fill arrow, which a click would open instead.
+  await page.mouse.move(daily.x + 30, onlyY);
+  await expect(page.getByRole("tooltip", { name: "Level", exact: true })).toContainText("ONH");
+  await page.mouse.click(daily.x + 30, onlyY);
   const onDaily = page.getByRole("tooltip", { name: "ONH level card" });
   await expect(onDaily).toContainText("How price met it today is read on intraday charts.");
   await expect(onDaily).toContainText("calculated · SIP minute");
-  await page.mouse.move(daily.x + 100, daily.y + 5);
+  await onDaily.getByRole("button", { name: "Close level card" }).click();
+  await expect(onDaily).toHaveCount(0);
 
   // The Layers panel lists what is missing and hides the group on all five charts, through a reload.
   await page.getByRole("button", { name: "Layers", exact: true }).click();
@@ -5676,6 +6040,46 @@ test("a chart image that failed to upload keeps its Retry after its plan is dism
 test.describe("voice plans", () => {
   test.use({ permissions: ["microphone"] });
 
+  for (const width of [1440, 390]) test(`microphone startup does not count as recorded time at ${width}px`, { tag: "@captures" }, async ({ page, request }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.addInitScript(() => {
+      const media = navigator.mediaDevices;
+      const open = media.getUserMedia.bind(media);
+      let release: () => void = () => {};
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      Object.assign(window, { __releaseMicrophone: release });
+      media.getUserMedia = async (constraints) => { await gate; return open(constraints); };
+    });
+    await captureSetup(request);
+    await page.route("**/api/backend/charts/workspace?**", async (route) => {
+      const data = fixture(route.request().url());
+      await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+    });
+    await page.goto("/charts");
+    await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+    await page.getByRole("button", { name: "Plan trade" }).click();
+    const sheet = planSheet(page);
+    await sheet.getByRole("button", { name: "Buy calls" }).click();
+    const mic = sheet.getByRole("button", { name: "Record voice plan" });
+    const at = (await mic.boundingBox())!;
+    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+    await page.mouse.down();
+    await expect(sheet).toContainText("Allow the microphone…");
+    await page.screenshot({ path: test.info().outputPath(`voice-microphone-pending-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toHaveCount(0);
+    await page.evaluate(() => (window as typeof window & { __releaseMicrophone(): void }).__releaseMicrophone());
+    const timer = sheet.getByRole("timer", { name: "Recording time" });
+    await expect(timer).toBeVisible();
+    await expect(timer).toHaveText(/^0:0[1-9] \/ 0:30$/);
+    await page.screenshot({ path: test.info().outputPath(`voice-recording-${width === 390 ? "phone" : "desktop"}.png`), animations: "disabled" });
+    await page.mouse.up();
+    await expect(sheet).toHaveCount(0);
+    const row = (await savedCaptures(request))[0];
+    expect(row.audio!.ms!).toBeGreaterThan(1000);
+    expect(row.audio?.type).toBe("audio/webm");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  });
+
   test("hold to record and release saves the recording; with no speech engine it says so and plays back", { tag: "@captures" }, async ({ page, request }) => {
     await captureSetup(request);
     await stub(page);
@@ -5693,7 +6097,7 @@ test.describe("voice plans", () => {
     await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
     await page.mouse.down();
     await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
-    await page.waitForTimeout(1500);
+    await expect(sheet.getByRole("timer", { name: "Recording time" })).toHaveText(/^0:0[1-9] \/ 0:30$/);
     await page.mouse.up();
     await expect(sheet).toHaveCount(0);
     await expect(page.getByLabel("Chart notice")).toHaveText("Recording saved");
@@ -5735,14 +6139,19 @@ test.describe("voice plans", () => {
     const mic = sheet.getByRole("button", { name: "Record voice plan" });
     await mic.dispatchEvent("pointerdown", { button: 0, pointerId: 7, isPrimary: true });
     await expect(sheet.getByRole("timer", { name: "Recording time" })).toBeVisible();
-    await page.waitForTimeout(600);
+    // As in the hold/release test, give the real fake-mic encoder enough audio
+    // to exceed the server's unchanged 1,000-byte usable-recording minimum.
+    await page.waitForTimeout(1500);
     await sheet.getByRole("button", { name: "Recording: release to save" }).dispatchEvent("pointercancel", { pointerId: 7 });
     await expect(sheet.getByRole("status").filter({ hasText: "press was interrupted" })).toBeVisible();
     const before = (await savedCaptures(request)).length;
     await sheet.getByRole("button", { name: "Save recording" }).click();
     await expect(sheet).toHaveCount(0);
     expect((await savedCaptures(request)).length).toBe(before + 1);
-    expect((await savedCaptures(request))[0].side).toBe("buy_puts");
+    const row = (await savedCaptures(request))[0];
+    expect(row.side).toBe("buy_puts");
+    expect(row.audio?.bytes).toBeGreaterThanOrEqual(1000);
+    expect(row.audio?.ms).toBeGreaterThan(1000);
   });
 
   test("the 30-second limit stops the clip and offers Save or Discard", { tag: "@captures" }, async ({ page, request }) => {
@@ -5855,4 +6264,223 @@ test("transcript states: transcribing, then ready; a failure keeps the recording
   await strip.getByRole("button", { name: "Retry transcript" }).click();
   await expect(strip.getByRole("status")).toHaveText("Recording saved — transcribing");
   expect(posts.filter((post) => post === "transcribe")).toHaveLength(1);
+});
+
+test("watchlist stays live during a slow symbol switch and bursts preserve candle extremes", async ({ page }) => {
+  await mockStreams(page);
+  await page.addInitScript(() => localStorage.setItem("tj:chart-performance", "1"));
+  let release!: () => void;
+  const delayed = new Promise<void>((resolve) => { release = resolve; });
+  let requests = 0;
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    requests++;
+    if (new URL(route.request().url()).searchParams.get("symbol") === "NVDA") await delayed;
+    await route.fulfill({ json: fixture(route.request().url()) });
+  });
+  await page.goto("/charts");
+  await expect(page.getByLabel("Selected symbol quote")).toContainText("262.66");
+  await expectStreamSymbols(page, ["AAPL", "AMD", "META", "MRVL", "MSFT", "NVDA", "QQQ", "SPY"]);
+  const before = await page.evaluate(() => (window as unknown as StreamWindow).__streams.length);
+  await page.getByRole("button", { name: "Chart NVDA", exact: true }).click();
+  await expect(page.getByText(/Loading NVDA/).first()).toBeVisible();
+  const at = Date.now() / 1000 - .2;
+  await page.evaluate((at) => {
+    const target = window as unknown as StreamWindow;
+    for (const price of [275, 290, 260, 280]) target.__emit("tick", { type: "tick", symbol: "NVDA", at,
+      minute: Math.floor(at / 60) * 60, session: "post", price, open: price, high: price, low: price, buckets: {} });
+  }, at);
+  await expect(page.locator("[data-watch-row]").filter({ hasText: "NVDA" })).toContainText("280.00");
+  expect(await page.evaluate(() => (window as unknown as StreamWindow).__streams.length)).toBe(before);
+  expect(requests).toBe(2); // one workspace request for the switch, no new polling
+  // Recovery while a request is busy is queued, never overlapped or forgotten.
+  await page.evaluate(() => {
+    for (let i = 0; i < 3; i++) (window as unknown as StreamWindow).__emit("status", { state: "fallback", resync: true });
+  });
+  expect(requests).toBe(2);
+  release();
+  await expect.poll(() => requests).toBe(3);
+  await expect(page.getByTestId("canvas-main")).not.toHaveAttribute("data-pending");
+  const stamp = Date.now() / 1000 + 1;
+  await page.evaluate((at) => {
+    const target = window as unknown as StreamWindow;
+    const widths = { "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "4h": 14400 };
+    const buckets = Object.fromEntries(Object.entries(widths).map(([frame, width]) => [frame, { time: Math.floor(at / width) * width, end_time: (Math.floor(at / width) + 1) * width, extended: true }]));
+    for (const price of [275, 290, 260, 280]) target.__emit("tick", { type: "tick", symbol: "NVDA", at, minute: Math.floor(at / 60) * 60,
+      session: "post", price, open: price, high: price, low: price, buckets });
+  }, stamp);
+  await expect(page.getByLabel("main candle values")).toContainText("H 290.00");
+  await expect(page.getByLabel("main candle values")).toContainText("L 260.00");
+  await expect(page.getByLabel("main candle values")).toContainText("C 280.00");
+  await expect.poll(() => page.evaluate(() => Object.keys(window.__tjChartPerformance?.summary() ?? {}))).toEqual(expect.arrayContaining(["symbol_to_usable_chart", "candle_receipt_to_paint_opportunity", "quote_receipt_to_paint_opportunity"]));
+  const count = requests;
+  await page.evaluate(() => (window as unknown as StreamWindow).__emit("status", { state: "fallback", resync: true }));
+  await expect.poll(() => requests).toBe(count + 1);
+});
+
+test("a small chart goes compact, and each smaller chart can choose its own studies", async ({ page, context }) => {
+  const server = await fakeChartSettings(context);
+  await stub(page);
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/charts");
+  const small = page.getByRole("region", { name: "MRVL 15m chart" });
+  await expect(small).toHaveAttribute("data-compact", "true");
+  await expect(page.getByRole("region", { name: "MRVL 5m chart" })).not.toHaveAttribute("data-compact");
+  // Compact and following the workspace: no RSI pane, no volume or slower averages, and it opens closer in.
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(1);
+  await expect.poll(() => paneCount(page, "main")).toBe(2);
+  await expect.poll(async () => { const range = await logicalRange(page, "Panel 2"); return range ? Math.round(range.to - range.from) : 0; }).toBe(44);
+  await expect(drawn(page, "Panel 2")).toHaveAttribute("data-compact", "true");
+
+  // Its own studies: RSI on for this chart only, saved with the workspace.
+  await small.getByRole("button", { name: "Panel 2 studies" }).click();
+  const menu = page.getByRole("group", { name: "Panel 2 studies" });
+  await expect(menu.getByRole("button", { name: /^Automatic/ })).toHaveAttribute("aria-pressed", "true");
+  await menu.getByRole("button", { name: "RSI 14" }).click();
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(2);
+  await expect.poll(() => paneCount(page, "Panel 3")).toBe(1);
+  await expect.poll(() => (server.data?.panelStudies as unknown[] | undefined)?.[1]).toEqual({ ema9: true, ema20: false, ema50: false, ema200: false, vwap: true, volume: false, rsi: true });
+  await page.keyboard.press("Escape");
+  // Back to automatic.
+  await small.getByRole("button", { name: "Panel 2 studies" }).click();
+  await menu.getByRole("button", { name: /^Automatic/ }).click();
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(1);
+  await expect.poll(() => (server.data?.panelStudies as unknown[] | undefined)?.[1]).toBeNull();
+  await page.keyboard.press("Escape");
+
+  // Maximized it is no longer small: the workspace's studies in full.
+  await small.getByRole("button", { name: "Maximize 15m chart" }).click();
+  await expect(small).toHaveAttribute("data-compact", "false");
+  await expect.poll(() => paneCount(page, "Panel 2")).toBe(2);
+  // Its reset opens on a smaller chart's usual 65 candles, and resets the RSI pane's scale too.
+  await small.getByRole("button", { name: "Latest candles Panel 2" }).click();
+  await expect.poll(async () => { const range = await logicalRange(page, "Panel 2"); return range ? Math.round(range.to - range.from) : 0; }).toBe(69);
+  expect(await autoScaled(page, "Panel 2")).toEqual([true, true]);
+});
+
+/** One wheel event as a trackpad pinch sends it (ctrlKey, small deltas) over a chart's plot, at a fraction of its width. */
+const wheelOver = (page: Page, id: string, at: number, init: { deltaX?: number; deltaY?: number; ctrlKey?: boolean }) => page.evaluate(({ id, at, init }) => {
+  const host = document.querySelector<HTMLElement>(`[data-testid="canvas-${id}"]`)!;
+  const box = host.getBoundingClientRect();
+  const target = document.elementFromPoint(box.left + box.width * at, box.top + 120)!;
+  target.dispatchEvent(new WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, clientX: box.left + box.width * at, clientY: box.top + 120, deltaX: 0, deltaY: 0, deltaMode: 0, ...init }));
+}, { id, at, init });
+const spanOf = async (page: Page, id: string) => { const r = (await logicalRange(page, id))!; return { from: r.from, span: r.to - r.from }; };
+/** The bar index under a point `at` of the way across the chart. */
+const barUnder = (page: Page, id: string, at: number) => page.evaluate(({ id, at }) => {
+  const host = document.querySelector<HTMLElement>(`[data-testid="canvas-${id}"]`)!;
+  const x = host.getBoundingClientRect().width * at;
+  return (window as unknown as { __tjCharts: Map<string, { timeScale(): { coordinateToLogical(x: number): number | null } }> }).__tjCharts.get(id)!.timeScale().coordinateToLogical(x);
+}, { id, at });
+
+test("zoom speed scales a pinch's vertical delta, keeps the pan and the cursor's candle", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await registerCharts(page);
+  await stub(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect.poll(() => logicalRange(page, "main")).not.toBeNull();
+  const pick = async (name: string) => { await indicator(page, "RSI 14"); await page.getByRole("group", { name: "Zoom speed" }).getByRole("button", { name }).click(); await page.keyboard.press("Escape"); };
+  const pinch = async (id: string, ctrl = true) => {
+    await page.getByRole("button", { name: "Latest candles main" }).click();
+    await page.waitForTimeout(100);
+    const before = await spanOf(page, id);
+    const anchor = await barUnder(page, id, 0.3);
+    for (let i = 0; i < 10; i++) await wheelOver(page, id, 0.3, { deltaY: -10, ctrlKey: ctrl });
+    await page.waitForTimeout(150);
+    const after = await spanOf(page, id);
+    return { shrink: (before.span - after.span) / before.span, anchorMoved: Math.abs((await barUnder(page, id, 0.3))! - anchor!) };
+  };
+  const results: Record<string, number> = {};
+  for (const name of ["Slow", "Normal", "Fast"]) {
+    await pick(name);
+    const { shrink, anchorMoved } = await pinch("main");
+    results[name] = shrink;
+    expect(anchorMoved, `${name}: the bar under the cursor stays under it`).toBeLessThanOrEqual(1);
+  }
+  expect(results.Slow).toBeGreaterThan(0.005);
+  expect(results.Normal / results.Slow).toBeGreaterThan(2.4);
+  expect(results.Normal / results.Slow).toBeLessThan(3.6);
+  expect(results.Fast / results.Slow).toBeGreaterThan(4.5);
+  expect(results.Fast / results.Slow).toBeLessThan(7.5);
+
+  // Panning (deltaX) is the same at every speed.
+  const shifts: number[] = [];
+  for (const name of ["Slow", "Normal"]) {
+    await pick(name);
+    const before = await spanOf(page, "main");
+    await wheelOver(page, "main", 0.5, { deltaX: 30 });
+    await page.waitForTimeout(100);
+    shifts.push((await spanOf(page, "main")).from - before.from);
+  }
+  expect(Math.abs(shifts[0])).toBeGreaterThan(0.5);
+  expect(shifts[1]).toBeCloseTo(shifts[0], 3);
+  // It is a choice of this device, remembered in the browser and not in the shared settings.
+  expect(await page.evaluate(() => localStorage.getItem("tradejournal.charts.zoomSpeed.v1"))).toBe("normal");
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await indicator(page, "RSI 14");
+  await expect(page.getByRole("group", { name: "Zoom speed" }).getByRole("button", { name: "Normal" })).toHaveAttribute("aria-pressed", "true");
+  expect(errors).toEqual([]);
+});
+
+test("indicator colors change the lines and legend, persist, reject bad values and reset", async ({ page, context }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const server = await fakeChartSettings(context, { revision: 1, data: { indicatorColors: { ema9: "red", ema50: "#12345", ema200: "#00ff00", unknown: "#123456" } } });
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const lineColors = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { panes(): { getSeries(): { options(): { color?: string } }[] }[] }> })
+    .__tjCharts.get("main")!.panes().flatMap((pane) => pane.getSeries().map((series) => series.options().color)).filter(Boolean));
+  const dots = () => page.evaluate(() => [...document.querySelectorAll<HTMLElement>("[aria-label='MRVL 5m chart'] span[aria-hidden][style*='background']")].map((el) => el.style.backgroundColor));
+  // Bad saved values fall back to the defaults; a good one is used.
+  await expect.poll(lineColors).toContain("#00ff00");
+  expect(await lineColors()).toContain("#67d5eb");
+  expect(await lineColors()).not.toContain("red");
+  expect(await lineColors()).toContain("#f5e6a1");
+
+  await indicator(page, "EMA 20");
+  const menu = page.getByRole("group", { name: "Chart indicators" });
+  for (const name of ["EMA 9", "EMA 20", "EMA 50", "EMA 200", "RTH VWAP", "RSI 14"]) await expect(menu.getByLabel(`${name} color`)).toBeVisible();
+  await expect(menu.getByLabel("Volume color")).toHaveCount(0);
+  await menu.getByLabel("EMA 20 color").fill("#ff0000");
+  await expect.poll(lineColors).toContain("#ff0000");
+  await expect.poll(dots).toContain("rgb(255, 0, 0)");
+  await expect.poll(() => server.data?.indicatorColors).toEqual({ ema20: "#ff0000", ema200: "#00ff00" });
+  await menu.getByLabel("RTH VWAP color").fill("#00ccff");
+  await menu.getByLabel("RSI 14 color").fill("#ff8800");
+  await expect.poll(lineColors).toContain("#ff8800");
+  await page.screenshot({ path: test.info().outputPath("indicator-colors-desktop.png"), animations: "disabled" });
+  await page.keyboard.press("Escape");
+
+  await page.reload();
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect.poll(lineColors).toContain("#ff0000");
+  await expect.poll(dots).toContain("rgb(255, 0, 0)");
+
+  await indicator(page, "EMA 20");
+  await menu.getByRole("button", { name: "Reset colors" }).click();
+  await expect.poll(lineColors).toContain("#f4c66b");
+  expect(await lineColors()).not.toContain("#ff0000");
+  await expect.poll(() => server.data?.indicatorColors).toEqual({});
+  await expect(menu.getByRole("button", { name: "Reset colors" })).toBeDisabled();
+  expect(errors).toEqual([]);
+
+  // On a phone the same menu keeps 44px targets and fits the screen.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Indicators", exact: true }).click();
+  const panel = page.getByRole("group", { name: "Chart indicators" });
+  await expect(panel).toBeVisible();
+  await expect(panel).toBeInViewport({ ratio: 1 });
+  await panel.getByRole("button", { name: "Reset colors" }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: test.info().outputPath("indicator-colors-phone.png"), animations: "disabled" });
 });

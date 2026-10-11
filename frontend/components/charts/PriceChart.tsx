@@ -1,16 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, ColorType, CrosshairMode, LineStyle, TickMarkType, createSeriesMarkers } from "lightweight-charts";
 import type { IChartApi, ISeriesApi, ISeriesMarkersPluginApi, Time, UTCTimestamp } from "lightweight-charts";
-import { Expand, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, Timer } from "lucide-react";
-import { INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, staleCandles, volumeAlpha } from "@/lib/charts";
-import type { AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
-import type { Earnings } from "@/lib/symbolInfo";
+import { Expand, Eye, EyeOff, Link2, LocateFixed, Maximize2, Minimize2, NotebookPen, Pin, SlidersHorizontal, Timer } from "lucide-react";
+import { INDICATOR_COLORS, COMPACT_OPENING_BARS, COMPACT_PANEL, INDICATOR_NAMES, INTERVALS, INTERVAL_SECONDS, OPENING_BARS, PANEL_OPENING_BARS, STUDIES, barAt, barChange, barClock, countdown, earningsMarks, etTime, gapSeconds, intradayInterval, price, rvolCoverage, rvolText, slimIndicators, staleCandles, volumeAlpha } from "@/lib/charts";
+import type { ColorKey, AutoLevels, ChartBar, ChartCommand, ChartCommands, ChartJump, ChartPanelData, CrosshairLink, EarningsMark, Indicators, Interval, LevelInteraction, MarketDay, PanelStudies, PriceLevel, RangeLink, RvolBaseline } from "@/lib/charts";
+import type { Earnings, NewsArticle } from "@/lib/symbolInfo";
+import { newsLabel, newsMarks, newsTip } from "@/lib/newsMarkers";
+import type { NewsMark } from "@/lib/newsMarkers";
+import { chartCommitted } from "@/lib/chartPerformance";
 import { useClock, useLivePanel } from "@/lib/chartStore";
 import { DRAG_START, DrawingLayer, drawingShape, levelShape, MOUSE_SLOP, moveHandle, POINTS, roundPrice, shiftPoints, Timeline, TOUCH_SLOP } from "@/lib/drawings";
 import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle } from "@/lib/drawings";
-import { AutoLevelLayer, isOption, isRange, shownZones } from "@/lib/autoLevels";
+import { AutoLevelLayer, chartLabel, isOption, isRange, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
 import { SessionShade } from "@/lib/sessionShade";
 import type { AlertMark } from "@/lib/alerts";
@@ -18,16 +21,18 @@ import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
 import { positionLineTitle, type ChartPosition } from "@/lib/chartJournal";
 import SelectionBar from "./SelectionBar";
+import ToolbarMenu from "./ToolbarMenu";
 import type { MenuRequest } from "./ChartMenu";
 import type { LiveFeed } from "@/lib/chartStore";
+import { ZOOM_SPEEDS, readZoomSpeed } from "@/lib/zoomSpeed";
 
-const COLORS = { ema9: "#67d5eb", ema20: "#f4c66b", ema50: "#b494f5", ema200: "#ee86bd", vwap: "#f5e6a1" };
+const OVERLAYS = ["ema9", "ema20", "ema50", "ema200", "vwap"] as const;
 const tickFormats = {
   [TickMarkType.Year]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", year: "numeric" }),
   [TickMarkType.Month]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short" }),
   [TickMarkType.DayOfMonth]: new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", month: "short", day: "numeric" }),
 };
-type Overlay = keyof typeof COLORS;
+type Overlay = typeof OVERLAYS[number];
 const MIN_BAR_SPACING = 2;
 const NO_DRAWINGS: Drawing[] = [];
 const NO_ALERTS: AlertMark[] = [];
@@ -45,6 +50,8 @@ function linePoint(bars: ChartBar[], index: number, name: Overlay) {
 }
 /** The range bands' VWAP bands (C2.7): VWAP plus and minus one and two of the session's standard deviations. */
 const VWAP_BANDS = [2, 1, -1, -2] as const;
+/** A VWAP band is the VWAP color at a faint alpha, the nearer bands stronger. */
+const bandColor = (vwap: string, k: number) => vwap + (Math.abs(k) === 1 ? "70" : "45");
 type VwapBand = typeof VWAP_BANDS[number];
 function bandPoint(bars: ChartBar[], index: number, k: VwapBand) {
   const b = bars[index];
@@ -58,26 +65,26 @@ const candlePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, open: b.op
 const volumePoint = (b: ChartBar) => ({ time: b.time as UTCTimestamp, value: b.volume, color: (b.close >= b.open ? "#2bc9a4" : "#ee617a") + volumeAlpha(b.rvol) });
 const rsiPoint = (b: ChartBar) => b.rsi === null ? { time: b.time as UTCTimestamp } : { time: b.time as UTCTimestamp, value: b.rsi };
 /**
- * The opening zoom: the latest candles at a fixed width. Fewer candles than that
+ * The opening zoom: the latest `count` candles. Fewer candles than that
  * (today's first premarket minutes, before the history pages arrive) sit at the
  * right with room to their left, so the history fills in at this zoom instead of
  * stretching the first few candles across the chart.
  */
-const openingRange = (bars: number, main: boolean) => ({ from: bars - (main ? OPENING_BARS : PANEL_OPENING_BARS), to: bars + 4 });
+const openingRange = (bars: number, count: number) => ({ from: bars - count, to: bars + 4 });
 /**
  * Reset: the latest candles at the opening zoom, every pane's price scale back
  * to automatic (dragging an axis turns it off). Realtime: the latest candle at
  * the current zoom.
  */
-function moveView(chart: IChartApi, bars: number, main: boolean, command: ChartCommand) {
+function moveView(chart: IChartApi, bars: number, opening: number, command: ChartCommand) {
   const scale = chart.timeScale();
   if (command === "reset") {
     chart.panes().forEach((_, pane) => chart.priceScale("right", pane).applyOptions({ autoScale: true }));
-    scale.setVisibleLogicalRange(openingRange(bars, main));
+    scale.setVisibleLogicalRange(openingRange(bars, opening));
     return;
   }
   const range = scale.getVisibleLogicalRange();
-  const width = range ? range.to - range.from : main ? 114 : 69;
+  const width = range ? range.to - range.from : opening + 4;
   scale.setVisibleLogicalRange({ from: bars + 4 - width, to: bars + 4 });
 }
 /** Browser tests register a map here to inspect chart ranges; production never defines it. */
@@ -97,6 +104,16 @@ const SECOND_TEXT: Partial<Record<Tool, string>> = { trend: "Click the second po
 /** A finger held this long without moving opens the chart menu (C1.3); moving further than `HOLD_SLOP` first is a pan or a crosshair scrub. */
 const LONG_PRESS = 500;
 const HOLD_SLOP = 10;
+/**
+ * Room for the candles: the price scale leaves this fraction of the pane above and below the candles, and volume is a thin strip along the
+ * bottom (drawn from `VOLUME_TOP` down, a little under the lowest candles, faint enough to read through) instead of a band the candles must clear.
+ */
+const CANDLE_MARGINS = { top: 0.10, bottom: 0.12 };
+const VOLUME_TOP = 0.88;
+/** A news marker's centre floats this many pixels above its candle's high: clear of the candle and of a fill arrow on it, and never part of the price scale's fit. */
+const NEWS_LIFT_PX = 26;
+/** How far from a news marker's centre a tap still counts as on it. */
+const NEWS_REACH = 24;
 /** A jump to an item drawn before the loaded candles (C1.4) loads at most this many older pages, and gives up after this long. */
 const JUMP_PAGES = 20;
 const JUMP_MS = 20_000;
@@ -125,13 +142,20 @@ function Countdown({ label, main, interval, bars, feed }: { label: string; main:
 type Bundle = {
   chart: IChartApi; candles: ISeriesApi<"Candlestick">; volume: ISeriesApi<"Histogram">;
   shade: SessionShade; rsi?: ISeriesApi<"Line">;
-  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
+  lines: Record<Overlay, ISeriesApi<"Line">>; bands: Record<VwapBand, ISeriesApi<"Line">>; markers: ISeriesMarkersPluginApi<Time>; news: ISeriesMarkersPluginApi<Time>; layer: DrawingLayer; auto: AutoLevelLayer; bells: AlertLayer;
   /** The symbol and interval now drawn; a new one opens on its latest candles. */
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
+  /** The studies' line colors (the user's choices over the defaults). */
+  colors?: Record<ColorKey, string>;
+  /**
+   * A smaller chart's own studies, from its header menu, already in `indicators`; null follows the workspace's,
+   * slimmed while the chart is compact. `onStudies` sets them (null: follow again); `studiesHidden` is the Indicators group hidden everywhere.
+   */
+  ownStudies?: PanelStudies | null; onStudies?(next: PanelStudies | null): void; studiesHidden?: boolean;
   /** This symbol's drawings on the chart's basis. */
   drawings?: Drawing[];
   /** This symbol's automatic levels (C2.3), null while hidden, and this chart's interactions with them. */
@@ -146,6 +170,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   rvol?: RvolBaseline | null;
   /** This symbol's earnings (C2.5): markers on report dates, and the header badge. */
   earnings?: Earnings | null;
+  /** The main chart's news markers (T3.5): the symbol's articles, or null while the layer is off. Only Focused articles are marked. */
+  news?: { symbol: string; articles: NewsArticle[] } | null;
+  /** A click on a news marker (a tap's popover button on touch): the ids of the articles on that candle. */
+  onNews?(ids: string[]): void;
   /** This symbol's level alerts (C5.1), on the chart's basis: a bell at each price. */
   alerts?: AlertMark[];
   /** A smaller chart either follows the main symbol or holds its own; the symbol opens a picker. */
@@ -195,6 +223,27 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onFill?(id: string): void;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const colorsRef = useRef(colors);
+  const box = useRef<HTMLElement>(null);
+  // A smaller chart under `COMPACT_PANEL` is compact; the ref is read where the chart opens or resets its view.
+  const [compact, setCompact] = useState(false);
+  const compactNow = useRef(false);
+  useLayoutEffect(() => {
+    const element = box.current;
+    if (!element || main) return;
+    const measure = () => {
+      const { width, height } = element.getBoundingClientRect();
+      if (!width && !height) return; // a panel hidden on a phone keeps what it was
+      compactNow.current = width < COMPACT_PANEL.width || height < COMPACT_PANEL.height;
+      setCompact(compactNow.current);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [main]);
+  const openingBars = () => main ? OPENING_BARS : compactNow.current ? COMPACT_OPENING_BARS : PANEL_OPENING_BARS;
+  const indicators = useMemo(() => compact && !ownStudies ? slimIndicators(given) : given, [compact, ownStudies, given]);
   const bundle = useRef<Bundle | null>(null);
   const barsRef = useRef<ChartBar[]>([]);
   const resets = useRef(0);
@@ -204,10 +253,19 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const quietUntil = useRef(0);
   const quiet = () => { quietUntil.current = performance.now() + 60; };
   const requestedGaps = useRef(new Set<number>());
-  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted: !!history?.exhausted });
+  const actions = useRef({ tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted: !!history?.exhausted });
   // The fill arrows drawn, by fill id, for hover summaries and clicks (C3.1).
   const fillMarks = useRef(new Map<string, { label: string; time: number }>());
   const [fillTip, setFillTip] = useState<{ label: string; time: number; x: number; y: number; width: number } | null>(null);
+  // The news markers drawn, by marker id, for hover headlines and clicks (T3.5). A tap on a phone pins the popover, which opens the News tab from its button.
+  const newsRef = useRef<NewsMark[]>([]);
+  const newsById = useRef(new Map<string, NewsMark>());
+  // Dragging the price axis turns the price scale's automatic fit off (the candles can then leave the pane); the Auto chip turns it back on.
+  const [manualScale, setManualScale] = useState<{ top: number } | null>(null);
+  const autoScale = useRef<() => void>(() => {});
+  const newsPriceRef = useRef(new Map<string, number>());
+  const placeNewsRef = useRef<() => void>(() => {});
+  const [newsOpen, setNewsOpen] = useState<{ mark: NewsMark; x: number; y: number; width: number; height: number; pinned: boolean } | null>(null);
   // A jump waiting for older candles retries when they arrive (set by the chart's effect below).
   const retryJump = useRef<() => void>(() => {});
   // A two-point tool's first click, kept until the second; `second` re-renders the hint.
@@ -229,7 +287,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     renders?.set(id, (renders.get(id) ?? 0) + 1);
   });
   const exhausted = !!history?.exhausted;
-  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, exhausted]);
+  useEffect(() => { actions.current = { tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending: !!pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted }; }, [tool, magnet, toolStyle, onDraw, onPlace, onNeedHistory, onVisibleRange, interval, pending, selected, onSelect, onMove, onEditDrawing, onMenu, onFill, onNews, exhausted]);
   useEffect(() => { linking.current = linkRange; }, [linkRange]);
 
   // One chart for the panel's lifetime. Symbol, interval, session and RSI
@@ -245,7 +303,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       grid: { vertLines: { color: "#1b2532" }, horzLines: { color: "#1b2532" } },
       crosshair: { mode: CrosshairMode.Normal, vertLine: { color: "#75859b", labelBackgroundColor: "#34455a" }, horzLine: { color: "#75859b", labelBackgroundColor: "#34455a" } },
       // entireTextOnly: a price cut off at a pane's edge is left out rather than printed against the next pane's.
-      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: 0.10, bottom: 0.23 }, entireTextOnly: true },
+      rightPriceScale: { borderColor: "#263141", minimumWidth: main ? 66 : 54, scaleMargins: { top: CANDLE_MARGINS.top, bottom: CANDLE_MARGINS.bottom }, entireTextOnly: true },
       timeScale: { borderColor: "#263141", secondsVisible: false, rightOffset: 4, minBarSpacing: MIN_BAR_SPACING,
         tickMarkFormatter: (time: Time, kind: TickMarkType) => {
           if (typeof time !== "number") return null;
@@ -254,13 +312,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     });
     const candles = chart.addSeries(CandlestickSeries, { upColor: "#2bc9a4", downColor: "#ee617a", wickUpColor: "#2bc9a4", wickDownColor: "#ee617a", borderVisible: false });
     const volume = chart.addSeries(HistogramSeries, { priceScaleId: "volume", priceFormat: { type: "volume" }, priceLineVisible: false, lastValueVisible: false });
-    volume.priceScale().applyOptions({ scaleMargins: { top: 0.84, bottom: 0 } });
+    volume.priceScale().applyOptions({ scaleMargins: { top: VOLUME_TOP, bottom: 0 } });
     const lines = {} as Bundle["lines"];
-    for (const name of Object.keys(COLORS) as Overlay[]) lines[name] = chart.addSeries(LineSeries, { color: COLORS[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
+    for (const name of OVERLAYS) lines[name] = chart.addSeries(LineSeries, { color: colorsRef.current[name], lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false });
     const bands = {} as Bundle["bands"];
-    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: Math.abs(k) === 1 ? "#f5e6a170" : "#f5e6a145", lineWidth: 1,
+    for (const k of VWAP_BANDS) bands[k] = chart.addSeries(LineSeries, { color: bandColor(colorsRef.current.vwap, k), lineWidth: 1,
       lineStyle: Math.abs(k) === 1 ? LineStyle.Dashed : LineStyle.Dotted, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false, visible: false });
     const markers = createSeriesMarkers(candles, []);
+    // News markers are their own set, and the scale ignores them: a story far above the candles is clipped, never a reason to shrink them.
+    const news = createSeriesMarkers(candles, [], { autoScale: false });
     const shade = new SessionShade(() => barsRef.current);
     candles.attachPrimitive(shade);
     const timeline = new Timeline(() => barsRef.current, () => INTERVAL_SECONDS[actions.current.interval]);
@@ -270,7 +330,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     candles.attachPrimitive(autoLayer);
     const bells = new AlertLayer();
     candles.attachPrimitive(bells);
-    bundle.current = { chart, candles, volume, shade, lines, bands, markers, layer, auto: autoLayer, bells, frame: "" };
+    bundle.current = { chart, candles, volume, shade, lines, bands, markers, news, layer, auto: autoLayer, bells, frame: "" };
     const layers = (window as typeof window & { __tjDrawings?: LayerRegistry }).__tjDrawings;
     layers?.set(id, layer);
     const autoLayers = (window as typeof window & { __tjAutoLevels?: AutoRegistry }).__tjAutoLevels;
@@ -322,6 +382,9 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // A fill arrow under the pointer: its one-line summary (C3.1).
       const fill = at && typeof event.hoveredObjectId === "string" ? fillMarks.current.get(event.hoveredObjectId) : undefined;
       setFillTip((open) => fill ? (open?.label === fill.label && open.time === fill.time ? open : { ...fill, x: at!.x, y: at!.y, width: element.clientWidth }) : null);
+      // A news marker under the pointer: its headlines (T3.5). A popover a tap pinned stays until the next tap.
+      const story = at && typeof event.hoveredObjectId === "string" ? newsById.current.get(event.hoveredObjectId) : undefined;
+      setNewsOpen((open) => open?.pinned ? open : story ? (open?.mark === story ? open : { mark: story, x: at!.x, y: at!.y, width: element.clientWidth, height: element.clientHeight, pinned: false }) : null);
       hoverCard(at && !layer.hit(at.x, at.y, MOUSE_SLOP) ? autoLayer.hit(at.y, MOUSE_SLOP) : null, at?.y ?? 0);
       // An armed tool previews what a click would place, where the magnet would put it.
       const kind = actions.current.tool;
@@ -462,7 +525,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // An automatic level under the pointer, when no level or drawing of the user's is (C5.1 alerts on it).
       const auto = plot && !hit && !now.tool ? autoLayer.hit(at.y, touch ? TOUCH_SLOP : MOUSE_SLOP) : null;
       const value = plot ? layer.anchorAt(at.x, at.y, now.magnet)?.price ?? priceAt(at.y) : null;
-      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, main, "reset"); } });
+      now.onMenu({ clientX, clientY, touch, price: value, id: hit?.id ?? null, auto, reset: () => { quiet(); pinnedLive.current = true; moveView(chart, barsRef.current.length, openingBars(), "reset"); } });
     };
     // A finger held still: its own timer, since browsers differ on whether a
     // long press fires `contextmenu` (Android does, iOS does not; whichever
@@ -537,13 +600,39 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     element.addEventListener("touchend", onTouchEnd, true);
     element.addEventListener("touchcancel", onTouchEnd, true);
     element.addEventListener("contextmenu", onContextMenu, true);
+    // lightweight-charts zooms by deltaY / 100 per wheel event with no speed option, so a trackpad's small deltas crawl.
+    // Re-send the event with deltaY scaled by this device's Zoom speed; deltaX (the pan) and the cursor anchor are untouched.
+    const scaled = new WeakSet<Event>();
+    const onWheel = (event: WheelEvent) => {
+      const factor = ZOOM_SPEEDS[readZoomSpeed()];
+      if (scaled.has(event) || factor === 1 || event.deltaY === 0) return;
+      event.preventDefault(); event.stopPropagation();
+      const again = new WheelEvent("wheel", { bubbles: true, cancelable: true, composed: true, view: window, clientX: event.clientX, clientY: event.clientY, screenX: event.screenX, screenY: event.screenY,
+        deltaX: event.deltaX, deltaY: event.deltaY * factor, deltaZ: event.deltaZ, deltaMode: event.deltaMode, ctrlKey: event.ctrlKey, shiftKey: event.shiftKey, altKey: event.altKey, metaKey: event.metaKey });
+      scaled.add(again);
+      (event.target as Element).dispatchEvent(again);
+    };
+    element.addEventListener("wheel", onWheel, { capture: true, passive: false });
     const unpin = () => { pinnedLive.current = false; };
     for (const type of ["mousedown", "touchstart", "wheel"]) element.addEventListener(type, unpin, { capture: true, passive: true });
+    const newsAt = (x: number, y: number, slop: number) => {
+      let best: { mark: NewsMark; dx: number } | undefined;
+      for (const mark of newsRef.current) {
+        const price = newsPriceRef.current.get(mark.id);
+        const left = chart.timeScale().timeToCoordinate(mark.time as UTCTimestamp);
+        const at = price === undefined ? null : candles.priceToCoordinate(price);
+        if (left === null || at === null) continue;
+        const dx = Math.abs(left - x);
+        if (dx > slop || Math.abs(y - at) > NEWS_REACH) continue;
+        if (!best || dx < best.dx) best = { mark, dx };
+      }
+      return best?.mark;
+    };
     chart.subscribeClick((event) => {
       const now = actions.current;
       if (now.tool) return; // placing reads its own clicks (above)
       if (performance.now() < tapsOffUntil) return; // the lift after a long press
-      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); return; }
+      if (!event.point || (event.paneIndex ?? 0) !== 0) { now.onSelect?.(null); tapCard(null, 0); setNewsOpen(null); return; }
       const touch = performance.now() - lastTouch < 1000;
       const slop = touch ? TOUCH_SLOP : MOUSE_SLOP;
       const hit = layer.hit(event.point.x, event.point.y, slop)?.id ?? null;
@@ -553,6 +642,16 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         now.onFill(event.hoveredObjectId);
         return;
       }
+      // A news marker (T3.5): a click opens the articles in the News tab; a tap shows their headlines first.
+      // The library reports no hovered marker for a tap, so a touch finds the marker by where it is drawn: above its candle.
+      const story = hit ? undefined : typeof event.hoveredObjectId === "string" ? newsById.current.get(event.hoveredObjectId) : touch ? newsAt(event.point.x, event.point.y, slop) : undefined;
+      if (story) {
+        now.onSelect?.(null); tapCard(null, 0); setFillTip(null);
+        if (touch) setNewsOpen({ mark: story, x: event.point.x, y: event.point.y, width: element.clientWidth, height: element.clientHeight, pinned: true });
+        else { setNewsOpen(null); now.onNews?.(story.articles.map((article) => article.id)); }
+        return;
+      }
+      setNewsOpen(null);
       now.onSelect?.(hit);
       tapCard(hit ? null : autoLayer.hit(event.point.y, slop), event.point.y);
     });
@@ -613,7 +712,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       if (!barsRef.current.length) return;
       quiet();
       pinnedLive.current = true;
-      moveView(chart, barsRef.current.length, main, command);
+      moveView(chart, barsRef.current.length, openingBars(), command);
     });
     // A jump from the layers panel (C1.4): centre the item's moments at the
     // current zoom (widened to fit a long drawing), then widen the price
@@ -641,7 +740,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         if (!spots.length) return;
         const [first, last] = [Math.min(...spots), Math.max(...spots)];
         const range = scale.getVisibleLogicalRange();
-        const width = range ? range.to - range.from : main ? 114 : 69;
+        const width = range ? range.to - range.from : openingBars() + 4;
         quiet();
         if (first < -0.5 && !actions.current.exhausted && pending.pages < JUMP_PAGES) {
           pending.pages += 1;
@@ -665,9 +764,45 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       tryJump();
     });
     const stopSnapshot = commands.provideSnapshot(id, () => barsRef.current.length ? chart.takeScreenshot() : null);
+    // Whether the candle pane's price scale still fits itself: read after anything that can change it (a drag, the wheel, a double click, a reset, a jump).
+    let disposed = false;
+    const syncScale = () => !disposed && setManualScale((now) => {
+      if (candles.priceScale().options().autoScale) return now ? null : now;
+      const top = Math.max(0, (chart.panes()[0]?.getHeight() ?? 0) - 22);
+      return now && now.top === top ? now : { top };
+    });
+    // News markers sit a fixed number of pixels above their candle's high, so their price is worked out from where the scale is now,
+    // and again after the scale settles or the zoom changes. They are a separate set the price scale ignores: one far above is clipped.
+    const placeNews = () => {
+      if (disposed) return;
+      const [high, low] = [candles.coordinateToPrice(0), candles.coordinateToPrice(100)];
+      const lift = high === null || low === null ? 0 : Math.abs(high - low) / 100 * NEWS_LIFT_PX;
+      const stories = newsRef.current.flatMap((m) => {
+        const bar = barAt(barsRef.current, m.time);
+        if (!bar || !lift) return [];
+        newsPriceRef.current.set(m.id, bar.high + lift);
+        return [{ time: m.time as UTCTimestamp, position: "atPriceMiddle" as const, price: bar.high + lift, shape: "square" as const, size: 0.5, color: "#94a3b8", text: newsLabel(m), id: m.id }];
+      });
+      news.setMarkers(stories);
+    };
+    placeNewsRef.current = placeNews;
+    let newsTimer = 0;
+    const replaceNews = () => { window.clearTimeout(newsTimer); newsTimer = window.setTimeout(placeNews, 120); };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(replaceNews);
+    const afterScale = () => { window.setTimeout(syncScale, 0); window.setTimeout(syncScale, 120); replaceNews(); };
+    autoScale.current = () => { candles.priceScale().applyOptions({ autoScale: true }); syncScale(); };
+    for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.addEventListener(type, afterScale, { capture: true, passive: true });
+    const scaleWatch = new ResizeObserver(syncScale);
+    scaleWatch.observe(element);
+    const stopScale = commands.listen(afterScale);
+    const stopScaleJump = commands.listenJump(afterScale);
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
     return () => {
+      disposed = true;
+      for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.removeEventListener(type, afterScale, true);
+      window.clearTimeout(newsTimer); chart.timeScale().unsubscribeVisibleLogicalRangeChange(replaceNews); placeNewsRef.current = () => {};
+      scaleWatch.disconnect(); stopScale(); stopScaleJump(); autoScale.current = () => {};
       stopLink(); stopRange(); stopCommands(); stopJumps(); stopSnapshot(); retryJump.current = () => {}; chart.timeScale().unsubscribeVisibleLogicalRangeChange(onLogical); if (rangeTimer) window.clearTimeout(rangeTimer); registry?.delete(id); layers?.delete(id); autoLayers?.delete(id);
       finish(false); dropHold();
       element.removeEventListener("pointerleave", releasePointer);
@@ -675,22 +810,23 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       element.removeEventListener("mousedown", onMouseDown, true); element.removeEventListener("touchstart", onTouchStart, true); element.removeEventListener("touchmove", onTouchMove, true);
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
-      markers.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
+      element.removeEventListener("wheel", onWheel, true);
+      markers.detach(); news.detach(); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); chart.remove(); bundle.current = null; barsRef.current = [];
     };
-  }, [id, link, rangeLink, commands, main]);
+  }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
   // RSI lives in a second pane, added and removed in place; the pane goes with its series.
   useEffect(() => {
     const current = bundle.current;
     if (!current || indicators.rsi === !!current.rsi) return;
     if (current.rsi) { current.chart.removeSeries(current.rsi); current.rsi = undefined; return; }
-    const rsi = current.chart.addSeries(LineSeries, { color: "#b494f5", lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
+    const rsi = current.chart.addSeries(LineSeries, { color: colorsRef.current.rsi, lineWidth: 1, priceLineVisible: false, lastValueVisible: true,
       autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }) }, 1);
     // Keep 100 and 0 clear of the divider, so they never sit against the price pane's bottom label.
     rsi.priceScale().applyOptions({ scaleMargins: { top: 0.24, bottom: 0.18 } });
     rsi.createPriceLine({ price: 70, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
     rsi.createPriceLine({ price: 30, color: "#655781", lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: false });
-    current.chart.panes()[1].setHeight(main ? 85 : 60);
+    current.chart.panes()[1].setHeight(main ? 64 : 60);
     rsi.setData(barsRef.current.map(rsiPoint));
     current.rsi = rsi;
   }, [indicators.rsi, main]);
@@ -733,16 +869,16 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       // follows the live edge only when the user is already looking at it.
       const last = bars.length - 1;
       if (change === "append") {
-        for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last - 1, name));
+        for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last - 1, name));
         for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last - 1, k));
       }
       current.candles.update(candlePoint(bars[last]));
       current.volume.update(volumePoint(bars[last]));
       current.shade.update();
-      for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].update(linePoint(bars, last, name));
+      for (const name of OVERLAYS) current.lines[name].update(linePoint(bars, last, name));
       for (const k of VWAP_BANDS) current.bands[k].update(bandPoint(bars, last, k));
       current.rsi?.update(rsiPoint(bars[last]));
-      return;
+      return chartCommitted(symbol, live.store.get(symbol).ticks.at(-1), main);
     }
     resets.current += 1;
     if (container.current) container.current.dataset.resets = String(resets.current);
@@ -757,12 +893,12 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     current.candles.setData(bars.map(candlePoint));
     current.volume.setData(bars.map(volumePoint));
     current.shade.update();
-    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
+    for (const name of OVERLAYS) current.lines[name].setData(bars.map((_, index) => linePoint(bars, index, name)));
     for (const k of VWAP_BANDS) current.bands[k].setData(bars.map((_, index) => bandPoint(bars, index, k)));
     if (container.current) container.current.dataset.vwapBands = String(bars.filter((bar) => bar.vwap !== null && bar.vwap_sd != null).length);
     current.rsi?.setData(bars.map(rsiPoint));
     if (bars.length && (initial.current || !prior.length)) {
-      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, main));
+      current.chart.timeScale().setVisibleLogicalRange(openingRange(bars.length, openingBars()));
       initial.current = false;
     } else if (bars.length && following && logical) {
       const width = logical.to - logical.from;
@@ -770,14 +906,24 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     } else if (logical && movedTo >= 0) current.chart.timeScale().setVisibleLogicalRange({ from: logical.from + moved, to: logical.to + moved });
     else if (bars.length && range) current.chart.timeScale().setVisibleRange(range);
     retryJump.current();
-  }, [panel, pending, dataKey, symbol, interval, main]);
+    if (bars.length) return chartCommitted(symbol, undefined, main);
+  }, [panel, pending, dataKey, symbol, interval, main, live.store]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
     current.volume.applyOptions({ visible: indicators.volume });
-    for (const name of Object.keys(COLORS) as Overlay[]) current.lines[name].applyOptions({ visible: indicators[name] });
+    for (const name of OVERLAYS) current.lines[name].applyOptions({ visible: indicators[name] });
   }, [indicators]);
+  // A chosen color reaches the lines, the VWAP bands (at their own alpha) and the RSI line in place.
+  useEffect(() => {
+    colorsRef.current = colors;
+    const current = bundle.current;
+    if (!current) return;
+    for (const name of OVERLAYS) current.lines[name].applyOptions({ color: colors[name] });
+    for (const k of VWAP_BANDS) current.bands[k].applyOptions({ color: bandColor(colors.vwap, k) });
+    current.rsi?.applyOptions({ color: colors.rsi });
+  }, [colors]);
   useEffect(() => {
     const current = bundle.current;
     if (!current) return;
@@ -788,6 +934,11 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const markers = panel?.markers;
   // Earnings dates (C2.5) as text, so a tick that leaves them on the same candles changes nothing.
   const earningsKey = useMemo(() => JSON.stringify(earningsMarks(panel?.bars ?? [], earnings, interval)), [panel?.bars, earnings, interval]);
+  // News markers (T3.5): the main chart's Focused articles, each on the candle that holds its time. A tick that leaves them on the same candles changes nothing.
+  const newsList = main && news && news.symbol === symbol ? news.articles : null;
+  const marked = useMemo(() => newsList ? newsMarks(panel?.bars ?? [], newsList, interval) : [], [panel?.bars, newsList, interval]);
+  const newsKey = marked.map((mark) => `${mark.time}:${mark.articles.map((article) => article.id).join(",")}`).join("|");
+  useEffect(() => { newsRef.current = marked; });
   useEffect(() => {
     if (pending) return;
     const reports = (JSON.parse(earningsKey) as EarningsMark[]).map((m) => ({ time: m.time as UTCTimestamp, position: "belowBar" as const,
@@ -800,6 +951,21 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     setFillTip(null);
     if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
   }, [markers, earningsKey, pending, indicators.fills, main]);
+  // The main chart's news markers: placed by `placeNews` (above), which needs the price scale, so a tick that changes nothing here re-places them in place.
+  const barsKey = panel?.bars.length ? `${panel.bars.length}:${panel.bars.at(-1)!.time}:${panel.bars.at(-1)!.high}:${panel.bars.at(-1)!.low}` : "";
+  useEffect(() => {
+    if (pending) return;
+    newsById.current = new Map(marked.map((m) => [m.id, m]));
+    newsPriceRef.current = new Map();
+    if (container.current) container.current.dataset.news = marked.map((m) => `${m.time}:${m.articles.length}`).join(",");
+    placeNewsRef.current();
+    // The scale settles on new candles over the next frames.
+    const frame = window.requestAnimationFrame(() => window.requestAnimationFrame(() => placeNewsRef.current()));
+    return () => window.cancelAnimationFrame(frame);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- the keys stand for `marked` and the candles
+  }, [newsKey, barsKey, pending, main]);
+  // A popover closes when its markers change, not when a poll rebuilds the fill list under it.
+  useEffect(() => { queueMicrotask(() => setNewsOpen(null)); }, [newsKey, pending]);
 
   useEffect(() => {
     const current = bundle.current;
@@ -832,14 +998,15 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   useEffect(() => {
     const current = bundle.current;
     if (!current || pending) return; // the next symbol's levels wait for its candles
-    current.auto.set(zones, main, lastClose);
+    current.auto.set(zones, main, lastClose, compact);
     setCard((open) => open && !zones.some((zone) => zone.id === open.id) ? null : open);
     if (container.current) {
+      container.current.dataset.compact = compact ? "true" : "false";
       container.current.dataset.autoLevels = zones.map((zone) => zone.id).join(",");
       container.current.dataset.optionLevels = zones.filter((zone) => zone.members.some(isOption)).map((zone) => zone.label).join(",");
       container.current.dataset.rangeLevels = zones.filter((zone) => zone.members.some(isRange)).map((zone) => zone.label).join(",");
     }
-  }, [zones, pending, main, lastClose]);
+  }, [zones, pending, main, lastClose, compact]);
   useEffect(() => {
     bundle.current?.auto.setHighlight(pending ? null : highlight);
     if (container.current) container.current.dataset.highlight = highlight === null || pending ? "" : String(highlight);
@@ -857,7 +1024,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
 
   const bar = (hover && barAt(panel?.bars ?? [], hover.time)) || panel?.bars.at(-1);
   // Relative volume (C2.4) beside a regular-session candle of today: its value, or why it has none.
-  const showRvol = indicators.volume && intradayInterval(interval);
+  // A compact chart keeps the readout, which costs no room, while it leaves out the volume bars.
+  const showRvol = given.volume && intradayInterval(interval);
   // The main chart's study row says it in full. A smaller chart's row is already tight beside its
   // countdown, so there RVol takes the volume's place, with the volume and the rest on hover.
   const volumeText = bar ? Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(bar.volume) : "";
@@ -865,15 +1033,22 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     ? <span className="text-slate-400" title={`${main ? "" : `Vol ${volumeText}. `}RVol ${rvolText(bar.rvol)} for ${etTime(bar.time)}. ${rvol ? rvolCoverage(rvol) : "RVol"}: regular-session volume through this candle over their average through the same minute. A candle still forming counts its volume so far.`}>
       RVol <span className="text-slate-300">{rvolText(bar.rvol)}</span>{main && <> for {etTime(bar.time)}</>}</span>
     : main ? <span className="text-slate-400" title={rvol && rvol.state !== "ready" && rvol.message ? rvol.message : "Fewer than five of the baseline sessions had traded by this minute."}>RVol —</span> : null) : null;
+  const emas = (["ema9", "ema20", "ema50", "ema200"] as const).filter((key) => indicators[key]);
+  // Why a candle has no VWAP, from how the backend builds it (chart_math.chart_bars): regular-session minutes only, never daily or weekly.
+  const vwapWhy = interval === "1D" || interval === "1W" ? "VWAP is an intraday study: daily and weekly candles have none."
+    : bar?.extended ? "VWAP covers the regular session only: this candle is in extended hours."
+    : "VWAP starts with the session's first regular-hours trade: none has traded yet.";
   const chosenLevel = selected ? levels.find((level) => level.id === selected) : undefined;
   const chosenDrawing = selected ? drawings.find((drawing) => drawing.id === selected) : undefined;
   // Main chart: in the header. Smaller charts: end of the values row, so the
   // header keeps room for its controls at quarter width.
+  // A compact chart's header buttons sit closer, so its symbol and interval keep their room.
+  const button = compact ? "p-1" : "p-1.5";
   const timer = !pending && intradayInterval(interval) && <Countdown label={main ? "Main" : id} main={main} interval={interval} bars={panel?.bars} feed={clock} />;
   return (
     // isolate: the chart library gives its pane-resize handle z-index 50. Without a stacking
     // context here that handle outranks the app's overlays (the Sync drawer's backdrop is 40).
-    <section aria-label={`${symbol} ${interval} chart`} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
+    <section ref={box} aria-label={`${symbol} ${interval} chart`} data-compact={main ? undefined : compact ? "true" : "false"} data-quiet-chrome={main ? undefined : ""} className={`relative isolate min-w-0 overflow-hidden rounded-lg border bg-[#10151e] ${height === undefined ? "flex min-h-0 flex-1 flex-col" : ""} ${main ? "border-slate-600/60" : "border-slate-700/50"}`}>
       <div className="flex h-10 shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 px-3">
         {/* A narrow chart (C7.4's dividers allow 160px) clips its symbol and interval, never its buttons. */}
         <div className="flex min-w-0 items-center gap-2 overflow-hidden text-xs">{onPickSymbol
@@ -887,41 +1062,77 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
           {main && <span className="hidden text-[10px] text-slate-500 sm:inline">{interval === "1D" || interval === "1W" ? "REGULAR SESSION" : "NEW YORK"}</span>}
           {!pending && main && <EarningsBadge earnings={earnings} />}
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className={`flex shrink-0 items-center ${compact ? "gap-0" : "gap-1"}`}>
           {onPlan && <button aria-label="Plan trade" aria-haspopup="dialog" title="Plan trade: what you are taking and your plan, before you enter" onClick={onPlan}
             className="inline-flex h-7 items-center gap-1 rounded border border-sky-500/40 px-2 text-[11px] text-sky-200 hover:bg-sky-500/15"><NotebookPen size={12} />Plan</button>}
           {main && timer}
-          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, main, "reset"); } }} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><LocateFixed size={13} /></button>
-          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded p-1.5 hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
-          {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className="rounded p-1.5 text-slate-500 hover:bg-slate-800 hover:text-slate-200"><Expand size={13} /></button>}
+          <span data-quiet-controls={main ? undefined : ""} className={`flex items-center ${compact ? "gap-0" : "gap-1"}`}>
+          {onStudies && <ToolbarMenu floating label={`${id} studies`} title={ownStudies ? "This chart's own studies" : compact ? "Studies: slimmed while this chart is small" : "Studies: same as every chart"}
+            className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${ownStudies ? "text-sky-300" : "text-slate-500"}`}
+            content={() => <div className="flex w-52 flex-col gap-0.5 text-[11px]">
+              <button aria-pressed={!ownStudies} onClick={() => onStudies(null)} className={`rounded px-2 py-1 text-left hover:bg-slate-800 ${ownStudies ? "text-slate-400" : "text-slate-200"}`}>
+                Automatic<span className="block text-[10px] text-slate-500">Same as every chart; only EMA 9 and VWAP while this chart is small</span></button>
+              <p className="mt-1 px-2 text-[10px] uppercase tracking-wide text-slate-500">This chart only</p>
+              {studiesHidden && <p className="px-2 text-[10px] text-amber-300">Indicators are hidden on every chart.</p>}
+              {STUDIES.map((key) => <button key={key} aria-pressed={indicators[key]} disabled={studiesHidden} onClick={() => onStudies({ ...Object.fromEntries(STUDIES.map((k) => [k, indicators[k]])) as PanelStudies, [key]: !indicators[key] })}
+                className={`flex min-h-7 items-center justify-between gap-2 rounded px-2 text-left hover:bg-slate-800 disabled:opacity-50 ${indicators[key] ? "text-slate-200" : "text-slate-500"}`}>{INDICATOR_NAMES[key]}{indicators[key] ? <Eye size={12} aria-hidden /> : <EyeOff size={12} aria-hidden />}</button>)}
+            </div>}><SlidersHorizontal size={13} aria-hidden /><span className="sr-only">{`${id} studies`}</span></ToolbarMenu>}
+          <button title="Latest candles, automatic price scale (Alt+R does every chart)" aria-label={`Latest candles ${id}`} onClick={() => { if (bundle.current) { pinnedLive.current = true; moveView(bundle.current.chart, barsRef.current.length, openingBars(), "reset"); } }} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><LocateFixed size={13} /></button>
+          {onMaximize && <button title={maximized ? "Restore every chart (Esc)" : "Maximize this chart for now; Esc restores"} aria-label={maximized ? "Restore charts" : `Maximize ${interval} chart`} onClick={onMaximize} className={`rounded ${button} hover:bg-slate-800 hover:text-slate-200 ${maximized ? "text-sky-300" : "text-slate-500"}`}>{maximized ? <Minimize2 size={13} /> : <Maximize2 size={13} />}</button>}
+          {onFocus && <button title="Make main chart" aria-label={`Focus ${interval} chart`} onClick={onFocus} className={`rounded ${button} text-slate-500 hover:bg-slate-800 hover:text-slate-200`}><Expand size={13} /></button>}
+          </span>
         </div>
       </div>
-      <div className="flex h-6 min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500">
+      <div className={`flex min-w-0 shrink-0 items-center gap-2 whitespace-nowrap px-3 font-mono text-[10px] text-slate-500 ${main ? "min-h-6 flex-wrap gap-y-0.5 pb-1" : "h-6"}`}>
         <div className="flex min-w-0 items-center gap-2 overflow-hidden" aria-label={`${id} candle values`}>
         {pending ? null : bar ? <>{main && <><span>O <span className="text-slate-300">{price(bar.open)}</span></span><span>H <span className="text-slate-300">{price(bar.high)}</span></span><span>L <span className="text-slate-300">{price(bar.low)}</span></span></>}<span>C <span className={bar.close >= bar.open ? "text-emerald-400" : "text-rose-400"}>{price(bar.close)}</span></span>{!main && (rvolValue && !bar.volumePending ? rvolValue : <span>Vol {bar.volumePending ? "pending" : volumeText}</span>)}{/* The status strip names Tradier for every chart; a smaller chart names its source only when it differs. */}
           {(main || bar.source === "alpaca_sip") && <span title={bar.source === "alpaca_sip" ? "Alpaca SIP minutes, stored raw. The price basis chip says how splits are shown." : "Tradier"}>{bar.source === "alpaca_sip" ? "SIP" : "Tradier"}</span>}</> : <span>No candles in this window</span>}
         </div>
         {!main && timer}
+        {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
+          {indicators.vwap && <span style={{ color: colors.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+          {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
+          {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
+          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
+          {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
+            <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: colors[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
+            <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
+              {emas.map((key) => <span key={key} style={{ color: colors[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
+          </span>}
+          {rvolValue}
+          {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
+            {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
+        </div>}
       </div>
-      {main && <div aria-label={`${id} study values`} className="flex min-h-5 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 px-3 pb-1 font-mono text-[10px]">
-        {(Object.keys(COLORS) as Overlay[]).filter((key) => indicators[key]).map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
-        {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
-        {rvolValue}
-        {showRvol && rvol && <span role="note" aria-label="Relative volume baseline" title={rvol.message ?? undefined} className={rvol.state === "ready" ? "text-slate-400" : "text-amber-300/80"}>
-          {rvol.state === "ready" ? rvolCoverage(rvol) : rvol.state === "building" ? "RVol baseline not built yet" : "RVol unavailable"}</span>}
-      </div>}
       <div className={height === undefined ? "relative min-h-0 flex-1" : "relative"}>
         {/* Keep the library's pane-resize handle below sibling cards and selection controls. */}
         <div ref={container} data-testid={`canvas-${id}`} data-pending={pending ? "" : undefined} data-selected={selected ?? undefined} style={height === undefined ? undefined : { height }} className={`isolate select-none transition-opacity [-webkit-touch-callout:none] ${height === undefined ? "absolute inset-0" : ""} ${tool ? "cursor-crosshair" : ""} ${pending ? "opacity-40" : ""}`} />
+        {/* TradingView's "A": shown only once the price axis has been dragged (the candles may be off the pane); one click fits the candles again. */}
+        {manualScale && !pending && <button type="button" data-testid={`${id}-price-auto`} aria-label="Auto price scale: fit the candles again" title="Fit the price scale to the candles"
+          onClick={() => autoScale.current()} style={{ top: manualScale.top }}
+          className="absolute right-1 z-10 h-[18px] rounded border border-sky-400/50 bg-[#141b26]/90 px-1.5 text-[10px] font-semibold leading-none text-sky-300 hover:bg-sky-400/10 focus-visible:outline focus-visible:outline-1 focus-visible:outline-sky-400">Auto</button>}
         {/* A smaller chart's header has no room: its badge, only when it holds a symbol of its own, sits on the canvas. */}
         {!pending && !main && follows === false && <EarningsBadge earnings={earnings} compact className="absolute left-2 top-1 z-10" />}
-        {cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
+        {cardZone && card && compact && !card.pinned ? <div role="tooltip" aria-label="Level" className="pointer-events-none absolute left-2 z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-0.5 font-mono text-[10px] text-slate-200 shadow-lg"
+          style={card.above ? { top: Math.max(2, Math.round(card.y) - 26) } : { top: Math.round(card.y) + 8 }}>
+          {chartLabel(cardZone)} {cardZone.low === cardZone.high ? price(cardZone.low) : `${price(cardZone.low)}–${price(cardZone.high)}`}<span className="text-slate-500"> · click for more</span></div>
+        : cardZone && autoLevels && card && <LevelCard zone={cardZone} auto={autoLevels} interaction={levelEvents?.[cardZone.id]} interval={interval} pinned={card.pinned}
           // Never past the chart's edge: a long card (an option strike's numbers) scrolls once kept open.
           style={card.above ? { bottom: `calc(100% - ${Math.round(card.y) - 12}px)`, maxHeight: Math.max(80, Math.round(card.y) - 20) }
             : { top: Math.round(card.y) + 12, maxHeight: `max(80px, calc(100% - ${Math.round(card.y) + 20}px))` }} onClose={() => setCard(null)} />}
         {fillTip && !pending && <div role="tooltip" aria-label="Fill summary" className="pointer-events-none absolute z-10 max-w-[calc(100%-1rem)] truncate rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 text-[11px] text-slate-200 shadow-lg"
           style={{ left: Math.max(4, Math.min(fillTip.x + 10, fillTip.width - 240)), top: Math.max(4, fillTip.y - 30) }}>
           {fillTip.label} · {etTime(fillTip.time, true)} {intradayInterval(interval) ? `${etTime(fillTip.time)} ET candle` : ""}{onFill ? " · click for the trade" : ""}</div>}
+        {newsOpen && !pending && <div role={newsOpen.pinned ? "dialog" : "tooltip"} aria-label="News headlines" data-news-tip={newsOpen.mark.time}
+          className={`absolute z-10 w-64 max-w-[calc(100%-1rem)] space-y-1 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1.5 text-[11px] text-slate-200 shadow-lg ${newsOpen.pinned ? "" : "pointer-events-none"}`}
+          style={{ left: Math.max(4, Math.min(newsOpen.x + 10, newsOpen.width - 264)), top: Math.max(4, Math.min(newsOpen.y + 14, newsOpen.height - 40 - newsTip(newsOpen.mark).lines.length * 34)) }}>
+          <p className="text-[10px] text-slate-400">{etTime(newsOpen.mark.time, true)}{intradayInterval(interval) ? ` ${etTime(newsOpen.mark.time)} ET candle` : " session"} · {newsOpen.mark.articles.length} {newsOpen.mark.articles.length === 1 ? "headline" : "headlines"}</p>
+          <ul className="space-y-1">{newsTip(newsOpen.mark).lines.map((line, index) => <li key={index} className="line-clamp-2">{line}</li>)}</ul>
+          {newsTip(newsOpen.mark).more > 0 && <p className="text-[10px] text-slate-400">+{newsTip(newsOpen.mark).more} more</p>}
+          {newsOpen.pinned ? <div className="flex gap-2 pt-1">
+            {onNews && <button onClick={() => { const ids = newsOpen.mark.articles.map((article) => article.id); setNewsOpen(null); onNews(ids); }} className="min-h-11 flex-1 rounded border border-sky-400/50 px-2 text-sky-300">Read in News</button>}
+            <button onClick={() => setNewsOpen(null)} className="min-h-11 rounded border border-slate-700 px-3 text-slate-300">Close</button></div>
+            : onNews && <p className="text-[10px] text-sky-300">Click to read in News</p>}</div>}
         {(chosenLevel || chosenDrawing) && showSelection && !pending && <SelectionBar key={`${selected}|${chosenDrawing?.text ?? ""}`} panel={id} level={chosenLevel} drawing={chosenDrawing} focusText={fresh === selected}
           onDelete={() => onDelete?.(selected!)} onDeselect={() => onSelect?.(null)} onEdit={(patch) => onEditDrawing?.(selected!, patch)} onUnlock={() => onUnlock?.(selected!)} />}
       </div>
