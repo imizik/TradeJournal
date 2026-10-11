@@ -108,7 +108,7 @@ const HOLD_SLOP = 10;
  * Room for the candles: the price scale leaves this fraction of the pane above and below the candles, and volume is a thin strip along the
  * bottom (drawn from `VOLUME_TOP` down, a little under the lowest candles, faint enough to read through) instead of a band the candles must clear.
  */
-const CANDLE_MARGINS = { top: 0.08, bottom: 0.12 };
+const CANDLE_MARGINS = { top: 0.10, bottom: 0.12 };
 const VOLUME_TOP = 0.88;
 /** A news marker's centre floats this many pixels above its candle's high: clear of the candle and of a fill arrow on it, and never part of the price scale's fit. */
 const NEWS_LIFT_PX = 26;

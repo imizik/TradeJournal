@@ -733,11 +733,11 @@ cd backend
   the interval buttons, the watchlist's up/down arrows and each chart's
   latest-candles button (which now also restores the automatic price scale)
   do the same things.
-- **Candle room and the Auto chip.** The price pane leaves 8% above and 12% below
+- **Candle room and the Auto chip.** The price pane leaves 10% above (so a level just past the highs stays in view) and 12% below
   the fitted prices (`CANDLE_MARGINS` in `PriceChart.tsx`), volume is a thin strip
   along the bottom (from 88% down, a little under the lowest candles) and the main
-  chart's RSI pane is 64 px, which gave the candles about 32% more pixel height on
-  the realistic 1440x900 picture (202 px before, 267 px after, measured by the browser test).
+  chart's RSI pane is 64 px, which gives the candles at least 20% more pixel height on
+  the realistic 1440x900 picture than before (202 px; the browser test checks it).
   Dragging a price axis (or a jump that widens it) turns the automatic fit off;
   while it is off an **Auto** button sits at the bottom of that chart's candle
   price axis (TradingView's "A"), and clicking it, or Alt+R, fits the candles
