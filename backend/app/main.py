@@ -21,7 +21,7 @@ from app.routers import symbol_info
 from app.routers import decisions as decisions_router
 from app.routers import practice as practice_router
 from app.routers import advisor_shadow as advisor_shadow_router
-from app.routers import cloud_practice, cloud_choices
+from app.routers import cloud_practice, cloud_choices, research_studio
 from app.routers import access as access_router
 from app.access_middleware import AccessMiddleware
 from app.routers.fills import (
@@ -288,6 +288,7 @@ app.include_router(
     prefix="/tradingview",
     tags=["tradingview"],
 )
+app.include_router(research_studio.router, prefix="/research-studio", tags=["research studio"])
 app.include_router(research.router, prefix="/research", tags=["research"])
 app.include_router(strategy_lab.router, prefix="/strategy-lab", tags=["strategy-lab"])
 
