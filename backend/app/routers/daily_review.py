@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import FILL_LIGHT, DailyReviewRecord, Fill, Trade, TradeFill
+from app.models import DailyReviewRecord, Trade
 
 router = APIRouter()
 
@@ -67,6 +67,15 @@ async def list_daily_reviews(session: Session = Depends(get_session)):
     ]
 
 
+@router.get("/runner")
+def plan_runner_status():
+    """The nightly plan review run (app.jobs.plan_reviews): its last status, or null before the first run."""
+    from app.ai import plan_runner
+    from app.jobs.plan_reviews import read_status
+
+    return {"configured": plan_runner.plan_configured(), "status": read_status()}
+
+
 @router.get("/{review_day}", response_model=DailyReviewResponse | None)
 async def get_daily_review(review_day: date, session: Session = Depends(get_session)):
     record = session.exec(select(DailyReviewRecord).where(DailyReviewRecord.day == review_day)).first()
@@ -85,33 +94,16 @@ async def get_daily_review(review_day: date, session: Session = Depends(get_sess
 def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get_session)):
     if not body.trade_ids:
         raise HTTPException(status_code=400, detail="At least one trade is required for a daily review")
-
-    trades = session.exec(
-        select(Trade).where(Trade.id.in_(body.trade_ids)).order_by(Trade.opened_at)
-    ).all()
-    if not trades:
-        raise HTTPException(status_code=404, detail="No matching trades found")
-
-    trade_fills = session.exec(select(TradeFill).where(TradeFill.trade_id.in_([trade.id for trade in trades]))).all()
-    fill_ids = [tf.fill_id for tf in trade_fills]
-    fills = session.exec(select(Fill).options(*FILL_LIGHT).where(Fill.id.in_(fill_ids)).order_by(Fill.executed_at)).all() if fill_ids else []
-
-    fills_by_id = {fill.id: fill for fill in fills}
-    fills_by_trade_id: dict[str, list[Fill]] = {str(trade.id): [] for trade in trades}
-    for tf in trade_fills:
-        fill = fills_by_id.get(tf.fill_id)
-        if fill:
-            fills_by_trade_id[str(tf.trade_id)].append(fill)
-
-    for trade_fills_for_trade in fills_by_trade_id.values():
-        trade_fills_for_trade.sort(key=lambda fill: fill.executed_at)
-
     review_day = _parse_day(body.day)
 
-    try:
-        from app.ai.daily_reviewer import review_trading_day
+    from app.ai import daily_review_service, plan_runner
 
-        review = review_trading_day(body.day, list(trades), fills_by_trade_id, session)
+    try:
+        record, review = daily_review_service.generate(session, review_day, body.trade_ids)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="No matching trades found") from exc
+    except plan_runner.PlanUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Daily review is not set up on the Claude plan: {exc}") from exc
     except ModuleNotFoundError as exc:
         if exc.name == "anthropic":
             raise HTTPException(
@@ -121,24 +113,6 @@ def create_daily_review(body: DailyReviewRequest, session: Session = Depends(get
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Daily review generation failed: {exc}") from exc
-
-    record = session.exec(select(DailyReviewRecord).where(DailyReviewRecord.day == review_day)).first()
-    now = datetime.utcnow()
-    if record:
-        record.review_json = json.dumps(review)
-        record.trade_count = len(trades)
-        record.updated_at = now
-    else:
-        record = DailyReviewRecord(
-            day=review_day,
-            review_json=json.dumps(review),
-            trade_count=len(trades),
-            created_at=now,
-            updated_at=now,
-        )
-    session.add(record)
-    session.commit()
-    session.refresh(record)
 
     return {
         "day": record.day.isoformat(),

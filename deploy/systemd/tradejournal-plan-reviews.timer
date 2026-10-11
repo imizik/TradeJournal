@@ -1,0 +1,12 @@
+[Unit]
+Description=Opt-in nightly daily reviews on the Claude plan at 20:00 New York
+
+[Timer]
+# After the 17:00 Sync Everything, its enrichment and the 19:20 options catch-up.
+OnCalendar=*-*-* 20:00:00 America/New_York
+RandomizedDelaySec=120
+Persistent=true
+Unit=tradejournal-plan-reviews.service
+
+[Install]
+WantedBy=timers.target

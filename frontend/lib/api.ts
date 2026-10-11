@@ -221,6 +221,25 @@ export type DailyReview = {
   };
   patterns: string[];
   next_session_rules: string[];
+  /** Prompt v2 (plan reviews): the last review's rules checked, today vs the trader's normal, what data was missing. */
+  rules_check?: RuleCheck[];
+  vs_baseline?: string[];
+  data_gaps?: string[];
+  generated_by?: string;
+};
+
+export type RuleCheck = { rule: string; set_on: string; result: "kept" | "broken" | "partly" | "not_tested"; evidence: string };
+
+/** The nightly reviews on the Claude plan (backend app/jobs/plan_reviews.py): the last run's status file. */
+export type PlanRunnerStatus = {
+  configured: boolean;
+  status: null | {
+    started_at: string; finished_at: string | null;
+    state: "running" | "ok" | "partial" | "failed" | "nothing";
+    message: string; written: { day: string; reason: string; grade: string | null }[];
+    failed: { day: string; reason: string; error: string }[]; backfill_remaining: number;
+    usage: { input_tokens: number; output_tokens: number; api_equivalent_usd: number }; model: string | null;
+  };
 };
 
 export type DailyReviewResponse = {
@@ -697,6 +716,7 @@ return {
   rebuild: () => post<{ status: string; trades_rebuilt: number; anomalies: string[] }>("/rebuild"),
   reviewTrade: (id: string) => post<Trade>(`/trades/${id}/review`),
   dailyReviews: () => get<DailyReviewIndexItem[]>("/daily-review"),
+  planRunner: () => get<PlanRunnerStatus>("/daily-review/runner"),
   dailyReview: (day: string) => get<DailyReviewResponse | null>(`/daily-review/${day}`),
   reviewDay: (body: { day: string; trade_ids: string[] }) =>
     post<DailyReviewResponse>("/daily-review", body),

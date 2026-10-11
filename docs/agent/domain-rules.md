@@ -337,7 +337,13 @@ is verifiable rather than hopeful.
   `GET /market-context/coverage`
   reports these rows as `*_incomplete`.
 - Daily review is intentionally **not** part of "Sync Everything" or the Gmail
-  push pipeline. It runs only on explicit request. Do not re-add it.
+  push pipeline. Do not re-add it. It runs on request (the Daily Review button)
+  and from its own opt-in nightly timer (`app/jobs/plan_reviews.py`), both on
+  the Claude plan through `app/ai/plan_runner.py`: never API credits, and
+  never a fallback to them. `AI_REVIEW_BACKEND=api` is the only way back to
+  the Anthropic API. The nightly run reviews at most `TJ_PLAN_REVIEW_MAX` days
+  (latest, then stale, then older days newest first) and stops on a sign-in
+  other than the plan token or two failed calls in a row.
 - `webull_listener` is a persistent listener, not a finite sync job.
 
 ## Strategy Lab

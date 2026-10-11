@@ -87,6 +87,12 @@ migrations require an explicit server setting and a fresh verified backup.
 Backup retention, prerequisites
 and the off-host boundary are documented in `deploy/README.md`.
 
+The nightly daily reviews run on the server itself
+(`tradejournal-plan-reviews.timer`, opt-in): Claude Code, pinned in the release
+as `bin/claude`, asks Claude on the owner's Claude plan token, never API
+credits, and the reviews are saved to the production database
+(`app/jobs/plan_reviews.py`, `deploy/README.md`).
+
 Two scheduled processes run off the server, neither touching a database (the
 first is started by launchd on the development Mac):
 

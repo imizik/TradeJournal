@@ -1,16 +1,23 @@
 import json
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from statistics import median
 
 from dotenv import load_dotenv
 from sqlmodel import Session, select
 
-from app.models import Account, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
+from app.models import Account, DailyReviewRecord, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 load_dotenv(BACKEND_DIR / ".env")
 load_dotenv(BACKEND_DIR.parent / ".env")
+
+
+REVIEW_FIELDS = ("summary", "day_grade", "key_takeaways", "best_trade", "worst_trade", "patterns", "next_session_rules")
+PROMPT_VERSION = 2
+BASELINE_DAYS = 20
+PRIOR_REVIEWS = 3
 
 
 def review_trading_day(
@@ -18,44 +25,97 @@ def review_trading_day(
     trades: list[Trade],
     fills_by_trade_id: dict[str, list[Fill]],
     session: Session,
+    backend: str | None = None,
 ) -> dict:
-    context = _assemble_daily_context(day, trades, fills_by_trade_id, session)
+    """One day's review, from Claude on the owner's plan (app.ai.plan_runner).
 
+    The Anthropic API is used only when ``AI_REVIEW_BACKEND=api`` is set
+    explicitly and the caller does not pin ``backend="plan"`` (the nightly run
+    always does); nothing falls back to it.
+    """
+    context = _assemble_daily_context(day, trades, fills_by_trade_id, session)
+    context["history"] = _history_context(date.fromisoformat(day), session)
+    message = f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}"
+    chosen = backend or os.environ.get("AI_REVIEW_BACKEND", "plan").strip().lower()
+    if chosen == "api":
+        review = _review_with_api(message)
+        review["generated_by"] = f"{os.environ.get('ANTHROPIC_MODEL', 'claude-opus-4-7')} through the Anthropic API"
+    else:
+        from app.ai import plan_runner
+
+        answer = plan_runner.ask(_SYSTEM_PROMPT, message, REVIEW_SCHEMA)
+        review = answer.data
+        review["generated_by"] = answer.author
+        review["usage"] = {"input_tokens": answer.input_tokens, "output_tokens": answer.output_tokens,
+                           "api_equivalent_usd": answer.api_equivalent_usd, "seconds": answer.seconds}
+    missing = [field for field in REVIEW_FIELDS if field not in review]
+    if missing:
+        raise ValueError(f"AI response missing required fields: {', '.join(missing)}")
+    review["prompt_version"] = PROMPT_VERSION
+    return review
+
+
+def _review_with_api(message: str) -> dict:
     from anthropic import Anthropic
 
-    client = Anthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY"),
-    )
-    message = client.messages.create(
+    client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+    response = client.messages.create(
         model=os.environ.get("ANTHROPIC_MODEL", "claude-opus-4-7"),
-        max_tokens=1600,
-        system=[
-            {
-                "type": "text",
-                "text": _SYSTEM_PROMPT,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ],
-        messages=[
-            {
-                "role": "user",
-                "content": f"Review this trading day:\n\n{json.dumps(context, indent=2, default=str)}",
-            }
-        ],
+        max_tokens=2400,
+        system=[{"type": "text", "text": _SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        messages=[{"role": "user", "content": f"{message}\n\nAnswer with one JSON object matching this schema:\n{json.dumps(REVIEW_SCHEMA)}"}],
     )
-
+    response_text = ""
     try:
-        response_text = message.content[0].text
-        review = _parse_json_response(response_text)
+        response_text = response.content[0].text
+        return _parse_json_response(response_text)
     except (json.JSONDecodeError, IndexError, AttributeError) as exc:
-        snippet = response_text[:300] if "response_text" in locals() else "<no text>"
-        raise ValueError(f"Failed to parse AI response as JSON: {exc}. Response starts: {snippet!r}") from exc
+        raise ValueError(f"Failed to parse AI response as JSON: {exc}. Response starts: {response_text[:300]!r}") from exc
 
-    required = {"summary", "day_grade", "key_takeaways", "best_trade", "worst_trade", "patterns", "next_session_rules"}
-    if not required.issubset(review.keys()):
-        raise ValueError(f"AI response missing required fields. Got: {review.keys()}")
 
-    return review
+def _history_context(review_day: date, session: Session) -> dict:
+    """What the coach needs to judge the day against: the rules it set before and the trader's normal."""
+    prior = session.exec(
+        select(DailyReviewRecord).where(DailyReviewRecord.day < review_day).order_by(DailyReviewRecord.day.desc()).limit(PRIOR_REVIEWS)
+    ).all()
+    prior_reviews = []
+    for record in prior:
+        try:
+            saved = json.loads(record.review_json)
+        except ValueError:
+            continue
+        prior_reviews.append({"day": record.day.isoformat(), "days_before": (review_day - record.day).days,
+                              "day_grade": saved.get("day_grade"), "next_session_rules": saved.get("next_session_rules") or []})
+
+    # The trader's normal: the last BASELINE_DAYS days with trades before this one.
+    window_start = review_day - timedelta(days=BASELINE_DAYS * 3)
+    earlier = session.exec(
+        select(Trade).where(Trade.opened_at >= datetime.combine(window_start, datetime.min.time()),
+                            Trade.opened_at < datetime.combine(review_day, datetime.min.time()))
+    ).all()
+    days = sorted({trade.opened_at.date() for trade in earlier}, reverse=True)[:BASELINE_DAYS]
+    in_window = [trade for trade in earlier if trade.opened_at.date() in set(days)]
+    closed = [trade for trade in in_window if trade.status in {"closed", "expired"} and trade.realized_pnl is not None]
+    wins = [float(trade.realized_pnl) for trade in closed if trade.realized_pnl > 0]
+    losses = [float(trade.realized_pnl) for trade in closed if trade.realized_pnl < 0]
+    premiums = [float(trade.total_premium_paid) for trade in in_window if trade.total_premium_paid]
+    holds = [trade.hold_duration_mins for trade in closed if trade.hold_duration_mins is not None]
+    by_day: dict[date, float] = {}
+    for trade in closed:
+        by_day[trade.opened_at.date()] = by_day.get(trade.opened_at.date(), 0.0) + float(trade.realized_pnl)
+    baseline = {
+        "trading_days": len(days),
+        "first_day": days[-1].isoformat() if days else None,
+        "trades_per_day": round(len(in_window) / len(days), 1) if days else None,
+        "median_premium_per_trade": round(median(premiums), 2) if premiums else None,
+        "win_rate": round(len(wins) / len(closed), 3) if closed else None,
+        "avg_win": round(sum(wins) / len(wins), 2) if wins else None,
+        "avg_loss": round(sum(losses) / len(losses), 2) if losses else None,
+        "median_hold_mins": median(holds) if holds else None,
+        "avg_day_pnl": round(sum(by_day.values()) / len(by_day), 2) if by_day else None,
+        "worst_day_pnl": round(min(by_day.values()), 2) if by_day else None,
+    } if days else None
+    return {"prior_reviews": prior_reviews, "baseline": baseline}
 
 
 def _assemble_daily_context(
@@ -298,10 +358,78 @@ def _parse_json_response(text: str) -> dict:
         return json.loads(stripped[start : end + 1])
 
 
-_SYSTEM_PROMPT = """You are an expert trading coach reviewing one trading day from a local trade journal.
+_TRADE_PICK = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["trade_id", "ticker", "reason"],
+    "properties": {"trade_id": {"type": ["string", "null"]}, "ticker": {"type": ["string", "null"]}, "reason": {"type": "string"}},
+}
+REVIEW_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [*REVIEW_FIELDS, "rules_check", "vs_baseline", "data_gaps"],
+    "properties": {
+        "summary": {"type": "string"},
+        "day_grade": {"type": "string"},
+        "key_takeaways": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+        "best_trade": _TRADE_PICK,
+        "worst_trade": _TRADE_PICK,
+        "patterns": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+        "next_session_rules": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+        "rules_check": {"type": "array", "items": {
+            "type": "object", "additionalProperties": False, "required": ["rule", "set_on", "result", "evidence"],
+            "properties": {"rule": {"type": "string"}, "set_on": {"type": "string"},
+                           "result": {"enum": ["kept", "broken", "partly", "not_tested"]}, "evidence": {"type": "string"}}}},
+        "vs_baseline": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+        "data_gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 4},
+    },
+}
 
-You will receive JSON with summary_stats and a list of stock/option trades. A trade is included when it opened or
-closed on the review day. Use activity_today/opened_today/closed_today to separate entry decisions from exit decisions.
+_SYSTEM_PROMPT = """You are the trading coach for one retail trader who mostly day-trades and scalps US equity options,
+reviewing one day from their own journal. Your job is to make tomorrow better, not to narrate today.
+
+You receive JSON: summary_stats, trades (each with fills, enrichment and path_metrics) and history. A trade is included
+when it opened or closed on the review day; use activity_today / opened_today / closed_today to separate entry decisions
+from exit decisions.
+
+## How to judge
+
+- Grade the process, not the P&L. A rule-following loss can be a B; a lucky, oversized, chased winner is not an A.
+  day_grade is "<letter A-F>: <one-line reason about decisions>". Mention the P&L in the summary, not as the grade.
+- Pick best_trade and worst_trade by decision quality (entry, size, exit), not by dollars. Use null ids only when the day
+  has no trades of that kind.
+- Separate "never worked" from "worked, then given back": a small loss after a large option_peak_unrealized_pnl is an
+  exit problem; a trade that went against them immediately is an entry problem.
+- Judge size and frequency against history.baseline (the trader's own last trading days): more trades than usual,
+  premium well above their median, or a loss larger than their average loss are coaching points. Put the clear
+  differences in vs_baseline as short sentences with both numbers ("6 trades vs usual 3.5"). Empty when nothing stands out
+  or there is no baseline.
+- Check the rules from the most recent entry in history.prior_reviews against today, one rules_check item per rule,
+  with set_on as that review's day: "kept", "broken", "partly", or "not_tested" when today gave no chance to test it.
+  evidence names the trade(s) and the facts. Empty when there are no prior rules, or when that review's days_before is
+  more than 4 (its rules were not the ones in force for this day).
+- Every takeaway and pattern must point at evidence in the JSON: ticker and time, or the field and value. Never invent
+  prices, levels, news or data that is not in the JSON. Fields are nullable; when missing data limits a judgement, say
+  so in data_gaps (e.g. "No path metrics for 2 of 4 trades, so exit quality is unknown") instead of guessing.
+- One-off observations are takeaways; patterns need two or more trades (today) or a repeat of a broken prior rule.
+
+## next_session_rules
+
+At most three. Each must be specific and checkable from the journal tomorrow, e.g. "No call entries when
+entry_day_range_used_pct > 80%" or "Max 2 contracts until 2 green trades". Prefer keeping or tightening a prior rule
+that was broken over inventing a new one. No generic advice ("stay disciplined", "trust your plan").
+
+## Style
+
+Plain, direct, short sentences. Write for the trader, second person. No hedging boilerplate, no motivational language,
+no recommendation to buy or sell any security.
+
+## history
+
+- prior_reviews: up to three earlier saved reviews, newest first: their day, days_before (calendar days before this
+  one), grade and next_session_rules.
+- baseline: the trader's last trading days before this one (trading_days, trades_per_day, median_premium_per_trade,
+  win_rate, avg_win, avg_loss, median_hold_mins, avg_day_pnl, worst_day_pnl). Null when there is no earlier trading.
 
 ## Fill enrichment data
 
@@ -354,30 +482,9 @@ The summary_stats object includes aggregated flag counts across all entry fills 
 Cross-reference these with P&L outcomes. For example: if chase_entry_count is high and the day was a net loser,
 that is a key coaching point. If trend_aligned_count is high and winners outperformed, note the confirmation.
 
-## Instructions
+## Answer
 
-Return only valid JSON with this exact shape. Do not wrap it in markdown. Do not include any text before or after the JSON:
-
-{
-  "summary": "<2-4 sentence direct assessment of the day>",
-  "day_grade": "<A, B, C, D, or F with a short reason>",
-  "key_takeaways": ["<takeaway>", "<takeaway>", "<takeaway>"],
-  "best_trade": {
-    "trade_id": "<id or null>",
-    "ticker": "<ticker or null>",
-    "reason": "<why this was strongest>"
-  },
-  "worst_trade": {
-    "trade_id": "<id or null>",
-    "ticker": "<ticker or null>",
-    "reason": "<why this was weakest>"
-  },
-  "patterns": ["<behavioral or execution pattern observed across multiple trades>", "<pattern>"],
-  "next_session_rules": ["<specific, actionable rule for next session>", "<rule>", "<rule>"]
-}
-
-Focus on execution quality, risk sizing, repeated behavioral patterns, timing, and whether trades were held or exited well.
-When behavioral flags are present, explicitly call out patterns — e.g. repeated chase entries, late moves, or entries near
-resistance. Be specific and concise. Do not invent market data that is not in the JSON.
-When path_metrics are present, account for peak open P&L, giveback, and exit efficiency.
+Answer in the given JSON schema only: summary (2-4 sentences, include the day's P&L and the one thing that mattered most),
+day_grade, key_takeaways (up to 3), best_trade, worst_trade, patterns (up to 4), next_session_rules (up to 3),
+rules_check, vs_baseline, data_gaps.
 """

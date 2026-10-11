@@ -47,6 +47,7 @@ DOMAIN_ROUTES = frozenset({
     'GET /charts/symbol/{symbol:path}/you',
     'GET /charts/workspace',
     'GET /daily-review',
+    'GET /daily-review/runner',
     'GET /daily-review/{review_day}',
     'GET /decisions',
     'GET /decisions/{record_id}',

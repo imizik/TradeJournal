@@ -2,7 +2,7 @@ import PracticeRoutine from "@/components/PracticeRoutine";
 import PracticeRunLinks from "@/components/PracticeRunLinks";
 import { requireAccess } from "@/lib/accessServer";
 import { api } from "@/lib/serverApi";
-import type { DailyReviewIndexItem } from "@/lib/api";
+import type { DailyReviewIndexItem, PlanRunnerStatus } from "@/lib/api";
 import { money } from "@/lib/format";
 
 function formatDate(value: string) {
@@ -26,7 +26,8 @@ function monthLabel(value: string) {
 export default async function DailyReviewPage() {
   const access = await requireAccess();
   if (!access.owner && !access.grants.journal_read) return <PracticeRoutine />;
-  const [days, practice] = await Promise.all([api.dailyReviews(), api.practiceRuns()]);
+  const [days, practice, runner] = await Promise.all([api.dailyReviews(), api.practiceRuns(),
+    access.owner ? api.planRunner().catch(() => null) : Promise.resolve(null)]);
   const savedCount = days.filter((day) => day.saved && !day.source_data_stale).length;
   const groups = groupByMonth(days);
   // A trade dated on a weekend (an expiry or a late fill) still needs a cell: then every month shows Saturday and Sunday.
@@ -50,6 +51,7 @@ export default async function DailyReviewPage() {
         </a>
       </div>
 
+      {access.owner && <PlanReviewStatus runner={runner} />}
       <PracticeRunLinks runs={practice.runs} />
       <div className="grid gap-4 sm:grid-cols-3">
         <StatCard label="Trade Days" value={String(days.length)} />
@@ -71,6 +73,22 @@ export default async function DailyReviewPage() {
       )}
     </div>
   );
+}
+
+/** The nightly reviews on the Claude plan: when they last ran and what they did, or why they did not. */
+function PlanReviewStatus({ runner }: { runner: PlanRunnerStatus | null }) {
+  const status = runner?.status;
+  const when = (value: string | null | undefined) => value ? new Date(value).toLocaleString("en-US", { timeZone: "America/New_York", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) + " ET" : "";
+  const problem = !runner || !runner.configured || status?.state === "failed" || status?.state === "partial";
+  const text = !runner ? "Nightly AI reviews: status unavailable."
+    : !runner.configured ? "Nightly AI reviews are not set up on the Claude plan yet."
+    : !status ? "Nightly AI reviews: set up, no run yet (each night at 8 PM ET)."
+    : status.state === "running" ? `Nightly AI reviews: running since ${when(status.started_at)}.`
+    : [`Nightly AI reviews: last run ${when(status.finished_at ?? status.started_at)}`, status.message,
+      status.backfill_remaining ? `${status.backfill_remaining} older day(s) left to backfill` : null].filter(Boolean).join(" · ");
+  return <p role="status" aria-label="Nightly AI reviews" className={`rounded border px-3 py-2 text-xs ${problem ? "border-amber-500/50 text-amber-200" : "border-border text-muted-foreground"}`}>
+    {text}{status?.state === "failed" && status.failed[0] && <span className="block">{status.failed[0].error}</span>}
+  </p>;
 }
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
