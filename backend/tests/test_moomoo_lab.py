@@ -210,3 +210,69 @@ def test_bounded_wait_preserves_cancel_when_child_completes_and_cleans_timeout()
             await d.bounded_await(pending(), 0.001)
         assert stopped.is_set()
     asyncio.run(scenario())
+
+
+def test_service_credential_directory_is_private_and_ed25519(tmp_path, monkeypatch):
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+    directory = tmp_path / "credentials"
+    directory.mkdir(mode=0o700)
+    key = Ed25519PrivateKey.generate()
+    (directory / "appkey").write_bytes(b"invented-appkey")
+    (directory / "phase1-ed25519.pem").write_bytes(key.private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    for path in directory.iterdir():
+        path.chmod(0o600)
+    monkeypatch.setenv("TJ_MOOMOO_CREDENTIAL_DIR", str(directory))
+    appkey, loaded = lab.credentials()
+    assert appkey == "invented-appkey"
+    assert loaded.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw) == key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    # systemd's read-only runtime credentials take precedence over local paths.
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(directory))
+    monkeypatch.setenv("TJ_MOOMOO_CREDENTIAL_DIR", "/nonexistent-local-path")
+    with pytest.raises(d.DiagnosticError, match="Unexpected systemd credential"):
+        lab.credentials()
+    monkeypatch.delenv("CREDENTIALS_DIRECTORY")
+    monkeypatch.setenv("TJ_MOOMOO_CREDENTIAL_DIR", str(directory))
+    (directory / "appkey").chmod(0o644)
+    with pytest.raises(d.DiagnosticError):
+        lab.credentials()
+    monkeypatch.setenv("TJ_MOOMOO_CREDENTIAL_DIR", "relative/credentials")
+    with pytest.raises(d.DiagnosticError):
+        lab.credentials()
+
+
+def test_systemd_private_read_only_group_permissions(monkeypatch):
+    import stat
+    from types import SimpleNamespace
+    def info(mode, uid=0, gid=0, directory=False):
+        return SimpleNamespace(st_uid=uid, st_gid=gid, st_mode=(stat.S_IFDIR if directory else stat.S_IFREG) | mode)
+    lab.validate_systemd_mode(info(0o550, directory=True), directory=True)
+    lab.validate_systemd_mode(info(0o440))
+    for value in [info(0o444), info(0o460), info(0o441), info(0o440, uid=987), info(0o440, gid=987), info(0o440, directory=True)]:
+        with pytest.raises(d.DiagnosticError):
+            lab.validate_systemd_mode(value)
+    with pytest.raises(d.DiagnosticError):
+        lab.validate_systemd_mode(info(0o570, directory=True), directory=True)
+
+
+def test_systemd_acl_allows_only_root_and_service_user(monkeypatch):
+    import struct
+    monkeypatch.setattr(lab.os, "getuid", lambda: 987)
+    def acl(uid=987, permission=4, other=0):
+        entries = [(1, permission, 0xffffffff), (2, permission, uid), (4, 0, 0xffffffff), (16, permission, 0xffffffff), (32, other, 0xffffffff)]
+        return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *item) for item in entries)
+    lab.validate_systemd_acl(acl())
+    lab.validate_systemd_acl(acl(permission=5), directory=True)
+    for raw in (acl(uid=988), acl(permission=6), acl(other=4), acl() + b"extra", b"short"):
+        with pytest.raises(d.DiagnosticError):
+            lab.validate_systemd_acl(raw)
+
+
+def test_service_preflight_withholds_credential_parser_errors(monkeypatch):
+    def failed():
+        raise ValueError("DO-NOT-ECHO-KEY-MATERIAL")
+    monkeypatch.setattr(lab, "credentials", failed)
+    with pytest.raises(SystemExit, match="details withheld") as result:
+        lab.check_credentials()
+    assert "DO-NOT-ECHO" not in str(result.value)

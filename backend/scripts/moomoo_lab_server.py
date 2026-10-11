@@ -11,8 +11,11 @@ import asyncio
 from contextlib import asynccontextmanager, suppress
 import json
 import os
+from pathlib import Path
 import re
 import secrets
+import stat
+import struct
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -23,16 +26,64 @@ import uvicorn
 from scripts import moomoo_diagnostic as diagnostic
 
 SESSION_SECONDS = 30  # Below the documented five-minute refresh recommendation.
+SYSTEMD_CREDENTIAL_DIR = Path("/run/credentials/tradejournal-moomoo.service")
+
+
+def validate_systemd_mode(info, *, directory=False):
+    """systemd uses root-owned copies and a read-only service-user ACL."""
+    kind = stat.S_ISDIR if directory else stat.S_ISREG
+    expected = 0o550 if directory else 0o440
+    if not kind(info.st_mode) or info.st_uid != 0 or info.st_gid != 0 or stat.S_IMODE(info.st_mode) != expected:
+        raise diagnostic.DiagnosticError("Invalid systemd credential permissions.")
+
+
+def validate_systemd_acl(raw, *, directory=False):
+    permission = 5 if directory else 4
+    undefined = 0xffffffff
+    expected = {(1, permission, undefined), (2, permission, os.getuid()),
+                (4, 0, undefined), (16, permission, undefined), (32, 0, undefined)}
+    if len(raw) != 44 or struct.unpack("<I", raw[:4])[0] != 2 or {
+        struct.unpack("<HHI", raw[offset:offset + 8]) for offset in range(4, 44, 8)
+    } != expected:
+        raise diagnostic.DiagnosticError("Invalid systemd credential access list.")
+
+
+def read_systemd_credential(path):
+    if path.parent != SYSTEMD_CREDENTIAL_DIR:
+        raise diagnostic.DiagnosticError("Unexpected systemd credential directory.")
+    validate_systemd_mode(path.parent.lstat(), directory=True)
+    validate_systemd_acl(os.getxattr(path.parent, "system.posix_acl_access", follow_symlinks=False), directory=True)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, "rb") as file:
+        validate_systemd_mode(os.fstat(file.fileno()))
+        validate_systemd_acl(os.getxattr(file.fileno(), "system.posix_acl_access"))
+        data = file.read(16385)
+        if len(data) > 16384:
+            raise diagnostic.DiagnosticError("Credential file exceeds the size limit.")
+        return data
 
 
 def credentials():
-    appkey = diagnostic.secure_read(diagnostic.KEY_DIR / "appkey").decode("ascii").strip()
+    managed = os.environ.get("CREDENTIALS_DIRECTORY")
+    directory = Path(managed or os.environ.get("TJ_MOOMOO_CREDENTIAL_DIR", str(diagnostic.KEY_DIR)))
+    if not directory.is_absolute():
+        raise diagnostic.DiagnosticError("Absolute credential directory required.")
+    reader = read_systemd_credential if managed else diagnostic.secure_read
+    appkey = reader(directory / "appkey").decode("ascii").strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", appkey):
         raise diagnostic.DiagnosticError("Invalid credential format.")
-    key = serialization.load_pem_private_key(diagnostic.secure_read(diagnostic.KEY_DIR / "phase1-ed25519.pem"), password=None)
+    key = serialization.load_pem_private_key(reader(directory / "phase1-ed25519.pem"), password=None)
     if not isinstance(key, Ed25519PrivateKey):
         raise diagnostic.DiagnosticError("Ed25519 key required.")
     return appkey, key
+
+
+def check_credentials():
+    """systemd preflight: reject bad setup without logging key parser errors."""
+    try:
+        credentials()
+    except Exception:
+        raise SystemExit("Secured moomoo credentials unavailable; details withheld.") from None
 
 
 def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials) -> FastAPI:

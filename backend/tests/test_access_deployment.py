@@ -48,7 +48,7 @@ def test_public_unit_cannot_read_private_state_and_is_optional():
     assert "backend.env" not in text and "access-owner.env" not in text
     controller = (ROOT / "deploy/control.py").read_text()
     assert 'OPTIONAL_UNITS = ["tradejournal-assistant.service"' in controller
-    assert 'for service in ["tradejournal-assistant.service"' in controller
+    assert 'for service in [MOOMOO_SERVICE, "tradejournal-assistant.service"' in controller
 
 
 

@@ -178,6 +178,47 @@ outside the backed-up data. The first transcription downloads the model
 never leave the server. `CAPTURE_TRANSCRIBER=off` in `backend.env` keeps
 recordings and skips transcription.
 
+## Manual moomoo Level 2 connection
+
+The optional market-depth lab uses a dedicated `tradejournal-moomoo` systemd
+service. It binds only to `127.0.0.1:8196`, has no database or journal-state
+access, and makes no provider request at startup. The browser can request one
+fixed NVDA 30-second stream after the operator starts the lab. There is no
+timer or scheduled work.
+
+Provision it explicitly with the reviewed appkey and Ed25519 PEM stored as
+mode-0600 files. The helper validates the private HTTPS Tailscale origin,
+creates the dedicated service account, copies the credentials into
+root-owned mode-0600 files under `/etc/tradejournal/moomoo`, and writes the
+shared token to root-owned mode-0600 environment files. It refuses to overwrite
+existing credentials or configuration and never prints the generated token:
+
+```bash
+sudo /opt/tradejournal/current/backend/.venv/bin/python \
+  /opt/tradejournal/current/deploy/moomoo_config.py \
+  --appkey-file /secure/source/appkey \
+  --private-key-file /secure/source/phase1-ed25519.pem \
+  --web-origin https://YOUR_SERVER.YOUR_TAILNET.ts.net
+```
+
+Provisioning does not start or enable the service. For a separately approved
+manual activation, enable the bridge and restart the frontend so systemd loads
+its optional environment file:
+
+```bash
+sudo systemctl enable --now tradejournal-moomoo.service
+sudo systemctl restart tradejournal-frontend.service
+```
+
+Deployments stop the bridge before replacing the frontend or release, then
+restart it only when the unit is explicitly enabled and
+`TJ_MOOMOO_LAB_ENABLED=true` is present in
+`/etc/tradejournal/moomoo-frontend.env`. A rollback to a release without the
+unit stops, disables and removes it while preserving operator credentials and
+configuration. Disable the bridge with `sudo systemctl disable --now
+tradejournal-moomoo.service`; the frontend lab route is unavailable until the
+operator explicitly enables the bridge again.
+
 ## Backups and scheduled Robinhood import
 
 The release installs five timers:
