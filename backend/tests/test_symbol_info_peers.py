@@ -186,7 +186,8 @@ def test_every_curated_group_member_gets_its_group_and_never_itself():
 
     groups = load_groups()
     assert groups["MU"][0] == "Memory and storage" and groups["MU"][1][:2] == ["SNDK", "WDC"]
-    assert groups["ALAB"][0] == "GPUs and AI compute chips"  # in two groups, the first wins
+    assert groups["MRVL"][0] == "GPUs and AI compute chips"  # in two groups, the first wins
+    assert groups["ALAB"][0] == "AI networking and connectivity"
     for symbol, (_, peers) in groups.items():
         assert symbol not in peers and 0 < len(peers) <= MAX_PEERS and len(set(peers)) == len(peers)
 

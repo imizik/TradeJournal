@@ -1,7 +1,7 @@
 {
   "_note": "Hand-picked peer groups for the symbols the owner trades and watches, written 2026-10-11. A symbol in a group gets that group's other members as peers (its first group if it is in several); every other symbol falls back to Polygon's related companies. Order is closeness: the first peers are the best comparisons.",
   "groups": [
-    {"name": "GPUs and AI compute chips", "members": ["NVDA", "AMD", "AVGO", "MRVL", "INTC", "QCOM", "ARM", "TSM", "ALAB"]},
+    {"name": "GPUs and AI compute chips", "members": ["NVDA", "AMD", "AVGO", "MRVL", "INTC", "QCOM", "ARM", "TSM"]},
     {"name": "Memory and storage", "members": ["MU", "SNDK", "WDC", "STX", "DRAM"]},
     {"name": "AI networking and connectivity", "members": ["ALAB", "CRDO", "MRVL", "AVGO", "ANET", "COHR"]},
     {"name": "Megacap platforms", "members": ["GOOG", "MSFT", "AMZN", "META", "AAPL", "NFLX"]},
