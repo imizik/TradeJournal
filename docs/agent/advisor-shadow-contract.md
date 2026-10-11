@@ -218,3 +218,8 @@ receipt equality across a real reopen, and account/tool isolation observations
 remain separate Phase-2 acceptance gates. No credential handling, OAuth grants,
 external transmission, live capture, real journal change, order, arm, schedule or
 production activation is authorized by this implementation.
+
+
+## Dormant advisor-only MCP transport
+
+The separate [advisor MCP contract](cloud-mcp-advisor-contract.md) adds an offline-tested three-tool advisor catalog and restricted standalone Unix backend. The original owner export and legacy manual receipts remain unchanged; fresh MCP answer receipts and UI labels identify OAuth transport. This source-only slice does not activate services, connect Jo, create credentials/grants, transmit packets or change any journal boundary. Actual separate identity/consent and Jo read/save/UI/restart acceptance remain later approval gates.
