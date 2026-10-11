@@ -1,5 +1,7 @@
 import { api } from "@/lib/serverApi";
 import type { Account, Fill, PositionQuote } from "@/lib/api";
+import type { AppAccess } from "@/lib/accessTypes";
+import { Suspense } from "react";
 import { requireAccess } from "@/lib/accessServer";
 import DashboardActions from "@/components/DashboardActions";
 import { OpenPositionsTable, RecentClosedTable } from "@/components/DashboardTables";
@@ -7,6 +9,8 @@ import PerformanceOverview from "@/components/PerformanceOverview";
 import PracticeDecisions from "@/components/PracticeDecisions";
 import PracticeRoutine from "@/components/PracticeRoutine";
 import OwnerDashboard from "@/components/dashboard/OwnerDashboard";
+import DashboardLoading from "@/components/dashboard/DashboardLoading";
+import DashboardError from "@/components/dashboard/DashboardError";
 import { money, newYorkToday } from "@/lib/format";
 import {
   buildOpenPositionMeta,
@@ -22,15 +26,32 @@ function pnlColor(val: number | null | undefined) {
 
 const fmt$ = (val: number | null | undefined) => money(val, { signed: true, cents: false });
 
-// Main dashboard route.
+type DashboardParams = { account?: string; type?: string; decision?: string; practice_run?: string };
+
+// Keep loading/error disclosure local to this route: other pages' refresh
+// transitions and assistant authorization branches retain their existing flow.
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ account?: string; type?: string; decision?: string; practice_run?: string }>;
+  searchParams: Promise<DashboardParams>;
 }) {
   const access = await requireAccess();
   if (access.grants.decision_write || access.grants.market_decision_write) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /></div>;
   if (!access.owner && !access.grants.journal_read) return <div className="space-y-6"><h1 className="text-2xl font-semibold">Today</h1><PracticeRoutine /><PracticeDecisions records={(await api.decisions()).decisions} /></div>;
+  if (access.owner) return <Suspense fallback={<DashboardLoading />}><DashboardData access={access} searchParams={searchParams} /></Suspense>;
+  return <DashboardData access={access} searchParams={searchParams} />;
+}
+
+async function DashboardData({ access, searchParams }: { access: AppAccess; searchParams: Promise<DashboardParams> }) {
+  try {
+    return await loadDashboard(access, searchParams);
+  } catch (error) {
+    if (!access.owner) throw error;
+    return <DashboardError />;
+  }
+}
+
+async function loadDashboard(access: AppAccess, searchParams: Promise<DashboardParams>) {
   const resolvedParams = await searchParams;
   const statsParams = new URLSearchParams();
 

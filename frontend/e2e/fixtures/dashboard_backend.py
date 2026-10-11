@@ -12,13 +12,13 @@ if os.environ.get("DATABASE_URL") != f"sqlite:///{expected}":
 from fastapi import HTTPException
 from starlette.responses import JSONResponse
 from app.engine.quotes import OptionQuoteResult
-from app.main import app
+from app.main import app as core_app
 from app.routers import quotes
 
 state = "ready"
 
 
-@app.post("/__test/dashboard-state", include_in_schema=False)
+@core_app.post("/__test/dashboard-state", include_in_schema=False)
 def dashboard_state(value: str):
     global state
     if value not in {"ready", "quotes_unavailable", "quotes_error", "journal_error", "slow"}:
@@ -27,14 +27,16 @@ def dashboard_state(value: str):
     return {"state": state}
 
 
-@app.middleware("http")
-async def journal_state(request, call_next):
-    if request.url.path == "/trades":
+async def app(scope, receive, send):
+    # Forward untouched ASGI messages for every other route, including chart
+    # streams and lifespan. Fault injection must not alter their transport.
+    if scope["type"] == "http" and scope["path"] == "/trades" and scope["method"] == "GET":
         if state == "journal_error":
-            return JSONResponse({"detail": "Fixture journal unavailable"}, status_code=503)
+            await JSONResponse({"detail": "Fixture journal unavailable"}, status_code=503)(scope, receive, send)
+            return
         if state == "slow":
             await asyncio.sleep(2)
-    return await call_next(request)
+    await core_app(scope, receive, send)
 
 
 def stock_quotes(tickers):
