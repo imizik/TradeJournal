@@ -1003,11 +1003,13 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
         </div>
         {!main && timer}
         {main && <div aria-label={`${id} study values`} className="flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-0.5 whitespace-normal font-mono text-[10px]">
-          {indicators.vwap && <span style={{ color: COLORS.vwap }} title={bar?.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
+          {indicators.vwap && <span style={{ color: COLORS.vwap }} title={bar && bar.vwap == null ? vwapWhy : undefined}>VWAP {price(bar?.vwap)}</span>}
           {indicators.rsi && <span className="text-violet-300">RSI {price(bar?.rsi)}</span>}
-          {emas.length > 0 && <span tabIndex={0} aria-label="EMA values" className="group relative cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60">
+          {/* A phone shows the EMA values in the row; a desktop folds them into one item that opens on hover or focus. */}
+          {emas.map((key) => <span key={key} className="md:hidden" style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}
+          {emas.length > 0 && <span tabIndex={0} role="group" aria-label="EMA values" aria-describedby={`${id}-ema-values`} className="group relative hidden cursor-default rounded outline-none focus-visible:ring-1 focus-visible:ring-sky-400/60 md:inline">
             <span className="text-slate-300">EMA</span>{emas.map((key) => <span key={key} aria-hidden style={{ background: COLORS[key] }} className="ml-1 inline-block h-1.5 w-1.5 rounded-full align-middle" />)}
-            <span role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
+            <span id={`${id}-ema-values`} role="tooltip" data-ema-values className="absolute left-0 top-full z-30 mt-1 hidden gap-x-3 rounded border border-slate-600/60 bg-[#141b26] px-2 py-1 shadow-lg group-hover:flex group-focus:flex">
               {emas.map((key) => <span key={key} style={{ color: COLORS[key] }}>{key.toUpperCase()} {price(bar?.[key])}</span>)}</span>
           </span>}
           {rvolValue}

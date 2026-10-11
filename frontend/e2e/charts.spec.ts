@@ -408,6 +408,8 @@ test("quiet chart chrome: small-chart controls appear on hover or focus, the leg
   await ema.focus();
   await expect(tip).toContainText("EMA20");
   await ema.blur();
+  // Assistive tech hears the values: the folded item is described by its tooltip.
+  await expect(ema).toHaveAccessibleDescription(/EMA9 .*EMA20 .*EMA50/);
 
   // A daily candle has no VWAP, and the legend says why.
   await page.getByLabel("Main interval").selectOption("1D");
@@ -418,6 +420,8 @@ test("quiet chart chrome: small-chart controls appear on hover or focus, the leg
   await page.mouse.move(2, 2);
   expect(await opacity()).toBe(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  // A phone keeps the EMA values in the row rather than behind hover.
+  await expect(studies.getByText(/^EMA20 /).filter({ visible: true })).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("charts-quiet-phone.png"), animations: "disabled" });
   expect(errors).toEqual([]);
 });
