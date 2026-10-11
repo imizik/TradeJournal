@@ -1,4 +1,10 @@
-# Moomoo historical timestamp validation: blocked evidence report
+# Moomoo historical timestamp validation: original blocked report
+
+**Follow-up on 2026-10-11:** the [October 8 comparison](moomoo-timestamp-comparison.md)
+resolved the API usage-cost blocker using the official direct-channel pricing
+statement and completed eight bounded reads. This report preserves the original
+October 10 findings; its cost/data blockers are superseded, while official
+timestamp publication/finality and auction semantics remain unresolved.
 
 Observed 2026-10-10, approximately 22:59 UTC. This follow-up concerns historical
 minute labels only. **The additional-session comparison is incomplete. Current
