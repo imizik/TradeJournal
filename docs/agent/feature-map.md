@@ -393,3 +393,16 @@ and paper review. Checks are `backend/tests/test_advisor_shadow.py`,
 `backend/tests/test_advisor_shadow_cli.py`, the owner-route refusals in
 `backend/tests/test_browser_access.py` and `frontend/e2e/advisor-shadow.spec.ts`.
 See the [contract and activation boundaries](advisor-shadow-contract.md).
+
+The optional direct owner page `/advisor-review` uses
+`frontend/components/AdvisorOwnerReview.tsx` and the shared pure
+`frontend/components/AdvisorReceiptView.tsx`. Its Node-only `GET /api/advisor-owner` BFF requires an
+explicit authenticated owner profile/session before and after a fixed Unix read.
+`backend/cloud_advisor_owner.py` independently checks the exact kernel frontend
+UID and reads only one pinned existing invented request/receipt from read-only
+SQLite. Default legacy/assistant access cannot retrieve it. No journal database
+repoint, file import, write or advisor catalog/grant expansion is involved.
+Optional owner units remain excluded from the four-unit installer; checks are
+`backend/tests/test_cloud_advisor_owner.py`, `frontend/scripts/advisor-owner.test.js`,
+`frontend/e2e/advisor-owner.auth.ts` and the disposable advisor native smoke.
+See the [direct owner boundary](cloud-mcp-advisor-contract.md#direct-owner-review-in-tradejournal-dormant).

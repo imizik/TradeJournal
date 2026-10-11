@@ -1,0 +1,17 @@
+{
+  "enabled": false,
+  "peer_uid": "REQUIRES-EXACT-REVIEWED-OWNER-FRONTEND-UID",
+  "socket_uid": 0,
+  "socket_path": "/run/tradejournal-advisor-owner/owner.sock",
+  "database_path": "/var/lib/tradejournal-advisor/fixture.db",
+  "binding": {
+    "subject": "REQUIRES-SEPARATE-ADVISOR-SUBJECT",
+    "id": "advisor_00000000-0000-0000-0000-000000000001",
+    "enabled": false,
+    "binding_version": 1,
+    "assignment_id": "00000000-0000-0000-0000-000000000002",
+    "run_id": "00000000-0000-0000-0000-000000000003",
+    "packet_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "request_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  }
+}

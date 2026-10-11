@@ -31,6 +31,10 @@ PROXY = "tradejournal-advisor-ci-proxy.service"
 RESOURCE = "https://127.0.0.1:18810/advisor/mcp"
 ISSUER = "https://127.0.0.1:18811/"
 MARKER = Path("/opt/tradejournal/.advisor-ci-public-read-control")
+OWNER_ROOT = Path("/opt/tradejournal-advisor-owner")
+OWNER_CONFIG = Path("/etc/tradejournal-advisor-owner")
+OWNER_RUN = Path("/run/tradejournal-advisor-owner")
+OWNER_UNITS = ("tradejournal-advisor-owner.socket", "tradejournal-advisor-owner.service")
 
 
 def run(*args, check=True, **kwargs):
@@ -46,7 +50,9 @@ def guard():
     if (os.geteuid() != 0 or os.environ.get("GITHUB_ACTIONS") != "true"
             or os.environ.get("TJ_DISPOSABLE_RUNNER") != "1"):
         raise ValueError("Advisor native smoke only runs as root on explicitly disposable CI")
-    for path in (control.ROOT, control.CONFIG, control.STATE, control.RUN, MARKER,
+    for path in (control.ROOT, control.CONFIG, control.STATE, control.RUN, MARKER, OWNER_ROOT, OWNER_CONFIG, OWNER_RUN,
+                 *[control.UNIT_DIR / u for u in OWNER_UNITS],
+                 *[control.UNIT_DIR / (u + ".d") for u in OWNER_UNITS],
                  control.UNIT_DIR / PROXY, *[control.UNIT_DIR / u for u in control.UNITS],
                  *[control.UNIT_DIR / (u + ".d") for u in (*control.UNITS, PROXY)]):
         if path.exists() or path.is_symlink():
@@ -55,7 +61,7 @@ def guard():
         for database in ("passwd", "group"):
             if run("getent", database, account, check=False).returncode == 0:
                 raise ValueError("Refuse a pre-existing advisor native-smoke identity")
-    for unit in (*control.UNITS, PROXY):
+    for unit in (*control.UNITS, *OWNER_UNITS, PROXY):
         if run("systemctl", "cat", unit, check=False).returncode == 0:
             raise ValueError("Refuse a pre-existing loaded advisor unit")
 
@@ -325,6 +331,7 @@ print("advisor native boundary positive" if positive else "advisor native bounda
         assert rpc("save_advisor_answer", body).json()["result"]["isError"]
         with Session(engine) as db:
             assert service.owner_view(db, run_id)["advisor"]["receipt"] == receipt
+    exercise_owner(config["profiles"][0], original_export, receipt)
     for unit in control.SERVICES:
         shutil.rmtree(control.UNIT_DIR / (unit + ".d"))
     run("systemctl", "daemon-reload")
@@ -339,18 +346,116 @@ print("advisor native boundary positive" if positive else "advisor native bounda
     print("Advisor native smoke passed: disabled install, distinct UIDs, private mounts/AF_UNIX, exact TLS routes/catalog, independent OAuth, invented cited save/uncertain recovery/retry/conflict, owner equality, restart, expiry/revocation, stop BOTH socket/process pairs and receipt-preserving rollback")
 
 
+def exercise_owner(binding, request, receipt):
+    """Actual optional owner units, never the normal retained installer."""
+    import pwd
+    frontend = pwd.getpwnam("tradejournal")
+    backend = pwd.getpwnam(control.BACKEND_ACCOUNT)
+    OWNER_ROOT.mkdir(mode=0o755)
+    shutil.copytree(control.ROOT / "backend", OWNER_ROOT / "backend", symlinks=True)
+    shutil.copyfile(REPO / "backend/cloud_advisor_owner.py", OWNER_ROOT / "backend/cloud_advisor_owner.py")
+    (OWNER_ROOT / "backend/cloud_advisor_owner.py").chmod(0o644)
+    OWNER_CONFIG.mkdir(mode=0o750)
+    run("chown", "root:tj-advisor", OWNER_CONFIG)
+    config = {"enabled": True, "peer_uid": frontend.pw_uid, "socket_uid": 0,
+        "socket_path": str(OWNER_RUN / "owner.sock"), "database_path": str(control.STATE / "fixture.db"), "binding": binding}
+    write(OWNER_CONFIG / "config.json", config)
+    probe = OWNER_CONFIG / "boundary.py"
+    probe.write_text('''import errno,os,socket,sqlite3
+from pathlib import Path
+assert os.geteuid()!=0
+for family in (socket.AF_INET,socket.AF_INET6):
+    try:
+        socket.socket(family,socket.SOCK_STREAM)
+    except OSError as error:
+        assert error.errno in (errno.EPERM,errno.EACCES,errno.EAFNOSUPPORT)
+    else:
+        raise AssertionError("Owner reader created IP socket")
+for name in ("/var/lib/tradejournal-advisor/fixture.db","/etc/tradejournal-advisor-owner/config.json","/opt/tradejournal-advisor-owner/backend/cloud_advisor_owner.py"):
+    try:
+        descriptor=os.open(name,os.O_WRONLY)
+    except OSError as error:
+        assert error.errno in (errno.EPERM,errno.EACCES,errno.EROFS)
+    else:
+        os.close(descriptor)
+        raise AssertionError("Owner reader writable mount")
+assert not Path("/opt/tradejournal/current").exists()
+assert not Path("/etc/tradejournal-advisor/config.json").exists()
+connection=sqlite3.connect("file:/var/lib/tradejournal-advisor/fixture.db?mode=ro",uri=True)
+try:
+    connection.execute("DELETE FROM practice_agent_call")
+except sqlite3.OperationalError as error:
+    assert "readonly" in str(error)
+else:
+    raise AssertionError("Owner reader mutated SQLite")
+print("Owner native readonly mounts and IP denial passed")
+''')
+    probe.chmod(0o644)
+    templates = REPO / "deploy/cloud-mcp-advisor"
+    unit_hashes = {}
+    for name in OWNER_UNITS:
+        target = control.UNIT_DIR / name
+        shutil.copyfile(templates / name, target)
+        target.chmod(0o644)
+        unit_hashes[name] = staging.digest(target)
+    dropin = control.UNIT_DIR / (OWNER_UNITS[1] + ".d")
+    dropin.mkdir()
+    (dropin / "boundary.conf").write_text("[Service]\nExecStartPre=/opt/tradejournal-advisor-owner/backend/.venv/bin/python -B /etc/tradejournal-advisor-owner/boundary.py\n")
+    run("systemctl", "daemon-reload")
+    for unit in OWNER_UNITS:
+        assert run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0
+        assert run("systemctl", "is-enabled", unit, check=False).stdout.strip() == b"static"
+    before = staging.digest(control.STATE / "fixture.db")
+    run("systemctl", "start", *OWNER_UNITS)
+    pid = int(run("systemctl", "show", OWNER_UNITS[1], "--property=MainPID", "--value").stdout)
+    uid = int(Path(f"/proc/{pid}/status").read_text().split("Uid:", 1)[1].split()[0])
+    assert uid == backend.pw_uid, f"Owner expected UID={backend.pw_uid}, observed PID={pid} UID={uid}"
+    client = "import httpx,json,sys; t=httpx.HTTPTransport(uds=sys.argv[1]); c=httpx.Client(transport=t); r=c.get('http://owner/owner/advisor'); print(json.dumps({'status':r.status_code,'value':r.json()}))"
+    python = Path("/opt/tradejournal/current/backend/.venv/bin/python")
+    def read_as(account):
+        result = run("runuser", "-u", account, "--", python, "-B", "-c", client, OWNER_RUN / "owner.sock",
+            env={"PATH": control.ADMIN_PATH, "PYTHON_DOTENV_DISABLED": "1", "PYTHONDONTWRITEBYTECODE": "1"})
+        return json.loads(result.stdout)
+    recovered = read_as("tradejournal")
+    assert recovered["status"] == 200
+    assert recovered["value"]["request"] == request and recovered["value"]["receipt"] == receipt
+    assert recovered["value"]["assignment"]["enabled"] is False
+    assert read_as("root")["status"] == 403  # OS access alone is not the selected frontend identity.
+    run("systemctl", "restart", OWNER_UNITS[1])
+    assert read_as("tradejournal")["value"]["receipt"] == receipt
+    config["enabled"] = False
+    write(OWNER_CONFIG / "config.json", config)
+    assert read_as("tradejournal")["status"] == 503
+    run("systemctl", "stop", OWNER_UNITS[0])
+    run("systemctl", "stop", OWNER_UNITS[1])
+    assert not (OWNER_RUN / "owner.sock").exists()
+    assert all(run("systemctl", "is-active", "--quiet", u, check=False).returncode != 0 for u in OWNER_UNITS)
+    assert staging.digest(control.STATE / "fixture.db") == before
+    for name in OWNER_UNITS:
+        assert staging.digest(control.UNIT_DIR / name) == unit_hashes[name]
+        (control.UNIT_DIR / name).unlink()
+    shutil.rmtree(dropin)
+    run("systemctl", "daemon-reload")
+    assert staging.digest(control.STATE / "fixture.db") == before
+    print("Owner native smoke passed: exact frontend/backend UID, readonly mounts/SQLite, AF_UNIX, wrong-peer denial, exact original request/receipt recovery after advisor revocation, restart, disabled config, BOTH socket/process stop and receipt-preserving unit rollback")
+
+
 def cleanup():
+    run("systemctl", "stop", OWNER_UNITS[0], check=False)
+    run("systemctl", "stop", OWNER_UNITS[1], check=False)
     run("systemctl", "stop", *control.SOCKETS, check=False)
     run("systemctl", "stop", *control.SERVICES, PROXY, check=False)
-    if any(run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0 for unit in (*control.UNITS, PROXY)):
+    if any(run("systemctl", "is-active", "--quiet", unit, check=False).returncode == 0 for unit in (*control.UNITS, *OWNER_UNITS, PROXY)):
         raise RuntimeError("Advisor disposable cleanup left an active unit; retaining diagnostics")
     if any((control.RUN / name).exists() for name in ("mcp.sock", "backend.sock")):
         raise RuntimeError("Advisor disposable cleanup left a socket; retaining diagnostics")
-    for name in (*control.UNITS, PROXY):
+    if (OWNER_RUN / "owner.sock").exists():
+        raise RuntimeError("Owner disposable cleanup left a socket")
+    for name in (*control.UNITS, *OWNER_UNITS, PROXY):
         (control.UNIT_DIR / name).unlink(missing_ok=True)
         shutil.rmtree(control.UNIT_DIR / (name + ".d"), ignore_errors=True)
     run("systemctl", "daemon-reload", check=False)
-    for path in (control.ROOT, control.CONFIG, control.STATE, control.RUN):
+    for path in (control.ROOT, control.CONFIG, control.STATE, control.RUN, OWNER_ROOT, OWNER_CONFIG, OWNER_RUN):
         shutil.rmtree(path, ignore_errors=True)
     MARKER.unlink(missing_ok=True)
     for account in (control.BACKEND_ACCOUNT, control.ACCOUNT):
@@ -376,7 +481,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="advisor-native-ci-") as directory:
             exercise(args.archive.resolve(), Path(directory))
     except BaseException:
-        for unit in (*control.UNITS, PROXY):
+        for unit in (*control.UNITS, *OWNER_UNITS, PROXY):
             result = run("journalctl", "-u", unit, "--no-pager", "-n", "60", check=False)
             sys.stderr.write(result.stdout.decode(errors="replace"))
         raise

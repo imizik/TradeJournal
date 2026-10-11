@@ -132,6 +132,10 @@ jobs:
         working-directory: frontend
         run: npm run lint
 
+      - name: Direct owner Unix transport boundary
+        working-directory: frontend
+        run: node --test scripts/advisor-owner.test.js
+
       # Catches server-component and route errors that typecheck alone misses.
       # next/font fetches Google Fonts at build time, which needs network.
       - name: Build

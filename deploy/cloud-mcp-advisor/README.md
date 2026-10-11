@@ -215,3 +215,95 @@ The root disposable smoke uses a fixed administrative PATH with `/usr/sbin`
 and an otherwise credential-free environment. Staging scopes Git trust to its
 own exact reviewed checkout per read command, without global/wildcard Git
 configuration. These are preparation portability controls, not runtime grants.
+
+## Optional direct owner reader
+
+The direct `/advisor-review` page solves the separate-ledger owner view without
+changing the journal database or advisor catalog. The existing four-unit bundle
+installer/stager does **not** install these additional units. The currently
+installed immutable source32/artifact1d8 runtime predates this reader; it must
+not be edited or used to launch an unrecorded newer module. Normal production
+release automation ships frontend/source changes but leaves this reader dormant.
+Existing journal/demo/production units, permissions and database paths stay
+unchanged. Default private-legacy frontend access cannot read this ledger.
+
+A later concrete approval must name the reviewed new owner runtime and complete
+source/dependency/interpreter inventory, exact existing invented ledger and
+assignment/run/packet/request identity, root-owned config and two unit hashes,
+actual owner frontend UID/group and its explicitly authenticated owner entrance.
+Do not infer that UID or profile from this template. New reader files belong in
+separate `/opt/tradejournal-advisor-owner/backend` and
+`/etc/tradejournal-advisor-owner`; refuse any pre-existing destination/unit/socket
+or symlink and preserve partial failure evidence instead of overwriting it.
+A separate runtime copy may use already verified matching offline wheels and
+must include its empty read-only import directories. Do not rewrite the
+existing advisor installation record or receipt ledger to accommodate it.
+The disabled `owner-config.example.json` has a deliberately invalid UID marker
+and placeholder binding; it is not a working config or grant. Reader binding
+pins the same frozen request; advisor binding enablement is not required for
+owner recovery. Only the top-level owner reader enable flag authorizes reads.
+
+The new service uses the existing unprivileged `tj-advisor-backend` identity but
+an independent read-only mount namespace, exposing only its reviewed runtime,
+owner config, isolated advisor state directory and inherited owner socket. All
+four mounts are read-only; there is no writable database directory, journal
+mount, IP family, OAuth/grant/key dependency or startup dependency on the MCP
+services. `tradejournal-advisor-owner.socket` grants its filesystem access to
+the reviewed owner frontend group (template `tradejournal`), while the process
+checks the exact configured frontend **UID** from the connected Unix socket.
+Root or another group member is denied by that UID check. No forwarded token,
+header, browser/assistant session or claimed UID substitutes for kernel identity.
+The retained platform is Linux/systemd; macOS `getpeereid` is supported only for
+disposable local acceptance. The app transport requires a Node frontend server
+on the same host with Unix-socket support; Edge/serverless/remote deployment
+cannot activate this route without a separately reviewed architecture change.
+
+Before a later approved start, validate the complete owner runtime inventory
+before invoking its interpreter, pin configuration/unit/runtime/state hashes,
+verify the private existing migrated fixture and unchanged exported identity,
+and confirm frontend profile/session, Unix directory/mode/group and exact UID.
+Frontend configuration requires `TJ_ACCESS_PROFILE=owner`, existing valid owner
+access settings, and these additional separately approved settings:
+
+```text
+TJ_ADVISOR_OWNER_ENABLED=true
+TJ_ADVISOR_OWNER_SOCKET=/run/tradejournal-advisor-owner/owner.sock
+TJ_ADVISOR_OWNER_SOCKET_UID=0
+```
+
+Do not set them during preparation. Installation, frontend configuration change
+and start remain separate approval gates; installing disabled config/units alone
+must leave both units inactive/static with the socket absent. No public proxy
+route, grant, timer or schedule is needed for this private owner reader. Once
+explicitly approved, start only the optional pair:
+
+```bash
+sudo systemctl start tradejournal-advisor-owner.socket tradejournal-advisor-owner.service
+```
+
+Stop the socket first, then the process, verifying both inactive and
+`/run/tradejournal-advisor-owner/owner.sock` absent, even when config has drifted:
+
+```bash
+sudo systemctl stop tradejournal-advisor-owner.socket
+sudo systemctl stop tradejournal-advisor-owner.service
+```
+
+Do not enable either unit at boot. Replacement requires stopping both before
+installing a newly reviewed, inventoried runtime/config/unit set; fail on
+collision or unreviewed drift and retain the old version for rollback. Rollback
+stops both, disables the frontend owner-read flag, and removes only unchanged
+recorded optional unit files followed by daemon-reload. Preserve owner runtime,
+config, existing advisor users, frozen request and SQLite receipts; never delete
+or rewrite the ledger. The four-unit advisor controller does not stop this
+separate owner pair, so an operator shutdown of all advisor access must stop
+both optional units as well. A failed/absent reader produces an unavailable view
+rather than a journal fallback or write. Actual host installation, owner browser
+acceptance and actual Jo/OAuth transmission remain unperformed until separately
+approved.
+
+The existing disposable Ubuntu advisor smoke additionally constructs only a
+fresh optional owner runtime/config/pair, proves native read-only mounts and
+SQLite/IP denial, exact peer/worker UIDs, receipt recovery/restart, disabled
+config, stop of both optional units and receipt-preserving unit rollback. It
+cleans its own temporary resources and is not an operator installer.
