@@ -3908,6 +3908,11 @@ test("on the charts page the journal navigation is a rail that expands and is re
     expect((await page.getByRole("tooltip").boundingBox())!.x).toBeGreaterThan(48);
   }
   await page.screenshot({ path: test.info().outputPath("navigation-hover-desktop.png") });
+  // Hover does not move focus into the rail: Escape must still dismiss the label.
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  await rail.getByRole("link", { name: "Charts", exact: true }).hover();
+  await expect(page.getByRole("tooltip")).toHaveText("Charts");
   await page.mouse.move(300, 100);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
   await rail.getByRole("link", { name: "Research Studio", exact: true }).focus();

@@ -15,6 +15,12 @@ export default function NavHint({ label, children }: { label: string; children: 
       window.removeEventListener("resize", hide);
     };
   }, []);
+  useEffect(() => {
+    if (!position) return;
+    const dismiss = (event: KeyboardEvent) => { if (event.key === "Escape") setPosition(null); };
+    window.addEventListener("keydown", dismiss);
+    return () => window.removeEventListener("keydown", dismiss);
+  }, [position]);
   const show = (element: HTMLElement) => {
     const rect = element.getBoundingClientRect();
     setPosition({ left: rect.right + 8, top: rect.top + rect.height / 2 });
@@ -22,7 +28,7 @@ export default function NavHint({ label, children }: { label: string; children: 
   return (
     <div onMouseEnter={event => show(event.currentTarget)} onMouseLeave={() => setPosition(null)}
       onFocus={event => show(event.currentTarget)} onBlur={() => setPosition(null)}
-      onClick={() => setPosition(null)} onKeyDown={event => { if (event.key === "Escape") setPosition(null); }}>
+      onClick={() => setPosition(null)}>
       {children}
       {position && createPortal(
         <span role="tooltip" style={position} className="pointer-events-none fixed z-[100] -translate-y-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-3 py-1.5 text-xs font-medium text-popover-foreground shadow-md">
