@@ -791,7 +791,8 @@ export default function ChartWorkspace() {
   };
   const choosePreset = (preset: LayoutPreset) => {
     setSettings((s) => applyPreset(s, preset));
-    showDock(preset.dock ? dock.tab : null); // the dock is per device: a preset opens or closes it here only
+    // The dock is per device: a preset opens or closes it here only, and a phone's sheet is left as it is.
+    if (!narrow) showDock(preset.dock ? dock.tab : null);
     setMaximized(null); setSymbolError(""); setLayoutMenu(false);
   };
   // Named layouts (C7.2) are arrangements saved in the shared settings: they
