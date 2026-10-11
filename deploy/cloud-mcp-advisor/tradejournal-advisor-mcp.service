@@ -1,0 +1,32 @@
+[Unit]
+Description=One-packet advisor MCP adapter; no database or network access
+Requires=tradejournal-advisor-mcp.socket tradejournal-advisor-backend.socket
+After=tradejournal-advisor-mcp.socket tradejournal-advisor-backend.socket
+
+[Service]
+Type=exec
+User=tj-advisor
+Group=tj-advisor
+WorkingDirectory=/opt/tradejournal-advisor/adapter
+ExecStart=/opt/tradejournal-advisor/adapter/.venv/bin/python -B /opt/tradejournal-advisor/adapter/cloud_mcp_advisor.py --config /etc/tradejournal-advisor/config.json
+UMask=0077
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro
+BindReadOnlyPaths=/opt/tradejournal-advisor/adapter /etc/tradejournal-advisor /run/tradejournal-advisor/backend.sock
+InaccessiblePaths=-/srv -/mnt -/media
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=32
+MemoryMax=256M
+CPUQuota=50%
+TimeoutStopSec=15
+
+# No Install, EnvironmentFile, restart loop, timer or IP-serving fallback.

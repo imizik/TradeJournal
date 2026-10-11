@@ -261,7 +261,7 @@ cd backend
 - **Workspace shell (C7.3).** On a screen at least 1024px wide `/charts` fills
   the browser window like TradingView: no page padding and no page scrolling.
   The journal navigation is an icon rail (`frontend/components/Nav.tsx`; each
-  page a named link with a tooltip, sync state and the Sync drawer at the
+  page a named link with an immediate hover/keyboard-focus label, sync state and the Sync drawer at the
   bottom) that **Expand navigation** widens to the full sidebar, remembered on
   the device; other pages keep the sidebar and their padding
   (`frontend/components/AppMain.tsx`), and an actionable Gmail banner still

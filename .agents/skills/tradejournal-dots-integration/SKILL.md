@@ -22,6 +22,7 @@ Read only the contracts for the requested mode:
 | Historical MCP and sealed continuation | [Historical MCP](../../../docs/agent/cloud-mcp-historical-contract.md), [historical replay](../../../docs/agent/dot-historical-replay-contract.md) |
 | Cloud-browser identity and sign-in | [Browser contract](../../../docs/agent/cloud-browser-auth-contract.md) |
 | Invented journal fixture or separately approved journal export | [Journal contract](../../../docs/agent/cloud-mcp-journal-contract.md) |
+| One invented advisor request / cited answer | [Advisor contract](../../../docs/agent/cloud-mcp-advisor-contract.md), [disabled activation bundle](../../../deploy/cloud-mcp-advisor/README.md) |
 | Synthetic browser replay | [Sample replay](../../../docs/agent/dot-sample-replay-contract.md) |
 
 Keep independent practice, instructed operational proofs, and journal coaching

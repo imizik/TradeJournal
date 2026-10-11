@@ -1,0 +1,35 @@
+# Disabled proposal, never included in normal deployment. Replace this reserved
+# hostname with the EXACT approved resource origin; validate before publication.
+advisor.example.test {
+    @advisor_mcp {
+        path /advisor/mcp
+        method GET POST DELETE OPTIONS
+    }
+    @advisor_metadata {
+        path /.well-known/oauth-protected-resource/advisor/mcp
+        method GET HEAD
+    }
+    handle @advisor_mcp {
+        request_body {
+            max_size 64KB
+        }
+        reverse_proxy unix//run/tradejournal-advisor/mcp.sock {
+            flush_interval -1
+            transport http {
+                dial_timeout 3s
+                response_header_timeout 15s
+            }
+        }
+    }
+    handle @advisor_metadata {
+        reverse_proxy unix//run/tradejournal-advisor/mcp.sock {
+            transport http {
+                dial_timeout 3s
+                response_header_timeout 15s
+            }
+        }
+    }
+    handle {
+        respond 404
+    }
+}
