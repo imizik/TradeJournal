@@ -246,6 +246,23 @@ export type PlanRunnerStatus = {
   };
 };
 
+export type MonthlyFinding = { finding: string; evidence: string };
+export type MonthlyReview = {
+  summary: string;
+  month_grade: string;
+  edge: MonthlyFinding[];
+  leaks: MonthlyFinding[];
+  recurring_patterns: MonthlyFinding[];
+  rules_scorecard: { rule: string; kept: number; broken: number; verdict: "keep" | "tighten" | "drop" | "now_a_habit" }[];
+  last_commitment_check: { commitment: string; result: "kept" | "broken" | "partly" | "unclear"; evidence: string } | null;
+  one_commitment: string;
+  vs_last_month: string[];
+  data_gaps: string[];
+  generated_by?: string;
+};
+export type MonthlyReviewResponse = { month: string; review: MonthlyReview; generated_at: string | null; trade_count: number };
+export type MonthlyReviewIndexItem = { month: string; closed_trades: number; saved: boolean; grade: string | null; generated_at: string | null };
+
 export type DailyReviewResponse = {
   day: string;
   review: DailyReview;
@@ -722,6 +739,9 @@ return {
   dailyReviews: () => get<DailyReviewIndexItem[]>("/daily-review"),
   planRunner: () => get<PlanRunnerStatus>("/daily-review/runner"),
   dailyReview: (day: string) => get<DailyReviewResponse | null>(`/daily-review/${day}`),
+  monthlyReviews: () => get<MonthlyReviewIndexItem[]>("/monthly-review"),
+  monthlyReview: (month: string) => get<MonthlyReviewResponse | null>(`/monthly-review/${month}`),
+  reviewMonth: (month: string) => post<MonthlyReviewResponse>("/monthly-review", { month }),
   reviewDay: (body: { day: string; trade_ids: string[] }) =>
     post<DailyReviewResponse>("/daily-review", body),
   positionQuotes: (positions: { ticker: string; expiration: string; strike: number; option_type: string }[]) =>

@@ -1,6 +1,7 @@
 """The nightly daily reviews on the Claude plan (``tradejournal-plan-reviews.timer``).
 
-Finite: one run reviews the latest trading day only, asking Claude through
+Finite: one run reviews the latest trading day only (and, on its first run in
+a new month, last month as a whole: app.ai.monthly_reviewer), asking Claude through
 Claude Code on the owner's plan (``app.ai.plan_runner``), saves it as the Daily
 Review button would, and writes a status file. The latest day is reviewed when
 it has no review, when trades were added after its review (one written
@@ -29,10 +30,11 @@ import os
 from pathlib import Path
 import sys
 import time
+from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
-from app.models import DailyReviewRecord, Trade
+from app.models import DailyReviewRecord, MonthlyReviewRecord, Trade
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
@@ -92,6 +94,10 @@ def _single_run():
         yield True
 
 
+def _label(key: date | str) -> str:
+    return key if isinstance(key, str) else key.isoformat()
+
+
 def trading_days(session: Session) -> list[date]:
     """Every day a trade opened or closed, newest first: the Daily Review calendar's days."""
     days: set[date] = set()
@@ -121,40 +127,63 @@ def plan(session: Session) -> list[tuple[date, str]]:
     return [(days[0], "stale")] if stale else []
 
 
-def run(session: Session, dry_run: bool = False) -> dict:
-    from app.ai import daily_review_service, plan_runner
+def plan_month(session: Session, today: date) -> str | None:
+    """Last calendar month, when it had closed trades and no review of the whole month: none yet, one written before
+    the month ended (run from its page mid-month), or one that covered fewer trades than have closed in it since."""
+    from app.ai import monthly_reviewer
+
+    month = monthly_reviewer.previous_month(today.strftime("%Y-%m"))
+    trades = monthly_reviewer.closed_trades(session, month)
+    if not trades:
+        return None
+    record = session.exec(select(MonthlyReviewRecord).where(MonthlyReviewRecord.month == month)).first()
+    if record is None:
+        return month
+    _, end = monthly_reviewer.month_bounds(month)
+    month_end_utc = end.replace(tzinfo=ZoneInfo("America/New_York")).astimezone(timezone.utc).replace(tzinfo=None)
+    return month if record.updated_at < month_end_utc or record.trade_count < len(trades) else None
+
+
+def run(session: Session, dry_run: bool = False, today: date | None = None) -> dict:
+    from app.ai import daily_review_service, monthly_reviewer, plan_runner
 
     started = time.time()
-    picked = plan(session)
+    picked: list[tuple[date | str, str]] = list(plan(session))
+    month = plan_month(session, today or datetime.now(ZoneInfo("America/New_York")).date())
+    if month:
+        picked.append((month, "monthly"))
     status: dict = {
         "started_at": datetime.fromtimestamp(started, timezone.utc).isoformat(),
         "finished_at": None, "state": "running", "message": "",
-        "planned": [{"day": day.isoformat(), "reason": reason} for day, reason in picked],
+        "planned": [{"day": _label(key), "reason": reason} for key, reason in picked],
         "written": [], "failed": [],
         "usage": {"input_tokens": 0, "output_tokens": 0, "api_equivalent_usd": 0.0}, "model": None,
     }
     if dry_run:
-        status.update(state="dry_run", message=f"{len(picked)} day(s) would be reviewed.")
+        status.update(state="dry_run", message=f"{len(picked)} review(s) would be written.")
         return status
     if not picked:
-        status.update(state="nothing", message="The latest trading day already has a current review.")
+        status.update(state="nothing", message="The latest trading day and last month already have current reviews.")
         return status
     _write_status(status)
-    for day, reason in picked:
+    for key, reason in picked:
         try:
             # Always the plan, whatever AI_REVIEW_BACKEND says: the nightly run never bills API credits.
-            _, review = daily_review_service.generate(session, day, backend="plan")
+            if isinstance(key, str):
+                _, review = monthly_reviewer.generate(session, key, backend="plan")
+            else:
+                _, review = daily_review_service.generate(session, key, backend="plan")
         except plan_runner.PlanUnavailable as exc:
-            status["failed"].append({"day": day.isoformat(), "reason": reason, "error": str(exc)})
+            status["failed"].append({"day": _label(key), "reason": reason, "error": str(exc)})
             status.update(state="failed", message=f"The Claude plan is not available: {exc}")
             break
         except LookupError:
             continue
         except Exception as exc:  # e.g. the plan's usage limit: recorded, and the next run tries again
             session.rollback()
-            status["failed"].append({"day": day.isoformat(), "reason": reason, "error": str(exc)[:300]})
+            status["failed"].append({"day": _label(key), "reason": reason, "error": str(exc)[:300]})
             continue
-        status["written"].append({"day": day.isoformat(), "reason": reason, "grade": review.get("day_grade")})
+        status["written"].append({"day": _label(key), "reason": reason, "grade": review.get("day_grade") or review.get("month_grade")})
         usage = review.get("usage") or {}
         for key in ("input_tokens", "output_tokens"):
             status["usage"][key] += int(usage.get(key) or 0)
