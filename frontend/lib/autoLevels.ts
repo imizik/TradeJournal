@@ -240,14 +240,15 @@ export class AutoLevelLayer implements ISeriesPrimitive<Time> {
     const [series, chart] = [this.series, this.chart];
     const range = chart?.timeScale().getVisibleLogicalRange();
     if (!series || !chart || !range) return [];
-    const data = series.data() as readonly CandlestickData<Time>[];
-    const first = Math.max(0, Math.floor(range.from) - 1), last = Math.min(data.length - 1, Math.ceil(range.to) + 1);
+    // Only the visible bars, by index: series.data() would copy the whole loaded history on every paint.
+    const first = Math.max(0, Math.floor(range.from) - 1), last = Math.ceil(range.to) + 1;
     const scale = chart.timeScale();
     const boxes: { x: number; half: number; top: number; bottom: number }[] = [];
     const [a, b] = [scale.logicalToCoordinate(first as never), scale.logicalToCoordinate((first + 1) as never)];
     const half = a !== null && b !== null ? Math.max(1, Math.abs(b - a) * 0.4) : 2;
     for (let index = first; index <= last; index++) {
-      const bar = data[index];
+      const bar = series.dataByIndex(index) as CandlestickData<Time> | null;
+      if (!bar) continue;
       const [x, top, bottom] = [scale.logicalToCoordinate(index as never), series.priceToCoordinate(bar.high), series.priceToCoordinate(bar.low)];
       if (x !== null && top !== null && bottom !== null) boxes.push({ x, half, top, bottom });
     }

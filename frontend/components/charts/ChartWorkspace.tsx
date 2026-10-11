@@ -1165,7 +1165,7 @@ export default function ChartWorkspace() {
     { key: "levels", name: "My levels", noun: "levels", hidden: settings.hiddenGroups.levels, items: levelItems },
     { key: "drawings", name: "Drawings", noun: "drawings", hidden: settings.hiddenGroups.drawings, items: drawingItems },
     { key: "auto", name: "Auto levels", hidden: settings.autoLevelsHidden,
-      info: "Prior day and week, premarket, overnight, opening ranges, daily swings and round numbers; nearby ones merge into zones. The nearest three above and below price show; only the nearest one each side is shaded, the rest are lines. Names sit in clear space on the main chart; a name with no room is dropped, never the level. Hover or tap one for its card.",
+      info: "Prior day and week, premarket, overnight, opening ranges, daily swings and round numbers; nearby ones merge into zones. The nearest three above and below price show; only the nearest one each side is shaded, the rest are lines. Names sit in clear space on the main chart; a name with no room shrinks to a short mark at the right edge, and the level is always drawn. Hover or tap one for its card.",
       status: Object.values(feedFor(symbol)?.auto_levels?.missing ?? {}).filter((reason) => !reason.startsWith("Forms at")).map((reason) => `Not shown for ${symbol}: ${reason}`).join(" ") },
     { key: "options", name: "Options levels", hidden: settings.optionsLayer.hidden, filters: settings.optionsLayer,
       info: "The call and put walls (most open interest, or most traded in volume mode) and the strikes ranked by the measure, from Tradier option chains; a strike near another level joins its zone. Hover or tap one for its card. Panels holding their own symbol show its nearest expiration.",

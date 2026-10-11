@@ -114,7 +114,7 @@ export default function LayersPanel({ groups, sheet, onClose, onGroupHidden, onG
           })}
         </div>}
         {open && "filters" in group && <OptionFilters filters={group.filters} sheet={sheet} onChange={(patch) => onOptions?.(patch)} />}
-        {"info" in group && explained.includes(group.key) && <p id={`layer-info-${group.key}`} className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.info}</p>}
+        {"info" in group && <p id={`layer-info-${group.key}`} hidden={!explained.includes(group.key)} className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.info}</p>}
         {open && "status" in group && !!group.status && <p className="px-3 pb-2 pl-5 text-[10px] leading-4 text-slate-500">{group.status}</p>}
         {open && "studies" in group && <div className="pb-1">
           {group.studies.map((study) => <div key={study.key} className={`${row} pl-5 ${group.hidden ? "opacity-60" : ""}`}>
