@@ -414,3 +414,31 @@ def test_websocket_handshake_redirect_refused_before_auth(key, status):
     assert all(result["subscriptions"][kind]["status"] == "not_attempted" for kind in probe.STREAM_TYPES)
     assert "offline-test-id" not in json.dumps(result)
     assert "outside-allowlist" not in json.dumps(result)
+
+
+def test_null_book_sides_between_subscription_acks_do_not_abort_or_reuse_depth(key):
+    class InterleavedBooks(FakeSocket):
+        async def send(self, raw):
+            if json.loads(raw)["id"] == "sub-ticker":
+                await self.queue.put(json.dumps({"type": "ORDER_BOOK", "symbol": "US.NVDA", "data": {
+                    "bid_list": [{"price": 100, "volume": 5}], "ask_list": [{"price": 101, "volume": 6}]}}))
+                await self.queue.put(json.dumps({"type": "ORDER_BOOK", "symbol": "US.NVDA", "data": {
+                    "bid_list": None, "ask_list": None}}))
+            await super().send(raw)
+    socket = InterleavedBooks(envelope=True)
+    events = []
+    result = asyncio.run(probe.stream_probe("offline-test-id", key, 1, lambda *a, **k: socket, observer=events.append))
+    assert result["status"] == "completed"
+    assert all(result["subscriptions"][kind]["status"] == "success" for kind in probe.STREAM_TYPES)
+    books = [event["books"][0] for event in events if event["event"] == "book"]
+    assert len(books[0]["bids"]) == len(books[0]["asks"]) == 1
+    assert books[1]["bids"] == books[1]["asks"] == []
+    assert books[1]["source_time_ms"] is None
+    assert result["message_counts"]["ORDER_BOOK"] == 2
+    assert result["unsubscribe"]["status"] == "success" and result["closed"]
+
+
+@pytest.mark.parametrize("invalid", ["not-levels", {}, 0, False])
+def test_null_side_normalization_still_rejects_other_non_list_shapes(invalid):
+    with pytest.raises(probe.DiagnosticError):
+        probe.display_book({"type": "ORDER_BOOK", "symbol": "US.NVDA", "data": {"bid_list": invalid, "ask_list": None}}, NOW, 0)
