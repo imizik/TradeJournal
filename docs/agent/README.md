@@ -1,7 +1,8 @@
 # Agent documentation
 
 Durable, shared context for anyone — human or agent — working in this
-repository. `CLAUDE.md` is the working agreement for every coding agent and
+repository. This is an on-demand lookup, not a required reading list.
+`CLAUDE.md` is the working agreement for every coding agent and
 points here rather than restating this; `AGENTS.md` points at `CLAUDE.md`.
 
 **Current selection:** [Dots functionality first](../product-roadmap.md#selected-priorities--october-11-2026).
@@ -22,9 +23,9 @@ the next-work sequence. Check it before starting another roadmap slice.
 | [research-studio-prospective-mu.md](research-studio-prospective-mu.md) | Frozen future MU study, bounded collection, immutable runtime and separate operator activation |
 | [architecture.md](architecture.md) | You need the shape of the system: processes, data flow, persistence, cost constraints |
 | [domain-rules.md](domain-rules.md) | Before touching PnL, FIFO, fill import, enrichment, Strategy Lab, TradingView alerts, or the strategy factory |
-| [verification.md](verification.md) | Before claiming a change works — the commands, what they cover, and what they don't |
-| [pr-review.md](pr-review.md) | Native pre-PR review; risk-based model selection, direct findings, bounded fixes and required CI |
-| [codex-workflow.md](codex-workflow.md) | How Sol leads substantial Codex work, delegates bounded tasks to Luna, and checks the result; when Luna can work directly |
+| [verification.md](verification.md) | Focused-check selection and on-demand coverage reference |
+| [pr-review.md](pr-review.md) | Risk classification: ordinary work needs no reviewer; broad/consequential review and CI readiness |
+| [codex-workflow.md](codex-workflow.md) | Optional bounded delegation; direct work with the selected model is the default |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [advisor-shadow-contract.md](advisor-shadow-contract.md) | Manual invented advisor/shadow session, atomic A3 assignment, disclosure/provenance and separate cloud/forward gates |
 | [cloud-mcp-advisor-contract.md](cloud-mcp-advisor-contract.md) | Dormant separate advisor OAuth catalog, singleton Unix backend binding, immutable cited receipt and later activation gates |
