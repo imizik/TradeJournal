@@ -601,6 +601,19 @@ cd backend
   (`/charts/stream?symbols=…`). History, retries and day rollover are kept per
   symbol and interval, and crosshair and time-range links match charts by time.
   Drawing a level still arms the main chart.
+- **Quiet chrome (UX-B).** On a device that hovers and at 768px or wider, a
+  smaller chart's header shows only its symbol and interval at rest. Its
+  studies, crosshair-reset, Maximize and Focus controls (`data-quiet-controls`,
+  `app/globals.css`) fade in while the pointer is over that chart, focus is
+  inside it or one of its menus is open; they stay rendered, in the tab order
+  and with the same names. Touch devices and phone widths always show them.
+  The main chart's legend is one row at 1440px: O/H/L/C, **VWAP**, **RSI**, one
+  **EMA** item (a dot per EMA that is on; EMA 9/20/50/200 values open on hover or
+  keyboard focus), then RVol. A candle with no VWAP reads "VWAP —", whose
+  tooltip says why: daily and weekly candles have none, extended-hours candles
+  have none (the backend builds VWAP from regular-session minutes only), and a
+  forming candle with no regular-session trade yet has none. A phone wraps the
+  row.
 - A smaller chart narrower than 360px or shorter than 260px (header included)
   is **compact** (`COMPACT_PANEL` in `frontend/lib/charts.ts`): it opens on the
   latest 40 candles instead of 65, its header buttons sit closer, and its

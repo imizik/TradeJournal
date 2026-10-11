@@ -351,6 +351,81 @@ test("realistic candles render on every chart for desktop and phone pictures", a
   expect(errors).toEqual([]);
 });
 
+test("quiet chart chrome: small-chart controls appear on hover or focus, the legend is one row, EMAs fold, VWAP says why", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  const small = page.getByRole("region", { name: "MRVL 15m chart" });
+  const controls = small.locator("[data-quiet-controls]");
+  const opacity = () => controls.evaluate((el) => Number(getComputedStyle(el).opacity));
+  // At rest only the symbol and the interval show; studies, crosshair, maximize and focus are quiet but still rendered.
+  await page.mouse.move(2, 2);
+  await expect.poll(opacity).toBe(0);
+  expect(await controls.locator("button").count()).toBeGreaterThanOrEqual(3);
+  const header = small.locator("div").first();
+  expect(await header.locator("button, select").evaluateAll((els) => els.filter((el) => Number(getComputedStyle(el.closest("[data-quiet-controls]") ?? el).opacity) > 0).length)).toBeLessThanOrEqual(2);
+  await page.screenshot({ path: test.info().outputPath("charts-quiet-desktop.png"), animations: "disabled" });
+  // The main chart's header is not quiet.
+  await expect(page.getByRole("button", { name: "Plan trade" })).toBeVisible();
+  // Pointer over the chart brings them back.
+  const box = (await small.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await expect.poll(opacity).toBe(1);
+  await page.screenshot({ path: test.info().outputPath("charts-quiet-hover-desktop.png"), animations: "disabled" });
+  // Keyboard focus inside the chart brings them back too, and the quiet controls stay in the tab order.
+  await page.mouse.move(2, 2);
+  await expect.poll(opacity).toBe(0);
+  await small.locator("select").focus();
+  await page.keyboard.press("Tab");
+  await expect(small.getByRole("button", { name: /studies/ })).toBeFocused();
+  await expect.poll(opacity).toBe(1);
+  await page.keyboard.press("Tab");
+  await expect(small.getByLabel(/^Latest candles/)).toBeFocused();
+
+  // The main legend: one row, EMAs folded into one item that shows its values on hover and focus.
+  await page.mouse.move(2, 2);
+  const values = page.getByLabel("main candle values"), studies = page.getByLabel("main study values");
+  const [v, s] = [(await values.boundingBox())!, (await studies.boundingBox())!];
+  expect(Math.abs(v.y + v.height / 2 - (s.y + s.height / 2))).toBeLessThan(4);
+  expect(s.height).toBeLessThan(16);
+  expect(v.height).toBeLessThan(16);
+  await expect(studies).toContainText("VWAP");
+  await expect(studies).toContainText("RSI");
+  const ema = studies.getByLabel("EMA values");
+  const tip = ema.locator("[data-ema-values]");
+  await expect(tip).toBeHidden();
+  await ema.hover();
+  for (const name of ["EMA9", "EMA20", "EMA50"]) await expect(tip).toContainText(name);
+  await page.mouse.move(2, 2);
+  await expect(tip).toBeHidden();
+  await ema.focus();
+  await expect(tip).toContainText("EMA20");
+  await ema.blur();
+  // Assistive tech hears the values: the folded item is described by its tooltip.
+  await expect(ema).toHaveAccessibleDescription(/EMA9 .*EMA20 .*EMA50/);
+
+  // A daily candle has no VWAP, and the legend says why.
+  await page.getByLabel("Main interval").selectOption("1D");
+  await expect(studies.getByText(/^VWAP —/)).toHaveAttribute("title", /intraday study/);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  await page.mouse.move(2, 2);
+  expect(await opacity()).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  // A phone keeps the EMA values in the row rather than behind hover.
+  await expect(studies.getByText(/^EMA20 /).filter({ visible: true })).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath("charts-quiet-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
+});
+
 test("Active layout preset makes the main chart dominant and Research restores the balance", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));

@@ -1344,7 +1344,7 @@ One small PR each, in order, through the skill's UI gate:
 | ID | Change | Done when |
 |---|---|---|
 | UX-A | "Active" and "Research" layout presets; new setups default the lower row to the compact share | Done in this branch: at 1440×900 the main canvas grew from about 381 to 458 px (+20%, browser-test banner included) with all five charts visible and the dock closed; saved settings untouched. A fixed 560 px needs chrome trimming, which is outside UX-A |
-| UX-B | Small-chart header controls on hover or keyboard focus (always on phone); one-row legend, EMAs folded, "VWAP —" says why | ≤ 2 visible controls per small chart at rest, all reachable by keyboard; legend one row at 1440 px |
+| UX-B | Small-chart header controls on hover or keyboard focus (always on phone); one-row legend, EMAs folded, "VWAP —" says why | Done in this branch: a small chart shows 2 controls at rest (symbol, interval), the rest on hover or focus and always on touch and phone; the main legend is one row at 1440 px with EMA 9/20/50/200 folded into one hover/focus item |
 | UX-C | Back to live returns to the symbol held before a past trade | Opening a trade from MU and pressing Back to live shows MU |
 | UX-D | Level labels avoid candles; shaded bands only for the nearest zones; Layers explanations behind an info control | No label covers a candle in the realistic picture; levels are never hidden, only labels |
 | UX-E | Two-finger swipes lock to their dominant axis, behind a toggle | Only if the trackpad test shows zoom drift: a synthetic dx 10 / dy 1.5 swipe drifts ≤ 0.5%; pinch and wheel unchanged |
