@@ -1,0 +1,34 @@
+[Unit]
+Description=Advisor-only backend; independently validates OAuth and frozen binding
+Requires=tradejournal-advisor-backend.socket
+After=tradejournal-advisor-backend.socket
+
+[Service]
+User=tj-advisor-backend
+Group=tj-advisor
+WorkingDirectory=/opt/tradejournal-advisor/backend
+ExecStart=/opt/tradejournal-advisor/backend/.venv/bin/python /opt/tradejournal-advisor/backend/cloud_mcp_advisor_bridge.py --config /etc/tradejournal-advisor/config.json --database /var/lib/tradejournal-advisor/fixture.db
+Environment=PYTHON_DOTENV_DISABLED=1
+UMask=0077
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro
+BindReadOnlyPaths=/opt/tradejournal-advisor/backend /etc/tradejournal-advisor
+BindPaths=/var/lib/tradejournal-advisor
+ReadWritePaths=/var/lib/tradejournal-advisor
+InaccessiblePaths=-/srv -/mnt -/media
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=32
+MemoryMax=512M
+CPUQuota=50%
+TimeoutStopSec=15
+
+# Only the isolated invented SQLite directory is writable. No Install or timer.

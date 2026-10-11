@@ -8,6 +8,12 @@ retained as a pre-cutover recovery source; it is no longer the live database.
 
 ## Access and layout
 
+The [disabled advisor bundle](cloud-mcp-advisor/README.md) is a separate manual
+proposal for one invented request. Its source/templates ship in this archive,
+but this installer does not install or start advisor units, publish its proxy,
+create grants or change existing journal/practice permissions. Retained
+installation, grants, ingress and startup require separate owner approval.
+
 | Component | Address / location |
 |---|---|
 | Frontend | `127.0.0.1:3000`, reached through private Tailscale Serve |
