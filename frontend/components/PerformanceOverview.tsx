@@ -72,7 +72,7 @@ function axisDate(value: string) {
   return `${Number(month)}/${Number(day)}`;
 }
 
-function PerformanceChart({ trades }: { trades: ClosedTrade[] }) {
+function PerformanceChart({ trades, compact = false }: { trades: ClosedTrade[]; compact?: boolean }) {
   if (trades.length === 0) {
     return (
       <div className="flex h-52 items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
@@ -120,17 +120,11 @@ function PerformanceChart({ trades }: { trades: ClosedTrade[] }) {
   return (
     <svg
       aria-label="Cumulative P&L for closed trades by close date"
-      className="h-52 w-full overflow-visible"
+      className={`${compact ? "h-40" : "h-52"} w-full overflow-visible`}
       role="img"
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
     >
-      <defs>
-        <linearGradient id="realized-pnl-fill" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor="currentColor" stopOpacity="0.2" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0.015" />
-        </linearGradient>
-      </defs>
       <line x1={left} x2={width - right} y1={zeroY} y2={zeroY} className="stroke-border" strokeDasharray="4 5" />
       <text x={left - 10} y={top + 4} textAnchor="end" className="fill-muted-foreground" fontSize="11">
         {shortMoney(maxValue)}
@@ -138,8 +132,8 @@ function PerformanceChart({ trades }: { trades: ClosedTrade[] }) {
       <text x={left - 10} y={top + plotHeight} textAnchor="end" className="fill-muted-foreground" fontSize="11">
         {shortMoney(minValue)}
       </text>
-      <path d={areaPath} fill="url(#realized-pnl-fill)" className={lineColor} />
-      <path d={linePath} fill="none" className={lineColor.replace("text-", "stroke-")} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
+      <path d={areaPath} fill="currentColor" opacity="0.08" className={lineColor} />
+      <path d={linePath} fill="none" className={values.at(-1)! >= 0 ? "stroke-emerald-400" : "stroke-red-400"} strokeWidth="2.5" vectorEffect="non-scaling-stroke" />
       {points.slice(1).map((point, index) => (
         <circle key={`${point.date}-${index}`} cx={point.x} cy={point.y} r="2.5" className={lineColor.replace("text-", "fill-")}>
           <title>{`${axisDate(point.date)} · ${formatMoney(point.value)}`}</title>
@@ -172,7 +166,7 @@ function Metric({
   );
 }
 
-export default function PerformanceOverview({ trades }: { trades: Trade[] }) {
+export default function PerformanceOverview({ trades, compact = false, analyticsHref = "/analytics" }: { trades: Trade[]; compact?: boolean; analyticsHref?: string }) {
   const [period, setPeriod] = useState<Period>("ALL");
   const start = startOfPeriod(period, new Date());
   const periodTrades = trades.filter(
@@ -210,22 +204,22 @@ export default function PerformanceOverview({ trades }: { trades: Trade[] }) {
     : null;
 
   return (
-    <section aria-labelledby="performance-heading" className="space-y-3">
+    <section aria-labelledby="performance-heading" className={compact ? "min-w-0 space-y-3 rounded-lg border bg-card p-4" : "space-y-3"}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h2 id="performance-heading" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Trading Performance
           </h2>
-          <p className="mt-1 text-xs text-muted-foreground">Closed trades in the selected period</p>
+          <p className="mt-1 text-xs text-muted-foreground">{periodTrades.length} closed trades in the selected period</p>
         </div>
-        <div className="flex rounded-full border bg-card p-1" aria-label="Performance period">
+        <div className="flex flex-wrap rounded-md border bg-card p-1" aria-label="Performance period">
           {PERIODS.map((option) => (
             <button
               key={option}
               type="button"
               aria-pressed={period === option}
               onClick={() => setPeriod(option)}
-              className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`min-h-11 rounded-md px-2.5 py-1 text-xs font-medium transition-colors sm:min-h-0 ${
                 period === option
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:text-foreground"
@@ -237,31 +231,39 @@ export default function PerformanceOverview({ trades }: { trades: Trade[] }) {
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card p-4 sm:p-5">
+      <div className={compact ? "grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_230px]" : ""}>
+      <div className={compact ? "min-w-0" : "rounded-lg border bg-card p-4 sm:p-5"}>
         <div className="mb-2">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {PERIOD_LABEL[period]}{" "}Closed P&amp;L
           </p>
-          <p className={`mt-1 text-3xl font-semibold tabular-nums sm:text-4xl ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+          <p className={`mt-1 font-semibold tabular-nums ${compact ? "text-2xl" : "text-3xl sm:text-4xl"} ${totalPnl >= 0 ? "text-emerald-400" : "text-red-400"}`}>
             {formatMoney(totalPnl)}
           </p>
         </div>
-        <PerformanceChart trades={periodTrades} />
+        <PerformanceChart trades={periodTrades} compact={compact} />
         <p className="mt-2 text-xs text-muted-foreground">
           Cumulative P&amp;L from closed trades. Open positions and their partial realized P&amp;L are excluded; this is not account equity or an investment return adjusted for cash flow.
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className={compact ? "grid grid-cols-2 gap-2" : "grid gap-3 sm:grid-cols-2 lg:grid-cols-4"}>
         <Metric label="Win Rate" value={periodTrades.length ? `${((winners.length / periodTrades.length) * 100).toFixed(1)}%` : "—"} />
         <Metric label="Profit Factor" value={profitFactor} />
         <Metric label="Expectancy / Trade" value={formatMoney(expectancy)} valueClass={expectancy == null ? "text-muted-foreground" : expectancy >= 0 ? "text-emerald-400" : "text-red-400"} />
         <Metric label="Max Drawdown (Closed Trades)" value={formatMoney(maxDrawdown, false)} valueClass={maxDrawdown < 0 ? "text-red-400" : "text-foreground"} />
+      </div>
+      </div>
+      <details open={!compact} className={compact ? "border-t pt-2" : ""}>
+        <summary className="min-h-11 cursor-pointer text-xs text-muted-foreground sm:min-h-0">More performance metrics</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Metric label="Avg Winner" value={formatMoney(avgWinner)} valueClass="text-emerald-400" />
         <Metric label="Avg Loser" value={formatMoney(avgLoser)} valueClass="text-red-400" />
         <Metric label="Avg Hold" value={formatHoldDuration(avgHold)} />
         <Metric label="Closed Trades" value={String(periodTrades.length)} />
       </div>
+      </details>
+      {compact && <a href={analyticsHref} className="inline-flex min-h-11 items-center text-xs text-primary hover:underline sm:min-h-0">Explore detailed Analytics →</a>}
     </section>
   );
 }

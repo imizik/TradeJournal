@@ -9,14 +9,20 @@ import { api, GmailHealth } from "@/lib/api";
 const POLL_MS = 30000;
 
 let health: GmailHealth | null = null;
+type HealthSnapshot = { health: GmailHealth | null; state: "checking" | "ready" | "unavailable"; lastSuccessAt: string | null };
+const INITIAL_SNAPSHOT: HealthSnapshot = { health: null, state: "checking", lastSuccessAt: null };
+let snapshot: HealthSnapshot = INITIAL_SNAPSHOT;
 let timer: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<() => void>();
 
 async function refresh() {
   try {
     health = await api.gmailHealth();
+    snapshot = { health, state: "ready", lastSuccessAt: new Date().toISOString() };
   } catch {
-    return; // keep the last answer; the API may be restarting
+    // Legacy consumers retain the last health object; status-aware consumers
+    // can disclose that it is historical. All subscribers still share one poll.
+    snapshot = { ...snapshot, state: "unavailable" };
   }
   listeners.forEach((listener) => listener());
 }
@@ -46,4 +52,8 @@ function subscribe(listener: () => void) {
 
 export function useGmailHealth(): GmailHealth | null {
   return useSyncExternalStore(subscribe, () => health, () => null);
+}
+
+export function useGmailHealthSnapshot() {
+  return useSyncExternalStore(subscribe, () => snapshot, () => INITIAL_SNAPSHOT);
 }

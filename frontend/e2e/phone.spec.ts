@@ -84,7 +84,7 @@ test("main content gets the width, and key numbers are readable", async ({ page 
 
   // The seeded all-time P&L must render in full, not clipped to "+$1,0...".
   // exact: the chart's own tooltip label also contains this number.
-  await expect(page.getByText("+$1,019.00", { exact: true })).toBeVisible();
+  await expect(page.getByText("+$1,019.00", { exact: true }).first()).toBeVisible();
 });
 
 test("a trade opens to a readable detail page", async ({ page }) => {
