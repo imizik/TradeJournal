@@ -87,6 +87,21 @@ def owner_view(db, profile, assignment_id=None):
     return service.bounded(result)
 
 
+
+def recovery_bound(request, receipt):
+    # Reserve the complete future owner response, not merely today's list.
+    # A control character takes six JSON bytes, exceeding any UTF-8 codepoint;
+    # all generated UUIDs, timestamps and status labels fit these placeholders.
+    summary = {"assignment_id": "0" * 36, "question": "\x00" * 120,
+        "requested_at": "9999-12-31T23:59:59.999999+00:00", "status": "answered"}
+    service.bounded({"schema_version": KEY, "demo_only": True, "selected": "0" * 36,
+        "assignments": [summary] * MAX_QUESTIONS,
+        "record": {"request": request, "receipt": receipt, "status": "answered"}})
+    service.bounded({"schema_version": "advisor-mcp-fixture-v1", "demo_only": True,
+        "delivery_transport": "oauth-mcp", "request_origin_transport": request["transport"],
+        "request": request, "receipt": receipt,
+        "recovery": "Read the current request and compare its exact receipt before an explicit retry."})
+
 def mutate(db, profile, body, authorize):
     service.lock(db)
     try:
@@ -115,7 +130,7 @@ def mutate(db, profile, body, authorize):
                 question=body["question"], user_plan=body["user_plan"])
             request["request_sha256"] = service.digest({k: request[k] for k in REQUEST_KEYS})
             request["answer_contract"].update({k: request[k] for k in IDENTITY})
-            service.bounded(request)
+            recovery_bound(request, None)
             entry = {"operation_id": operation, "request": request, "receipt": None, "enabled": True}
             ledger["entries"].append(entry)
             ledger["selected"] = request["assignment_id"]
@@ -161,6 +176,7 @@ def save(db, profile, body, authorize):
             db.rollback()
             return entry["receipt"]
         receipt = service.answer_receipt(request, envelope, "oauth-mcp")
+        recovery_bound(request, receipt)
         # selected() reloaded JSON; update the entry in this transaction's ledger.
         target = next(e for e in ledger["entries"] if e["request"]["assignment_id"] == request["assignment_id"])
         target["receipt"] = receipt

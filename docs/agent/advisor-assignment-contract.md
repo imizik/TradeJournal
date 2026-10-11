@@ -42,7 +42,10 @@ request hashes must match it under the shared SQLite writer lock; a delayed
 answer cannot bind to a newer question. Revocation, creation and save serialize
 on that lock. Assignment expiry, config disablement and OAuth authority are
 rechecked before commit. Exact active retries recover the original receipt;
-changed answers conflict. After an uncertain owner write, reload and inspect
+changed answers conflict. Before committing a new request or answer, reserve
+the complete 64 KiB owner-response budget for all 20 future summaries (including
+JSON escaping), and check the complete MCP read response. A too-large answer
+rolls back rather than creating an unrecoverable receipt. After an uncertain owner write, reload and inspect
 saved state; never automatically resubmit. A create operation UUID makes an
 explicit identical retry idempotent. Revoked assignments cannot be reactivated.
 

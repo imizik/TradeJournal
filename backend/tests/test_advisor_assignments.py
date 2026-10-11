@@ -180,3 +180,37 @@ def test_adapter_refuses_owner_uid_and_management_limit(manager, monkeypatch):
     with Session(manager.engine) as db:
         call = db.get(PracticeAgentCall, manager.call_id)
         assert len(json.loads(call.config_json)[managed.KEY]["entries"]) == 2
+
+
+
+def test_complete_response_budget_preserves_receipts_through_full_history(manager):
+    body = {"operation_id": str(uuid.uuid4()), "question": "q" * 2000, "user_plan": "p" * 2000, "invented_only": True}
+    response = manager.manager.post(MANAGE_PATH, json=body)
+    assert response.status_code == 200
+    request = response.json()["record"]["request"]
+    payload = answer(manager, request)
+    refs = [{"opportunity_id": o["opportunity_id"], "fact_name": f["name"]}
+        for o in request["packet"]["opportunities"] for f in o["price_facts"]][:10]
+    fields = ("summary", "interpretation", "risks", "conditions", "gaps")
+    payload["answer"] = {**{k: "😀" * 2000 for k in fields}, "references": refs}
+    # Individually legal fields/receipt, but not enough room for future history.
+    assert manager.cloud.post(WRITE_PATH, json=payload).status_code == 409
+    assert manager.cloud.get(READ_PATH).json()["receipt"] is None
+    payload["answer"] = {**{k: "😀" * 1400 for k in fields}, "references": refs}
+    saved = manager.cloud.post(WRITE_PATH, json=payload)
+    assert saved.status_code == 200
+    receipt = saved.json()["receipt"]
+    assert manager.cloud.get(READ_PATH).json()["receipt"] == receipt
+    for _ in range(19):
+        # Escaped control characters cost more JSON bytes than four-byte emoji.
+        _, other = create(manager, "\x00" * 120)
+        assert manager.manager.post(MANAGE_PATH, json={"revoke": other["assignment_id"]}).status_code == 200
+    recovered = manager.manager.get(MANAGE_PATH, params={"assignment_id": request["assignment_id"]})
+    assert recovered.status_code == 200
+    assert len(recovered.content) <= 65536
+    assert len(recovered.json()["assignments"]) == 20
+    assert recovered.json()["record"]["receipt"] == receipt
+    revoked = manager.manager.post(MANAGE_PATH, json={"revoke": request["assignment_id"]})
+    assert revoked.status_code == 200
+    assert revoked.json()["record"]["receipt"] == receipt
+    assert revoked.json()["record"]["status"] == "revoked"
