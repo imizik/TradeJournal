@@ -46,6 +46,9 @@ class Variants:
     def _publish(self, name, record, run_id):
         raw = canonical_bytes(record)
         digest = hashlib.sha256(raw).hexdigest()
+        # Validate existing commitment before creating anything: retrying must
+        # not repair a deleted committed file or adopt an uncommitted file.
+        self._artifact(name)
         with self.store._root() as fd:
             self.store._immutable(fd, name, raw)
         with self.store._db(write=True) as db:

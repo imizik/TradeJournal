@@ -296,3 +296,36 @@ def test_variant_question_uuid_reuse_refuses_both_directions(session, definition
     with pytest.raises(ValueError, match="operation id reused"):
         actions["question" if first == "variant" else "variant"]()
     assert session.store.status(parent["run_id"])["exposures"] == 0
+
+
+@pytest.mark.parametrize("action", ["variant", "compare", "conclude"])
+def test_retry_cannot_recreate_deleted_committed_artifact(session, definition, action):
+    parent = completed(session, definition)
+    raw = replace(definition, predicates=(replace(definition.predicates[0], minimum=29),)).canonical()
+    variant_operation = op()
+    child = session.variant(raw, parent["run_id"], variant_operation)
+    session.store.work_once()
+    operation = op()
+    if action == "variant":
+        filename = f'parent.{child["run_id"]}.json'
+        def retry():
+            return session.variant(raw, parent["run_id"], variant_operation)
+    elif action == "compare":
+        session.compare(parent["run_id"], child["run_id"], operation)
+        filename = f"r4-operation.{operation}.json"
+        def retry():
+            return session.compare(parent["run_id"], child["run_id"], operation)
+    else:
+        session.variants.conclude([child["run_id"]], "Unclear", "Keep original history.", "30m", "percent", operation)
+        filename = f"r4-operation.{operation}.json"
+        def retry():
+            return session.variants.conclude([child["run_id"]], "Unclear", "Keep original history.", "30m", "percent", operation)
+    path = session.store.root / filename
+    exposures = [session.store.status(r["run_id"])["exposures"] for r in (parent, child)]
+    notes = {p.name: p.read_bytes() for p in session.store.root.glob("conclusion.*.json")}
+    path.unlink()
+    with pytest.raises(ValueError, match="committed R4 artifact is missing"):
+        retry()
+    assert not path.exists()
+    assert [session.store.status(r["run_id"])["exposures"] for r in (parent, child)] == exposures
+    assert {p.name: p.read_bytes() for p in session.store.root.glob("conclusion.*.json")} == notes
