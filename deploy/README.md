@@ -628,6 +628,47 @@ The frontend packaging follows Next's
 [standalone output documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)
 and [rewrite proxy documentation](https://nextjs.org/docs/app/api-reference/config/next-config-js/rewrites).
 
+### Nightly reviews on the Claude plan (opt-in)
+
+`tradejournal-plan-reviews.timer` writes the Daily Review for each trading day
+at 20:00 New York (after Sync Everything, enrichment and the options
+catch-up), with Claude Code on the owner's Claude plan, never API credits. Each
+night it reviews the latest day, then reviews marked stale, then older days that
+never had one, newest first, at most 10 (`TJ_PLAN_REVIEW_MAX`), so a backfill
+takes several nights. The Daily Review button uses the same plan. The release
+carries Claude Code at the version `deploy/claude-code/package.json` pins, as
+`bin/claude`; its state is under `/var/lib/tradejournal/claude` and the last
+run's status in `/var/lib/tradejournal/plan-reviews/status.json`, which the
+Daily Review calendar shows. A failed run, or the enabled timer being off,
+reaches the phone through the alert check.
+
+Turn it on once, after a release that contains it:
+
+1. On a computer signed in to the Claude plan, run `claude setup-token` and
+   copy the token it prints.
+2. On the VPS, create the token file (paste the token when `cat` waits, then
+   press Ctrl-D):
+
+   ```bash
+   sudo install -m 600 -o root -g root /dev/null /etc/tradejournal/claude-plan.env
+   printf 'CLAUDE_CODE_OAUTH_TOKEN=%s\n' "$(cat)" | sudo tee /etc/tradejournal/claude-plan.env > /dev/null
+   sudo systemctl restart tradejournal-api
+   ```
+
+3. Try one run by hand, then enable the schedule:
+
+   ```bash
+   sudo systemctl start tradejournal-plan-reviews.service
+   sudo journalctl -u tradejournal-plan-reviews.service -n 40
+   sudo systemctl enable --now tradejournal-plan-reviews.timer
+   ```
+
+An enabled timer survives releases; a release never enables it. To stop the
+nightly reviews, `sudo systemctl disable --now tradejournal-plan-reviews.timer`.
+The run uses the plan's usage like any Claude Code session; it stops after two
+failed calls in a row (most likely the plan's limit) and continues the next
+night. `claude-plan.env.example` lists the optional model, cap and timeout.
+
 ### A3 Practice preparation (opt-in, disabled)
 
 The package includes a dedicated `practice` worker lane and
