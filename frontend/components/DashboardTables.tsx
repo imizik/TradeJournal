@@ -161,7 +161,7 @@ function getOpenSortVal(
     case "qty_left":
       return meta.qtyLeft;
     case "avg_cost":
-      return trade.avg_entry_premium;
+      return meta.avgCostLeft;
     case "cost_left":
       return meta.capitalLeft;
     case "current_price":
@@ -213,12 +213,14 @@ export function OpenPositionsTable({
   accountMap,
   quotes = {},
   today,
+  compact = false,
 }: {
   rows: OpenPositionRow[];
   accountMap: Record<string, Account>;
   quotes?: Record<string, PositionQuote>;
   /** New York's date (YYYY-MM-DD): an option expiring on it is flagged. */
   today?: string;
+  compact?: boolean;
 }) {
   // Biggest unrealized losers first: the positions that need a decision.
   const [sort, setSort] = useState<{ key: OpenSortKey; dir: SortDir } | null>({ key: "unrealized_pnl", dir: "asc" });
@@ -255,24 +257,24 @@ export function OpenPositionsTable({
 
   return (
     <div className="overflow-x-auto rounded-lg border bg-card">
-      <table className="w-full text-sm sm:min-w-[1280px]">
+      <table className={cn("w-full text-sm tabular-nums", !compact && "sm:min-w-[1280px]")}>
         <thead className="bg-muted text-xs uppercase text-muted-foreground">
           <tr>
             <Th {...thProps("ticker")}>Ticker</Th>
             {showAccount && <Th {...thProps("account", true)}>Account</Th>}
-            <Th {...thProps("instrument_type", true)}>Instrument</Th>
+            {!compact && <Th {...thProps("instrument_type", true)}>Instrument</Th>}
             <Th {...thProps("strike", true)}>Strike</Th>
             <Th {...thProps("option_type", true)}>Type</Th>
             <Th {...thProps("expiration", true)}>Expiry</Th>
             <Th {...thProps("qty_left")}>Qty Left</Th>
-            <Th {...thProps("avg_cost", true)}>Avg Cost</Th>
-            <Th {...thProps("cost_left", true)}>Entry Value Left</Th>
+            {!compact && <Th {...thProps("avg_cost", true)}>Remaining Avg Cost</Th>}
+            {!compact && <Th {...thProps("cost_left", true)}>Entry Value Left</Th>}
             <Th {...thProps("current_price")}>Mark</Th>
-            <Th {...thProps("underlying", true)}>Stock</Th>
+            {!compact && <Th {...thProps("underlying", true)}>Stock</Th>}
             <Th {...thProps("unrealized_pnl")}>Unreal. P&amp;L</Th>
-            <Th {...thProps("realized", true)}>Realized</Th>
-            <Th {...thProps("opened_at", true)}>Opened</Th>
-            <Th {...thProps("last_activity", true)}>Last Activity</Th>
+            {!compact && <Th {...thProps("realized", true)}>Realized</Th>}
+            {!compact && <Th {...thProps("opened_at", true)}>Opened</Th>}
+            {!compact && <Th {...thProps("last_activity", true)}>Last Activity</Th>}
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -301,9 +303,9 @@ export function OpenPositionsTable({
                     <AccountBadge accountMap={accountMap} accountId={trade.account_id} />
                   </Td>
                 )}
-                <Td wide>
+                {!compact && <Td wide>
                   <span className="capitalize">{trade.instrument_type}</span>
-                </Td>
+                </Td>}
                 <Td wide>
                   {trade.strike != null ? fmtMoney(trade.strike) : <span className="text-muted-foreground/40">-</span>}
                 </Td>
@@ -319,14 +321,14 @@ export function OpenPositionsTable({
                     </span>
                   </div>
                 </Td>
-                <Td wide>{fmtMoney(trade.avg_entry_premium)}</Td>
-                <Td wide>{fmtMoney(meta.capitalLeft)}</Td>
+                {!compact && <Td wide>{fmtMoney(meta.avgCostLeft)}</Td>}
+                {!compact && <Td wide>{fmtMoney(meta.capitalLeft)}</Td>}
                 <Td>{currentMark != null ? fmtMoney(currentMark) : <span className="text-muted-foreground/40">—</span>}</Td>
-                <Td wide>
+                {!compact && <Td wide>
                   {trade.instrument_type === "option" && quote?.underlying_price != null
                     ? <span className="text-muted-foreground">{fmtMoney(quote.underlying_price)}</span>
                     : <span className="text-muted-foreground/40">—</span>}
-                </Td>
+                </Td>}
                 <Td>
                   {unrealizedPnl != null ? (
                     <span className={pnlColor(unrealizedPnl)}>{fmt$(unrealizedPnl)}</span>
@@ -334,11 +336,11 @@ export function OpenPositionsTable({
                     <span className="text-muted-foreground/40">—</span>
                   )}
                 </Td>
-                <Td wide>
+                {!compact && <Td wide>
                   <span className={pnlColor(meta.realizedSoFar)}>{fmt$(meta.realizedSoFar)}</span>
-                </Td>
-                <Td wide>{fmtDateShort(trade.opened_at)}</Td>
-                <Td wide>{fmtDateShort(meta.lastActivityAt)}</Td>
+                </Td>}
+                {!compact && <Td wide>{fmtDateShort(trade.opened_at)}</Td>}
+                {!compact && <Td wide>{fmtDateShort(meta.lastActivityAt)}</Td>}
               </tr>
             );
           })}
