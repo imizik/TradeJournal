@@ -53,16 +53,22 @@ collection; fixture tests do not prove live SIP entitlement.
 
 The timer runs at 20:30 ET, persists across reboot, and considers at most the
 last five completed scheduled sessions. A failed date is attempted at most
-once per ET date; a later date may retry it within that window. Older gaps stay
+once per ET date, including after a process interruption: an immutable intent
+is persisted before source reads or networking. A later date may retry it
+within that window. Older gaps stay
 in the study. Each request permits at most four pages of at most 2 MiB each,
 so at most 20 requests per run, ordinarily one for a new session pair.
 Both symbols must have every scheduled minute, with no duplicate, invalid or
 off-grid rows, before a session is committed. Incomplete attempts record
 quality counts without committing deficient payloads. A crash after one symbol
-was committed resumes with the same immutable bytes and fetches the missing
-symbol. No committed source file is overwritten.
+was committed resumes on a later ET date with the same immutable bytes and
+fetches the missing symbol. No committed source file is overwritten.
 The final collection attempt closes collection permanently, including when
-the provider fails. Formal review then uses committed receipts only; interrupted
+the provider fails, storage preflight fails or the process is interrupted.
+A terminal intent is persisted before fallible work; a restart closes that
+interrupted attempt without further networking. A first invocation after the
+final ET date closes with a disclosed gap rather than fetching late. Formal
+review requires collection to be closed and then uses committed receipts only; interrupted
 or uncommitted files remain retained but excluded. A reboot resumes partial
 pre-deadline captures, not indefinite fetches after the study ends.
 
@@ -112,7 +118,8 @@ sudo -u tradejournal \
   --warmup /var/lib/tradejournal/data/research-studio/cache/stocks/1Min/sip
 ```
 
-After April 9's final collection, `review.json`, `review.snapshot.gz` and the
+After April 9's final collection, `/var/lib/tradejournal/data/research-studio/prospective/records/review.json`,
+`review.snapshot.gz` and the
 two `result.<run_id>.json` files live in the records directory. The `review`
 CLI action returns the saved report; before that deadline it refuses. These
 prospective results are separate from the historical comparison UI and can be

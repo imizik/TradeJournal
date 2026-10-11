@@ -78,6 +78,7 @@ def test_collect_once_immutable_receipts_and_frozen_warmup(study):
     (study.warmup.root/"MU"/f"{NEWER_END}.json").write_text("[]")
     with pytest.raises(ValueError, match="not due"):
         study.review(stamp(PROSPECTIVE_END-timedelta(days=1)))
+    study.collect(lambda day, symbols: {s: [] for s in symbols}, stamp(PROSPECTIVE_END))
     report = study.review(stamp(PROSPECTIVE_END))
     assert len(report["runs"]) == 2
     for run in report["runs"]:
@@ -115,6 +116,7 @@ def test_clock_storage_and_runtime_fail_before_network(study, monkeypatch):
 def test_future_payload_correction_is_refused_before_review(study):
     study.collect(lambda day, symbols: {s: rows(day) for s in symbols}, stamp(PROSPECTIVE_START))
     (study.cache.root/"MU"/f"{PROSPECTIVE_START}.json").write_text("[]")
+    study.collect(lambda day, symbols: {s: [] for s in symbols}, stamp(PROSPECTIVE_END))
     with pytest.raises(ValueError, match="immutable session receipt"):
         study.review(stamp(PROSPECTIVE_END))
 
@@ -153,6 +155,74 @@ def test_final_collection_failure_closes_network_and_reviews_only_committed_byte
     report = study.review(stamp(PROSPECTIVE_END))
     assert all(run["primary_30m_percent"]["event_n"] == 0 for run in report["runs"])
     assert study._artifact("review-exposure.json")["source_start"] == "2023-06-01"
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_interrupted_fetch_reserves_attempt_before_network(study, terminal):
+    day = PROSPECTIVE_END if terminal else PROSPECTIVE_START
+    calls = []
+    def interrupted(session, symbols):
+        calls.append(session)
+        raise SystemExit("simulated process death")
+    with pytest.raises(SystemExit):
+        study.collect(interrupted, stamp(day))
+    restarted = ProspectiveStudy(study.store.root, study.cache.root, study.warmup.root)
+    assert restarted.collect(interrupted, stamp(day)) == []
+    assert len(calls) == 1
+    if terminal:
+        assert restarted.collect(interrupted, stamp(day+timedelta(days=3))) == []
+        assert all(r["primary_30m_percent"]["event_n"] == 0 for r in restarted.review(stamp(day))["runs"])
+    else:
+        with pytest.raises(SystemExit):
+            restarted.collect(interrupted, stamp(day+timedelta(days=1)))
+        assert len(calls) == 2
+
+
+def test_interrupted_partial_commit_retries_only_missing_symbol_next_date(study, monkeypatch):
+    original = study.store._immutable
+    def interrupted(fd, name, payload):
+        result = original(fd, name, payload)
+        if name == f"{PROSPECTIVE_START}.json":
+            raise SystemExit("simulated death after first source commit")
+        return result
+    monkeypatch.setattr(study.store, "_immutable", interrupted)
+    with pytest.raises(SystemExit):
+        study.collect(lambda day, symbols: {s: rows(day) for s in symbols}, stamp(PROSPECTIVE_START))
+    first = (study.cache.root/"MU"/f"{PROSPECTIVE_START}.json").read_bytes()
+    monkeypatch.undo()
+    assert study.collect(lambda *a: pytest.fail("same date must not retry"), stamp(PROSPECTIVE_START)) == []
+    calls = []
+    def fetch(day, symbols):
+        calls.append((day, symbols))
+        return {s: rows(day) for s in symbols}
+    study.collect(fetch, stamp(PROSPECTIVE_START+timedelta(days=1)))
+    assert calls[0] == (PROSPECTIVE_START, ("SPY",))
+    assert (study.cache.root/"MU"/f"{PROSPECTIVE_START}.json").read_bytes() == first
+    assert study._artifact(f"session.{PROSPECTIVE_START}.json") is not None
+
+
+@pytest.mark.parametrize("failure", ["capacity", "raw_read"])
+def test_terminal_failure_before_fetch_cannot_reopen(study, monkeypatch, failure):
+    if failure == "capacity":
+        monkeypatch.setattr(forward, "BUDGET", 1)
+    else:
+        monkeypatch.setattr(study.cache, "_read", lambda *a, **k: (_ for _ in ()).throw(ValueError("raw read failed")))
+    with pytest.raises(ValueError):
+        study.collect(lambda *a: pytest.fail("failed preflight must not fetch"), stamp(PROSPECTIVE_END))
+    monkeypatch.undo()
+    restarted = ProspectiveStudy(study.store.root, study.cache.root, study.warmup.root)
+    assert restarted.collect(lambda *a: pytest.fail("closed collection must not fetch"), stamp(PROSPECTIVE_END+timedelta(days=3))) == []
+    assert restarted._artifact("terminal-collection.json") is not None
+
+
+def test_review_requires_collection_closed_and_late_first_run_never_fetches(study):
+    with pytest.raises(ValueError, match="collection.*closed"):
+        study.review(stamp(PROSPECTIVE_END))
+    assert study._artifact("review-exposure.json") is None
+    assert study.collect(lambda *a: pytest.fail("late activation must not fetch"), stamp(PROSPECTIVE_END+timedelta(days=3))) == []
+    report = study.review(stamp(PROSPECTIVE_END+timedelta(days=3)))
+    assert study.collect(lambda *a: pytest.fail("reviewed cohort must not grow"), stamp(PROSPECTIVE_END+timedelta(days=4))) == []
+    assert study.review(stamp(PROSPECTIVE_END+timedelta(days=4))) == report
 
 
 def provider_module():

@@ -191,61 +191,81 @@ class ProspectiveStudy:
                 "missing_sessions": [str(d) for d in due if d not in completed],
                 "bytes": self._capacity(), "byte_budget": BUDGET, "review_completed": self._artifact("review.json") is not None}
 
+    def _closure(self, state, now):
+        # Bounded control receipts must remain writable when the data budget is
+        # exhausted. Failure to persist one aborts before any provider access.
+        with self.store._root() as fd:
+            self.store._immutable(fd, "terminal-collection.json", canonical_bytes({"state": state, "at": now.isoformat()}))
+
     def collect(self, fetch, now):
         now = _now(now)
         with self.store._lock("collection.lock", nonblocking=True):
             self._check_seal()
-            if self._artifact("terminal-collection.json") is not None:
+            if self._artifact("terminal-collection.json") is not None or self._artifact("review.json") is not None:
                 return []
-            self._capacity()
+            if self._artifact("terminal-intent.json") is not None:
+                self._closure("closed_interrupted", now)
+                return []
             terminal = PROSPECTIVE_END in due_sessions(now)
-            pending = [d for d in due_sessions(now)[-5:] if self._artifact(f"session.{d}.json") is None]
-            attempted = []
-            for day in pending[:5]:
-                attempt = f"attempt.{day}.{now.date()}.json"
-                if self._artifact(attempt) is not None:
-                    continue
-                payloads = {s: self.cache._read(s, day, version=3) for s in ("MU", "SPY")}
-                missing = tuple(s for s, value in payloads.items() if value is None)
-                try:
-                    if missing:
-                        rows = fetch(day, missing)
-                        if type(rows) is not dict or set(rows) != set(missing):
-                            raise ValueError("provider must return exactly the requested symbols")
-                        for symbol in missing:
-                            payloads[symbol] = canonical_bytes(rows[symbol])
-                    quality = {}
-                    for symbol, payload in payloads.items():
-                        if len(payload) > SESSION_BYTES:
-                            raise ValueError("prospective session exceeded byte bound")
-                        _, cov = _decode(payload, day)
-                        quality[symbol] = {"missing_minutes": session_close(day)-570-cov.valid_minutes.bit_count(),
-                                           "invalid": cov.invalid_rows, "duplicates": cov.duplicate_minutes, "off_grid": cov.off_grid_rows}
-                    if any(any(q.values()) for q in quality.values()):
-                        self._write(attempt, canonical_bytes({"session": str(day), "state": "incomplete", "coverage": quality}))
-                        attempted.append({"session": str(day), "state": "incomplete"})
-                        continue
-                    receipt = {"session": str(day), "collected_at": now.astimezone(timezone.utc).isoformat(), "source": {}}
-                    for symbol, payload in payloads.items():
-                        self._capacity(len(payload) if symbol in missing else 0)
-                        with self._cache_root() as fd:
-                            child = os.open(symbol, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
-                            try:
-                                self.store._immutable(child, f"{day}.json", payload)
-                            finally:
-                                os.close(child)
-                        receipt["source"][symbol] = {"sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
-                    self._write(f"session.{day}.json", canonical_bytes(receipt))
-                    self._write(attempt, canonical_bytes({"session": str(day), "state": "complete"}))
-                    attempted.append({"session": str(day), "state": "complete"})
-                except (ValueError, OSError) as exc:
-                    # No provider response, URL or credential is logged by the engine.
-                    self._write(attempt, canonical_bytes({"session": str(day), "state": "failed", "error_type": type(exc).__name__}))
-                    if terminal:
-                        self._write("terminal-collection.json", canonical_bytes({"state": "closed_with_gap", "at": now.isoformat()}))
-                    raise ValueError("prospective collection failed; inspect bounded attempt status") from None
             if terminal:
-                self._write("terminal-collection.json", canonical_bytes({"state": "closed", "at": now.isoformat()}))
+                with self.store._root() as fd:
+                    self.store._immutable(fd, "terminal-intent.json", canonical_bytes({"at": now.isoformat()}))
+                if now.date() > PROSPECTIVE_END:
+                    self._closure("closed_missed_deadline", now)
+                    return []
+            attempted = []
+            try:
+                self._capacity()
+                pending = [d for d in due_sessions(now)[-5:] if self._artifact(f"session.{d}.json") is None]
+                for day in pending[:5]:
+                    attempt = f"attempt.{day}.{now.date()}.json"
+                    intent = f"attempt-intent.{day}.{now.date()}.json"
+                    if self._artifact(intent) is not None:
+                        continue
+                    self._write(intent, canonical_bytes({"session": str(day), "at": now.isoformat()}))
+                    try:
+                        payloads = {s: self.cache._read(s, day, version=3) for s in ("MU", "SPY")}
+                        missing = tuple(s for s, value in payloads.items() if value is None)
+                        if missing:
+                            rows = fetch(day, missing)
+                            if type(rows) is not dict or set(rows) != set(missing):
+                                raise ValueError("provider must return exactly the requested symbols")
+                            for symbol in missing:
+                                payloads[symbol] = canonical_bytes(rows[symbol])
+                        quality = {}
+                        for symbol, payload in payloads.items():
+                            if len(payload) > SESSION_BYTES:
+                                raise ValueError("prospective session exceeded byte bound")
+                            _, cov = _decode(payload, day)
+                            quality[symbol] = {"missing_minutes": session_close(day)-570-cov.valid_minutes.bit_count(),
+                                               "invalid": cov.invalid_rows, "duplicates": cov.duplicate_minutes, "off_grid": cov.off_grid_rows}
+                        if any(any(q.values()) for q in quality.values()):
+                            self._write(attempt, canonical_bytes({"session": str(day), "state": "incomplete", "coverage": quality}))
+                            attempted.append({"session": str(day), "state": "incomplete"})
+                            continue
+                        receipt = {"session": str(day), "collected_at": now.astimezone(timezone.utc).isoformat(), "source": {}}
+                        for symbol, payload in payloads.items():
+                            self._capacity(len(payload) if symbol in missing else 0)
+                            with self._cache_root() as fd:
+                                child = os.open(symbol, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                                try:
+                                    self.store._immutable(child, f"{day}.json", payload)
+                                finally:
+                                    os.close(child)
+                            receipt["source"][symbol] = {"sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
+                        self._write(f"session.{day}.json", canonical_bytes(receipt))
+                        self._write(attempt, canonical_bytes({"session": str(day), "state": "complete"}))
+                        attempted.append({"session": str(day), "state": "complete"})
+                    except (ValueError, OSError) as exc:
+                        # No provider response, URL or credential is logged.
+                        self._write(attempt, canonical_bytes({"session": str(day), "state": "failed", "error_type": type(exc).__name__}))
+                        raise ValueError("prospective collection failed; inspect bounded attempt status") from None
+            except (ValueError, OSError):
+                if terminal:
+                    self._closure("closed_with_gap", now)
+                raise
+            if terminal:
+                self._closure("closed", now)
             return attempted
 
     def review(self, now):
@@ -253,6 +273,8 @@ class ProspectiveStudy:
             raise ValueError("performance review is not due before the final session closes")
         with self.store._lock("collection.lock", nonblocking=True):
             self._check_seal()
+            if self._artifact("terminal-collection.json") is None:
+                raise ValueError("performance review requires collection to be closed")
             previous = self._artifact("review.json")
             if previous is not None:
                 return previous
