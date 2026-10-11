@@ -102,8 +102,11 @@ reads once on a 2.5 s budget with no retry and mutes itself for five minutes); e
 Polygon failure.
 
 **News markers** (T3.5) put the same Focused headlines on the main chart: a small
-square above the candle that holds an article's publish time, labelled "N" for
-one article or "N3" for three. The **News markers** group of the Layers panel
+square floating about 26 px above the high of the candle that holds an article's
+publish time (clear of the candle and of a fill arrow on it), labelled "N" for
+one article or "N3" for three. They are their own marker set that the price
+scale ignores, so a marker above the frame is clipped, never a reason to
+shrink the candles; hover and click work on the marker where it is drawn. The **News markers** group of the Layers panel
 (and the chart menu's layer list) hides them; it is on by default and saved with
 the other layers (a `newsHidden` settings field of its own, for the same reason
 as `autoLevelsHidden`). While the layer is on the chart reads the news endpoint
@@ -730,6 +733,15 @@ cd backend
   the interval buttons, the watchlist's up/down arrows and each chart's
   latest-candles button (which now also restores the automatic price scale)
   do the same things.
+- **Candle room and the Auto chip.** The price pane leaves 10% above (so a level just past the highs stays in view) and 12% below
+  the fitted prices (`CANDLE_MARGINS` in `PriceChart.tsx`), volume is a thin strip
+  along the bottom (from 88% down, a little under the lowest candles) and the main
+  chart's RSI pane is 64 px, which gives the candles at least 20% more pixel height on
+  the realistic 1440x900 picture than before (202 px; the browser test checks it).
+  Dragging a price axis (or a jump that widens it) turns the automatic fit off;
+  while it is off an **Auto** button sits at the bottom of that chart's candle
+  price axis (TradingView's "A"), and clicking it, or Alt+R, fits the candles
+  again and hides it.
 - **Link time ranges** (off by default) makes panning or zooming one chart set
   the same visible *time* window on the other four. Coarser charts keep at least
   a dozen candles around that moment; finer charts that cannot fit the span at

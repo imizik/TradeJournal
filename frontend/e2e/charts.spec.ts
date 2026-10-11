@@ -321,6 +321,14 @@ test("mobile layout stays within the viewport and chart controls work", async ({
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
 });
 
+/** The main chart's candle room: the pixel span from the highest visible high to the lowest visible low, and the pane it sits in. */
+const candleRoom = (page: Page) => page.evaluate(() => {
+  const layer = (window as unknown as { __tjAutoLevels: Map<string, { candleBoxes(): { top: number; bottom: number }[] }> }).__tjAutoLevels.get("main")!;
+  const boxes = layer.candleBoxes();
+  const top = Math.min(...boxes.map((box) => box.top)), bottom = Math.max(...boxes.map((box) => box.bottom));
+  const pane = (window as unknown as { __tjCharts: Map<string, { panes(): { getHeight(): number }[] }> }).__tjCharts.get("main")!.panes()[0].getHeight();
+  return { span: Math.round(bottom - top), pane };
+});
 // Pictures for judging the workspace by eye (layout, clutter, label collisions)
 // on market-shaped candles; the sine-wave fixture above cannot show those.
 test("realistic candles render on every chart for desktop and phone pictures", async ({ page }) => {
@@ -344,9 +352,18 @@ test("realistic candles render on every chart for desktop and phone pictures", a
       autoZone([near("round", "155", 2.63, ROUND)]), autoZone([near("prior_week_high", "PWH", 4.9)]), autoZone([near("round", "160", 7.63, ROUND)]),
     ];
     data.auto_levels = { day: "2026-09-14", as_of: Date.now() / 1000, atr: 2, band: 0.2, session: "extended", zones, missing: {} };
+    newsTimes = [-150, -118, -91, -64, -33, -9].map((back) => panels["5m"]!.bars.at(back)!.time);
     await route.fulfill({ json: { ...data, panels, quotes } });
   });
+  // News on six of the 5m candles, so the picture shows where the markers sit relative to the candles (they never move the price scale).
+  let newsTimes: number[] = [];
+  await page.route("**/api/backend/charts/symbol/*/news", async (route) => {
+    const articles = newsTimes.map((time, i) => ({ id: `n${i}`, provider: "alpaca_benzinga", publisher: "Benzinga", headline: `Headline ${i}`, url: `https://example.com/n${i}`,
+      published_at: new Date(time * 1000 + 20_000).toISOString(), summary: null, tickers: ["MRVL"], roundup: false, sentiment: [], also_in: [] }));
+    await route.fulfill({ json: { symbol: "MRVL", as_of: new Date().toISOString(), time_zone: "America/New_York", days: 7, sentiment_note: "", sources: [], articles } });
+  });
   await registerAutoLevels(page);
+  await registerCharts(page);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/charts");
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
@@ -364,6 +381,12 @@ test("realistic candles render on every chart for desktop and phone pictures", a
   const placed = await covered();
   expect(placed.candles).toBeGreaterThan(50);
   expect(placed.hits).toEqual([]);
+  await expect(page.getByTestId("canvas-main")).toHaveAttribute("data-news", /:1/);
+  // Candle room: before the candle-room change the visible candles spanned 202px of this 366px pane (margins 0.10 / 0.23, 85px RSI). At least 20% more now.
+  const room = await candleRoom(page);
+  expect(room.span).toBeGreaterThanOrEqual(Math.ceil(202 * 1.2));
+  expect(room.pane).toBeGreaterThan(366);
+  await page.screenshot({ path: test.info().outputPath("candle-room-desktop.png"), animations: "disabled" });
   await page.screenshot({ path: test.info().outputPath("charts-realistic-desktop.png"), animations: "disabled" });
   await page.screenshot({ path: test.info().outputPath("levels-quiet-desktop.png"), animations: "disabled" });
   // The Layers panel keeps each layer's explanation behind an info button: closed at rest, opened from the keyboard.
@@ -384,6 +407,46 @@ test("realistic candles render on every chart for desktop and phone pictures", a
   await expect(page.getByTestId("canvas-main")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-realistic-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
+});
+
+test("dragging the price axis shows an Auto chip; one click fits the candles again and hides it", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    await route.fulfill({ json: { ...data, panels: realisticPanels(Object.keys(data.panels) as Interval[]) } });
+  });
+  await registerCharts(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  const main = page.getByTestId("canvas-main");
+  await expect(main.locator("canvas").first()).toBeVisible();
+  const chip = page.getByTestId("main-price-auto");
+  const autoOn = () => page.evaluate(() => (window as unknown as { __tjCharts: Map<string, { priceScale(id: string, pane: number): { options(): { autoScale: boolean } } }> }).__tjCharts.get("main")!.priceScale("right", 0).options().autoScale);
+  await page.waitForTimeout(500);
+  await expect(chip).toHaveCount(0);
+  expect(await autoOn()).toBe(true);
+  // Drag the price axis (the right edge of the plot) up and down: the scale stops fitting itself.
+  const box = (await main.boundingBox())!;
+  const x = box.x + box.width - 25;
+  await page.mouse.move(x, box.y + 150);
+  await page.mouse.down();
+  await page.mouse.move(x, box.y + 200, { steps: 6 });
+  await page.mouse.move(x, box.y + 260, { steps: 6 });
+  await page.mouse.up();
+  await expect(chip).toBeVisible();
+  expect(await autoOn()).toBe(false);
+  await expect(chip).toHaveAccessibleName(/Auto price scale/);
+  const at = (await chip.boundingBox())!;
+  expect(at.x + at.width).toBeLessThanOrEqual(box.x + box.width);
+  expect(at.y).toBeGreaterThan(box.y + 200);
+  await page.screenshot({ path: test.info().outputPath("price-auto-chip-desktop.png"), animations: "disabled" });
+  // Keyboard: focus it and press Enter.
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await expect(chip).toHaveCount(0);
+  expect(await autoOn()).toBe(true);
   expect(errors).toEqual([]);
 });
 
@@ -4839,6 +4902,8 @@ test("a pinned level card covers the RSI resize handle and chart lines", async (
   expect(overlap.background).toBe("rgb(20, 27, 38)");
   await page.screenshot({ path: test.info().outputPath("auto-level-card-over-rsi.png") });
   await card.getByRole("button", { name: "Close level card" }).click();
+  // Off the chart, so a hover card cannot open where the pinned one was.
+  await page.mouse.move(5, 450);
   await expect(card).toHaveCount(0);
 });
 
