@@ -105,7 +105,6 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
       <span>{symbol} symbol info</span>{view.expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
     </button>
     {view.expanded && <div id={`${id}-content`}>
-      {onSelectSymbol && <SymbolInfoPeers symbol={symbol} onSelect={onSelectSymbol} />}
       {/* Names never squeeze into each other: a narrow dock wraps the tabs onto a second row. */}
       <div role="tablist" aria-label="Symbol info tabs" className="flex flex-wrap border-y border-slate-700/40">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
@@ -115,6 +114,8 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
           }} className={`min-h-11 flex-auto whitespace-nowrap px-2 py-3 text-[10px] lg:min-h-0 ${view.tab === tab ? "bg-sky-400/5 text-sky-300" : "text-slate-500 hover:text-slate-200"}`}>{tab}</button>)}
       </div>
       <div role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${view.tab}`} className="p-3">
+        {/* Peers live in the Overview tab rather than above every tab. */}
+        {view.tab === "Overview" && onSelectSymbol && <SymbolInfoPeers symbol={symbol} onSelect={onSelectSymbol} />}
         {view.tab === "You" && !journal ? <p className="text-xs text-slate-500">Your journal is not shared with this assistant.</p> : !built(view.tab) ? <p className="text-xs text-slate-500">{view.tab} is coming soon.</p>
           : shown?.data ? (view.tab === "Overview" ? <SymbolInfoOverview data={shown.data as SymbolOverview} quote={quote} quoteFetchedAt={quoteFetchedAt ?? null} />
             : view.tab === "You" ? <SymbolInfoYou data={shown.data as SymbolJournal} /> : view.tab === "Events" ? <SymbolInfoEvents data={shown.data as SymbolEvents} />

@@ -126,7 +126,7 @@ the Watchlist sheet on the News tab. Markers stack with fill arrows and earnings
 dates without covering them, and a level or drawing under the pointer still wins
 a click. Historical chart mode shows only the articles whose candles are loaded.
 
-A **Peers** strip (T3.4) sits above the tabs whenever the panel is expanded:
+A **Peers** strip (T3.4) sits at the top of the **Overview** tab:
 Polygon's related companies for the active symbol as chips, each with today's
 percent change, from `GET /charts/symbol/{symbol}/peers`. The list is cached
 seven days on disk, read through the enricher's limiter the way the News feed
