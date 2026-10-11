@@ -172,6 +172,9 @@ for (const arrival of ["together", "main first", "main last"]) {
         fills_truncated: false, issue: null } });
     });
     await page.route(`**/api/backend/charts/journal/trades/${TRADE}`, (route) => route.fulfill({ json: { ...CARD, fill: null } }));
+    // The trader was on MRVL; Back to live returns there (UX-C).
+    await page.goto("/charts?symbol=MRVL");
+    await expect(page.getByRole("region", { name: /MRVL 5m chart/ })).toHaveCount(1);
     await page.goto(`/charts?symbol=NVDA&from=${ENTRY}&to=${EXIT}&trade=${TRADE}`);
     const banner = page.getByRole("status", { name: "Past trade view" });
     await expect(banner).toContainText("Showing NVDA Jul 14, 2026, 9:40 AM–10:20 AM ET");
@@ -187,6 +190,7 @@ for (const arrival of ["together", "main first", "main last"]) {
     await page.getByRole("dialog", { name: "Trade card" }).getByRole("button", { name: "Close trade card" }).click();
     await banner.getByRole("button", { name: "Back to live" }).click();
     await expect(banner).toHaveCount(0);
+    await expect(page.getByRole("region", { name: /MRVL 5m chart/ })).toHaveCount(1);
     expect(new URL(page.url()).search).toBe("");
     await expect.poll(async () => (await visible(page))?.to ?? 0).toBeGreaterThan(now - 600);
   });
