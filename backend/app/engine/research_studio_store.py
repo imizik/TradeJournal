@@ -38,6 +38,30 @@ TABLE_COLUMNS = {
     "exposure": ("seq", "run_id", "operation_id", "at"),
 }
 
+SCHEMA = """
+                    CREATE TABLE IF NOT EXISTS run (
+                      id TEXT PRIMARY KEY, request TEXT NOT NULL, request_sha TEXT NOT NULL,
+                      result_sha TEXT, created TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS attempt (
+                      run_id TEXT NOT NULL REFERENCES run(id), number INTEGER NOT NULL,
+                      state TEXT NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, reason TEXT,
+                      PRIMARY KEY(run_id,number));
+                    CREATE TABLE IF NOT EXISTS operation (
+                      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES run(id), action TEXT NOT NULL);
+                    CREATE TABLE IF NOT EXISTS event (
+                      seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run(id),
+                      attempt INTEGER NOT NULL, kind TEXT NOT NULL, at TEXT NOT NULL, detail TEXT);
+                    CREATE TABLE IF NOT EXISTS exposure (
+                      seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run(id),
+                      operation_id TEXT NOT NULL UNIQUE REFERENCES operation(id), at TEXT NOT NULL);
+                """
+
+
+def schema_signature(db):
+    # Include tables and indexes with their full definitions: column names
+    # alone cannot establish primary keys, foreign keys or uniqueness.
+    return tuple(db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY type,name"))
+
 
 def code_identity() -> str:
     root = Path(__file__).resolve().parent
@@ -197,34 +221,20 @@ class ResearchStore:
                     except FileNotFoundError:
                         existing = False
                 if existing:
-                    objects = set(db.execute("SELECT type,name FROM sqlite_master WHERE type IN ('table','view','trigger') AND name!='sqlite_sequence'"))
-                    signature = {name: tuple(r[1] for r in db.execute(f"PRAGMA table_info({name})"))
-                                 for name in TABLE_COLUMNS}
+                    expected = sqlite3.connect(":memory:")
+                    try:
+                        expected.executescript(SCHEMA)
+                        signature_matches = schema_signature(db) == schema_signature(expected)
+                    finally:
+                        expected.close()
                     marker = db.execute("PRAGMA application_id").fetchone()[0]
                     version = db.execute("PRAGMA user_version").fetchone()[0]
-                    if (objects != {("table", name) for name in TABLE_COLUMNS} or signature != TABLE_COLUMNS
-                            or marker not in (0, APPLICATION_ID) or version not in (0, 1)):
+                    if (not signature_matches or marker not in (0, APPLICATION_ID) or version not in (0, 1)):
                         raise ValueError("existing file is not a Research Studio V1 ledger")
                     # Exact unmarked pre-release R2 indexes remain readable;
                     # only a later explicit write publishes the namespace mark.
                 db.execute("PRAGMA foreign_keys=ON")
-                db.executescript("""
-                    CREATE TABLE IF NOT EXISTS run (
-                      id TEXT PRIMARY KEY, request TEXT NOT NULL, request_sha TEXT NOT NULL,
-                      result_sha TEXT, created TEXT NOT NULL);
-                    CREATE TABLE IF NOT EXISTS attempt (
-                      run_id TEXT NOT NULL REFERENCES run(id), number INTEGER NOT NULL,
-                      state TEXT NOT NULL, cancel_requested INTEGER NOT NULL DEFAULT 0, reason TEXT,
-                      PRIMARY KEY(run_id,number));
-                    CREATE TABLE IF NOT EXISTS operation (
-                      id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES run(id), action TEXT NOT NULL);
-                    CREATE TABLE IF NOT EXISTS event (
-                      seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run(id),
-                      attempt INTEGER NOT NULL, kind TEXT NOT NULL, at TEXT NOT NULL, detail TEXT);
-                    CREATE TABLE IF NOT EXISTS exposure (
-                      seq INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL REFERENCES run(id),
-                      operation_id TEXT NOT NULL UNIQUE REFERENCES operation(id), at TEXT NOT NULL);
-                """)
+                db.executescript(SCHEMA)
                 db.execute(f"PRAGMA application_id={APPLICATION_ID}")
                 db.execute("PRAGMA user_version=1")
                 yield db

@@ -349,3 +349,126 @@ def test_known_unmarked_research_index_remains_readable_and_namespaced_on_next_w
     with store._db() as db:
         from app.engine.research_studio_store import APPLICATION_ID
         assert db.execute("PRAGMA application_id").fetchone()[0] == APPLICATION_ID
+
+
+@pytest.mark.parametrize("marked", [False, True])
+@pytest.mark.parametrize("change", ["plain_columns", "foreign_key", "unique", "default", "autoincrement", "type", "extra_index"])
+def test_matching_columns_with_wrong_schema_refused_without_adoption(store, snapshot, definition, marked, change):
+    import sqlite3
+    from app.engine.research_studio_store import APPLICATION_ID, SCHEMA, TABLE_COLUMNS
+    db = sqlite3.connect(":memory:")
+    if change == "plain_columns":
+        for name, columns in TABLE_COLUMNS.items():
+            db.execute(f"CREATE TABLE {name} (" + ",".join(f"{col} TEXT" for col in columns) + ")")
+    else:
+        altered = SCHEMA
+        if change == "foreign_key":
+            altered = altered.replace("REFERENCES run(id)", "")
+        elif change == "unique":
+            altered = altered.replace("TEXT NOT NULL UNIQUE", "TEXT NOT NULL")
+        elif change == "default":
+            altered = altered.replace("DEFAULT 0", "DEFAULT 1")
+        elif change == "autoincrement":
+            altered = altered.replace("AUTOINCREMENT", "")
+        elif change == "type":
+            altered = altered.replace("number INTEGER", "number TEXT")
+        db.executescript(altered)
+        if change == "extra_index":
+            db.execute("CREATE INDEX unexpected_index ON run(created)")
+    if marked:
+        db.execute(f"PRAGMA application_id={APPLICATION_ID}")
+        db.execute("PRAGMA user_version=1")
+    original = db.serialize()
+    db.close()
+    (store.root / "ledger.sqlite3").write_bytes(original)
+    with pytest.raises(ValueError, match="not a Research Studio"):
+        store.enqueue(snapshot, definition, operation())
+    assert (store.root / "ledger.sqlite3").read_bytes() == original
+    assert not any(p.is_dir() for p in store.root.iterdir())
+
+
+def test_orphan_calculation_keeps_lock_until_exit_then_explicit_retry(store, snapshot, definition, tmp_path):
+    import os
+    import signal
+    import time
+    run = store.enqueue(snapshot, definition, operation())["run_id"]
+    worker = Path(__file__).resolve().parents[1] / "scripts/research_studio_worker.py"
+    ready = tmp_path / "child-ready"
+    exited = tmp_path / "child-exited"
+    errors = tmp_path / "child-errors"
+    wrapper = tmp_path / "pause-worker.py"
+    # Run the actual worker, pausing at the calculation entry after its complete
+    # envelope/identities were read. Production source and inherited FD stay intact.
+    wrapper.write_text(f'''
+import importlib.util, os, signal
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("actual_worker", {str(worker)!r})
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+original = module.analyze
+def paused(*args, **kwargs):
+    Path({str(ready)!r}).write_text(str(os.getpid()))
+    os.kill(os.getpid(), signal.SIGSTOP)
+    return original(*args, **kwargs)
+module.analyze = paused
+try:
+    module.main()
+finally:
+    Path({str(exited)!r}).write_text("exited")
+''')
+    parent_program = f'''
+from app.engine import research_studio_store as module
+from pathlib import Path
+original = module.subprocess.Popen
+def launch(command, **kwargs):
+    command[1] = {str(wrapper)!r}
+    kwargs["stderr"] = open({str(errors)!r}, "wb")
+    return original(command, **kwargs)
+module.subprocess.Popen = launch
+module.ResearchStore(Path({str(store.root)!r}), source_root=Path({str(store.root.parent / 'sip')!r})).work_once()
+'''
+    parent = subprocess.Popen([sys.executable, "-c", parent_program], cwd=Path(__file__).parents[1])
+    child_pid = None
+    def wait_for(predicate):
+        deadline = time.monotonic() + 15
+        while not predicate():
+            assert time.monotonic() < deadline, "owned worker lifecycle timed out"
+            time.sleep(.02)
+    try:
+        wait_for(ready.exists)
+        child_pid = int(ready.read_text())
+        assert store.status(run)["status"] == "running"
+        parent.kill()
+        assert parent.wait(timeout=5) == -signal.SIGKILL
+        with pytest.raises(ValueError, match="already active"):
+            store.work_once()
+        assert store.status(run)["status"] == "running"
+        os.kill(child_pid, signal.SIGCONT)
+        wait_for(exited.exists)
+        assert "Cancelled" in errors.read_text()
+        def recover():
+            try:
+                assert store.work_once() == {"status": "idle"}
+                return True
+            except ValueError as exc:
+                assert "already active" in str(exc)
+                return False
+        wait_for(recover)
+        state = store.status(run)
+        assert state["status"] == "failed" and "interrupted" in state["reason"]
+        assert state["attempt"] == 1 and state["exposures"] == 0
+        assert not (store.root / run / "result.json").exists()
+        store.control(run, "retry", operation())
+        assert store.work_once()["status"] == "completed"
+        assert store.status(run)["attempt"] == 2 and store.status(run)["exposures"] == 0
+        store.result(run, operation())
+        assert store.status(run)["exposures"] == 1
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait(timeout=5)
+        if child_pid is not None and not exited.exists():
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass

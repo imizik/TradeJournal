@@ -55,8 +55,8 @@ separate attempts, append-only transitions, operation IDs and outcome exposures.
 SQLite opens only `:memory:`: Python3.11+ serialization loads/saves its image
 through bounded, no-follow files. A ledger kernel lock serializes short write
 transactions; atomic replacement and directory fsync publish the image.
-Application identity/schema checks refuse unrelated SQLite files before any
-schema/index write. Exact unmarked R2 indexes with the saved-version request
+Application identity and complete table/index SQL checks refuse unrelated or
+constraint-altered SQLite files before any schema/index write. Exact unmarked R2 indexes with the saved-version request
 schema remain readable and gain the namespace mark on a later explicit write. This
 avoids a path-following SQLite/WAL open or coupling to the app database. Explicit
 local single-host storage only; network filesystems and multi-host workers are
@@ -124,7 +124,8 @@ Synthetic tests independently pin next-open/endpoint values, early closes,
 missing/partial reference, horizon-only gaps, frozen ATR and percent availability,
 weighted matching including qualifiers, joint-symbol shocks, recomputed draw
 composition against closed-form calculations, deterministic seed, insufficient
-weeks/draws, cancellation, real subprocess death and explicit recovery/retry,
+weeks/draws, cancellation, parent death with a surviving paused calculation child,
+inherited-lock refusal, orphan cancellation and explicit recovery/retry,
 operation conflicts, immutable reopen/exposure, corrections and protected opens.
 A fixed-design null simulation with seed9841,40 joint weeks and30 independent
 trials found28/30 nominal95% intervals covering zero. This is a bounded Monte
@@ -137,14 +138,15 @@ used66 eligible calendar weeks and2,000 valid draws with zero invalid draws.
 The one explicit result retrieval was recorded as an exposure; it is not new
 independent validation.
 
-An end-to-end pass measured15.61s source snapshot,5.21s submission/serialization,
-7.40s worker execution including child startup and re-preparation, and28.27s
-total including result retrieval. Cached retrieval was5.8ms. Parent peak RSS was
-341,049,344 bytes (325.2MiB); calculation child peak was467,566,592 bytes
-(445.9MiB). This question met the completed-run time and per-process RSS targets
+The saved-version compatibility pass measured16.78s source snapshot,4.95s
+submission/serialization,9.18s worker execution including child startup and
+re-preparation, and31.01s total including result retrieval. Cached retrieval was
+51.6ms. Parent peak RSS was343,867,392 bytes (327.9MiB); calculation child peak
+was451,641,344 bytes (430.7MiB). This question met the completed-run time and per-process RSS targets
 on this host. It does not establish all windows/workloads or concurrent-load
 latency. Tests measured <=1s parent cancellation of an uncooperative child.
 
-Full verification, native tier2 review and final-head CI are pending. The R0 targets remain <=30s warm/
+The PR records verification, native tier2 review and final-head CI receipts.
+The R0 targets remain <=30s warm/
 <=60s cold completed analysis, <=512MiB research-process RSS, and <=1s cancellation
 acknowledgment. R3 browser/API feedback is unmeasured; no latency promise is made.
