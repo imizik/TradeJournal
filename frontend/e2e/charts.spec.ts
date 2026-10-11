@@ -1,6 +1,7 @@
 import { expect, test, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test";
 import type { AutoLevel, AutoZone, ChartData, ChartBar, Interval, LevelInteraction, MarketDay, OptionsInfo, OptionsLadder, OptionStrike, PriceAdjustment, RangesInfo, RvolBaseline } from "../lib/charts";
 import { fakeChartSettings, type SettingsStore } from "./fixtures/chartSettings";
+import { realisticPanels } from "./fixtures/realisticBars";
 import type { Earnings } from "../lib/symbolInfo";
 import type { AlertsPayload, LevelAlert } from "../lib/alerts";
 import type { Capture, CaptureSetup } from "../lib/captures";
@@ -318,6 +319,36 @@ test("mobile layout stays within the viewport and chart controls work", async ({
   await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({ path: test.info().outputPath("charts-mobile.png"), fullPage: true });
+});
+
+// Pictures for judging the workspace by eye (layout, clutter, label collisions)
+// on market-shaped candles; the sine-wave fixture above cannot show those.
+test("realistic candles render on every chart for desktop and phone pictures", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  let last = 0;
+  await page.route("**/api/backend/charts/workspace?**", async (route) => {
+    const data = fixture(route.request().url());
+    const intervals = Object.keys(data.panels) as Interval[];
+    const panels = realisticPanels(intervals);
+    const daily = realisticPanels(["1D"])["1D"]!.bars;
+    last = daily.at(-1)!.close;
+    const previous = daily.at(-2)!.close;
+    const quotes = data.quotes.map((quote) => quote.symbol !== data.symbol ? quote : { ...quote, last, previous_close: previous, regular_close: last,
+      change: Math.round((last - previous) * 100) / 100, change_percentage: Math.round((last / previous - 1) * 10000) / 100 });
+    await route.fulfill({ json: { ...data, panels, quotes } });
+  });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts");
+  await expect(page.getByRole("region", { name: /MRVL .* chart/ })).toHaveCount(5);
+  await expect(page.getByTestId("canvas-main").locator("canvas").first()).toBeVisible();
+  await expect(page.getByLabel("Selected symbol quote")).toContainText(last.toFixed(2));
+  await page.screenshot({ path: test.info().outputPath("charts-realistic-desktop.png"), animations: "disabled" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.getByTestId("canvas-main")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.screenshot({ path: test.info().outputPath("charts-realistic-phone.png"), animations: "disabled" });
+  expect(errors).toEqual([]);
 });
 
 test("VWAP draws inside the session without painting through an extended-hours gap", async ({ page }) => {

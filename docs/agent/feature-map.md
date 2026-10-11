@@ -148,7 +148,12 @@ you change it (`verification.md`, "What is NOT covered yet").
   `/fills`, `/analytics`, `/daily`, `/strategy-lab` against a seeded backend
   and assert the values from `EXPECTED` in `scripts/seed_dev_data.py`. Then
   open the route on the dev server (`bash startdev.sh`, port 3000) and say
-  what you saw.
+  what you saw. For a chart picture a person will judge, use the
+  market-shaped candles in `frontend/e2e/fixtures/realisticBars.ts`; to try
+  the UI on real candles without touching real records or synced chart
+  settings, `bash scripts/ux_sandbox.sh` (port 3098, its own seeded SQLite).
+  The `trade-chart-ux` skill (`.claude/skills/trade-chart-ux/SKILL.md`)
+  covers UI review and the picture checks before review.
 - **A route with no test:** call it and paste the response.
   `curl -s localhost:8080/health` tells you which database you are on first.
 
@@ -179,6 +184,10 @@ you change it (`verification.md`, "What is NOT covered yet").
   no UI, provider, database, outcomes or Factory execution. Shared stop-free
   features and strict masks live in `app/engine/research_studio.py`;
   [R1 contract](research-studio-r1.md) owns source/identity and acceptance.
+- `research_studio_run.py` — explicit local R2 enqueue/work-once/status/result/
+  cancel/retry; parent-owned research SQLite/artifacts and a pure calculation
+  child, no app route/service/provider or journal/Factory writes. The
+  [R2 contract](research-studio-r2.md) owns semantics, exposure and acceptance.
 - `strategy_factory.py` — judges a strategy spec through the factory's gates
   and appends the result to `research/ledger.jsonl`; `prepare` fetches the SIP
   minute bars it needs (the only step that calls Alpaca); `week` is the weekly

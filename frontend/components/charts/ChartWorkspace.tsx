@@ -299,6 +299,8 @@ export default function ChartWorkspace() {
   const refreshNow = useRef<() => void>(() => {});
   const lastRequest = useRef("");
   // History, its requests and visible ranges belong to a frame: a symbol at an interval.
+  // Failure is visible to queued callbacks before React commits the issue.
+  const failedHistory = useRef(new Set<string>());
   const historyFlights = useRef(new Map<string, AbortController>());
   const visibleTimes = useRef(new Map<string, { from: number; to: number }>());
   const lastWorkspaceDay = useRef<{ key: string; day: string } | null>(null);
@@ -463,6 +465,7 @@ export default function ChartWorkspace() {
   useEffect(() => {
     historyFlights.current.forEach((controller) => controller.abort());
     historyFlights.current.clear();
+    failedHistory.current.clear();
     visibleTimes.current.clear();
     setOlder({ key: session, panels: {} });
     setRollover(null);
@@ -472,6 +475,7 @@ export default function ChartWorkspace() {
     const shown = new Set<string>(framesKey.split(","));
     historyFlights.current.forEach((controller, key) => { if (!shown.has(key)) { controller.abort(); historyFlights.current.delete(key); } });
     visibleTimes.current.forEach((_, key) => { if (!shown.has(key)) visibleTimes.current.delete(key); });
+    failedHistory.current.forEach((key) => { if (!shown.has(key)) failedHistory.current.delete(key); });
     setOlder((state) => Object.keys(state.panels).every((key) => shown.has(key)) ? state
       : { ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => shown.has(key))) });
   }, [framesKey]);
@@ -487,7 +491,7 @@ export default function ChartWorkspace() {
       return loaded && target != null && splitsKey(loaded) !== target;
     }).map(frameKey));
     if (!stale.size) return;
-    stale.forEach((key) => { historyFlights.current.get(key)?.abort(); historyFlights.current.delete(key); visibleTimes.current.delete(key); });
+    stale.forEach((key) => { historyFlights.current.get(key)?.abort(); historyFlights.current.delete(key); visibleTimes.current.delete(key); failedHistory.current.delete(key); });
     setOlder((state) => ({ ...state, panels: Object.fromEntries(Object.entries(state.panels).filter(([key]) => !stale.has(key))) }));
   }, [feedBasis, older.panels, slots]);
 
@@ -496,7 +500,8 @@ export default function ChartWorkspace() {
     const feed = feedFor(frame.symbol);
     if (historyFlights.current.has(key) || !feed) return;
     const past = currentOlder[key];
-    if (((past?.exhausted || past?.issue) && !retry) && beforeOverride === undefined) return;
+    if ((past?.exhausted || past?.issue || failedHistory.current.has(key)) && !retry && beforeOverride === undefined) return;
+    failedHistory.current.delete(key);
     const before = beforeOverride ?? past?.bars[0]?.time ?? feed.panels[frame.interval]?.bars[0]?.time ?? Math.floor(Date.now() / 1000);
     const controller = new AbortController();
     historyFlights.current.set(key, controller);
@@ -540,10 +545,13 @@ export default function ChartWorkspace() {
         });
       }
     } catch (err) {
-      if (!controller.signal.aborted) setOlder((state) => state.key !== session ? state : ({ ...state, panels: { ...state.panels,
+      if (!controller.signal.aborted) {
+        failedHistory.current.add(key);
+        setOlder((state) => state.key !== session ? state : ({ ...state, panels: { ...state.panels,
         [key]: { bars: state.panels[key]?.bars ?? [], markers: state.panels[key]?.markers ?? [],
           exhausted: false, warmup: state.panels[key]?.warmup ?? "pending",
           issue: err instanceof Error ? err.message : "Older candles could not load.", loading: false } } }));
+      }
     } finally {
       if (historyFlights.current.get(key) === controller) historyFlights.current.delete(key);
       setOlder((state) => state.key !== session || !state.panels[key] ? state : ({ ...state,
