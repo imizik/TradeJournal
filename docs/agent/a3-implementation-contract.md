@@ -236,8 +236,13 @@ its existing attention timer keeps its original run identity. Stale list or
 detail responses cannot replace a later selection or an acknowledged timing
 write. A session change invalidates previous-session responses; explicit
 historical run deep-links remain readable and reopen their frozen choices and
-advisor receipts. The entry link is consumed once; it cannot override a later
-requested session. Historical runs still refuse current-facts assisted revisions.
+advisor receipts. The entry link remains pending through failed or superseded
+reads until a current detail response applies it; a later explicit selection or
+session change discards it. The selector includes an accepted historical run
+outside the current day's list. Failed reload/preparation settles superseded
+loading back to the last accepted run in the same requested session, preserving
+its timer; stale errors cannot cancel a newer selection. The entry link cannot
+override a later requested session. Historical runs still refuse current-facts assisted revisions.
 Queued-run polling waits for its current read to finish.
 
 A final focused browser check covers the attention timer staying on its
