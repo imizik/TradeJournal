@@ -5,6 +5,9 @@ the trials, not authorization to change services or account permissions.
 
 | Observation | Next bounded step |
 | --- | --- |
+| Provider Create control is disabled by capacity | Check quota before partial creation. Request a decision about one exact cleanup candidate; do not assume an app unused or upgrade billing. See [OAuth fast path](oauth-fast-path.md). |
+| Creation unexpectedly generated a test companion | Inspect its actual access, preserve intended resources, and obtain any required exact cleanup authorization. Do not widen grants or delete another app to compensate. |
+| A saved mutation and quota/banner disagree | Read persisted state once; use a bounded user refresh if appropriate. Do not resubmit an uncertain mutation or loop on stale UI. |
 | Browser stops responding while the host may be asleep | Request wake/sign-in handoff and continue independent preparation. Do not repeatedly click or infer an authentication failure. |
 | Locator or accessibility index fails after a page change | Read current page state and retarget the visible control. A failed receipt-expansion click is not a reason to repeat replay or save. |
 | Login prompt disagrees with an apparently signed-in page | Check the displayed identity and a fresh authorized read in the relevant browser. Local sign-in does not prove the cloud browser is authenticated. |
