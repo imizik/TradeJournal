@@ -765,7 +765,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     });
     const stopSnapshot = commands.provideSnapshot(id, () => barsRef.current.length ? chart.takeScreenshot() : null);
     // Whether the candle pane's price scale still fits itself: read after anything that can change it (a drag, the wheel, a double click, a reset, a jump).
-    const syncScale = () => setManualScale((now) => {
+    let disposed = false;
+    const syncScale = () => !disposed && setManualScale((now) => {
       if (candles.priceScale().options().autoScale) return now ? null : now;
       const top = Math.max(0, (chart.panes()[0]?.getHeight() ?? 0) - 22);
       return now && now.top === top ? now : { top };
@@ -773,6 +774,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     // News markers sit a fixed number of pixels above their candle's high, so their price is worked out from where the scale is now,
     // and again after the scale settles or the zoom changes. They are a separate set the price scale ignores: one far above is clipped.
     const placeNews = () => {
+      if (disposed) return;
       const [high, low] = [candles.coordinateToPrice(0), candles.coordinateToPrice(100)];
       const lift = high === null || low === null ? 0 : Math.abs(high - low) / 100 * NEWS_LIFT_PX;
       const stories = newsRef.current.flatMap((m) => {
@@ -797,6 +799,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     const registry = (window as typeof window & { __tjCharts?: ChartRegistry }).__tjCharts;
     registry?.set(id, chart);
     return () => {
+      disposed = true;
       for (const type of ["pointerup", "mouseup", "touchend", "dblclick", "wheel"]) window.removeEventListener(type, afterScale, true);
       window.clearTimeout(newsTimer); chart.timeScale().unsubscribeVisibleLogicalRangeChange(replaceNews); placeNewsRef.current = () => {};
       scaleWatch.disconnect(); stopScale(); stopScaleJump(); autoScale.current = () => {};
@@ -949,7 +952,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) container.current.dataset.earnings = reports.map((m) => `${m.id.slice(9)}@${m.time}`).join(",");
   }, [markers, earningsKey, pending, indicators.fills, main]);
   // The main chart's news markers: placed by `placeNews` (above), which needs the price scale, so a tick that changes nothing here re-places them in place.
-  const barsKey = panel?.bars.length ? `${panel.bars.length}:${panel.bars.at(-1)!.time}:${panel.bars.at(-1)!.high}` : "";
+  const barsKey = panel?.bars.length ? `${panel.bars.length}:${panel.bars.at(-1)!.time}:${panel.bars.at(-1)!.high}:${panel.bars.at(-1)!.low}` : "";
   useEffect(() => {
     if (pending) return;
     newsById.current = new Map(marked.map((m) => [m.id, m]));
