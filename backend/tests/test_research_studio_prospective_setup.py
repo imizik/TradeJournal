@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -70,7 +71,7 @@ def test_offline_minimal_environment_executes_actual_study_runtime(tmp_path):
     module = setup_module_code()
     source = Path(__file__).parents[1]
     target = tmp_path/"backend"
-    versions = module.copy_environment(source/".venv", target/".venv")
+    versions = module.copy_environment(Path(sys.prefix), target/".venv")
     assert "numpy" in versions and "httpx" in versions
     assert "sqlalchemy" not in versions and "alpaca-py" not in versions
     for name in module.SOURCE_FILES:
@@ -79,7 +80,9 @@ def test_offline_minimal_environment_executes_actual_study_runtime(tmp_path):
         shutil.copyfile(source/name, file)
     moved = tmp_path/"frozen-runtime"
     target.rename(moved)
-    assert not (moved/".venv/bin/python").resolve().is_relative_to(source/".venv")
+    prefix = subprocess.check_output([str(moved/".venv/bin/python"), "-c", "import sys; print(sys.prefix)"], text=True).strip()
+    assert Path(prefix).resolve() == (moved/".venv").resolve()
+    assert Path(prefix).resolve() != Path(sys.prefix).resolve()
     result = subprocess.run([str(moved/".venv/bin/python"), str(moved/"scripts/research_studio_prospective.py"), "--help"], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert "register" in result.stdout and "review" in result.stdout
