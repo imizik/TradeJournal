@@ -38,14 +38,15 @@ Prices are underlying prices from completed bars. Daily ATR is the 14-day ATR
 as of the prior close. Parameters are versioned; changing one creates `s1-v2`.
 
 **VWAP fade (calls and puts).** Long version (call): price has been at least
-0.25 daily ATR below session VWAP, then a completed 5-minute bar closes above
+0.35 daily ATR below session VWAP, then a completed 5-minute bar closes above
 the previous 5-minute bar's high while still below VWAP. Stop: the session low
 reached during the stretch, minus 0.05 daily ATR. Target: session VWAP at
 detection. Require target distance ≥ stop distance. The put version mirrors it
 above VWAP. At most two fade candidates per symbol per day.
 
 **Opening-range break (calls only).** The first completed 5-minute bar of the
-day to close above the 09:30–09:45 high, with price above VWAP. Stop: the
+day to close above the 09:30–09:45 high, closing by 10:45 ET, above VWAP, with
+volume at least the average of the three opening-range bars. Stop: the
 opening-range midpoint. Target: entry plus twice the stop distance. One per
 symbol per day.
 
@@ -111,13 +112,32 @@ saved events; a monitoring gap longer than 2 minutes on an open trade marks it
 
 ## Before switching it on
 
-1. **Historical fire-rate check.** Replay the rules over completed sessions
+1. **Historical fire-rate check** (done, results above). Replay the rules over completed sessions
    to confirm a manageable candidate count (target 3–15 a day in total) and
    to catch rule bugs. Use stock minute bars only, with no option prices and
    no profit tuning. Keep the most recent four weeks untouched as a holdout.
 2. **Owner approval to enable on the VPS**, then 10 live sessions forward.
    Forward results decide whether the rules stay; nothing is tuned on them
    until 50 resolved paper trades exist.
+
+## Historical fire-rate check (October 12, 2026)
+
+Replayed over 135 sessions (March 2 – September 11, 2026) of Alpaca SIP
+split-adjusted 5-minute bars; September 14 onward is held out and was not
+examined. Counts and exit types only; no option prices and no profit figures.
+The script lives outside the repo.
+
+| Rule set | Setups per session | Note |
+|---|---|---|
+| Fade 0.25 ATR, opening-range break any time, no volume check | 18.1 | Above the 3–15 target; the break fired on 58% of symbol-days |
+| Break by 10:45 + volume ≥ opening-range average | 12.9 | Break cut from 691 to 108 |
+| **Above + fade 0.35 ATR (adopted as `s1-v1`)** | **8.8** | 1,193 setups: 601 fade puts, 484 fade calls, 108 break calls; 1 session had none, busiest had 24 |
+| Above + fade 0.5 ATR | 4.3 | 11 sessions with none |
+
+Every symbol produced setups and no session had missing data. In the adopted
+set, 57% of underlying exits were the 60-minute time stop, 32% stops, 9% targets
+and 2% the flat-by time: the VWAP target is usually farther than an hour away.
+This is a property of the rules to watch forward, not a reason to tune them.
 
 ## Acceptance
 
