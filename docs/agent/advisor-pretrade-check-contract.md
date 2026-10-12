@@ -237,16 +237,17 @@ was, and what overriding cost.
 
 | # | Step | Done when | Status |
 |---|---|---|---|
-| 1 | Stay signed in (Auth0 Allow Offline Access on the check API) | A check more than an hour after connecting works without reconnecting | Owner toggle |
+| 1 | Stay signed in: Auth0 Allow Offline Access on the check API, and the server advertises `offline_access` so ChatGPT requests a refresh token | A check more than an hour after connecting works without reconnecting | Toggle done Oct 12; scope fix pending deploy, then one reconnect |
 | 2 | Jo saves its own verdict on every check (`next_step`) | At least 9 of 10 saved checks carry Jo's verdict and summary | Live; confirm on real days |
 | 3 | Checks visible on `/advisor-review` | Every saved check reopens identical to the server copy, including after a restart | Live |
 | 4 | Link each check to what happened (`review_checks`) | One day's links agree with a hand check of that day's fills | Live |
 | 5 | While-holding check (`position_check`) | Stop distance, live mark and similar-trade behaviour match the trade page | Live |
 | 6 | Options-aware checks | Quote, IV, greeks, cost, decay and the at-stop estimate appear with timestamps on a live check | Live |
 | 7 | Pre-open watchlist pass (`preopen_watchlist`) | One real morning's pass matches the journal and the provider | Built |
-| 8 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Not started; needs a source choice (new provider or key) |
-| 9 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Needs weeks of checks |
-| 10 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Later |
+| 8 | **Price after the check** in `review_checks`: for every check (above all skip/wait), the underlying's move from the check price to the window end, with the best and worst move in between | A skipped idea shows what it would have done; numbers match recorded bars | Next |
+| 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Not started; needs a source choice (new provider or key) |
+| 10 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Needs weeks of checks |
+| 11 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Later |
 
 Shadow Isaac ([design](shadow-trader-design.md)) follows the advisor.
 

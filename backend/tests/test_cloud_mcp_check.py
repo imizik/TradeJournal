@@ -130,7 +130,7 @@ IDEA = {"ticker": "spy", "side": "long", "instrument": "stock", "horizon": "intr
 def test_catalog_metadata_and_scopes(harness):
     with TestClient(harness.server().streamable_http_app()) as client:
         metadata = client.get("/.well-known/oauth-protected-resource/check/mcp").json()
-        assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == SCOPES.split()
+        assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == [*SCOPES.split(), "offline_access"]
         tools = {t["name"]: t for t in rpc(client, "", {}, harness.token(), "tools/list").json()["result"]["tools"]}
         assert set(tools) == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
         "preopen_watchlist"}
