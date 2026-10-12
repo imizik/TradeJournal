@@ -248,6 +248,21 @@ overrode (traded against a wait/pass and its P&L; skipped a go and the move
 after); and Jo's saved verdicts against the rules. Groups under 10 settled
 checks say "not enough evidence".
 
+Swing scoring (advisor step 11, `pretrade-swing-v1`): `horizon: swing` ideas
+read the same live packet and are scored from its completed daily bars.
+Textbook defaults fixed before any test on Isaac's trades (see the
+[swing roadmap](../swing-strategy-roadmap.md#5-the-first-swing-families)):
+against the trend (price not past the 50-day average in the idea's direction)
+is `pass`; more than 1.5 daily ATR past the 20-day EMA or RSI over 70 (under 30
+for shorts) is `wait` for a pullback; a 9/20-day EMA cross against the idea is
+`wait` for it to cross back; otherwise `go`. Waits expire at the next weekday's
+close. A stop is measured in daily ATRs and a wrong-side stop is `pass`.
+History uses his closed trades on that ticker and side held overnight; a weak
+record (8+ trades, under 40% won, negative average) turns `go` into `wait`.
+The answer carries the daily inputs and caveats that the rules are untested
+and that no earnings date was checked. Swing checks are not yet linked to
+outcomes or graded.
+
 ## Next steps
 
 The advisor plan agreed with Isaac on October 12, 2026, in order. The end goal:
@@ -268,7 +283,7 @@ was, and what overriding cost.
 | 8 | **Price after the check** in `review_checks`: for every check (above all skip/wait), the underlying's move from the check price to the window end, with the best and worst move in between | A skipped idea shows what it would have done; numbers match recorded bars | Built (`price_after`; final results saved once) |
 | 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Not started; needs a source choice (new provider or key) |
 | 10 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Built (`grade_checks`, `/advisor-review`); needs weeks of checks to mean much |
-| 11 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Later |
+| 11 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Built (`pretrade-swing-v1`); outcome linking for swings still open |
 
 Shadow Isaac ([design](shadow-trader-design.md)) follows the advisor.
 

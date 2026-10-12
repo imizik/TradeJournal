@@ -19,6 +19,11 @@ from sqlmodel import Session, select
 from app.models import Account, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 RULES_VERSION = "pretrade-rules-v1"
+SWING_RULES_VERSION = "pretrade-swing-v1"
+# Textbook swing defaults fixed before any test on Isaac's trades (docs/swing-strategy-roadmap.md section 5).
+SWING_EXTENDED_ATR = 1.5
+SWING_RSI_HOT = 70
+SWING_TIGHT_STOP_ATR = 0.5
 NY = ZoneInfo("America/New_York")
 # Display policy, not proof: below these the card says "not enough history".
 MIN_TRADES = 8
@@ -182,6 +187,85 @@ def history_card(rows: Iterable[dict], features: dict, receipt_utc: datetime) ->
     }
 
 
+def swing_history_card(rows: Iterable[dict], features: dict, receipt_utc: datetime) -> dict:
+    """Closed trades before the check on this ticker and side: those held overnight first, then all."""
+    cutoff = _ny_wall(receipt_utc)
+    prior = [row for row in rows if datetime.fromisoformat(row["closed_at"]) < cutoff]
+    same_side = [row for row in prior if row["underlying"] == features["underlying"] and row["side"] == features["side"]]
+    overnight = [row for row in same_side if row["closed_at"][:10] > row["opened_at"][:10]]
+    definition = {key: features[key] for key in ("underlying", "side")}
+    return {
+        "as_of_ny": cutoff.isoformat(timespec="seconds"),
+        "cohorts": [
+            {"name": "same_ticker_side_overnight", "definition": {**definition, "held": "overnight"}, **_summary(overnight)},
+            {"name": "same_ticker_side", "definition": definition, **_summary(same_side)},
+        ],
+        "source_fill_keys": sorted(row["source_fill_key"] for row in overnight),
+    }
+
+
+def _next_session_close(receipt_utc: datetime) -> str:
+    """Swing waits last until the next weekday's close (holidays are not modelled)."""
+    day = receipt_utc.astimezone(NY).date() + timedelta(days=1)
+    while day.weekday() >= 5:
+        day += timedelta(days=1)
+    return datetime(day.year, day.month, day.day, *SESSION_CLOSE, tzinfo=NY).isoformat(timespec="minutes")
+
+
+def swing_verdict(analysis: dict, history: dict, idea: dict, receipt_utc: datetime) -> dict:
+    """Multi-day ideas from completed daily bars: trend, extension and pullback, stop in daily ATRs.
+
+    Long: trend is price above the 50-day average; the 9-day EMA above the 20-day is aligned. Extended (more than
+    1.5 ATR past the 20-day EMA, or RSI over 70) waits for a pullback; a pullback in progress waits for the 9-day EMA
+    to cross back. Against the trend passes. Short mirrors it. Textbook defaults, not fitted to Isaac's trades.
+    """
+    data = analysis.get("data") or {}
+    daily = data.get("daily") or {}
+    price = ((data.get("snapshot") or {}).get("price") or (data.get("intraday") or {}).get("price")
+             or daily.get("last_close"))
+    sma50, ema9, ema20, atr, rsi = (daily.get(key) for key in ("sma_50", "ema_9", "ema_20", "atr_14", "rsi_14"))
+    up = idea.get("side") != "short"
+    sign = 1 if up else -1
+    word = "above" if up else "below"
+    reasons, wait_for = [], None
+    risk = {"stop": idea.get("stop"), "note": "no stop given; none invented"}
+    if None in (price, sma50, ema9, ema20, atr, rsi) or not atr:
+        return {"verdict": "insufficient_data", "wait_for": None, "risk_check": risk,
+                "reasons": [{"source": "daily", "text": "not enough daily history to score a swing (needs 50 sessions)"}]}
+    stretch = sign * (price - ema20) / atr
+    hot = rsi > SWING_RSI_HOT if up else rsi < 100 - SWING_RSI_HOT
+    if sign * (price - sma50) <= 0:
+        verdict = "pass"
+        reasons.append({"source": "daily", "text": f"price {price} is not {word} the 50-day average {sma50}: against the trend"})
+    elif stretch > SWING_EXTENDED_ATR or hot:
+        verdict = "wait"
+        wait_for = {"condition": f"a pullback toward the 20-day EMA {ema20}", "expires_at": _next_session_close(receipt_utc)}
+        reasons.append({"source": "daily", "text": f"extended: {stretch:.1f} ATR from the 20-day EMA, RSI {rsi:.0f}"})
+    elif sign * (ema9 - ema20) <= 0:
+        verdict = "wait"
+        wait_for = {"condition": f"the 9-day EMA back {word} the 20-day EMA {ema20}", "expires_at": _next_session_close(receipt_utc)}
+        reasons.append({"source": "daily", "text": f"pullback in progress inside the trend: 9-day EMA {ema9} vs 20-day {ema20}"})
+    else:
+        verdict = "go"
+        reasons.append({"source": "daily", "text": f"trend intact: {word} the 50-day average {sma50}, 9-day EMA {word} "
+                        f"the 20-day, {stretch:.1f} ATR from it, RSI {rsi:.0f}"})
+    same = history["cohorts"][0]
+    if verdict == "go" and same.get("enough") and (same.get("win_rate") or 0) < WEAK_WIN_RATE and (same.get("avg_pnl") or 0) < 0:
+        verdict = "wait"
+        wait_for = {"condition": f"a pullback toward the 20-day EMA {ema20}", "expires_at": _next_session_close(receipt_utc)}
+        reasons.append({"source": "history", "text": f"your {same['trades']} similar overnight trades won "
+                        f"{same['win_rate']:.0%} with average P&L {same['avg_pnl']}"})
+    stop = idea.get("stop")
+    if stop is not None:
+        distance = sign * (price - stop)
+        risk = {"stop": stop, "reference_price": price, "distance_pct": round(distance / price * 100, 3),
+                "distance_atr": round(distance / atr, 2), "daily_atr": atr}
+        if distance <= 0 and verdict in ("go", "wait"):
+            verdict, wait_for = "pass", None
+            reasons.append({"source": "risk", "text": "stop is on the wrong side of the price for this direction"})
+    return {"verdict": verdict, "wait_for": wait_for, "reasons": reasons[:3], "risk_check": risk}
+
+
 def _wait_expiry(receipt_utc: datetime) -> str:
     ny = receipt_utc.astimezone(NY)
     close = ny.replace(hour=SESSION_CLOSE[0], minute=SESSION_CLOSE[1], second=0, microsecond=0)
@@ -291,8 +375,9 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
             or idea["horizon"] not in ("intraday", "swing"):
         raise ValueError("side long|short, instrument stock|option, horizon intraday|swing")
     rows = list(rows)
-    history = history_card(rows, idea_features(idea, analysis), receipt_utc)
-    rules = rules_verdict(analysis, history, idea, receipt_utc)
+    swing = idea["horizon"] == "swing"
+    history = (swing_history_card if swing else history_card)(rows, idea_features(idea, analysis), receipt_utc)
+    rules = (swing_verdict if swing else rules_verdict)(analysis, history, idea, receipt_utc)
     assessment = analysis.get("assessment") or {}
     data = analysis.get("data") or {}
     intraday = data.get("intraday") or {}
@@ -302,10 +387,24 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
             "invalidation": assessment.get("invalidation"), "generated_at": assessment.get("generated_at"),
             "staleness": data.get("staleness")}
     would_change = assessment.get("trigger") if rules["verdict"] in ("wait", "pass") else assessment.get("invalidation")
+    caveats = _caveats(analysis, history)
+    if swing:
+        daily = data.get("daily") or {}
+        live["daily"] = {key: daily.get(key) for key in ("as_of_date", "last_close", "ema_9", "ema_20", "sma_50",
+                                                         "sma_200", "rsi_14", "atr_14", "pct_vs_sma_50", "pct_vs_sma_200")}
+        sma50 = daily.get("sma_50")
+        would_change = ((rules["wait_for"] or {}).get("condition") if rules["verdict"] == "wait"
+                        else f"a daily close {'below' if idea['side'] != 'short' else 'above'} the 50-day average {sma50}"
+                        if rules["verdict"] == "go" and sma50 else
+                        f"a daily close back {'above' if idea['side'] != 'short' else 'below'} the 50-day average {sma50}"
+                        if sma50 else None)
+        caveats = [c for c in caveats if c != "live quotes/bars are stale"]  # Daily bars decide a swing.
+        caveats += ["swing rules are textbook defaults, not yet tested on your trades",
+                    "earnings date not checked (no calendar source yet)"]
     option = option_summary(data.get("option"), idea.get("stop"), intraday.get("price")) if idea["instrument"] == "option" else None
-    answer = {"rules_version": RULES_VERSION, "receipt_utc": receipt_utc.astimezone(timezone.utc).isoformat(),
+    answer = {"rules_version": SWING_RULES_VERSION if swing else RULES_VERSION, "receipt_utc": receipt_utc.astimezone(timezone.utc).isoformat(),
               "idea": idea, **rules, "would_change": would_change, "history": history, "live": live, "option": option,
-              "caveats": _caveats(analysis, history)}
+              "caveats": caveats}
     answer["live_context_sha256"] = hashlib.sha256(
         json.dumps({"request": analysis.get("request"), "data": data}, sort_keys=True, default=str).encode()).hexdigest()
     return answer
