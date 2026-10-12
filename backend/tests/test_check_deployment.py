@@ -44,7 +44,7 @@ def test_owner_reader_unit_is_private_readonly_and_networkless():
     assert "User=tj-check\n" in service and "PrivateNetwork=true" in service and "RestrictAddressFamilies=AF_UNIX\n" in service
     assert "LoadCredential" not in service and "EnvironmentFile" not in service and "[Install]" not in service
     assert "TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro" in service
-    assert "BindReadOnlyPaths=/opt/tradejournal-check/backend /etc/tradejournal-check/owner.json " in service
+    assert "BindReadOnlyPaths=/opt/tradejournal-check/backend /etc/tradejournal-check/owner " in service
     socket = unit("tradejournal-check-owner.socket")
     assert "ListenStream=/run/tradejournal-check-owner/owner.sock" in socket and "SocketUser=root" in socket
     assert f"SocketGroup={control.OWNER_WEB}\n" in socket and "SocketMode=0660" in socket and "[Install]" not in socket
@@ -158,7 +158,7 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
     assert sorted(p.name for p in config_dir.iterdir()) == sorted(control.SETTINGS)  # No credential files.
     assert "meta skuid 1001" in (config_dir / "network.nft").read_text()
     assert json.loads((config_dir / "config.json").read_text())["enabled"] is False
-    owner = json.loads((config_dir / "owner.json").read_text())
+    owner = json.loads((config_dir / "owner/config.json").read_text())
     assert owner == {"enabled": False, "peer_uid": 2001, "socket_path": str(control.OWNER_RUN / "owner.sock"),
         "ledger_path": "/var/lib/tradejournal-check/ledger.db"}
     assert (control.ROOT / "backend/data/alpaca_cache").is_dir()

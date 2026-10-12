@@ -161,7 +161,7 @@ def create_app(config_path):
     @app.middleware("http")
     async def guard(request, call_next):
         path = request.url.path
-        match = CHECK_PATH.match(path)
+        match = CHECK_PATH.fullmatch(path)
         if request.method != "GET" or (path != LIST_PATH and match is None) or request.url.query:
             return JSONResponse({"detail": "Not found"}, 404)
         headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}

@@ -48,9 +48,9 @@ UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejourna
 RUNTIME_FILES = ("cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
-SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner.json")
+SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
-# client) and enables owner.json; the network policy and view SQL stay pinned.
+# client) and enables owner/config.json; the network policy and view SQL stay pinned.
 PINNED_SETTINGS = ("network.nft", "feature-view.sql")
 
 
@@ -188,7 +188,10 @@ def install(bundle, approved, *, dns_servers, host_ips):
         private_file(CONFIG / "feature-view.sql", (bundle / "config/feature-view.sql").read_bytes(), mode=0o644)
         owner = {"enabled": False, "peer_uid": pwd.getpwnam(OWNER_WEB).pw_uid,
             "socket_path": str(OWNER_RUN / "owner.sock"), "ledger_path": config["ledger_file"]}
-        private_file(CONFIG / "owner.json", (json.dumps(owner, indent=2) + "\n").encode(), mode=0o640, group=GROUP)
+        # Its own directory, bound whole: a replaced (renamed) file still reaches the running reader.
+        (CONFIG / "owner").mkdir(mode=0o750)
+        old.run("chown", f"root:{GROUP}", CONFIG / "owner")
+        private_file(CONFIG / "owner/config.json", (json.dumps(owner, indent=2) + "\n").encode(), mode=0o640, group=GROUP)
         for path, owner, mode in ((STATE, ACCOUNTS["service"], 0o700), (KEYS, ACCOUNTS["keys"], 0o750),
                 (FEATURES, ACCOUNTS["features"], 0o750)):
             path.mkdir(mode=mode)

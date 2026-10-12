@@ -214,8 +214,8 @@ def exercise(archive, scratch):
         " insufficient_data, real feature history, immutable ledger replay across restart, verdict note once."
         f" Server timings {first['timings_ms']}")
 
-    owner = json.loads((control.CONFIG / "owner.json").read_text())
-    owned(control.CONFIG / "owner.json", json.dumps({**owner, "enabled": True}).encode(), "root:tj-check")
+    owner = json.loads((control.CONFIG / "owner/config.json").read_text())
+    owned(control.CONFIG / "owner/config.json", json.dumps({**owner, "enabled": True}).encode(), "root:tj-check")
     run("systemctl", "start", "tradejournal-check-owner.socket")
     status, body = owner_get("/owner/checks", control.OWNER_WEB)
     assert status == 200, (status, body)

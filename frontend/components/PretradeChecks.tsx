@@ -38,9 +38,14 @@ const idea = (c: { ticker: string | number | null; side: string | number | null;
 const SESSION: Record<string, string> = { rth: "regular session", premarket: "premarket", afterhours: "after hours", closed: "market closed" };
 const num = (value: number | null | undefined, digits = 2) => value == null ? "—" : value.toFixed(digits);
 
+// Not switched on is configuration, not an outage: the section stays out of the way.
+const DORMANT = "Pre-trade check review is not switched on yet";
+class Dormant extends Error {}
+
 async function readJson<T>(url: string, signal: AbortSignal, schema: string): Promise<T> {
   const response = await fetch(url, { cache: "no-store", redirect: "error", signal });
   const body = await response.json();
+  if (response.status === 503 && body.detail === DORMANT) throw new Dormant(DORMANT);
   if (!response.ok) throw new Error(body.detail ?? "Saved pre-trade checks unavailable.");
   if (body.schema_version !== schema) throw new Error("Unsupported pre-trade check response.");
   return body as T;
@@ -92,6 +97,7 @@ export default function PretradeChecks() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [dormant, setDormant] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [detailError, setDetailError] = useState("");
@@ -107,7 +113,8 @@ export default function PretradeChecks() {
       const body = await readJson<Listing>("/api/check-owner/checks", pending.signal, "check-owner-list-v1");
       if (current === sequence.current) setListing(body);
     } catch (err) {
-      if (current === sequence.current && !pending.signal.aborted) { setListing(null); setError(err instanceof Error ? err.message : "Saved pre-trade checks unavailable."); }
+      if (current === sequence.current && !pending.signal.aborted && err instanceof Dormant) setDormant(true);
+      else if (current === sequence.current && !pending.signal.aborted) { setListing(null); setError(err instanceof Error ? err.message : "Saved pre-trade checks unavailable."); }
     } finally { if (current === sequence.current) setLoading(false); }
   }, []);
 
@@ -131,6 +138,7 @@ export default function PretradeChecks() {
     return () => { active = false; sequence.current += 1; controller.current?.abort(); };
   }, [reload]);
 
+  if (dormant) return null;
   return <section className="mx-auto mb-4 max-w-4xl rounded border bg-card p-3 text-sm" data-testid="pretrade-checks" aria-labelledby="pretrade-checks-heading">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <h2 id="pretrade-checks-heading" className="font-semibold">Pre-trade checks</h2>

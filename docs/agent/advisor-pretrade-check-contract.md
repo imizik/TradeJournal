@@ -158,7 +158,7 @@ Step 3 (owner view) is **built, not installed or activated** (October 11, 2026):
   `mode=ro` with `query_only`, and admits only the kernel-identified
   `tj-advisor-web-owner` peer (the trial's private owner frontend) on
   `/run/tradejournal-check-owner/owner.sock`. `install` now also writes the
-  two owner units and a disabled `/etc/tradejournal-check/owner.json`, and
+  two owner units and a disabled config in its own bound directory, and
   refuses when that frontend identity is missing.
 - Page: `/advisor-review` lists and reopens checks through
   `/api/check-owner/checks[/{id}]`, behind the same owner session as the

@@ -8,7 +8,7 @@ Type=exec
 User=tj-check
 Group=tj-check
 WorkingDirectory=/opt/tradejournal-check/backend
-ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-check/backend/cloud_check_owner.py --config /etc/tradejournal-check/owner.json
+ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-check/backend/cloud_check_owner.py --config /etc/tradejournal-check/owner/config.json
 Environment=PYTHON_DOTENV_DISABLED=1
 Environment=PYTHONDONTWRITEBYTECODE=1
 UMask=0077
@@ -21,7 +21,7 @@ ProtectSystem=strict
 ProtectHome=true
 ProtectProc=invisible
 TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro
-BindReadOnlyPaths=/opt/tradejournal-check/backend /etc/tradejournal-check/owner.json /run/tradejournal-check-owner
+BindReadOnlyPaths=/opt/tradejournal-check/backend /etc/tradejournal-check/owner /run/tradejournal-check-owner
 # SQLite needs the ledger directory writable for its WAL index files while the
 # check service writes; the reader opens the file mode=ro with query_only.
 BindPaths=/var/lib/tradejournal-check
