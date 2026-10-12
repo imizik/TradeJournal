@@ -220,6 +220,35 @@ configuration. Disable the bridge with `sudo systemctl disable --now
 tradejournal-moomoo.service`; the frontend lab route is unavailable until the
 operator explicitly enables the bridge again.
 
+### Depth recorder and its R2 upload
+
+The [depth recorder](../docs/level2-manual-connection.md#depth-recorder) reuses the
+provisioned `tradejournal-moomoo` account and credentials. Releases install its
+units but never enable them. To change the default watchlist, write
+`TJ_DEPTH_TICKERS=SPY,MU,NBIS,SNDK,NVDA` (plain tickers, at most 20) to a
+root-owned 0600 `/etc/tradejournal/depth-recorder.env`, then:
+
+```bash
+sudo systemctl enable --now tradejournal-depth-recorder.service
+sudo cat /var/lib/tradejournal-depth/status.json
+```
+
+For the upload, create a separate private R2 bucket and an Object Read & Write
+token scoped to that bucket only (not the offsite backup's). Put its account
+endpoint, bucket and keys in a root-owned 0600 `/etc/tradejournal/depth-r2.env`:
+
+```
+TJ_DEPTH_R2_ENDPOINT=https://ACCOUNT_ID.r2.cloudflarestorage.com
+TJ_DEPTH_R2_BUCKET=trade-journal-depth
+TJ_DEPTH_R2_ACCESS_KEY_ID=...
+TJ_DEPTH_R2_SECRET_ACCESS_KEY=...
+```
+
+then `sudo systemctl enable --now tradejournal-depth-upload.timer`. Deployments
+stop both before switching releases and start them again only when enabled.
+`sudo systemctl disable --now tradejournal-depth-recorder.service` stops recording;
+recorded files stay until removed.
+
 ## Backups and scheduled Robinhood import
 
 The release installs five timers:

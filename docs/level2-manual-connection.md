@@ -99,6 +99,45 @@ which one is drawn, ARCA-labelled by default. Brightness is relative to the
 not consolidated or executable liquidity, and no spread/imbalance signal is
 derived from it.
 
+## Depth recorder
+
+`backend/scripts/moomoo_depth_recorder.py` is an opt-in always-on service
+(`tradejournal-depth-recorder.service`) for a short watchlist, by default SPY, MU,
+NBIS, SNDK and NVDA (`TJ_DEPTH_TICKERS` in `/etc/tradejournal/depth-recorder.env`,
+at most 20 plain tickers). From 04:00 to 20:00 New York on weekdays it holds one
+provider connection with the same service account, credentials and in-session
+auth refresh as the bridge, and subscribes order_book and ticker for every
+watched ticker. Holidays are not known to it; such a session receives nothing.
+
+It writes one gzip JSON-lines file per ticker per day under
+`/var/lib/tradejournal-depth/YYYY-MM-DD/`:
+
+- `{"t":"b"}` book lines: every 2 seconds, the latest update of each book kind
+  (`arca` or `mpid`) that changed in that window, with its source time and
+  estimated age at receipt. Books are never merged; a missing side stays empty
+  and nothing is carried forward. A window without an update writes nothing.
+- `{"t":"x"}` trade lines: every print with price, volume, provider direction
+  (`BUY`, `SELL`, `NEUTRAL`, else null), sequence and type. The provider does not
+  document whether direction is the aggressor side.
+
+It never reads the journal, its database or any R2 credential. Below 2 GB of
+free disk it stops writing and says so in `status.json`; without an uploader it
+keeps 14 local days. A failed connection reconnects with a back-off from 15
+seconds to 5 minutes; provider and credential text is never logged.
+
+`backend/scripts/depth_upload.py` (`tradejournal-depth-upload.timer`, 20:30 New
+York) PUTs each finished day to `depth/v1/<TICKER>/<YYYY>/<YYYY-MM-DD>.jsonl.gz`
+in a private R2 bucket of its own, signs with SigV4, confirms the stored size,
+marks the day uploaded and deletes uploaded local days older than three days.
+It uses a bucket-scoped token in `/etc/tradejournal/depth-r2.env`, never the
+offsite backup's, so the provider-connected process holds no storage key.
+
+A live minute on 2026-10-12 after hours (18:03 ET, five tickers) wrote 14–17 KB
+per ticker: 60/60-entry books in both kinds (SPY asks 31–34 after hours) and
+56–246 trades, about three quarters marked NEUTRAL. Expect roughly 25 MB per
+ticker per trading day until a full regular session is measured. Nothing here
+draws the recorded data yet; reading it into Charts is the next step.
+
 ## Fields and clocks
 
 - Price and volume retain provider numeric precision. Volume is labeled provider

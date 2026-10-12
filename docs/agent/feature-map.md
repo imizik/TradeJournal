@@ -154,7 +154,9 @@ covered by `frontend/e2e/level2-lab.spec.ts`. A separate manual provider section
 (`frontend/components/level2/useDepthSession.ts`) and feeds a memory-only
 heatmap behind the main chart's candles for one US ticker at a time (`frontend/lib/depthHeatmap.ts`, drawn from
 `frontend/components/charts/PriceChart.tsx`); its browser checks are in
-`frontend/e2e/charts.spec.ts`. It changes no chart feed or saved metrics;
+`frontend/e2e/charts.spec.ts`. The opt-in depth recorder and its R2 upload are
+`backend/scripts/moomoo_depth_recorder.py` and `backend/scripts/depth_upload.py`,
+tested in `backend/tests/test_moomoo_depth_recorder.py`. It changes no chart feed or saved metrics;
 see the [prototype notes](../level2-synthetic-prototype.md) and
 [manual connection contract](../level2-manual-connection.md).
 

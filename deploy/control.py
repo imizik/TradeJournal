@@ -41,6 +41,12 @@ OPTIONAL_UNITS = ["tradejournal-assistant.service", *PRACTICE_UNITS, *PLAN_REVIE
 MOOMOO_SERVICE = "tradejournal-moomoo.service"
 MOOMOO_FRONTEND_ENV = CONFIG / "moomoo-frontend.env"
 OPTIONAL_UNITS.append(MOOMOO_SERVICE)
+# The depth recorder and its nightly R2 upload are opt-in the same way: shipped
+# with releases, started again only when the owner enabled them.
+DEPTH_RECORDER = "tradejournal-depth-recorder.service"
+DEPTH_UPLOAD_UNITS = ["tradejournal-depth-upload.service", "tradejournal-depth-upload.timer"]
+OPTIONAL_UNITS.extend([DEPTH_RECORDER, *DEPTH_UPLOAD_UNITS])
+OPT_IN_TIMERS.append("tradejournal-depth-upload.timer")
 # Retired units stay listed until upgrades have removed their installed copies.
 RETIRED_SERVICES = ["tradejournal-ingress"]
 # The alert check keeps running through a deployment, so a release that fails
@@ -189,7 +195,7 @@ def stop_services() -> None:
     # Missing units on first install are harmless; a failed stop is not.
     # The bridge owns a provider socket and must stop before its frontend and
     # release target are replaced, including when rolling back old releases.
-    for service in [MOOMOO_SERVICE, "tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *PLAN_REVIEW_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
+    for service in [DEPTH_RECORDER, *DEPTH_UPLOAD_UNITS, MOOMOO_SERVICE, "tradejournal-assistant.service", *RETIRED_SERVICES, *PRACTICE_UNITS, *PLAN_REVIEW_UNITS, *TIMERS, *[f"{name}.service" for name in AUTOMATION_SERVICES], *SERVICES]:
         if service in ALERT_UNITS:
             continue
         result = subprocess.run(["systemctl", "show", service, "--property=LoadState", "--value"], capture_output=True, text=True, check=False)
@@ -258,6 +264,9 @@ def start_services(release: Path, confirmation: str) -> None:
     # frontend configuration; absent files and disabled units are normal.
     if moomoo_is_enabled():
         run("systemctl", "start", MOOMOO_SERVICE)
+    if (release / "deploy/systemd" / DEPTH_RECORDER).is_file() and subprocess.run(
+            ["systemctl", "is-enabled", "--quiet", DEPTH_RECORDER], check=False).returncode == 0:
+        run("systemctl", "start", DEPTH_RECORDER)
 
 
 def moomoo_is_enabled() -> bool:

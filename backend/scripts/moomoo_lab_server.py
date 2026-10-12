@@ -43,6 +43,8 @@ def book_kind(event) -> str:
     exchange = books[0].get("exchange") if books else None
     return "arca" if exchange == "ARCA" else "mpid" if exchange == "NASDAQ" else "unknown"
 SYSTEMD_CREDENTIAL_DIR = Path("/run/credentials/tradejournal-moomoo.service")
+# The depth recorder runs as the same service user with its own unit's copies.
+SYSTEMD_CREDENTIAL_DIRS = (SYSTEMD_CREDENTIAL_DIR, Path("/run/credentials/tradejournal-depth-recorder.service"))
 
 
 def validate_systemd_mode(info, *, directory=False):
@@ -65,7 +67,7 @@ def validate_systemd_acl(raw, *, directory=False):
 
 
 def read_systemd_credential(path):
-    if path.parent != SYSTEMD_CREDENTIAL_DIR:
+    if path.parent not in SYSTEMD_CREDENTIAL_DIRS:
         raise diagnostic.DiagnosticError("Unexpected systemd credential directory.")
     validate_systemd_mode(path.parent.lstat(), directory=True)
     validate_systemd_acl(os.getxattr(path.parent, "system.posix_acl_access", follow_symlinks=False), directory=True)
