@@ -26,7 +26,11 @@ def _clean_environment():
         raise ValueError("Ambient database/provider environment is forbidden")
 
 
-def read_view(database_url: str) -> list[dict]:
+POSITION_VIEW = "pretrade_position_source"
+CAPTURE_VIEW = "pretrade_capture_source"
+
+
+def read_view(database_url: str, view: str = VIEW) -> list[dict]:
     from sqlalchemy import create_engine, text
 
     engine = create_engine(database_url, pool_pre_ping=False, connect_args={"connect_timeout": 10}
@@ -35,7 +39,7 @@ def read_view(database_url: str) -> list[dict]:
         with engine.connect() as connection:
             if connection.dialect.name == "postgresql":
                 connection.execute(text("SET TRANSACTION READ ONLY"))
-            return [dict(row) for row in connection.execute(text(f"SELECT * FROM {VIEW}")).mappings()]
+            return [dict(row) for row in connection.execute(text(f"SELECT * FROM {view}")).mappings()]
     finally:
         engine.dispose()
 
@@ -43,12 +47,20 @@ def read_view(database_url: str) -> list[dict]:
 def run(pointer_file: Path, database_url_file: Path) -> dict:
     _clean_environment()
     from journal_coach_refresh import _regular_private_file
-    from pretrade_features import publish, rows_from_view
+    from pretrade_features import CAPTURE_KEYS, POSITION_KEYS, context_rows, publish, publish_context, rows_from_view
 
     url = _regular_private_file(database_url_file, _CREDENTIAL_LIMIT, "database credential").decode().strip()
     if not url or "\n" in url or "\r" in url:
         raise ValueError("Database credential is invalid")
-    return publish(rows_from_view(read_view(url)), pointer_file)
+    result = publish(rows_from_view(read_view(url)), pointer_file)
+    try:
+        positions = context_rows(read_view(url, POSITION_VIEW), POSITION_KEYS)
+        captures = context_rows(read_view(url, CAPTURE_VIEW), CAPTURE_KEYS)
+        result["context"] = publish_context(positions, captures, pointer_file.parent / "context.json")
+    except Exception:
+        # Context views are applied separately; history still publishes without them.
+        result["context"] = "unavailable"
+    return result
 
 
 def main(argv=None):

@@ -187,6 +187,27 @@ total P&L only (never counted as followed); `no_closed_trade` never claims no po
 appear only after they close; `pending` until the window has passed and the
 history file was refreshed after it; swing checks are `not_linked`.
 
+While holding and notes (slice 2, owner decision October 12, 2026: Jo may see
+all of Isaac's trade data; still never credentials, account numbers, internal
+IDs, fill keys, raw emails, images or audio). The publisher also reads two
+additive views from [check_scope.py](../../deploy/check_scope.py)
+(`pretrade_position_source`: open non-Webull trades with size, entry, strike,
+expiration, account name/type; `pretrade_capture_source`: newest 200 non-Webull captures
+with setup, wording, note, transcript, latest added note, linked/not-taken,
+account name/type but never the capture's account label, which embeds digits) and
+writes a content-addressed context file beside the history file. Jo's tools
+(`check:read`): `position_check(ticker?, stop?)` returns each open position
+with time held, live underlying, stop distance and how similar closed trades
+went after entry (win rate, median best/worst move, giveback, hold time), with
+no verdict and no invented option P&L; `get_notes(ticker?)` returns recent
+captures. `check_control.py upgrade --approve-sql <sha>` (or `add-context-views` on a
+fresh install) applies the reviewed `context-views.sql` once and records its
+exact bytes; a rerun skips only when both views exist and the recorded SQL is
+identical, and refuses anything else. Positions are as fresh as the 10-minute
+publish and read as stale after 30 minutes; a stop applies only when one
+position matches; positions are treated as bought (sold options would read
+inverted).
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his
