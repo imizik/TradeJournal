@@ -6596,14 +6596,14 @@ async function level2Service(page: Page, options: { enabled?: boolean; hold?: bo
   await page.route(L2_PATH, async (route) => {
     if (route.request().method() === "GET") { calls.get += 1; return route.fulfill({ json: { enabled: options.enabled ?? true } }); }
     calls.post += 1;
-    if (options.hold) await new Promise((resolve) => setTimeout(resolve, 2500));
+    if (options.hold) await new Promise((resolve) => setTimeout(resolve, 30_000));
     await route.fulfill({ status: 200, contentType: "application/x-ndjson", body: options.hold ? "" : l2Book }).catch(() => undefined);
   });
   return calls;
 }
 const l2Aborted = (page: Page) => page.evaluate(() => (window as unknown as L2Window).l2Posts.map((post) => post.aborted));
 const l2Tab = (page: Page) => page.getByRole("button", { name: "Level 2", exact: true });
-const l2Connect = (page: Page) => page.getByRole("button", { name: "Connect for 30 seconds" });
+const l2Connect = (page: Page) => page.getByRole("button", { name: "Connect", exact: true });
 const setSymbol = async (page: Page, symbol: string) => { const input = page.getByLabel("Chart symbol"); await input.fill(symbol); await input.press("Enter"); };
 
 test("Level 2 opens in the dock without starting a session, shows a replaced latest book, and says NVDA only elsewhere", async ({ page }) => {
@@ -6623,14 +6623,15 @@ test("Level 2 opens in the dock without starting a session, shows a replaced lat
   await expect(panel.getByText("123.4567")).toBeVisible();
   await expect(panel.getByText("Subscription: success · code 0").first()).toBeVisible();
   expect(calls.post).toBe(1);
+  // The heatmap leaves out an update with no usable source time rather than guessing one.
+  await expect(sidePanel(page).getByText("Nothing collected for this book yet · 1 updates without a usable source time left out")).toBeVisible({ timeout: 3_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("level2-dock-book-desktop.png") });
-  // The dock's other tabs still work, and returning does not reconnect.
+  // The dock's other tabs still work; the session belongs to the page, so returning shows it again without reconnecting.
   await page.getByRole("button", { name: "Layers", exact: true }).click();
   await expect(sidePanel(page).getByRole("region", { name: "Layers" })).toBeVisible();
   await l2Tab(page).click();
-  await expect(l2Connect(page)).toBeEnabled();
-  await expect(panel.getByText("123.4567")).toHaveCount(0);
+  await expect(panel.getByText("123.4567")).toBeVisible();
   expect(calls.post).toBe(1);
   // Another symbol: no provider traffic, no NVDA book under its name.
   await setSymbol(page, "MRVL");
@@ -6652,41 +6653,83 @@ test("a saved Level 2 dock tab restores without a session, and a disabled servic
   expect(calls.post).toBe(0);
 });
 
-test("Level 2: closing the dock, switching tabs, switching symbol, hiding the page and leaving Charts each abort the session, with no reconnect", async ({ page }) => {
+test("Level 2: the session outlives the dock, other tabs, symbols and a hidden page; Stop and leaving Charts end it, with no reconnect", async ({ page }) => {
   await stub(page);
   const calls = await level2Service(page, { hold: true });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/charts?symbol=NVDA");
-  const start = async () => { if (!(await l2Connect(page).isVisible())) await l2Tab(page).click(); await l2Connect(page).click(); await expect(page.getByRole("button", { name: "Session running…" })).toBeVisible(); };
+  const running = page.getByRole("status", { name: "Level 2 session" });
   await l2Tab(page).click();
-  await start();
-  await l2Tab(page).click(); // a second press closes the dock
+  await l2Connect(page).click();
+  await expect(page.getByRole("button", { name: "Session running…" })).toBeVisible();
+  await l2Tab(page).click(); // a second press closes the dock; the heatmap keeps collecting
+  await expect(running).toBeVisible();
+  await page.getByRole("button", { name: "Layers", exact: true }).click();
+  await setSymbol(page, "MRVL");
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
+  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: false }); });
+  await page.waitForTimeout(200);
+  expect(await l2Aborted(page)).toEqual([false]);
+  // Another symbol's Level 2 panel can still stop it.
+  await l2Tab(page).click();
+  await sidePanel(page).getByRole("button", { name: "Stop it" }).click();
   await expect.poll(() => l2Aborted(page)).toEqual([true]);
-  await l2Tab(page).click(); // reopening shows a fresh, idle panel
-  await expect(l2Connect(page)).toBeEnabled();
-  expect(calls.post).toBe(1);
-  await start();
-  await page.getByRole("button", { name: "Layers", exact: true }).click(); // another tab
-  await expect.poll(() => l2Aborted(page)).toEqual([true, true]);
-  await l2Tab(page).click();
-  await start();
-  await setSymbol(page, "MRVL"); // another symbol
-  await expect.poll(() => l2Aborted(page)).toEqual([true, true, true]);
+  await expect(running).toHaveCount(0);
   await setSymbol(page, "NVDA");
   await expect(l2Connect(page)).toBeEnabled();
-  await start();
-  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
-  await expect.poll(() => l2Aborted(page)).toEqual([true, true, true, true]);
-  await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: false }); });
+  expect(calls.post).toBe(1);
+  // The status strip's Stop works with the dock closed.
+  await l2Connect(page).click();
+  await l2Tab(page).click();
+  await running.getByRole("button", { name: "Stop" }).click();
+  await expect.poll(() => l2Aborted(page)).toEqual([true, true]);
   await page.reload();
-  await expect(l2Connect(page)).toBeEnabled(); // the dock restores open on Level 2 with no session
-  expect(calls.post).toBe(4);
-  await start();
+  await expect(running).toHaveCount(0); // a reload starts idle, with nothing collected
+  expect(calls.post).toBe(2);
+  await l2Tab(page).click();
+  await l2Connect(page).click();
+  await expect(running).toBeVisible();
   await page.getByRole("link", { name: "Dashboard" }).click();
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
   await expect.poll(() => l2Aborted(page)).toEqual([true]); // the active request's signal was aborted on leaving Charts
   await page.waitForTimeout(300);
-  expect(calls.post).toBe(5);
+  expect(calls.post).toBe(3);
+});
+
+test("Level 2 heatmap fills behind the NVDA candles from synthetic books placed at their source times", async ({ page }) => {
+  await stub(page);
+  // Synthetic ARCA-labelled books every 2 s across the fixture's last ten 5m candles, with a resting
+  // wall that is pulled halfway through, plus one market-maker book that must not appear in the ARCA view.
+  const end = 1789392600 + 3 * 86400 + 6 * 300;
+  const lines: string[] = [JSON.stringify({ event: "status", phase: "authenticated" })];
+  for (let t = end - 3000; t < end; t += 2) {
+    const i = 239 - Math.floor((end - 1 - t) / 300);
+    const mid = Math.round((245 + i * 0.06 + Math.sin(i / 8) * 2) * 100) / 100;
+    const level = (k: number) => ({ price: Math.round((mid + k * 0.01) * 100) / 100, volume: 40 + Math.abs((k * 37) % 90), order_count: 3, mpid: "ARCA" });
+    const bids = Array.from({ length: 30 }, (_, n) => level(-1 - n));
+    const asks = Array.from({ length: 30 }, (_, n) => level(1 + n));
+    if (t < end - 1500) asks[12] = { ...asks[12], volume: 2400 };
+    lines.push(JSON.stringify({ event: "book", symbol: "US.NVDA", received_ms: t * 1000 + 40, books: [{ exchange: "", source_time_ms: t * 1000, estimated_age_ms: 40, order_volume_precision: null, bids, asks }] }));
+  }
+  await page.route(L2_PATH, (route) => route.request().method() === "GET" ? route.fulfill({ json: { enabled: true } })
+    : route.fulfill({ status: 200, contentType: "application/x-ndjson", body: lines.join("\n") + "\n" }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  await l2Tab(page).click();
+  await l2Connect(page).click();
+  await expect(sidePanel(page).getByText("50 min of ARCA-labelled book collected")).toBeVisible({ timeout: 5_000 });
+  await page.waitForTimeout(1_500); // the layer repaints at most once a second
+  await page.getByRole("region", { name: /NVDA .* chart/ }).first().screenshot({ path: test.info().outputPath("level2-heatmap-main-chart.png") });
+  // Zoomed in on the last candles, where each 2-second column has its own pixels.
+  const chart = page.getByRole("region", { name: /NVDA .* chart/ }).first();
+  const box = (await chart.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.4);
+  for (let n = 0; n < 12; n++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(50); }
+  await page.waitForTimeout(1_200);
+  await chart.screenshot({ path: test.info().outputPath("level2-heatmap-zoomed.png") });
+  await sidePanel(page).getByLabel("Heatmap behind the NVDA candles").uncheck();
+  await page.waitForTimeout(300);
+  await page.getByRole("region", { name: /NVDA .* chart/ }).first().screenshot({ path: test.info().outputPath("level2-heatmap-off.png") });
 });
 
 test("on a phone Level 2 is in the More menu as a sheet, with no page overflow", async ({ page }) => {
@@ -6697,9 +6740,9 @@ test("on a phone Level 2 is in the More menu as a sheet, with no page overflow",
   await page.getByRole("button", { name: "More chart controls" }).click();
   await page.getByRole("button", { name: "Level 2", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "Level 2" });
-  await expect(sheet.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
+  await expect(sheet.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
   expect(calls.post).toBe(0);
-  await sheet.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await sheet.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(sheet.getByText("123.4567")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("level2-dock-book-phone.png") });

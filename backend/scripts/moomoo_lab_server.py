@@ -1,4 +1,4 @@
-"""Explicitly started loopback-only, memory-only 30-second moomoo lab bridge.
+"""Explicitly started loopback-only, memory-only manual moomoo lab bridge.
 
 Never imported by app.main, never loads the journal or starts on deployment.
 Run with python -m scripts.moomoo_lab_server after configuring an ephemeral
@@ -25,7 +25,10 @@ import uvicorn
 
 from scripts import moomoo_diagnostic as diagnostic
 
-SESSION_SECONDS = 30  # Below the documented five-minute refresh recommendation.
+# A manual session runs until the browser stops it, refreshing auth in place
+# inside the documented five-minute cycle, and ends by itself at this ceiling.
+SESSION_SECONDS = diagnostic.MAX_REFRESHED_SECONDS
+REFRESH_SECONDS = 240
 SYSTEMD_CREDENTIAL_DIR = Path("/run/credentials/tradejournal-moomoo.service")
 
 
@@ -142,7 +145,7 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
 
         async def run():
             try:
-                report = await runner(appkey, key, SESSION_SECONDS, observer=observe)
+                report = await runner(appkey, key, SESSION_SECONDS, observer=observe, refresh_seconds=REFRESH_SECONDS)
                 control.put_nowait({"event": "summary", "report": report})
             except asyncio.CancelledError:
                 raise

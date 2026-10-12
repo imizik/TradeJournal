@@ -48,7 +48,7 @@ test("live session stays manually disabled when the local service is disabled", 
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
   await expect(panel.getByText("Local live service is disabled.")).toBeVisible();
-  await expect(panel.getByRole("button", { name: "Connect for 30 seconds" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();
   await page.screenshot({ path: test.info().outputPath("level2-live-disabled-desktop.png"), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -60,9 +60,9 @@ test("hiding the tab before connecting leaves the manually enabled action availa
   await enabledSession(page, "");
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await expect(panel.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
-  await expect(panel.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
   await expect(panel.getByText("No live session started.")).toBeVisible();
 });
 
@@ -96,9 +96,9 @@ test("manual session renders acknowledgements and only the latest book with miss
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await expect(panel.getByRole("button", { name: "Connect for 30 seconds" })).toBeEnabled();
-  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
-  await expect(panel.getByText("Session closed. Any retained book is for inspection only.")).toBeVisible();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(panel.getByText("Session closed. Connect starts a new one.")).toBeVisible();
   await expect(panel.getByText("Authentication: success · Session status: completed")).toBeVisible();
   await expect(panel.getByText("Subscription: failed · code 429")).toBeVisible();
   await expect(panel.getByText("Messages: 0")).toBeVisible();
@@ -124,7 +124,7 @@ test("malformed and oversized NDJSON records are ignored without leaking raw tex
   await enabledSession(page, body);
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(panel.getByText("An invalid or oversized protocol line was ignored.")).toBeVisible();
   await expect(panel.getByText("Authentication: failed · Session status: failed_or_timed_out")).toBeVisible();
   await expect(panel.getByText("x".repeat(100))).toHaveCount(0);
@@ -138,10 +138,10 @@ test("stop aborts the manual request and does not reconnect", async ({ page }) =
   });
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(panel.getByRole("button", { name: "Session running…" })).toBeVisible();
   await panel.getByRole("button", { name: "Stop" }).click();
-  await expect(panel.getByRole("button", { name: "Reload to start again" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled(); // manual reconnect only
   await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
   await page.waitForTimeout(1400);
   expect(posts()).toBe(1);
@@ -155,9 +155,9 @@ test("hidden tab cancels the active stream without automatic reconnect", async (
   });
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: true }); document.dispatchEvent(new Event("visibilitychange")); });
-  await expect(panel.getByRole("button", { name: "Reload to start again" })).toBeDisabled();
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled(); // manual reconnect only
   await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
   await page.waitForTimeout(1400);
   expect(posts()).toBe(1);
@@ -172,7 +172,7 @@ test("unmounting the panel aborts its active request", async ({ page }) => {
   });
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(panel.getByRole("button", { name: "Session running…" })).toBeVisible();
   await page.getByRole("link", { name: "Dashboard" }).click();
   await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
@@ -181,7 +181,7 @@ test("unmounting the panel aborts its active request", async ({ page }) => {
   expect(posts()).toBe(1);
 });
 
-test("the 40 second client safety timeout aborts the stream", async ({ page }) => {
+test("the client safety timeout above the eight-hour bridge ceiling aborts the stream", async ({ page }) => {
   await trackPostAbort(page);
   await page.clock.install();
   await enabledSession(page, async route => {
@@ -190,8 +190,8 @@ test("the 40 second client safety timeout aborts the stream", async ({ page }) =
   });
   await page.goto("/level2-lab");
   const panel = page.getByTestId("live-depth-session");
-  await panel.getByRole("button", { name: "Connect for 30 seconds" }).click();
-  await page.clock.fastForward(40_001);
-  await expect(panel.getByRole("button", { name: "Reload to start again" })).toBeDisabled();
+  await panel.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.clock.fastForward(8 * 3600_000 + 60_001);
+  await expect(panel.getByRole("button", { name: "Connect", exact: true })).toBeEnabled(); // manual reconnect only
   await expect.poll(async () => (await postAbortRecords(page))[0]?.aborted).toBe(true);
 });

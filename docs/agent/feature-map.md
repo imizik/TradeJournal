@@ -149,7 +149,11 @@ covered by `frontend/e2e/level2-lab.spec.ts`. A separate manual provider section
 `frontend/app/api/level2-lab/session/route.ts` and an explicitly started
 `backend/scripts/moomoo_lab_server.py` loopback bridge. Its tests are
 `frontend/e2e/level2-live.spec.ts`, `frontend/e2e/level2-route.spec.ts` and
-`backend/tests/test_moomoo_lab.py`. It changes no chart feed or saved metrics;
+`backend/tests/test_moomoo_lab.py`. On Charts the session is owned by the page
+(`frontend/components/level2/useDepthSession.ts`) and feeds a memory-only
+heatmap behind the NVDA candles (`frontend/lib/depthHeatmap.ts`, drawn from
+`frontend/components/charts/PriceChart.tsx`); its browser checks are in
+`frontend/e2e/charts.spec.ts`. It changes no chart feed or saved metrics;
 see the [prototype notes](../level2-synthetic-prototype.md) and
 [manual connection contract](../level2-manual-connection.md).
 

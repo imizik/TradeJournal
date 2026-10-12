@@ -42,6 +42,10 @@ SYMBOL = "US.NVDA"
 KEY_DIR = Path.home() / ".config/tradejournal/moomoo"
 WS_URL = "wss://webapi-quote.moomoo.com/ws"
 STREAM_TYPES = ("quote", "order_book", "ticker")
+# A refreshed manual session still ends by itself; it is never a background collector.
+MAX_REFRESHED_SECONDS = 8 * 3600
+REFRESH_ACK_SECONDS = 30
+MIN_REFRESH_SECONDS = 30
 
 
 class NoRedirectConnect(connect):
@@ -319,6 +323,12 @@ def websocket_auth(appkey: str, key: Ed25519PrivateKey, timestamp_ms: int, nonce
     }}
 
 
+def websocket_refresh(appkey: str, key: Ed25519PrivateKey, timestamp_ms: int, nonce: str, request_id: str) -> dict:
+    """Documented in-session AppKey refresh: a fresh signature over the auth layout."""
+    frame = websocket_auth(appkey, key, timestamp_ms, nonce)["data"]
+    return {"id": request_id, "action": "refresh", "data": {field: frame[field] for field in ("credential_id", "authorization", "timestamp_ms", "nonce")}}
+
+
 def protocol_summary(message: dict) -> dict:
     """Never echo messages/session identifiers; retain only safe protocol evidence."""
     code = number(message.get("code", message.get("ret_code")))
@@ -435,13 +445,19 @@ def display_book(message: dict, received_ms: int, offset_ms: float | None) -> di
     return {"event": "book", "symbol": SYMBOL, "received_ms": received_ms, "books": output}
 
 
-async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None) -> dict:
-    # No reusable long-lived connection: the hard cap is well below the
-    # documented ten-minute auth refresh limit (recommended cycle five minutes).
-    if not 1 <= seconds <= 60:
-        raise DiagnosticError("Streaming diagnostic duration must be 1..60 seconds.")
+async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None,
+                       refresh_seconds: int | None = None) -> dict:
+    # Without refresh the hard cap stays well below the documented ten-minute
+    # auth refresh limit. A longer manual session must refresh in place
+    # (recommended cycle five minutes); an unconfirmed refresh ends it.
+    if refresh_seconds is not None and not MIN_REFRESH_SECONDS <= refresh_seconds <= 300:
+        raise DiagnosticError("Refresh interval must be 30..300 seconds.")
+    if not 1 <= seconds <= (MAX_REFRESHED_SECONDS if refresh_seconds else 60):
+        raise DiagnosticError("Streaming diagnostic duration is outside the permitted cap.")
     report = {"symbol": SYMBOL, "started_at_utc": datetime.now(timezone.utc).isoformat(),
-              "requested_seconds": seconds, "refresh_policy": "Hard cap 60 seconds; below the 10-minute refresh requirement.",
+              "requested_seconds": seconds, "refresh_policy": f"Refresh every {refresh_seconds} seconds; ends if unconfirmed." if refresh_seconds
+              else "Hard cap 60 seconds; below the 10-minute refresh requirement.",
+              "refreshes": {"sent": 0, "confirmed": 0},
               "subscriptions": {kind: {"status": "not_attempted"} for kind in STREAM_TYPES},
               "message_counts": {kind: 0 for kind in ("QUOTE", "ORDER_BOOK", "TICKER")},
               "samples": {}, "protocol_samples": [], "unsubscribe": {"status": "not_needed"}, "closed": False}
@@ -471,6 +487,14 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             if kind == "ORDER_BOOK" and observer is not None and report.get("authentication", {}).get("status") == "success":
                 notify(display_book(message, time.time_ns() // 1_000_000, offset))
 
+    def correlated(message: dict, request_id: str) -> dict | None:
+        if message.get("id") == request_id:
+            return message
+        nested = message.get("data")
+        if number(message.get("ret_code")) == 0 and isinstance(nested, dict) and nested.get("id") == request_id:
+            return nested
+        return None
+
     async def receive_until(request_id: str, timeout: float) -> dict:
         until = time.perf_counter() + timeout
         while True:
@@ -480,11 +504,9 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             message = json.loads(await bounded_await(socket.recv(), remaining))
             if not isinstance(message, dict):
                 raise DiagnosticError("WebSocket protocol message is malformed.")
-            if message.get("id") == request_id:
-                return message
-            nested = message.get("data")
-            if number(message.get("ret_code")) == 0 and isinstance(nested, dict) and nested.get("id") == request_id:
-                return nested
+            reply = correlated(message, request_id)
+            if reply is not None:
+                return reply
             if message.get("type") not in ("QUOTE", "ORDER_BOOK", "TICKER"):
                 summary = protocol_summary(message)
                 if len(report["protocol_samples"]) < 4:
@@ -525,13 +547,34 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                     report["subscriptions"][kind] = result
                     notify({"event": "status", "phase": "subscribed" if result["status"] == "success" else "failed",
                             "kind": kind, "code": result["code"]})
-                while time.perf_counter() < deadline:
+                next_refresh = time.perf_counter() + refresh_seconds if refresh_seconds else None
+                pending = None  # (request id, give-up time) of the one unconfirmed refresh
+                while (now := time.perf_counter()) < deadline:
+                    if pending is None and next_refresh is not None and now >= next_refresh:
+                        request_id = f"refresh-{report['refreshes']['sent'] + 1}"
+                        await socket.send(json.dumps(websocket_refresh(appkey, key, time.time_ns() // 1_000_000,
+                                                                       secrets.token_urlsafe(24), request_id), separators=(",", ":")))
+                        report["refreshes"]["sent"] += 1
+                        pending = (request_id, now + REFRESH_ACK_SECONDS)
+                    if pending is not None and now >= pending[1]:
+                        report["refresh_failed"] = True
+                        raise DiagnosticError("Refresh was not acknowledged.")
+                    wake = min(deadline, pending[1] if pending else next_refresh or deadline)
                     try:
-                        message = json.loads(await bounded_await(socket.recv(), deadline - time.perf_counter()))
+                        message = json.loads(await bounded_await(socket.recv(), max(0.01, wake - now)))
                     except asyncio.TimeoutError:
-                        break
+                        continue
                     if not isinstance(message, dict):
                         raise DiagnosticError("WebSocket protocol message is malformed.")
+                    reply = correlated(message, pending[0]) if pending else None
+                    if reply is not None:
+                        if protocol_summary(reply)["error_present"]:
+                            report["refresh_failed"] = True
+                            raise DiagnosticError("Refresh was refused.")
+                        report["refreshes"]["confirmed"] += 1
+                        notify({"event": "status", "phase": "refreshed"})
+                        pending, next_refresh = None, time.perf_counter() + refresh_seconds
+                        continue
                     capture(message)
                 report["status"] = "completed"
             finally:
