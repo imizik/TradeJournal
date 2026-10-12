@@ -166,8 +166,8 @@ def _prefetch_rvol_history(fills: list[Fill], daily_bars: dict[str, list], on_pr
     sessions = {ticker: sorted({_bar_date(b) for b in bars}) for ticker, bars in daily_bars.items()}
     by_day: dict[date, set[str]] = defaultdict(set)
     for fill in fills:
-        if fill.executed_at.hour * 60 + fill.executed_at.minute < 9 * 60 + 30:
-            continue  # no RVOL before the open
+        if fill.executed_at.hour * 60 + fill.executed_at.minute <= 9 * 60 + 30:
+            continue  # no RVOL until a regular-session minute has completed
         fill_date = fill.executed_at.date()
         prior = [day for day in sessions.get(fill.ticker, []) if day < fill_date]
         for day in prior[-20:]:
