@@ -447,7 +447,8 @@ def begin_swap(record, incoming):
 
 def retired(record, slot, schema):
     return {"slot": slot, **{key: record[key] for key in ("manifest_sha256", "source_commit", "release", "runtime_inventory")},
-        "schema_revision": schema, "kept_inventory": old.runtime_inventory(root=KEPT / slot, roles=ROLES)}
+        "schema_revision": schema, "schema_sql": record.get("schema_sql"),
+        "kept_inventory": old.runtime_inventory(root=KEPT / slot, roles=ROLES)}
 
 
 def migration_ancestors(bundle, heads):
@@ -455,10 +456,10 @@ def migration_ancestors(bundle, heads):
     parents = {}
     for script in (bundle / "backend/alembic/versions").glob("*.py"):
         text = script.read_text()
-        revision = re.search(r'^revision(?::[^=]*)?=\s*"([^"]+)"', text, re.M)
-        down = re.search(r'^down_revision(?::[^=]*)?=\s*(.+)$', text, re.M)
+        revision = re.search(r'^revision\s*(?::[^=]*)?=\s*["\']([^"\']+)["\']', text, re.M)
+        down = re.search(r'^down_revision\s*(?::[^=]*)?=\s*(.+)$', text, re.M)
         if revision and down:
-            parents[revision[1]] = re.findall(r'"([^"]+)"', down[1])
+            parents[revision[1]] = re.findall(r'["\']([^"\']+)["\']', down[1])
     seen, pending = set(), list(heads)
     while pending:
         revision = pending.pop()
@@ -503,6 +504,7 @@ def upgrade(bundle, approved):
         os.sync()  # The new tree is durable before the record names it.
         write_atomic(RECORD, {**record, "manifest_sha256": approved, "source_commit": manifest["source_commit"],
             "release": plan["release"], "runtime_inventory": runtime(), "schema_revision": schema,
+            "schema_sql": ledger_content(bundle / "state/fixture.db")["schema"],
             "previous_runtimes": [*record.get("previous_runtimes", []), entry]})
     except BaseException:
         resume()
@@ -533,8 +535,8 @@ def downgrade():
             raise ValueError("Restored runtime differs from its recorded inventory")
         entry = retired(record, slot, live)
         os.sync()
-        write_atomic(RECORD, {**record, **{key: target[key] for key in ("manifest_sha256", "source_commit", "release",
-            "runtime_inventory", "schema_revision")}, "previous_runtimes": [*kept[:-1], entry]})
+        write_atomic(RECORD, {**record, **{key: target.get(key) for key in ("manifest_sha256", "source_commit", "release",
+            "runtime_inventory", "schema_revision", "schema_sql")}, "previous_runtimes": [*kept[:-1], entry]})
     except BaseException:
         resume()
         raise
@@ -559,11 +561,13 @@ def migrate_ledger():
     """
     record = swap_ready()
     ledger = STATE / "fixture.db"
-    current, target = ledger_revision(ledger), record.get("schema_revision")
-    if not target or current == target:
+    current, target, expected = ledger_revision(ledger), record.get("schema_revision"), record.get("schema_sql")
+    if not target or not expected or current == target:
         raise ValueError("Ledger already matches the installed runtime schema")
     info, entries = ledger.stat(), set(STATE.iterdir())
     before = ledger_content(ledger)
+    # The exact reviewed schema, plus any objects the ledger already had beyond it.
+    wanted = {**{name: sql for name, sql in before["schema"].items() if name not in expected}, **expected}
     LEDGER_BACKUPS.mkdir(mode=0o700, exist_ok=True)
     stage.exact(LEDGER_BACKUPS)
     fd, name = tempfile.mkstemp(prefix=time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + "-".join(current) + "-",
@@ -580,18 +584,23 @@ def migrate_ledger():
         run_alembic("upgrade", "heads")  # The installed scripts' heads are the recorded schema.
         after = ledger_content(ledger)
         final = ledger.stat()
-        if (ledger_revision(ledger) != target or set(STATE.iterdir()) != entries
+        if (ledger_revision(ledger) != target or set(STATE.iterdir()) != entries or after["schema"] != wanted
                 or any(after["schema"].get(name) != sql for name, sql in before["schema"].items() if name != "alembic_version")
                 or any(after["rows"].get(name) != digest for name, digest in before["rows"].items())
                 or (final.st_uid, final.st_gid, final.st_mode) != (info.st_uid, info.st_gid, info.st_mode)):
             raise ValueError("Migration changed existing ledger content or did not reach the runtime schema")
         installed()  # Runtime untouched by running its Alembic.
-    except BaseException:
+    except BaseException as error:
         # A leftover SQLite journal would be replayed onto restored bytes; leave that for review.
         if set(STATE.iterdir()) == entries and stage.digest(ledger) != original:
             with backup.open("rb") as source, ledger.open("r+b") as target_file:
                 shutil.copyfileobj(source, target_file)
                 target_file.truncate()
+                target_file.flush()
+                os.fsync(target_file.fileno())
+            if stage.digest(ledger) != original:
+                raise RuntimeError("Ledger restore incomplete; pre-migration copy is " + str(backup))
+        error.add_note("Pre-migration ledger copy: " + str(backup))
         raise
     write_atomic(RECORD, {**record, "ledger_migrations": [*record.get("ledger_migrations", []),
         {"from": current, "to": target, "backup": str(backup), "backup_sha256": original}]})

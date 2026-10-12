@@ -281,7 +281,7 @@ def preserved_bytes():
     return {path: path.read_bytes() for path in paths if path.is_file()}
 
 
-RUNTIME_FIELDS = {"manifest_sha256", "source_commit", "release", "runtime_inventory", "previous_runtimes", "schema_revision"}
+RUNTIME_FIELDS = {"manifest_sha256", "source_commit", "release", "runtime_inventory", "previous_runtimes", "schema_revision", "schema_sql"}
 
 
 def test_upgrade_swaps_only_runtime_and_downgrade_restores_it(prepared, tmp_path, monkeypatch):
@@ -308,7 +308,8 @@ def test_upgrade_swaps_only_runtime_and_downgrade_restores_it(prepared, tmp_path
     assert "reviewed newer runtime" not in (control.ROOT / "backend/cloud_mcp_advisor_bridge.py").read_text()
     assert [kept["manifest_sha256"] for kept in record["previous_runtimes"]] == [approved]
     assert preserved_bytes() == before
-    assert record == {**first, "previous_runtimes": record["previous_runtimes"], "schema_revision": record["schema_revision"]}
+    assert record == {**first, "previous_runtimes": record["previous_runtimes"], "schema_revision": record["schema_revision"],
+        "schema_sql": None}
     assert control.upgrade(newer, approved)["manifest_sha256"] == approved  # Re-upgrade builds afresh.
     control.rollback()  # The original side-by-side rollback still works after upgrades.
     assert (control.STATE / "fixture.db").read_bytes() == before[control.STATE / "fixture.db"]
@@ -498,3 +499,28 @@ def test_failed_or_destructive_migration_restores_ledger_bytes(prepared, tmp_pat
     assert "ledger_migrations" not in record
     monkeypatch.setattr(control, "run_alembic", alembic)
     assert control.migrate_ledger()["ledger_migrations"][-1]["to"] == record["schema_revision"]
+
+
+def test_partial_earlier_migration_is_refused_not_recorded(prepared, tmp_path, monkeypatch):
+    """A killed run can leave the new table without its index; a rerun must not accept that."""
+    bundle, _ = behind_ledger(prepared, tmp_path, monkeypatch)
+    newer, approved = newer_bundle(bundle)
+    control.upgrade(newer, approved)
+    ledger = control.STATE / "fixture.db"
+    connection = sqlite3.connect(ledger)
+    connection.execute("CREATE TABLE monthly_review (id CHAR(32) NOT NULL, month VARCHAR NOT NULL, review_json TEXT NOT NULL, "
+        "trade_count INTEGER NOT NULL, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL, PRIMARY KEY (id))")
+    connection.commit()
+    connection.close()
+    partial = ledger.read_bytes()
+    with pytest.raises(ValueError, match="did not reach the runtime schema") as refused:
+        control.migrate_ledger()
+    assert any("Pre-migration ledger copy" in note for note in refused.value.__notes__)
+    assert ledger.read_bytes() == partial
+    assert "ledger_migrations" not in control.installed()
+
+
+def test_migration_ancestry_reads_every_repository_script():
+    scripts = list((base.REPO / "backend/alembic/versions").glob("*.py"))
+    from app.schema import alembic_heads
+    assert len(control.migration_ancestors(base.REPO, alembic_heads())) == len(scripts)

@@ -313,10 +313,13 @@ drop-in needs its own reviewed procedure.
 heads`, `-B`) against only the v2 ledger. It first writes a root-private byte
 copy to `ledger-backups/` and records it. Only additive change is accepted:
 afterwards every existing table's SQL and every row (receipts included) must be
-identical, the revision must equal the runtime's `schema_revision`, owner/mode
-must be unchanged and no extra file may remain beside the ledger. Otherwise the
-copy's bytes are written back in place (same inode, so owner, mode and ACL stay)
-and it refuses. The current #251 ledger is one migration behind main
+identical, the whole schema must equal the bundle's staged schema recorded at
+upgrade (so a half-applied earlier attempt is refused), the revision must equal
+the runtime's `schema_revision`, owner/mode must be unchanged and no extra file
+may remain beside the ledger. Otherwise the copy's bytes are written back in
+place (same inode, so owner, mode and ACL stay), verified by digest, and it
+refuses naming the copy. A leftover SQLite journal blocks that automatic
+restore and needs review. The current #251 ledger is one migration behind main
 (`d6e1f2a3b4c5`, the unrelated empty `monthly_review` table from #258).
 
 The current roles move to `previous-runtime/<UTC time>-<manifest prefix>-<random>/`
