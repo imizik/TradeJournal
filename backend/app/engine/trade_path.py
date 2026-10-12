@@ -329,7 +329,7 @@ def _compute(
     # Entry underlying price: prefer Alpaca context, then Polygon fill enrichment, then stock price
     entry_price = (
         entry_ctx.entry_underlying_price if entry_ctx and entry_ctx.entry_underlying_price
-        else entry_fill.underlying_price_at_fill
+        else float(entry_fill.underlying_price_at_fill)
         if entry_fill.underlying_price_at_fill
         else float(trade.avg_entry_premium) if trade.instrument_type == "stock"
         else None

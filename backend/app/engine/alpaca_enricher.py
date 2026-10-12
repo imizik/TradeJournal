@@ -30,6 +30,7 @@ from app.engine.indicators import (
     compute_rvol,
     compute_rvol_time_adjusted,
     get_previous_day_data,
+    _bar_date,
     _pct_diff,
 )
 from app.engine.behavior import SequenceState
@@ -97,6 +98,9 @@ def enrich_fills_alpaca(
     for ticker, bars in daily_bars.items():
         daily_indicators[ticker] = compute_daily_indicators(bars)
 
+    # --- 2a. Minute bars for the time-adjusted RVOL history ---
+    _prefetch_rvol_history(fills_with_time, daily_bars, on_progress)
+
     # --- 2b. Trader-state sequence metrics (journal-derived, no API) ---
     sequence = SequenceState(session)
 
@@ -148,12 +152,41 @@ def enrich_fills_alpaca(
 # Context builder
 # ---------------------------------------------------------------------------
 
+def _prefetch_rvol_history(fills: list[Fill], daily_bars: dict[str, list], on_progress=None) -> None:
+    """Cache the minute bars of the 20 sessions before each fill, batched by day.
+
+    The time-adjusted RVOL compares a fill's volume with those sessions. Only
+    the fill's own day used to be fetched, so the history was whatever other
+    trades happened to have cached and most fills had none. Fetching per day
+    covers up to 50 tickers a call, and cached days are never fetched again.
+    The sessions are the ticker's daily-bar dates, exactly the ones
+    ``compute_rvol_time_adjusted`` reads; a ticker without daily bars (an
+    index such as SPXW) asks for nothing.
+    """
+    sessions = {ticker: sorted({_bar_date(b) for b in bars}) for ticker, bars in daily_bars.items()}
+    by_day: dict[date, set[str]] = defaultdict(set)
+    for fill in fills:
+        if fill.executed_at.hour * 60 + fill.executed_at.minute < 9 * 60 + 30:
+            continue  # no RVOL before the open
+        fill_date = fill.executed_at.date()
+        prior = [day for day in sessions.get(fill.ticker, []) if day < fill_date]
+        for day in prior[-20:]:
+            by_day[day].add(fill.ticker)
+
+    for idx, (day, tickers) in enumerate(sorted(by_day.items())):
+        if on_progress:
+            on_progress(0, f"Loading RVOL history {day} ({idx + 1}/{len(by_day)})")
+        try:
+            fetch_minute_bars_for_date(sorted(tickers), day)
+        except Exception as e:
+            log.warning("Failed to fetch RVOL history bars for %s: %s", day, e)
+
+
 def _cached_minute_bars(ticker: str, day: date) -> list[dict]:
     """Minute bars already on disk for one ticker/day; never fetches.
 
-    The time-adjusted RVOL history asks for up to 21 days per fill. Fetching
-    those would turn one enrichment run into thousands of Alpaca calls, so the
-    history is whatever the cache happens to hold and a miss is an empty list.
+    ``_prefetch_rvol_history`` has already cached the sessions the RVOL history
+    needs, so this loader only reads; a day still missing is an empty list.
     """
     return fetch_minute_bars_for_date([ticker], day, cache_only=True).get(ticker, [])
 
