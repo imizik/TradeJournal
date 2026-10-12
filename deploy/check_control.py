@@ -33,20 +33,24 @@ STATE = Path("/var/lib/tradejournal-check")
 KEYS = Path("/var/lib/tradejournal-check-keys")
 FEATURES = Path("/var/lib/tradejournal-check-features")
 RUN = Path("/run/tradejournal-check")
+OWNER_RUN = Path("/run/tradejournal-check-owner")
 RECORD = ROOT / "installation.json"
 UNIT_DIR = old.UNIT_DIR
 GROUP = "tj-check"
 ACCOUNTS = {"service": "tj-check", "keys": "tj-check-keys", "features": "tj-check-features"}
+# The private owner frontend (advisor trial) is the only peer of the owner reader.
+OWNER_WEB = "tj-advisor-web-owner"
 TEMPLATES = SOURCE / "deploy/cloud-mcp-check"
 UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejournal-check-network.service",
     "tradejournal-check-keys.service", "tradejournal-check-keys.timer",
-    "tradejournal-check-features.service", "tradejournal-check-features.timer")
-RUNTIME_FILES = ("cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
+    "tradejournal-check-features.service", "tradejournal-check-features.timer",
+    "tradejournal-check-owner.socket", "tradejournal-check-owner.service")
+RUNTIME_FILES = ("cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
-SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql")
+SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
-# client); the network policy and view SQL stay pinned.
+# client) and enables owner/config.json; the network policy and view SQL stay pinned.
 PINNED_SETTINGS = ("network.nft", "feature-view.sql")
 
 
@@ -126,7 +130,7 @@ def preflight(bundle, approved, *, dns_servers, host_ips):
     distro = platform.freedesktop_os_release()
     if distro.get("ID") != "ubuntu" or distro.get("VERSION_ID") != "24.04" or platform.machine() != "x86_64":
         raise ValueError("Require artifact-matched Ubuntu 24.04 x86_64 host")
-    for path in (ROOT, CONFIG, STATE, KEYS, FEATURES, RUN, *[UNIT_DIR / u for u in UNITS],
+    for path in (ROOT, CONFIG, STATE, KEYS, FEATURES, RUN, OWNER_RUN, *[UNIT_DIR / u for u in UNITS],
             *[UNIT_DIR / (u + ".d") for u in UNITS]):
         exact(path.parent)
         if path.exists() or path.is_symlink():
@@ -140,6 +144,8 @@ def preflight(bundle, approved, *, dns_servers, host_ips):
             raise ValueError("Refuse a loaded check unit from any search path")
     if old.run("getent", "group", "caddy", check=False).returncode != 0:
         raise ValueError("Dedicated reverse proxy socket group missing")
+    if old.run("getent", "passwd", OWNER_WEB, check=False).returncode != 0:
+        raise ValueError("Private owner frontend identity missing: " + OWNER_WEB)
     if not list((bundle / "wheels").glob("*.whl")):
         raise ValueError("Offline verified runtime wheels required")
     return manifest
@@ -180,6 +186,12 @@ def install(bundle, approved, *, dns_servers, host_ips):
         private_file(CONFIG / "refresh-keys.json", (json.dumps(refresh, indent=2) + "\n").encode(), mode=0o644)
         private_file(CONFIG / "network.nft", policy, mode=0o644)
         private_file(CONFIG / "feature-view.sql", (bundle / "config/feature-view.sql").read_bytes(), mode=0o644)
+        owner = {"enabled": False, "peer_uid": pwd.getpwnam(OWNER_WEB).pw_uid,
+            "socket_path": str(OWNER_RUN / "owner.sock"), "ledger_path": config["ledger_file"]}
+        # Its own directory, bound whole: a replaced (renamed) file still reaches the running reader.
+        (CONFIG / "owner").mkdir(mode=0o750)
+        old.run("chown", f"root:{GROUP}", CONFIG / "owner")
+        private_file(CONFIG / "owner/config.json", (json.dumps(owner, indent=2) + "\n").encode(), mode=0o640, group=GROUP)
         for path, owner, mode in ((STATE, ACCOUNTS["service"], 0o700), (KEYS, ACCOUNTS["keys"], 0o750),
                 (FEATURES, ACCOUNTS["features"], 0o750)):
             path.mkdir(mode=mode)
@@ -266,9 +278,9 @@ def stop():
     json.loads(exact(RECORD).read_text())  # Fixed names stay stoppable after drift.
     timers = [u for u in UNITS if u.endswith(".timer")]
     results = [old.run("systemctl", "stop", *group, check=False) for group in (
-        timers, ["tradejournal-check.socket"], [u for u in UNITS if u.endswith(".service")])]
+        timers, [u for u in UNITS if u.endswith(".socket")], [u for u in UNITS if u.endswith(".service")])]
     if any(old.run("systemctl", "is-active", "--quiet", u, check=False).returncode == 0 for u in UNITS) \
-            or (RUN / "mcp.sock").exists() or any(r.returncode for r in results):
+            or (RUN / "mcp.sock").exists() or (OWNER_RUN / "owner.sock").exists() or any(r.returncode for r in results):
         raise RuntimeError("Check shutdown incomplete; all groups were attempted")
 
 

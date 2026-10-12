@@ -39,6 +39,17 @@ def test_service_unit_is_isolated_and_gets_provider_key_only_by_credential():
     assert "[Install]" not in socket
 
 
+def test_owner_reader_unit_is_private_readonly_and_networkless():
+    service = unit("tradejournal-check-owner.service")
+    assert "User=tj-check\n" in service and "PrivateNetwork=true" in service and "RestrictAddressFamilies=AF_UNIX\n" in service
+    assert "LoadCredential" not in service and "EnvironmentFile" not in service and "[Install]" not in service
+    assert "TemporaryFileSystem=/etc:ro /var:ro /opt:ro /run:ro" in service
+    assert "BindReadOnlyPaths=/opt/tradejournal-check/backend /etc/tradejournal-check/owner " in service
+    socket = unit("tradejournal-check-owner.socket")
+    assert "ListenStream=/run/tradejournal-check-owner/owner.sock" in socket and "SocketUser=root" in socket
+    assert f"SocketGroup={control.OWNER_WEB}\n" in socket and "SocketMode=0660" in socket and "[Install]" not in socket
+
+
 def test_publisher_and_key_units_are_finite_and_separate():
     features = unit("tradejournal-check-features.service")
     assert "Type=oneshot" in features and "User=tj-check-features" in features
@@ -102,7 +113,7 @@ def test_stage_is_private_disabled_and_complete(staged):
 
 
 def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monkeypatch):
-    for name in ("ROOT", "CONFIG", "STATE", "KEYS", "FEATURES", "RUN"):
+    for name in ("ROOT", "CONFIG", "STATE", "KEYS", "FEATURES", "RUN", "OWNER_RUN"):
         monkeypatch.setattr(control, name, tmp_path / ("host-" + name.lower()))
     monkeypatch.setattr(control, "RECORD", control.ROOT / "installation.json")
     unit_dir = tmp_path / "systemd"
@@ -116,7 +127,7 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
             python = Path(args[-1]) / "bin/python"
             python.parent.mkdir(parents=True)
             python.write_text("")
-        if args[:3] == ("getent", "group", "caddy"):
+        if args[:3] in (("getent", "group", "caddy"), ("getent", "passwd", control.OWNER_WEB)):
             return SimpleNamespace(returncode=0)
         return SimpleNamespace(returncode=2 if args[0] in ("getent", "systemctl") and args[1] in ("passwd", "group", "cat", "is-active") else 0)
     monkeypatch.setattr(old, "run", run)
@@ -126,7 +137,8 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
     monkeypatch.setattr(control.platform, "freedesktop_os_release", lambda: {"ID": "ubuntu", "VERSION_ID": "24.04"})
     monkeypatch.setattr(control.platform, "machine", lambda: "x86_64")
     ids = iter(range(1001, 1004))
-    monkeypatch.setattr(control.pwd, "getpwnam", lambda name: SimpleNamespace(pw_uid=next(ids)))
+    monkeypatch.setattr(control.pwd, "getpwnam", lambda name: SimpleNamespace(
+        pw_uid=2001 if name == control.OWNER_WEB else next(ids)))
     monkeypatch.setattr(control.grp, "getgrnam", lambda name: SimpleNamespace(gr_gid=990))
     original_stat = Path.stat
     monkeypatch.setattr(Path, "stat", lambda path, *a, **k: os.stat_result(
@@ -146,6 +158,9 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
     assert sorted(p.name for p in config_dir.iterdir()) == sorted(control.SETTINGS)  # No credential files.
     assert "meta skuid 1001" in (config_dir / "network.nft").read_text()
     assert json.loads((config_dir / "config.json").read_text())["enabled"] is False
+    owner = json.loads((config_dir / "owner/config.json").read_text())
+    assert owner == {"enabled": False, "peer_uid": 2001, "socket_path": str(control.OWNER_RUN / "owner.sock"),
+        "ledger_path": "/var/lib/tradejournal-check/ledger.db"}
     assert (control.ROOT / "backend/data/alpaca_cache").is_dir()
     assert not list((control.ROOT / "backend").glob("**/.env"))
     with pytest.raises(ValueError):  # A second install refuses every collision.

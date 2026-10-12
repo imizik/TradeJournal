@@ -148,6 +148,28 @@ Step 2 is **built, not installed or activated** (October 11, 2026):
   [smoke](../../deploy/cloud-mcp-check/smoke.py) in the deployment workflow.
   Speed against the live provider is not yet observed.
 
+Step 3 (owner view) is **built, not installed or activated** (October 11, 2026):
+
+- Reader: [cloud_check_owner.py](../../backend/cloud_check_owner.py) serves
+  `GET /owner/checks` (newest 50: idea, rules verdict, Jo's verdict, timing)
+  and `GET /owner/checks/{check_id}` (the saved answer after its record hash
+  is verified; fill keys become a count, the raw provider packet stays behind
+  its hash). It runs as `tj-check` with no network, opens the ledger
+  `mode=ro` with `query_only`, and admits only the kernel-identified
+  `tj-advisor-web-owner` peer (the trial's private owner frontend) on
+  `/run/tradejournal-check-owner/owner.sock`. `install` now also writes the
+  two owner units and a disabled config in its own bound directory, and
+  refuses when that frontend identity is missing.
+- Page: `/advisor-review` lists and reopens checks through
+  `/api/check-owner/checks[/{id}]`, behind the same owner session as the
+  advisor review. It stays dormant until `TJ_CHECK_OWNER_ENABLED=true`,
+  `TJ_CHECK_OWNER_SOCKET` and `TJ_CHECK_OWNER_SOCKET_UID=0` are set for the
+  owner frontend, which runs the v2 trial's runtime: activation upgrades that
+  runtime first, then enables the owner reader config and starts the owner socket.
+- Proof: `backend/tests/test_cloud_check_owner.py`, the check BFF cases in
+  `frontend/scripts/advisor-owner.test.js`, and an owner read as the real
+  frontend UID (another UID refused) in the disposable Ubuntu smoke.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his

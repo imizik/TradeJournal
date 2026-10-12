@@ -32,7 +32,7 @@ JWKS_URL = ISSUER + ".well-known/jwks.json"
 CLIENT = "check-smoke-client"
 SUBJECT = "check-smoke-subject"
 DROPIN = control.UNIT_DIR / "tradejournal-check.service.d"
-PROBE_UNITS = [f"check-egress-probe-{os.getpid()}-{n}.service" for n in range(2)]
+PROBE_UNITS = [f"check-egress-probe-{os.getpid()}-{n}.service" for n in range(3)]
 ADMIN_PATH = "/usr/sbin:/usr/bin:/sbin:/bin"
 
 
@@ -49,13 +49,14 @@ def guard():
     if (os.geteuid() != 0 or os.environ.get("GITHUB_ACTIONS") != "true"
             or os.environ.get("TJ_DISPOSABLE_RUNNER") != "1"):
         raise ValueError("Check native smoke only runs as root on explicitly disposable CI")
-    for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN, DROPIN,
+    for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN,
+            control.OWNER_RUN, DROPIN,
             *[control.UNIT_DIR / u for u in control.UNITS]):
         if path.exists() or path.is_symlink():
             raise ValueError("Refuse a pre-existing check native-smoke resource: " + str(path))
     if Path("/var/cache/tradejournal-check").exists():
         raise ValueError("Refuse a pre-existing check cache directory")
-    for name in (control.GROUP, *control.ACCOUNTS.values()):
+    for name in (control.GROUP, *control.ACCOUNTS.values(), control.OWNER_WEB):
         for database in ("passwd", "group"):
             if run("getent", database, name, check=False).returncode == 0:
                 raise ValueError("Refuse a pre-existing check identity: " + name)
@@ -83,6 +84,20 @@ def egress(account, port):
     return result.returncode == 0
 
 
+def owner_get(path, account):
+    """GET over the owner socket as a real UID; the kernel supplies the peer."""
+    script = ("import socket,sys\ns=socket.socket(socket.AF_UNIX);s.settimeout(10)\n"
+        f"s.connect({str(control.OWNER_RUN / 'owner.sock')!r})\n"
+        f"s.sendall(b'GET {path} HTTP/1.1\\r\\nHost: owner\\r\\nConnection: close\\r\\n\\r\\n')\n"
+        "b=b''\nwhile (c:=s.recv(65536)): b+=c\nsys.stdout.write(b.decode())")
+    result = run("systemd-run", f"--unit={PROBE_UNITS[2]}", "--wait", "--pipe", "--collect", "--property=Type=oneshot",
+        f"--property=User={account}", "/usr/bin/python3.12", "-c", script, check=False)
+    if result.returncode:
+        return None, result.stderr.decode(errors="replace")
+    head, _, body = result.stdout.decode().partition("\r\n\r\n")
+    return int(head.split()[1]), body
+
+
 def exercise(archive, scratch):
     import httpx
     import jwt
@@ -98,6 +113,8 @@ def exercise(archive, scratch):
             if entry.isfile() and "/wheels/" in entry.name and entry.name.endswith(".whl"):
                 (wheels / Path(entry.name).name).write_bytes(package.extractfile(entry).read())
     bundle = scratch / "bundle"
+    # The private owner frontend identity the owner reader admits (the advisor trial's).
+    run("useradd", "--system", "--user-group", "--no-create-home", "--shell", "/usr/sbin/nologin", control.OWNER_WEB)
     control.stage(bundle, wheels=wheels)
     resolvers = [line.split()[1] for line in Path("/etc/resolv.conf").read_text().splitlines()
         if line.startswith("nameserver ")]
@@ -197,6 +214,22 @@ def exercise(archive, scratch):
         " insufficient_data, real feature history, immutable ledger replay across restart, verdict note once."
         f" Server timings {first['timings_ms']}")
 
+    owner = json.loads((control.CONFIG / "owner/config.json").read_text())
+    owned(control.CONFIG / "owner/config.json", json.dumps({**owner, "enabled": True}).encode(), "root:tj-check")
+    run("systemctl", "start", "tradejournal-check-owner.socket")
+    status, body = owner_get("/owner/checks", control.OWNER_WEB)
+    assert status == 200, (status, body)
+    listing = json.loads(body)
+    assert [c["check_id"] for c in listing["checks"]] == [first["check_id"]] and listing["checks"][0]["model_verdict"] == "wait"
+    status, body = owner_get("/owner/checks/" + first["check_id"], control.OWNER_WEB)
+    assert status == 200 and json.loads(body)["answer"]["verdict"] == "insufficient_data", (status, body)
+    assert owner_get("/owner/checks", "tj-check-keys")[0] is None, "another UID reached the owner socket"
+    reader_pid = int(run("systemctl", "show", "--property=MainPID", "--value", "tradejournal-check-owner.service").stdout)
+    reader_uid = next(line for line in Path(f"/proc/{reader_pid}/status").read_text().splitlines()
+        if line.startswith("Uid:")).split()[1]
+    assert int(reader_uid) == record["uids"]["service"], "owner reader is not running as the check UID"
+    print("PASS: owner reader lists and reopens the saved check for the owner frontend UID only")
+
     control.stop()
     shutil.rmtree(DROPIN)
     removed = control.remove()
@@ -207,7 +240,8 @@ def exercise(archive, scratch):
 
 
 def cleanup():
-    run("systemctl", "stop", "tradejournal-check.socket", "tradejournal-check.service", *PROBE_UNITS, check=False)
+    run("systemctl", "stop", "tradejournal-check.socket", "tradejournal-check.service", "tradejournal-check-owner.socket",
+        "tradejournal-check-owner.service", *PROBE_UNITS, check=False)
     run("systemctl", "stop", "tradejournal-check-network.service", check=False)
     run("nft", "delete", "table", "inet", "tj_check", check=False)
     for name in control.UNITS:
@@ -215,11 +249,13 @@ def cleanup():
     shutil.rmtree(DROPIN, ignore_errors=True)
     run("systemctl", "daemon-reload", check=False)
     for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN,
-            Path("/var/cache/tradejournal-check")):
+            control.OWNER_RUN, Path("/var/cache/tradejournal-check")):
         shutil.rmtree(path, ignore_errors=True)
     for account in control.ACCOUNTS.values():
         run("userdel", account, check=False)
     run("groupdel", control.GROUP, check=False)
+    run("userdel", control.OWNER_WEB, check=False)
+    run("groupdel", control.OWNER_WEB, check=False)
 
 
 def main():

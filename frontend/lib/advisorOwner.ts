@@ -62,7 +62,18 @@ export const advisorOwner = (request: Request) => ownerRead(request, "/owner/adv
 export const advisorOwnerStatus = (request: Request) => ownerRead(request, "/owner/advisor/status", validStatus,
   "Advisor connection status unavailable. The owner reader may be stopped; no write or retry was sent.");
 
-async function ownerRead(request: Request, route: string, valid: (value: Record<string, unknown>) => boolean, unavailable: string) {
+// Saved pre-trade checks come from the check service's own owner reader and socket.
+const CHECK_ID = /^chk_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const CHECK_UNAVAILABLE = "Saved pre-trade checks unavailable. The check owner reader may be stopped; nothing was sent to Jo.";
+export const checkOwnerList = (request: Request) => ownerRead(request, "/owner/checks",
+  value => value.schema_version === "check-owner-list-v1" && Array.isArray(value.checks), CHECK_UNAVAILABLE, "TJ_CHECK_OWNER");
+export const checkOwnerDetail = (request: Request, checkId: string) => CHECK_ID.test(checkId)
+  ? ownerRead(request, `/owner/checks/${checkId}`, value => value.schema_version === "check-owner-detail-v1" && value.check_id === checkId,
+    CHECK_UNAVAILABLE, "TJ_CHECK_OWNER")
+  : Promise.resolve(Response.json({ detail: "Unknown check" }, { status: 404, headers: { "Cache-Control": "no-store" } }));
+
+async function ownerRead(request: Request, route: string, valid: (value: Record<string, unknown>) => boolean, unavailable: string,
+  prefix: "TJ_ADVISOR_OWNER" | "TJ_CHECK_OWNER" = "TJ_ADVISOR_OWNER") {
   const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   const refusal = (status: number, detail: string) => Response.json({ detail }, { status, headers });
   try {
@@ -72,9 +83,9 @@ async function ownerRead(request: Request, route: string, valid: (value: Record<
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(DEADLINE)]);
     const status = await ownerSession(config.target, request.headers, signal);
     if (status !== 200) return refusal(status, "Owner session unavailable");
-    const socketPath = process.env.TJ_ADVISOR_OWNER_SOCKET ?? "";
-    const uidText = process.env.TJ_ADVISOR_OWNER_SOCKET_UID ?? "";
-    if (process.env.TJ_ADVISOR_OWNER_ENABLED !== "true" || !/^\d+$/.test(uidText) || !path.isAbsolute(socketPath) || path.normalize(socketPath) !== socketPath || path.basename(socketPath) !== "owner.sock") return refusal(503, "Direct advisor owner review is not activated");
+    const socketPath = process.env[`${prefix}_SOCKET`] ?? "";
+    const uidText = process.env[`${prefix}_SOCKET_UID`] ?? "";
+    if (process.env[`${prefix}_ENABLED`] !== "true" || !/^\d+$/.test(uidText) || !path.isAbsolute(socketPath) || path.normalize(socketPath) !== socketPath || path.basename(socketPath) !== "owner.sock") return refusal(503, prefix === "TJ_CHECK_OWNER" ? "Pre-trade check review is not switched on yet" : "Direct advisor owner review is not activated");
     const expectedUid = Number(uidText);
     if (!Number.isSafeInteger(expectedUid)) return refusal(503, "Direct advisor owner review is not configured");
     if (activeReads >= 4) return refusal(429, "Owner reader busy");
