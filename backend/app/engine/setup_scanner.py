@@ -8,8 +8,10 @@ stores what the rules decide as ``ScannerCandidate`` rows and append-only
 ``ScannerEvent`` rows. A trade's state is always the fold of its events, so a
 restart rebuilds it from the database.
 
-Nothing here touches fills, trades, accounts, decisions or alerts, and nothing
-is sent anywhere. Every entry and exit is priced from an option quote read
+Nothing here touches fills, trades, accounts, decisions or alerts. When
+setup emails are configured (``scanner_mail``), each setup with a contract is
+also emailed once while fresh so Jo can review it; the email is a notice,
+never part of the paper trade. Every entry and exit is priced from an option quote read
 after the decision; a decision that cannot be priced within two minutes, or a
 condition noticed more than two minutes late, ends the trade ``unresolved``.
 """
@@ -26,7 +28,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.engine import scanner_rules as rules
-from app.engine import tradier
+from app.engine import scanner_mail, tradier
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, normalize_bars
 from app.engine.level_alerts import LATENESS
@@ -38,6 +40,9 @@ log = logging.getLogger(__name__)
 
 SOURCE = "tradier_timesales_1min"
 TERMINAL = {"exit", "unresolved", "no_contract"}
+EMAIL_SUBJECT = "TJ Setup:"  # the fixed prefix Jo's Gmail trigger watches for
+EMAILS_PER_DAY = 15  # bounds Jo's wake-ups; the historical replay averaged 8.8 setups a day
+SETUP_NAMES = {"orb": "opening-range break", "fade": "VWAP fade"}
 
 
 def enabled() -> bool:
@@ -55,6 +60,38 @@ def _epoch(moment: datetime) -> float:
 def fold(events: list[ScannerEvent]) -> dict:
     """The trade's state: one entry per event type, by type."""
     return {e.event_type: {**json.loads(e.data_json), "at": _epoch(e.effective_at)} for e in events}
+
+
+def setup_email(candidate: ScannerCandidate) -> tuple[str, str]:
+    """Subject and plain-text body for one setup. Market facts and rule output only: no journal data."""
+    contract = json.loads(candidate.contract_json)
+    facts = json.loads(candidate.facts_json)
+    flags = json.loads(candidate.flags_json)
+    side = contract["option_type"].upper()
+    at_et = candidate.bar_end.replace(tzinfo=UTC).astimezone(ET)
+    expires_et = candidate.expires_at.replace(tzinfo=UTC).astimezone(ET)
+    subject = f"{EMAIL_SUBJECT} {candidate.symbol} {side} {SETUP_NAMES[candidate.setup]} {at_et:%H:%M} ET"
+    lines = [
+        f"Scanner setup {candidate.id}",
+        f"{candidate.symbol} {SETUP_NAMES[candidate.setup]}, {candidate.direction} ({side}), 5-minute bar closed {at_et:%H:%M} ET.",
+        f"Underlying close {facts['close']}, VWAP {facts['vwap']}, EMA9 {facts['ema9']}, daily ATR {facts['daily_atr14']}.",
+        f"Opening range {facts['opening_range_low']} - {facts['opening_range_high']}.",
+        f"Rule stop {candidate.stop} and target {candidate.target} on the underlying; 60-minute time stop.",
+        f"Contract {contract['symbol']}: {contract['expiration']} {contract['strike']} {contract['option_type']}, "
+        f"delta {contract['delta']}, bid {contract['bid']} / ask {contract['ask']} at detection.",
+        f"Flags: {', '.join(flags) if flags else 'none'}.",
+        f"Stale after {expires_et:%H:%M} ET: do not act on it later.",
+        "",
+        "For Jo: run pre_trade_check with these exact inputs, then attach_model_verdict.",
+        json.dumps({"ticker": candidate.symbol, "side": candidate.direction, "instrument": "option", "horizon": "intraday",
+                    "entry": facts["close"], "stop": candidate.stop, "option_type": contract["option_type"],
+                    "expiration": contract["expiration"], "strike": contract["strike"],
+                    "free_text": f"scanner {candidate.scanner_version} {candidate.setup} setup {candidate.id}",
+                    "operation_id": str(candidate.id)}),
+        "",
+        "Rule-generated paper setup, not advice. The rules-only paper trade is recorded in TradeJournal either way.",
+    ]
+    return subject, "\n".join(lines)
 
 
 def status_of(candidate: ScannerCandidate, state: dict) -> str:
@@ -91,6 +128,10 @@ class SetupScanner:
         finally:
             if session is not None:
                 self.scan(today, session)
+                try:
+                    self.email(today)  # a setup saved on this pass goes out now, not 20 seconds later
+                except Exception:
+                    log.exception("Setup emails failed this pass")
 
     # -------------------------------------------------------------- scanning
 
@@ -191,6 +232,10 @@ class SetupScanner:
     # -------------------------------------------------------------- the paper trades
 
     def manage(self, now: float, today: date, session) -> None:
+        try:
+            self.email(today)
+        except Exception:
+            log.exception("Setup emails failed this pass")
         with Session(self.engine) as db:
             rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.contract_json.is_not(None))
                            .where(ScannerCandidate.session_date >= today - timedelta(days=7))).all()
@@ -212,6 +257,33 @@ class SetupScanner:
                 log.warning("Scanner trade %s not judged this pass: %s", candidate.id, exc)
             except Exception:
                 log.exception("Scanner trade %s failed this pass", candidate.id)
+
+    def email(self, today: date) -> None:
+        """Email each of today's setups with a contract once, while it is still fresh, up to the daily cap."""
+        if not scanner_mail.configured():
+            return
+        with Session(self.engine) as db:
+            rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == today)
+                           .where(ScannerCandidate.contract_json.is_not(None)).order_by(ScannerCandidate.bar_end)).all()
+            states = [(c, fold(self._events(db, c.id))) for c in rows]
+        sent = sum(1 for _, state in states if state.get("email", {}).get("status") == "sent")
+        for candidate, state in states:
+            if "email" in state:
+                continue
+            now = self.clock()
+            if now > _epoch(candidate.expires_at):
+                self._store(candidate, "email", now, {"status": "expired"})
+            elif sent >= EMAILS_PER_DAY:
+                self._store(candidate, "email", now, {"status": "skipped_daily_cap"})
+            else:
+                subject, body = setup_email(candidate)
+                try:
+                    scanner_mail.send(subject, body)
+                except scanner_mail.MailError as exc:
+                    log.warning("Setup email for %s not sent this pass: %s", candidate.id, exc)
+                    continue  # retried on the next pass until the setup goes stale
+                self._store(candidate, "email", self.clock(), {"status": "sent"})
+                sent += 1
 
     def _enter(self, candidate: ScannerCandidate, now: float) -> None:
         contract = json.loads(candidate.contract_json)

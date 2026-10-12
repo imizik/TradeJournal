@@ -2,8 +2,9 @@
 
 Selected by Isaac on October 12, 2026 as build step 2 of the
 [shadow trader design](shadow-trader-design.md#build-order-after-dots-steps-35).
-**Contract only; nothing is built or activated.** S1 has no model, no Dot, no
-connector, no alert and no real order. It produces the setup feed that the
+**Built and enabled on the VPS October 12, 2026** (see build status). S1 has
+no model, no connector and no real order; its only outbound message is the
+optional setup email below. It produces the setup feed that the
 co-pilot and the shadow trader will later consume, plus the rules-only paper
 baseline they are judged against.
 
@@ -108,7 +109,7 @@ verification, an independent review, and the deployment backup and
 market-hours rules in the [deploy guide](../../deploy/README.md#automatic-deployment).
 The scanner runs inside the existing backend job system, off by default
 behind one environment flag, uses existing Alpaca and Tradier credentials,
-and sends no alert in S1. Restart recovery resumes open paper trades from
+and sends nothing except the optional setup emails below. Restart recovery resumes open paper trades from
 saved events; a monitoring gap longer than 2 minutes on an open trade marks it
 `unresolved`.
 
@@ -177,6 +178,27 @@ Fixture tests cover the rules, duplicate suppression across a restarted
 process, entry and exit pricing, missing quotes, late exits and the
 review-time flag. A seeded local page was checked at desktop and 375px
 widths. No live session has run.
+
+## Setup emails for Jo (co-pilot trial)
+
+Isaac chose on October 12, 2026 to try Jo on live setups before the forward
+trial finishes. Off unless `SCANNER_EMAIL_TO`, `SCANNER_SMTP_USER` and
+`SCANNER_SMTP_PASSWORD` are set in the server's private environment.
+`app/engine/scanner_mail.py` sends one plain-text email per setup that has a
+contract, from Isaac's Gmail to his own `+tjsetups` address using a Google app
+password (separate from the read-only Gmail OAuth token that imports fills).
+At most 15 a day; a setup past its 10-minute expiry is never sent; a failed
+send is retried each pass while fresh. Each send is a `ScannerEvent` with key
+`email` (`sent`, `expired` or `skipped_daily_cap`).
+
+Subject: `TJ Setup: <SYMBOL> <CALL|PUT> <setup> <HH:MM> ET`. The body holds
+only market facts and rule output (no journal data) and one JSON line with
+the exact `pre_trade_check` inputs, using the candidate ID as `operation_id`
+so a repeated check returns the original. Jo's Gmail event task watches for
+that subject prefix, runs `pre_trade_check`, saves `attach_model_verdict`,
+and messages Isaac only on agreed criteria. The rules-only paper trade is
+unaffected either way. Jo's ratings are assisted advice, not Shadow Isaac:
+Jo reads Isaac's history through the pre-trade check.
 
 ## Acceptance
 
