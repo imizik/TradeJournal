@@ -8,11 +8,14 @@ the owner status it grants the owner-reader UID read-only access (named-UID
 ACL) to the snapshot and advisor config directories and mounts both read-only
 into the owner reader. Nothing is started or enabled. `check` reports freshness. `remove` reverses
 the unit/config switch and preserves the key UID, directories and snapshots.
+`extend-owner-status` brings an install made before the owner status (only the
+two serving units bound) up to that layout without reinstalling.
 """
 from __future__ import annotations
 
 import argparse
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -42,6 +45,8 @@ KEY_UNITS = ("tradejournal-advisor-keys-network.service", "tradejournal-advisor-
 OWNER_SERVICE = "tradejournal-advisor-owner.service"
 # Units that read the snapshot: the two serving units plus the owner status reader.
 SERVING = ("tradejournal-advisor-mcp.service", "tradejournal-advisor-backend.service", OWNER_SERVICE)
+# Installs made before the owner status bound only these (see extend_owner_status).
+OLD_SERVING = SERVING[:2]
 BUNDLE_FILES = ("cloud_mcp_d0_refresh.py", *[f"units/{name}" for name in KEY_UNITS])
 RECORD_NAME = "keys-installation.json"
 
@@ -88,6 +93,10 @@ def validate(bundle):
             or {k for k, v in manifest["inventory"].items() if v["sha256"]} != set(BUNDLE_FILES)):
         raise ValueError("Key bundle inventory, modes or format changed")
     return manifest
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
 
 
 def unit_binds(name):
@@ -321,11 +330,20 @@ def interrupted_after_config_switch():
     previous = json.loads(stage.exact(RUNTIME / "previous/config.json").read_text())
     if json.loads(advisor_config_path().read_text())["jwks_file"] != previous["jwks_file"]:
         return False
-    return all(stage.digest(old.UNIT_DIR / name) == keys_record["serving_units_before"][name] for name in SERVING)
+    return all(stage.digest(old.UNIT_DIR / name) == digest for name, digest in keys_record["serving_units_before"].items())
+
+
+def half_extended():
+    """An interrupted extend-owner-status switched the owner unit but not the keys record."""
+    saved = RUNTIME / "previous" / OWNER_SERVICE
+    named = OWNER_SERVICE in trial.private_json(record_path())["serving_units_before"]
+    return not named and saved.exists() and stage.digest(old.UNIT_DIR / OWNER_SERVICE) != stage.digest(stage.exact(saved))
 
 
 def remove():
     old.root_only()
+    if record_path().exists() and half_extended():
+        raise ValueError("Owner unit is half-extended; re-run extend-owner-status before remove")
     if record_path().exists() and interrupted_after_config_switch():
         advisor_stopped()
         trial.installed()  # Units and record already restored; only leftovers remain.
@@ -340,7 +358,9 @@ def remove():
     if stage.digest(saved_config) != keys_record["config_before_sha256"]:
         raise ValueError("Preserved advisor config changed")
     saved_units = {}
-    for name in SERVING:
+    for name in keys_record["serving_units_before"]:  # Two units for an old-layout install, else three.
+        if name not in SERVING:
+            raise ValueError("Unknown serving unit in key upkeep record")
         saved = stage.exact(RUNTIME / "previous" / name)
         if stage.digest(saved) != keys_record["serving_units_before"][name]:
             raise ValueError("Preserved serving unit changed")
@@ -362,7 +382,7 @@ def remove():
     write_file(original, latest, mode=info.st_mode & 0o777, uid=info.st_uid, gid=info.st_gid,
         expected=stage.digest(original))
     units = dict(record["units"])
-    for name in SERVING:
+    for name in saved_units:
         write_file(old.UNIT_DIR / name, saved_units[name], mode=0o644, expected=record["units"][name])
         units[name] = stage.digest(old.UNIT_DIR / name)
         trial.write_private(trial.RECORD, {**record, "units": units})  # Keep the record matching each switch.
@@ -376,9 +396,73 @@ def remove():
     # The key UID, directories, snapshots and preserved files remain.
 
 
+def extend_owner_status():
+    """Bring an old-layout key install (two serving units bound) up to `install`'s layout.
+
+    With the advisor, owner bridge and owner frontend stopped, this adds the
+    owner-reader grant and the two owner-unit binds exactly as `install` does,
+    then records the owner unit in both records so `upgrade` sees the units it
+    expects. Re-runnable after an interruption; restores on failure; starts nothing.
+    """
+    old.root_only()
+    keys_record = trial.private_json(record_path())
+    layout = set(keys_record.get("serving_units_before", ()))
+    if layout == set(SERVING):
+        installed()
+        raise ValueError("Key upkeep already has the owner status layout")
+    if layout != set(OLD_SERVING):
+        raise ValueError("Unknown key upkeep serving-unit layout")
+    trial.runtime_stopped()  # Same requirement as the trial's runtime upgrade.
+    unit, saved = old.UNIT_DIR / OWNER_SERVICE, RUNTIME / "previous" / OWNER_SERVICE
+    record = trial.private_json(trial.RECORD)
+    if saved.exists() or saved.is_symlink():
+        # An earlier attempt saved the original owner unit; if it was killed
+        # between the unit switch and the record write, finish that record write.
+        before = stage.exact(saved).read_bytes()
+        after = serving_unit(before.decode(), unit_binds(OWNER_SERVICE)).encode()
+        if stage.digest(stage.exact(unit)) == sha256(after) and record["units"][OWNER_SERVICE] == sha256(before):
+            trial.write_atomic(trial.RECORD, {**record, "units": {**record["units"], OWNER_SERVICE: sha256(after)}})
+    keys_record = installed()  # Full key upkeep and trial verification; refuses any other drift.
+    record = trial.private_json(trial.RECORD)
+    config_path = advisor_config_path()
+    reader_uid = json.loads(config_path.read_text()).get("owner_reader_uid")
+    if not isinstance(reader_uid, int) or reader_uid < 1:
+        raise ValueError("Owner status grant requires the trial's exact owner reader UID")
+    before = stage.exact(saved).read_bytes() if saved.exists() else unit.read_bytes()
+    after = serving_unit(before.decode(), unit_binds(OWNER_SERVICE)).encode()
+    if record["units"][OWNER_SERVICE] not in {sha256(before), sha256(after)}:
+        raise ValueError("Owner unit does not match its preserved original")
+    if not saved.exists():
+        write_file(saved, before, mode=0o600)  # Root-private copy that `remove` restores.
+    try:
+        grant_owner_read(KEYS, reader_uid)  # Kept with the directory, as for install.
+        grant_owner_read(config_path.parent, reader_uid)
+        # Rewrite the config's own bytes so it carries the default ACL, as install's config switch does.
+        info = config_path.stat()
+        write_file(config_path, config_path.read_bytes(), mode=info.st_mode & 0o777, uid=info.st_uid,
+            gid=info.st_gid, expected=stage.digest(config_path))
+        if stage.digest(unit) == sha256(before):
+            write_file(unit, after, mode=0o644, expected=sha256(before))
+        trial.write_atomic(trial.RECORD, {**record, "units": {**record["units"], OWNER_SERVICE: sha256(after)}})
+        old.run("systemctl", "daemon-reload")
+        # Last: once the keys record names the owner unit, the extension is complete.
+        trial.write_atomic(record_path(), {**keys_record, "serving_units_before": {
+            **keys_record["serving_units_before"], OWNER_SERVICE: stage.digest(saved)}})
+        return installed()  # No start, enable, restart or issuer contact.
+    except BaseException:
+        # Reverse order of the forward writes, so a crash here leaves a state re-running resumes.
+        trial.write_atomic(record_path(), keys_record)
+        trial.write_atomic(trial.RECORD, {**record, "units": {**record["units"], OWNER_SERVICE: sha256(before)}})
+        if stage.digest(unit) == sha256(after):
+            write_file(unit, before, mode=0o644, expected=sha256(after))
+        revoke_owner_read(config_path.parent)
+        old.run("systemctl", "daemon-reload", check=False)
+        raise
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("stage", "install", "check", "remove"))
+    parser.add_argument("action", choices=("stage", "install", "check", "remove", "extend-owner-status"))
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--approve-install")
     parser.add_argument("--dns", action="append", default=[], help="Resolver IP literal the key UID may query")
@@ -396,6 +480,9 @@ def main():
         print(json.dumps({"installed": True, "started": False, "enabled": False}))
     elif args.action == "check":
         print(json.dumps(check()))
+    elif args.action == "extend-owner-status":
+        extend_owner_status()
+        print(json.dumps({"extended": True, "started": False, "enabled": False}))
     else:
         remove()
         print(json.dumps({"removed": True}))
