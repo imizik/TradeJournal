@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const sessionPath = "**/api/level2-lab/session";
+const sessionPath = "**/api/level2-lab/session**";
 
 async function enabledSession(page: Page, ndjson: string | ((route: import("@playwright/test").Route) => Promise<void>)) {
   let posts = 0;

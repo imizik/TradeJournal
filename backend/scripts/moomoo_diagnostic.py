@@ -39,6 +39,8 @@ QUOTE_PATH = "/api/v1.0/quote/stock-quote"
 BOOK_PATH = "/api/v1.0/quote/order-book"
 TIME_PATH = "/api/v1.0/server-time"
 SYMBOL = "US.NVDA"
+# A US stock or ETF ticker in moomoo form; streaming accepts any that matches.
+STREAM_SYMBOL = re.compile(r"US\.[A-Z]{1,5}(\.[A-Z])?")
 KEY_DIR = Path.home() / ".config/tradejournal/moomoo"
 WS_URL = "wss://webapi-quote.moomoo.com/ws"
 STREAM_TYPES = ("quote", "order_book", "ticker")
@@ -346,10 +348,10 @@ def protocol_summary(message: dict) -> dict:
             "error_present": bool(message.get("error")) or (code is not None and code != 0)}
 
 
-def push_summary(message: dict, received_ms: int, offset_ms: float | None) -> dict | None:
+def push_summary(message: dict, received_ms: int, offset_ms: float | None, symbol: str = SYMBOL) -> dict | None:
     kind = message.get("type")
     data = message.get("data")
-    if message.get("symbol") != SYMBOL or kind not in ("QUOTE", "ORDER_BOOK", "TICKER") or not isinstance(data, dict):
+    if message.get("symbol") != symbol or kind not in ("QUOTE", "ORDER_BOOK", "TICKER") or not isinstance(data, dict):
         return None
     result = {"type": kind, "freshness": freshness(data.get("data_time_ms"), received_ms, offset_ms)}
     if kind == "QUOTE":
@@ -400,14 +402,14 @@ def push_summary(message: dict, received_ms: int, offset_ms: float | None) -> di
     return result
 
 
-def display_book(message: dict, received_ms: int, offset_ms: float | None) -> dict:
+def display_book(message: dict, received_ms: int, offset_ms: float | None, symbol: str = SYMBOL) -> dict:
     """Allowlisted latest-book view, never infer venue from MPID or missing time.
 
     No delta merging: each push is displayed independently. Partial sides stay
     empty rather than borrowing levels from a previous message.
     """
     data = message.get("data")
-    if message.get("symbol") != SYMBOL or message.get("type") != "ORDER_BOOK" or not isinstance(data, dict):
+    if message.get("symbol") != symbol or message.get("type") != "ORDER_BOOK" or not isinstance(data, dict):
         raise DiagnosticError("Unexpected lab book message.")
     books = data.get("books", [data])
     if not isinstance(books, list) or len(books) > 10:
@@ -442,11 +444,11 @@ def display_book(message: dict, received_ms: int, offset_ms: float | None) -> di
                     "order_count": count if isinstance(count, int) and count >= 0 else None,
                     "mpid": mpid if isinstance(mpid, str) and re.fullmatch(r"[A-Z0-9]{1,8}", mpid) else None})
         output.append(entry)
-    return {"event": "book", "symbol": SYMBOL, "received_ms": received_ms, "books": output}
+    return {"event": "book", "symbol": symbol, "received_ms": received_ms, "books": output}
 
 
 async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connector=NoRedirectConnect, observer=None,
-                       refresh_seconds: int | None = None) -> dict:
+                       refresh_seconds: int | None = None, symbol: str = SYMBOL) -> dict:
     # Without refresh the hard cap stays well below the documented ten-minute
     # auth refresh limit. A longer manual session must refresh in place
     # (recommended cycle five minutes); an unconfirmed refresh ends it.
@@ -454,7 +456,9 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
         raise DiagnosticError("Refresh interval must be 30..300 seconds.")
     if not 1 <= seconds <= (MAX_REFRESHED_SECONDS if refresh_seconds else 60):
         raise DiagnosticError("Streaming diagnostic duration is outside the permitted cap.")
-    report = {"symbol": SYMBOL, "started_at_utc": datetime.now(timezone.utc).isoformat(),
+    if not isinstance(symbol, str) or not STREAM_SYMBOL.fullmatch(symbol):
+        raise DiagnosticError("Streaming symbol must be a US stock or ETF ticker.")
+    report = {"symbol": symbol, "started_at_utc": datetime.now(timezone.utc).isoformat(),
               "requested_seconds": seconds, "refresh_policy": f"Refresh every {refresh_seconds} seconds; ends if unconfirmed." if refresh_seconds
               else "Hard cap 60 seconds; below the 10-minute refresh requirement.",
               "refreshes": {"sent": 0, "confirmed": 0},
@@ -474,7 +478,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
     def capture(message):
         nonlocal offset
         try:
-            sample = push_summary(message, time.time_ns() // 1_000_000, offset)
+            sample = push_summary(message, time.time_ns() // 1_000_000, offset, symbol)
         except DiagnosticError:
             report["invalid_data_messages"] = report.get("invalid_data_messages", 0) + 1
             return
@@ -485,7 +489,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             saved.setdefault("first", sample)
             saved["last"] = sample
             if kind == "ORDER_BOOK" and observer is not None and report.get("authentication", {}).get("status") == "success":
-                notify(display_book(message, time.time_ns() // 1_000_000, offset))
+                notify(display_book(message, time.time_ns() // 1_000_000, offset, symbol))
 
     def correlated(message: dict, request_id: str) -> dict | None:
         if message.get("id") == request_id:
@@ -540,7 +544,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
                     request_id = "sub-" + kind
                     attempted.append(kind)
                     report["subscriptions"][kind] = {"status": "sent_unconfirmed"}
-                    await socket.send(json.dumps({"id": request_id, "action": "subscribe", kind: [SYMBOL]}))
+                    await socket.send(json.dumps({"id": request_id, "action": "subscribe", kind: [symbol]}))
                     ack = await receive_until(request_id, min(5, max(0, deadline - time.perf_counter())))
                     result = protocol_summary(ack)
                     result["status"] = "success" if result["code"] == 0 and not result["error_present"] else "failed"
@@ -580,7 +584,7 @@ async def stream_probe(appkey: str, key: Ed25519PrivateKey, seconds: int, connec
             finally:
                 if attempted:
                     try:
-                        await socket.send(json.dumps({"id": "unsub-1", "action": "unsubscribe", **{kind: [SYMBOL] for kind in attempted}}))
+                        await socket.send(json.dumps({"id": "unsub-1", "action": "unsubscribe", **{kind: [symbol] for kind in attempted}}))
                         ack = await receive_until("unsub-1", 5)
                         result = protocol_summary(ack)
                         result["status"] = "success" if result["code"] == 0 and not result["error_present"] else "failed"

@@ -1,4 +1,4 @@
-"""Explicitly started loopback-only, memory-only manual moomoo lab bridge.
+"""Explicitly started loopback-only, memory-only manual moomoo lab bridge (one US ticker per session).
 
 Never imported by app.main, never loads the journal or starts on deployment.
 Run with python -m scripts.moomoo_lab_server after configuring an ephemeral
@@ -133,7 +133,12 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
     async def session(request: Request):
         nonlocal active
         authorize(request)
-        if request.headers.get("content-type") != "application/x-level2-start" or request.query_params:
+        # The one argument is a ticker, checked to a strict pattern before any
+        # credential read; it only names what to subscribe to.
+        ticker = request.query_params.get("symbol", "NVDA")
+        if (request.headers.get("content-type") != "application/x-level2-start"
+                or set(request.query_params) - {"symbol"} or len(request.query_params.getlist("symbol")) > 1
+                or not diagnostic.STREAM_SYMBOL.fullmatch("US." + ticker)):
             raise HTTPException(400, "Fixed lab session required")
         # The frontend sends no body. Bound the read before credential access.
         async for chunk in request.stream():
@@ -162,7 +167,7 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
 
         async def run():
             try:
-                report = await runner(appkey, key, SESSION_SECONDS, observer=observe, refresh_seconds=REFRESH_SECONDS)
+                report = await runner(appkey, key, SESSION_SECONDS, observer=observe, refresh_seconds=REFRESH_SECONDS, symbol="US." + ticker)
                 control.put_nowait({"event": "summary", "report": report})
             except asyncio.CancelledError:
                 raise

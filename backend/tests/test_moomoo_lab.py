@@ -80,8 +80,8 @@ def test_sanitized_credential_failure():
 
 
 def test_session_coalesces_latest_no_archive_and_fixed_cap():
-    async def runner(appkey, key, seconds, observer, refresh_seconds):
-        assert seconds == 8 * 3600 and refresh_seconds == 240 and appkey == "fixture"
+    async def runner(appkey, key, seconds, observer, refresh_seconds, symbol):
+        assert seconds == 8 * 3600 and refresh_seconds == 240 and appkey == "fixture" and symbol == "US.NVDA"
         observer({"event": "status", "phase": "authenticated"})
         for i in range(100):
             observer({"event": "book", "symbol": "US.NVDA", "received_ms": i, "books": []})
@@ -98,7 +98,7 @@ def test_coalescing_keeps_the_latest_book_of_each_kind():
     def book(i, mpid):
         return {"event": "book", "symbol": "US.NVDA", "received_ms": i, "books": [
             {"exchange": "", "bids": [{"price": 1, "volume": 1, "mpid": mpid}], "asks": []}]}
-    async def runner(appkey, key, seconds, observer, refresh_seconds):
+    async def runner(appkey, key, seconds, observer, refresh_seconds, symbol):
         for i in range(50):
             observer(book(i, "ARCA"))
         observer(book(50, "NSDQ"))
@@ -111,7 +111,7 @@ def test_coalescing_keeps_the_latest_book_of_each_kind():
 
 def test_quiet_stream_sends_keepalives(monkeypatch):
     monkeypatch.setattr(lab, "KEEPALIVE_SECONDS", 0.3)
-    async def runner(appkey, key, seconds, observer, refresh_seconds):
+    async def runner(appkey, key, seconds, observer, refresh_seconds, symbol):
         await asyncio.sleep(1.2)
         return {"closed": True}
     with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
@@ -119,11 +119,45 @@ def test_quiet_stream_sends_keepalives(monkeypatch):
     assert result.count({"event": "keepalive"}) >= 2 and result[-1] == {"event": "status", "phase": "closed"}
 
 
+@pytest.mark.parametrize("query, expected", [("symbol=AAPL", "US.AAPL"), ("symbol=BRK.B", "US.BRK.B"), ("", "US.NVDA")])
+def test_session_streams_the_requested_ticker(query, expected):
+    seen = []
+    async def runner(appkey, key, seconds, observer, refresh_seconds, symbol):
+        seen.append(symbol)
+        return {"closed": True}
+    with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
+        assert client.post("/session" + ("?" + query if query else ""), headers=HEADERS).status_code == 200
+    assert seen == [expected]
+
+
+@pytest.mark.parametrize("query", ["symbol=aapl", "symbol=TOOLONG", "symbol=AAPL&x=1", "symbol=AAPL&symbol=MSFT", "symbol=AA%2FPL", "symbol=", "symbol=SPXW240119C00450000", "other=1"])
+def test_session_refuses_any_other_argument_before_reading_credentials(query):
+    def loader():
+        raise AssertionError("credentials must not be read")
+    with TestClient(lab.create_app(token=TOKEN, loader=loader), client=("127.0.0.1", 50000)) as client:
+        assert client.post("/session?" + query, headers=HEADERS).status_code == 400
+
+
+def test_stream_probe_subscribes_and_filters_by_symbol():
+    async def scenario():
+        key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        socket, events = FakeSocket(), []
+        other = copy.deepcopy(BOOK)  # an NVDA book must not count or display in an AAPL session
+        await socket.queue.put(json.dumps(other))
+        report = await d.stream_probe("fixture", key, 1, lambda *a, **k: socket, events.append, symbol="US.AAPL")
+        assert all(frame.get(kind) == ["US.AAPL"] for frame in socket.sent if frame["action"] == "subscribe" for kind in d.STREAM_TYPES if kind in frame)
+        assert report["symbol"] == "US.AAPL" and report["message_counts"]["ORDER_BOOK"] == 0
+        assert not any(event["event"] == "book" for event in events)
+        with pytest.raises(d.DiagnosticError):
+            await d.stream_probe("fixture", key, 1, lambda *a, **k: FakeSocket(), symbol="US.aapl")
+    asyncio.run(scenario())
+
+
 def test_single_session_gate_and_stop_closes_provider():
     async def scenario():
         from starlette.requests import Request
         started, stopped = asyncio.Event(), asyncio.Event()
-        async def runner(appkey, key, seconds, observer, refresh_seconds):
+        async def runner(appkey, key, seconds, observer, refresh_seconds, symbol):
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -233,8 +267,8 @@ def test_actual_asgi_http_disconnect_unsubscribes_before_session_release():
     async def scenario():
         socket = FakeSocket()
         key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
-        async def runner(appkey, supplied_key, seconds, observer, refresh_seconds):
-            return await d.stream_probe(appkey, supplied_key, seconds, lambda *a, **k: socket, observer, refresh_seconds=refresh_seconds)
+        async def runner(appkey, supplied_key, seconds, observer, refresh_seconds, symbol):
+            return await d.stream_probe(appkey, supplied_key, seconds, lambda *a, **k: socket, observer, refresh_seconds=refresh_seconds, symbol=symbol)
         app = lab.create_app(token=TOKEN, loader=lambda: ("fixture", key), runner=runner)
         disconnect = asyncio.Event()
         first = True

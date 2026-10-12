@@ -3,6 +3,8 @@ import { accessConfig, currentAccess } from "@/lib/accessServer";
 export const dynamic = "force-dynamic";
 /** The bridge ends a session by itself after eight hours; this backstop sits just above that. */
 const SESSION_TIMEOUT_MS = 8 * 3600_000 + 60_000;
+/** A US stock or ETF ticker (BRK.B style classes included); the bridge checks the same pattern. */
+const TICKER = /^[A-Z]{1,5}(\.[A-Z])?$/;
 
 async function handler(request: Request) {
   try {
@@ -36,7 +38,10 @@ async function handler(request: Request) {
     if (!permittedOrigin || process.env.TJ_MOOMOO_LAB_ENABLED !== "true" || !/^[A-Za-z0-9_-]{32,128}$/.test(token)) {
       return Response.json({ enabled: false }, { status: request.method === "GET" ? 200 : 503 });
     }
-    if (url.search || (request.method === "POST" && (request.headers.get("origin") !== permittedOrigin ||
+    // The only argument is a POST's single `symbol`; anything else is refused before it is forwarded.
+    const params = [...url.searchParams];
+    const ticker = request.method === "POST" && params.length === 1 && params[0][0] === "symbol" && TICKER.test(params[0][1]) ? params[0][1] : null;
+    if ((url.search && !ticker) || (request.method === "POST" && (request.headers.get("origin") !== permittedOrigin ||
       request.headers.get("content-type") !== "application/x-level2-start"))) {
       return Response.json({ detail: "Fixed same-origin session required" }, { status: 400 });
     }
@@ -55,7 +60,7 @@ async function handler(request: Request) {
     const timeout = setTimeout(abort, SESSION_TIMEOUT_MS);
     const dispose = () => { clearTimeout(timeout); request.signal.removeEventListener("abort", abort); };
     try {
-      const response = await fetch(`http://127.0.0.1:8196/${request.method === "GET" ? "status" : "session"}`, {
+      const response = await fetch(`http://127.0.0.1:8196/${request.method === "GET" ? "status" : `session${ticker ? `?symbol=${ticker}` : ""}`}`, {
         method: request.method, headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/x-level2-start" },
         redirect: "manual", cache: "no-store", signal: controller.signal,
       });

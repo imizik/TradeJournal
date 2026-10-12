@@ -183,7 +183,7 @@ recordings and skips transcription.
 The optional market-depth lab uses a dedicated `tradejournal-moomoo` systemd
 service. It binds only to `127.0.0.1:8196`, has no database or journal-state
 access, and makes no provider request at startup. The browser can request one
-fixed NVDA stream, which refreshes its auth in place and runs until stopped
+stream for one validated US ticker, which refreshes its auth in place and runs until stopped
 (eight hours at most), after the operator starts the lab. There is no
 timer or scheduled work.
 
