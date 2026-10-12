@@ -96,7 +96,10 @@ def book_line(message: dict, received_ms: int, offset_ms: float | None, symbol: 
         event = diagnostic.display_book(message, received_ms, offset_ms, symbol)
     except diagnostic.DiagnosticError:
         return None
-    level = lambda entry: [entry["price"], entry["volume"], entry["order_count"], entry["mpid"]]
+
+    def level(entry):
+        return [entry["price"], entry["volume"], entry["order_count"], entry["mpid"]]
+
     return {"t": "b", "rx": received_ms, "k": lab.book_kind(event), "books": [
         {"ex": book["exchange"], "ts": book["source_time_ms"], "age": book["estimated_age_ms"],
          "b": [level(entry) for entry in book["bids"]], "a": [level(entry) for entry in book["asks"]]}
@@ -213,7 +216,6 @@ async def record_window(appkey, key, tickers: list[str], until: datetime, store:
     symbols = ["US." + ticker for ticker in tickers]
     offset = None
     latest: dict[tuple[str, str], dict] = {}
-    socket = None
     subscribed = False
 
     async def receive_until(request_id: str, timeout: float) -> dict:
