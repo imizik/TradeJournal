@@ -514,6 +514,8 @@ def price_after(idea: dict, answer: dict, receipt_utc: datetime, bars: Optional[
     window = {"from_ny": start.isoformat(timespec="minutes"), "to_ny": end.isoformat(timespec="minutes")}
     if not reference:
         return {**base, "state": "no_reference", "window": window, "note": "the check had no live price to measure from"}
+    if start >= end:
+        return {**base, "state": "no_window", "window": window, "note": "checked after the close; no session left to measure"}
     if bars is None:
         return {**base, "state": "unavailable", "window": window, "note": "minute bars could not be read"}
     inside = sorted((bar for bar in bars if start <= _bar_time(bar) < end), key=lambda bar: str(bar["t"]))
@@ -534,6 +536,30 @@ def price_after(idea: dict, answer: dict, receipt_utc: datetime, bars: Optional[
         hit = next((bar for bar in inside if (bar["l"] <= stop if up else bar["h"] >= stop)), None)
         result["stop_hit_ny"] = _bar_time(hit).isoformat(timespec="minutes") if hit else None
     return result
+
+
+SETTLE_DELAY_HOURS = 12  # Late fill emails and same-day closes reach the history file well within this.
+FINAL_MOVES = ("complete", "no_reference", "no_window", "no_bars")
+
+
+def result_final(idea: dict, answer: dict, receipt_utc: datetime, result: dict,
+                 features_generated_at: Optional[datetime], positions: Optional[Iterable[dict]]) -> bool:
+    """Whether a check's result can no longer change, so it may be saved for good.
+
+    Needs a closed-trade link, a finished move, a history file at least 12 hours past the window, and current
+    open positions with none on this ticker and side opened inside the window (it would link once it closes).
+    """
+    if result["outcome"].get("state") not in ("traded", "no_closed_trade") or result["move"].get("state") not in FINAL_MOVES:
+        return False
+    start, end = check_window(answer, receipt_utc)
+    if features_generated_at is None or _ny_wall(features_generated_at) < end + timedelta(hours=SETTLE_DELAY_HOURS):
+        return False
+    if positions is None:
+        return False
+    side = _side(idea["instrument"], idea.get("option_type"))
+    return not any(p["ticker"].upper() == idea["ticker"].upper()
+                   and _side(p["instrument_type"], p.get("option_type")) == side
+                   and start <= datetime.fromisoformat(p["opened_at"]) <= end for p in positions)
 
 
 GRADE_VERSION = "pretrade-grade-v1"

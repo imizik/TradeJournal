@@ -22,6 +22,7 @@ import asyncio
 import copy
 from datetime import date, datetime, timedelta, timezone
 import math
+import sqlite3
 from pathlib import Path
 import stat
 import threading
@@ -67,8 +68,6 @@ PREOPEN_LIMIT = 8
 PREOPEN_BUDGET = 20.0  # Seconds for the whole pass; tickers left over are named, not guessed.
 SETTLE_BUDGET = 20.0  # Seconds of minute-bar reads per review/grade call; the rest stay unmeasured until next time.
 GRADE_LIMIT = 1000
-FINAL_OUTCOMES = ("traded", "no_closed_trade")
-FINAL_MOVES = ("complete", "no_reference")
 CONTEXT_MAX_AGE = 30 * 60  # Positions change during a session; older than this is labelled stale.
 
 
@@ -231,7 +230,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     from app.engine.alpaca import ET
     from app.engine.alpaca import fetch_minute_bars_live
     from app.engine.pretrade_check import (check_outcome, grade_results, position_view, preopen_tickers, preopen_view,
-        price_after, run_check)
+        price_after, result_final, run_check)
     from app.engine.scalper import build_scalp_analysis
 
     clock = clock or (lambda: datetime.now(timezone.utc))
@@ -401,7 +400,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         span = (start.astimezone(timezone.utc).isoformat(), (start + timedelta(days=1)).astimezone(timezone.utc).isoformat())
         try:
             saved = await asyncio.to_thread(ledger.between, checked.subject, *span, REVIEW_LIMIT + 1)
-        except (ValueError, OSError):
+        except (ValueError, OSError, sqlite3.Error):
             raise ToolError("Checks could not be read") from None
         truncated = len(saved) > REVIEW_LIMIT
         settled, features = await settle(checked.subject, saved[:REVIEW_LIMIT], now)
@@ -423,9 +422,12 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         """Each check with its result: the saved final one, else computed now and saved once it is final."""
         features = await asyncio.to_thread(history, now)
         generated = datetime.fromisoformat(features["generated_at"]) if features["generated_at"] else None
+        held = await asyncio.to_thread(context, now)
+        # Stale or missing positions could hide an open trade from the window; then nothing is saved.
+        positions = held["positions"] if held["state"] == "fresh" else None
         try:
             done = await asyncio.to_thread(ledger.results, [record["check_id"] for record, _ in saved])
-        except (ValueError, OSError):
+        except (ValueError, OSError, sqlite3.Error):
             raise ToolError("Check results could not be read") from None
         wanted = {}
         for record, _ in saved:
@@ -437,7 +439,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             if slots.locked():
                 raise ToolError("Check service busy; retry shortly")
             async with slots:  # Same provider bound as the other live calls.
-                for day, tickers in sorted(wanted.items()):
+                for day, tickers in sorted(wanted.items(), reverse=True):  # Newest first within the budget.
                     remaining = deadline - time.monotonic()
                     if remaining <= 1:
                         break
@@ -457,10 +459,10 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             result = {"outcome": check_outcome(record["idea"], record["answer"], received, features["rows"], generated, now),
                 "move": price_after(record["idea"], record["answer"], received,
                     bars.get((day, record["idea"]["ticker"].upper())), now)}
-            if result["outcome"]["state"] in FINAL_OUTCOMES and result["move"]["state"] in FINAL_MOVES:
+            if result_final(record["idea"], record["answer"], received, result, generated, positions):
                 try:
                     result = {**await asyncio.to_thread(ledger.save_result, actor, record["check_id"], result), "saved": True}
-                except (ValueError, OSError):
+                except (ValueError, OSError, sqlite3.Error):
                     pass  # Not saved this time; the computed result is still shown.
             settled.append((record, model, result))
         return settled, features
@@ -478,13 +480,15 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         start = now - timedelta(days=days or 30)
         try:
             saved = await asyncio.to_thread(ledger.between, checked.subject, start.isoformat(), now.isoformat(), GRADE_LIMIT)
-        except (ValueError, OSError):
+        except (ValueError, OSError, sqlite3.Error):
             raise ToolError("Checks could not be read") from None
         settled, features = await settle(checked.subject, saved, now)
+        # Saved results only, the same set /advisor-review grades, so the two always agree.
+        final = [(record, model, result) for record, model, result in settled if result.get("saved")]
         grade = grade_results([{"verdict": record["answer"]["verdict"], "model_verdict": (model or {}).get("verdict"),
-            "outcome": result["outcome"], "move": result["move"]} for record, model, result in settled])
-        return {"schema_version": SCHEMA, "days": days or 30, "checks": len(settled),
-            "pending_or_unmeasured": len(settled) - grade["final_checks"], "grade": grade,
+            "outcome": result["outcome"], "move": result["move"]} for record, model, result in final])
+        return {"schema_version": SCHEMA, "days": days or 30, "checks": len(settled), "settled": len(final),
+            "pending": len(settled) - len(final), "truncated": len(saved) >= GRADE_LIMIT, "grade": grade,
             "history": {key: features[key] for key in ("state", "generated_at")}}
 
     def context(now):

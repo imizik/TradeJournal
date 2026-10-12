@@ -183,7 +183,8 @@ saved verdict and an outcome from closed trades
 `pretrade-link-v1`). The window is fixed by the check itself: receipt to the
 `wait_for` expiry, otherwise to that session's close. `traded` means a trade on
 the same underlying and side opened inside it, reported as count, wins and
-total P&L only (never counted as followed); `no_closed_trade` never claims no position, since open trades
+total P&L only (on its own not proof the check was followed; grading counts a
+go that was traded as followed); `no_closed_trade` never claims no position, since open trades
 appear only after they close; `pending` until the window has passed and the
 history file was refreshed after it; swing checks are `not_linked`.
 
@@ -232,12 +233,16 @@ Price after and grading (advisor steps 8 and 10): `review_checks` adds
 price inside the check's own window, signed in the idea's direction (last,
 best, worst, and when a given stop was hit). Options are measured on the
 underlying; the premium is not replayed. Once a check's trade link is final
-(`traded`/`no_closed_trade`) and its move is complete, the pair is saved once
-in the ledger's `check_result` table (immutable, hashed) and later reads use
-it. Each call reads at most 20 seconds of minute bars; unread days stay
-unmeasured until the next call. `grade_checks(days?)` (`check:read`, default
+(`traded`/`no_closed_trade`), its move is finished (`complete`, or nothing to
+measure: no reference price, checked after the close, no bars), the history
+file is at least 12 hours past the window, and current open positions show none
+on that ticker and side opened inside the window, the pair is saved once in the
+ledger's `check_result` table (immutable, hashed) and later reads use it. Until
+then it is recomputed on each read and never graded. Each call reads at most 20
+seconds of minute bars, newest day first; unread days stay unmeasured until the
+next call. `grade_checks(days?)` (`check:read`, default
 30) and the "How the checks did" section on `/advisor-review` (owner reader
-`GET /owner/grades`, saved results only) report, per rules verdict, checks,
+`GET /owner/grades`) both grade saved results only, so they agree, and report, per rules verdict, checks,
 how many went the idea's way, median move and traded P&L; followed versus
 overrode (traded against a wait/pass and its P&L; skipped a go and the move
 after); and Jo's saved verdicts against the rules. Groups under 10 settled

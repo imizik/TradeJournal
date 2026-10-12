@@ -307,3 +307,23 @@ def test_grade_counts_followed_overrode_and_jo():
     assert passes["checks"] == 12 and passes["enough"] is True and passes["went_the_idea_way"] == 0
     assert passes["traded"] == 3 and passes["traded_pnl"] == -165.0
     assert grade["jo"] == {**grade["jo"], "with_verdict": 18, "agrees_with_rules": 15}
+
+
+def test_result_final_waits_for_history_and_open_positions():
+    receipt = datetime(2026, 10, 9, 15, 0, tzinfo=timezone.utc)  # 11:00 New York; window to 16:00.
+    idea = {"ticker": "SPY", "side": "long", "instrument": "option", "option_type": "call", "horizon": "intraday"}
+    answer = {"verdict": "pass", "wait_for": None, "live": {"price": 100.0}}
+    result = {"outcome": {"state": "no_closed_trade"}, "move": {"state": "complete"}}
+    morning = datetime(2026, 10, 10, 13, 0, tzinfo=timezone.utc)
+    held = {"ticker": "spy", "instrument_type": "option", "option_type": "call", "opened_at": "2026-10-09T11:20:00"}
+    assert check.result_final(idea, answer, receipt, result, morning, []) is True
+    assert check.result_final(idea, answer, receipt, result, datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc), []) is False
+    assert check.result_final(idea, answer, receipt, result, morning, None) is False
+    assert check.result_final(idea, answer, receipt, result, morning, [held]) is False
+    assert check.result_final(idea, answer, receipt, result, morning, [{**held, "option_type": "put"}]) is True
+    assert check.result_final(idea, answer, receipt, result, morning, [{**held, "opened_at": "2026-10-08T11:00:00"}]) is True
+    for state in ("pending", "not_linked"):
+        assert check.result_final(idea, answer, receipt, {**result, "outcome": {"state": state}}, morning, []) is False
+    assert check.result_final(idea, answer, receipt, {**result, "move": {"state": "unavailable"}}, morning, []) is False
+    late = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)  # Checked at 17:00, after the close.
+    assert check.price_after({**idea, "stop": None}, answer, late, [], morning)["state"] == "no_window"
