@@ -246,3 +246,21 @@ def test_position_marks_options_by_live_mid_and_shares_by_price():
     assert not any("P&L is not computed" in c for c in view["caveats"])
     shares = {**position, "instrument_type": "stock", "option_type": None, "contracts": 10.0, "total_premium_paid": 5700.0}
     assert check.position_view(shares, [], analysis(price=580.0), RECEIPT)["mark"]["unrealized_pnl"] == 100.0
+
+
+def test_preopen_defaults_and_premarket_facts_without_verdict():
+    receipt = datetime(2026, 10, 9, 12, 30, tzinfo=timezone.utc)  # 08:30 New York, premarket.
+    rows = [{**row, "underlying": "NVDA"} for row in cohort(3, 5.0)] + cohort(10, 15.0)
+    old = {**cohort(1, 1.0)[0], "underlying": "AMD", "closed_at": "2026-08-01T11:00:00", "opened_at": "2026-08-01T10:00:00"}
+    held = [{"ticker": "apld", "instrument_type": "option", "option_type": "call", "strike": 30.0,
+             "expiration": "2026-11-20", "contracts": 2.0, "total_premium_paid": 420.0, "opened_at": "2026-10-01T10:00:00"}]
+    assert check.preopen_tickers(held, [*rows, old], receipt, 8) == ["APLD", "SPY", "NVDA"]
+    analysis = {"assessment": {"market_state": "premarket"}, "data": {"market_state": "premarket", "missing": [],
+        "snapshot": {"price": 583.1, "prev_close": 580.0, "change_pct": 0.53, "gap_pct": None},
+        "intraday": {"premarket_high": 583.5, "premarket_low": 579.2, "premarket_volume": 120000}}}
+    view = check.preopen_view("spy", rows, analysis, receipt, held)
+    assert view["live"] | {} == {**view["live"], "price": 583.1, "prev_close": 580.0, "premarket_high": 583.5,
+        "market_state": "premarket"}
+    assert view["held_now"] == [] and view["history"]["trades"] == 10 and view["news"] == []
+    assert view["history"]["by_side"][0]["side"] == "call" and "verdict" not in view
+    assert check.preopen_view("APLD", rows, analysis, receipt, held)["held_now"][0]["contracts"] == 2.0

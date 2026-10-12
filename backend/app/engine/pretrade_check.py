@@ -431,3 +431,63 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
              **_hold_summary(same_entry)}]},
         "caveats": caveats,
     }
+
+
+PREOPEN_VERSION = "pretrade-preopen-v1"
+PREOPEN_RECENT_DAYS = 30
+PREOPEN_HEADLINES = 5
+
+
+def preopen_tickers(positions: Iterable[dict], rows: Iterable[dict], receipt_utc: datetime, limit: int) -> list[str]:
+    """Default watchlist: tickers held now, then the most-traded tickers of the last 30 days."""
+    cutoff = _ny_wall(receipt_utc) - timedelta(days=PREOPEN_RECENT_DAYS)
+    held = [p["ticker"].upper() for p in positions]
+    recent = Counter(row["underlying"].upper() for row in rows if datetime.fromisoformat(row["closed_at"]) >= cutoff)
+    return list(dict.fromkeys([*held, *(ticker for ticker, _ in recent.most_common())]))[:limit]
+
+
+def preopen_view(ticker: str, rows: Iterable[dict], analysis: dict, receipt_utc: datetime,
+                 positions: Iterable[dict] = ()) -> dict:
+    """Before the bell, one ticker: where it trades versus yesterday, its last-24h headlines, and how Isaac has
+    traded it.
+
+    Facts only; no verdict. Premarket reads are not session reads, and small cohorts say so.
+    """
+    now_ny = _ny_wall(receipt_utc)
+    ticker = ticker.upper()
+    data = analysis.get("data") or {}
+    snapshot = data.get("snapshot") or {}
+    intraday = data.get("intraday") or {}
+    prior = [row for row in rows if datetime.fromisoformat(row["closed_at"]) < now_ny and row["underlying"].upper() == ticker]
+    sides = []
+    for side in sorted({row["side"] for row in prior}):
+        same = [row for row in prior if row["side"] == side]
+        by_time = []
+        for bucket in sorted({row["time_bucket"] for row in same if row["time_bucket"]}):
+            group = [row for row in same if row["time_bucket"] == bucket]
+            pnl = [row["realized_pnl"] for row in group if row["realized_pnl"] is not None]
+            by_time.append({"time_bucket": bucket, "trades": len(group),
+                            "win_rate": round(sum(1 for v in pnl if v > 0) / len(pnl), 3) if len(pnl) >= 3 else None,
+                            "total_pnl": round(sum(pnl), 2) if pnl else None})
+        sides.append({"side": side, **_hold_summary(same), "by_entry_time": by_time})
+    caveats = []
+    if (data.get("staleness") or {}).get("is_stale"):
+        caveats.append("live quotes/bars are stale")
+    caveats.extend(data.get("missing") or [])
+    return {
+        "preopen_version": PREOPEN_VERSION,
+        "ticker": ticker,
+        "live": {"price": snapshot.get("price") or intraday.get("price"), "prev_close": snapshot.get("prev_close"),
+                 "change_pct": snapshot.get("change_pct"), "gap_pct": snapshot.get("gap_pct"),
+                 "premarket_high": intraday.get("premarket_high"), "premarket_low": intraday.get("premarket_low"),
+                 "premarket_volume": intraday.get("premarket_volume"),
+                 "market_state": (analysis.get("assessment") or {}).get("market_state") or data.get("market_state"),
+                 "staleness": data.get("staleness")},
+        "news": [{key: article.get(key) for key in ("headline", "source", "created_at", "url")}
+                 for article in (data.get("news") or [])[:PREOPEN_HEADLINES]],
+        "held_now": [{key: p.get(key) for key in ("instrument_type", "option_type", "strike", "expiration", "contracts",
+                      "total_premium_paid", "opened_at")} for p in positions if p["ticker"].upper() == ticker],
+        "history": {"as_of_ny": now_ny.isoformat(timespec="seconds"), "trades": len(prior),
+                    "last_closed": max((row["closed_at"] for row in prior), default=None), "by_side": sides},
+        "caveats": caveats,
+    }
