@@ -255,6 +255,99 @@ the two optional socket/process pairs and verifies active state; any startup
 failure attempts stopping both groups. No boot enablement follows. Current
 implementation work must leave this step paused.
 
+## Upgrading the installed v2 runtime
+
+`install` refuses an existing v2 tree, so merged advisor code reaches the
+retained trial only through `upgrade`. It replaces **only** the five runtime
+roles under `/opt/tradejournal-advisor-v2` (`adapter`, `backend`, `frontend`,
+`bin`, `operator`) with a newer reviewed bundle. The advisor and owner config
+(live `client_claim`, client, subject and assignment bindings, `jwks_file`),
+`frontend.env`, the ledger and its receipts, recovery files, accounts, the six
+unit files (including key upkeep's extra read-only binds), the owner drop-in and
+the v1 resources stay byte-identical. Nothing is started, enabled or restarted.
+A ledger behind the new runtime's schema is migrated only by the separate
+`migrate-ledger` step below.
+
+1. From the reviewed new source revision, prepare the bundle exactly as for
+   install (verified release archive + offline wheels; the guard file is not
+   used by upgrade, the original one may be reused). Approve its manifest SHA.
+   Take a root-private copy on the host and run the controller from a
+   root-private copy of that same revision.
+2. Stop the six advisor units (`advisor_trial_control.py stop`), then
+   `tradejournal-dot-trial-owner-bridge.socket`, its `.service` and the private
+   owner frontend `tradejournal-dot-trial-owner.service`. The frontend runs the
+   v2 Node/frontend runtime and the bridge socket would start it on the next
+   request. This is a separately approved, announced outage of the private demo
+   app. Do not reboot until the swap finishes: the frontend starts at boot, so
+   after an interrupted swap stop it again and run `resume` first.
+3. Upgrade, always with bytecode writing disabled:
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py upgrade \
+  --bundle /root/approved-trial-bundle --approve-upgrade REVIEWED_MANIFEST_SHA256
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py preflight
+```
+
+4. If `preflight` shows `ledger_revision` different from the record's
+   `schema_revision`, the new runtime refuses that ledger until it is migrated.
+   With separate owner approval and the same units stopped:
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py migrate-ledger
+```
+
+5. If key upkeep is installed, run `advisor_keys_control.py check`. Starting the
+   sockets, services, bridge socket and owner frontend again is the usual
+   separately approved start; re-run the start verification.
+
+Upgrade refuses, before changing anything, unless the approval names the
+bundle manifest, the six advisor units, the bridge pair and the owner frontend
+are all `inactive`/`failed`, the current installation (and key upkeep, when
+present) verifies, the bundle differs from the installed one, and its
+units/drop-in equal the installed ones (with key binds applied). The live
+ledger's Alembic revision (read-only) must equal the bundle's staged ledger or
+be one of its ancestors in the bundle's own migration scripts. A changed unit or
+drop-in needs its own reviewed procedure.
+
+`migrate-ledger` runs the installed, verified backend's own Alembic (`upgrade
+heads`, `-B`) against only the v2 ledger. It first writes a root-private byte
+copy to `ledger-backups/` and records it. Only additive change is accepted:
+afterwards every existing table's SQL and every row (receipts included) must be
+identical, the whole schema must equal the bundle's staged schema recorded at
+upgrade (so a half-applied earlier attempt is refused), the revision must equal
+the runtime's `schema_revision`, owner/mode must be unchanged and no extra file
+may remain beside the ledger. Otherwise the copy's bytes are written back in
+place (same inode, so owner, mode and ACL stay), verified by digest, and it
+refuses naming the copy. A leftover SQLite journal blocks that automatic
+restore and needs review. The current #251 ledger is one migration behind main
+(`d6e1f2a3b4c5`, the unrelated empty `monthly_review` table from #258).
+
+The current roles move to `previous-runtime/<UTC time>-<manifest prefix>-<random>/`
+(kept, inventoried in the record as `previous_runtimes` with the schema they
+served), the new runtime is built at the final paths and synced to disk, and
+only then is `installation.json` replaced atomically with the new runtime
+inventory, provenance and `schema_revision`. A root-private
+`upgrade-intent.json` journals the swap. A failure before the record switch
+moves the partial build to `failed-upgrades/` (never deleted) and puts the
+recorded runtime back. While the journal exists, `preflight`, `rollback` and
+key upkeep refuse; `resume` (or the next `upgrade`/`downgrade`) finishes or
+reverses the swap. Trial `rollback` still restores the original v1 units
+afterwards, and still requires key upkeep `remove` first.
+
+`downgrade` (same stops) verifies the most recently retained runtime against
+its recorded inventory, swaps it back and retains the replaced one, so a later
+`upgrade` or second `downgrade` stays possible. Config, ledger and receipts are
+untouched in both directions; receipts saved by a newer runtime remain in the
+ledger. After `migrate-ledger`, `downgrade` refuses because the older runtime
+would refuse the newer schema; going back then needs a reviewed ledger
+procedure (the backup lacks receipts saved after the migration). Pruning old
+`previous-runtime/`, `failed-upgrades/` or `ledger-backups/` entries is a
+manual, reviewed step.
+
+Upgrading the runtime does not turn on repeatable-question management (see
+"Dormant repeatable-question mode"); `assignment_management` stays off until
+that separate activation.
+
 ## Optional public-key upkeep for the v2 trial
 
 Without upkeep the advisor stops accepting new sign-ins when its manual public-key
@@ -339,7 +432,8 @@ Never delete the ledger to make a reinstall pass or reuse an answered binding.
 
 Replacement requires stop first, verified source/config and new bounded review;
 there is no automatic update, mutable runtime symlink or unattended relink in
-this bundle. Reopening original receipts after revocation remains owner-only.
+this bundle. The v2 trial's manual runtime-only `upgrade`/`downgrade` is
+described under "Upgrading the installed v2 runtime". Reopening original receipts after revocation remains owner-only.
 
 ## Evidence boundaries
 

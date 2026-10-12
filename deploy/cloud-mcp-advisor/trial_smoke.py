@@ -293,6 +293,7 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
             raise AssertionError("Native executable drift accepted")
         dependency.write_bytes(original)
         control.installed()
+        upgraded_runtime(archive, scratch, run)
         new_ledger = staging.digest(control.STATE / "fixture.db")
         control.rollback()
         # Rollback restores the unit definition; the operator must separately
@@ -317,6 +318,40 @@ app.add_middleware(AccessMiddleware,routes=app.router.routes)
         for account in (trial.READER_ACCOUNT, trial.WEB_ACCOUNT):
             run("userdel", account, check=False)
             run("groupdel", account, check=False)
+
+
+def upgraded_runtime(archive, scratch, run):
+    """Actual runtime-only upgrade and downgrade on the disposable install."""
+    run("systemctl", "stop", trial.FRONTEND)
+    control.stop()
+    first = control.installed()
+    kept = (control.STATE / "fixture.db", control.CONFIG / "advisor/config.json", control.CONFIG / "owner/config.json",
+        control.CONFIG / "frontend.env", control.DROPIN, *[old.UNIT_DIR / name for name in control.UNITS])
+    before = {path: staging.digest(path) for path in kept}
+    bundle = scratch / "trial-upgrade"
+    trial.prepare(bundle, archive=archive, archive_sha256=staging.digest(archive), wheels=scratch / "wheels", guards={})
+    approved = staging.digest(bundle / "manifest.json")
+    assert control.upgrade(bundle, approved)["manifest_sha256"] == approved
+    assert {path: staging.digest(path) for path in kept} == before
+    assert all(run("systemctl", "is-active", "--quiet", unit, check=False).returncode != 0 for unit in (*control.UNITS, trial.FRONTEND))
+    restored = control.downgrade()
+    assert restored["runtime_inventory"] == first["runtime_inventory"] and restored["manifest_sha256"] == first["manifest_sha256"]
+    assert {path: staging.digest(path) for path in kept} == before
+    # An older ledger (like #251's) upgrades, then migrates separately and additively.
+    ledger = control.STATE / "fixture.db"
+    control.run_alembic("downgrade", "-1")
+    older, content = control.ledger_revision(ledger), control.ledger_content(ledger)
+    assert control.upgrade(bundle, approved)["schema_revision"] != older
+    migrated = control.migrate_ledger()
+    assert control.ledger_revision(ledger) == migrated["schema_revision"]
+    assert all(control.ledger_content(ledger)["rows"][name] == digest for name, digest in content["rows"].items())
+    try:
+        control.downgrade()
+    except ValueError as error:
+        assert "migrated past" in str(error)
+    else:
+        raise AssertionError("Downgrade accepted a ledger migrated past the retained runtime")
+    print("Trial runtime upgrade native passed: stopped swap to a newer reviewed bundle and back with config, ledger, units and drop-in unchanged, older-ledger upgrade with separate additive migration and refused downgrade, nothing started")
 
 
 def interrupted_install(bundle, run):
