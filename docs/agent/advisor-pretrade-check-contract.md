@@ -68,7 +68,9 @@ The private production API stays private (hard constraint). A new isolated
 - **Live data:** the service calls the market-data provider directly using the
   existing scalp packet code with a dedicated read-only provider credential,
   delivered as a systemd credential. A UID-only network policy permits only
-  DNS and the provider's HTTPS; private/host addresses stay denied.
+  DNS and public HTTPS (the provider has no fixed addresses); loopback,
+  private and host addresses stay denied, with a systemd `IPAddressDeny`
+  backstop if the table is ever flushed.
 - **History:** a separate finite publisher (like the journal export) writes a
   per-trade feature row file after fill import/rebuild, through a read-only
   database role on a narrow view. The check service never holds a database
@@ -110,6 +112,41 @@ coach export or the fixture advisor.
    390px.
 4. **Activation** (separate approval): Auth0 API/scopes, provider credential,
    database role/view, restore point and rollback files.
+
+## Build status
+
+Step 2 is **built, not installed or activated** (October 11, 2026):
+
+- Service: [cloud_mcp_check.py](../../backend/cloud_mcp_check.py) with
+  [identity/config](../../backend/cloud_mcp_check_common.py) and the
+  [immutable ledger](../../backend/cloud_mcp_check_ledger.py). Scopes:
+  `check:read` on every call, plus `check:run` for `pre_trade_check` and
+  `check:note` for `attach_model_verdict`. `pre_trade_check` also takes an
+  optional `operation_id`; reusing it with the same idea returns the saved
+  check. Jo's view omits the hashed fill keys; the ledger keeps them.
+- Live data: the scalp packet's four provider reads now run concurrently, and
+  the service swaps the engine's patient getter for one bounded attempt
+  (3 s timeout, 10 s shared cache). A provider failure is a caveat and
+  `insufficient_data`, never a guessed price.
+- History: [pretrade_feature_publish.py](../../backend/pretrade_feature_publish.py)
+  selects the narrow view from [check_scope.py](../../deploy/check_scope.py)
+  (raw fill keys hashed in Postgres) and writes a content-addressed file via
+  [pretrade_features.py](../../backend/pretrade_features.py). Missing →
+  `history.available=false` plus a caveat; older than 36 h → used with a caveat.
+- Install: [check_control.py](../../deploy/check_control.py) `stage`/`install`
+  (exact manifest approval, `--dns`, `--host-ip`), `check`, `stop`, `remove`;
+  units in [cloud-mcp-check](../../deploy/cloud-mcp-check/); UID-only policy in
+  [check_network.py](../../deploy/check_network.py). Install writes no
+  credential and starts, enables and loads nothing. Activation (step 4) adds
+  `alpaca-key-id`, `alpaca-secret-key` and `features-database-url` under
+  `/etc/tradejournal-check/` (root 0600), creates role `tj_check_features`
+  and applies `feature-view.sql`, runs the key unit before the service, and
+  publishes the Caddy route.
+- Proof: `backend/tests/test_cloud_mcp_check.py` (generated tokens, recorded
+  Alpaca responses for SPY/QQQ on October 9, 2026),
+  `backend/tests/test_check_deployment.py`, and the disposable Ubuntu
+  [smoke](../../deploy/cloud-mcp-check/smoke.py) in the deployment workflow.
+  Speed against the live provider is not yet observed.
 
 ## Acceptance
 

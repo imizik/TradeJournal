@@ -1,0 +1,34 @@
+[Unit]
+Description=Refresh only public OAuth keys for the pre-trade check entrance
+Wants=network-online.target
+Requires=tradejournal-check-network.service
+After=network-online.target tradejournal-check-network.service
+
+[Service]
+Type=oneshot
+User=tj-check-keys
+Group=tj-check
+WorkingDirectory=/var/lib/tradejournal-check-keys
+Environment=PYTHON_DOTENV_DISABLED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-check/backend/cloud_mcp_d0_refresh.py --config /etc/tradejournal-check/refresh-keys.json
+TimeoutStartSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ReadWritePaths=/var/lib/tradejournal-check-keys
+InaccessiblePaths=-/etc/tradejournal-check/config.json -/etc/tradejournal-check/alpaca-key-id -/etc/tradejournal-check/alpaca-secret-key -/etc/tradejournal-check/features-database-url -/var/lib/tradejournal-check -/var/lib/tradejournal-check-features -/run/tradejournal-check -/etc/tradejournal -/opt/tradejournal -/var/lib/tradejournal -/var/backups/tradejournal -/run/postgresql -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=16
+MemoryMax=256M
+CPUQuota=50%
+
+# Separate public-key publisher: no check config, ledger, provider or database
+# credential. Writes only the public snapshot directory the service reads.

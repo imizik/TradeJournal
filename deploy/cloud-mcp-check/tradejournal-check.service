@@ -1,0 +1,47 @@
+[Unit]
+Description=Isolated pre-trade check MCP; provider reads only, own ledger
+Requires=tradejournal-check.socket tradejournal-check-network.service
+After=tradejournal-check.socket tradejournal-check-network.service
+
+[Service]
+Type=exec
+User=tj-check
+Group=tj-check
+WorkingDirectory=/opt/tradejournal-check/backend
+ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-check/backend/cloud_mcp_check.py --config /etc/tradejournal-check/config.json
+Environment=PYTHON_DOTENV_DISABLED=1
+LoadCredential=alpaca-key-id:/etc/tradejournal-check/alpaca-key-id
+LoadCredential=alpaca-secret-key:/etc/tradejournal-check/alpaca-secret-key
+CacheDirectory=tradejournal-check
+CacheDirectoryMode=0700
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/tradejournal-check
+InaccessiblePaths=-/etc/tradejournal-check/features-database-url -/etc/tradejournal-check/refresh-keys.json -/etc/tradejournal -/etc/tradejournal-d0 -/etc/tradejournal-d1 -/etc/tradejournal-journal -/etc/tradejournal-journal-real -/etc/tradejournal-dot-trial -/etc/tradejournal-advisor -/etc/tradejournal-advisor-v2 -/opt/tradejournal -/opt/tradejournal-journal -/opt/tradejournal-journal-real -/opt/tradejournal-dot-trial -/opt/tradejournal-advisor -/opt/tradejournal-advisor-v2 -/var/lib/tradejournal -/var/lib/tradejournal-journal -/var/lib/tradejournal-journal-real -/var/lib/tradejournal-dot-trial -/var/lib/tradejournal-advisor -/var/lib/tradejournal-advisor-v2 -/var/backups/tradejournal -/run/postgresql -/var/run/postgresql -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Backstop if the nftables table is ever flushed: loopback/private stay denied
+# (only the local DNS stub is allowed). Provider HTTPS is public.
+IPAddressDeny=localhost link-local multicast 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 fc00::/7
+IPAddressAllow=127.0.0.53
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=64
+MemoryMax=512M
+CPUQuota=100%
+TimeoutStopSec=15
+
+# No EnvironmentFile and no database credential. The UID-only nftables policy
+# (tradejournal-check-network.service) allows DNS and public HTTPS only, so the
+# private API on loopback (8080/8000) and Postgres stay unreachable.

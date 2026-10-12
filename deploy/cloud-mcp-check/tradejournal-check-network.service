@@ -1,0 +1,22 @@
+[Unit]
+Description=Constrain only the pre-trade check UIDs' network identities
+Before=tradejournal-check.service tradejournal-check-keys.service tradejournal-check-features.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/tradejournal-check/network.nft
+ExecStop=/usr/sbin/nft delete table inet tj_check
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CapabilityBoundingSet=CAP_NET_ADMIN
+RestrictAddressFamilies=AF_NETLINK AF_UNIX
+SystemCallArchitectures=native
+TasksMax=8
+MemoryMax=128M
+TimeoutStartSec=15
+
+# The policy affects only the three dedicated check UIDs. Never flush the host
+# ruleset. Every check unit requires this unit to start successfully.
