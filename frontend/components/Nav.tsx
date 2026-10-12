@@ -5,7 +5,7 @@ import Link from "next/link";
 import NavHint from "@/components/NavHint";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { LayoutDashboard, FileText, BarChart2, ChartCandlestick, Activity, ClipboardList, FlaskConical, GitBranch, Radio, Radar, ChevronRight, Menu, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import StatusPanel, { useAnyJobRunning } from "@/components/StatusPanel";
 import { useGmailHealth } from "@/lib/useGmailHealth";
@@ -25,6 +25,7 @@ const navItems = [
   { href: "/analytics", label: "Analytics", icon: BarChart2 },
   { href: "/fills", label: "Fills", icon: Activity },
   { href: "/signals", label: "Signals", icon: Radio },
+  { href: "/scanner", label: "Scanner", icon: Radar },
   { href: "/strategy-lab", label: "Strategy Lab", icon: GitBranch },
   { href: "/research-studio", label: "Research Studio", icon: FlaskConical },
   { href: "/level2-lab", label: "Level 2 lab", icon: FlaskConical },
