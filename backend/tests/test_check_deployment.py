@@ -112,7 +112,9 @@ def test_stage_is_private_disabled_and_complete(staged):
         control.validate(staged)
 
 
-def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monkeypatch):
+@pytest.fixture
+def host(tmp_path, monkeypatch):
+    """A fake Ubuntu host: paths under tmp_path, recorded commands, no systemd."""
     for name in ("ROOT", "CONFIG", "STATE", "KEYS", "FEATURES", "RUN", "OWNER_RUN"):
         monkeypatch.setattr(control, name, tmp_path / ("host-" + name.lower()))
     monkeypatch.setattr(control, "RECORD", control.ROOT / "installation.json")
@@ -143,6 +145,11 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
     original_stat = Path.stat
     monkeypatch.setattr(Path, "stat", lambda path, *a, **k: os.stat_result(
         [*list(original_stat(path, *a, **k))[:4], 0, *list(original_stat(path, *a, **k))[5:]]))
+    return calls
+
+
+def test_install_writes_disabled_units_and_no_credentials(staged, host, monkeypatch):
+    calls = host
     with pytest.raises(ValueError):
         control.install(staged, "0" * 64, dns_servers=["1.1.1.1"], host_ips=["203.0.113.5"])
     with pytest.raises(ValueError):  # A bad resolver refuses before any identity exists.
@@ -151,7 +158,7 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
     record = control.install(staged, control.digest(staged / "manifest.json"), dns_servers=["1.1.1.1"],
         host_ips=["203.0.113.5"])
     assert record["enabled"] is False and record["uids"] == {"service": 1001, "keys": 1002, "features": 1003}
-    assert set(record["units"]) == set(control.UNITS) and sorted(p.name for p in unit_dir.iterdir()) == sorted(control.UNITS)
+    assert set(record["units"]) == set(control.UNITS) and sorted(p.name for p in control.UNIT_DIR.iterdir()) == sorted(control.UNITS)
     assert not any(c[0] == "systemctl" and c[1] in ("start", "enable", "restart") for c in calls)
     assert not any(c[0] == "nft" or c[0].endswith("/nft") for c in calls)
     config_dir = control.CONFIG
@@ -173,7 +180,7 @@ def test_install_writes_disabled_units_and_no_credentials(staged, tmp_path, monk
     (config_dir / "refresh-keys.json").write_text(json.dumps({"issuer_url": "https://real.example/"}))
     assert control.installed()["format"] == "check-installation-v1"
     removed = control.remove()
-    assert set(removed["removed_units"]) == set(control.UNITS) and not list(unit_dir.iterdir())
+    assert set(removed["removed_units"]) == set(control.UNITS) and not list(control.UNIT_DIR.iterdir())
     assert (config_dir / "config.json").exists() and control.STATE.exists()
     assert not control.RECORD.exists()
     stopped = [c for c in calls if c[:2] == ["systemctl", "stop"]]
@@ -187,3 +194,46 @@ def test_check_modules_never_import_the_owner_api_or_database_engine():
             assert forbidden not in text
     result = subprocess.run(["git", "grep", "-l", "cloud_mcp_check", "--", "backend/app"], cwd=REPO, capture_output=True)
     assert result.stdout == b""
+
+
+def test_upgrade_swaps_only_the_stopped_runtime_and_keeps_the_previous(staged, host, monkeypatch):
+    approved = control.digest(staged / "manifest.json")
+    record = control.install(staged, approved, dns_servers=["1.1.1.1"], host_ips=["203.0.113.5"])
+    monkeypatch.setattr(control.pwd, "getpwnam", lambda name: SimpleNamespace(
+        pw_uid=record["uids"][next(r for r, a in control.ACCOUNTS.items() if a == name)], pw_gid=990,
+        pw_shell="/usr/sbin/nologin"))
+    config_before = {p.name: p.read_bytes() for p in control.CONFIG.iterdir() if p.is_file()}
+    (control.STATE / "ledger.db").write_bytes(b"saved checks")
+    with pytest.raises(ValueError, match="already"):
+        control.upgrade(staged, approved)
+    # A newer reviewed bundle: same units and view, different code.
+    (staged / "backend/cloud_mcp_check.py").write_text((staged / "backend/cloud_mcp_check.py").read_text() + "\n# newer\n")
+    manifest = json.loads((staged / "manifest.json").read_text())
+    manifest["inventory"] = control.inventory(staged)
+    (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    newer_approval = control.digest(staged / "manifest.json")
+    monkeypatch.setattr(old, "runtime_inventory", lambda **k: {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]})
+    record = {**json.loads(control.RECORD.read_text()), "runtime_inventory": {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]}}
+    control.RECORD.write_text(json.dumps(record))
+    control.RECORD.chmod(0o600)
+    with pytest.raises(ValueError):
+        control.upgrade(staged, "0" * 64)
+    running = old.run
+    monkeypatch.setattr(old, "run", lambda *a, check=True: SimpleNamespace(returncode=0) if a[:2] == ("systemctl", "is-active") else running(*a, check=check))
+    with pytest.raises(ValueError, match="Stop every check unit"):
+        control.upgrade(staged, newer_approval)
+    monkeypatch.setattr(old, "run", running)
+    upgraded = control.upgrade(staged, newer_approval)
+    assert upgraded["manifest_sha256"] == newer_approval and upgraded["previous_runtimes"][0]["manifest_sha256"] == approved
+    assert (control.ROOT / "backend/cloud_mcp_check.py").read_text().endswith("# newer\n")
+    previous = Path(upgraded["previous_runtimes"][0]["path"])
+    assert not (previous / "backend/cloud_mcp_check.py").read_text().endswith("# newer\n")
+    assert {p.name: p.read_bytes() for p in control.CONFIG.iterdir() if p.is_file()} == config_before
+    assert (control.STATE / "ledger.db").read_bytes() == b"saved checks"
+    # A bundle that changes a unit is refused before anything moves.
+    (staged / "units/tradejournal-check.service").write_text("[Service]\n")
+    manifest["inventory"] = control.inventory(staged)
+    (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    with pytest.raises(ValueError, match="units"):
+        control.upgrade(staged, control.digest(staged / "manifest.json"))
+    assert (control.ROOT / "backend/cloud_mcp_check.py").read_text().endswith("# newer\n")
