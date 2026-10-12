@@ -131,6 +131,8 @@ def host(tmp_path, monkeypatch):
             python.write_text("")
         if args[:3] in (("getent", "group", "caddy"), ("getent", "passwd", control.OWNER_WEB)):
             return SimpleNamespace(returncode=0)
+        if args[:2] == ("systemctl", "show"):
+            return SimpleNamespace(returncode=0, stdout=b"inactive\n")
         return SimpleNamespace(returncode=2 if args[0] in ("getent", "systemctl") and args[1] in ("passwd", "group", "cat", "is-active") else 0)
     monkeypatch.setattr(old, "run", run)
     monkeypatch.setattr(old, "root_only", lambda: None)
@@ -219,7 +221,8 @@ def test_upgrade_swaps_only_the_stopped_runtime_and_keeps_the_previous(staged, h
     with pytest.raises(ValueError):
         control.upgrade(staged, "0" * 64)
     running = old.run
-    monkeypatch.setattr(old, "run", lambda *a, check=True: SimpleNamespace(returncode=0) if a[:2] == ("systemctl", "is-active") else running(*a, check=check))
+    monkeypatch.setattr(old, "run", lambda *a, check=True: SimpleNamespace(returncode=0, stdout=b"activating\n")
+        if a[:2] == ("systemctl", "show") else running(*a, check=check))
     with pytest.raises(ValueError, match="Stop every check unit"):
         control.upgrade(staged, newer_approval)
     monkeypatch.setattr(old, "run", running)

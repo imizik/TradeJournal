@@ -20,6 +20,7 @@ from pathlib import Path
 import platform
 import pwd
 import shutil
+import signal
 import sys
 import time
 
@@ -258,7 +259,10 @@ def upgrade(bundle, approved):
     """Replace only the stopped runtime code. Config, credentials, ledger, keys,
     features, identities, policy and units stay byte-identical; nothing starts.
 
-    The replaced runtime is kept under ROOT/previous-runtime/. A bundle whose
+    The replaced runtime is kept under ROOT/previous-runtime/. After a hard kill
+    mid-swap (SIGKILL, power loss) every action refuses on inventory drift; move
+    the partial ROOT/backend aside and move previous-runtime/<newest>/backend
+    back to ROOT/backend. A bundle whose
     units or pinned feature view differ is refused: those need their own review.
     """
     record = installed()
@@ -274,13 +278,19 @@ def upgrade(bundle, approved):
         raise ValueError("Bundle changes check units; review that replacement separately")
     if digest(bundle / "config/feature-view.sql") != record["settings"]["feature-view.sql"]:
         raise ValueError("Bundle changes the feature view; review that database change separately")
-    running = [u for u in UNITS if old.run("systemctl", "is-active", "--quiet", u, check=False).returncode == 0]
+    # A oneshot refresh reports "activating" for its whole run; only inactive/failed count as stopped.
+    running = [u for u in UNITS if old.run("systemctl", "show", u, "--property=ActiveState", "--value",
+        check=False).stdout.decode().strip() not in {"inactive", "failed"}]
     if running:
         raise ValueError("Stop every check unit first (check_control.py stop): " + ", ".join(running))
     previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
     previous.mkdir(parents=True, mode=0o700)
     (ROOT / "backend").rename(previous / "backend")
     scratch = ROOT / "upgrade-unrecorded.json"  # normalize_new_runtime refuses an existing record path.
+
+    def interrupted(signum, frame):
+        raise SystemExit("Upgrade interrupted by signal " + str(signum))  # Runs the rollback below.
+    handlers = {s: signal.signal(s, interrupted) for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)}
     try:
         build_runtime(bundle, scratch)
         updated = {**record, "manifest_sha256": approved, "source_commit": manifest["source_commit"],
@@ -297,6 +307,9 @@ def upgrade(bundle, approved):
             (ROOT / "backend").rename(previous / "failed-backend")
         (previous / "backend").rename(ROOT / "backend")
         raise
+    finally:
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
     return installed()
 
 
