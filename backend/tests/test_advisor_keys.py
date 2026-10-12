@@ -378,3 +378,156 @@ def test_runtime_upgrade_refuses_while_key_removal_is_unfinished(prepared, tmp_p
     assert trial.RECORD.read_bytes() == before and not trial.KEPT.exists()
     keys.remove()
     assert trial.upgrade(newer, approved)["manifest_sha256"] == approved
+
+
+def old_layout_install(key_bundle, monkeypatch):
+    """Key upkeep as PR #261 installed it: two serving units bound, no owner grant."""
+    with monkeypatch.context() as patch:
+        patch.setattr(keys, "SERVING", keys.OLD_SERVING)
+        patch.setattr(keys, "grant_owner_read", lambda *args: None)
+        record = install(key_bundle)
+    assert set(record["serving_units_before"]) == set(keys.OLD_SERVING) and not acls
+    return record
+
+
+def extend_watched():
+    return [trial.CONFIG / "advisor/config.json", trial.RECORD, keys.record_path(),
+        *[old.UNIT_DIR / n for n in (*trial.UNITS, *keys.KEY_UNITS)]]
+
+
+def test_extend_owner_status_lets_runtime_upgrade_proceed_and_remove_restores(prepared, tmp_path, monkeypatch):
+    key_bundle, calls = installed_trial(prepared, tmp_path, monkeypatch)
+    owner_unit = old.UNIT_DIR / keys.OWNER_SERVICE
+    config_path = trial.CONFIG / "advisor/config.json"
+    original = {path: path.read_bytes() for path in (config_path, *[old.UNIT_DIR / n for n in trial.UNITS])}
+    old_layout_install(key_bundle, monkeypatch)
+    newer, approved = trial_tests.newer_bundle(tmp_path / "bundle")
+    with pytest.raises(ValueError, match="changes advisor units"):  # The refusal observed on the host.
+        trial.upgrade(newer, approved)
+    assert trial.expected_unit_digests(newer) != trial.installed()["units"]
+
+    record = keys.extend_owner_status()
+    assert set(record["serving_units_before"]) == set(keys.SERVING)
+    assert owner_unit.read_text() == keys.serving_unit(original[owner_unit].decode(),
+        keys.unit_binds(keys.OWNER_SERVICE))
+    assert (keys.RUNTIME / "previous" / keys.OWNER_SERVICE).read_bytes() == original[owner_unit]
+    reader_uid = json.loads(config_path.read_text())["owner_reader_uid"]
+    for directory in (keys.KEYS, config_path.parent):
+        assert acls[(str(directory), "system.posix_acl_access")] == keys.owner_read_acl(reader_uid, default=False)
+        assert acls[(str(directory), "system.posix_acl_default")] == keys.owner_read_acl(reader_uid, default=True)
+    assert trial.expected_unit_digests(newer) == trial.installed()["units"]
+    keys.installed()
+    assert keys.check()["keys"]["state"] == "fresh"
+    assert not any(word in command for command in calls for word in ("start", "restart", "enable"))
+    with pytest.raises(ValueError, match="already has the owner status layout"):
+        keys.extend_owner_status()
+
+    assert trial.upgrade(newer, approved)["manifest_sha256"] == approved
+    keys.installed()
+    keys.remove()
+    assert owner_grants() == {str(keys.KEYS)}
+    assert all(path.read_bytes() == value for path, value in original.items())
+    trial.installed()
+    trial.rollback()
+
+
+def test_remove_restores_an_old_layout_install_without_extension(prepared, tmp_path, monkeypatch):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    before = {path: path.read_bytes() for path in (trial.CONFIG / "advisor/config.json",
+        *[old.UNIT_DIR / n for n in trial.UNITS])}
+    old_layout_install(key_bundle, monkeypatch)
+    keys.remove()
+    assert all(path.read_bytes() == value for path, value in before.items())
+    assert not keys.record_path().exists() and not any((old.UNIT_DIR / n).exists() for n in keys.KEY_UNITS)
+    trial.installed()
+    trial.rollback()
+
+
+@pytest.mark.parametrize("change", ["owner-running", "frontend-running", "bridge-running", "owner-drift",
+    "other-drift", "no-reader-uid", "already-new"])
+def test_extend_owner_status_refuses_before_any_change(prepared, tmp_path, monkeypatch, change):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    if change == "already-new":
+        install(key_bundle)
+    else:
+        old_layout_install(key_bundle, monkeypatch)
+    running = {"owner-running": keys.OWNER_SERVICE, "frontend-running": trial_tests.trial.FRONTEND,
+        "bridge-running": trial.OWNER_BRIDGE[0]}.get(change)
+    if running:
+        command = old.run
+        def active(*args, **kwargs):
+            result = command(*args, **kwargs)
+            if "--property=ActiveState" in args and running in args:
+                result.stdout = b"active\n"
+            return result
+        monkeypatch.setattr(old, "run", active)
+    elif change == "owner-drift":
+        path = old.UNIT_DIR / keys.OWNER_SERVICE
+        path.write_text(path.read_text() + "# unreviewed\n")
+    elif change == "other-drift":
+        path = old.UNIT_DIR / keys.KEY_UNITS[1]
+        path.write_text(path.read_text() + "# unreviewed\n")
+    elif change == "no-reader-uid":
+        config_path = trial.CONFIG / "advisor/config.json"
+        trial.write_private(config_path, {**json.loads(config_path.read_text()), "owner_reader_uid": None})
+    before = {path: path.read_bytes() for path in extend_watched()}
+    grants = dict(acls)
+    reason = {"owner-drift": "Trial unit drift", "other-drift": "Key unit drift", "no-reader-uid": "owner reader UID",
+        "already-new": "already has the owner status layout"}.get(change, "Stop the six")
+    with pytest.raises(ValueError, match=reason):
+        keys.extend_owner_status()
+    assert all(path.read_bytes() == value for path, value in before.items())
+    assert acls == grants
+    assert (keys.RUNTIME / "previous" / keys.OWNER_SERVICE).exists() == (change == "already-new")
+
+
+def test_extend_owner_status_failure_restores_and_retry_completes(prepared, tmp_path, monkeypatch):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    old_layout_install(key_bundle, monkeypatch)
+    before = {path: path.read_bytes() for path in extend_watched()}
+    replace = keys.os.replace
+    failed = []
+    def fail_once(source, target):
+        if Path(target) == keys.record_path() and not failed:  # The final keys-record step.
+            failed.append(target)
+            raise OSError("Controlled keys record failure")
+        return replace(source, target)
+    monkeypatch.setattr(keys.os, "replace", fail_once)
+    with pytest.raises(OSError, match="Controlled"):
+        keys.extend_owner_status()
+    assert failed and all(path.read_bytes() == value for path, value in before.items())
+    assert owner_grants() == {str(keys.KEYS)}  # Config grant revoked; the kept directory's stays, as for install.
+    keys.installed()
+    keys.extend_owner_status()
+    newer, _ = trial_tests.newer_bundle(tmp_path / "bundle")
+    assert trial.expected_unit_digests(newer) == trial.installed()["units"]
+
+
+@pytest.mark.parametrize("trial_record_written", [False, True])
+def test_extend_owner_status_resumes_after_interruption(prepared, tmp_path, monkeypatch, trial_record_written):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    old_layout_install(key_bundle, monkeypatch)
+    owner_unit = old.UNIT_DIR / keys.OWNER_SERVICE
+    original = owner_unit.read_bytes()
+    # A killed run: original saved and owner unit switched; the keys record still names two units.
+    keys.write_file(keys.RUNTIME / "previous" / keys.OWNER_SERVICE, original, mode=0o600)
+    keys.write_file(owner_unit, keys.serving_unit(original.decode(), keys.unit_binds(keys.OWNER_SERVICE)).encode(),
+        mode=0o644, expected=stage.digest(owner_unit))
+    if trial_record_written:
+        record = json.loads(trial.RECORD.read_text())
+        trial.write_atomic(trial.RECORD, {**record, "units": {**record["units"], keys.OWNER_SERVICE: stage.digest(owner_unit)}})
+        keys.installed()
+    else:
+        with pytest.raises(ValueError, match="Trial unit drift"):
+            keys.installed()
+    before = {path: path.read_bytes() for path in extend_watched()}
+    with pytest.raises(ValueError, match="half-extended"):  # Remove would otherwise leave the owner unit bound.
+        keys.remove()
+    assert all(path.read_bytes() == value for path, value in before.items())
+    keys.extend_owner_status()
+    keys.installed()
+    newer, approved = trial_tests.newer_bundle(tmp_path / "bundle")
+    assert trial.upgrade(newer, approved)["manifest_sha256"] == approved
+    keys.remove()
+    assert owner_unit.read_bytes() == original
+    trial.rollback()

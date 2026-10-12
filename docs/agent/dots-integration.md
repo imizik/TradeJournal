@@ -42,7 +42,7 @@ Resolve an actual blocked user action before adding another infrastructure slice
 | **3 — Current: dependable connection** | Routine use survives normal credential/key lifecycle and service maintenance | Supported refresh/reconnect, health/failure visibility and recovery are observed; connection maintenance stays separate from agent schedules and trading automation. Scoped in the [connection upkeep contract](advisor-connection-upkeep-contract.md). Optional key upkeep for the v2 install is built (`deploy/advisor_keys_control.py`); not installed, activated or observed. The owner status view on `/advisor-review` is built as dormant source (keys, advisor enabled, selected question, last Jo save); it reaches the VPS only through the v2 upgrade command |
 | **4 — Useful approved real-data advisor** | Move beyond invented packets to a narrowly selected real question and data scope | Separately approved fields/sources, frozen provenance, stale/missing-input handling and actual useful answer; do not call the fixture advisor the live AV0 Go/Wait/Pass product. Slice 1 (pre-trade check, live data and own-trade aggregates approved October 11) is planned in the [pre-trade check contract](advisor-pretrade-check-contract.md); engine, the disabled check service/installer (step 2) and the dormant owner view (step 3) are built, not installed or activated |
 | **5 — Coach in the same workspace** | Request/review coaching without extra setup or copy/paste | Preserve the completed read-only journal connector and link displayed work to its approved snapshot. Define saved-result scope explicitly; UI unification is not broader data access |
-| **6 — Bounded independent shadow** | Obtain a separately formed decision for comparison | Separate role/context, observed input isolation and commitment/reveal rules, then applicable forward/paper and A3 gates. Reuse the working advisor operations without sharing human/advisor inputs |
+| **6 — Bounded independent shadow** | Obtain a separately formed decision for comparison. Direction selected October 12, 2026: an informed shadow trader with its own paper book plus a setup co-pilot sharing one scanner ([design](shadow-trader-design.md)) | Learns from closed history up to a cutoff; blind to Isaac's same-day decisions until it commits (commit-then-reveal), then applicable forward/paper gates. Dots feasibility checks (event wake-up, plan usage, identity) started; none observed on Isaac's account |
 
 After these bounded outcomes, select one follow-through capability only when a
 real recurring need justifies it. Do not build a general agent platform, widen
@@ -137,6 +137,9 @@ preparation only. The current adapter advertises the existing all-journal
 profile as well as A1 tools; do not give it to an independent shadow agent.
 
 ## Proposed restricted shadow-agent profile (design only)
+
+Superseded as the target by the [shadow trader design](shadow-trader-design.md), which allows closed-history reads and a fuller trader toolset; the backend authorization rules below still apply.
+
 
 Keep the existing MCP adapter as a local manual toolset. Build a **separate** `shadow_agent_v1` catalog whose only capabilities are `get_decision_context` for a P0 universe symbol, `record_decision` for the authenticated shadow actor, `get_decision` for that actor's own record ID, and `list_decisions` filtered to that actor with a strict page limit. A future read-only status tool may expose only the agent's own plan/paper events after A2 exists. No journal fills, trades, accounts, human decisions, raw database access, arbitrary URL fetch, shell, factory writer, alert administration, or generic HTTP proxy belongs in this profile. Tool names are a convenience; backend authorization is authoritative.
 

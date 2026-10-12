@@ -309,7 +309,11 @@ present) verifies, the bundle differs from the installed one, and its
 units/drop-in equal the installed ones (with key binds applied). The live
 ledger's Alembic revision (read-only) must equal the bundle's staged ledger or
 be one of its ancestors in the bundle's own migration scripts. A changed unit or
-drop-in needs its own reviewed procedure.
+drop-in needs its own reviewed procedure. Key upkeep installed before the owner
+status (#261 layout, owner service unbound) makes `upgrade` refuse ("Bundle
+changes advisor units…") because of `tradejournal-advisor-owner.service`; run
+`extend-owner-status` first (see
+[Extending an older key upkeep install](#extending-an-older-key-upkeep-install)).
 
 `migrate-ledger` runs the installed, verified backend's own Alembic (`upgrade
 heads`, `-B`) against only the v2 ledger. It first writes a root-private byte
@@ -384,7 +388,8 @@ root-private copy of the reviewed source revision.
    timer is active. It never prints key material.
 5. `remove` (advisor stopped) disables the timer, stops both key units, copies
    the latest maintained snapshot back to the original path (keeping the old one
-   under `previous/`), restores the original config and serving-unit bytes and
+   under `previous/`), restores the original config and the serving-unit bytes
+   its record names (two units for a #261-layout install, three otherwise) and
    removes the three key units. The UID, directories and snapshots remain, so a
    later reinstall first needs a reviewed manual removal of those leftovers.
 
@@ -400,6 +405,42 @@ are inaccessible to it. A failed refresh keeps the previous snapshot, which stil
 expires normally. Activation identities for this install must bind the issuer
 and JWKS URLs plus a fresh `check`, not the snapshot digest, which changes every
 refresh. Upkeep does not change Auth0 consent or token lifetimes.
+
+### Extending an older key upkeep install
+
+Key upkeep installed by #261 bound only the adapter and backend services and
+granted no owner read. Current `install` also binds the owner service and adds
+the [owner status](#owner-connection-status) grant, so runtime `upgrade`
+expects that owner unit and refuses an older install. `extend-owner-status`
+brings it to the current layout without reinstalling. With the same stops as
+`upgrade` (six units, the owner bridge pair and the owner frontend inactive) and
+only when the keys record names exactly the two serving units, it verifies key
+upkeep and the trial installation (any other drift refuses), keeps the original
+owner unit as `previous/tradejournal-advisor-owner.service`, grants the owner
+reader exactly as `install` does (both directory ACLs; the advisor config is
+rewritten with its own bytes so it carries the default ACL), appends the two
+binds to the owner unit and then records it in `installation.json` and, last,
+in `keys-installation.json`. A failure puts the owner unit, both records and the
+config-directory grant back; an interrupted run resumes when re-run, and
+`remove` refuses a half-extended owner unit until it has. An already-current
+install refuses. It starts, enables and contacts nothing, and
+does not write the owner config's `advisor_config_path` (still the separate
+step below). The existing snapshot gains the owner read on its next publisher
+refresh; until then the status panel reports `unreadable`.
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py stop
+sudo systemctl stop tradejournal-dot-trial-owner-bridge.socket tradejournal-dot-trial-owner-bridge.service \
+  tradejournal-dot-trial-owner.service
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_keys_control.py extend-owner-status
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py upgrade \
+  --bundle /root/approved-trial-bundle --approve-upgrade REVIEWED_MANIFEST_SHA256
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py preflight
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_keys_control.py check
+```
+
+Then the usual separately approved start (sockets before services, then the
+bridge socket) and start verification.
 
 ### Connection recovery
 
@@ -475,8 +516,9 @@ keys, tokens, subjects, config bodies or receipt contents. The freshness logic
 is `backend/advisor_key_state.py`, shared with `advisor_keys_control.py check`.
 
 The owner reader needs read access to the advisor config (enabled flags and
-`jwks_file`) and the maintained snapshot. Key upkeep `install` grants exactly
-that and nothing else:
+`jwks_file`) and the maintained snapshot. Key upkeep `install` (or
+`extend-owner-status` for a #261-layout install) grants exactly that and
+nothing else:
 
 - a named-UID POSIX ACL for the trial's `owner_reader_uid` on
   `/etc/tradejournal-advisor-v2/advisor` and

@@ -26,6 +26,7 @@ the next-work sequence. Check it before starting another roadmap slice.
 | [verification.md](verification.md) | Focused-check selection and on-demand coverage reference |
 | [pr-review.md](pr-review.md) | Risk classification: ordinary work needs no reviewer; broad/consequential review and CI readiness |
 | [codex-workflow.md](codex-workflow.md) | Optional bounded delegation; direct work with the selected model is the default |
+| [shadow-trader-design.md](shadow-trader-design.md) | Selected Dots step 6 direction: informed shadow trader with its own paper book, setup co-pilot, shared scanner and Dots feasibility checks |
 | [practice-policy.md](practice-policy.md) | Selected P0 Shadow Isaac practice universe, schedule, cost rules, worked example and live source-time observation |
 | [advisor-shadow-contract.md](advisor-shadow-contract.md) | Manual invented advisor/shadow session, atomic A3 assignment, disclosure/provenance and separate cloud/forward gates |
 | [cloud-mcp-advisor-contract.md](cloud-mcp-advisor-contract.md) | Dormant separate advisor OAuth catalog, singleton Unix backend binding, immutable cited receipt and later activation gates |
