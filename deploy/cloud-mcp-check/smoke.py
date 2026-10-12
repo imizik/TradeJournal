@@ -195,7 +195,7 @@ def exercise(archive, scratch):
     tools = listing.json()["result"]["tools"]
     assert rpc("pre_trade_check", {}, token(azp="other-client")).status_code == 401
     assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
-        "preopen_watchlist"}
+        "preopen_watchlist", "grade_checks"}
     assert rpc("pre_trade_check", {}, token(aud="https://check.example.test/mcp")).status_code == 401
     assert rpc("pre_trade_check", {}, token(scope="journal:read")).status_code == 403
     operation = str(uuid.uuid4())
@@ -224,6 +224,8 @@ def exercise(archive, scratch):
     assert [c["check_id"] for c in listing["checks"]] == [first["check_id"]] and listing["checks"][0]["model_verdict"] == "wait"
     status, body = owner_get("/owner/checks/" + first["check_id"], control.OWNER_WEB)
     assert status == 200 and json.loads(body)["answer"]["verdict"] == "insufficient_data", (status, body)
+    status, body = owner_get("/owner/grades", control.OWNER_WEB)
+    assert status == 200 and json.loads(body)["checks"] == 1, (status, body)  # Imports the engine inside the sandbox.
     assert owner_get("/owner/checks", "tj-check-keys")[0] is None, "another UID reached the owner socket"
     reader_pid = int(run("systemctl", "show", "--property=MainPID", "--value", "tradejournal-check-owner.service").stdout)
     reader_uid = next(line for line in Path(f"/proc/{reader_pid}/status").read_text().splitlines()

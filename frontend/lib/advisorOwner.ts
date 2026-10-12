@@ -67,6 +67,9 @@ const CHECK_ID = /^chk_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const CHECK_UNAVAILABLE = "Saved pre-trade checks unavailable. The check owner reader may be stopped; nothing was sent to Jo.";
 export const checkOwnerList = (request: Request) => ownerRead(request, "/owner/checks",
   value => value.schema_version === "check-owner-list-v1" && Array.isArray(value.checks), CHECK_UNAVAILABLE, "TJ_CHECK_OWNER");
+export const checkOwnerGrades = (request: Request) => ownerRead(request, "/owner/grades",
+  value => value.schema_version === "check-owner-grades-v1" && typeof value.grade === "object" && value.grade !== null,
+  CHECK_UNAVAILABLE, "TJ_CHECK_OWNER");
 export const checkOwnerDetail = (request: Request, checkId: string) => CHECK_ID.test(checkId)
   ? ownerRead(request, `/owner/checks/${checkId}`, value => value.schema_version === "check-owner-detail-v1" && value.check_id === checkId,
     CHECK_UNAVAILABLE, "TJ_CHECK_OWNER")

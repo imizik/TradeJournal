@@ -491,3 +491,101 @@ def preopen_view(ticker: str, rows: Iterable[dict], analysis: dict, receipt_utc:
                     "last_closed": max((row["closed_at"] for row in prior), default=None), "by_side": sides},
         "caveats": caveats,
     }
+
+
+MOVE_VERSION = "pretrade-move-v1"
+
+
+def _bar_time(bar: dict) -> datetime:
+    return _ny_wall(datetime.fromisoformat(str(bar["t"]).replace("Z", "+00:00")))
+
+
+def price_after(idea: dict, answer: dict, receipt_utc: datetime, bars: Optional[list[dict]], now_utc: datetime) -> dict:
+    """How the underlying moved after a check, inside the check's own fixed window, in the idea's direction.
+
+    Positive means the move went the idea's way. Options are measured on the underlying only; the premium is
+    not replayed. "so_far" while the window is open; never extrapolated.
+    """
+    base = {"move_version": MOVE_VERSION}
+    if idea.get("horizon") != "intraday":
+        return {**base, "state": "not_measured", "note": "swing checks are not measured yet"}
+    start, end = check_window(answer, receipt_utc)
+    reference = (answer.get("live") or {}).get("price")
+    window = {"from_ny": start.isoformat(timespec="minutes"), "to_ny": end.isoformat(timespec="minutes")}
+    if not reference:
+        return {**base, "state": "no_reference", "window": window, "note": "the check had no live price to measure from"}
+    if bars is None:
+        return {**base, "state": "unavailable", "window": window, "note": "minute bars could not be read"}
+    inside = sorted((bar for bar in bars if start <= _bar_time(bar) < end), key=lambda bar: str(bar["t"]))
+    if not inside:
+        return {**base, "state": "no_bars", "window": window, "note": "no minute bars after the check yet"}
+    up = idea.get("side") != "short"
+    high, low, last = max(bar["h"] for bar in inside), min(bar["l"] for bar in inside), inside[-1]["c"]
+
+    def pct(price):
+        return round((price - reference) / reference * 100 * (1 if up else -1), 3)
+
+    result = {**base, "state": "complete" if _ny_wall(now_utc) >= end else "so_far", "window": window,
+              "reference_price": reference, "last_price": last, "last_bar_ny": _bar_time(inside[-1]).isoformat(timespec="minutes"),
+              "move_pct": pct(last), "best_pct": pct(high if up else low), "worst_pct": pct(low if up else high),
+              "basis": "underlying 1-minute bars; positive = the idea's direction"}
+    stop = idea.get("stop")
+    if stop:
+        hit = next((bar for bar in inside if (bar["l"] <= stop if up else bar["h"] >= stop)), None)
+        result["stop_hit_ny"] = _bar_time(hit).isoformat(timespec="minutes") if hit else None
+    return result
+
+
+GRADE_VERSION = "pretrade-grade-v1"
+MIN_GRADE_GROUP = 10  # Display policy: below this a group says "not enough evidence".
+
+
+def _moves(items: list[dict]) -> dict:
+    moves = [item["move"]["move_pct"] for item in items if (item.get("move") or {}).get("state") == "complete"]
+    result = {"checks": len(items), "measured": len(moves), "enough": len(items) >= MIN_GRADE_GROUP}
+    if moves:
+        result.update({"median_move_pct": round(median(moves), 3),
+                       "went_the_idea_way": sum(1 for value in moves if value > 0)})
+    if not result["enough"]:
+        result["note"] = "not enough evidence"
+    return result
+
+
+def grade_results(items: Iterable[dict]) -> dict:
+    """Saved checks with their final results -> results by verdict, followed versus overrode, rules versus Jo.
+
+    Each item: verdict (rules), model_verdict (or None), outcome (check_outcome) and move (price_after).
+    Followed: go and traded, or wait/pass and no trade. Overrode: the other way round. Swing and
+    insufficient_data checks are counted but not graded.
+    """
+    items = [item for item in items if item["outcome"].get("state") in ("traded", "no_closed_trade")]
+    by_verdict = {}
+    for verdict in ("go", "wait", "pass"):
+        group = [item for item in items if item["verdict"] == verdict]
+        traded = [item for item in group if item["outcome"]["state"] == "traded"]
+        pnl = [item["outcome"]["total_pnl"] for item in traded if item["outcome"].get("total_pnl") is not None]
+        by_verdict[verdict] = {**_moves(group), "traded": len(traded), "traded_pnl": round(sum(pnl), 2) if pnl else None}
+    graded = [item for item in items if item["verdict"] in ("go", "wait", "pass")]
+    followed = [item for item in graded if (item["verdict"] == "go") == (item["outcome"]["state"] == "traded")]
+    overrode = [item for item in graded if item not in followed]
+    took_against = [item for item in overrode if item["verdict"] != "go"]
+    skipped_go = [item for item in overrode if item["verdict"] == "go"]
+    against_pnl = [item["outcome"]["total_pnl"] for item in took_against if item["outcome"].get("total_pnl") is not None]
+    with_model = [item for item in graded if item.get("model_verdict")]
+    by_model = {}
+    for verdict in ("go", "wait", "pass"):
+        by_model[verdict] = _moves([item for item in with_model if item["model_verdict"] == verdict])
+    return {
+        "grade_version": GRADE_VERSION,
+        "final_checks": len(items),
+        "by_rules_verdict": by_verdict,
+        "followed": len(followed),
+        "overrode": {"total": len(overrode),
+                     "traded_against_wait_or_pass": {**_moves(took_against),
+                                                     "pnl": round(sum(against_pnl), 2) if against_pnl else None},
+                     "skipped_a_go": _moves(skipped_go)},
+        "jo": {"with_verdict": len(with_model),
+               "agrees_with_rules": sum(1 for item in with_model if item["model_verdict"] == item["verdict"]),
+               "by_jo_verdict": by_model},
+        "note": "Closed trades and underlying moves only; small groups are not evidence of an edge.",
+    }

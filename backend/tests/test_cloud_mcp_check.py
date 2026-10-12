@@ -133,7 +133,7 @@ def test_catalog_metadata_and_scopes(harness):
         assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == SCOPES.split()
         tools = {t["name"]: t for t in rpc(client, "", {}, harness.token(), "tools/list").json()["result"]["tools"]}
         assert set(tools) == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
-        "preopen_watchlist"}
+        "preopen_watchlist", "grade_checks"}
         assert tools["review_checks"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read"]}]
         assert tools["pre_trade_check"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:run"]}]
         assert tools["attach_model_verdict"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:note"]}]
@@ -466,3 +466,31 @@ def test_preopen_watchlist_defaults_to_held_then_recent_tickers(harness):
     assert "source_fill_key" not in json.dumps(default) and "verdict" not in json.dumps(default["watchlist"])
     assert chosen["tickers"] == ["SPY"] and len(chosen["watchlist"]) == 1
     assert refused["isError"] is True
+
+
+def test_price_after_is_saved_once_final_and_graded(harness, monkeypatch):
+    after_close = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)
+    with TestClient(harness.server().streamable_http_app()) as client:
+        check = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+    reference = check["live"]["price"]
+    later = [{"t": f"2026-10-09T{h:02d}:{m:02d}:00Z", "o": reference, "h": reference + 2, "l": reference - 1,
+        "c": reference + 1, "v": 1000, "n": 10, "vw": reference} for h, m in ((14, 30), (16, 0), (19, 59))]
+    monkeypatch.setitem(FIXTURE["minute_bars"], "SPY", [*FIXTURE["minute_bars"]["SPY"], *later])
+    pretrade_features.publish([], harness.pointer, now=after_close)
+    with TestClient(harness.server(now=after_close).streamable_http_app()) as client:
+        first = call(client, "review_checks", {"day": "2026-10-09"}, harness.token())["structuredContent"]["checks"][0]
+        monkeypatch.setitem(FIXTURE["minute_bars"], "SPY", [])  # A saved result never changes afterwards.
+        again = call(client, "review_checks", {"day": "2026-10-09"}, harness.token(scope="check:read"))["structuredContent"]["checks"][0]
+        graded = call(client, "grade_checks", {"days": 7}, harness.token(scope="check:read"))["structuredContent"]
+    move = first["price_after"]
+    assert first["outcome"]["state"] == "no_closed_trade" and first["result_saved"] is True
+    window_end = check["wait_for"]["expires_at"][:16] if check["verdict"] == "wait" else "2026-10-09T16:00"
+    assert move["state"] == "complete" and move["reference_price"] == reference and move["window"]["to_ny"] == window_end
+    assert move["move_pct"] == round(1 / reference * 100, 3) and move["best_pct"] == round(2 / reference * 100, 3)
+    assert again["price_after"] == move and again["result_saved"] is True
+    grade = graded["grade"]
+    assert graded["checks"] == 1 and grade["final_checks"] == 1
+    if check["verdict"] == "go":
+        assert grade["overrode"]["skipped_a_go"]["checks"] == 1
+    elif check["verdict"] in ("wait", "pass"):
+        assert grade["followed"] == 1

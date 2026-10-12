@@ -148,6 +148,7 @@ test('management uncertain response never retries and assistant/legacy cannot re
 
 const checkId = 'chk_0f8c2a8e-1d6b-4c3a-9e1f-2b7a5c4d3e21';
 const checkList = JSON.stringify({ schema_version: 'check-owner-list-v1', checks: [], total: 0, limit: 50, read_at: '2026-10-11T12:00:00+00:00' });
+const checkGrades = JSON.stringify({ schema_version: 'check-owner-grades-v1', days: 30, checks: 0, settled: 0, grade: { final_checks: 0 } });
 const checkDetail = JSON.stringify({ schema_version: 'check-owner-detail-v1', check_id: checkId, answer: { verdict: 'wait' } });
 function checkSocket(socket) {
   Object.assign(process.env, { TJ_ADVISOR_OWNER_ENABLED: 'false', TJ_CHECK_OWNER_ENABLED: 'true', TJ_CHECK_OWNER_SOCKET: socket, TJ_CHECK_OWNER_SOCKET_UID: String(process.getuid()) });
@@ -158,7 +159,7 @@ test('check BFF reads its own socket, fixed paths and exact check IDs only', asy
   server.on('request', (request, response) => {
     seen.push(request.url); assert.equal(request.method, 'GET');
     for (const key of ['cookie', 'authorization', 'x-tj-gateway']) assert.equal(request.headers[key], undefined);
-    response.setHeader('Content-Type', 'application/json'); response.end(request.url === '/owner/checks' ? checkList : checkDetail);
+    response.setHeader('Content-Type', 'application/json'); response.end(request.url === '/owner/checks' ? checkList : request.url === '/owner/grades' ? checkGrades : checkDetail);
   });
   const owner = { headers: { cookie: 'invented-owner-session' } };
   const list = await loaded.exports.checkOwnerList(new Request('http://owner/api/check-owner/checks', owner));
@@ -169,7 +170,9 @@ test('check BFF reads its own socket, fixed paths and exact check IDs only', asy
   assert.equal((await loaded.exports.checkOwnerDetail(new Request(`http://owner/api/check-owner/checks/${other}`, owner), other)).status, 503);
   for (const bad of ['../advisor', 'chk_x', `${checkId}/x`]) assert.equal((await loaded.exports.checkOwnerDetail(new Request('http://owner/x', owner), bad)).status, 404);
   assert.equal((await loaded.exports.checkOwnerList(new Request('http://owner/api/check-owner/checks?limit=500', owner))).status, 400);
-  assert.deepEqual(seen, ['/owner/checks', `/owner/checks/${checkId}`, `/owner/checks/${other}`]);
+  const grades = await loaded.exports.checkOwnerGrades(new Request('http://owner/api/check-owner/grades', owner));
+  assert.equal(grades.status, 200); assert.equal(await grades.text(), checkGrades);
+  assert.deepEqual(seen, ['/owner/checks', `/owner/checks/${checkId}`, `/owner/checks/${other}`, '/owner/grades']);
   profile.value = 'assistant'; assert.equal((await loaded.exports.checkOwnerList(new Request('http://owner/x', owner))).status, 403);
 }));
 
