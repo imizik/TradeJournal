@@ -114,3 +114,42 @@ test("owner UI clears stale content during delayed/error/dormant reads and assis
   await expect(assistant.getByRole("link", { name: "Advisor review", exact: true })).toHaveCount(0);
   await publicContext.close(); await context.close();
 });
+
+test("connection status shows one line per item with recovery, no secrets, desktop and phone", async ({ browser }) => {
+  const context = await browser.newContext({ baseURL: ownerOrigin }); const page = await context.newPage();
+  const status = page.getByTestId("advisor-connection-status");
+  await page.goto("/advisor-review");
+  await expect(status.getByTestId("advisor-connection-line")).toHaveCount(4);
+  await expect(status).toContainText(/Sign-in keys: Current until .* ET\./);
+  await expect(status).toContainText("Advisor: Advisor config and Jo's profile are on.");
+  await expect(status).toContainText("Selected question: Revoked."); // Revoked by the first test.
+  await expect(status).toContainText(/Last Jo save: .* ET\. Jo read the question before saving\./);
+  const advisor = JSON.parse(readFileSync(`${directory}/advisor.json`, "utf8"));
+  for (const secret of [advisor.client_id, advisor.profiles[0].subject, "invented-public-key", expected().request.request_sha256, directory])
+    expect(await status.innerText()).not.toContain(secret);
+  const api = await context.request.get("/api/advisor-owner/status");
+  expect(api.status()).toBe(200); expect(api.headers()["cache-control"]).toBe("no-store");
+  for (const secret of [advisor.client_id, advisor.profiles[0].subject, "invented-public-key", directory]) expect(await api.text()).not.toContain(secret);
+  run("keys-expired"); run("advisor-disabled");
+  await status.getByRole("button", { name: "Check again" }).click();
+  await expect(status).toContainText(/Sign-in keys: Expired at .* ET\. Jo's sign-ins and calls are refused\./);
+  await expect(status).toContainText("Operator: run the key check, start the key refresh once");
+  await expect(status).toContainText("Advisor: The advisor config is turned off.");
+  await page.screenshot({ path: test.info().outputPath("owner-status-problems-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(status.getByRole("heading", { name: "Advisor connection" })).toBeInViewport();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  await page.screenshot({ path: test.info().outputPath("owner-status-problems-phone.png"), fullPage: true });
+  await stop();
+  await status.getByRole("button", { name: "Check again" }).click();
+  await expect(status.getByRole("alert")).toContainText("start the sockets before the services");
+  await start(); run("keys-fresh");
+  await status.getByRole("button", { name: "Check again" }).click();
+  await expect(status).toContainText(/Sign-in keys: Current until/);
+  for (const action of ["POST", "PUT", "DELETE"]) expect((await context.request.fetch("/api/advisor-owner/status", { method: action })).status()).toBe(405);
+  expect((await context.request.get("/api/advisor-owner/status?state=fresh")).status()).toBe(400);
+  const publicContext = await browser.newContext({ baseURL: publicOrigin });
+  expect((await publicContext.request.get("/api/advisor-owner/status")).status()).toBe(401);
+  await publicContext.close(); await context.close();
+});

@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import socket
 import sys
+import time
 import uuid
 
 from alembic import command
@@ -13,6 +14,25 @@ from sqlmodel import Session, create_engine
 
 from app.engine import advisor_shadow as service
 from cloud_advisor_owner import OwnerConfig
+
+ISSUER = "https://advisor-identity.example.test/"
+JWKS = ISSUER + ".well-known/jwks.json"
+
+
+def write_keys(directory, expires_in=3600):
+    now = int(time.time())
+    (Path(directory) / "public-keys.json").write_text(json.dumps({"issuer_url": ISSUER, "jwks_url": JWKS,
+        "fetched_at": now, "expires_at": now + expires_in, "keys": [{"kid": "invented-public-key", "kty": "RSA"}]}))
+
+
+def write_advisor(directory, binding, *, enabled=True, profile_enabled=True):
+    """Invented advisor config the status reads; never a real issuer or client."""
+    directory = Path(directory)
+    (directory / "advisor.json").write_text(json.dumps({"enabled": enabled, "advisor_only": True,
+        "issuer_url": ISSUER, "resource_url": "https://advisor.example.test/advisor/mcp", "jwks_url": JWKS,
+        "jwks_file": str(directory / "public-keys.json"), "client_id": "invented-owner-test-client",
+        "client_claim": "azp", "backend_socket": str(directory / "backend.sock"),
+        "profiles": [{**binding, "enabled": profile_enabled}]}))
 
 
 def initialize(directory, *, saved=True, peer=None):
@@ -91,6 +111,9 @@ def initialize(directory, *, saved=True, peer=None):
             },
         },
     }
+    config["advisor_config_path"] = str(directory / "advisor.json")
+    write_keys(directory)
+    write_advisor(directory, config["binding"])
     OwnerConfig.model_validate(config)
     path = directory / "owner.json"
     path.write_text(json.dumps(config))
@@ -122,6 +145,12 @@ def change(directory, operation):
             (directory / "expected.json").write_text(json.dumps(value))
         elif operation == "revoke":
             service.set_enabled(db, uuid.UUID(value["request"]["assignment_id"]), False)
+        elif operation == "keys-expired":
+            write_keys(directory, -60)
+        elif operation == "keys-fresh":
+            write_keys(directory)
+        elif operation == "advisor-disabled":
+            write_advisor(directory, value["config"]["binding"], enabled=False)
     engine.dispose()
 
 

@@ -109,7 +109,9 @@ configuration), `/var/lib/tradejournal-advisor-v2/fixture.db` (new invented
 ledger), and `/run/tradejournal-advisor{,-owner}-v2` (private sockets). The
 six existing-name advisor units are the backend, MCP and owner socket/service
 pairs. The new reader account `tj-advisor-owner` differs from the writer and
-frontend; its later approved named-UID ACL applies only to the **new** ledger.
+frontend; its later approved named-UID fixture ACL applies only to the **new**
+ledger. Optional key upkeep separately grants it read of the advisor config and
+public-key snapshot for the [owner status](#owner-connection-status) only.
 The owner socket's group is only `tj-advisor-web-owner`, never the general
 production `tradejournal` group. Actual UID and GID are recorded independently.
 
@@ -370,7 +372,8 @@ root-private copy of the reviewed source revision.
    publisher oneshot, its network unit and a 15-minute timer, appends only that
    directory to the existing `BindReadOnlyPaths=` of the adapter and backend
    services, points the advisor config's `jwks_file` there and updates the trial
-   record's unit digests. It starts, enables and contacts nothing.
+   record's unit digests. It also adds the [owner status](#owner-connection-status)
+   read grant and binds. It refuses without the trial's `owner_reader_uid`. It starts, enables and contacts nothing.
 3. Separately approved activation: `systemctl start
    tradejournal-advisor-keys.service` once and confirm `check` reports `fresh`,
    then `systemctl enable --now tradejournal-advisor-keys.timer`, then start the
@@ -407,7 +410,7 @@ refresh. Upkeep does not change Auth0 consent or token lifetimes.
 | New sign-ins or calls refused after about an hour | Public-key snapshot expired | `check`; start the key oneshot, inspect its journal, confirm the timer is enabled |
 | Backend exits with "assignment expired or revoked" | The bound request passed its 30-minute expiry | Create a new approved request; old receipts stay readable to the owner |
 | Save returns "refused or immutable content conflicts" with no receipt | Malformed answer (often the whole `answer_contract` wrapper instead of its six-field `answer`) or a real conflict | Read `get_advisor_request` first; resend only `summary`, `interpretation`, `risks`, `conditions`, `gaps`, `references` |
-| Units inactive after host reboot or deploy | Advisor units have no Install section by design | Verify the installation, then start sockets before services |
+| Units inactive after host reboot or deploy (owner status panel says unavailable) | Advisor units have no Install section by design | Verify the installation, then start sockets before services |
 | Operator command refuses with inventory drift | Root Python wrote `__pycache__` into the runtime | Run operator Python with `-B` and `PYTHONDONTWRITEBYTECODE=1`; remove only the generated caches, then recheck |
 
 ## Stop, replacement and receipt-preserving rollback
@@ -458,6 +461,36 @@ The root disposable smoke uses a fixed administrative PATH with `/usr/sbin`
 and an otherwise credential-free environment. Staging scopes Git trust to its
 own exact reviewed checkout per read command, without global/wildcard Git
 configuration. These are preparation portability controls, not runtime grants.
+
+## Owner connection status
+
+`/advisor-review` shows an "Advisor connection" panel read from the owner
+reader's fixed `GET /owner/advisor/status` (same owner peer UID, no selectors,
+credentials or body; owner session through the BFF). It returns states and
+timestamps only: key snapshot `fresh` / `expiring` / `expired` /
+`issuer-mismatch` / `unreadable` with its expiry, advisor config and profile
+enabled, the selected question (`pending`, `answered`, `expired`, `revoked`,
+`none`) with its expiry, and the last saved Jo answer time. It never returns
+keys, tokens, subjects, config bodies or receipt contents. The freshness logic
+is `backend/advisor_key_state.py`, shared with `advisor_keys_control.py check`.
+
+The owner reader needs read access to the advisor config (enabled flags and
+`jwks_file`) and the maintained snapshot. Key upkeep `install` grants exactly
+that and nothing else:
+
+- a named-UID POSIX ACL for the trial's `owner_reader_uid` on
+  `/etc/tradejournal-advisor-v2/advisor` and
+  `/var/lib/tradejournal-advisor-v2-keys`: traverse on each directory, plus a
+  default ACL giving read on files created there later (each publisher refresh
+  and config rewrite). No list, write, group or other change. Group membership
+  was rejected because the trial requires its owner UID to have none;
+- both directories appended to the owner service's `BindReadOnlyPaths=`.
+
+The owner config then needs `"advisor_config_path":
+"/etc/tradejournal-advisor-v2/advisor/config.json"`. Without it the panel says
+"Not set up for this page". `remove` restores the owner unit and drops the
+config-directory grant (the kept snapshot directory keeps its own). A missing or
+stale grant fails closed as `unreadable`.
 
 ## Optional direct owner reader
 
@@ -512,7 +545,9 @@ an independent read-only mount namespace, exposing only its reviewed runtime,
 owner config, isolated advisor state directory and inherited owner socket. All
 four mounts are read-only; there is no writable database directory, journal
 mount, IP family, OAuth/grant/key dependency or startup dependency on the MCP
-services. `tradejournal-advisor-owner.socket` grants its filesystem access to
+services. Installed key upkeep adds two more read-only mounts, the advisor
+config and snapshot directories, for the [owner status](#owner-connection-status);
+the status still never returns key material or config bodies. `tradejournal-advisor-owner.socket` grants its filesystem access to
 the reviewed owner frontend group (template `tradejournal`), while the process
 checks the exact configured frontend **UID** from the connected Unix socket.
 Root or another socket-group member is denied by that UID check. The distinct

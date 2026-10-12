@@ -9,6 +9,7 @@ if __name__ == "__main__" and os.environ.get("TJ_ADVISOR_OWNER_CLEAN") != "1":
 
 import asyncio
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import socket
 import sqlite3
@@ -25,13 +26,16 @@ from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 from uvicorn.protocols.http.h11_impl import H11Protocol
 
-from app.engine import advisor_shadow as service, decisions, practice
+from advisor_key_state import snapshot_state
+from app.engine import advisor_assignments as managed, advisor_shadow as service, decisions, practice
 from app.models import PracticeAgentCall
 from app.schema import ensure_current
-from cloud_mcp_advisor_common import AdvisorProfile, REQUEST_KEYS, private_fixture, reject_credentials
+from cloud_mcp_advisor_common import (AdvisorConfig, AdvisorProfile, REQUEST_KEYS, private_fixture,
+    reject_credentials)
 from cloud_mcp_d0 import MAX_BYTES, Strict
 
 READ_PATH = "/owner/advisor"
+STATUS_PATH = "/owner/advisor/status"
 
 
 def private_path(value, *, file=False, reader_uid=None):
@@ -51,11 +55,15 @@ class OwnerConfig(Strict):
     reader_uid: int | None = Field(default=None, ge=1)
     database_path: str
     binding: AdvisorProfile
+    # Optional connection status: the advisor config (read through a separately
+    # granted named-UID ACL) and, through its jwks_file, the public-key snapshot.
+    advisor_config_path: str | None = None
 
-    @field_validator("socket_path", "database_path")
+    @field_validator("socket_path", "database_path", "advisor_config_path")
     @classmethod
     def exact_path(cls, value):
-        private_path(value)
+        if value is not None:
+            private_path(value)
         return value
 
 
@@ -138,6 +146,80 @@ def project(engine, binding):
             "recovery": "Owner read only. After an uncertain save, compare the complete saved receipt before any explicit advisor retry."})
 
 
+def stamp(value):
+    return None if value is None else datetime.fromtimestamp(value, timezone.utc).isoformat()
+
+
+def advisor_settings(config):
+    """Read the advisor config for status only; its body never leaves."""
+    if config.advisor_config_path is None:
+        return None, {"state": "not-configured"}, {"state": "not-configured", "expires_at": None}
+    try:
+        path = private_path(config.advisor_config_path)
+        with path.open("rb") as handle:
+            body = handle.read(MAX_BYTES + 1)
+        if len(body) > MAX_BYTES:
+            raise ValueError("Advisor configuration exceeds its bound")
+        settings = AdvisorConfig.model_validate_json(body)
+        raw = json.loads(body)
+    except Exception:
+        return None, {"state": "unreadable"}, {"state": "unreadable", "expires_at": None}
+    profile = next((p for p in settings.profiles if p.id == config.binding.id), None)
+    if profile is None or profile.subject != config.binding.subject:
+        advisor = {"state": "profile-mismatch"}
+    elif not settings.enabled:
+        advisor = {"state": "config-disabled"}
+    elif not profile.enabled:
+        advisor = {"state": "profile-disabled"}
+    else:
+        advisor = {"state": "enabled"}
+    keys = snapshot_state(raw)
+    return settings, advisor, {"state": keys["state"], "expires_at": stamp(keys["expires_at"])}
+
+
+def assignment_status(engine, binding):
+    """Selected assignment state/expiry and the latest saved Jo answer time.
+
+    The ledger itself says whether owner-managed questions exist, so a missing
+    or unreadable advisor config never reports the original question instead.
+    """
+    with Session(engine) as db:
+        db.connection().exec_driver_sql("BEGIN")
+        call = db.get(PracticeAgentCall, uuid.UUID(binding.assignment_id))
+        if call is None or str(call.run_id) != binding.run_id:
+            raise ValueError("Assigned owner fixture unavailable")
+        _, config, _ = service.assignment(db, call)
+        if managed.KEY in config:
+            _, _, original, ledger = managed.anchor(db, binding)
+            entries = [managed.validate(entry, original) for entry in ledger["entries"]]
+            chosen = next((e for e in entries if e["request"]["assignment_id"] == ledger["selected"]), None)
+            saves = [e["receipt"]["received_at"] for e in entries if e["receipt"] is not None]
+            if (config.get("advisor") or {}).get("receipt") is not None:
+                saves.append(config["advisor"]["received_at"])  # The original question's answer.
+            if chosen is None:
+                return {"state": "none", "expires_at": None}, max(saves, default=None)
+            return ({"state": managed.status(chosen), "expires_at": chosen["request"]["expires_at"]},
+                max(saves, default=None))
+        advisor = config.get("advisor") or {}
+        received = advisor.get("received_at") if advisor.get("receipt") is not None else None
+        state = managed.status({"enabled": config["enabled"], "receipt": advisor.get("receipt"),
+            "request": {"expires_at": config["expires_at"]}})
+        return {"state": state, "expires_at": config["expires_at"]}, received
+
+
+def connection_status(engine, config):
+    """States and timestamps only: no keys, tokens, subjects, config bodies or receipts."""
+    _, advisor, keys = advisor_settings(config)
+    try:
+        assignment, last_save = assignment_status(engine, config.binding)
+    except Exception:
+        assignment, last_save = {"state": "unreadable", "expires_at": None}, None
+    return {"schema_version": "advisor-owner-status-v1", "checked_at": datetime.now(timezone.utc).isoformat(),
+        "keys": keys, "advisor": advisor, "assignment": assignment,
+        # The advisor does not record reads; a saved answer implies the read before it.
+        "last_save_at": last_save, "last_read_at": None}
+
+
 def create_app(config_path):
     reject_credentials()
     if os.environ.get("PYTHON_DOTENV_DISABLED") != "1":
@@ -164,7 +246,7 @@ def create_app(config_path):
 
     @app.middleware("http")
     async def guard(request, call_next):
-        if request.method != "GET" or request.url.path != READ_PATH or request.url.query:
+        if request.method != "GET" or request.url.path not in (READ_PATH, STATUS_PATH) or request.url.query:
             return JSONResponse({"detail": "Not found"}, 404)
         try:
             config = current()
@@ -178,7 +260,10 @@ def create_app(config_path):
             if slots.locked():
                 return JSONResponse({"detail": "Owner reader busy"}, 429)
             async with slots:
-                value = await asyncio.wait_for(run_in_threadpool(project, engine, config.binding), 5)
+                if request.url.path == STATUS_PATH:
+                    value = await asyncio.wait_for(run_in_threadpool(connection_status, engine, config), 5)
+                else:
+                    value = await asyncio.wait_for(run_in_threadpool(project, engine, config.binding), 5)
                 current()  # Refuse revocation/config drift during a read.
             return JSONResponse(value, headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"})
         except Exception:

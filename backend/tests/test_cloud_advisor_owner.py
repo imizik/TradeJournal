@@ -329,3 +329,115 @@ def test_reader_config_uid_requires_actual_process_and_acl_grant(owner_fixture):
     (directory / "owner.json").write_text(json.dumps(value["config"]))
     with pytest.raises(ValueError, match="read-only owner UID grant"):
         reader.create_app(directory / "owner.json")
+
+
+def status(directory):
+    result = read(reader.create_app(directory / "owner.json"), os.getuid(), path=reader.STATUS_PATH)
+    assert result.status_code == 200, result.text
+    assert result.headers["cache-control"] == "no-store"
+    return result
+
+
+def test_status_reports_states_and_times_without_secrets(owner_fixture, monkeypatch):
+    from tests import advisor_owner_fixture as fixture
+
+    directory, value = owner_fixture
+    result = status(directory)
+    body = result.json()
+    assert body["schema_version"] == "advisor-owner-status-v1"
+    assert body["keys"]["state"] == "fresh" and body["keys"]["expires_at"]
+    assert body["advisor"] == {"state": "enabled"}
+    assert body["assignment"] == {"state": "answered", "expires_at": value["request"]["expires_at"]}
+    assert body["last_save_at"] == value["receipt"]["received_at"] and body["last_read_at"] is None
+    advisor = json.loads((directory / "advisor.json").read_text())
+    secrets = [advisor["client_id"], advisor["profiles"][0]["subject"], "invented-public-key", "RSA",
+        value["request"]["request_sha256"], value["request"]["packet_sha256"], value["receipt"]["receipt_sha256"],
+        "Invented evidence only", str(directory)]
+    assert not any(secret in result.text for secret in secrets)
+
+    fixture.write_keys(directory, 600)
+    assert status(directory).json()["keys"]["state"] == "expiring"
+    fixture.write_keys(directory, -1)
+    assert status(directory).json()["keys"]["state"] == "expired"
+    (directory / "public-keys.json").unlink()
+    (directory / "public-keys.json").symlink_to(directory / "advisor.json")
+    assert status(directory).json()["keys"] == {"state": "unreadable", "expires_at": None}
+    fixture.write_advisor(directory, value["config"]["binding"], profile_enabled=False)
+    assert status(directory).json()["advisor"] == {"state": "profile-disabled"}
+    fixture.write_advisor(directory, value["config"]["binding"], enabled=False)
+    assert status(directory).json()["advisor"] == {"state": "config-disabled"}
+    fixture.write_advisor(directory, {**value["config"]["binding"], "subject": "someone-else"})
+    assert status(directory).json()["advisor"] == {"state": "profile-mismatch"}
+    (directory / "advisor.json").write_text("{not json")
+    assert status(directory).json()["advisor"] == {"state": "unreadable"}
+
+
+def test_status_assignment_states_and_unconfigured_grant(owner_fixture, monkeypatch, tmp_path):
+    from sqlmodel import create_engine
+
+    directory, value = owner_fixture
+    writer = create_engine("sqlite:///" + str(directory / "fixture.db"))
+    with Session(writer) as db:
+        service.set_enabled(db, uuid.UUID(value["request"]["assignment_id"]), False)
+    writer.dispose()
+    assert status(directory).json()["assignment"]["state"] == "revoked"
+    config = json.loads((directory / "owner.json").read_text())
+    del config["advisor_config_path"]
+    (directory / "owner.json").write_text(json.dumps(config))
+    body = status(directory).json()
+    assert body["keys"] == {"state": "not-configured", "expires_at": None}
+    assert body["advisor"] == {"state": "not-configured"}
+
+
+def test_status_reports_pending_then_expired_before_any_save(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    for name in ("DATABASE_URL", "MIGRATION_DATABASE_URL"):
+        monkeypatch.delenv(name, raising=False)  # Records the pinned values so teardown restores them.
+    scratch = tempfile.TemporaryDirectory(prefix="tj-owner-", dir="/private/tmp" if Path("/private/tmp").is_dir() else "/tmp")
+    directory = Path(scratch.name).resolve()
+    try:
+        value = initialize(directory, saved=False)
+        for name in ("DATABASE_URL", "MIGRATION_DATABASE_URL"):
+            monkeypatch.delenv(name, raising=False)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(value["config"]["socket_path"])
+        os.chmod(value["config"]["socket_path"], 0o600)
+        body = status(directory).json()
+        assert body["assignment"]["state"] == "pending" and body["last_save_at"] is None
+        monkeypatch.setattr(practice, "now_utc", lambda: decisions._utc(value["request"]["expires_at"], "expiry")
+            + timedelta(seconds=1))
+        assert status(directory).json()["assignment"]["state"] == "expired"
+        listener.close()
+    finally:
+        scratch.cleanup()
+
+
+def test_status_route_keeps_owner_peer_and_no_selector_rules(owner_fixture):
+    directory, _ = owner_fixture
+    app = reader.create_app(directory / "owner.json")
+    assert read(app, 999999, path=reader.STATUS_PATH).status_code == 403
+    assert read(app, os.getuid(), path=reader.STATUS_PATH + "?state=x").status_code == 404
+    assert read(app, os.getuid(), path=reader.STATUS_PATH, method="POST").status_code == 404
+    assert read(app, os.getuid(), path=reader.STATUS_PATH, headers={"cookie": "owner=forged"}).status_code == 400
+
+
+def test_status_follows_managed_questions_even_without_advisor_config(owner_fixture):
+    from sqlmodel import create_engine
+    from app.engine import advisor_assignments as managed
+    from cloud_mcp_advisor_common import AdvisorProfile
+
+    directory, value = owner_fixture
+    config = json.loads((directory / "owner.json").read_text())
+    del config["advisor_config_path"]  # Mode must come from the ledger, not the config.
+    (directory / "owner.json").write_text(json.dumps(config))
+    writer = create_engine("sqlite:///" + str(directory / "fixture.db"))
+    with Session(writer) as db:
+        managed.mutate(db, AdvisorProfile.model_validate(value["config"]["binding"]), {
+            "operation_id": str(uuid.uuid4()), "question": "Invented follow-up?", "user_plan": "Wait",
+            "invented_only": True}, lambda: None)
+    writer.dispose()
+    body = status(directory).json()
+    assert body["assignment"]["state"] == "pending" and body["assignment"]["expires_at"]
+    assert body["assignment"]["expires_at"] != value["request"]["expires_at"]
+    assert body["last_save_at"] == value["receipt"]["received_at"]  # The original answer is still the latest save.
+    assert "Invented follow-up" not in json.dumps(body)
