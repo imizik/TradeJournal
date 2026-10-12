@@ -1,0 +1,122 @@
+# Jo pre-trade check — Dots step 4, slice 1
+
+Selected by Isaac on October 11, 2026 (evening ET) as the first real-data
+advisor slice: the moment he would use most during a session. Plan only;
+nothing here is built, installed or activated. It reconciles Dots step 4 on the
+[delivery board](dots-integration.md#functionality-sequence) with the
+[pre-trade advisor roadmap](../advisor-roadmap.md) (AV0 rules, AV2 records and
+AV5 phone access, narrowed to one call). Later slices (after-close review,
+pre-open plan, while holding) reuse this gateway and are not authorized here.
+
+## What Isaac does
+
+Mid-session, from ChatGPT on phone or desktop: "Thinking SPY 0DTE calls here,
+stop 578.20." Jo calls one tool and answers within seconds with **Go / Wait /
+Pass** (or insufficient data), the reasons, what would change it, and how his
+own similar past trades went. Later he reopens every check in TradeJournal.
+
+Jo advises only. No tool places, sizes, amends or arms an order, and nothing
+writes fills, trades, captures, P&L or the paper ledger.
+
+## Approved data
+
+Isaac approved on October 11, 2026 that Jo (ChatGPT/OpenAI) may receive, for
+this slice only:
+
+- **Live market data** for the ticker asked about: the existing scalp packet
+  (price, VWAP, opening range, day structure, relative volume, scores, trigger,
+  invalidation), with source and observation timestamps.
+- **Aggregates of his own closed trades** forming the similar-trades card:
+  counts, distinct days/weeks, win rate, realized P&L and return summaries,
+  MFE/MAE and giveback, by cohort. No account numbers, order IDs or raw fill
+  rows; Webull stays excluded while dormant.
+
+Open positions and trade notes/plans are **not** sent in this slice (they
+belong to the while-holding and later slices and need their own approval).
+
+## The one tool
+
+`pre_trade_check(ticker, side, instrument, horizon, entry?, stop?, option_type?,
+expiration?, strike?, free_text?)` returns the
+[answer contract](../advisor-roadmap.md#the-answer-contract) in one round trip:
+`verdict`, `wait_for` (with `wait`), up to three sourced `reasons`,
+`would_change`, `risk_check`, `history`, `live`, `caveats`, plus the saved
+check's ID and receipt. `horizon=swing` returns `insufficient_data`.
+
+- **Rules verdict only** from the server, using the roadmap's
+  [verdict mapping](../advisor-roadmap.md#rules-verdict-mapping). Stale or
+  missing live data, a closed/premarket/after-hours session or a missing setup
+  can never yield `go`. History and risk may only downgrade.
+- **Similar trades** follow the roadmap's cohort, honest-count, display
+  threshold and as-of rules: only trades closed before the check's receipt
+  time, converting UTC receipt to New York wall time before comparing.
+- **Jo's narration** is optional on top. A second tool,
+  `attach_model_verdict(check_id, verdict, summary)`, saves it once per check;
+  identical retries return the original, different content conflicts.
+- No `free_text` instruction changes the computation; it is stored as data.
+
+## Where it runs
+
+The private production API stays private (hard constraint). A new isolated
+**check service** on the VPS, following the advisor/journal isolation pattern:
+
+- Its own system UID, service units and Unix socket behind a new OAuth
+  resource (`/check/mcp`) with its own scopes (`check:run`, `check:read`,
+  `check:note`). Existing journal and advisor resources, scopes and tokens are
+  not reused. Issuer keys are maintained the way
+  [connection upkeep](advisor-connection-upkeep-contract.md) does.
+- **Live data:** the service calls the market-data provider directly using the
+  existing scalp packet code with a dedicated read-only provider credential,
+  delivered as a systemd credential. A UID-only network policy permits only
+  DNS and the provider's HTTPS; private/host addresses stay denied.
+- **History:** a separate finite publisher (like the journal export) writes a
+  per-trade feature row file after fill import/rebuild, through a read-only
+  database role on a narrow view. The check service never holds a database
+  credential. Rows carry close time, cohort dimensions and outcome measures
+  only; a stale or missing feature file is a caveat, never fabricated history.
+- **Records:** each check is an immutable row in the service's own SQLite ledger
+  (the roadmap's [record fields](../advisor-roadmap.md#records), including stage
+  timings and a live-context hash). The owner reads the ledger read-only in
+  `/advisor-review` through the existing private owner frontend.
+
+Rejected: letting the gateway call the private API over loopback (widens the
+unauthenticated API's blast radius) and reusing the invented-fixture advisor
+install (its ledger, binding and grants are fixture-only).
+
+## Speed
+
+Server-side p50 under 1.5 s and p95 under 4 s for the deterministic answer:
+concurrent provider calls with a short cache, history from feature rows. Each
+record stores its stage timings. Provider latency is observed, not assumed.
+
+## Out of scope
+
+Orders or sizing; open positions; notes/plans; push alerts or schedules;
+swing scoring; the in-app Check button (AV3); grading views (AV4); linking
+checks to captures; repeatable fixture questions; any change to the journal
+coach export or the fixture advisor.
+
+## Build order
+
+1. **Engine (local, no network exposure):** per-trade feature rows, cohort card
+   with the as-of cut, verdict mapper and immutable check record, against
+   fixtures and the existing scalp packet. Tests cover every mapping row,
+   stale data, closed session, thin cohorts and the UTC/New York cut.
+2. **Check service and installer:** isolated units, ledger, OAuth resource and
+   scopes, provider credential and network policy, key upkeep, feature-row
+   publisher; disposable Ubuntu proof with generated tokens and recorded
+   provider fixtures.
+3. **Owner view:** list and reopen checks in `/advisor-review`, desktop and
+   390px.
+4. **Activation** (separate approval): Auth0 API/scopes, provider credential,
+   database role/view, restore point and rollback files.
+
+## Acceptance
+
+During a regular session, Isaac asks Jo for at least three real checks from his
+phone. Each answer arrives within the speed budget, cites live timestamps and a
+history card consistent with `get_fill_contexts`/`get_trade_path_metrics` for
+the same filters, and reopens unchanged in TradeJournal after reload and service
+restart. A stale-data or out-of-session check returns `insufficient_data`.
+Isaac records whether the answer was useful. Built, activated, observed and
+accepted are recorded separately with dates; none implies a trading edge.
