@@ -9,6 +9,9 @@ type Listing = { schema_version: "check-owner-list-v1"; checks: Summary[]; total
 type Cohort = { name: string; definition: Record<string, string | null>; trades: number; distinct_days: number; enough: boolean;
   note?: string; win_rate?: number | null; avg_pnl?: number | null; total_pnl?: number | null; median_mfe_pct?: number | null;
   median_mae_pct?: number | null; loser_pattern?: string };
+type OptionInfo = { contract: string; bid: number | null; ask: number | null; mid: number | null; spread_pct: number | null;
+  iv: number | null; delta: number | null; theta_per_contract_per_day: number | null; cost_per_contract: number | null; dte: number | null;
+  at_stop?: { estimated_premium: number; estimated_loss_per_contract: number } };
 type Detail = {
   schema_version: "check-owner-detail-v1"; check_id: string; received_at: string; record_sha256: string;
   idea: Record<string, string | number | null>; free_text: string | null;
@@ -18,6 +21,7 @@ type Detail = {
     history: { as_of_ny: string; cohorts: Cohort[]; trades_used: number; available?: boolean };
     live: { price: number | null; vwap: number | null; rvol: number | null; market_state: string | null; setup_score: number | null;
       trigger: string | null; invalidation: string | null; generated_at: string | null };
+    option?: OptionInfo | null;
     caveats: string[] };
   features: { state: string; generated_at: string | null; age_seconds: number | null };
   timings_ms: Record<string, number>; errors: string[];
@@ -78,6 +82,10 @@ function CheckDetail({ value }: { value: Detail }) {
       {answer.live.trigger && <p className="text-muted-foreground">Trigger: {answer.live.trigger}</p>}
       {answer.live.invalidation && <p className="text-muted-foreground">Invalidation: {answer.live.invalidation}</p>}
     </section>
+    {answer.option && <section aria-label="Option"><h4 className="font-medium">Option <span className="font-normal text-muted-foreground">{answer.option.contract}{answer.option.dte != null && <> · {answer.option.dte} DTE</>}</span></h4>
+      <p>Bid {num(answer.option.bid)} · ask {num(answer.option.ask)} · spread {answer.option.spread_pct == null ? "—" : `${answer.option.spread_pct}%`} · IV {answer.option.iv == null ? "—" : `${Math.round(answer.option.iv * 100)}%`} · delta {num(answer.option.delta)}</p>
+      <p>Cost {answer.option.cost_per_contract == null ? "—" : `$${answer.option.cost_per_contract}`}/contract · time decay {answer.option.theta_per_contract_per_day == null ? "—" : `${answer.option.theta_per_contract_per_day < 0 ? "−" : ""}$${Math.abs(answer.option.theta_per_contract_per_day)}`}/day{answer.option.at_stop && <> · at your stop ≈ ${answer.option.at_stop.estimated_loss_per_contract} loss/contract (delta estimate)</>}</p>
+    </section>}
     <section aria-label="Your similar trades"><h4 className="font-medium">Your similar trades <span className="font-normal text-muted-foreground">closed before {answer.history.as_of_ny.replace("T", " ")} ET</span></h4>
       {answer.history.available === false ? <p>No trade history was available for this check.</p>
         : <ul className="divide-y">{answer.history.cohorts.map(c => <CohortLine key={c.name} cohort={c} />)}</ul>}

@@ -213,3 +213,36 @@ def test_position_view_put_stop_side_and_no_invented_pnl():
     assert any("P&L is not computed" in c for c in view["caveats"])
     breached = check.position_view(position, [], analysis(price=583.0), RECEIPT, stop=582.0)
     assert breached["stop_check"]["breached"] is True
+
+
+OPTION = {"contract": "SPY261016C00580000", "option_type": "call", "expiration": "2026-10-16", "strike": 580.0, "dte": 7,
+    "moneyness": "ATM", "moneyness_pct": 0.0, "bid": 2.0, "ask": 2.2, "mid": 2.1, "spread_pct": 9.52, "iv": 0.18,
+    "delta": 0.5, "gamma": 0.05, "theta": -0.3, "last_trade_price": 2.05, "quote_time": "2026-10-09T15:00:00Z",
+    "feed": "indicative"}
+
+
+def test_option_check_shows_quote_cost_decay_and_delta_stop_estimate():
+    with_option = analysis()
+    with_option["data"]["option"] = OPTION
+    answer = check.run_check(IDEA, with_option, [], RECEIPT)  # Long call, stop 578.2, price 580.
+    option = answer["option"]
+    assert option["contract"] == OPTION["contract"] and option["cost_per_contract"] == 210.0
+    assert option["theta_per_contract_per_day"] == -30.0
+    assert option["at_stop"]["estimated_premium"] == 1.2 and option["at_stop"]["estimated_loss_per_contract"] == 90.0
+    stock = check.run_check({**IDEA, "instrument": "stock", "option_type": None}, with_option, [], RECEIPT)
+    assert stock["option"] is None
+    assert check.option_summary(None) is None
+    assert "at_stop" not in check.option_summary({**OPTION, "delta": None}, 578.2, 580.0)
+
+
+def test_position_marks_options_by_live_mid_and_shares_by_price():
+    position = {"ticker": "SPY", "instrument_type": "option", "option_type": "call", "strike": 580.0,
+        "expiration": "2026-10-16", "contracts": 2.0, "avg_entry_premium": 150.0, "total_premium_paid": 300.0,
+        "opened_at": "2026-10-09T10:20:00", "entry_time_bucket": "open", "account_name": "Roth", "account_type": "roth_ira"}
+    with_option = analysis()
+    with_option["data"]["option"] = OPTION
+    view = check.position_view(position, [], with_option, RECEIPT)
+    assert view["mark"]["value_now"] == 420.0 and view["mark"]["unrealized_pnl"] == 120.0 and view["mark"]["unrealized_pct"] == 40.0
+    assert not any("P&L is not computed" in c for c in view["caveats"])
+    shares = {**position, "instrument_type": "stock", "option_type": None, "contracts": 10.0, "total_premium_paid": 5700.0}
+    assert check.position_view(shares, [], analysis(price=580.0), RECEIPT)["mark"]["unrealized_pnl"] == 100.0
