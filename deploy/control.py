@@ -15,6 +15,7 @@ import pwd
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 import time
@@ -264,9 +265,12 @@ def start_services(release: Path, confirmation: str) -> None:
     # frontend configuration; absent files and disabled units are normal.
     if moomoo_is_enabled():
         run("systemctl", "start", MOOMOO_SERVICE)
+    # A recorder that cannot start (say, its credentials were removed) must not
+    # roll back an otherwise healthy release; its own failure alert reports it.
     if (release / "deploy/systemd" / DEPTH_RECORDER).is_file() and subprocess.run(
             ["systemctl", "is-enabled", "--quiet", DEPTH_RECORDER], check=False).returncode == 0:
-        run("systemctl", "start", DEPTH_RECORDER)
+        if subprocess.run(["systemctl", "start", DEPTH_RECORDER], check=False).returncode != 0:
+            print("Warning: the depth recorder did not start; the release continues.", file=sys.stderr)
 
 
 def moomoo_is_enabled() -> bool:

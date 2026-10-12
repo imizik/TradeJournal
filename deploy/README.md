@@ -245,7 +245,10 @@ TJ_DEPTH_R2_SECRET_ACCESS_KEY=...
 ```
 
 then `sudo systemctl enable --now tradejournal-depth-upload.timer`. Deployments
-stop both before switching releases and start them again only when enabled.
+stop both before switching releases and start them again only when enabled; a
+recorder that fails to start is reported, not a reason to roll back. A rollback
+to a release without these units disables and removes them, so enable them
+again after returning to a release that has them.
 `sudo systemctl disable --now tradejournal-depth-recorder.service` stops recording;
 recorded files stay until removed.
 

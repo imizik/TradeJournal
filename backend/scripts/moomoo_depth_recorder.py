@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+import signal
+import zlib
 from datetime import date, datetime, time as day_time, timedelta, timezone
 import gzip
 import json
@@ -48,8 +50,11 @@ MAX_TICKERS = 20
 DEFAULT_TICKERS = "SPY,MU,NBIS,SNDK,NVDA"
 # Stop writing (and say so) rather than fill the disk the journal also needs.
 MIN_FREE_BYTES = 2 * 1024 ** 3
-# Without the uploader, local days are kept this long and then deleted.
+# Without the uploader, local days are kept this long and then deleted. Once the
+# uploader has run (it leaves UPLOADER_SEEN), only it deletes days, after R2 confirms them.
 LOCAL_DAYS = 14
+UPLOADER_SEEN = ".uploader"
+UPLOADED = ".uploaded"
 BACKOFF = (15, 300)
 STATE = Path(os.environ.get("STATE_DIRECTORY", "/var/lib/tradejournal-depth"))
 LOG = logging.getLogger("depth-recorder")
@@ -114,18 +119,42 @@ def trade_lines(message: dict, received_ms: int, symbol: str) -> list[dict]:
             continue
         kind = tick.get("type")
         lines.append({"t": "x", "ts": diagnostic.timestamp(tick.get("time_ms")), "rx": received_ms, "p": price, "v": volume,
-                      "d": tick.get("direction") if tick.get("direction") in DIRECTIONS else None,
+                      "d": tick.get("direction") if isinstance(tick.get("direction"), str) and tick.get("direction") in DIRECTIONS else None,
                       "q": diagnostic.number(tick.get("sequence")),
                       "y": kind if isinstance(kind, str) and re.fullmatch(r"[A-Z_]{1,24}", kind) else None})
     return lines
 
 
+def repair(path: Path) -> None:
+    """Cut a file back to its last complete gzip member.
+
+    Each flush appends one whole member in a single write, but a crash or power
+    loss can still leave a partial one at the end, and anything appended after
+    it would be unreadable. Checked once per file per process, before appending.
+    """
+    data = path.read_bytes()
+    good = 0
+    while good < len(data):
+        reader = zlib.decompressobj(31)
+        try:
+            reader.decompress(data[good:])
+        except zlib.error:
+            break
+        if not reader.eof:
+            break
+        good = len(data) - len(reader.unused_data)
+    if good < len(data):
+        with path.open("r+b") as file:
+            file.truncate(good)
+
+
 class Store:
-    """Day files under the state directory; each flush appends one gzip member."""
+    """Day files under the state directory; each flush appends one complete gzip member."""
 
     def __init__(self, root: Path):
         self.root = root
         self.pending: dict[tuple[str, str], list[dict]] = {}
+        self.checked: set[Path] = set()
 
     def add(self, day: str, ticker: str, line: dict) -> None:
         self.pending.setdefault((day, ticker), []).append(line)
@@ -141,13 +170,21 @@ class Store:
         for (day, ticker), lines in self.pending.items():
             folder = self.root / day
             folder.mkdir(exist_ok=True)
-            with gzip.open(folder / f"{ticker}.jsonl.gz", "ab") as file:
-                file.write("".join(json.dumps(line, separators=(",", ":"), allow_nan=False) + "\n" for line in lines).encode())
+            path = folder / f"{ticker}.jsonl.gz"
+            if path not in self.checked:
+                if path.exists():
+                    repair(path)
+                self.checked.add(path)
+            member = gzip.compress("".join(json.dumps(line, separators=(",", ":"), allow_nan=False) + "\n" for line in lines).encode())
+            with path.open("ab") as file:
+                file.write(member)
         self.pending.clear()
         return True
 
     def prune(self, today: date) -> None:
-        """Without an uploader, keep LOCAL_DAYS of local days; uploaded days are the uploader's to remove."""
+        """Without an uploader, keep LOCAL_DAYS of local days. Once one has run, never delete here."""
+        if (self.root / UPLOADER_SEEN).exists():
+            return
         for folder in sorted(self.root.glob("????-??-??")):
             with suppress(ValueError):
                 if (today - date.fromisoformat(folder.name)).days > LOCAL_DAYS:
@@ -297,8 +334,10 @@ async def run(tickers: list[str], loader=lab.credentials, connector=diagnostic.N
             delay = BACKOFF[0]
         except asyncio.CancelledError:
             raise
-        except (OSError, WebSocketException, asyncio.TimeoutError, ValueError, diagnostic.DiagnosticError):
+        except (OSError, WebSocketException, asyncio.TimeoutError, ValueError, TypeError, KeyError, diagnostic.DiagnosticError):
             # Fixed text only: provider and credential errors are never logged.
+            if status["state"] == "recording":
+                delay = BACKOFF[0]  # a connection that recorded starts the back-off over
             status["reconnects"] += 1
             status["state"] = f"reconnecting in {delay}s"
             write_status(root, status)
@@ -314,7 +353,16 @@ def main() -> None:
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
     LOG.info("Depth recorder watching %s.", ", ".join(tickers))
-    asyncio.run(run(tickers))
+
+    async def supervised():
+        # systemd stops with SIGTERM: cancel so the flush and unsubscribe in
+        # record_window's finally run instead of losing the buffered seconds.
+        task = asyncio.current_task()
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+        with suppress(asyncio.CancelledError):
+            await run(tickers)
+
+    asyncio.run(supervised())
 
 
 if __name__ == "__main__":

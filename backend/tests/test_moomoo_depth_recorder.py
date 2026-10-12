@@ -80,6 +80,59 @@ def test_store_appends_readable_members_and_pauses_on_low_disk(tmp_path, monkeyp
     assert lines(tmp_path / "2026-10-12/NVDA.jsonl.gz") == [{"a": 1}, {"a": 2}]
 
 
+def test_store_cuts_a_partial_member_before_appending(tmp_path):
+    path = tmp_path / "2026-10-12" / "NVDA.jsonl.gz"
+    store = rec.Store(tmp_path)
+    store.add("2026-10-12", "NVDA", {"a": 1})
+    store.flush()
+    whole = path.read_bytes()
+    partial = gzip.compress(b'{"a":2}\n' * 500)
+    path.write_bytes(whole + partial[: len(partial) // 2])  # a crash in the middle of a flush
+    restarted = rec.Store(tmp_path)
+    restarted.add("2026-10-12", "NVDA", {"a": 3})
+    restarted.flush()
+    assert lines(path) == [{"a": 1}, {"a": 3}]
+
+
+def test_prune_never_deletes_once_an_uploader_has_run(tmp_path):
+    for day in ("2026-09-01", "2026-10-11"):
+        (tmp_path / day).mkdir()
+    rec.Store(tmp_path).prune(datetime(2026, 10, 12).date())
+    assert not (tmp_path / "2026-09-01").exists() and (tmp_path / "2026-10-11").exists()
+    (tmp_path / "2026-09-02").mkdir()
+    (tmp_path / ".uploader").touch()
+    rec.Store(tmp_path).prune(datetime(2026, 10, 12).date())
+    assert (tmp_path / "2026-09-02").exists()
+
+
+def test_unhashable_direction_is_dropped_not_fatal():
+    message = {"type": "TICKER", "symbol": "US.NVDA", "data": {"ticker_list": [{"price": 1, "volume": 1, "direction": ["BUY"]}]}}
+    assert rec.trade_lines(message, 1, "US.NVDA")[0]["d"] is None
+
+
+def test_backoff_restarts_after_a_connection_that_recorded(tmp_path, monkeypatch):
+    waits = []
+    attempts = iter(["recording", "recording", "fail", "fail", "recording"])
+
+    async def fake_window(appkey, key, tickers, until, store, status, connector):
+        if next(attempts) == "recording":
+            status["state"] = "recording"
+        raise rec.diagnostic.DiagnosticError("dropped")
+
+    async def fake_sleep(seconds):
+        waits.append(seconds)
+        if len(waits) == 5:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(rec, "record_window", fake_window)
+    monkeypatch.setattr(rec, "window", lambda now: (now, now + timedelta(hours=1)))
+    monkeypatch.setattr(rec.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(rec.random, "uniform", lambda a, b: 0)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(rec.run(["NVDA"], loader=lambda: ("fixture", KEY), root=tmp_path))
+    assert waits == [15, 15, 30, 60, 15]  # doubles while failing, starts over after one that recorded
+
+
 def test_record_window_snapshots_latest_book_per_kind_and_every_trade(tmp_path, monkeypatch):
     monkeypatch.setattr(rec, "SNAPSHOT_SECONDS", 0.2)
     monkeypatch.setattr(rec, "FLUSH_SECONDS", 0.2)
@@ -172,7 +225,7 @@ def test_upload_confirms_size_marks_day_and_removes_only_confirmed_old_days(tmp_
     # 2026-10-12 at 19:00 New York: today is still recording and is not touched.
     result = up.run(tmp_path, settings, client, datetime(2026, 10, 12, 19, 0, tzinfo=NY))
     assert sorted(stored) == ["/trade-journal-depth/depth/v1/NVDA/2026/2026-10-05.jsonl.gz", "/trade-journal-depth/depth/v1/NVDA/2026/2026-10-09.jsonl.gz"]
-    assert result == {"uploaded": 2, "days": 2, "removed": 1}
+    assert result == {"uploaded": 2, "days": 2, "removed": 1} and (tmp_path / ".uploader").exists()
     assert not (tmp_path / "2026-10-05").exists() and (tmp_path / "2026-10-09/.uploaded").exists()
     assert not (tmp_path / "2026-10-12/.uploaded").exists()
     up.run(tmp_path, settings, client, datetime(2026, 10, 12, 20, 30, tzinfo=NY))

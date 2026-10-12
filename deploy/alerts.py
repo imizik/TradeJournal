@@ -55,6 +55,12 @@ SERVICES = {
     "tradejournal-plan-reviews.service": (
         "Nightly AI reviews", "Tonight's daily reviews on the Claude plan didn't run; the Daily page says why."
     ),
+    "tradejournal-depth-recorder.service": (
+        "Depth recorder", "The Level 2 depth recorder stopped, so the watchlist isn't being recorded."
+    ),
+    "tradejournal-depth-upload.service": (
+        "Depth upload", "Finished depth days didn't reach R2; they stay on the VPS until an upload succeeds."
+    ),
 }
 TIMERS = {
     "tradejournal-backup.timer": "Nightly backup",
@@ -67,6 +73,7 @@ TIMERS = {
 # Opt-in schedules: only one the owner enabled can be "switched off".
 OPT_IN_TIMERS = {
     "tradejournal-plan-reviews.timer": "Nightly AI reviews",
+    "tradejournal-depth-upload.timer": "Nightly depth upload",
 }
 
 

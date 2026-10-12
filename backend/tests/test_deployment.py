@@ -732,7 +732,7 @@ def test_depth_recorder_units_are_opt_in_and_never_see_r2_or_journal_state(contr
     assert "User=tradejournal-moomoo" in recorder and "StateDirectory=tradejournal-depth" in recorder
     assert "depth-r2" not in recorder and "InaccessiblePaths=-/var/lib/tradejournal -/etc/tradejournal" in recorder
     assert "EnvironmentFile=/etc/tradejournal/depth-r2.env" in upload and "LoadCredential" not in upload
-    assert "offsite.env" not in upload and "ReadWritePaths=/var/lib/tradejournal-depth" in upload
+    assert "offsite.env" not in upload and "ReadWritePaths=-/var/lib/tradejournal-depth" in upload
 
 
 def test_depth_recorder_restarts_only_when_enabled(control, monkeypatch, tmp_path):
@@ -744,12 +744,17 @@ def test_depth_recorder_restarts_only_when_enabled(control, monkeypatch, tmp_pat
     monkeypatch.setattr(control, "health", lambda *args: None)
     monkeypatch.setattr(control, "moomoo_is_enabled", lambda: False)
     monkeypatch.setattr(control.time, "sleep", lambda seconds: None)
-    monkeypatch.setattr(control, "run", lambda *command, **kwargs: started.append(command))
-    for enabled in (1, 0):
+    monkeypatch.setattr(control, "run", lambda *command, **kwargs: None)
+    for enabled, start_code in ((1, 0), (0, 0), (0, 1)):
         started.clear()
-        monkeypatch.setattr(control.subprocess, "run", lambda command, **kwargs: type("R", (), {"returncode": enabled})())
-        control.start_services(release, "fixture")
-        assert (("systemctl", "start", control.DEPTH_RECORDER) in started) == (enabled == 0)
+        def fake(command, **kwargs):
+            if command[:2] == ["systemctl", "start"]:
+                started.append(command[2])
+                return type("R", (), {"returncode": start_code})()
+            return type("R", (), {"returncode": enabled})()
+        monkeypatch.setattr(control.subprocess, "run", fake)
+        control.start_services(release, "fixture")  # a recorder that fails to start never raises
+        assert (control.DEPTH_RECORDER in started) == (enabled == 0)
 
 
 def test_moomoo_unit_is_loopback_bridge_with_separate_read_only_credentials():

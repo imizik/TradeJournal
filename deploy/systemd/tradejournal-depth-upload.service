@@ -21,6 +21,6 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ReadWritePaths=/var/lib/tradejournal-depth
+ReadWritePaths=-/var/lib/tradejournal-depth
 InaccessiblePaths=-/var/lib/tradejournal
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

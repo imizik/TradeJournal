@@ -27,6 +27,8 @@ STATE = Path(os.environ.get("TJ_DEPTH_DIR", "/var/lib/tradejournal-depth"))
 NEW_YORK = ZoneInfo("America/New_York")
 LOCAL_DAYS = 3
 MARKER = ".uploaded"
+# Tells the recorder an uploader exists, so it never deletes an unconfirmed day itself.
+UPLOADER_SEEN = ".uploader"
 LOG = logging.getLogger("depth-upload")
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
@@ -109,6 +111,7 @@ def run(root: Path = STATE, settings: dict | None = None, client: httpx.Client |
     result = {"uploaded": 0, "days": 0, "removed": 0}
     own = client is None
     client = client or httpx.Client(timeout=60, follow_redirects=False, trust_env=False)
+    (root / UPLOADER_SEEN).touch()
     try:
         for folder in finished_days(root, now):
             if not (folder / MARKER).exists():
