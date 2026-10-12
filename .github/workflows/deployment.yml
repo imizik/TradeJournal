@@ -71,7 +71,7 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Prepare host runtime
         run: |
-          sudo apt-get update && sudo apt-get install -y python3.12-venv postgresql-client caddy
+          sudo apt-get update && sudo apt-get install -y python3.12-venv postgresql-client caddy nftables
           sudo systemctl disable --now caddy
       - name: Build committed source away from production
         run: python deploy/build.py --release-id "$(git rev-parse --short=12 HEAD)-${{ github.run_id }}-${{ github.run_attempt }}"
@@ -85,6 +85,8 @@ jobs:
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-journal/smoke.py
       - name: Exercise disabled advisor bundle and isolated native fixture services
         run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-advisor/smoke.py dist/*.tar.gz
+      - name: Exercise disabled pre-trade check install, UID egress policy and isolated service
+        run: sudo env GITHUB_ACTIONS=true TJ_DISPOSABLE_RUNNER=1 /usr/bin/python3.12 deploy/cloud-mcp-check/smoke.py dist/*.tar.gz
       - name: Save verified release
         uses: actions/upload-artifact@v4
         with:

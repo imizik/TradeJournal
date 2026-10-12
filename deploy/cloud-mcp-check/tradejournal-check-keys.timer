@@ -1,0 +1,12 @@
+[Unit]
+Description=Maintain the pre-trade check public verification keys every 15 minutes
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=15min
+AccuracySec=30s
+RandomizedDelaySec=30s
+Unit=tradejournal-check-keys.service
+
+[Install]
+WantedBy=timers.target

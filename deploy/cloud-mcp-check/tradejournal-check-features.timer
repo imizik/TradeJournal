@@ -1,0 +1,11 @@
+[Unit]
+Description=Republish pre-trade feature rows every 10 minutes (after fill import/rebuild)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+AccuracySec=30s
+Unit=tradejournal-check-features.service
+
+[Install]
+WantedBy=timers.target

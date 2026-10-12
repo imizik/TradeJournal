@@ -374,7 +374,7 @@ def expected_unit_digests(bundle):
     if KEYS_RECORD.exists() or KEYS_RECORD.is_symlink():
         import advisor_keys_control as keys  # Lazy: that module imports this one.
         for name in keys.SERVING:
-            units[name] = keys.serving_unit(units[name].decode()).encode()
+            units[name] = keys.serving_unit(units[name].decode(), keys.unit_binds(name)).encode()
     return {name: hashlib.sha256(data).hexdigest() for name, data in units.items()}
 
 

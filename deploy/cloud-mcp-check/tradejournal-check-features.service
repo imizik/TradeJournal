@@ -1,0 +1,36 @@
+[Unit]
+Description=Publish per-trade feature rows for the pre-trade check (read-only view)
+Requires=tradejournal-check-network.service
+After=postgresql.service tradejournal-check-network.service
+
+[Service]
+Type=oneshot
+User=tj-check-features
+Group=tj-check
+WorkingDirectory=/opt/tradejournal-check/backend
+Environment=PYTHON_DOTENV_DISABLED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=database-url:/etc/tradejournal-check/features-database-url
+ExecStart=/opt/tradejournal-check/backend/.venv/bin/python -B /opt/tradejournal-check/backend/pretrade_feature_publish.py --pointer /var/lib/tradejournal-check-features/current.json --database-url-file %d/database-url
+TimeoutStartSec=60
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ReadWritePaths=/var/lib/tradejournal-check-features
+InaccessiblePaths=-/etc/tradejournal-check/config.json -/etc/tradejournal-check/alpaca-key-id -/etc/tradejournal-check/alpaca-secret-key -/etc/tradejournal-check/refresh-keys.json -/var/lib/tradejournal-check -/var/lib/tradejournal-check-keys -/run/tradejournal-check -/etc/tradejournal -/opt/tradejournal -/var/lib/tradejournal -/var/backups/tradejournal -/run/dbus -/run/docker.sock -/run/containerd -/run/podman
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=true
+TasksMax=16
+MemoryMax=512M
+CPUQuota=50%
+
+# Finite: selects one security-barrier view as a read-only role and exits.
+# No provider credential, no serving socket, no journal writes.
