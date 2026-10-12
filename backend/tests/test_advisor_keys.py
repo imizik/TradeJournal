@@ -38,6 +38,8 @@ def installed_trial(prepared, tmp_path, monkeypatch, *, expires_in=3600):
     for name, path in (("RUNTIME", "keys-runtime"), ("SETTINGS", "keys-settings"), ("KEYS", "keys-state")):
         monkeypatch.setattr(keys, name, tmp_path / path)
     monkeypatch.setattr(trial, "KEYS_RECORD", keys.record_path())
+    # The trial controller imports key upkeep lazily; resolve it to this patched module.
+    monkeypatch.setitem(sys.modules, "advisor_keys_control", keys)
     monkeypatch.setattr(keys.os, "chown", lambda *args: None)
     lookup = keys.pwd.getpwnam
     publisher = SimpleNamespace(pw_name=keys.ACCOUNT, pw_uid=os.getuid(), pw_gid=280, pw_shell="/usr/sbin/nologin")
@@ -289,3 +291,44 @@ def test_remove_resumes_when_interrupted_after_config_switch(prepared, tmp_path,
     assert not keys.record_path().exists()
     assert not any((old.UNIT_DIR / name).exists() for name in keys.KEY_UNITS)
     trial.rollback()
+
+
+def test_runtime_upgrade_keeps_key_upkeep_units_and_config(prepared, tmp_path, monkeypatch):
+    key_bundle, calls = installed_trial(prepared, tmp_path, monkeypatch)
+    install(key_bundle)
+    config_path = trial.CONFIG / "advisor/config.json"
+    watched = [config_path, *[old.UNIT_DIR / n for n in (*trial.UNITS, *keys.KEY_UNITS)], keys.record_path()]
+    before = {path: path.read_bytes() for path in watched}
+    newer, approved = trial_tests.newer_bundle(tmp_path / "bundle")
+    record = trial.upgrade(newer, approved)
+    assert record["manifest_sha256"] == approved
+    assert all(path.read_bytes() == value for path, value in before.items())  # Binds and jwks_file kept.
+    keys.installed()
+    assert not any(word in command for command in calls for word in ("start", "restart", "enable"))
+    trial.downgrade()
+    keys.installed()
+    with pytest.raises(ValueError, match="remove before trial rollback"):
+        trial.rollback()
+    keys.remove()
+    trial.rollback()
+
+
+def test_runtime_upgrade_refuses_while_key_removal_is_unfinished(prepared, tmp_path, monkeypatch):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    install(key_bundle)
+    unlink = Path.unlink
+    def fail(path, *args, **kwargs):
+        if path.name == keys.KEY_UNITS[0]:
+            raise OSError("Controlled interruption after config switch")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", fail)
+    with pytest.raises(OSError, match="Controlled"):
+        keys.remove()
+    monkeypatch.setattr(Path, "unlink", unlink)
+    newer, approved = trial_tests.newer_bundle(tmp_path / "bundle")
+    before = trial.RECORD.read_bytes()
+    with pytest.raises(ValueError, match="no longer reads the maintained snapshot"):
+        trial.upgrade(newer, approved)  # Finish keys remove first.
+    assert trial.RECORD.read_bytes() == before and not trial.KEPT.exists()
+    keys.remove()
+    assert trial.upgrade(newer, approved)["manifest_sha256"] == approved
