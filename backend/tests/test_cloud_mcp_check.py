@@ -454,6 +454,8 @@ def test_preopen_watchlist_defaults_to_held_then_recent_tickers(harness):
         chosen = call(client, "preopen_watchlist", {"tickers": ["spy", "SPY"]}, harness.token())["structuredContent"]
         refused = rpc(client, "preopen_watchlist", {"tickers": ["SPY"] * 9}, harness.token()).json()["result"]
     assert default["tickers"] == ["SPY", "QQQ"] and default["skipped_for_time"] == []
+    assert set(default["market"]) == {"SPY", "QQQ"} and default["market"]["SPY"]["pct_change"] is not None
+    assert 0 < len(default["watchlist"][0]["news"]) <= 5 and default["watchlist"][0]["news"][0]["headline"]
     spy = default["watchlist"][0]
     assert spy["live"]["price"] is not None and spy["live"]["prev_close"] is not None and spy["held_now"][0]["contracts"] == 10.0
     stock = spy["history"]["by_side"][0]

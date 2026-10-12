@@ -435,6 +435,7 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
 
 PREOPEN_VERSION = "pretrade-preopen-v1"
 PREOPEN_RECENT_DAYS = 30
+PREOPEN_HEADLINES = 5
 
 
 def preopen_tickers(positions: Iterable[dict], rows: Iterable[dict], receipt_utc: datetime, limit: int) -> list[str]:
@@ -447,7 +448,8 @@ def preopen_tickers(positions: Iterable[dict], rows: Iterable[dict], receipt_utc
 
 def preopen_view(ticker: str, rows: Iterable[dict], analysis: dict, receipt_utc: datetime,
                  positions: Iterable[dict] = ()) -> dict:
-    """Before the bell, one ticker: where it trades versus yesterday, and how Isaac has traded it.
+    """Before the bell, one ticker: where it trades versus yesterday, its last-24h headlines, and how Isaac has
+    traded it.
 
     Facts only; no verdict. Premarket reads are not session reads, and small cohorts say so.
     """
@@ -481,6 +483,8 @@ def preopen_view(ticker: str, rows: Iterable[dict], analysis: dict, receipt_utc:
                  "premarket_volume": intraday.get("premarket_volume"),
                  "market_state": (analysis.get("assessment") or {}).get("market_state") or data.get("market_state"),
                  "staleness": data.get("staleness")},
+        "news": [{key: article.get(key) for key in ("headline", "source", "created_at", "url")}
+                 for article in (data.get("news") or [])[:PREOPEN_HEADLINES]],
         "held_now": [{key: p.get(key) for key in ("instrument_type", "option_type", "strike", "expiration", "contracts",
                       "total_premium_paid", "opened_at")} for p in positions if p["ticker"].upper() == ticker],
         "history": {"as_of_ny": now_ny.isoformat(timespec="seconds"), "trades": len(prior),

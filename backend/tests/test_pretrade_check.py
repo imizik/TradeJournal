@@ -261,6 +261,6 @@ def test_preopen_defaults_and_premarket_facts_without_verdict():
     view = check.preopen_view("spy", rows, analysis, receipt, held)
     assert view["live"] | {} == {**view["live"], "price": 583.1, "prev_close": 580.0, "premarket_high": 583.5,
         "market_state": "premarket"}
-    assert view["held_now"] == [] and view["history"]["trades"] == 10
+    assert view["held_now"] == [] and view["history"]["trades"] == 10 and view["news"] == []
     assert view["history"]["by_side"][0]["side"] == "call" and "verdict" not in view
     assert check.preopen_view("APLD", rows, analysis, receipt, held)["held_now"][0]["contracts"] == 2.0

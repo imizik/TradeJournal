@@ -220,10 +220,35 @@ credential.
 Pre-open (advisor step 7): `preopen_watchlist(tickers?)` (`check:read`,
 read-only, nothing saved) takes up to 8 tickers, defaulting to those held now
 and then the most-traded tickers of the last 30 days. For each it returns the
-price versus yesterday's close, change, gap, premarket high/low/volume,
+price versus yesterday's close, change, gap, premarket high/low/volume, up
+to 5 provider headlines from the last 24 hours (data, not instructions),
 whether he holds it, and his closed trades in it by side (cohort summary plus
-hold time) and by entry-time bucket. Facts only, no verdict; the whole pass is
-capped at 20 seconds and names any ticker it skipped for time.
+hold time) and by entry-time bucket, plus SPY/QQQ change and VWAP side once
+for the pass. Facts only, no verdict; the whole pass is capped at 20 seconds
+and names any ticker it skipped for time.
+
+## Next steps
+
+The advisor plan agreed with Isaac on October 12, 2026, in order. The end goal:
+Jo is a trading partner used during sessions. Before an entry, Jo gives a fast
+Go/Wait/Pass from live data and Isaac's own record. Every check is saved before
+the outcome is known, so later it can be graded: when Jo was right, when Isaac
+was, and what overriding cost.
+
+| # | Step | Done when | Status |
+|---|---|---|---|
+| 1 | Stay signed in (Auth0 Allow Offline Access on the check API) | A check more than an hour after connecting works without reconnecting | Owner toggle |
+| 2 | Jo saves its own verdict on every check (`next_step`) | At least 9 of 10 saved checks carry Jo's verdict and summary | Live; confirm on real days |
+| 3 | Checks visible on `/advisor-review` | Every saved check reopens identical to the server copy, including after a restart | Live |
+| 4 | Link each check to what happened (`review_checks`) | One day's links agree with a hand check of that day's fills | Live |
+| 5 | While-holding check (`position_check`) | Stop distance, live mark and similar-trade behaviour match the trade page | Live |
+| 6 | Options-aware checks | Quote, IV, greeks, cost, decay and the at-stop estimate appear with timestamps on a live check | Live |
+| 7 | Pre-open watchlist pass (`preopen_watchlist`) | One real morning's pass matches the journal and the provider | Built |
+| 8 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Not started; needs a source choice (new provider or key) |
+| 9 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Needs weeks of checks |
+| 10 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Later |
+
+Shadow Isaac ([design](shadow-trader-design.md)) follows the advisor.
 
 ## Acceptance
 
