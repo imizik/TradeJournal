@@ -391,6 +391,8 @@ def test_status_assignment_states_and_unconfigured_grant(owner_fixture, monkeypa
 
 def test_status_reports_pending_then_expired_before_any_save(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTHON_DOTENV_DISABLED", "1")
+    for name in ("DATABASE_URL", "MIGRATION_DATABASE_URL"):
+        monkeypatch.delenv(name, raising=False)  # Records the pinned values so teardown restores them.
     scratch = tempfile.TemporaryDirectory(prefix="tj-owner-", dir="/private/tmp" if Path("/private/tmp").is_dir() else "/tmp")
     directory = Path(scratch.name).resolve()
     try:
