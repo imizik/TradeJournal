@@ -724,6 +724,39 @@ def test_moomoo_bridge_restart_requires_enabled_unit_and_explicit_frontend_confi
     assert not control.moomoo_is_enabled()
 
 
+def test_depth_recorder_units_are_opt_in_and_never_see_r2_or_journal_state(control):
+    systemd = Path(__file__).resolve().parents[2] / "deploy/systemd"
+    recorder = (systemd / "tradejournal-depth-recorder.service").read_text()
+    upload = (systemd / "tradejournal-depth-upload.service").read_text()
+    assert control.DEPTH_RECORDER in control.OPTIONAL_UNITS and "tradejournal-depth-upload.timer" in control.OPT_IN_TIMERS
+    assert "User=tradejournal-moomoo" in recorder and "StateDirectory=tradejournal-depth" in recorder
+    assert "depth-r2" not in recorder and "InaccessiblePaths=-/var/lib/tradejournal -/etc/tradejournal" in recorder
+    assert "EnvironmentFile=/etc/tradejournal/depth-r2.env" in upload and "LoadCredential" not in upload
+    assert "offsite.env" not in upload and "ReadWritePaths=-/var/lib/tradejournal-depth" in upload
+
+
+def test_depth_recorder_restarts_only_when_enabled(control, monkeypatch, tmp_path):
+    release = tmp_path / "release"
+    (release / "deploy/systemd").mkdir(parents=True)
+    (release / "deploy/systemd" / control.DEPTH_RECORDER).write_text("")
+    started = []
+    monkeypatch.setattr(control, "install_units", lambda release: None)
+    monkeypatch.setattr(control, "health", lambda *args: None)
+    monkeypatch.setattr(control, "moomoo_is_enabled", lambda: False)
+    monkeypatch.setattr(control.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(control, "run", lambda *command, **kwargs: None)
+    for enabled, start_code in ((1, 0), (0, 0), (0, 1)):
+        started.clear()
+        def fake(command, **kwargs):
+            if command[:2] == ["systemctl", "start"]:
+                started.append(command[2])
+                return type("R", (), {"returncode": start_code})()
+            return type("R", (), {"returncode": enabled})()
+        monkeypatch.setattr(control.subprocess, "run", fake)
+        control.start_services(release, "fixture")  # a recorder that fails to start never raises
+        assert (control.DEPTH_RECORDER in started) == (enabled == 0)
+
+
 def test_moomoo_unit_is_loopback_bridge_with_separate_read_only_credentials():
     systemd = Path(__file__).resolve().parents[2] / "deploy/systemd"
     bridge = (systemd / "tradejournal-moomoo.service").read_text()

@@ -99,6 +99,58 @@ which one is drawn, ARCA-labelled by default. Brightness is relative to the
 not consolidated or executable liquidity, and no spread/imbalance signal is
 derived from it.
 
+## Depth recorder
+
+`backend/scripts/moomoo_depth_recorder.py` is an opt-in always-on service
+(`tradejournal-depth-recorder.service`) for a short watchlist, by default SPY, MU,
+NBIS, SNDK and NVDA (`TJ_DEPTH_TICKERS` in `/etc/tradejournal/depth-recorder.env`,
+at most 20 plain tickers). From 04:00 to 20:00 New York on weekdays it holds one
+provider connection with the same service account, credentials and in-session
+auth refresh as the bridge, and subscribes order_book and ticker for every
+watched ticker. Holidays are not known to it; such a session receives nothing.
+
+It writes one gzip JSON-lines file per ticker per day under
+`/var/lib/tradejournal-depth/YYYY-MM-DD/`:
+
+- `{"t":"b"}` book lines: every 2 seconds, the latest update of each book kind
+  (`arca` or `mpid`) that changed in that window, with its source time and
+  estimated age at receipt. Books are never merged; a missing side stays empty
+  and nothing is carried forward. A window without an update writes nothing.
+- `{"t":"x"}` trade lines: every print with price, volume, provider direction
+  (`BUY`, `SELL`, `NEUTRAL`, else null), sequence and type. The provider does not
+  document whether direction is the aggressor side.
+
+It never reads the journal, its database or any R2 credential. Each flush
+appends one complete gzip member in a single write, and a file is cut back to
+its last complete member before the first append after a restart, so a crash
+loses at most that flush. SIGTERM flushes and unsubscribes before exit. Below
+2 GB of free disk it stops writing and says so in `status.json`. Until an
+uploader has run it keeps 14 local days; after that it never deletes a day,
+and only the uploader removes days R2 confirmed. A failed connection reconnects
+with a back-off from 15 seconds to 5 minutes, starting over after a connection
+that recorded; provider and credential text is never logged. The phone alerts
+report a failed recorder or upload, and a disabled upload timer.
+
+`backend/scripts/depth_upload.py` (`tradejournal-depth-upload.timer`, 20:30 New
+York) PUTs each finished day to `depth/v1/<TICKER>/<YYYY>/<YYYY-MM-DD>.jsonl.gz`
+in a private R2 bucket of its own, signs with SigV4, confirms the stored size,
+marks the day uploaded and deletes uploaded local days older than three days.
+It uses a bucket-scoped token in `/etc/tradejournal/depth-r2.env`, never the
+offsite backup's. The recorder never loads that token, but the uploader runs as
+the same `tradejournal-moomoo` user, so a compromised provider-facing process of
+that user could read it during the nightly run. The token reaches only the depth
+bucket, never the backups.
+
+Recording is the owner's decision (2026-10-12): private recording for personal
+use, with the rights questions in the
+[permissions audit](moomoo-depth-permissions-rights-audit.md) left unasked.
+
+A live minute on 2026-10-12 after hours (18:03 ET, five tickers) wrote 14–17 KB
+per ticker: 60/60-entry books in both kinds (SPY asks 31–34 after hours) and
+56–246 trades, about three quarters marked NEUTRAL. Expect roughly 25 MB per
+ticker per trading day until a full regular session is measured. Nothing here
+draws the recorded data yet; reading it into Charts is the next step.
+
 ## Fields and clocks
 
 - Price and volume retain provider numeric precision. Volume is labeled provider
