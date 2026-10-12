@@ -199,7 +199,10 @@ class CheckMCP(FastMCP):
     def streamable_http_app(self):
         app = super().streamable_http_app()
         metadata = create_protected_resource_routes(resource_url=self.settings.auth.resource_server_url,
-            authorization_servers=[self.settings.auth.issuer_url], scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE])
+            # offline_access makes the client request it, so Auth0 issues a refresh token and the
+            # five-minute access token renews without a reconnect. The tools never require it.
+            authorization_servers=[self.settings.auth.issuer_url],
+            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, "offline_access"])
         paths = {route.path for route in metadata}
         app.routes[:] = [route for route in app.routes if route.path not in paths] + metadata
         return RequestLimits(app)
