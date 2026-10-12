@@ -59,11 +59,16 @@ TOOL_ARGUMENTS = {
     "position_check": (set(), {"ticker", "stop"}),
     "get_notes": (set(), {"ticker"}),
     "preopen_watchlist": (set(), {"tickers"}),
+    "grade_checks": (set(), {"days"}),
 }
-READ_ONLY_TOOLS = ("review_checks", "position_check", "get_notes", "preopen_watchlist")
+READ_ONLY_TOOLS = ("review_checks", "position_check", "get_notes", "preopen_watchlist", "grade_checks")
 POSITION_LIMIT = 5
 PREOPEN_LIMIT = 8
 PREOPEN_BUDGET = 20.0  # Seconds for the whole pass; tickers left over are named, not guessed.
+SETTLE_BUDGET = 20.0  # Seconds of minute-bar reads per review/grade call; the rest stay unmeasured until next time.
+GRADE_LIMIT = 1000
+FINAL_OUTCOMES = ("traded", "no_closed_trade")
+FINAL_MOVES = ("complete", "no_reference")
 CONTEXT_MAX_AGE = 30 * 60  # Positions change during a session; older than this is labelled stale.
 
 
@@ -224,7 +229,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     ledger = Ledger(config.ledger_file)
     bind_provider(provider, feed=config.provider_feed, cache_dir=cache_dir)
     from app.engine.alpaca import ET
-    from app.engine.pretrade_check import check_outcome, position_view, preopen_tickers, preopen_view, run_check
+    from app.engine.alpaca import fetch_minute_bars_live
+    from app.engine.pretrade_check import (check_outcome, grade_results, position_view, preopen_tickers, preopen_view,
+        price_after, run_check)
     from app.engine.scalper import build_scalp_analysis
 
     clock = clock or (lambda: datetime.now(timezone.utc))
@@ -371,11 +378,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             "model_verdict": {key: saved[key] for key in ("verdict", "summary", "received_at", "content_sha256")}}
 
     @server.tool(title="Review checks for a day", structured_output=True,
-        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False, idempotentHint=True),
+        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True, idempotentHint=True),
         meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("review_checks")}]})
     async def review_checks(day: Annotated[Optional[str], Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None) -> dict[str, Any]:
         """List one New York trading day's saved checks (default today) with the rules verdict, your saved verdict,
-        and what happened after: traded / no_closed_trade / pending / not_linked, from closed trades only.
+        and what happened after: traded / no_closed_trade / pending / not_linked, from closed trades only, plus
+        price_after: the underlying's move in the idea's direction inside the check's window (best, worst, last,
+        stop hit), so a skipped idea shows what it would have done. Final results are saved once.
 
         "traded" means a trade on that ticker and side opened inside the check's fixed window; it is not proof the
         check was followed. Use it for an after-close review; it never changes a check.
@@ -394,22 +403,89 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             saved = await asyncio.to_thread(ledger.between, checked.subject, *span, REVIEW_LIMIT + 1)
         except (ValueError, OSError):
             raise ToolError("Checks could not be read") from None
-        features = await asyncio.to_thread(history, now)
-        generated = datetime.fromisoformat(features["generated_at"]) if features["generated_at"] else None
-        checks, counts = [], {}
         truncated = len(saved) > REVIEW_LIMIT
-        for record, model in saved[:REVIEW_LIMIT]:
+        settled, features = await settle(checked.subject, saved[:REVIEW_LIMIT], now)
+        checks, counts = [], {}
+        for record, model, result in settled:
             answer = record["answer"]
-            outcome = check_outcome(record["idea"], answer, datetime.fromisoformat(record["received_at"]),
-                features["rows"], generated, now)
-            key = f"{answer['verdict']}:{outcome['state']}"
+            key = f"{answer['verdict']}:{result['outcome']['state']}"
             counts[key] = counts.get(key, 0) + 1
             checks.append({"check_id": record["check_id"], "received_at": record["received_at"], "idea": record["idea"],
-                "verdict": answer["verdict"], "model_verdict": model, "outcome": outcome})
+                "verdict": answer["verdict"], "model_verdict": model, "outcome": result["outcome"],
+                "price_after": result["move"], "result_saved": result.get("saved", False)})
         return {"schema_version": SCHEMA, "day": target.isoformat(), "checks": checks, "truncated": truncated,
             "counts_by_verdict_and_outcome": counts,
             "history": {key: features[key] for key in ("state", "generated_at")},
-            "note": "Closed trades only; small counts are not evidence of an edge. Nothing here changes a check."}
+            "note": "Closed trades only; price_after is the underlying's move in the idea's direction inside the "
+                "check's window. Small counts are not evidence of an edge. Nothing here changes a check."}
+
+    async def settle(actor, saved, now):
+        """Each check with its result: the saved final one, else computed now and saved once it is final."""
+        features = await asyncio.to_thread(history, now)
+        generated = datetime.fromisoformat(features["generated_at"]) if features["generated_at"] else None
+        try:
+            done = await asyncio.to_thread(ledger.results, [record["check_id"] for record, _ in saved])
+        except (ValueError, OSError):
+            raise ToolError("Check results could not be read") from None
+        wanted = {}
+        for record, _ in saved:
+            if record["check_id"] not in done and record["idea"]["horizon"] == "intraday":
+                day = datetime.fromisoformat(record["received_at"]).astimezone(ET).date()
+                wanted.setdefault(day, set()).add(record["idea"]["ticker"].upper())
+        bars, deadline = {}, time.monotonic() + SETTLE_BUDGET
+        if wanted:
+            if slots.locked():
+                raise ToolError("Check service busy; retry shortly")
+            async with slots:  # Same provider bound as the other live calls.
+                for day, tickers in sorted(wanted.items()):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 1:
+                        break
+                    try:
+                        fetched = await asyncio.wait_for(asyncio.to_thread(fetch_minute_bars_live, sorted(tickers), day),
+                            min(CONTEXT_TIMEOUT, remaining))
+                    except Exception:
+                        continue  # Unread days stay "unavailable" and are retried next time.
+                    bars.update({(day, ticker): fetched.get(ticker) or [] for ticker in tickers})
+        settled = []
+        for record, model in saved:
+            if record["check_id"] in done:
+                settled.append((record, model, {**done[record["check_id"]], "saved": True}))
+                continue
+            received = datetime.fromisoformat(record["received_at"])
+            day = received.astimezone(ET).date()
+            result = {"outcome": check_outcome(record["idea"], record["answer"], received, features["rows"], generated, now),
+                "move": price_after(record["idea"], record["answer"], received,
+                    bars.get((day, record["idea"]["ticker"].upper())), now)}
+            if result["outcome"]["state"] in FINAL_OUTCOMES and result["move"]["state"] in FINAL_MOVES:
+                try:
+                    result = {**await asyncio.to_thread(ledger.save_result, actor, record["check_id"], result), "saved": True}
+                except (ValueError, OSError):
+                    pass  # Not saved this time; the computed result is still shown.
+            settled.append((record, model, result))
+        return settled, features
+
+    @server.tool(title="Grade checks", structured_output=True,
+        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True, idempotentHint=True),
+        meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("grade_checks")}]})
+    async def grade_checks(days: Annotated[Optional[int], Field(ge=1, le=365)] = None) -> dict[str, Any]:
+        """Grade saved checks over the last N days (default 30): results by rules verdict, how often Isaac followed
+        or overrode it and what that cost or saved (closed-trade P&L, underlying move after the check), and how
+        Jo's own saved verdicts compare. Small groups say "not enough evidence". Changes no check.
+        """
+        checked = await authenticated("grade_checks")
+        now = clock()
+        start = now - timedelta(days=days or 30)
+        try:
+            saved = await asyncio.to_thread(ledger.between, checked.subject, start.isoformat(), now.isoformat(), GRADE_LIMIT)
+        except (ValueError, OSError):
+            raise ToolError("Checks could not be read") from None
+        settled, features = await settle(checked.subject, saved, now)
+        grade = grade_results([{"verdict": record["answer"]["verdict"], "model_verdict": (model or {}).get("verdict"),
+            "outcome": result["outcome"], "move": result["move"]} for record, model, result in settled])
+        return {"schema_version": SCHEMA, "days": days or 30, "checks": len(settled),
+            "pending_or_unmeasured": len(settled) - grade["final_checks"], "grade": grade,
+            "history": {key: features[key] for key in ("state", "generated_at")}}
 
     def context(now):
         return pretrade_features.read_context(Path(config.features_pointer).parent / "context.json",

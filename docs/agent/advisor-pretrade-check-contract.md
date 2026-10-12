@@ -227,6 +227,22 @@ hold time) and by entry-time bucket, plus SPY/QQQ change and VWAP side once
 for the pass. Facts only, no verdict; the whole pass is capped at 20 seconds
 and names any ticker it skipped for time.
 
+Price after and grading (advisor steps 8 and 10): `review_checks` adds
+`price_after` per intraday check: the underlying's move from the check's live
+price inside the check's own window, signed in the idea's direction (last,
+best, worst, and when a given stop was hit). Options are measured on the
+underlying; the premium is not replayed. Once a check's trade link is final
+(`traded`/`no_closed_trade`) and its move is complete, the pair is saved once
+in the ledger's `check_result` table (immutable, hashed) and later reads use
+it. Each call reads at most 20 seconds of minute bars; unread days stay
+unmeasured until the next call. `grade_checks(days?)` (`check:read`, default
+30) and the "How the checks did" section on `/advisor-review` (owner reader
+`GET /owner/grades`, saved results only) report, per rules verdict, checks,
+how many went the idea's way, median move and traded P&L; followed versus
+overrode (traded against a wait/pass and its P&L; skipped a go and the move
+after); and Jo's saved verdicts against the rules. Groups under 10 settled
+checks say "not enough evidence".
+
 ## Next steps
 
 The advisor plan agreed with Isaac on October 12, 2026, in order. The end goal:
@@ -243,10 +259,10 @@ was, and what overriding cost.
 | 4 | Link each check to what happened (`review_checks`) | One day's links agree with a hand check of that day's fills | Live |
 | 5 | While-holding check (`position_check`) | Stop distance, live mark and similar-trade behaviour match the trade page | Live |
 | 6 | Options-aware checks | Quote, IV, greeks, cost, decay and the at-stop estimate appear with timestamps on a live check | Live |
-| 7 | Pre-open watchlist pass (`preopen_watchlist`) | One real morning's pass matches the journal and the provider | Built |
-| 8 | **Price after the check** in `review_checks`: for every check (above all skip/wait), the underlying's move from the check price to the window end, with the best and worst move in between | A skipped idea shows what it would have done; numbers match recorded bars | Next |
+| 7 | Pre-open watchlist pass (`preopen_watchlist`) | One real morning's pass matches the journal and the provider | Live (deployed Oct 12) |
+| 8 | **Price after the check** in `review_checks`: for every check (above all skip/wait), the underlying's move from the check price to the window end, with the best and worst move in between | A skipped idea shows what it would have done; numbers match recorded bars | Built (`price_after`; final results saved once) |
 | 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Not started; needs a source choice (new provider or key) |
-| 10 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Needs weeks of checks |
+| 10 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Built (`grade_checks`, `/advisor-review`); needs weeks of checks to mean much |
 | 11 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Later |
 
 Shadow Isaac ([design](shadow-trader-design.md)) follows the advisor.

@@ -1,7 +1,8 @@
 """Owner-only Unix reader for the pre-trade check ledger. No OAuth, writes or network.
 
 Serves `/advisor-review` through the private owner frontend: a bounded list of
-saved checks and one check reopened with its integrity verified. Runs as the
+saved checks, one check reopened with its integrity verified, and a grade of
+the last 30 days from the results the check service saved. Runs as the
 check service UID against its own SQLite file, opened read-only with
 `query_only`; the ledger's triggers also refuse updates and deletes. The peer
 is identified by the kernel (SO_PEERCRED), never a header or claim.
@@ -16,7 +17,7 @@ if __name__ == "__main__" and os.environ.get("TJ_CHECK_OWNER_CLEAN") != "1":
         **{k: os.environ[k] for k in ("LISTEN_PID", "LISTEN_FDS") if k in os.environ}})
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -39,8 +40,12 @@ from cloud_mcp_d0 import MAX_BYTES, Strict
 LIST_PATH = "/owner/checks"
 CHECK_PATH = re.compile(r"^/owner/checks/(chk_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
 LIST_LIMIT = 50
+GRADES_PATH = "/owner/grades"
 LIST_SCHEMA = "check-owner-list-v1"
 DETAIL_SCHEMA = "check-owner-detail-v1"
+GRADES_SCHEMA = "check-owner-grades-v1"
+GRADE_DAYS = 30
+GRADE_LIMIT = 1000
 
 
 def exact_path(value):
@@ -107,6 +112,43 @@ def list_checks(path):
         "read_at": datetime.now(timezone.utc).isoformat()}
 
 
+def saved_results(db, check_ids):
+    """Final results the check service saved, verified; none before its first save creates the table."""
+    if not check_ids or db.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'check_result'").fetchone() is None:
+        return {}
+    rows = db.execute("SELECT check_id, result_json, result_sha256 FROM check_result WHERE check_id IN ("
+        + ",".join("?" * len(check_ids)) + ")", list(check_ids)).fetchall()
+    results = {}
+    for check_id, body, sha in rows:
+        if hashlib.sha256(body.encode()).hexdigest() != sha:
+            raise ValueError("Check result integrity failed")
+        results[check_id] = json.loads(body)
+    return results
+
+
+def grade_checks(path, now=None):
+    """Checks from the last 30 days graded from their saved final results only; the rest count as pending."""
+    from app.engine.pretrade_check import grade_results
+
+    now = now or datetime.now(timezone.utc)
+    db = connect(path)
+    try:
+        rows = db.execute("SELECT c.check_id, c.record_json, c.record_sha256, v.verdict FROM check_record c LEFT JOIN"
+            " model_verdict v ON v.check_id = c.check_id WHERE c.received_at >= ? ORDER BY c.received_at LIMIT ?",
+            ((now - timedelta(days=GRADE_DAYS)).isoformat(), GRADE_LIMIT)).fetchall()
+        results = saved_results(db, [row[0] for row in rows])
+    finally:
+        db.close()
+    items = []
+    for check_id, body, sha, model in rows:
+        if hashlib.sha256(body.encode()).hexdigest() != sha:
+            raise ValueError("Check record integrity failed")
+        if check_id in results:
+            items.append({"verdict": json.loads(body)["answer"]["verdict"], "model_verdict": model, **results[check_id]})
+    return {"schema_version": GRADES_SCHEMA, "days": GRADE_DAYS, "checks": len(rows), "settled": len(items),
+        "grade": grade_results(items), "read_at": now.isoformat()}
+
+
 def read_check(path, check_id):
     """One saved check exactly as stored, after its integrity hash is verified."""
     db = connect(path)
@@ -114,6 +156,7 @@ def read_check(path, check_id):
         row = db.execute("SELECT record_json, record_sha256 FROM check_record WHERE check_id = ?", (check_id,)).fetchone()
         model = db.execute("SELECT received_at, verdict, summary FROM model_verdict WHERE check_id = ?",
             (check_id,)).fetchone()
+        result = saved_results(db, [check_id]).get(check_id)
     finally:
         db.close()
     if row is None:
@@ -131,7 +174,7 @@ def read_check(path, check_id):
         "live_context_sha256": record["live_context"]["sha256"], "timings_ms": record["timings_ms"],
         "errors": record["errors"],
         "model_verdict": None if model is None else {"received_at": model[0], "verdict": model[1], "summary": model[2]},
-        "read_at": datetime.now(timezone.utc).isoformat()}
+        "result": result, "read_at": datetime.now(timezone.utc).isoformat()}
 
 
 def socket_identity(config):
@@ -162,7 +205,7 @@ def create_app(config_path):
     async def guard(request, call_next):
         path = request.url.path
         match = CHECK_PATH.fullmatch(path)
-        if request.method != "GET" or (path != LIST_PATH and match is None) or request.url.query:
+        if request.method != "GET" or (path not in (LIST_PATH, GRADES_PATH) and match is None) or request.url.query:
             return JSONResponse({"detail": "Not found"}, 404)
         headers = {"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"}
         try:
@@ -176,7 +219,9 @@ def create_app(config_path):
             if slots.locked():
                 return JSONResponse({"detail": "Check owner reader busy"}, 429, headers=headers)
             async with slots:
-                if match is None:
+                if path == GRADES_PATH:
+                    value = await asyncio.wait_for(run_in_threadpool(grade_checks, config.ledger_path), 5)
+                elif match is None:
                     value = await asyncio.wait_for(run_in_threadpool(list_checks, config.ledger_path), 5)
                 else:
                     value = await asyncio.wait_for(run_in_threadpool(read_check, config.ledger_path, match[1]), 5)

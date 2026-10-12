@@ -141,3 +141,23 @@ def test_reader_never_writes(owner):
             db.execute("INSERT INTO model_verdict VALUES ('x', 'a', 'b', 'go', 's', 'h')")
     finally:
         db.close()
+
+
+def test_grades_and_detail_use_only_saved_results(owner):
+    ledger, path, _ = owner
+    app = reader.create_app(path)
+    empty = read(app, PEER, reader.GRADES_PATH).json()
+    assert empty["schema_version"] == reader.GRADES_SCHEMA and empty["checks"] == 0 and empty["grade"]["final_checks"] == 0
+    now = datetime.now(timezone.utc)
+    saved = ledger.insert(record(now))
+    pending = ledger.insert(record(now))
+    ledger.attach(saved["actor"], saved["check_id"], "go", "Take it.")
+    result = {"outcome": {"state": "traded", "total_pnl": 30.0}, "move": {"state": "complete", "move_pct": 0.4}}
+    ledger.save_result(saved["actor"], saved["check_id"], result)
+    grades = read(app, PEER, reader.GRADES_PATH).json()
+    assert grades["checks"] == 2 and grades["settled"] == 1
+    assert grades["grade"]["followed"] == 1 and grades["grade"]["jo"]["agrees_with_rules"] == 1
+    assert read(app, PEER, f"{reader.LIST_PATH}/{saved['check_id']}").json()["result"] == result
+    assert read(app, PEER, f"{reader.LIST_PATH}/{pending['check_id']}").json()["result"] is None
+    assert read(app, PEER + 1, reader.GRADES_PATH).status_code == 403
+    assert read(app, PEER, reader.GRADES_PATH + "?days=900").status_code == 404

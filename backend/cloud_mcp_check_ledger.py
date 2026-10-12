@@ -3,7 +3,8 @@
 Each check is inserted once and never updated or deleted (SQLite triggers
 refuse both). A retry with the same operation ID and the same request returns
 the original row; the same operation ID with a different request conflicts.
-A model verdict is attached once per check under the same rule.
+A model verdict is attached once per check under the same rule. A check's final
+result (trade link and price move) is saved once and kept; later reads use it.
 """
 from __future__ import annotations
 
@@ -37,6 +38,17 @@ CREATE TABLE IF NOT EXISTS model_verdict (
     summary TEXT NOT NULL,
     content_sha256 TEXT NOT NULL
 );
+-- What happened after a check, saved once when final (closed-trade link and price move).
+CREATE TABLE IF NOT EXISTS check_result (
+    check_id TEXT PRIMARY KEY REFERENCES check_record(check_id),
+    saved_at TEXT NOT NULL,
+    result_json TEXT NOT NULL,
+    result_sha256 TEXT NOT NULL
+);
+CREATE TRIGGER IF NOT EXISTS check_result_no_update BEFORE UPDATE ON check_result
+BEGIN SELECT RAISE(ABORT, 'check results are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS check_result_no_delete BEFORE DELETE ON check_result
+BEGIN SELECT RAISE(ABORT, 'check results are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS check_record_no_update BEFORE UPDATE ON check_record
 BEGIN SELECT RAISE(ABORT, 'check records are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS check_record_no_delete BEFORE DELETE ON check_record
@@ -182,6 +194,45 @@ class Ledger:
             db.close()
         return {"check_id": check_id, "actor": row[0], "received_at": row[1], "verdict": row[2],
             "summary": row[3], "content_sha256": row[4]}
+
+
+    def save_result(self, actor: str, check_id: str, result: dict) -> dict:
+        """Save a check's final result once; the first saved result is kept and returned."""
+        body = json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        db = self._connect()
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM check_record WHERE check_id = ? AND actor = ?", (check_id, actor)).fetchone() is None:
+                raise NotFound("Unknown check")
+            db.execute("INSERT OR IGNORE INTO check_result VALUES (?, ?, ?, ?)",
+                (check_id, now_utc(), body, hashlib.sha256(body.encode()).hexdigest()))
+            row = db.execute("SELECT result_json FROM check_result WHERE check_id = ?", (check_id,)).fetchone()
+            db.execute("COMMIT")
+        except BaseException:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            raise
+        finally:
+            db.close()
+        return json.loads(row[0])
+
+    def results(self, check_ids) -> dict:
+        """Saved final results by check ID, each verified against its hash."""
+        ids = list(check_ids)
+        if not ids:
+            return {}
+        db = self._connect()
+        try:
+            rows = db.execute("SELECT check_id, result_json, result_sha256 FROM check_result WHERE check_id IN ("
+                + ",".join("?" * len(ids)) + ")", ids).fetchall()
+        finally:
+            db.close()
+        saved = {}
+        for check_id, body, sha in rows:
+            if hashlib.sha256(body.encode()).hexdigest() != sha:
+                raise ValueError("Check result integrity failed")
+            saved[check_id] = json.loads(body)
+        return saved
 
 
 def new_check_id() -> str:

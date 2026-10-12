@@ -26,7 +26,17 @@ type Detail = {
   features: { state: string; generated_at: string | null; age_seconds: number | null };
   timings_ms: Record<string, number>; errors: string[];
   model_verdict: { received_at: string; verdict: Verdict; summary: string } | null;
+  result?: Result | null;
 };
+type Move = { state: string; move_pct?: number; best_pct?: number; worst_pct?: number; last_price?: number;
+  reference_price?: number; stop_hit_ny?: string | null; window?: { from_ny: string; to_ny: string } };
+type Result = { outcome: { state: string; trade_count?: number; wins?: number; total_pnl?: number | null }; move: Move };
+type Group = { checks: number; measured: number; enough: boolean; note?: string; median_move_pct?: number; went_the_idea_way?: number;
+  traded?: number; traded_pnl?: number | null; pnl?: number | null };
+type Grades = { schema_version: "check-owner-grades-v1"; days: number; checks: number; settled: number;
+  grade: { final_checks: number; followed: number; by_rules_verdict: Record<"go" | "wait" | "pass", Group>;
+    overrode: { total: number; traded_against_wait_or_pass: Group; skipped_a_go: Group };
+    jo: { with_verdict: number; agrees_with_rules: number } } };
 
 const LABEL: Record<Verdict, string> = { go: "Go", wait: "Wait", pass: "Pass", insufficient_data: "Not enough data" };
 const TONE: Record<Verdict, string> = {
@@ -41,6 +51,51 @@ const idea = (c: { ticker: string | number | null; side: string | number | null;
   [c.ticker, c.side, c.instrument === "option" ? (c.option_type ?? "option") : c.instrument].filter(Boolean).join(" · ");
 const SESSION: Record<string, string> = { rth: "regular session", premarket: "premarket", afterhours: "after hours", closed: "market closed" };
 const num = (value: number | null | undefined, digits = 2) => value == null ? "—" : value.toFixed(digits);
+const pct = (value: number | null | undefined) => value == null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+const money = (value: number | null | undefined) => value == null ? "—" : `${value < 0 ? "−" : ""}$${Math.abs(value).toFixed(0)}`;
+const OUTCOME: Record<string, string> = { traded: "You traded it", no_closed_trade: "No closed trade on it",
+  pending: "Pending", not_linked: "Not linked (swing)" };
+
+function AfterCheck({ result }: { result: Result }) {
+  const { outcome, move } = result;
+  return <section aria-label="After the check"><h4 className="font-medium">After the check</h4>
+    <p>{OUTCOME[outcome.state] ?? outcome.state}{outcome.state === "traded" && <> · {outcome.trade_count} trade{outcome.trade_count === 1 ? "" : "s"}, {outcome.wins} won, {money(outcome.total_pnl)}</>}</p>
+    {move.state === "complete"
+      ? <p className="text-muted-foreground">Price in the idea&apos;s direction until {move.window?.to_ny.slice(11)} ET: {pct(move.move_pct)} at the end, best {pct(move.best_pct)}, worst {pct(move.worst_pct)}{move.stop_hit_ny ? <> · stop hit {move.stop_hit_ny.slice(11)}</> : null}</p>
+      : <p className="text-muted-foreground">Price move not measured ({move.state.replace(/_/g, " ")}).</p>}
+  </section>;
+}
+
+function GradeRow({ label, group }: { label: string; group: Group }) {
+  return <tr className="border-t">
+    <th scope="row" className="py-1.5 pr-2 text-left font-medium">{label}</th>
+    <td className="px-2 text-right tabular-nums">{group.checks}</td>
+    <td className="px-2 text-right tabular-nums">{group.measured ? `${group.went_the_idea_way ?? 0}/${group.measured}` : "—"}</td>
+    <td className="px-2 text-right tabular-nums">{pct(group.median_move_pct)}</td>
+    <td className="whitespace-nowrap pl-2 text-right tabular-nums">{group.traded ? `${group.traded} · ${money(group.traded_pnl)}` : "—"}</td>
+  </tr>;
+}
+
+function GradeView({ value }: { value: Grades }) {
+  const { grade } = value;
+  const against = grade.overrode.traded_against_wait_or_pass, skipped = grade.overrode.skipped_a_go;
+  const thin = (["go", "wait", "pass"] as const).every(v => !grade.by_rules_verdict[v].enough);
+  return <section aria-label="How the checks did" className="mt-3 border-t pt-3" data-testid="pretrade-grades">
+    <h3 className="font-medium">How the checks did <span className="font-normal text-muted-foreground">last {value.days} days · {value.settled} of {value.checks} settled</span></h3>
+    {grade.final_checks === 0 ? <p className="mt-1 text-muted-foreground">Nothing settled yet. A check settles after its window ends and the journal has its trades; ask Jo to review the day.</p> : <>
+      <div className="mt-1 overflow-x-auto"><table className="w-full min-w-[20rem] text-sm">
+        <thead className="text-xs text-muted-foreground"><tr><th className="text-left font-normal">Rules said</th><th className="px-2 text-right font-normal">Checks</th>
+          <th className="px-2 text-right font-normal">Went its way</th><th className="px-2 text-right font-normal">Median move</th><th className="pl-2 text-right font-normal">You traded · P&amp;L</th></tr></thead>
+        <tbody><GradeRow label="Go" group={grade.by_rules_verdict.go} /><GradeRow label="Wait" group={grade.by_rules_verdict.wait} /><GradeRow label="Pass" group={grade.by_rules_verdict.pass} /></tbody>
+      </table></div>
+      <p className="mt-2">You followed the rules {grade.followed} time{grade.followed === 1 ? "" : "s"} and overrode them {grade.overrode.total}.</p>
+      {against.checks > 0 && <p className="text-muted-foreground">Traded against a Wait or Pass: {against.checks} · {money(against.pnl)}</p>}
+      {skipped.checks > 0 && <p className="text-muted-foreground">Skipped a Go: {skipped.checks} · median move after {pct(skipped.median_move_pct)}</p>}
+      <p className="text-muted-foreground">Jo saved its own verdict on {grade.jo.with_verdict}; it agreed with the rules on {grade.jo.agrees_with_rules}.</p>
+      {thin && <p className="mt-1 text-xs text-muted-foreground">Not enough evidence yet: each group needs 10 settled checks before it means much.</p>}
+    </>}
+  </section>;
+}
 
 // Not switched on is configuration, not an outage: the section stays out of the way.
 const DORMANT = "Pre-trade check review is not switched on yet";
@@ -92,6 +147,7 @@ function CheckDetail({ value }: { value: Detail }) {
     </section>
     {answer.caveats.length > 0 && <section aria-label="Caveats"><h4 className="font-medium">Caveats</h4>
       <ul className="list-disc pl-5 text-muted-foreground">{answer.caveats.map((c, i) => <li key={i} className="break-words">{c}</li>)}</ul></section>}
+    {value.result && <AfterCheck result={value.result} />}
     <section aria-label="Jo's note"><h4 className="font-medium">Jo</h4>
       {value.model_verdict ? <p className="break-words"><Pill verdict={value.model_verdict.verdict} /> {value.model_verdict.summary} <span className="text-muted-foreground">({advisorStamp(value.model_verdict.received_at)})</span></p>
         : <p className="text-muted-foreground">Jo didn&apos;t attach a note.</p>}
@@ -103,6 +159,7 @@ function CheckDetail({ value }: { value: Detail }) {
 
 export default function PretradeChecks() {
   const [listing, setListing] = useState<Listing | null>(null);
+  const [grades, setGrades] = useState<Grades | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [dormant, setDormant] = useState(false);
@@ -120,6 +177,9 @@ export default function PretradeChecks() {
     try {
       const body = await readJson<Listing>("/api/check-owner/checks", pending.signal, "check-owner-list-v1");
       if (current === sequence.current) setListing(body);
+      // Grades are secondary: a failure hides them and leaves the list usable.
+      const graded = await readJson<Grades>("/api/check-owner/grades", pending.signal, "check-owner-grades-v1").catch(() => null);
+      if (current === sequence.current) setGrades(graded);
     } catch (err) {
       if (current === sequence.current && !pending.signal.aborted && err instanceof Dormant) setDormant(true);
       else if (current === sequence.current && !pending.signal.aborted) { setListing(null); setError(err instanceof Error ? err.message : "Saved pre-trade checks unavailable."); }
@@ -172,6 +232,7 @@ export default function PretradeChecks() {
         </div>}
       </li>)}</ul>
       {listing.total > listing.checks.length && <p className="mt-1 text-xs text-muted-foreground">Showing the newest {listing.checks.length} of {listing.total}.</p>}
+      {grades && <GradeView value={grades} />}
     </>}
   </section>;
 }

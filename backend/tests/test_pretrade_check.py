@@ -264,3 +264,46 @@ def test_preopen_defaults_and_premarket_facts_without_verdict():
     assert view["held_now"] == [] and view["history"]["trades"] == 10 and view["news"] == []
     assert view["history"]["by_side"][0]["side"] == "call" and "verdict" not in view
     assert check.preopen_view("APLD", rows, analysis, receipt, held)["held_now"][0]["contracts"] == 2.0
+
+
+def _bar(minute_utc, low, high, close):
+    return {"t": f"2026-10-09T{minute_utc}:00Z", "o": close, "h": high, "l": low, "c": close}
+
+
+def test_price_after_measures_the_window_in_the_ideas_direction():
+    receipt = datetime(2026, 10, 9, 15, 0, tzinfo=timezone.utc)  # 11:00 New York.
+    answer = {"verdict": "pass", "wait_for": None, "live": {"price": 100.0}}
+    bars = [_bar("14:59", 99.0, 101.0, 100.0), _bar("15:10", 98.0, 101.5, 99.0), _bar("17:00", 97.0, 100.5, 98.0),
+            _bar("20:00", 90.0, 110.0, 105.0)]  # Before the check and after the 16:00 close: ignored.
+    after_close = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)
+    long_idea = {"ticker": "SPY", "side": "long", "horizon": "intraday", "stop": 97.5}
+    move = check.price_after(long_idea, answer, receipt, bars, after_close)
+    assert move | {} == {**move, "state": "complete", "reference_price": 100.0, "last_price": 98.0,
+        "move_pct": -2.0, "best_pct": 1.5, "worst_pct": -3.0, "stop_hit_ny": "2026-10-09T13:00"}
+    short = check.price_after({**long_idea, "side": "short", "stop": None}, answer, receipt, bars, after_close)
+    assert (short["move_pct"], short["best_pct"], short["worst_pct"]) == (2.0, 3.0, -1.5) and "stop_hit_ny" not in short
+    during = check.price_after(long_idea, answer, receipt, bars[:2], datetime(2026, 10, 9, 15, 30, tzinfo=timezone.utc))
+    assert during["state"] == "so_far"
+    assert check.price_after(long_idea, answer, receipt, [], after_close)["state"] == "no_bars"
+    assert check.price_after(long_idea, answer, receipt, None, after_close)["state"] == "unavailable"
+    assert check.price_after(long_idea, {**answer, "live": {"price": None}}, receipt, bars, after_close)["state"] == "no_reference"
+    assert check.price_after({**long_idea, "horizon": "swing"}, answer, receipt, bars, after_close)["state"] == "not_measured"
+
+
+def test_grade_counts_followed_overrode_and_jo():
+    def item(verdict, state, move, pnl=None, model=None):
+        outcome = {"state": state, "total_pnl": pnl}
+        return {"verdict": verdict, "model_verdict": model, "outcome": outcome,
+                "move": {"state": "complete", "move_pct": move}}
+    items = ([item("go", "traded", 0.5, 40.0, "go")] * 6 + [item("go", "no_closed_trade", 0.8)] * 2
+             + [item("pass", "no_closed_trade", -0.4, model="pass")] * 9 + [item("pass", "traded", -0.6, -55.0, "go")] * 3
+             + [item("insufficient_data", "no_closed_trade", 0.1)] + [item("go", "pending", 0.2)])
+    grade = check.grade_results(items)
+    assert grade["final_checks"] == 21 and grade["followed"] == 15 and grade["overrode"]["total"] == 5
+    against = grade["overrode"]["traded_against_wait_or_pass"]
+    assert against["checks"] == 3 and against["pnl"] == -165.0 and against["note"] == "not enough evidence"
+    assert grade["overrode"]["skipped_a_go"]["median_move_pct"] == 0.8
+    passes = grade["by_rules_verdict"]["pass"]
+    assert passes["checks"] == 12 and passes["enough"] is True and passes["went_the_idea_way"] == 0
+    assert passes["traded"] == 3 and passes["traded_pnl"] == -165.0
+    assert grade["jo"] == {**grade["jo"], "with_verdict": 18, "agrees_with_rules": 15}
