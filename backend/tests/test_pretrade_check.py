@@ -182,3 +182,20 @@ def test_feature_rows_use_first_entry_context_and_exclude_webull_and_open(sessio
         "trend_aligned": True, "rvol_bucket": "high", "realized_pnl": 30.0, "mfe_pct": 0.5,
         "closed_at": "2026-10-09T10:45:00"}
     assert "trade_id" not in rows[0] and "id" not in rows[0]
+
+
+def test_check_outcome_window_states_and_side_matching():
+    answer = check.run_check(IDEA, analysis(verdict="wait"), [], RECEIPT)  # Wait until 11:30 New York.
+    later = datetime(2026, 10, 9, 20, 30, tzinfo=timezone.utc)
+    inside = {**row("2026-10-09T13:00:00", 30.0), "opened_at": "2026-10-09T11:10:00"}
+    outside = {**row("2026-10-09T13:00:00", 30.0), "opened_at": "2026-10-09T12:00:00"}
+    put = {**row("2026-10-09T13:00:00", 30.0, side="put"), "opened_at": "2026-10-09T11:05:00"}
+    assert check.check_window(answer, RECEIPT)[1] == datetime(2026, 10, 9, 11, 30)
+    assert check.check_outcome(IDEA, answer, RECEIPT, [inside], later, RECEIPT)["state"] == "pending"
+    stale = check.check_outcome(IDEA, answer, RECEIPT, [inside], RECEIPT, later)
+    assert stale["state"] == "pending" and "refreshed" in stale["note"]
+    assert check.check_outcome(IDEA, answer, RECEIPT, [outside, put], later, later)["state"] == "no_closed_trade"
+    traded = check.check_outcome(IDEA, answer, RECEIPT, [outside, inside, put], later, later)
+    assert traded["state"] == "traded" and traded["trade_count"] == 1 and traded["link_version"] == check.LINK_VERSION
+    swing = check.check_outcome({**IDEA, "horizon": "swing"}, answer, RECEIPT, [inside], later, later)
+    assert swing["state"] == "not_linked"

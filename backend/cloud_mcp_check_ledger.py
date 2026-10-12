@@ -139,6 +139,23 @@ class Ledger:
             raise ValueError("Check record integrity failed")
         return json.loads(row[0])
 
+    def between(self, actor: str, start: str, end: str, limit: int = 50) -> list[tuple[dict, dict | None]]:
+        """This actor's checks received in [start, end) (UTC ISO strings), oldest first, each with its model verdict."""
+        db = self._connect()
+        try:
+            rows = db.execute("SELECT c.record_json, c.record_sha256, v.verdict, v.summary, v.received_at FROM check_record c"
+                " LEFT JOIN model_verdict v ON v.check_id = c.check_id WHERE c.actor = ? AND c.received_at >= ?"
+                " AND c.received_at < ? ORDER BY c.received_at, c.check_id LIMIT ?", (actor, start, end, limit)).fetchall()
+        finally:
+            db.close()
+        result = []
+        for body, sha, verdict, summary, received in rows:
+            if hashlib.sha256(body.encode()).hexdigest() != sha:
+                raise ValueError("Check record integrity failed")
+            result.append((json.loads(body), None if verdict is None else
+                {"verdict": verdict, "summary": summary, "received_at": received}))
+        return result
+
     def attach(self, actor: str, check_id: str, verdict: str, summary: str) -> dict:
         """Save the model verdict once; identical retries return the original."""
         if verdict not in VERDICTS or not isinstance(summary, str) or not summary.strip() or len(summary) > MAX_SUMMARY:

@@ -98,9 +98,9 @@ def harness(signing_key, tmp_path, monkeypatch):
         config_path = path
         pointer = features_dir / "current.json"
 
-        def server(self, *, fail=False):
+        def server(self, *, fail=False, now=RECEIPT):
             provider = service.Provider("test-key-id", "test-secret", timeout=3, transport=recorded(self.requests, fail=fail))
-            return service.create_server(path, provider=provider, cache_dir=cache, clock=lambda: RECEIPT)
+            return service.create_server(path, provider=provider, cache_dir=cache, clock=lambda: now)
 
         def token(self, **changes):
             return _token(signing_key, **{"audience": RESOURCE, "subject": SUBJECT, "client_id": CLIENT,
@@ -132,7 +132,8 @@ def test_catalog_metadata_and_scopes(harness):
         metadata = client.get("/.well-known/oauth-protected-resource/check/mcp").json()
         assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == SCOPES.split()
         tools = {t["name"]: t for t in rpc(client, "", {}, harness.token(), "tools/list").json()["result"]["tools"]}
-        assert set(tools) == {"pre_trade_check", "attach_model_verdict"}
+        assert set(tools) == {"pre_trade_check", "attach_model_verdict", "review_checks"}
+        assert tools["review_checks"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read"]}]
         assert tools["pre_trade_check"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:run"]}]
         assert tools["attach_model_verdict"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:note"]}]
         assert all(t["inputSchema"]["additionalProperties"] is False for t in tools.values())
@@ -363,3 +364,33 @@ def test_feature_file_tampering_reads_as_missing(tmp_path):
         pretrade_features.publish([{**feature_row("2026-09-10T10:00:00", 1.0, "x"), "account_id": "1"}], pointer)
     with pytest.raises(ValueError):
         pretrade_features.publish([{**feature_row("2026-09-10T10:00:00", 1.0, "x"), "source_fill_key": "raw-key"}], pointer)
+
+
+def test_review_checks_links_outcomes_only_after_the_window_and_history_refresh(harness):
+    after_close = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)  # 17:00 New York.
+    with TestClient(harness.server().streamable_http_app()) as client:
+        check = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+        call(client, "attach_model_verdict", {"check_id": check["check_id"], "verdict": "pass", "summary": "Skip it."},
+            harness.token())
+        during = call(client, "review_checks", {}, harness.token())["structuredContent"]
+    assert [c["check_id"] for c in during["checks"]] == [check["check_id"]] and during["day"] == "2026-10-09"
+    assert during["checks"][0]["outcome"]["state"] == "pending"
+    assert during["checks"][0]["model_verdict"]["verdict"] == "pass"
+    # Trade history refreshed after the close: one SPY stock trade opened 10:30 New York, one before the check.
+    taken = {**feature_row("2026-10-09T11:00:00", 25.0, "taken"), "opened_at": "2026-10-09T10:30:00"}
+    earlier = {**feature_row("2026-10-09T10:10:00", -5.0, "earlier"), "opened_at": "2026-10-09T10:00:00"}
+    pretrade_features.publish([taken, earlier], harness.pointer, now=after_close)
+    with TestClient(harness.server(now=after_close).streamable_http_app()) as client:
+        review = call(client, "review_checks", {"day": "2026-10-09"}, harness.token())["structuredContent"]
+        other_day = call(client, "review_checks", {"day": "2026-10-08"}, harness.token())["structuredContent"]
+        read_only = rpc(client, "review_checks", {}, harness.token(scope="check:read")).json()["result"]
+        refused = rpc(client, "review_checks", {}, harness.token(scope="check:run"))
+    outcome = review["checks"][0]["outcome"]
+    assert outcome["state"] == "traded" and outcome["trade_count"] == 1
+    assert outcome["first_opened_at"] == "2026-10-09T10:30:00" and outcome["wins"] == 1 and outcome["total_pnl"] == 25.0
+    assert "trades" not in outcome and "taken" not in json.dumps(review)
+    window_end = check["wait_for"]["expires_at"][:16] if check["verdict"] == "wait" else "2026-10-09T16:00"
+    assert outcome["window"] == {"from_ny": "2026-10-09T10:20", "to_ny": window_end}
+    assert review["counts_by_verdict_and_outcome"] == {f"{check['verdict']}:traded": 1}
+    assert other_day["checks"] == [] and not read_only.get("isError")
+    assert refused.status_code == 403 or refused.json()["result"].get("isError")
