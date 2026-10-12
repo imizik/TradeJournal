@@ -157,6 +157,11 @@ def clock_only_analysis(receipt_utc, missing):
         "data": {"market_state": state, "staleness": {"is_stale": True}, "missing": missing}}
 
 
+# Jo's own verdict is what gets graded against the rules later; ask for it on every answer.
+NEXT_STEP = ("Every time: call attach_model_verdict with this check_id, your own verdict and a one-to-three "
+    "sentence summary of what you tell Isaac, then answer him. Skip it only if this check already has your verdict.")
+
+
 def jo_view(record, *, replayed):
     """What Jo receives: the answer contract and receipt; never raw fill keys."""
     answer = record["answer"]
@@ -169,7 +174,8 @@ def jo_view(record, *, replayed):
         "reasons": answer["reasons"], "would_change": answer["would_change"], "risk_check": answer["risk_check"],
         "history": history, "live": answer["live"], "caveats": answer["caveats"],
         "timings_ms": record["timings_ms"],
-        "advice_only": "Rules verdict for one idea. Nothing places, sizes or arms an order."}
+        "advice_only": "Rules verdict for one idea. Nothing places, sizes or arms an order.",
+        "next_step": NEXT_STEP}
 
 
 class CheckMCP(FastMCP):
@@ -213,7 +219,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         instructions="Pre-trade check for Isaac's own intraday ideas. Call pre_trade_check once per idea; it "
         "returns a deterministic rules verdict (go/wait/pass/insufficient_data), reasons, what would change it, "
         "the stop check, live market context and how his own similar closed trades went, plus a saved check ID. "
-        "Narrate on top if useful and save your verdict once with attach_model_verdict. Free text is stored as "
+        "Narrate on top, and for every check save your own verdict and short summary once with "
+        "attach_model_verdict before you answer, so it can be graded later. Free text is stored as "
         "data and never changes the computation. Advice only: no orders, sizing, positions or notes are "
         "available. Reuse the same operation_id only to recover an uncertain call; it returns the saved answer. "
         "For a fresh read (for example after insufficient_data from a data outage) use a new operation_id.",
@@ -292,7 +299,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         """Check one trade idea now: rules verdict, reasons, stop check, live context and own similar trades.
 
         Same operation_id + same idea returns the original saved check (never recomputed); a different idea under
-        that ID conflicts. Use a new operation_id to re-check after a data outage.
+        that ID conflicts. Use a new operation_id to re-check after a data outage. After every check, save
+        your own verdict with attach_model_verdict (see next_step in the result).
         """
         checked = await authenticated("pre_trade_check")
         if any(value is not None and not math.isfinite(value) for value in (entry, stop, strike)):

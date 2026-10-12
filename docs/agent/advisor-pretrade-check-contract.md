@@ -134,7 +134,9 @@ Step 2 is **built, not installed or activated** (October 11, 2026):
   [pretrade_features.py](../../backend/pretrade_features.py). Missing →
   `history.available=false` plus a caveat; older than 36 h → used with a caveat.
 - Install: [check_control.py](../../deploy/check_control.py) `stage`/`install`
-  (exact manifest approval, `--dns`, `--host-ip`), `check`, `stop`, `remove`;
+  (exact manifest approval, `--dns`, `--host-ip`), `check`, `stop`, `remove`,
+  and `upgrade` (all units stopped; replaces only the runtime code, keeps the
+  previous one, refuses a bundle with changed units or feature view);
   units in [cloud-mcp-check](../../deploy/cloud-mcp-check/); UID-only policy in
   [check_network.py](../../deploy/check_network.py). Install writes no
   credential and starts, enables and loads nothing. Activation (step 4) adds

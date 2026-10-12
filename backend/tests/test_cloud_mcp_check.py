@@ -191,6 +191,7 @@ def test_recorded_live_check_saves_immutable_record_and_replays(harness):
     assert first["idea"]["ticker"] == "SPY" and first["risk_check"]["stop"] == round(SPY_LAST * 0.99, 2)
     assert first["history"]["cohorts"][1]["trades"] == 9 and "source_fill_keys" not in first["history"]
     assert set(first["timings_ms"]) == {"context", "history", "check", "total"}
+    assert "attach_model_verdict" in first["next_step"] and "check_id" in first["next_step"]
     assert first["replayed"] is False and replay["replayed"] is True
     assert {k: v for k, v in replay.items() if k != "replayed"} == {k: v for k, v in first.items() if k != "replayed"}
     assert len(harness.requests) == provider_calls  # Replay never refetches.

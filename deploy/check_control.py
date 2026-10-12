@@ -7,6 +7,8 @@ UID-only network policy and unit files. Nothing is started, enabled or
 granted; no provider or database credential is written (activation is a
 separate approval). `check` reports state, `stop` stops every check unit and
 `remove` retires the units while preserving the ledger, keys and features.
+`upgrade` (all units stopped, exact manifest approval) replaces only the
+runtime code and keeps the previous one.
 Never called by normal deployment. See docs/agent/advisor-pretrade-check-contract.md.
 """
 from __future__ import annotations
@@ -18,6 +20,7 @@ from pathlib import Path
 import platform
 import pwd
 import shutil
+import signal
 import sys
 import time
 
@@ -159,6 +162,18 @@ def private_file(path, data, *, mode, owner="root", group="root"):
     old.run("chown", f"{owner}:{group}", path)
 
 
+def build_runtime(bundle, record_path):
+    """Build ROOT/backend from the reviewed bundle's code and offline wheels."""
+    shutil.copytree(bundle / "backend", ROOT / "backend")
+    old.run("/usr/bin/python3.12", "-B", "-m", "venv", ROOT / "backend/.venv")
+    old.run(ROOT / "backend/.venv/bin/python", "-B", "-m", "pip", "install", "--no-index", "--find-links",
+        bundle / "wheels", "trade-journal-backend==0.1.0")
+    # The shared Alpaca module creates this at import; supply it empty and
+    # read-only. The service points its cache at its own CacheDirectory.
+    (ROOT / "backend/data/alpaca_cache").mkdir(parents=True)
+    old.normalize_new_runtime("backend", root=ROOT, record=record_path)
+
+
 def install(bundle, approved, *, dns_servers, host_ips):
     bundle = exact(bundle)
     manifest = preflight(bundle, approved, dns_servers=dns_servers, host_ips=host_ips)
@@ -170,14 +185,7 @@ def install(bundle, approved, *, dns_servers, host_ips):
         uids = {role: pwd.getpwnam(name).pw_uid for role, name in ACCOUNTS.items()}
         policy = check_policy(uids["service"], uids["keys"], uids["features"], dns_servers, host_ips).encode()
         ROOT.mkdir(mode=0o755)
-        shutil.copytree(bundle / "backend", ROOT / "backend")
-        old.run("/usr/bin/python3.12", "-B", "-m", "venv", ROOT / "backend/.venv")
-        old.run(ROOT / "backend/.venv/bin/python", "-B", "-m", "pip", "install", "--no-index", "--find-links",
-            bundle / "wheels", "trade-journal-backend==0.1.0")
-        # The shared Alpaca module creates this at import; supply it empty and
-        # read-only. The service points its cache at its own CacheDirectory.
-        (ROOT / "backend/data/alpaca_cache").mkdir(parents=True)
-        old.normalize_new_runtime("backend", root=ROOT, record=RECORD)
+        build_runtime(bundle, RECORD)
         CONFIG.mkdir(mode=0o750)
         old.run("chown", f"root:{GROUP}", CONFIG)
         config = json.loads((bundle / "config/config.json").read_text())
@@ -247,6 +255,64 @@ def installed():
     return record
 
 
+def upgrade(bundle, approved):
+    """Replace only the stopped runtime code. Config, credentials, ledger, keys,
+    features, identities, policy and units stay byte-identical; nothing starts.
+
+    The replaced runtime is kept under ROOT/previous-runtime/. After a hard kill
+    mid-swap (SIGKILL, power loss) every action refuses on inventory drift; move
+    the partial ROOT/backend aside and move previous-runtime/<newest>/backend
+    back to ROOT/backend. A bundle whose
+    units or pinned feature view differ is refused: those need their own review.
+    """
+    record = installed()
+    old.approval(exact(bundle) / "manifest.json", approved)
+    manifest = validate(bundle)
+    for path in (bundle, *bundle.rglob("*"), *bundle.parents):
+        info = path.stat()
+        if info.st_uid != 0 or (info.st_mode & 0o022 and not info.st_mode & 0o1000):
+            raise ValueError("Require root-owned immutable reviewed bundle/ancestors")
+    if approved == record["manifest_sha256"]:
+        raise ValueError("Bundle is already the installed runtime")
+    if {u: digest(bundle / "units" / u) for u in UNITS} != record["units"]:
+        raise ValueError("Bundle changes check units; review that replacement separately")
+    if digest(bundle / "config/feature-view.sql") != record["settings"]["feature-view.sql"]:
+        raise ValueError("Bundle changes the feature view; review that database change separately")
+    # A oneshot refresh reports "activating" for its whole run; only inactive/failed count as stopped.
+    running = [u for u in UNITS if old.run("systemctl", "show", u, "--property=ActiveState", "--value",
+        check=False).stdout.decode().strip() not in {"inactive", "failed"}]
+    if running:
+        raise ValueError("Stop every check unit first (check_control.py stop): " + ", ".join(running))
+    previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
+    previous.mkdir(parents=True, mode=0o700)
+    (ROOT / "backend").rename(previous / "backend")
+    scratch = ROOT / "upgrade-unrecorded.json"  # normalize_new_runtime refuses an existing record path.
+
+    def interrupted(signum, frame):
+        raise SystemExit("Upgrade interrupted by signal " + str(signum))  # Runs the rollback below.
+    handlers = {s: signal.signal(s, interrupted) for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)}
+    try:
+        build_runtime(bundle, scratch)
+        updated = {**record, "manifest_sha256": approved, "source_commit": manifest["source_commit"],
+            "runtime_inventory": old.runtime_inventory(root=ROOT, roles=("backend",), python_roles=("backend",)),
+            "previous_runtimes": [*record.get("previous_runtimes", []), {"path": str(previous),
+                "manifest_sha256": record["manifest_sha256"], "source_commit": record["source_commit"]}]}
+        temporary = ROOT / "installation.json.new"
+        temporary.write_text(json.dumps(updated, indent=2) + "\n")
+        temporary.chmod(0o600)
+        temporary.rename(RECORD)
+    except BaseException:
+        # Put the recorded runtime back; the partial build is kept for review, never deleted.
+        if (ROOT / "backend").exists():
+            (ROOT / "backend").rename(previous / "failed-backend")
+        (previous / "backend").rename(ROOT / "backend")
+        raise
+    finally:
+        for number, handler in handlers.items():
+            signal.signal(number, handler)
+    return installed()
+
+
 def _age(path):
     try:
         return int(time.time() - exact(path).stat().st_mtime)
@@ -298,10 +364,11 @@ def remove():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("stage", "install", "check", "stop", "remove"))
+    parser.add_argument("action", choices=("stage", "install", "check", "stop", "upgrade", "remove"))
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--wheels", type=Path, help="Already verified release wheels; no downloading")
     parser.add_argument("--approve-install")
+    parser.add_argument("--approve-upgrade")
     parser.add_argument("--dns", action="append", default=[], help="Resolver IP literal the check UIDs may query")
     parser.add_argument("--host-ip", action="append", default=[], help="This host's own IPs, denied to the check UIDs")
     args = parser.parse_args()
@@ -315,6 +382,11 @@ def main():
             parser.error("install requires --bundle, at least one --dns and this host's --host-ip")
         install(args.bundle, args.approve_install, dns_servers=args.dns, host_ips=args.host_ip)
         print(json.dumps({"installed": True, "started": False, "enabled": False}))
+    elif args.action == "upgrade":
+        if not args.bundle:
+            parser.error("upgrade requires a reviewed --bundle")
+        record = upgrade(args.bundle, args.approve_upgrade)
+        print(json.dumps({"upgraded": True, "started": False, "source_commit": record["source_commit"]}))
     elif args.action == "check":
         print(json.dumps(check()))
     elif args.action == "stop":
