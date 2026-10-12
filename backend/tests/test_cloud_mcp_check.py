@@ -469,17 +469,36 @@ def test_preopen_watchlist_defaults_to_held_then_recent_tickers(harness):
 
 
 def test_price_after_is_saved_once_final_and_graded(harness, monkeypatch):
-    after_close = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)
+    after_close = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)  # 17:00 New York, same day.
+    next_morning = datetime(2026, 10, 10, 13, 0, tzinfo=timezone.utc)  # 09:00 New York, 17 h past the close.
     with TestClient(harness.server().streamable_http_app()) as client:
         check = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
     reference = check["live"]["price"]
     later = [{"t": f"2026-10-09T{h:02d}:{m:02d}:00Z", "o": reference, "h": reference + 2, "l": reference - 1,
         "c": reference + 1, "v": 1000, "n": 10, "vw": reference} for h, m in ((14, 30), (16, 0), (19, 59))]
     monkeypatch.setitem(FIXTURE["minute_bars"], "SPY", [*FIXTURE["minute_bars"]["SPY"], *later])
+    context_file = harness.pointer.parent / "context.json"
+    held = {"ticker": "SPY", "instrument_type": "stock", "option_type": None, "strike": None, "expiration": None,
+        "contracts": 1.0, "avg_entry_premium": 580.0, "total_premium_paid": 580.0, "opened_at": "2026-10-09T10:25:00",
+        "entry_time_bucket": "open", "account_name": "Roth", "account_type": "roth_ira"}
+    # Same evening: the move is complete, but the history is not 12 h past the window, so nothing is saved.
     pretrade_features.publish([], harness.pointer, now=after_close)
+    pretrade_features.publish_context([], [], context_file, now=after_close)
     with TestClient(harness.server(now=after_close).streamable_http_app()) as client:
+        evening = call(client, "review_checks", {"day": "2026-10-09"}, harness.token())["structuredContent"]["checks"][0]
+    assert evening["price_after"]["state"] == "complete" and evening["result_saved"] is False
+    # Next morning, still holding a SPY position opened inside the window: it would link once closed; not saved.
+    pretrade_features.publish([], harness.pointer, now=next_morning)
+    pretrade_features.publish_context([held], [], context_file, now=next_morning)
+    with TestClient(harness.server(now=next_morning).streamable_http_app()) as client:
+        holding = call(client, "review_checks", {"day": "2026-10-09"}, harness.token())["structuredContent"]["checks"][0]
+        ungraded = call(client, "grade_checks", {"days": 7}, harness.token())["structuredContent"]
+    assert holding["result_saved"] is False and ungraded["settled"] == 0 and ungraded["pending"] == 1
+    # Position gone: final, saved once, and later reads ignore changed bars.
+    pretrade_features.publish_context([], [], context_file, now=next_morning)
+    with TestClient(harness.server(now=next_morning).streamable_http_app()) as client:
         first = call(client, "review_checks", {"day": "2026-10-09"}, harness.token())["structuredContent"]["checks"][0]
-        monkeypatch.setitem(FIXTURE["minute_bars"], "SPY", [])  # A saved result never changes afterwards.
+        monkeypatch.setitem(FIXTURE["minute_bars"], "SPY", [])
         again = call(client, "review_checks", {"day": "2026-10-09"}, harness.token(scope="check:read"))["structuredContent"]["checks"][0]
         graded = call(client, "grade_checks", {"days": 7}, harness.token(scope="check:read"))["structuredContent"]
     move = first["price_after"]
@@ -489,7 +508,7 @@ def test_price_after_is_saved_once_final_and_graded(harness, monkeypatch):
     assert move["move_pct"] == round(1 / reference * 100, 3) and move["best_pct"] == round(2 / reference * 100, 3)
     assert again["price_after"] == move and again["result_saved"] is True
     grade = graded["grade"]
-    assert graded["checks"] == 1 and grade["final_checks"] == 1
+    assert graded["checks"] == 1 and graded["settled"] == 1 and grade["final_checks"] == 1
     if check["verdict"] == "go":
         assert grade["overrode"]["skipped_a_go"]["checks"] == 1
     elif check["verdict"] in ("wait", "pass"):

@@ -134,7 +134,7 @@ def grade_checks(path, now=None):
     db = connect(path)
     try:
         rows = db.execute("SELECT c.check_id, c.record_json, c.record_sha256, v.verdict FROM check_record c LEFT JOIN"
-            " model_verdict v ON v.check_id = c.check_id WHERE c.received_at >= ? ORDER BY c.received_at LIMIT ?",
+            " model_verdict v ON v.check_id = c.check_id WHERE c.received_at >= ? ORDER BY c.received_at DESC LIMIT ?",
             ((now - timedelta(days=GRADE_DAYS)).isoformat(), GRADE_LIMIT)).fetchall()
         results = saved_results(db, [row[0] for row in rows])
     finally:
