@@ -356,3 +356,96 @@ def test_day_route_marks_a_sixth_entry(engine):
     body = TestClient(app).get("/scanner/day", params={"day": "2026-10-07"}).json()
     assert body["candidates"][0]["flags"] == ["sixth_plus_entry"] and body["scanner_version"] == "s1-v1"
     assert TestClient(app).get("/scanner/day", params={"day": "nope"}).status_code == 422
+
+
+# ------------------------------------------------------------------ setup emails
+
+
+def mail_env(monkeypatch):
+    monkeypatch.setenv("SCANNER_EMAIL_TO", "owner+tjsetups@example.com")
+    monkeypatch.setenv("SCANNER_SMTP_USER", "owner@example.com")
+    monkeypatch.setenv("SCANNER_SMTP_PASSWORD", "test-only")
+
+
+def test_each_setup_is_emailed_once_with_the_pre_trade_check_inputs(engine, monkeypatch):
+    sent = []
+    mail_env(monkeypatch)
+    monkeypatch.setattr(setup_scanner.scanner_mail, "send", lambda title, body: sent.append((title, body)))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    watch.run()
+    assert len(sent) == 1
+    title, body = sent[0]
+    assert title == "TJ Setup: SPY CALL opening-range break 09:50 ET"
+    inputs = json.loads(next(line for line in body.splitlines() if line.startswith("{")))
+    candidate = rows(engine)[0][0]
+    assert inputs == {"ticker": "SPY", "side": "long", "instrument": "option", "horizon": "intraday", "entry": 100.9,
+                      "stop": candidate.stop, "option_type": "call", "expiration": "2026-10-07", "strike": 101.0,
+                      "free_text": f"scanner s1-v1 orb setup {candidate.id}", "operation_id": str(candidate.id)}
+    assert rows(engine)[1]["email"]["status"] == "sent"
+
+
+def test_emails_are_off_without_an_address_and_never_sent_stale(engine, monkeypatch):
+    sent = []
+    mail_env(monkeypatch)
+    monkeypatch.delenv("SCANNER_EMAIL_TO")
+    monkeypatch.setattr(setup_scanner.scanner_mail, "send", lambda title, body: sent.append(title))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    assert sent == [] and "email" not in rows(engine)[1]
+
+    monkeypatch.setenv("SCANNER_EMAIL_TO", "owner@example.com")
+    clock.now = at(10, 5)  # after the setup's ten-minute expiry
+    watch.run()
+    assert sent == [] and rows(engine)[1]["email"]["status"] == "expired"
+
+
+def test_a_failed_send_is_retried_while_fresh(engine, monkeypatch):
+    calls = []
+
+    def flaky(title, body):
+        calls.append(title)
+        if len(calls) == 1:
+            raise setup_scanner.scanner_mail.MailError("down")
+
+    mail_env(monkeypatch)
+    monkeypatch.setattr(setup_scanner.scanner_mail, "send", flaky)
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    assert "email" not in rows(engine)[1]
+    clock.now = at(9, 51)
+    watch.run()
+    assert len(calls) == 2 and rows(engine)[1]["email"]["status"] == "sent"
+
+
+def test_mail_send_logs_in_with_the_app_password_and_addresses_the_owner(monkeypatch):
+    from app.engine import scanner_mail
+
+    seen = {}
+
+    class FakeSMTP:
+        def __init__(self, host, port, timeout, context):
+            seen["server"] = (host, port)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def login(self, user, password):
+            seen["login"] = (user, password)
+
+        def send_message(self, message):
+            seen["message"] = message
+
+    mail_env(monkeypatch)
+    monkeypatch.setenv("SCANNER_SMTP_PASSWORD", "abcd efgh ijkl mnop")
+    monkeypatch.setattr(scanner_mail.smtplib, "SMTP_SSL", FakeSMTP)
+    assert scanner_mail.configured()
+    scanner_mail.send("TJ Setup: test", "body")
+    assert seen["server"] == ("smtp.gmail.com", 465) and seen["login"] == ("owner@example.com", "abcdefghijklmnop")
+    assert seen["message"]["To"] == "owner+tjsetups@example.com" and seen["message"]["Subject"] == "TJ Setup: test"
