@@ -208,6 +208,15 @@ publish and read as stale after 30 minutes; a stop applies only when one
 position matches; positions are treated as bought (sold options would read
 inverted).
 
+Options (advisor step 6): option checks now return the contract the scalper
+resolved (given strike/expiration, else nearest expiration at the money) with
+live bid/ask, spread, IV, delta, gamma, theta, cost and time decay per
+contract, and a delta-only estimate of the premium and loss per contract at
+the given stop (labelled an estimate). `position_check` marks option positions
+at the live mid x 100 x contracts and shares at the live price, against the
+journal's total paid. Alpaca's options feed on the existing key; no new
+credential.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his

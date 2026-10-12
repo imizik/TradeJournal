@@ -181,7 +181,7 @@ def jo_view(record, *, replayed):
             "record_sha256": digest(record), "rules_version": answer["rules_version"]},
         "idea": record["idea"], "verdict": answer["verdict"], "wait_for": answer["wait_for"],
         "reasons": answer["reasons"], "would_change": answer["would_change"], "risk_check": answer["risk_check"],
-        "history": history, "live": answer["live"], "caveats": answer["caveats"],
+        "history": history, "live": answer["live"], "option": answer.get("option"), "caveats": answer["caveats"],
         "timings_ms": record["timings_ms"],
         "advice_only": "Rules verdict for one idea. Nothing places, sizes or arms an order.",
         "next_step": NEXT_STEP}

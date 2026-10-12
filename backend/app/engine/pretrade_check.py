@@ -248,6 +248,27 @@ def rules_verdict(analysis: dict, history: dict, idea: dict, receipt_utc: dateti
     return {"verdict": verdict, "wait_for": wait_for, "reasons": reasons[:3], "risk_check": risk}
 
 
+OPTION_FIELDS = ("contract", "option_type", "expiration", "strike", "dte", "moneyness", "moneyness_pct", "bid", "ask",
+                 "mid", "spread_pct", "iv", "delta", "gamma", "theta", "last_trade_price", "quote_time", "feed")
+
+
+def option_summary(option: Optional[dict], stop: Optional[float] = None,
+                   underlying_price: Optional[float] = None) -> Optional[dict]:
+    """The contract's live quote and greeks, plus per-contract cost, daily decay and a delta-only stop estimate."""
+    if not option:
+        return None
+    result = {key: option.get(key) for key in OPTION_FIELDS}
+    mid, delta, theta = option.get("mid"), option.get("delta"), option.get("theta")
+    result["cost_per_contract"] = round(mid * 100, 2) if mid else None
+    result["theta_per_contract_per_day"] = round(theta * 100, 2) if theta is not None else None
+    if stop is not None and underlying_price and mid and delta is not None:
+        estimate = max(0.0, mid + (stop - underlying_price) * delta)
+        result["at_stop"] = {"estimated_premium": round(estimate, 4),
+                             "estimated_loss_per_contract": round((mid - estimate) * 100, 2),
+                             "method": "delta only (ignores gamma, theta and IV change); an estimate, not a quote"}
+    return result
+
+
 def _caveats(analysis: dict, history: dict) -> list[str]:
     data = analysis.get("data") or {}
     assessment = analysis.get("assessment") or {}
@@ -281,8 +302,9 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
             "invalidation": assessment.get("invalidation"), "generated_at": assessment.get("generated_at"),
             "staleness": data.get("staleness")}
     would_change = assessment.get("trigger") if rules["verdict"] in ("wait", "pass") else assessment.get("invalidation")
+    option = option_summary(data.get("option"), idea.get("stop"), intraday.get("price")) if idea["instrument"] == "option" else None
     answer = {"rules_version": RULES_VERSION, "receipt_utc": receipt_utc.astimezone(timezone.utc).isoformat(),
-              "idea": idea, **rules, "would_change": would_change, "history": history, "live": live,
+              "idea": idea, **rules, "would_change": would_change, "history": history, "live": live, "option": option,
               "caveats": _caveats(analysis, history)}
     answer["live_context_sha256"] = hashlib.sha256(
         json.dumps({"request": analysis.get("request"), "data": data}, sort_keys=True, default=str).encode()).hexdigest()
@@ -350,7 +372,7 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
                   stop: Optional[float] = None) -> dict:
     """One open position now: live underlying, time held, stop distance, and how similar closed trades went.
 
-    Facts only; no verdict. Option premium marks are not available, so P&L is not computed.
+    Facts only; no verdict. Unrealized P&L uses the live mid (options) or price (shares) when available.
     """
     now_ny = _ny_wall(receipt_utc)
     opened = datetime.fromisoformat(position["opened_at"])
@@ -370,8 +392,26 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
                       "breached": distance <= 0}
     expiration = position.get("expiration")
     caveats = ["treated as a bought position (calls/puts/shares); a sold option or short would read inverted"]
+    option = None
+    mark = None
     if position["instrument_type"] == "option":
-        caveats.append("option premium marks are not available here; P&L is not computed")
+        option = option_summary(data.get("option"), stop, price)
+        mid = (option or {}).get("mid")
+        contracts = position.get("contracts")
+        if mid and contracts:
+            value = round(mid * 100 * contracts, 2)
+            paid = position.get("total_premium_paid")
+            mark = {"value_now": value, "paid": paid, "unrealized_pnl": round(value - paid, 2) if paid else None,
+                    "unrealized_pct": round((value - paid) / paid * 100, 2) if paid else None,
+                    "basis": "mid of the live bid/ask x 100 x contracts; a fill could differ by the spread"}
+        else:
+            caveats.append("no live quote for this contract; P&L is not computed")
+    elif price and position.get("contracts") and position.get("total_premium_paid"):
+        value = round(price * position["contracts"], 2)
+        mark = {"value_now": value, "paid": position["total_premium_paid"],
+                "unrealized_pnl": round(value - position["total_premium_paid"], 2),
+                "unrealized_pct": round((value - position["total_premium_paid"]) / position["total_premium_paid"] * 100, 2),
+                "basis": "live underlying price x shares"}
     if (data.get("staleness") or {}).get("is_stale"):
         caveats.append("live quotes/bars are stale")
     return {
@@ -383,6 +423,8 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
                  "rvol": intraday.get("rvol"), "market_state": (analysis.get("assessment") or {}).get("market_state")
                  or data.get("market_state"), "staleness": data.get("staleness")},
         "stop_check": stop_check,
+        "option": option,
+        "mark": mark,
         "history": {"as_of_ny": now_ny.isoformat(timespec="seconds"), "cohorts": [
             {"name": "same_ticker_side", **_hold_summary(prior)},
             {"name": "same_ticker_side_entry_time", "entry_time_bucket": position.get("entry_time_bucket"),
