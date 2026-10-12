@@ -27,7 +27,7 @@ import time
 import advisor_mcp_control as old
 from advisor_mcp_stage import SOURCE, digest, exact, inventory, reviewed_git
 from check_network import check_policy
-from check_scope import view_sql
+from check_scope import CAPTURE_VIEW, POSITION_VIEW, context_view_sql, view_sql
 
 FORMAT = "check-disabled-bundle-v1"
 ROOT = Path("/opt/tradejournal-check")
@@ -51,10 +51,12 @@ UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejourna
 RUNTIME_FILES = ("cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
-SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
+SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "context-views.sql", "owner")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
 # client) and enables owner/config.json; the network policy and view SQL stay pinned.
-PINNED_SETTINGS = ("network.nft", "feature-view.sql")
+PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql")
+# Database changes an upgrade may add, each applied only under its own SHA-256 approval.
+ADDITIVE_SQL = ("context-views.sql",)
 
 
 def stage(destination, *, wheels):
@@ -86,7 +88,7 @@ def stage(destination, *, wheels):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(source.read_bytes())
         generated = {"config/config.json": json.dumps(config, indent=2) + "\n",
-            "config/feature-view.sql": view_sql()}
+            "config/feature-view.sql": view_sql(), "config/context-views.sql": context_view_sql()}
         for relative, body in generated.items():
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -194,6 +196,7 @@ def install(bundle, approved, *, dns_servers, host_ips):
         private_file(CONFIG / "refresh-keys.json", (json.dumps(refresh, indent=2) + "\n").encode(), mode=0o644)
         private_file(CONFIG / "network.nft", policy, mode=0o644)
         private_file(CONFIG / "feature-view.sql", (bundle / "config/feature-view.sql").read_bytes(), mode=0o644)
+        private_file(CONFIG / "context-views.sql", (bundle / "config/context-views.sql").read_bytes(), mode=0o644)
         owner = {"enabled": False, "peer_uid": pwd.getpwnam(OWNER_WEB).pw_uid,
             "socket_path": str(OWNER_RUN / "owner.sock"), "ledger_path": config["ledger_file"]}
         # Its own directory, bound whole: a replaced (renamed) file still reaches the running reader.
@@ -255,7 +258,34 @@ def installed():
     return record
 
 
-def upgrade(bundle, approved):
+def psql(sql_bytes):
+    """Run SQL as the database superuser against the publisher's database, stopping on any error."""
+    from urllib.parse import urlsplit
+    import subprocess
+    url = (CONFIG / "features-database-url").read_text().strip()
+    database = urlsplit(url).path.lstrip("/")
+    if not database or "/" in database:
+        raise ValueError("Cannot read the target database name")
+    result = subprocess.run(["runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+        "-d", database], input=sql_bytes, capture_output=True, check=False,
+        env={"PATH": old.ADMIN_PATH, "PGOPTIONS": "-c statement_timeout=30000"})
+    if result.returncode:
+        raise RuntimeError("Database statement refused")
+    return result.stdout.decode().strip()
+
+
+def apply_context_views(sql_bytes):
+    """Additive and re-runnable: apply when neither view exists, skip when both do, refuse a half state."""
+    names = (POSITION_VIEW, CAPTURE_VIEW)
+    present = int(psql(("SELECT count(*) FROM pg_views WHERE schemaname = 'public' AND viewname IN ('%s', '%s');"
+        % names).encode()))
+    if present == 0:
+        psql(sql_bytes)
+    elif present != len(names):
+        raise RuntimeError("Only some context views exist; review the database before upgrading")
+
+
+def upgrade(bundle, approved, sql_approvals=()):
     """Replace only the stopped runtime code. Config, credentials, ledger, keys,
     features, identities, policy and units stay byte-identical; nothing starts.
 
@@ -276,13 +306,21 @@ def upgrade(bundle, approved):
         raise ValueError("Bundle is already the installed runtime")
     if {u: digest(bundle / "units" / u) for u in UNITS} != record["units"]:
         raise ValueError("Bundle changes check units; review that replacement separately")
-    if digest(bundle / "config/feature-view.sql") != record["settings"]["feature-view.sql"]:
-        raise ValueError("Bundle changes the feature view; review that database change separately")
+    additions = []
+    for name in PINNED_SETTINGS:
+        if name not in record["settings"] and name in ADDITIVE_SQL:
+            if digest(bundle / "config" / name) not in sql_approvals:
+                raise ValueError(f"Bundle adds {name}; approve its SHA-256 with --approve-sql to apply it")
+            additions.append(name)
+        elif name != "network.nft" and digest(bundle / "config" / name) != record["settings"].get(name):
+            raise ValueError(f"Bundle changes {name}; review that database change separately")
     # A oneshot refresh reports "activating" for its whole run; only inactive/failed count as stopped.
     running = [u for u in UNITS if old.run("systemctl", "show", u, "--property=ActiveState", "--value",
         check=False).stdout.decode().strip() not in {"inactive", "failed"}]
     if running:
         raise ValueError("Stop every check unit first (check_control.py stop): " + ", ".join(running))
+    for name in additions:  # Additive database change first: on refusal nothing else has moved.
+        apply_context_views((bundle / "config" / name).read_bytes())
     previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
     previous.mkdir(parents=True, mode=0o700)
     (ROOT / "backend").rename(previous / "backend")
@@ -293,7 +331,12 @@ def upgrade(bundle, approved):
     handlers = {s: signal.signal(s, interrupted) for s in (signal.SIGHUP, signal.SIGTERM, signal.SIGINT)}
     try:
         build_runtime(bundle, scratch)
-        updated = {**record, "manifest_sha256": approved, "source_commit": manifest["source_commit"],
+        settings = dict(record["settings"])
+        for name in additions:
+            if not (CONFIG / name).exists():
+                private_file(CONFIG / name, (bundle / "config" / name).read_bytes(), mode=0o644)
+            settings[name] = digest(CONFIG / name)
+        updated = {**record, "manifest_sha256": approved, "settings": settings, "source_commit": manifest["source_commit"],
             "runtime_inventory": old.runtime_inventory(root=ROOT, roles=("backend",), python_roles=("backend",)),
             "previous_runtimes": [*record.get("previous_runtimes", []), {"path": str(previous),
                 "manifest_sha256": record["manifest_sha256"], "source_commit": record["source_commit"]}]}
@@ -369,6 +412,7 @@ def main():
     parser.add_argument("--wheels", type=Path, help="Already verified release wheels; no downloading")
     parser.add_argument("--approve-install")
     parser.add_argument("--approve-upgrade")
+    parser.add_argument("--approve-sql", action="append", default=[], help="SHA-256 of a reviewed additive SQL file")
     parser.add_argument("--dns", action="append", default=[], help="Resolver IP literal the check UIDs may query")
     parser.add_argument("--host-ip", action="append", default=[], help="This host's own IPs, denied to the check UIDs")
     args = parser.parse_args()
@@ -385,7 +429,7 @@ def main():
     elif args.action == "upgrade":
         if not args.bundle:
             parser.error("upgrade requires a reviewed --bundle")
-        record = upgrade(args.bundle, args.approve_upgrade)
+        record = upgrade(args.bundle, args.approve_upgrade, tuple(args.approve_sql))
         print(json.dumps({"upgraded": True, "started": False, "source_commit": record["source_commit"]}))
     elif args.action == "check":
         print(json.dumps(check()))

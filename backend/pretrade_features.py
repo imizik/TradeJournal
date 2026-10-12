@@ -27,6 +27,16 @@ FEATURE_KEYS = frozenset({
     "source_fill_key",
 })
 _HEX = re.compile(r"^[0-9a-f]{64}$")
+CONTEXT_FORMAT = "pretrade-context-v1"
+CONTEXT_MAX = 4 * 1024 * 1024
+POSITION_KEYS = frozenset({
+    "ticker", "instrument_type", "option_type", "strike", "expiration", "contracts", "avg_entry_premium",
+    "total_premium_paid", "opened_at", "entry_time_bucket", "account_name", "account_type",
+})
+CAPTURE_KEYS = frozenset({
+    "received_at", "underlying", "side", "instrument", "mode", "setup_label", "wording", "note", "strike",
+    "expiration", "quantity", "transcript_text", "not_taken_at", "account_label", "latest_note", "linked",
+})
 
 
 def _when(value):
@@ -104,11 +114,92 @@ def publish(rows: list[dict], pointer_file, *, now: datetime | None = None) -> d
     return {"features_sha256": digest, "row_count": len(rows)}
 
 
-def _retain(directory: Path, current: str):
+def _plain(value):
+    """JSON-safe scalar: dates/times as ISO strings, decimals as floats."""
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return float(value)
+
+
+def context_rows(records, keys) -> list[dict]:
+    rows = []
+    for item in records:
+        item = dict(item)
+        if set(item) != keys:
+            raise ValueError("Context rows must have the exact approved fields")
+        rows.append({key: _plain(item[key]) for key in sorted(keys)})
+    return rows
+
+
+def publish_context(positions: list[dict], captures: list[dict], pointer_file, *, now: datetime | None = None) -> dict:
+    """Open positions and recent captures: context-<sha>.json, then atomically repoint context.json."""
+    pointer = _safe_path(pointer_file)
+    directory = pointer.parent
+    if not stat.S_ISDIR(directory.lstat().st_mode):
+        raise ValueError("Context directory must already exist")
+    if any(set(row) != POSITION_KEYS for row in positions) or any(set(row) != CAPTURE_KEYS for row in captures):
+        raise ValueError("Context rows must have the exact approved fields")
+    payload = json.dumps({"format": CONTEXT_FORMAT, "generated_at": (now or datetime.now(timezone.utc)).astimezone(
+        timezone.utc).isoformat(), "positions": positions, "captures": captures}, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode()
+    if len(payload) > CONTEXT_MAX:
+        raise ValueError("Context file exceeds its bound")
+    digest = hashlib.sha256(payload).hexdigest()
+    target = directory / f"context-{digest}.json"
+    if target.exists() or target.is_symlink():
+        if _read_regular(_safe_path(target), CONTEXT_MAX) != payload:
+            raise ValueError("Content-addressed context file differs from its name")
+    else:
+        temporary = _atomic_file(directory, payload, mode=0o640)
+        try:
+            os.link(temporary, target, follow_symlinks=False)
+        finally:
+            temporary.unlink(missing_ok=True)
+    temporary = _atomic_file(directory, json.dumps({"context_sha256": digest}).encode(), mode=0o640)
+    try:
+        os.replace(temporary, pointer)
+    finally:
+        temporary.unlink(missing_ok=True)
+    _fsync_directory(directory)
+    _retain(directory, digest, prefix="context")
+    return {"context_sha256": digest, "positions": len(positions), "captures": len(captures)}
+
+
+def read_context(pointer_file, *, max_age_seconds: int, now: datetime | None = None) -> dict:
+    """Return {state, positions, captures, generated_at, age_seconds}; missing means none, never invented."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        pointer = _safe_path(pointer_file)
+        value = json.loads(_read_regular(pointer, POINTER_MAX))
+        if not isinstance(value, dict) or set(value) != {"context_sha256"} or not _HEX.fullmatch(str(value["context_sha256"])):
+            raise ValueError("Invalid context pointer")
+        digest = value["context_sha256"]
+        raw = _read_regular(_safe_path(pointer.parent / f"context-{digest}.json"), CONTEXT_MAX)
+        if hashlib.sha256(raw).hexdigest() != digest:
+            raise ValueError("Context file does not match its digest")
+        document = json.loads(raw)
+        if (not isinstance(document, dict) or set(document) != {"format", "generated_at", "positions", "captures"}
+                or document["format"] != CONTEXT_FORMAT
+                or any(not isinstance(r, dict) or set(r) != POSITION_KEYS for r in document["positions"])
+                or any(not isinstance(r, dict) or set(r) != CAPTURE_KEYS for r in document["captures"])):
+            raise ValueError("Invalid context file")
+        generated = datetime.fromisoformat(document["generated_at"])
+        if generated.tzinfo is None or (now - generated).total_seconds() < -60:
+            raise ValueError("Invalid context time")
+        age = (now - generated).total_seconds()
+    except (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError, AttributeError):
+        return {"state": "missing", "positions": None, "captures": None, "generated_at": None, "age_seconds": None}
+    return {"state": "stale" if age > max_age_seconds else "fresh", "positions": document["positions"],
+        "captures": document["captures"], "generated_at": document["generated_at"], "age_seconds": max(0, int(age))}
+
+
+def _retain(directory: Path, current: str, prefix: str = "features"):
     """Best effort: keep the current file and the two newest previous ones we own."""
     owned = []
     for entry in directory.iterdir():
-        match = re.fullmatch(r"features-([0-9a-f]{64})\.json", entry.name)
+        match = re.fullmatch(prefix + r"-([0-9a-f]{64})\.json", entry.name)
         if not match or match.group(1) == current:
             continue
         info = entry.lstat()

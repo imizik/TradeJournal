@@ -329,3 +329,61 @@ def check_outcome(idea: dict, answer: dict, receipt_utc: datetime, rows: Optiona
     return {**base, "state": "traded", "trade_count": len(trades), "wins": sum(1 for value in pnl if value > 0),
         "total_pnl": round(sum(pnl), 2) if pnl else None, "first_opened_at": trades[0]["opened_at"],
         "note": "a trade on this ticker and side opened in the window; not proof the check was followed"}
+
+
+POSITION_VERSION = "pretrade-position-v1"
+
+
+def _hold_summary(rows: list[dict]) -> dict:
+    """The cohort summary plus how long those trades were held."""
+    result = _summary(rows)
+    if result.get("enough"):
+        holds = [(datetime.fromisoformat(row["closed_at"]) - datetime.fromisoformat(row["opened_at"])).total_seconds() / 60
+                 for row in rows]
+        giveback = [row["giveback_pct"] for row in rows if row["giveback_pct"] is not None]
+        result["median_hold_minutes"] = round(median(holds)) if holds else None
+        result["median_giveback_pct"] = round(median(giveback), 3) if giveback else None
+    return result
+
+
+def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_utc: datetime,
+                  stop: Optional[float] = None) -> dict:
+    """One open position now: live underlying, time held, stop distance, and how similar closed trades went.
+
+    Facts only; no verdict. Option premium marks are not available, so P&L is not computed.
+    """
+    now_ny = _ny_wall(receipt_utc)
+    opened = datetime.fromisoformat(position["opened_at"])
+    side = _side(position["instrument_type"], position.get("option_type"))
+    ticker = position["ticker"].upper()
+    data = analysis.get("data") or {}
+    intraday = data.get("intraday") or {}
+    price = intraday.get("price")
+    prior = [row for row in rows if datetime.fromisoformat(row["closed_at"]) < now_ny
+             and row["underlying"] == ticker and row["side"] == side]
+    same_entry = [row for row in prior if position.get("entry_time_bucket") and row["time_bucket"] == position["entry_time_bucket"]]
+    stop_check = {"stop": stop, "note": "no stop given; none invented"}
+    if stop is not None and price:
+        bearish = side == "put"
+        distance = (stop - price) if bearish else (price - stop)
+        stop_check = {"stop": stop, "underlying_price": price, "distance_pct": round(distance / price * 100, 3),
+                      "breached": distance <= 0}
+    expiration = position.get("expiration")
+    caveats = ["option premium marks are not available here; P&L is not computed"] if position["instrument_type"] == "option" else []
+    if (data.get("staleness") or {}).get("is_stale"):
+        caveats.append("live quotes/bars are stale")
+    return {
+        "position_version": POSITION_VERSION,
+        "position": position,
+        "held_minutes": max(0, round((now_ny - opened).total_seconds() / 60)),
+        "days_to_expiration": (datetime.fromisoformat(expiration).date() - now_ny.date()).days if expiration else None,
+        "live": {"price": price, "vwap": intraday.get("vwap"), "price_vs_vwap_pct": intraday.get("price_vs_vwap_pct"),
+                 "rvol": intraday.get("rvol"), "market_state": (analysis.get("assessment") or {}).get("market_state")
+                 or data.get("market_state"), "staleness": data.get("staleness")},
+        "stop_check": stop_check,
+        "history": {"as_of_ny": now_ny.isoformat(timespec="seconds"), "cohorts": [
+            {"name": "same_ticker_side", **_hold_summary(prior)},
+            {"name": "same_ticker_side_entry_time", "entry_time_bucket": position.get("entry_time_bucket"),
+             **_hold_summary(same_entry)}]},
+        "caveats": caveats,
+    }
