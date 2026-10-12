@@ -20,7 +20,7 @@ if __name__ == "__main__" and os.environ.get("TJ_CHECK_CLEAN_PROCESS") != "1":
 import argparse
 import asyncio
 import copy
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import math
 from pathlib import Path
 import stat
@@ -55,10 +55,13 @@ TOOL_ARGUMENTS = {
     "pre_trade_check": ({"ticker", "side", "instrument", "horizon"},
         {"entry", "stop", "option_type", "expiration", "strike", "free_text", "operation_id"}),
     "attach_model_verdict": ({"check_id", "verdict", "summary"}, set()),
+    "review_checks": (set(), {"day"}),
 }
 
 
 def scopes(name):
+    if name == "review_checks":
+        return [READ_SCOPE]
     return [READ_SCOPE, RUN_SCOPE if name == "pre_trade_check" else NOTE_SCOPE]
 
 
@@ -157,6 +160,7 @@ def clock_only_analysis(receipt_utc, missing):
         "data": {"market_state": state, "staleness": {"is_stale": True}, "missing": missing}}
 
 
+REVIEW_LIMIT = 50
 # Jo's own verdict is what gets graded against the rules later; ask for it on every answer.
 NEXT_STEP = ("Every time: call attach_model_verdict with this check_id, your own verdict and a one-to-three "
     "sentence summary of what you tell Isaac, then answer him. Skip it only if this check already has your verdict.")
@@ -195,7 +199,7 @@ class CheckMCP(FastMCP):
 
     async def call_tool(self, name, arguments):
         if name not in TOOL_ARGUMENTS or not isinstance(arguments, dict):
-            raise ToolError("Use only pre_trade_check or attach_model_verdict")
+            raise ToolError("Use only pre_trade_check, attach_model_verdict or review_checks")
         required, optional = TOOL_ARGUMENTS[name]
         if not required <= set(arguments) <= required | optional:
             raise ToolError("Use only the declared arguments")
@@ -208,7 +212,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     config = verifier.config
     ledger = Ledger(config.ledger_file)
     bind_provider(provider, feed=config.provider_feed, cache_dir=cache_dir)
-    from app.engine.pretrade_check import run_check
+    from app.engine.alpaca import ET
+    from app.engine.pretrade_check import check_outcome, run_check
     from app.engine.scalper import build_scalp_analysis
 
     clock = clock or (lambda: datetime.now(timezone.utc))
@@ -352,6 +357,47 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             raise ToolError("Model verdict could not be saved; retry with identical content") from None
         return {"schema_version": SCHEMA, "check_id": check_id, "rules_verdict": record["answer"]["verdict"],
             "model_verdict": {key: saved[key] for key in ("verdict", "summary", "received_at", "content_sha256")}}
+
+    @server.tool(title="Review checks for a day", structured_output=True,
+        annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=False, idempotentHint=True),
+        meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("review_checks")}]})
+    async def review_checks(day: Annotated[Optional[str], Field(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None) -> dict[str, Any]:
+        """List one New York trading day's saved checks (default today) with the rules verdict, your saved verdict,
+        and what happened after: traded / no_closed_trade / pending / not_linked, from closed trades only.
+
+        "traded" means a trade on that ticker and side opened inside the check's fixed window; it is not proof the
+        check was followed. Use it for an after-close review; it never changes a check.
+        """
+        checked = await authenticated("review_checks")
+        now = clock()
+        try:
+            target = date.fromisoformat(day) if day else now.astimezone(ET).date()
+            if not date(2020, 1, 1) <= target <= date(2100, 1, 1):
+                raise ValueError("day out of range")
+        except ValueError:
+            raise ToolError("day must be a real YYYY-MM-DD date") from None
+        start = datetime.combine(target, datetime.min.time(), ET)
+        span = (start.astimezone(timezone.utc).isoformat(), (start + timedelta(days=1)).astimezone(timezone.utc).isoformat())
+        try:
+            saved = await asyncio.to_thread(ledger.between, checked.subject, *span, REVIEW_LIMIT + 1)
+        except (ValueError, OSError):
+            raise ToolError("Checks could not be read") from None
+        features = await asyncio.to_thread(history, now)
+        generated = datetime.fromisoformat(features["generated_at"]) if features["generated_at"] else None
+        checks, counts = [], {}
+        truncated = len(saved) > REVIEW_LIMIT
+        for record, model in saved[:REVIEW_LIMIT]:
+            answer = record["answer"]
+            outcome = check_outcome(record["idea"], answer, datetime.fromisoformat(record["received_at"]),
+                features["rows"], generated, now)
+            key = f"{answer['verdict']}:{outcome['state']}"
+            counts[key] = counts.get(key, 0) + 1
+            checks.append({"check_id": record["check_id"], "received_at": record["received_at"], "idea": record["idea"],
+                "verdict": answer["verdict"], "model_verdict": model, "outcome": outcome})
+        return {"schema_version": SCHEMA, "day": target.isoformat(), "checks": checks, "truncated": truncated,
+            "counts_by_verdict_and_outcome": counts,
+            "history": {key: features[key] for key in ("state", "generated_at")},
+            "note": "Closed trades only; small counts are not evidence of an edge. Nothing here changes a check."}
 
     return server
 

@@ -172,6 +172,21 @@ Step 3 (owner view) is **built, not installed or activated** (October 11, 2026):
   `frontend/scripts/advisor-owner.test.js`, and an owner read as the real
   frontend UID (another UID refused) in the disposable Ubuntu smoke.
 
+Activated and first used **October 12, 2026** (10:16 ET: SPY intraday
+pass in 0.75 s with 33 similar trades; NBIS swing insufficient_data). Auth0
+API token lifetime must be 300 s to match the verifier.
+
+After-close review (advisor step 4, outcome linking): `review_checks(day?)`
+(`check:read`) lists one New York day's checks with the rules verdict, Jo's
+saved verdict and an outcome from closed trades
+([`check_outcome`](../../backend/app/engine/pretrade_check.py),
+`pretrade-link-v1`). The window is fixed by the check itself: receipt to the
+`wait_for` expiry, otherwise to that session's close. `traded` means a trade on
+the same underlying and side opened inside it, reported as count, wins and
+total P&L only (never counted as followed); `no_closed_trade` never claims no position, since open trades
+appear only after they close; `pending` until the window has passed and the
+history file was refreshed after it; swing checks are `not_linked`.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his

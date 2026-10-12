@@ -287,3 +287,45 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
     answer["live_context_sha256"] = hashlib.sha256(
         json.dumps({"request": analysis.get("request"), "data": data}, sort_keys=True, default=str).encode()).hexdigest()
     return answer
+
+
+LINK_VERSION = "pretrade-link-v1"
+
+
+def check_window(answer: dict, receipt_utc: datetime) -> tuple[datetime, datetime]:
+    """Fixed before the outcome is known: receipt to the wait expiry, else to that session's close (NY wall time)."""
+    start = _ny_wall(receipt_utc)
+    close = start.replace(hour=SESSION_CLOSE[0], minute=SESSION_CLOSE[1], second=0, microsecond=0)
+    end = close
+    if answer.get("verdict") == "wait" and answer.get("wait_for"):
+        end = min(datetime.fromisoformat(answer["wait_for"]["expires_at"]).astimezone(NY).replace(tzinfo=None), close)
+    return start, max(start, end)
+
+
+def check_outcome(idea: dict, answer: dict, receipt_utc: datetime, rows: Optional[Iterable[dict]],
+                  features_generated_at: Optional[datetime], now_utc: datetime) -> dict:
+    """What happened after a check, from closed trades only (docs/advisor-roadmap.md#checks-and-captures).
+
+    "traded" means a trade on the same underlying and side opened inside the window; it is not proof the
+    check was followed. "no_closed_trade" never claims no position: an open one appears after it closes.
+    """
+    if idea.get("horizon") != "intraday":
+        return {"state": "not_linked", "link_version": LINK_VERSION, "note": "swing checks are not linked yet"}
+    start, end = check_window(answer, receipt_utc)
+    window = {"from_ny": start.isoformat(timespec="minutes"), "to_ny": end.isoformat(timespec="minutes")}
+    base = {"link_version": LINK_VERSION, "window": window}
+    if _ny_wall(now_utc) < end:
+        return {**base, "state": "pending", "note": "the check's window is still open"}
+    if rows is None or features_generated_at is None or _ny_wall(features_generated_at) < end:
+        return {**base, "state": "pending", "note": "trade history has not been refreshed since the window closed"}
+    side = _side(idea["instrument"], idea.get("option_type"))
+    trades = sorted((row for row in rows if row["underlying"] == idea["ticker"].upper() and row["side"] == side
+                     and start <= datetime.fromisoformat(row["opened_at"]) <= end), key=lambda row: row["opened_at"])
+    if not trades:
+        return {**base, "state": "no_closed_trade",
+                "note": "no closed trade on this ticker and side opened in the window; an open one would appear after it closes"}
+    pnl = [row["realized_pnl"] for row in trades if row["realized_pnl"] is not None]
+    # Aggregates only: the approved scope shares own-trade summaries, not individual trades.
+    return {**base, "state": "traded", "trade_count": len(trades), "wins": sum(1 for value in pnl if value > 0),
+        "total_pnl": round(sum(pnl), 2) if pnl else None, "first_opened_at": trades[0]["opened_at"],
+        "note": "a trade on this ticker and side opened in the window; not proof the check was followed"}
