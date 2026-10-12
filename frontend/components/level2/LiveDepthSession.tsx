@@ -26,9 +26,13 @@ function BookTable({ book, side }: { book: LiveBook; side: "bids" | "asks" }) {
  * heatmap keeps collecting while the dock is closed; the lab owns one here,
  * cancelled when its tab is hidden.
  */
-export default function LiveDepthSession({ compact = false, session }: { compact?: boolean; session?: DepthSession }) {
+export default function LiveDepthSession({ compact = false, session, symbol = "NVDA" }: { compact?: boolean; session?: DepthSession; symbol?: string }) {
   const own = useDepthSession({ active: !session, stopWhenHidden: true });
-  const { availability, enabled, running, message, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, connect, stop } = session ?? own;
+  const current = session ?? own;
+  const { availability, enabled, running, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, connect, stop } = current;
+  // A finished session for another ticker is not this symbol's result.
+  const mine = current.symbol === null || current.symbol === symbol;
+  const message = mine ? current.message : "No live session started.";
 
   // Compact (dock) mode puts the latest book first so the depth is visible without scrolling past diagnostics.
   const diagBlocks = <>
@@ -84,26 +88,28 @@ export default function LiveDepthSession({ compact = false, session }: { compact
       <span className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">MANUAL · UNTIL STOPPED</span>
     </div>
     {compact
-      ? <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">About this session (US.NVDA, manual, until stopped)</summary>
+      ? <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">About this session (US.{symbol}, manual, until stopped)</summary>
         <div className="space-y-1 pt-1">
-    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. It runs until Stop (eight hours at most), refreshing its sign-in every four minutes. Nothing is recorded or saved, and it never reconnects by itself.</p>
+    <p className="text-sm text-muted-foreground">US.{symbol} · isolated local service session. It runs until Stop (eight hours at most), refreshing its sign-in every four minutes. Nothing is recorded or saved, and it never reconnects by itself.</p>
     <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
         </div></details>
       : <>
-    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. It runs until Stop (eight hours at most), refreshing its sign-in every four minutes. Nothing is recorded or saved, and it never reconnects by itself.</p>
+    <p className="text-sm text-muted-foreground">US.{symbol} · isolated local service session. It runs until Stop (eight hours at most), refreshing its sign-in every four minutes. Nothing is recorded or saved, and it never reconnects by itself.</p>
     <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
       </>}
     {availability === "unavailable" && <p role="status" className="rounded border border-amber-400/40 p-2 text-sm text-amber-200">Local service is not enabled or unavailable. No provider connection was started.</p>}
     {availability === "ready" && !enabled && <p role="status" className="rounded border border-muted p-2 text-sm text-muted-foreground">Local live service is disabled. No provider connection was started.</p>}
     <div className="flex flex-wrap items-center gap-2">
-      <Button size={compact ? "sm" : undefined} onClick={connect} disabled={availability !== "ready" || !enabled || running}>{running ? "Session running…" : "Connect"}</Button>
+      <Button size={compact ? "sm" : undefined} onClick={() => connect(symbol)} disabled={availability !== "ready" || !enabled || running}>{running ? "Session running…" : "Connect"}</Button>
       <Button size={compact ? "sm" : undefined} variant="outline" onClick={stop} disabled={!running}>Stop</Button>
       <span role="status" aria-live="polite" className="text-sm text-muted-foreground">{message}</span>
     </div>
+    {mine && <>
     {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}{refreshedAt ? ` · sign-in refreshed ${new Date(refreshedAt).toLocaleTimeString()}` : ""}</p>}
     {protocolError && <p role="status" className="text-xs text-amber-200">An invalid or oversized protocol line was ignored.</p>}
     {compact && bookBlock}
     {diagBlocks}
     {!compact && bookBlock}
+    </>}
   </section>;
 }

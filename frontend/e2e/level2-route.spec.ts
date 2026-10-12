@@ -31,7 +31,9 @@ test("local lab proxy fails closed and never forwards browser credentials or par
     profile = "private_legacy";
     expect((await output.POST!(request(undefined, "https://evil.invalid"))).status).toBe(400);
     expect((await output.POST!(request("https://tradejournal.invalid/api/level2-lab/session"))).status).toBe(503);
-    expect((await output.POST!(request("http://127.0.0.1:3197/api/level2-lab/session?symbol=US.AAPL"))).status).toBe(400);
+    // One plain-ticker `symbol` is the only argument; anything else is refused before forwarding.
+    for (const query of ["symbol=US.AAPL", "symbol=aapl", "symbol=AAPL&x=1", "symbol=AAPL&symbol=MSFT", "symbol=AA%2FPL", "x=AAPL", "symbol=TOOLONG"])
+      expect((await output.POST!(request(`http://127.0.0.1:3197/api/level2-lab/session?${query}`))).status).toBe(400);
     expect((await output.POST!(request(undefined, undefined, "{}"))).status).toBe(400);
     const remoteHost = request(); remoteHost.headers.set("host", "remote.invalid:3197");
     expect((await output.POST!(remoteHost)).status).toBe(503);
@@ -45,6 +47,9 @@ test("local lab proxy fails closed and never forwards browser credentials or par
     const forwarded = JSON.stringify(calls[0].init?.headers);
     expect(forwarded).not.toContain("DO-NOT-FORWARD");
     expect(forwarded).toContain("Bearer invented-loopback-token");
+    await (await output.POST!(request("http://127.0.0.1:3197/api/level2-lab/session?symbol=BRK.B"))).text();
+    expect(calls[1].target).toBe("http://127.0.0.1:8196/session?symbol=BRK.B");
+    expect((await output.GET!(new Request("http://127.0.0.1:3197/api/level2-lab/session?symbol=AAPL", { headers: { Host: "127.0.0.1:3197" } }))).status).toBe(400);
   } finally {
     globalThis.fetch = originalFetch;
     if (priorEnabled === undefined) delete process.env.TJ_MOOMOO_LAB_ENABLED; else process.env.TJ_MOOMOO_LAB_ENABLED = priorEnabled;

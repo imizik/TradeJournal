@@ -6567,8 +6567,8 @@ test("indicator colors change the lines and legend, persist, reject bad values a
   await page.screenshot({ path: test.info().outputPath("indicator-colors-phone.png"), animations: "disabled" });
 });
 
-// ---- Level 2 dock tab: owner-only, manual, NVDA only. Provider responses are synthetic; nothing here proves live behavior or entitlements. ----
-const L2_PATH = "**/api/level2-lab/session";
+// ---- Level 2 dock tab: owner-only, manual, one US ticker at a time. Provider responses are synthetic; nothing here proves live behavior or entitlements. ----
+const L2_PATH = "**/api/level2-lab/session**";
 const l2Book = [
   { event: "status", phase: "authenticated" },
   { event: "status", phase: "subscribed", kind: "order_book", code: 0 },
@@ -6576,18 +6576,20 @@ const l2Book = [
     bids: [{ price: 123.4567, volume: 100.25, order_count: null, mpid: null }], asks: [] }] },
   { event: "summary", report: { authentication: { status: "success", code: 0 }, status: "completed", subscriptions: { order_book: { status: "success", code: 0 } }, message_counts: { ORDER_BOOK: 1 }, unsubscribe: { status: "success", code: 0 }, closed: true } },
 ].map((record) => JSON.stringify(record)).join("\n") + "\n";
-type L2Window = Window & { l2Posts: { aborted: boolean }[] };
+type L2Window = Window & { l2Posts: { aborted: boolean }[]; l2Urls: string[] };
 /** Records every Level 2 POST and whether its request was aborted; `hold` keeps the response open so the session stays active. */
 async function level2Service(page: Page, options: { enabled?: boolean; hold?: boolean } = {}) {
   const calls = { get: 0, post: 0 };
   await page.addInitScript(() => {
     const original = window.fetch.bind(window);
     (window as unknown as L2Window).l2Posts = [];
+    (window as unknown as L2Window).l2Urls = [];
     window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if ((init?.method ?? "GET").toUpperCase() === "POST" && url.includes("/api/level2-lab/session") && init?.signal) {
         const record = { aborted: init.signal.aborted };
         (window as unknown as L2Window).l2Posts.push(record);
+        (window as unknown as L2Window).l2Urls.push(url.replace(location.origin, ""));
         init.signal.addEventListener("abort", () => { record.aborted = true; }, { once: true });
       }
       return original(input, init);
@@ -6606,7 +6608,7 @@ const l2Tab = (page: Page) => page.getByRole("button", { name: "Level 2", exact:
 const l2Connect = (page: Page) => page.getByRole("button", { name: "Connect", exact: true });
 const setSymbol = async (page: Page, symbol: string) => { const input = page.getByLabel("Chart symbol"); await input.fill(symbol); await input.press("Enter"); };
 
-test("Level 2 opens in the dock without starting a session, shows a replaced latest book, and says NVDA only elsewhere", async ({ page }) => {
+test("Level 2 opens in the dock without starting a session, shows a replaced latest book, and gives another ticker its own Connect", async ({ page }) => {
   await stub(page);
   const calls = await level2Service(page);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -6633,11 +6635,13 @@ test("Level 2 opens in the dock without starting a session, shows a replaced lat
   await l2Tab(page).click();
   await expect(panel.getByText("123.4567")).toBeVisible();
   expect(calls.post).toBe(1);
-  // Another symbol: no provider traffic, no NVDA book under its name.
+  // Another ticker gets its own Connect and never shows NVDA's finished book under its name.
   await setSymbol(page, "MRVL");
-  await expect(sidePanel(page).getByText("Level 2 depth supports NVDA only")).toBeVisible();
-  await expect(panel).toHaveCount(0);
+  await expect(sidePanel(page).getByText("Heatmap behind the MRVL candles")).toBeVisible();
+  await expect(l2Connect(page)).toBeEnabled();
+  await expect(panel.getByText("123.4567")).toHaveCount(0);
   expect(calls.post).toBe(1);
+  expect(await page.evaluate(() => (window as unknown as L2Window).l2Urls)).toEqual(["/api/level2-lab/session?symbol=NVDA"]);
 });
 
 test("a saved Level 2 dock tab restores without a session, and a disabled service leaves Connect off", async ({ page }) => {
@@ -6670,9 +6674,11 @@ test("Level 2: the session outlives the dock, other tabs, symbols and a hidden p
   await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, value: false }); });
   await page.waitForTimeout(200);
   expect(await l2Aborted(page)).toEqual([false]);
-  // Another symbol's Level 2 panel can still stop it.
+  // One ticker streams at a time: MRVL's panel offers only to stop NVDA.
   await l2Tab(page).click();
-  await sidePanel(page).getByRole("button", { name: "Stop it" }).click();
+  await expect(sidePanel(page).getByText("One symbol streams at a time, and NVDA is running for its heatmap.")).toBeVisible();
+  await expect(l2Connect(page)).toHaveCount(0);
+  await sidePanel(page).getByRole("button", { name: "Stop NVDA" }).click();
   await expect.poll(() => l2Aborted(page)).toEqual([true]);
   await expect(running).toHaveCount(0);
   await setSymbol(page, "NVDA");

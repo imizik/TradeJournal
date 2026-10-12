@@ -3,7 +3,8 @@
 The owner `/level2-lab` page has two separate sections: a manually started
 US.NVDA moomoo session that runs until stopped, and the original synthetic
 replay. Charts adds the same session in its dock and a memory-only liquidity
-heatmap behind the NVDA candles. Tradier/Alpaca feeds and saved metrics are
+heatmap behind the candles, for any US stock or ETF ticker, one at a time.
+Tradier/Alpaca feeds and saved metrics are
 unchanged. The provider book is an inspection display, not a validated live
 trading feed.
 
@@ -26,7 +27,13 @@ POST with no arguments or body. Authenticated owner profiles also require an
 owner session. The private legacy entrance retains owner-restricted Tailscale
 access without an additional login; Host/Origin checks are not identity proof.
 It forwards to a fixed loopback endpoint without browser cookies or credentials.
-No provider URL, symbol or duration can be supplied by the browser.
+No provider URL or duration can be supplied by the browser. Its only argument
+is one `symbol` query parameter on the POST, a plain US ticker matching
+`^[A-Z]{1,5}(\.[A-Z])?$` (BRK.B style classes included). The Next route and the
+bridge each refuse anything else (other or repeated parameters, lowercase,
+options, `US.` prefixes) before forwarding or reading credentials. The bridge
+subscribes to `US.<ticker>` and accepts only pushes for that code. Without the
+parameter it streams NVDA, which the lab page uses.
 
 Each connection authenticates before subscribing separately to quote,
 order_book and ticker. It returns each acknowledgment and a final sanitized
@@ -63,17 +70,22 @@ own heatmap uses invented replay data only.
 ## Charts dock panel and heatmap
 
 The owner's Charts dock has an optional **Level 2** tab (a phone reaches it from
-the More menu as a sheet). It follows the main chart's symbol: NVDA shows the
-session (`LiveDepthSession`, compact layout) and the heatmap controls; any other
-symbol shows an NVDA-only notice, plus a Stop link if a session is running.
+the More menu as a sheet). It follows the main chart's symbol: a US stock or ETF
+ticker shows the session (`LiveDepthSession`, compact layout) and the heatmap
+controls; anything else (an option, an index) says so and makes no request.
+One ticker streams at a time: while one runs, another ticker's panel only
+offers to stop it, and Connect then starts the ticker on screen. Whether the
+account's depth access covers a ticker shows in its subscription result.
 Assistants get no tab, and a saved Level 2 tab restores as the watchlist for
 them. The service status is checked only once the tab has been shown; nothing
 reaches the provider before Connect. Only the dock's open/tab choice is stored
 on the device; no depth data is. Browser checks use synthetic responses only.
 
-The heatmap (`frontend/lib/depthHeatmap.ts`) draws behind the main chart's NVDA
-candles while **Heatmap behind the NVDA candles** is on. It keeps 2-second
-columns for at most four hours, in the page's memory only; leaving Charts or
+The heatmap (`frontend/lib/depthHeatmap.ts`) draws behind the main chart's
+candles for the ticker shown while **Heatmap behind the … candles** is on. Each
+ticker connected on this visit keeps its own heatmap, so checking another
+symbol does not discard an earlier one. It keeps 2-second columns for at most
+four hours per ticker, in the page's memory only; leaving Charts or
 reloading starts empty. Each update is placed at its own provider source time.
 An update without a source time, or with an estimated age at receipt outside
 0–2 seconds, is left out and counted. A side missing from an update adds
@@ -170,6 +182,13 @@ service account for 540 seconds with a 240-second refresh: both refreshes were
 acknowledged (correlated by id), delivery continued throughout (3,720 order_book,
 2,133 quote and 512 ticker messages), and unsubscribe succeeded with the socket
 closed. A multi-hour session through the deployed proxy is not yet observed.
+
+Also that day, 20-second checks of the ticker-parameter build: US.AAPL and
+US.SPY each authenticated and had all three subscriptions acknowledged, then
+delivered depth (AAPL 20 order_book messages, 60 bid/60 ask entries, MPIDs ARCA,
+NASD, NSDQ; SPY 42 messages, books of 35–60 entries per side, MPIDs ARCA, IMCC,
+NSDQ). Unsubscribe succeeded and both sockets closed. This shows these two
+tickers stream, not coverage for every symbol or any named depth product.
 
 - Opening, restoring and reloading the dock made only GET status checks; the
   bridge held no provider socket until Connect.

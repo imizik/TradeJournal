@@ -13,7 +13,9 @@ export type LiveBook = {
   bids: Level[];
   asks: Level[];
 };
-export type BookEvent = { event: "book"; symbol: "US.NVDA"; received_ms: number; books: LiveBook[] };
+export type BookEvent = { event: "book"; symbol: string; received_ms: number; books: LiveBook[] };
+/** A US stock or ETF ticker the bridge will stream (BRK.B style classes included). */
+export const LEVEL2_TICKER = /^[A-Z]{1,5}(\.[A-Z])?$/;
 export type StatusEvent = { event: "status"; phase: Phase; kind?: Kind; code?: number | null };
 type ProtocolStatus = "success" | "failed" | "unconfirmed" | "not_attempted" | "sent_unconfirmed" | "not_needed" | "unconfirmed; connection will close";
 export type ProtocolResult = { status: ProtocolStatus; code?: number | null };
@@ -52,8 +54,8 @@ function validLevel(value: unknown): value is Level {
     && (value.mpid === null || (typeof value.mpid === "string" && /^[A-Z0-9]{1,8}$/.test(value.mpid)));
 }
 
-function validBook(value: unknown): value is BookEvent {
-  if (!isRecord(value) || value.event !== "book" || value.symbol !== "US.NVDA"
+function validBook(value: unknown, symbol: string): value is BookEvent {
+  if (!isRecord(value) || value.event !== "book" || value.symbol !== `US.${symbol}`
     || !safeTimestamp(value.received_ms) || value.received_ms === null || value.received_ms === 0
     || !Array.isArray(value.books) || value.books.length > 10) return false;
   return value.books.every(book => isRecord(book)
@@ -110,12 +112,14 @@ export type DepthSession = {
   protocolError: boolean;
   /** Local time of the last confirmed in-session auth refresh. */
   refreshedAt: number | null;
-  connect(): void;
+  /** The ticker of the current or last session. */
+  symbol: string | null;
+  connect(symbol: string): void;
   stop(): void;
 };
 
 /**
- * One manual NVDA depth session: nothing is requested until `active` (the
+ * One manual depth session for one US ticker at a time: nothing is requested until `active` (the
  * status check) and nothing reaches the provider until `connect()`. It runs
  * until `stop()`, unmount, the bridge's own ceiling or a failure; there is no
  * automatic reconnect. `stopWhenHidden` keeps the lab's hide-to-cancel rule;
@@ -134,6 +138,7 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
   const [bookEvent, setBookEvent] = useState<BookEvent | null>(null);
   const [protocolError, setProtocolError] = useState(false);
   const [refreshedAt, setRefreshedAt] = useState<number | null>(null);
+  const [symbol, setSymbol] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const onBookRef = useRef(onBook);
   useEffect(() => { onBookRef.current = onBook; }, [onBook]);
@@ -172,15 +177,15 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
   }, [stop, stopWhenHidden]);
   useEffect(() => () => { abortRef.current?.abort(); abortRef.current = null; }, []);
 
-  const connect = useCallback(async () => {
-    if (availability !== "ready" || !enabled || abortRef.current) return;
+  const connect = useCallback(async (ticker: string) => {
+    if (availability !== "ready" || !enabled || abortRef.current || !LEVEL2_TICKER.test(ticker)) return;
     const controller = new AbortController();
     abortRef.current = controller;
     const timeout = window.setTimeout(() => controller.abort(), SESSION_TIMEOUT_MS);
-    setStarted(true); setRunning(true); setMessage("Connecting to the provider…"); setStatuses({}); setSessionPhase(null); setSummary(null); setBookEvent(null); setProtocolError(false); setRefreshedAt(null);
+    setStarted(true); setRunning(true); setMessage("Connecting to the provider…"); setStatuses({}); setSessionPhase(null); setSummary(null); setBookEvent(null); setProtocolError(false); setRefreshedAt(null); setSymbol(ticker);
     let sawClosed = false;
     try {
-      const response = await fetch("/api/level2-lab/session", {
+      const response = await fetch(`/api/level2-lab/session?symbol=${ticker}`, {
         method: "POST",
         headers: { "Content-Type": "application/x-level2-start" },
         signal: controller.signal,
@@ -205,7 +210,7 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
           if (parsed.kind) setStatuses(current => ({ ...current, [parsed.kind!]: parsed }));
           if (parsed.phase === "failed") setMessage("Provider session failed. See the sanitized diagnostic status below.");
           if (parsed.phase === "closed") setMessage("Session closed.");
-        } else if (validBook(parsed)) {
+        } else if (validBook(parsed, ticker)) {
           setBookEvent(parsed);
           onBookRef.current?.(parsed);
           setMessage("Receiving provider book updates. This display is for inspection only.");
@@ -236,5 +241,5 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
     }
   }, [availability, enabled]);
 
-  return { availability, enabled, running, started, message, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, connect, stop };
+  return { availability, enabled, running, started, message, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, symbol, connect, stop };
 }
