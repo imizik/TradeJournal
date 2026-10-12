@@ -154,7 +154,8 @@ def exercise(archive, scratch):
 
     def token(**changes):
         issued = int(time.time())
-        claims = {"iss": ISSUER, "aud": RESOURCE, "sub": SUBJECT, "client_id": CLIENT,
+        # The staged config verifies the Auth0-style "azp" client claim.
+        claims = {"iss": ISSUER, "aud": RESOURCE, "sub": SUBJECT, "azp": CLIENT,
             "scope": "check:read check:run check:note", "iat": issued, "exp": issued + 300, **changes}
         return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "check-smoke"})
 
@@ -167,12 +168,15 @@ def exercise(archive, scratch):
 
     def call(name, arguments):
         response = rpc(name, arguments, token())
-        response.raise_for_status()
+        assert response.status_code == 200, (name, response.status_code, response.headers.get("www-authenticate"))
         result = response.json()["result"]
         assert not result.get("isError"), result
         return result["structuredContent"]
 
-    tools = rpc("", {}, token(), "tools/list").json()["result"]["tools"]
+    listing = rpc("", {}, token(), "tools/list")
+    assert listing.status_code == 200, (listing.status_code, listing.headers.get("www-authenticate"))
+    tools = listing.json()["result"]["tools"]
+    assert rpc("pre_trade_check", {}, token(azp="other-client")).status_code == 401
     assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict"}
     assert rpc("pre_trade_check", {}, token(aud="https://check.example.test/mcp")).status_code == 401
     assert rpc("pre_trade_check", {}, token(scope="journal:read")).status_code == 403
