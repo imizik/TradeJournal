@@ -141,7 +141,7 @@ const PALETTE = Array.from({ length: SHADES }, (_, index) => {
   const mix = (k: number) => a[k] + (b[k] - a[k]) * f;
   return `rgba(${Math.round(mix(0))},${Math.round(mix(1))},${Math.round(mix(2))},${mix(3).toFixed(3)})`;
 });
-/** The price step one cell spans; NVDA quotes in cents. */
+/** The price step one cell spans: US stocks over $1 quote in cents; finer sub-dollar steps share a pixel row. */
 const TICK = 0.01;
 
 /**
