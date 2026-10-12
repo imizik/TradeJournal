@@ -217,6 +217,14 @@ at the live mid x 100 x contracts and shares at the live price, against the
 journal's total paid. Alpaca's options feed on the existing key; no new
 credential.
 
+Pre-open (advisor step 7): `preopen_watchlist(tickers?)` (`check:read`,
+read-only, nothing saved) takes up to 8 tickers, defaulting to those held now
+and then the most-traded tickers of the last 30 days. For each it returns the
+price versus yesterday's close, change, gap, premarket high/low/volume,
+whether he holds it, and his closed trades in it by side (cohort summary plus
+hold time) and by entry-time bucket. Facts only, no verdict; the whole pass is
+capped at 20 seconds and names any ticker it skipped for time.
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his
