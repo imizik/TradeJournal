@@ -52,7 +52,17 @@ export async function advisorUnix(socketPath: string, signal: AbortSignal, route
   });
 }
 
-export async function advisorOwner(request: Request) {
+const validReview = (value: { schema_version?: unknown; demo_only?: unknown; request?: unknown }) =>
+  value.schema_version === "advisor-owner-review-v1" && value.demo_only === true && !!value.request && "receipt" in value;
+const validStatus = (value: { schema_version?: unknown }) => value.schema_version === "advisor-owner-status-v1";
+const UNAVAILABLE = "Direct advisor owner review unavailable. Reload to read the saved receipt; no write or retry was sent.";
+
+export const advisorOwner = (request: Request) => ownerRead(request, "/owner/advisor", validReview, UNAVAILABLE);
+// States and timestamps only; the owner reader never returns keys, tokens, subjects or config bodies.
+export const advisorOwnerStatus = (request: Request) => ownerRead(request, "/owner/advisor/status", validStatus,
+  "Advisor connection status unavailable. The owner reader may be stopped; no write or retry was sent.");
+
+async function ownerRead(request: Request, route: string, valid: (value: Record<string, unknown>) => boolean, unavailable: string) {
   const headers = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
   const refusal = (status: number, detail: string) => Response.json({ detail }, { status, headers });
   try {
@@ -71,14 +81,14 @@ export async function advisorOwner(request: Request) {
     activeReads += 1;
     try {
       const before = await socketIdentity(socketPath, expectedUid);
-      const body = await advisorUnix(socketPath, signal);
+      const body = await advisorUnix(socketPath, signal, route);
       if (before !== await socketIdentity(socketPath, expectedUid)) throw new Error("Owner socket changed");
       // Uncached revalidation closes owner revocation during a slow ledger read.
       const latest = await ownerSession(config.target, request.headers, signal);
       if (latest !== 200) return refusal(latest, "Owner session unavailable");
       const value = JSON.parse(body.toString("utf8"));
-      if (value.schema_version !== "advisor-owner-review-v1" || value.demo_only !== true || !value.request || !("receipt" in value)) throw new Error("Invalid owner response");
+      if (!value || typeof value !== "object" || !valid(value)) throw new Error("Invalid owner response");
       return new Response(new Uint8Array(body), { status: 200, headers: { ...headers, "Content-Type": "application/json" } });
     } finally { activeReads -= 1; }
-  } catch { return refusal(503, "Direct advisor owner review unavailable. Reload to read the saved receipt; no write or retry was sent."); }
+  } catch { return refusal(503, unavailable); }
 }

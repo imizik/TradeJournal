@@ -109,7 +109,9 @@ configuration), `/var/lib/tradejournal-advisor-v2/fixture.db` (new invented
 ledger), and `/run/tradejournal-advisor{,-owner}-v2` (private sockets). The
 six existing-name advisor units are the backend, MCP and owner socket/service
 pairs. The new reader account `tj-advisor-owner` differs from the writer and
-frontend; its later approved named-UID ACL applies only to the **new** ledger.
+frontend; its later approved named-UID fixture ACL applies only to the **new**
+ledger. Optional key upkeep separately grants it read of the advisor config and
+public-key snapshot for the [owner status](#owner-connection-status) only.
 The owner socket's group is only `tj-advisor-web-owner`, never the general
 production `tradejournal` group. Actual UID and GID are recorded independently.
 
@@ -255,6 +257,99 @@ the two optional socket/process pairs and verifies active state; any startup
 failure attempts stopping both groups. No boot enablement follows. Current
 implementation work must leave this step paused.
 
+## Upgrading the installed v2 runtime
+
+`install` refuses an existing v2 tree, so merged advisor code reaches the
+retained trial only through `upgrade`. It replaces **only** the five runtime
+roles under `/opt/tradejournal-advisor-v2` (`adapter`, `backend`, `frontend`,
+`bin`, `operator`) with a newer reviewed bundle. The advisor and owner config
+(live `client_claim`, client, subject and assignment bindings, `jwks_file`),
+`frontend.env`, the ledger and its receipts, recovery files, accounts, the six
+unit files (including key upkeep's extra read-only binds), the owner drop-in and
+the v1 resources stay byte-identical. Nothing is started, enabled or restarted.
+A ledger behind the new runtime's schema is migrated only by the separate
+`migrate-ledger` step below.
+
+1. From the reviewed new source revision, prepare the bundle exactly as for
+   install (verified release archive + offline wheels; the guard file is not
+   used by upgrade, the original one may be reused). Approve its manifest SHA.
+   Take a root-private copy on the host and run the controller from a
+   root-private copy of that same revision.
+2. Stop the six advisor units (`advisor_trial_control.py stop`), then
+   `tradejournal-dot-trial-owner-bridge.socket`, its `.service` and the private
+   owner frontend `tradejournal-dot-trial-owner.service`. The frontend runs the
+   v2 Node/frontend runtime and the bridge socket would start it on the next
+   request. This is a separately approved, announced outage of the private demo
+   app. Do not reboot until the swap finishes: the frontend starts at boot, so
+   after an interrupted swap stop it again and run `resume` first.
+3. Upgrade, always with bytecode writing disabled:
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py upgrade \
+  --bundle /root/approved-trial-bundle --approve-upgrade REVIEWED_MANIFEST_SHA256
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py preflight
+```
+
+4. If `preflight` shows `ledger_revision` different from the record's
+   `schema_revision`, the new runtime refuses that ledger until it is migrated.
+   With separate owner approval and the same units stopped:
+
+```bash
+sudo env PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3.12 -B deploy/advisor_trial_control.py migrate-ledger
+```
+
+5. If key upkeep is installed, run `advisor_keys_control.py check`. Starting the
+   sockets, services, bridge socket and owner frontend again is the usual
+   separately approved start; re-run the start verification.
+
+Upgrade refuses, before changing anything, unless the approval names the
+bundle manifest, the six advisor units, the bridge pair and the owner frontend
+are all `inactive`/`failed`, the current installation (and key upkeep, when
+present) verifies, the bundle differs from the installed one, and its
+units/drop-in equal the installed ones (with key binds applied). The live
+ledger's Alembic revision (read-only) must equal the bundle's staged ledger or
+be one of its ancestors in the bundle's own migration scripts. A changed unit or
+drop-in needs its own reviewed procedure.
+
+`migrate-ledger` runs the installed, verified backend's own Alembic (`upgrade
+heads`, `-B`) against only the v2 ledger. It first writes a root-private byte
+copy to `ledger-backups/` and records it. Only additive change is accepted:
+afterwards every existing table's SQL and every row (receipts included) must be
+identical, the whole schema must equal the bundle's staged schema recorded at
+upgrade (so a half-applied earlier attempt is refused), the revision must equal
+the runtime's `schema_revision`, owner/mode must be unchanged and no extra file
+may remain beside the ledger. Otherwise the copy's bytes are written back in
+place (same inode, so owner, mode and ACL stay), verified by digest, and it
+refuses naming the copy. A leftover SQLite journal blocks that automatic
+restore and needs review. The current #251 ledger is one migration behind main
+(`d6e1f2a3b4c5`, the unrelated empty `monthly_review` table from #258).
+
+The current roles move to `previous-runtime/<UTC time>-<manifest prefix>-<random>/`
+(kept, inventoried in the record as `previous_runtimes` with the schema they
+served), the new runtime is built at the final paths and synced to disk, and
+only then is `installation.json` replaced atomically with the new runtime
+inventory, provenance and `schema_revision`. A root-private
+`upgrade-intent.json` journals the swap. A failure before the record switch
+moves the partial build to `failed-upgrades/` (never deleted) and puts the
+recorded runtime back. While the journal exists, `preflight`, `rollback` and
+key upkeep refuse; `resume` (or the next `upgrade`/`downgrade`) finishes or
+reverses the swap. Trial `rollback` still restores the original v1 units
+afterwards, and still requires key upkeep `remove` first.
+
+`downgrade` (same stops) verifies the most recently retained runtime against
+its recorded inventory, swaps it back and retains the replaced one, so a later
+`upgrade` or second `downgrade` stays possible. Config, ledger and receipts are
+untouched in both directions; receipts saved by a newer runtime remain in the
+ledger. After `migrate-ledger`, `downgrade` refuses because the older runtime
+would refuse the newer schema; going back then needs a reviewed ledger
+procedure (the backup lacks receipts saved after the migration). Pruning old
+`previous-runtime/`, `failed-upgrades/` or `ledger-backups/` entries is a
+manual, reviewed step.
+
+Upgrading the runtime does not turn on repeatable-question management (see
+"Dormant repeatable-question mode"); `assignment_management` stays off until
+that separate activation.
+
 ## Optional public-key upkeep for the v2 trial
 
 Without upkeep the advisor stops accepting new sign-ins when its manual public-key
@@ -277,7 +372,8 @@ root-private copy of the reviewed source revision.
    publisher oneshot, its network unit and a 15-minute timer, appends only that
    directory to the existing `BindReadOnlyPaths=` of the adapter and backend
    services, points the advisor config's `jwks_file` there and updates the trial
-   record's unit digests. It starts, enables and contacts nothing.
+   record's unit digests. It also adds the [owner status](#owner-connection-status)
+   read grant and binds. It refuses without the trial's `owner_reader_uid`. It starts, enables and contacts nothing.
 3. Separately approved activation: `systemctl start
    tradejournal-advisor-keys.service` once and confirm `check` reports `fresh`,
    then `systemctl enable --now tradejournal-advisor-keys.timer`, then start the
@@ -314,7 +410,7 @@ refresh. Upkeep does not change Auth0 consent or token lifetimes.
 | New sign-ins or calls refused after about an hour | Public-key snapshot expired | `check`; start the key oneshot, inspect its journal, confirm the timer is enabled |
 | Backend exits with "assignment expired or revoked" | The bound request passed its 30-minute expiry | Create a new approved request; old receipts stay readable to the owner |
 | Save returns "refused or immutable content conflicts" with no receipt | Malformed answer (often the whole `answer_contract` wrapper instead of its six-field `answer`) or a real conflict | Read `get_advisor_request` first; resend only `summary`, `interpretation`, `risks`, `conditions`, `gaps`, `references` |
-| Units inactive after host reboot or deploy | Advisor units have no Install section by design | Verify the installation, then start sockets before services |
+| Units inactive after host reboot or deploy (owner status panel says unavailable) | Advisor units have no Install section by design | Verify the installation, then start sockets before services |
 | Operator command refuses with inventory drift | Root Python wrote `__pycache__` into the runtime | Run operator Python with `-B` and `PYTHONDONTWRITEBYTECODE=1`; remove only the generated caches, then recheck |
 
 ## Stop, replacement and receipt-preserving rollback
@@ -339,7 +435,8 @@ Never delete the ledger to make a reinstall pass or reuse an answered binding.
 
 Replacement requires stop first, verified source/config and new bounded review;
 there is no automatic update, mutable runtime symlink or unattended relink in
-this bundle. Reopening original receipts after revocation remains owner-only.
+this bundle. The v2 trial's manual runtime-only `upgrade`/`downgrade` is
+described under "Upgrading the installed v2 runtime". Reopening original receipts after revocation remains owner-only.
 
 ## Evidence boundaries
 
@@ -364,6 +461,36 @@ The root disposable smoke uses a fixed administrative PATH with `/usr/sbin`
 and an otherwise credential-free environment. Staging scopes Git trust to its
 own exact reviewed checkout per read command, without global/wildcard Git
 configuration. These are preparation portability controls, not runtime grants.
+
+## Owner connection status
+
+`/advisor-review` shows an "Advisor connection" panel read from the owner
+reader's fixed `GET /owner/advisor/status` (same owner peer UID, no selectors,
+credentials or body; owner session through the BFF). It returns states and
+timestamps only: key snapshot `fresh` / `expiring` / `expired` /
+`issuer-mismatch` / `unreadable` with its expiry, advisor config and profile
+enabled, the selected question (`pending`, `answered`, `expired`, `revoked`,
+`none`) with its expiry, and the last saved Jo answer time. It never returns
+keys, tokens, subjects, config bodies or receipt contents. The freshness logic
+is `backend/advisor_key_state.py`, shared with `advisor_keys_control.py check`.
+
+The owner reader needs read access to the advisor config (enabled flags and
+`jwks_file`) and the maintained snapshot. Key upkeep `install` grants exactly
+that and nothing else:
+
+- a named-UID POSIX ACL for the trial's `owner_reader_uid` on
+  `/etc/tradejournal-advisor-v2/advisor` and
+  `/var/lib/tradejournal-advisor-v2-keys`: traverse on each directory, plus a
+  default ACL giving read on files created there later (each publisher refresh
+  and config rewrite). No list, write, group or other change. Group membership
+  was rejected because the trial requires its owner UID to have none;
+- both directories appended to the owner service's `BindReadOnlyPaths=`.
+
+The owner config then needs `"advisor_config_path":
+"/etc/tradejournal-advisor-v2/advisor/config.json"`. Without it the panel says
+"Not set up for this page". `remove` restores the owner unit and drops the
+config-directory grant (the kept snapshot directory keeps its own). A missing or
+stale grant fails closed as `unreadable`.
 
 ## Optional direct owner reader
 
@@ -418,7 +545,9 @@ an independent read-only mount namespace, exposing only its reviewed runtime,
 owner config, isolated advisor state directory and inherited owner socket. All
 four mounts are read-only; there is no writable database directory, journal
 mount, IP family, OAuth/grant/key dependency or startup dependency on the MCP
-services. `tradejournal-advisor-owner.socket` grants its filesystem access to
+services. Installed key upkeep adds two more read-only mounts, the advisor
+config and snapshot directories, for the [owner status](#owner-connection-status);
+the status still never returns key material or config bodies. `tradejournal-advisor-owner.socket` grants its filesystem access to
 the reviewed owner frontend group (template `tradejournal`), while the process
 checks the exact configured frontend **UID** from the connected Unix socket.
 Root or another socket-group member is denied by that UID check. The distinct

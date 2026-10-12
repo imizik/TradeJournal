@@ -27,6 +27,13 @@ def snapshot(expires_in=3600, issuer=ISSUER):
         "expires_at": now + expires_in, "keys": [{"kid": "fixture", "kty": "RSA"}]}) + "\n"
 
 
+acls = {}  # Fake Linux ACL xattrs: tests also run on macOS, which has no setxattr.
+
+
+def owner_grants():
+    return {path for path, _ in acls}
+
+
 def installed_trial(prepared, tmp_path, monkeypatch, *, expires_in=3600):
     bundle, calls = trial_tests.host(tmp_path, monkeypatch, prepared)
     trial.install(bundle, stage.digest(bundle / "manifest.json"))
@@ -38,7 +45,17 @@ def installed_trial(prepared, tmp_path, monkeypatch, *, expires_in=3600):
     for name, path in (("RUNTIME", "keys-runtime"), ("SETTINGS", "keys-settings"), ("KEYS", "keys-state")):
         monkeypatch.setattr(keys, name, tmp_path / path)
     monkeypatch.setattr(trial, "KEYS_RECORD", keys.record_path())
+    # The trial controller imports key upkeep lazily; resolve it to this patched module.
+    monkeypatch.setitem(sys.modules, "advisor_keys_control", keys)
     monkeypatch.setattr(keys.os, "chown", lambda *args: None)
+    acls.clear()
+    def setxattr(path, name, value):
+        acls[(str(path), name)] = value
+    def removexattr(path, name, follow_symlinks=True):
+        if acls.pop((str(path), name), None) is None:
+            raise OSError(keys.errno.ENODATA, "No ACL")
+    monkeypatch.setattr(keys.os, "setxattr", setxattr, raising=False)
+    monkeypatch.setattr(keys.os, "removexattr", removexattr, raising=False)
     lookup = keys.pwd.getpwnam
     publisher = SimpleNamespace(pw_name=keys.ACCOUNT, pw_uid=os.getuid(), pw_gid=280, pw_shell="/usr/sbin/nologin")
     monkeypatch.setattr(keys.pwd, "getpwnam", lambda name: publisher if name == keys.ACCOUNT else lookup(name))
@@ -71,8 +88,13 @@ def test_install_mounts_maintained_snapshot_and_starts_nothing_then_remove_resto
     for name in keys.SERVING:
         text = (old.UNIT_DIR / name).read_text()
         bind = next(line for line in text.splitlines() if line.startswith("BindReadOnlyPaths="))
-        assert bind.endswith(" " + str(keys.KEYS))
-        assert text.replace(" " + str(keys.KEYS), "") == before[old.UNIT_DIR / name].decode()
+        added = "".join(" " + str(path) for path in keys.unit_binds(name))
+        assert bind.endswith(added) and text.replace(added, "") == before[old.UNIT_DIR / name].decode()
+    assert keys.unit_binds(keys.OWNER_SERVICE) == (config_path.parent, keys.KEYS)
+    reader_uid = json.loads(config_path.read_text())["owner_reader_uid"]
+    for directory in (keys.KEYS, config_path.parent):
+        assert acls[(str(directory), "system.posix_acl_access")] == keys.owner_read_acl(reader_uid, default=False)
+        assert acls[(str(directory), "system.posix_acl_default")] == keys.owner_read_acl(reader_uid, default=True)
     for name in keys.KEY_UNITS:
         assert (old.UNIT_DIR / name).read_bytes() == (key_bundle / "units" / name).read_bytes()
     assert f"meta skuid {os.getuid()}" in (keys.SETTINGS / "network.nft").read_text()
@@ -86,7 +108,9 @@ def test_install_mounts_maintained_snapshot_and_starts_nothing_then_remove_resto
         trial.rollback()  # Trial rollback cannot strand the key timer and network table.
 
     snapshot_path.write_text(snapshot(3000))  # The timer refreshed while installed.
+    acls[(str(config_path), "system.posix_acl_access")] = b"inherited"  # Rewritten config inherits the default.
     keys.remove()
+    assert owner_grants() == {str(keys.KEYS)}  # The kept snapshot directory keeps its grant.
     assert all(path.read_bytes() == value for path, value in before.items())
     assert (trial.CONFIG / "advisor/public-keys.json").read_text() == snapshot_path.read_text()
     assert not any((old.UNIT_DIR / name).exists() for name in keys.KEY_UNITS)
@@ -125,7 +149,7 @@ def test_refuses_before_any_host_change(prepared, tmp_path, monkeypatch, change)
         monkeypatch.setattr(old, "run", exists)
     with pytest.raises(ValueError):
         keys.install(key_bundle, approved, dns_servers=["127.0.0.53"], host_ips=[])
-    assert config_path.read_bytes() == before
+    assert config_path.read_bytes() == before and not acls
     assert not any("useradd" in command for command in calls)
     assert not any((old.UNIT_DIR / name).exists() for name in keys.KEY_UNITS)
     trial.installed()
@@ -144,6 +168,7 @@ def test_failed_config_switch_restores_units_and_record(prepared, tmp_path, monk
     with pytest.raises(OSError, match="Controlled"):
         install(key_bundle)
     assert all(path.read_bytes() == value for path, value in before.items())
+    assert str(config_path.parent) not in owner_grants()
     assert not any((old.UNIT_DIR / name).exists() for name in keys.KEY_UNITS)
     trial.installed()
     with pytest.raises(ValueError, match="collision"):  # Inert partial state blocks a blind retry.
@@ -168,6 +193,29 @@ def test_snapshot_state_reports_freshness_without_key_material(tmp_path, expires
     result = keys.snapshot_state({"jwks_file": str(path), "issuer_url": ISSUER, "jwks_url": JWKS})
     assert result["state"] == state and "keys" not in result
     assert keys.snapshot_state({"jwks_file": str(tmp_path / "missing"), "issuer_url": ISSUER, "jwks_url": JWKS})["state"] == "unreadable"
+
+
+def test_owner_read_acl_names_one_uid_with_traverse_and_read_only():
+    import struct
+    def entries(blob):
+        assert struct.unpack("<I", blob[:4]) == (2,)
+        return [struct.unpack("<HHI", blob[i:i + 8]) for i in range(4, len(blob), 8)]
+    undefined = 0xFFFFFFFF
+    assert entries(keys.owner_read_acl(304, default=False)) == [(1, 7, undefined), (2, 1, 304), (4, 5, undefined),
+        (16, 5, undefined), (32, 0, undefined)]
+    assert entries(keys.owner_read_acl(304, default=True)) == [(1, 6, undefined), (2, 4, 304), (4, 4, undefined),
+        (16, 4, undefined), (32, 0, undefined)]
+
+
+def test_install_refuses_without_owner_reader_uid(prepared, tmp_path, monkeypatch):
+    key_bundle, calls = installed_trial(prepared, tmp_path, monkeypatch)
+    config_path = trial.CONFIG / "advisor/config.json"
+    trial.write_private(config_path, {**json.loads(config_path.read_text()), "owner_reader_uid": None})
+    before = config_path.read_bytes()
+    with pytest.raises(ValueError, match="owner reader UID"):
+        install(key_bundle)
+    assert config_path.read_bytes() == before and not acls
+    assert not any("useradd" in command for command in calls)
 
 
 def test_serving_unit_bind_is_added_once_to_the_existing_read_only_line():
@@ -286,6 +334,47 @@ def test_remove_resumes_when_interrupted_after_config_switch(prepared, tmp_path,
         keys.remove()
     monkeypatch.setattr(Path, "unlink", unlink)
     keys.remove()
-    assert not keys.record_path().exists()
+    assert not keys.record_path().exists() and owner_grants() == {str(keys.KEYS)}
     assert not any((old.UNIT_DIR / name).exists() for name in keys.KEY_UNITS)
     trial.rollback()
+
+
+def test_runtime_upgrade_keeps_key_upkeep_units_and_config(prepared, tmp_path, monkeypatch):
+    key_bundle, calls = installed_trial(prepared, tmp_path, monkeypatch)
+    install(key_bundle)
+    config_path = trial.CONFIG / "advisor/config.json"
+    watched = [config_path, *[old.UNIT_DIR / n for n in (*trial.UNITS, *keys.KEY_UNITS)], keys.record_path()]
+    before = {path: path.read_bytes() for path in watched}
+    newer, approved = trial_tests.newer_bundle(tmp_path / "bundle")
+    record = trial.upgrade(newer, approved)
+    assert record["manifest_sha256"] == approved
+    assert all(path.read_bytes() == value for path, value in before.items())  # Binds and jwks_file kept.
+    keys.installed()
+    assert not any(word in command for command in calls for word in ("start", "restart", "enable"))
+    trial.downgrade()
+    keys.installed()
+    with pytest.raises(ValueError, match="remove before trial rollback"):
+        trial.rollback()
+    keys.remove()
+    trial.rollback()
+
+
+def test_runtime_upgrade_refuses_while_key_removal_is_unfinished(prepared, tmp_path, monkeypatch):
+    key_bundle, _ = installed_trial(prepared, tmp_path, monkeypatch)
+    install(key_bundle)
+    unlink = Path.unlink
+    def fail(path, *args, **kwargs):
+        if path.name == keys.KEY_UNITS[0]:
+            raise OSError("Controlled interruption after config switch")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", fail)
+    with pytest.raises(OSError, match="Controlled"):
+        keys.remove()
+    monkeypatch.setattr(Path, "unlink", unlink)
+    newer, approved = trial_tests.newer_bundle(tmp_path / "bundle")
+    before = trial.RECORD.read_bytes()
+    with pytest.raises(ValueError, match="no longer reads the maintained snapshot"):
+        trial.upgrade(newer, approved)  # Finish keys remove first.
+    assert trial.RECORD.read_bytes() == before and not trial.KEPT.exists()
+    keys.remove()
+    assert trial.upgrade(newer, approved)["manifest_sha256"] == approved

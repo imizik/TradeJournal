@@ -14,7 +14,7 @@ SOURCE = Path(__file__).resolve().parent.parent
 TEMPLATES = SOURCE / "deploy/cloud-mcp-advisor"
 UNITS = tuple(f"tradejournal-advisor-{role}.{kind}" for role in ("backend", "mcp") for kind in ("socket", "service"))
 ADAPTER_FILES = ("cloud_mcp_advisor.py", "cloud_mcp_advisor_common.py", "cloud_mcp_d0.py")
-BACKEND_FILES = (*ADAPTER_FILES, "cloud_mcp_advisor_bridge.py", "cloud_advisor_owner.py", "pyproject.toml", "alembic.ini")
+BACKEND_FILES = (*ADAPTER_FILES, "cloud_mcp_advisor_bridge.py", "cloud_advisor_owner.py", "advisor_key_state.py", "pyproject.toml", "alembic.ini")
 FORMAT = "advisor-disabled-bundle-v1"
 
 

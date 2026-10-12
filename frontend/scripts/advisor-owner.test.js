@@ -84,6 +84,22 @@ test('oversize, redirect and malformed reader responses fail without retry/fallb
   });
 });
 
+const status = () => loaded.exports.advisorOwnerStatus(new Request('http://owner/api/advisor-owner/status', { headers: { cookie: 'invented-owner-session' } }));
+const statusBody = JSON.stringify({ schema_version: 'advisor-owner-status-v1', checked_at: '2026-10-11T12:00:00+00:00', keys: { state: 'fresh', expires_at: '2026-10-11T13:00:00+00:00' }, advisor: { state: 'enabled' }, assignment: { state: 'pending', expires_at: '2026-10-11T12:30:00+00:00' }, last_save_at: null, last_read_at: null });
+
+test('status BFF reads only the fixed status path with the same owner session and shape checks', async () => fixture(async ({ server, calls }) => {
+  let reply = statusBody;
+  server.on('request', (request, response) => {
+    assert.equal(request.method, 'GET'); assert.equal(request.url, '/owner/advisor/status');
+    for (const key of ['cookie', 'authorization', 'x-tj-gateway']) assert.equal(request.headers[key], undefined);
+    response.setHeader('Content-Type', 'application/json'); response.end(reply);
+  });
+  const response = await status(); assert.equal(response.status, 200); assert.equal(await response.text(), statusBody); assert.equal(calls(), 2);
+  reply = body; const wrong = await status(); assert.equal(wrong.status, 503); assert.match(await wrong.text(), /connection status unavailable/);
+  assert.equal((await loaded.exports.advisorOwnerStatus(new Request('http://owner/api/advisor-owner/status?state=x'))).status, 400);
+  profile.value = 'assistant'; assert.equal((await status()).status, 403);
+}));
+
 
 const managerSource = path.resolve(__dirname, '../lib/advisorAssignments.ts');
 const managerModule = new Module(managerSource, module);
