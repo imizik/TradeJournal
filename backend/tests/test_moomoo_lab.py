@@ -80,8 +80,8 @@ def test_sanitized_credential_failure():
 
 
 def test_session_coalesces_latest_no_archive_and_fixed_cap():
-    async def runner(appkey, key, seconds, observer):
-        assert seconds == 30 and appkey == "fixture"
+    async def runner(appkey, key, seconds, observer, refresh_seconds):
+        assert seconds == 8 * 3600 and refresh_seconds == 240 and appkey == "fixture"
         observer({"event": "status", "phase": "authenticated"})
         for i in range(100):
             observer({"event": "book", "symbol": "US.NVDA", "received_ms": i, "books": []})
@@ -94,11 +94,36 @@ def test_session_coalesces_latest_no_archive_and_fixed_cap():
     assert result[-1] == {"event": "status", "phase": "closed"}
 
 
+def test_coalescing_keeps_the_latest_book_of_each_kind():
+    def book(i, mpid):
+        return {"event": "book", "symbol": "US.NVDA", "received_ms": i, "books": [
+            {"exchange": "", "bids": [{"price": 1, "volume": 1, "mpid": mpid}], "asks": []}]}
+    async def runner(appkey, key, seconds, observer, refresh_seconds):
+        for i in range(50):
+            observer(book(i, "ARCA"))
+        observer(book(50, "NSDQ"))
+        observer(book(51, "ARCA"))
+        return {"closed": True}
+    with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
+        result = [json.loads(line) for line in client.post("/session", headers=HEADERS).text.splitlines()]
+    assert sorted(event["received_ms"] for event in result if event["event"] == "book") == [50, 51]
+
+
+def test_quiet_stream_sends_keepalives(monkeypatch):
+    monkeypatch.setattr(lab, "KEEPALIVE_SECONDS", 0.3)
+    async def runner(appkey, key, seconds, observer, refresh_seconds):
+        await asyncio.sleep(1.2)
+        return {"closed": True}
+    with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
+        result = [json.loads(line) for line in client.post("/session", headers=HEADERS).text.splitlines()]
+    assert result.count({"event": "keepalive"}) >= 2 and result[-1] == {"event": "status", "phase": "closed"}
+
+
 def test_single_session_gate_and_stop_closes_provider():
     async def scenario():
         from starlette.requests import Request
         started, stopped = asyncio.Event(), asyncio.Event()
-        async def runner(appkey, key, seconds, observer):
+        async def runner(appkey, key, seconds, observer, refresh_seconds):
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -149,12 +174,67 @@ def test_observer_auth_failure_no_subscribe_and_cancel_cleanup():
     asyncio.run(scenario())
 
 
+class RefreshSocket(FakeSocket):
+    """Answers refresh frames with `refresh_code`, or never when it is None."""
+    def __init__(self, refresh_code=0):
+        super().__init__()
+        self.refresh_code = refresh_code
+
+    async def send(self, raw):
+        frame = json.loads(raw)
+        if frame["action"] != "refresh":
+            return await super().send(raw)
+        self.sent.append(frame)
+        if self.refresh_code is not None:
+            await self.queue.put(json.dumps({"id": frame["id"], "code": self.refresh_code, "session_id": "DO-NOT-ECHO"}))
+
+
+def test_refreshed_session_signs_fresh_frames_and_keeps_subscriptions(monkeypatch):
+    monkeypatch.setattr(d, "MIN_REFRESH_SECONDS", 0)
+    async def scenario():
+        key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        socket, events = RefreshSocket(), []
+        report = await d.stream_probe("fixture", key, 1, lambda *a, **k: socket, events.append, refresh_seconds=0.2)
+        refreshes = [frame for frame in socket.sent if frame["action"] == "refresh"]
+        assert len(refreshes) >= 3 and report["refreshes"] == {"sent": len(refreshes), "confirmed": len(refreshes)}
+        assert all(set(frame["data"]) == {"credential_id", "authorization", "timestamp_ms", "nonce"} for frame in refreshes)
+        assert len({frame["data"]["nonce"] for frame in refreshes}) == len(refreshes)
+        # Subscriptions are sent once; a refresh keeps them, per the provider's auth contract.
+        assert sum(frame["action"] == "subscribe" for frame in socket.sent) == 3
+        assert report["status"] == "completed" and socket.sent[-1]["action"] == "unsubscribe" and report["closed"]
+        assert events.count({"event": "status", "phase": "refreshed"}) == len(refreshes)
+        assert "DO-NOT-ECHO" not in json.dumps(report)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("refresh_code", [4, None])
+def test_refused_or_silent_refresh_ends_session_and_unsubscribes(monkeypatch, refresh_code):
+    monkeypatch.setattr(d, "MIN_REFRESH_SECONDS", 0)
+    monkeypatch.setattr(d, "REFRESH_ACK_SECONDS", 0.2)
+    async def scenario():
+        key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+        socket = RefreshSocket(refresh_code)
+        report = await d.stream_probe("fixture", key, 5, lambda *a, **k: socket, None, refresh_seconds=0.1)
+        assert report["status"] == "failed_or_timed_out" and report["refresh_failed"]
+        assert report["refreshes"] == {"sent": 1, "confirmed": 0} and report["elapsed_seconds"] < 2
+        assert socket.sent[-1]["action"] == "unsubscribe" and report["closed"]
+    asyncio.run(scenario())
+
+
+def test_long_session_requires_refresh(key=None):
+    key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
+    with pytest.raises(d.DiagnosticError):
+        asyncio.run(d.stream_probe("fixture", key, 61, lambda *a, **k: FakeSocket()))
+    with pytest.raises(d.DiagnosticError):
+        asyncio.run(d.stream_probe("fixture", key, 8 * 3600 + 1, lambda *a, **k: FakeSocket(), refresh_seconds=240))
+
+
 def test_actual_asgi_http_disconnect_unsubscribes_before_session_release():
     async def scenario():
         socket = FakeSocket()
         key = Ed25519PrivateKey.from_private_bytes(bytes(range(32)))
-        async def runner(appkey, supplied_key, seconds, observer):
-            return await d.stream_probe(appkey, supplied_key, seconds, lambda *a, **k: socket, observer)
+        async def runner(appkey, supplied_key, seconds, observer, refresh_seconds):
+            return await d.stream_probe(appkey, supplied_key, seconds, lambda *a, **k: socket, observer, refresh_seconds=refresh_seconds)
         app = lab.create_app(token=TOKEN, loader=lambda: ("fixture", key), runner=runner)
         disconnect = asyncio.Event()
         first = True

@@ -1,6 +1,8 @@
 import { accessConfig, currentAccess } from "@/lib/accessServer";
 
 export const dynamic = "force-dynamic";
+/** The bridge ends a session by itself after eight hours; this backstop sits just above that. */
+const SESSION_TIMEOUT_MS = 8 * 3600_000 + 60_000;
 
 async function handler(request: Request) {
   try {
@@ -50,7 +52,7 @@ async function handler(request: Request) {
     const abort = () => controller.abort();
     request.signal.addEventListener("abort", abort, { once: true });
     if (request.signal.aborted) abort();
-    const timeout = setTimeout(abort, 40_000);
+    const timeout = setTimeout(abort, SESSION_TIMEOUT_MS);
     const dispose = () => { clearTimeout(timeout); request.signal.removeEventListener("abort", abort); };
     try {
       const response = await fetch(`http://127.0.0.1:8196/${request.method === "GET" ? "status" : "session"}`, {

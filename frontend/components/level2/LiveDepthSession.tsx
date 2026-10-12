@@ -1,96 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
-
-type Kind = "quote" | "order_book" | "ticker";
-type Phase = "connecting" | "authenticated" | "subscribed" | "failed" | "closed";
-type Level = { price: number; volume: number; order_count: number | null; mpid: string | null };
-type LiveBook = {
-  exchange: "ARCA" | "NASDAQ" | "UNKNOWN" | "";
-  source_time_ms: number | null;
-  estimated_age_ms: number | null;
-  order_volume_precision: number | null;
-  bids: Level[];
-  asks: Level[];
-};
-type BookEvent = { event: "book"; symbol: "US.NVDA"; received_ms: number; books: LiveBook[] };
-type StatusEvent = { event: "status"; phase: Phase; kind?: Kind; code?: number | null };
-type ProtocolStatus = "success" | "failed" | "unconfirmed" | "not_attempted" | "sent_unconfirmed" | "not_needed" | "unconfirmed; connection will close";
-type ProtocolResult = { status: ProtocolStatus; code?: number | null };
-type Summary = {
-  authentication?: ProtocolResult;
-  status?: "completed" | "failed_or_timed_out";
-  subscriptions?: Partial<Record<Kind, ProtocolResult>>;
-  message_counts?: Partial<Record<"QUOTE" | "ORDER_BOOK" | "TICKER", number>>;
-  unsubscribe?: ProtocolResult;
-  closed?: boolean;
-};
-
-const KINDS: Kind[] = ["quote", "order_book", "ticker"];
-const REPORT_KINDS = ["QUOTE", "ORDER_BOOK", "TICKER"] as const;
-const REPORT_STATUSES: ProtocolStatus[] = ["success", "failed", "unconfirmed", "not_attempted", "sent_unconfirmed", "not_needed", "unconfirmed; connection will close"];
-const MAX_LINE_BYTES = 256 * 1024;
-const SESSION_TIMEOUT_MS = 40_000;
-const numberOrNull = (value: unknown): value is number | null => value === null || (typeof value === "number" && Number.isFinite(value));
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
-const safeTimestamp = (value: unknown): value is number | null => value === null || (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 8_640_000_000_000_000);
-
-function validProtocolResult(value: unknown): value is ProtocolResult {
-  return isRecord(value) && REPORT_STATUSES.includes(value.status as ProtocolStatus)
-    && (value.code === undefined || (value.code === null || (typeof value.code === "number" && Number.isSafeInteger(value.code))));
-}
-
-function validLevel(value: unknown): value is Level {
-  if (!isRecord(value)) return false;
-  return typeof value.price === "number" && Number.isFinite(value.price) && value.price > 0
-    && typeof value.volume === "number" && Number.isFinite(value.volume) && value.volume >= 0
-    && (value.order_count === null || (typeof value.order_count === "number" && Number.isSafeInteger(value.order_count) && value.order_count >= 0))
-    && (value.mpid === null || (typeof value.mpid === "string" && /^[A-Z0-9]{1,8}$/.test(value.mpid)));
-}
-
-function validBook(value: unknown): value is BookEvent {
-  if (!isRecord(value) || value.event !== "book" || value.symbol !== "US.NVDA"
-    || !safeTimestamp(value.received_ms) || value.received_ms === null || value.received_ms === 0
-    || !Array.isArray(value.books) || value.books.length > 10) return false;
-  return value.books.every(book => isRecord(book)
-    && (book.exchange === "ARCA" || book.exchange === "NASDAQ" || book.exchange === "UNKNOWN" || book.exchange === "")
-    && safeTimestamp(book.source_time_ms)
-    && (book.estimated_age_ms === null || (typeof book.estimated_age_ms === "number" && Number.isFinite(book.estimated_age_ms) && Math.abs(book.estimated_age_ms) <= 8_640_000_000_000_000))
-    && (book.order_volume_precision === null || (typeof book.order_volume_precision === "number" && Number.isInteger(book.order_volume_precision) && book.order_volume_precision >= 0 && book.order_volume_precision <= 9))
-    && Array.isArray(book.bids) && book.bids.length <= 60 && book.bids.every(validLevel)
-    && Array.isArray(book.asks) && book.asks.length <= 60 && book.asks.every(validLevel));
-}
-
-function validStatus(value: unknown): value is StatusEvent {
-  return isRecord(value) && value.event === "status"
-    && ["connecting", "authenticated", "subscribed", "failed", "closed"].includes(String(value.phase))
-    && (value.kind === undefined || KINDS.includes(value.kind as Kind))
-    && (value.code === undefined || numberOrNull(value.code));
-}
-
-function validSummary(value: unknown): value is { event: "summary"; report: Summary } {
-  if (!isRecord(value) || value.event !== "summary" || !isRecord(value.report)) return false;
-  const report = value.report;
-  if (report.authentication !== undefined && !validProtocolResult(report.authentication)) return false;
-  if (report.status !== undefined && report.status !== "completed" && report.status !== "failed_or_timed_out") return false;
-  if (report.subscriptions !== undefined) {
-    if (!isRecord(report.subscriptions)) return false;
-    for (const kind of KINDS) {
-      const subscription = report.subscriptions[kind];
-      if (subscription !== undefined && !validProtocolResult(subscription)) return false;
-    }
-  }
-  if (report.message_counts !== undefined) {
-    if (!isRecord(report.message_counts)) return false;
-    for (const kind of REPORT_KINDS) {
-      const count = report.message_counts[kind];
-      if (count !== undefined && (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0)) return false;
-    }
-  }
-  return (report.unsubscribe === undefined || validProtocolResult(report.unsubscribe))
-    && (report.closed === undefined || typeof report.closed === "boolean");
-}
+import { KINDS, useDepthSession } from "./useDepthSession";
+import type { DepthSession, LiveBook } from "./useDepthSession";
 
 function displayTime(value: number | null): string {
   if (value === null || value === 0) return "Unavailable";
@@ -108,115 +20,15 @@ function BookTable({ book, side }: { book: LiveBook; side: "bids" | "asks" }) {
   </table>;
 }
 
-/** `compact` adapts the same session to the Charts dock: stacked books, one column, no page heading. Parsing and cancellation are unchanged. */
-export default function LiveDepthSession({ compact = false }: { compact?: boolean }) {
-  const again = compact ? "Close and reopen this panel to start again." : "Reload to start again.";
-  const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [availability, setAvailability] = useState<"checking" | "ready" | "unavailable">("checking");
-  const [running, setRunning] = useState(false);
-  const [started, setStarted] = useState(false);
-  const [message, setMessage] = useState("No live session started.");
-  const [statuses, setStatuses] = useState<Partial<Record<Kind, StatusEvent>>>({});
-  const [sessionPhase, setSessionPhase] = useState<Phase | null>(null);
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [bookEvent, setBookEvent] = useState<BookEvent | null>(null);
-  const [protocolError, setProtocolError] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    fetch("/api/level2-lab/session", { signal: controller.signal })
-      .then(response => {
-        if (!response.ok) throw new Error("unavailable");
-        return response.json();
-      })
-      .then((payload: unknown) => {
-        if (!isRecord(payload) || typeof payload.enabled !== "boolean") throw new Error("unavailable");
-        setEnabled(payload.enabled);
-        setAvailability("ready");
-      })
-      .catch(() => { if (!controller.signal.aborted) setAvailability("unavailable"); });
-    return () => controller.abort();
-  }, []);
-
-  const stop = useCallback(() => {
-    const active = abortRef.current;
-    if (!active) return;
-    active.abort();
-    abortRef.current = null;
-    setStarted(true);
-    setRunning(false);
-    setSessionPhase("closed");
-    setMessage(`Session stopped. Any retained book is for inspection only. ${again}`);
-  }, [again]);
-
-  useEffect(() => {
-    const onVisibility = () => { if (document.hidden && abortRef.current) stop(); };
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      abortRef.current?.abort();
-      abortRef.current = null;
-    };
-  }, [stop]);
-
-  const connect = async () => {
-    if (availability !== "ready" || !enabled || running || started) return;
-    const controller = new AbortController();
-    abortRef.current = controller;
-    const timeout = window.setTimeout(() => controller.abort(), SESSION_TIMEOUT_MS);
-    setStarted(true); setRunning(true); setMessage("Connecting to the provider…"); setStatuses({}); setSessionPhase(null); setSummary(null); setBookEvent(null); setProtocolError(false);
-    let sawClosed = false;
-    try {
-      const response = await fetch("/api/level2-lab/session", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-level2-start" },
-        signal: controller.signal,
-      });
-      if (!response.ok || !response.body) { setMessage("The local service could not start this session."); return; }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      const consumeLine = (line: string) => {
-        if (!line.trim()) return;
-        if (new TextEncoder().encode(line).byteLength > MAX_LINE_BYTES) { setProtocolError(true); return; }
-        let parsed: unknown;
-        try { parsed = JSON.parse(line); } catch { setProtocolError(true); return; }
-        if (validStatus(parsed)) {
-          setSessionPhase(parsed.phase);
-          if (parsed.phase === "closed") sawClosed = true;
-          if (parsed.kind) setStatuses(current => ({ ...current, [parsed.kind!]: parsed }));
-          if (parsed.phase === "failed") setMessage("Provider session failed. See the sanitized diagnostic status below.");
-          if (parsed.phase === "closed") setMessage("Session closed. Any retained book is for inspection only.");
-        } else if (validBook(parsed)) {
-          setBookEvent(parsed);
-          setMessage("Receiving provider book updates. This display is for inspection only.");
-        } else if (validSummary(parsed)) {
-          setSummary(parsed.report);
-          if (parsed.report.closed) sawClosed = true;
-        }
-        // Unknown and malformed protocol records are ignored without exposing provider text.
-      };
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        if (new TextEncoder().encode(buffer).byteLength > MAX_LINE_BYTES && !buffer.includes("\n")) {
-          setProtocolError(true); buffer = ""; continue;
-        }
-        let newline = buffer.indexOf("\n");
-        while (newline >= 0) { consumeLine(buffer.slice(0, newline)); buffer = buffer.slice(newline + 1); newline = buffer.indexOf("\n"); }
-      }
-      buffer += decoder.decode();
-      if (buffer) consumeLine(buffer);
-      if (!controller.signal.aborted) setMessage(sawClosed ? `Session closed. Any retained book is for inspection only. ${again}` : `Session ended. Any retained book is for inspection only. ${again}`);
-    } catch {
-      if (abortRef.current === controller) setMessage(controller.signal.aborted ? `Session timed out. Any retained book is for inspection only. ${again}` : `The local service connection ended. ${again}`);
-    } finally {
-      window.clearTimeout(timeout);
-      if (abortRef.current === controller) { abortRef.current = null; setRunning(false); }
-    }
-  };
+/**
+ * `compact` adapts the same session to the Charts dock: stacked books, one
+ * column, no page heading. Charts passes its own page-level `session` so the
+ * heatmap keeps collecting while the dock is closed; the lab owns one here,
+ * cancelled when its tab is hidden.
+ */
+export default function LiveDepthSession({ compact = false, session }: { compact?: boolean; session?: DepthSession }) {
+  const own = useDepthSession({ active: !session, stopWhenHidden: true });
+  const { availability, enabled, running, message, statuses, sessionPhase, summary, bookEvent, protocolError, refreshedAt, connect, stop } = session ?? own;
 
   // Compact (dock) mode puts the latest book first so the depth is visible without scrolling past diagnostics.
   const diagBlocks = <>
@@ -237,6 +49,7 @@ export default function LiveDepthSession({ compact = false }: { compact?: boolea
     {summary && <div className="rounded border p-3 text-xs text-muted-foreground" aria-label="Sanitized session summary">
       <p>Authentication: {summary.authentication?.status ?? "Unavailable"} · Session status: {summary.status ?? "Unavailable"}</p>
       <p>Unsubscribe: {summary.unsubscribe?.status ?? "Unavailable"} · Closed: {summary.closed === undefined ? "Unavailable" : summary.closed ? "Yes" : "No"}</p>
+      {summary.refreshes && <p>Sign-in refreshes: {summary.refreshes.confirmed} of {summary.refreshes.sent} confirmed{summary.refresh_failed ? " · the session ended on an unconfirmed refresh" : ""}</p>}
       <p>No-message success does not confirm live delivery.</p>
     </div>}
   </>;
@@ -268,26 +81,26 @@ export default function LiveDepthSession({ compact = false }: { compact?: boolea
   return <section aria-labelledby="live-depth-title" className={compact ? "min-w-0 space-y-2 border-b border-sky-400/20 p-3 text-slate-200" : "space-y-3 rounded-lg border border-sky-400/30 bg-card p-4"} data-testid="live-depth-session" data-compact={compact || undefined}>
     <div className="flex flex-wrap items-center gap-3">
       <h2 id="live-depth-title" className={compact ? "text-xs font-medium" : "text-lg font-semibold"}>Manual provider session</h2>
-      <span className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">MANUAL · 30 SECONDS</span>
+      <span className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1 text-xs font-semibold text-sky-200">MANUAL · UNTIL STOPPED</span>
     </div>
     {compact
-      ? <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">About this session (US.NVDA, 30 seconds, manual)</summary>
+      ? <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">About this session (US.NVDA, manual, until stopped)</summary>
         <div className="space-y-1 pt-1">
-    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. Latest order-book update only; no recording, history, saved metrics, or automatic reconnect.</p>
+    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. It runs until Stop (eight hours at most), refreshing its sign-in every four minutes. Nothing is recorded or saved, and it never reconnects by itself.</p>
     <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
         </div></details>
       : <>
-    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. Latest order-book update only; no recording, history, saved metrics, or automatic reconnect.</p>
+    <p className="text-sm text-muted-foreground">US.NVDA · isolated local service session. It runs until Stop (eight hours at most), refreshing its sign-in every four minutes. Nothing is recorded or saved, and it never reconnects by itself.</p>
     <p className="text-xs text-muted-foreground">Provider volume units are unverified. Exchange and source timestamps are shown as reported. A received update does not establish consolidated depth or entitlement coverage.</p>
       </>}
     {availability === "unavailable" && <p role="status" className="rounded border border-amber-400/40 p-2 text-sm text-amber-200">Local service is not enabled or unavailable. No provider connection was started.</p>}
     {availability === "ready" && !enabled && <p role="status" className="rounded border border-muted p-2 text-sm text-muted-foreground">Local live service is disabled. No provider connection was started.</p>}
     <div className="flex flex-wrap items-center gap-2">
-      <Button size={compact ? "sm" : undefined} onClick={connect} disabled={availability !== "ready" || !enabled || running || started}>{running ? "Session running…" : started ? (compact ? "Reopen to start again" : "Reload to start again") : "Connect for 30 seconds"}</Button>
+      <Button size={compact ? "sm" : undefined} onClick={connect} disabled={availability !== "ready" || !enabled || running}>{running ? "Session running…" : "Connect"}</Button>
       <Button size={compact ? "sm" : undefined} variant="outline" onClick={stop} disabled={!running}>Stop</Button>
       <span role="status" aria-live="polite" className="text-sm text-muted-foreground">{message}</span>
     </div>
-    {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}</p>}
+    {sessionPhase && <p className="text-xs text-muted-foreground">Provider phase: {sessionPhase}{refreshedAt ? ` · sign-in refreshed ${new Date(refreshedAt).toLocaleTimeString()}` : ""}</p>}
     {protocolError && <p role="status" className="text-xs text-amber-200">An invalid or oversized protocol line was ignored.</p>}
     {compact && bookBlock}
     {diagBlocks}

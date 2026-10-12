@@ -52,7 +52,7 @@ test("local lab proxy fails closed and never forwards browser credentials or par
   }
 });
 
-test("proxy propagates request abort, response cancel and its 40-second bound upstream", async () => {
+test("proxy propagates request abort, response cancel and its eight-hour backstop upstream", async () => {
   const source = readFileSync(path.join(__dirname, "../app/api/level2-lab/session/route.ts"), "utf8");
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const output: { POST?: (request: Request) => Promise<Response> } = {};
@@ -61,7 +61,7 @@ test("proxy propagates request abort, response cancel and its 40-second bound up
   const priorEnabled = process.env.TJ_MOOMOO_LAB_ENABLED, priorToken = process.env.TJ_MOOMOO_LAB_TOKEN;
   let fireDeadline: (() => void) | undefined;
   globalThis.setTimeout = ((callback: () => void, delay?: number) => {
-    if (delay === 40_000) { fireDeadline = callback; return originalTimeout(callback, 1_000_000); }
+    if (delay === 8 * 3600_000 + 60_000) { fireDeadline = callback; return originalTimeout(callback, 1_000_000); }
     return originalTimeout(callback, delay);
   }) as typeof setTimeout;
   process.env.TJ_MOOMOO_LAB_ENABLED = "true";
