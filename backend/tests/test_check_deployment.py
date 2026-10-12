@@ -215,8 +215,12 @@ def test_upgrade_swaps_only_the_stopped_runtime_and_keeps_the_previous(staged, h
     (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     newer_approval = control.digest(staged / "manifest.json")
     monkeypatch.setattr(old, "runtime_inventory", lambda **k: {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]})
-    record = {**json.loads(control.RECORD.read_text()), "runtime_inventory": {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]}}
+    (control.CONFIG / "context-views.sql").write_bytes((staged / "config/context-views.sql").read_bytes())
+    record = json.loads(control.RECORD.read_text())
+    record = {**record, "settings": {**record["settings"], "context-views.sql": control.digest(control.CONFIG / "context-views.sql")},
+        "runtime_inventory": {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]}}
     control.RECORD.write_text(json.dumps(record))
+    config_before = {p.name: p.read_bytes() for p in control.CONFIG.iterdir() if p.is_file()}
     control.RECORD.chmod(0o600)
     with pytest.raises(ValueError):
         control.upgrade(staged, "0" * 64)
@@ -240,3 +244,44 @@ def test_upgrade_swaps_only_the_stopped_runtime_and_keeps_the_previous(staged, h
     with pytest.raises(ValueError, match="units"):
         control.upgrade(staged, control.digest(staged / "manifest.json"))
     assert (control.ROOT / "backend/cloud_mcp_check.py").read_text().endswith("# newer\n")
+
+
+def test_upgrade_adds_context_views_only_with_their_own_approval(staged, host, monkeypatch):
+    approved = control.digest(staged / "manifest.json")
+    record = control.install(staged, approved, dns_servers=["1.1.1.1"], host_ips=["203.0.113.5"])
+    monkeypatch.setattr(control.pwd, "getpwnam", lambda name: SimpleNamespace(
+        pw_uid=record["uids"][next(r for r, a in control.ACCOUNTS.items() if a == name)], pw_gid=990,
+        pw_shell="/usr/sbin/nologin"))
+    # The live host was installed before context views existed.
+    record = json.loads(control.RECORD.read_text())
+    assert "context-views.sql" not in record["settings"]  # Install never applies or pins database views.
+    record["manifest_sha256"] = "1" * 64
+    control.RECORD.write_text(json.dumps(record))
+    control.RECORD.chmod(0o600)
+    statements, present = [], {"count": "0"}
+
+    def fake_psql(sql):
+        statements.append(sql.decode())
+        return present["count"] if sql.startswith(b"SELECT count(*)") else ""
+    monkeypatch.setattr(control, "psql", fake_psql)
+    sql_digest = control.digest(staged / "config/context-views.sql")
+    with pytest.raises(ValueError, match="approve-sql"):
+        control.upgrade(staged, approved)
+    assert statements == []
+    upgraded = control.upgrade(staged, approved, (sql_digest,))
+    assert any("CREATE VIEW public.pretrade_position_source" in s for s in statements)
+    assert upgraded["settings"]["context-views.sql"] == sql_digest == control.digest(control.CONFIG / "context-views.sql")
+    # Re-runs: the exact recorded SQL skips; different SQL over existing views or a half state refuses.
+    statements.clear()
+    present["count"] = "2"
+    sql = (staged / "config/context-views.sql").read_bytes()
+    control.apply_context_views(sql)
+    assert not any(s.startswith("BEGIN") for s in statements)
+    with pytest.raises(RuntimeError, match="do not match"):
+        control.apply_context_views(sql.replace(b"LIMIT 200", b"LIMIT 201"))
+    present["count"] = "1"
+    with pytest.raises(RuntimeError, match="do not match"):
+        control.apply_context_views(sql)
+    present["count"] = "0"
+    with pytest.raises(RuntimeError, match="recorded but its views are missing"):
+        control.apply_context_views(sql)

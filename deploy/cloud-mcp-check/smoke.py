@@ -194,7 +194,7 @@ def exercise(archive, scratch):
     assert listing.status_code == 200, (listing.status_code, listing.headers.get("www-authenticate"))
     tools = listing.json()["result"]["tools"]
     assert rpc("pre_trade_check", {}, token(azp="other-client")).status_code == 401
-    assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict"}
+    assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes"}
     assert rpc("pre_trade_check", {}, token(aud="https://check.example.test/mcp")).status_code == 401
     assert rpc("pre_trade_check", {}, token(scope="journal:read")).status_code == 403
     operation = str(uuid.uuid4())
