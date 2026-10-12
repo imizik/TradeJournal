@@ -66,6 +66,11 @@ def status_of(candidate: ScannerCandidate, state: dict) -> str:
     return "pending_entry"
 
 
+def _fresh(quote, decided: float) -> bool:
+    """Both sides of the quote were updated at or after the decision (Tradier's millisecond times)."""
+    return all(isinstance(t, (int, float)) and t >= decided * 1000 for t in (quote.bid_date, quote.ask_date))
+
+
 def _quote(occ: str):
     return tradier.get_quotes([occ]).get(occ)
 
@@ -74,7 +79,7 @@ class SetupScanner:
     def __init__(self, engine, feed, calendar, options, clock, quote=_quote):
         self.engine, self.feed, self.calendar, self.options, self.clock = engine, feed, calendar, options, clock
         self.quote = quote
-        self._scanned_through = 0  # the newest 5-minute bar end already judged
+        self._scanned: dict[str, int] = {}  # per symbol, the newest 5-minute bar end already judged
         self._atr: dict[tuple[str, date], float | None] = {}
 
     def run(self) -> None:
@@ -94,15 +99,16 @@ class SetupScanner:
         bar_end = session.open_at + (int(now - LATENESS) - session.open_at) // rules.BAR_SECONDS * rules.BAR_SECONDS
         last_end = min(int(datetime(today.year, today.month, today.day, rules.LAST_BAR_END_MINUTE // 60,
                                     rules.LAST_BAR_END_MINUTE % 60, tzinfo=ET).timestamp()), session.close_at - 3600)
-        if bar_end <= self._scanned_through or bar_end - rules.BAR_SECONDS < session.open_at + rules.FIRST_BAR_AFTER or bar_end > last_end:
+        if bar_end - rules.BAR_SECONDS < session.open_at + rules.FIRST_BAR_AFTER or bar_end > last_end:
             return
-        self._scanned_through = bar_end
         if now - bar_end > rules.MAX_DELAY_SECONDS + LATENESS:
-            log.info("Setup scanner skipped the bar ending %s: noticed %.0fs late", _utc(bar_end), now - bar_end)
-            return
+            return  # too late to act on this bar; a symbol not judged in time simply misses it
         for symbol in rules.UNIVERSE:
+            if self._scanned.get(symbol, 0) >= bar_end:
+                continue
             try:
                 self._scan_symbol(symbol, today, session, bar_end, last_end)
+                self._scanned[symbol] = bar_end  # a failed read is retried on the next pass while still in time
             except (ChartFeedError, OptionsChainError, ValueError) as exc:
                 log.warning("Setup scanner could not judge %s at %s: %s", symbol, _utc(bar_end), exc)
             except Exception:
@@ -209,12 +215,13 @@ class SetupScanner:
 
     def _enter(self, candidate: ScannerCandidate, now: float) -> None:
         contract = json.loads(candidate.contract_json)
+        decided = _epoch(candidate.detected_at)
         quote = self._read_quote(contract["symbol"])
         at = self.clock()
-        if quote is not None and quote.ask and quote.ask > 0 and quote.bid is not None:
+        if at - decided > rules.MAX_DELAY_SECONDS:
+            return self._store(candidate, "unresolved", at, {"reason": "no entry quote within two minutes"})
+        if quote is not None and quote.ask and quote.ask > 0 and quote.bid is not None and _fresh(quote, decided):
             self._store(candidate, "entry", at, {"ask": quote.ask, "bid": quote.bid, "ask_time": quote.ask_date, "bid_time": quote.bid_date})
-        elif at - _epoch(candidate.detected_at) > rules.MAX_DELAY_SECONDS:
-            self._store(candidate, "unresolved", at, {"reason": "no entry quote within two minutes"})
 
     def _watch(self, candidate: ScannerCandidate, state: dict, session) -> None:
         entry_at = state["entry"]["at"]
@@ -236,14 +243,15 @@ class SetupScanner:
 
     def _exit(self, candidate: ScannerCandidate, state: dict) -> None:
         contract = json.loads(candidate.contract_json)
+        decided = state["exit_intent"]["at"]
         quote = self._read_quote(contract["symbol"])
         at = self.clock()
-        if quote is not None and quote.bid is not None and quote.ask:
+        if at - decided > rules.MAX_DELAY_SECONDS:
+            return self._store(candidate, "unresolved", at, {"reason": "no exit quote within two minutes"})
+        if quote is not None and quote.bid is not None and quote.ask and _fresh(quote, decided):
             exit_ = {"bid": quote.bid, "ask": quote.ask, "bid_time": quote.bid_date, "ask_time": quote.ask_date,
                      "reason": state["exit_intent"]["reason"]}
             self._store(candidate, "exit", at, {**exit_, **rules.result(state["entry"], exit_, contract["multiplier"])})
-        elif at - state["exit_intent"]["at"] > rules.MAX_DELAY_SECONDS:
-            self._store(candidate, "unresolved", at, {"reason": "no exit quote within two minutes"})
 
     def _read_quote(self, occ: str):
         try:
@@ -278,8 +286,8 @@ class SetupScanner:
 def day_view(db: Session, day: date, own_entries: list[datetime] | None = None) -> dict:
     """The day's candidates and rules-only results for the owner page.
 
-    ``own_entries`` are Isaac's option entry times that day (New York wall
-    clock); they fill the review-time ``sixth_plus_entry`` flag and are never
+    ``own_entries`` are the open times of Isaac's option trades that day (New
+    York wall clock); they fill the review-time ``sixth_plus_entry`` flag and are never
     read by the scanner itself."""
     rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == day).order_by(ScannerCandidate.bar_end)).all()
     items, totals = [], {"candidates": 0, "trades": 0, "resolved": 0, "unresolved": 0, "no_contract": 0,

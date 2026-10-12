@@ -157,6 +157,22 @@ judged on completed 1-minute bars that start after the entry minute, the stop
 winning a bar that touches both. Same-day contracts are flat by 15:45 and
 others by 15:50 (or 10 minutes before an early close).
 
+An entry or exit is priced only from a quote read within two minutes of its
+decision whose bid and ask were both updated at or after the decision;
+otherwise the trade is `unresolved`, even if a usable quote arrives later.
+A gap in watching an open trade ends it `unresolved` only when an exit
+condition fell inside the gap: the minute bars cover the rest of the gap, so
+nothing is backdated. The review-time `sixth_plus_entry` flag counts trades
+opened that day, not fills.
+
+Budget when enabled: each 5-minute bar reads 12 one-minute series from the
+chart feed's shared 60-per-minute allowance (plus 12 daily series once a
+day), and each open trade re-reads its symbol about three times a minute. A
+symbol whose read is refused is retried on later passes while the bar is
+still within two minutes. Option quotes use Tradier's quote endpoint, which
+waits out a rate limit inside the monitor pass. Watch for `rate_limited`
+chart reads during the first live sessions.
+
 Fixture tests cover the rules, duplicate suppression across a restarted
 process, entry and exit pricing, missing quotes, late exits and the
 review-time flag. A seeded local page was checked at desktop and 375px

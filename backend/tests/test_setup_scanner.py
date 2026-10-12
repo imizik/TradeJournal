@@ -15,7 +15,7 @@ from app.database import get_session
 from app.engine import scanner_rules as rules
 from app.engine import setup_scanner
 from app.engine.options_models import OptionContract
-from app.models import Account, Fill, ScannerCandidate, ScannerEvent
+from app.models import Account, Fill, Trade, ScannerCandidate, ScannerEvent
 from app.routers import scanner as routes
 
 ET = ZoneInfo("America/New_York")
@@ -183,12 +183,13 @@ class Options:
 class Quotes:
     def __init__(self):
         self.next = (1.0, 1.05)
+        self.updated_ms = 10**15  # both sides updated after any decision in these tests
 
     def __call__(self, occ):
         if self.next is None:
             return None
         bid, ask = self.next
-        return SimpleNamespace(bid=bid, ask=ask, bid_date=1, ask_date=1)
+        return SimpleNamespace(bid=bid, ask=ask, bid_date=self.updated_ms, ask_date=self.updated_ms)
 
 
 class Clock:
@@ -264,6 +265,49 @@ def test_no_quote_for_two_minutes_is_unresolved(engine):
     assert rows(engine)[1]["unresolved"]["reason"] == "no entry quote within two minutes"
 
 
+def test_a_quote_that_arrives_after_the_window_is_never_used(engine):
+    quotes = Quotes()
+    quotes.next = None
+    watch, clock = scanner(engine, at(9, 50, 35), quotes=quotes)
+    breakout_day(watch.feed)
+    watch.run()
+    quotes.next = (1.0, 1.05)  # the provider recovers half an hour later
+    clock.now = at(10, 20)
+    watch.run()
+    events = rows(engine)[1]
+    assert "entry" not in events and events["unresolved"]["reason"] == "no entry quote within two minutes"
+
+
+def test_a_quote_not_updated_since_the_decision_is_not_a_fill(engine):
+    quotes = Quotes()
+    quotes.updated_ms = (at(9, 50, 0)) * 1000  # last changed before the setup was saved
+    watch, clock = scanner(engine, at(9, 50, 35), quotes=quotes)
+    breakout_day(watch.feed)
+    watch.run()
+    assert "entry" not in rows(engine)[1]
+    quotes.updated_ms = at(9, 51) * 1000
+    clock.now = at(9, 51, 5)
+    watch.run()
+    assert rows(engine)[1]["entry"]["ask"] == 1.05
+
+
+def test_an_exit_quote_after_the_window_is_unresolved(engine):
+    quotes = Quotes()
+    watch, clock = scanner(engine, at(9, 50, 35), quotes=quotes)
+    breakout_day(watch.feed)
+    watch.run()
+    watch.feed.add(at(9, 51), at(9, 52), 100.9, rows(engine)[0][0].target + 0.1)
+    quotes.next = None
+    clock.now = at(9, 52, 40)
+    watch.run()
+    assert "exit_intent" in rows(engine)[1]
+    quotes.next = (1.5, 1.6)
+    clock.now = at(10, 30)
+    watch.run()
+    events = rows(engine)[1]
+    assert "exit" not in events and events["unresolved"]["reason"] == "no exit quote within two minutes"
+
+
 def test_an_exit_noticed_late_is_unresolved_never_priced(engine):
     watch, clock = scanner(engine, at(9, 50, 35))
     breakout_day(watch.feed)
@@ -300,8 +344,11 @@ def test_day_route_marks_a_sixth_entry(engine):
         account = Account(name="Roth", type="roth_ira", last4="0000")
         db.add(account)
         for i in range(5):
-            db.add(Fill(account_id=account.id, ticker="SPY", instrument_type="option", side="buy_to_open", contracts=1, price=1.0,
-                        executed_at=datetime(2026, 10, 7, 9, 31 + i), raw_email_id=f"e{i}"))
+            db.add(Trade(account_id=account.id, ticker="SPY", instrument_type="option", contracts=1, avg_entry_premium=1.0,
+                         total_premium_paid=100.0, opened_at=datetime(2026, 10, 7, 9, 31 + i)))
+        # A sixth fill of an already-open trade is not another entry.
+        db.add(Fill(account_id=account.id, ticker="SPY", instrument_type="option", side="buy_to_open", contracts=1, price=1.0,
+                    executed_at=datetime(2026, 10, 7, 9, 40), raw_email_id="scale-in"))
         db.commit()
     app = FastAPI()
     app.include_router(routes.router, prefix="/scanner")
