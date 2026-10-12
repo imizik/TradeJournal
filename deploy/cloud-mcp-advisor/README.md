@@ -325,8 +325,9 @@ the runtime's `schema_revision`, owner/mode must be unchanged and no extra file
 may remain beside the ledger. Otherwise the copy's bytes are written back in
 place (same inode, so owner, mode and ACL stay), verified by digest, and it
 refuses naming the copy. A leftover SQLite journal blocks that automatic
-restore and needs review. The current #251 ledger is one migration behind main
-(`d6e1f2a3b4c5`, the unrelated empty `monthly_review` table from #258).
+restore and needs review. The current #251 ledger is behind main: it predates `d6e1f2a3b4c5` (the
+unrelated empty `monthly_review` table from #258) and `a7c3e9f1b2d4` (the
+unrelated setup scanner tables).
 
 The current roles move to `previous-runtime/<UTC time>-<manifest prefix>-<random>/`
 (kept, inventoried in the record as `previous_runtimes` with the schema they

@@ -597,6 +597,50 @@ export type TradingViewVerdict =
   | "long_scalp"
   | "short_scalp";
 
+export type ScannerEventRow = Record<string, number | string | null> & { at: string };
+
+export type ScannerCandidateRow = {
+  id: string;
+  symbol: string;
+  setup: "fade" | "orb";
+  direction: "long" | "short";
+  bar_end: string;
+  detected_at: string;
+  stop: number;
+  target: number;
+  flags: string[];
+  facts: Record<string, number | string>;
+  contract: {
+    symbol: string;
+    expiration: string;
+    option_type: string;
+    strike: number;
+    delta: number;
+    bid: number;
+    ask: number;
+  } | null;
+  status: "no_contract" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  events: Record<string, ScannerEventRow>;
+};
+
+export type ScannerDay = {
+  date: string;
+  scanner_version: string;
+  params_hash: string;
+  enabled: boolean;
+  totals: {
+    candidates: number;
+    trades: number;
+    resolved: number;
+    unresolved: number;
+    no_contract: number;
+    pnl: number;
+    pnl_2x_spread: number;
+    wins: number;
+  };
+  candidates: ScannerCandidateRow[];
+};
+
 export type TradingViewAlert = {
   alert_id: string;
   contract_version: number;
@@ -771,6 +815,7 @@ return {
   advancedRebuildAll: () => post<{ run_id: string }>("/sync/advanced/rebuild-all"),
   advancedResyncAll: (confirm?: string) => post<{ run_id: string }>("/sync/advanced/resync-all", confirm ? { confirm } : undefined),
   health: () => get<Health>("/health"),
+  scannerDay: (day?: string) => get<ScannerDay>(`/scanner/day${day ? `?day=${encodeURIComponent(day)}` : ""}`),
   tradingViewAlerts: (params?: string) =>
     get<TradingViewAlert[]>(`/tradingview/alerts${params ? `?${params}` : ""}`),
   tradingViewAlert: (alertId: string) =>

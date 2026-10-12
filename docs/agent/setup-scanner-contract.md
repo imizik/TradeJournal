@@ -54,10 +54,12 @@ symbol per day.
 paper trades is open, and none within 30 minutes of that symbol's last
 candidate. A repeated detection of the same bar is the same candidate.
 
-**Flags (recorded, not filtered).** `put_first_15m`, `put_extended` (more than
+**Flags (recorded, not filtered).** `put_extended` (more than
 1.5% beyond VWAP or 0.8% beyond EMA9 in the trade direction), and `sixth_plus_entry`
 (Isaac's sixth or later entry that day, filled in at review, never visible to
-the scanner or a later shadow before commit).
+the scanner or a later shadow before commit). Puts in the first 15 minutes
+cannot occur because scanning starts with the 09:45 bar, so that leak is
+measured on Isaac's own trades, not flagged here.
 
 ## Contract choice
 
@@ -138,6 +140,43 @@ Every symbol produced setups and no session had missing data. In the adopted
 set, 57% of underlying exits were the 60-minute time stop, 32% stops, 9% targets
 and 2% the flat-by time: the VWAP target is usually farther than an hour away.
 This is a property of the rules to watch forward, not a reason to tune them.
+
+## Build status (October 12, 2026)
+
+Built, not activated. `app/engine/scanner_rules.py` holds the rules and
+`app/engine/setup_scanner.py` runs them inside the level alert monitor's
+pass when `SETUP_SCANNER_ENABLED=true` (default off, and level alerts must
+also be running). Migration `a7c3e9f1b2d4` adds `scanner_candidate` and
+`scanner_event`. The owner page is `/scanner` (`GET /scanner/day`).
+
+Implementation choices within this contract: session VWAP uses each
+minute's typical price; daily ATR is the simple mean of 14 true ranges from
+Tradier daily bars; the scanner judges only the newest completed 5-minute
+bar and skips one noticed more than two minutes late; stop and target are
+judged on completed 1-minute bars that start after the entry minute, the stop
+winning a bar that touches both. Same-day contracts are flat by 15:45 and
+others by 15:50 (or 10 minutes before an early close).
+
+An entry or exit is priced only from a quote read within two minutes of its
+decision whose bid and ask were both updated at or after the decision;
+otherwise the trade is `unresolved`, even if a usable quote arrives later.
+A gap in watching an open trade ends it `unresolved` only when an exit
+condition fell inside the gap: the minute bars cover the rest of the gap, so
+nothing is backdated. The review-time `sixth_plus_entry` flag counts trades
+opened that day, not fills.
+
+Budget when enabled: each 5-minute bar reads 12 one-minute series from the
+chart feed's shared 60-per-minute allowance (plus 12 daily series once a
+day), and each open trade re-reads its symbol about three times a minute. A
+symbol whose read is refused is retried on later passes while the bar is
+still within two minutes. Option quotes use Tradier's quote endpoint, which
+waits out a rate limit inside the monitor pass. Watch for `rate_limited`
+chart reads during the first live sessions.
+
+Fixture tests cover the rules, duplicate suppression across a restarted
+process, entry and exit pricing, missing quotes, late exits and the
+review-time flag. A seeded local page was checked at desktop and 375px
+widths. No live session has run.
 
 ## Acceptance
 

@@ -1346,3 +1346,52 @@ class PracticeAgentCall(SQLModel, table=True):
     started_at: datetime = Field(default_factory=datetime.utcnow)
     finished_at: Optional[datetime] = None
     error: Optional[str] = None
+
+
+class ScannerCandidate(SQLModel, table=True):
+    """One setup the scanner found (S1, ``docs/agent/setup-scanner-contract.md``).
+
+    Frozen at detection and never rewritten. The unique (version, symbol, setup,
+    bar end) keeps a restart or a second pass from recording the same bar twice.
+    ``contract_json`` is null when no contract met the choice rule."""
+
+    __tablename__ = "scanner_candidate"
+    __table_args__ = (
+        UniqueConstraint("scanner_version", "symbol", "setup", "bar_end", name="uq_scanner_candidate_bar"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    scanner_version: str
+    params_hash: str
+    session_date: date = Field(index=True)
+    symbol: str
+    setup: str  # fade | orb
+    direction: str  # long | short
+    bar_start: datetime  # UTC, the 5-minute bar that confirmed the setup
+    bar_end: datetime
+    detected_at: datetime  # UTC, when this server saved it
+    expires_at: datetime
+    stop: float
+    target: float
+    flags_json: str = Field(default="[]", sa_column=Column(Text, nullable=False))
+    facts_json: str = Field(sa_column=Column(Text, nullable=False))
+    contract_json: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    source: str
+
+
+class ScannerEvent(SQLModel, table=True):
+    """One append-only rules-only paper event for a scanner candidate.
+
+    The trade's state is always the fold of these rows; the unique (candidate,
+    key) pair keeps a retry or restart from recording a fact twice."""
+
+    __tablename__ = "scanner_event"
+    __table_args__ = (UniqueConstraint("candidate_id", "key", name="uq_scanner_event_key"),)
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    candidate_id: uuid.UUID = Field(foreign_key="scanner_candidate.id", index=True)
+    key: str
+    event_type: str  # entry | exit_intent | exit | unresolved
+    effective_at: datetime  # UTC: the quote or market moment the event is about
+    recorded_at: datetime  # UTC: when this server stored it
+    data_json: str = Field(sa_column=Column(Text, nullable=False))
