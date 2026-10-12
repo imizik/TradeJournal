@@ -3,23 +3,29 @@
 `stage` copies only the reviewed key publisher files into a private bundle.
 `install` (advisor stopped) adds a dedicated key UID, a public snapshot
 directory, three key units and a UID-only network policy, mounts that directory
-read-only into the two serving units and points the advisor config at it.
-Nothing is started or enabled. `check` reports freshness. `remove` reverses
+read-only into the two serving units and points the advisor config at it. For
+the owner status it grants the owner-reader UID read-only access (named-UID
+ACL) to the snapshot and advisor config directories and mounts both read-only
+into the owner reader. Nothing is started or enabled. `check` reports freshness. `remove` reverses
 the unit/config switch and preserves the key UID, directories and snapshots.
 """
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 from pathlib import Path
 import pwd
 import shutil
 import stat
+import struct
 import sys
 import tempfile
 import time
 
+sys.path.append(str(Path(__file__).resolve().parent.parent / "backend"))
+from advisor_key_state import FRESH_MARGIN, MAX_SNAPSHOT, read_snapshot, snapshot_state  # noqa: E402,F401
 import advisor_mcp_control as old
 import advisor_mcp_stage as stage
 import advisor_trial_control as trial
@@ -33,38 +39,15 @@ KEYS = Path("/var/lib/tradejournal-advisor-v2-keys")
 SNAPSHOT_NAME = "public-keys.json"
 KEY_UNITS = ("tradejournal-advisor-keys-network.service", "tradejournal-advisor-keys.service",
     "tradejournal-advisor-keys.timer")
-SERVING = ("tradejournal-advisor-mcp.service", "tradejournal-advisor-backend.service")
+OWNER_SERVICE = "tradejournal-advisor-owner.service"
+# Units that read the snapshot: the two serving units plus the owner status reader.
+SERVING = ("tradejournal-advisor-mcp.service", "tradejournal-advisor-backend.service", OWNER_SERVICE)
 BUNDLE_FILES = ("cloud_mcp_d0_refresh.py", *[f"units/{name}" for name in KEY_UNITS])
 RECORD_NAME = "keys-installation.json"
-FRESH_MARGIN = 15 * 60
-MAX_SNAPSHOT = 64 * 1024
 
 
 def record_path():
     return RUNTIME / RECORD_NAME
-
-
-def read_snapshot(path, *, owner=None):
-    """Read a public snapshot without following links or blocking on special files.
-
-    The key UID owns the maintained directory, so root must not trust its leaf:
-    require a small regular file (owned by the key UID when given) that parses.
-    """
-    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    try:
-        info = os.fstat(descriptor)
-        if not stat.S_ISREG(info.st_mode) or (owner is not None and info.st_uid != owner):
-            raise ValueError("Public-key snapshot must be a regular file owned by its publisher")
-        body = os.read(descriptor, MAX_SNAPSHOT + 1)
-    finally:
-        os.close(descriptor)
-    if len(body) > MAX_SNAPSHOT:
-        raise ValueError("Public-key snapshot is too large")
-    snapshot = json.loads(body)
-    if (not isinstance(snapshot, dict) or set(snapshot) != {"issuer_url", "jwks_url", "fetched_at", "expires_at", "keys"}
-            or not isinstance(snapshot["keys"], list)):
-        raise ValueError("Not a public-key snapshot")
-    return body, snapshot
 
 
 def bundle_sources():
@@ -107,14 +90,54 @@ def validate(bundle):
     return manifest
 
 
-def serving_unit(text):
+def unit_binds(name):
+    """The owner reader also needs the advisor config for its enabled/issuer status."""
+    return (advisor_config_path().parent, KEYS) if name == OWNER_SERVICE else (KEYS,)
+
+
+def serving_unit(text, paths=None):
     """Add the public snapshot directory to the existing read-only binds only."""
+    paths = (KEYS,) if paths is None else paths
     lines = text.splitlines(keepends=True)
     binds = [i for i, line in enumerate(lines) if line.startswith("BindReadOnlyPaths=")]
-    if len(binds) != 1 or str(KEYS) in text:
+    if len(binds) != 1 or any(str(path) in text for path in paths):
         raise ValueError("Unexpected serving unit read-only bind layout")
-    lines[binds[0]] = lines[binds[0]].rstrip("\n") + " " + str(KEYS) + "\n"
+    lines[binds[0]] = lines[binds[0]].rstrip("\n") + "".join(" " + str(path) for path in paths) + "\n"
     return "".join(lines)
+
+
+def owner_read_acl(uid, *, default):
+    """Linux POSIX ACL for a 0750 directory plus one named owner-reader UID.
+
+    The access ACL lets that UID traverse (never list or write); the default
+    ACL gives files created later, such as each atomically replaced snapshot
+    or config, read for that UID. Owner, group and other keep their modes.
+    """
+    undefined = 0xFFFFFFFF
+    user, named, group, mask = (6, 4, 4, 4) if default else (7, 1, 5, 5)
+    entries = ((1, user, undefined), (2, named, uid), (4, group, undefined), (16, mask, undefined), (32, 0, undefined))
+    return struct.pack("<I", 2) + b"".join(struct.pack("<HHI", *entry) for entry in entries)
+
+
+def grant_owner_read(directory, uid):
+    if stat.S_IMODE(directory.lstat().st_mode) != 0o750 or not directory.is_dir() or directory.is_symlink():
+        raise ValueError("Owner read grant requires an exact 0750 directory: " + str(directory))
+    os.setxattr(directory, "system.posix_acl_access", owner_read_acl(uid, default=False))
+    os.setxattr(directory, "system.posix_acl_default", owner_read_acl(uid, default=True))
+
+
+def revoke_owner_read(directory):
+    """Drop the named-UID grant from a root-owned directory and its direct files."""
+    targets = [(directory, ("system.posix_acl_default", "system.posix_acl_access"))]
+    targets += [(path, ("system.posix_acl_access",)) for path in sorted(directory.iterdir())
+        if path.is_file() and not path.is_symlink()]
+    for path, names in targets:
+        for name in names:
+            try:
+                os.removexattr(path, name, follow_symlinks=False)
+            except OSError as error:
+                if error.errno != errno.ENODATA:
+                    raise
 
 
 def write_file(path, data, *, mode, uid=0, gid=0, expected=None):
@@ -141,26 +164,6 @@ def write_file(path, data, *, mode, uid=0, gid=0, expected=None):
 
 def advisor_config_path():
     return trial.CONFIG / "advisor/config.json"
-
-
-def snapshot_state(config, *, now=None):
-    """Public freshness facts only; never key material."""
-    now = time.time() if now is None else now
-    try:
-        _, snapshot = read_snapshot(config["jwks_file"])
-        expires = int(snapshot["expires_at"])
-        matches = snapshot["issuer_url"] == config["issuer_url"] and snapshot["jwks_url"] == config["jwks_url"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return {"state": "unreadable", "expires_at": None}
-    if not matches:
-        state = "issuer-mismatch"
-    elif now >= expires:
-        state = "expired"
-    elif expires - now <= FRESH_MARGIN:
-        state = "expiring"
-    else:
-        state = "fresh"
-    return {"state": state, "expires_at": expires, "seconds_left": max(0, int(expires - now))}
 
 
 def advisor_stopped():
@@ -191,6 +194,9 @@ def install(bundle, approved, *, dns_servers, host_ips):
     current = snapshot_state(config)
     if current["state"] not in {"fresh", "expiring"}:
         raise ValueError("Seed requires a current matching public-key snapshot (" + current["state"] + ")")
+    reader_uid = config.get("owner_reader_uid")
+    if not isinstance(reader_uid, int) or reader_uid < 1:
+        raise ValueError("Owner status grant requires the trial's exact owner reader UID")
     snapshot = KEYS / SNAPSHOT_NAME
     reader_gid = pwd.getpwnam(old.ACCOUNT).pw_gid
     serving_before = {name: (old.UNIT_DIR / name).read_bytes() for name in SERVING}
@@ -211,14 +217,17 @@ def install(bundle, approved, *, dns_servers, host_ips):
         write_file(SETTINGS / "network.nft", policy, mode=0o644)
         KEYS.mkdir(mode=0o750)
         os.chown(KEYS, key_uid, reader_gid)
+        grant_owner_read(KEYS, reader_uid)  # Kept with the directory on remove.
         write_file(snapshot, read_snapshot(config["jwks_file"])[0], mode=0o640, uid=key_uid, gid=reader_gid)
         for name in KEY_UNITS:
             write_file(old.UNIT_DIR / name, (bundle / "units" / name).read_bytes(), mode=0o644)
             switched[name] = None
         for name in SERVING:
-            write_file(old.UNIT_DIR / name, serving_unit(serving_before[name].decode()).encode(), mode=0o644,
-                expected=record["units"][name])
+            write_file(old.UNIT_DIR / name, serving_unit(serving_before[name].decode(), unit_binds(name)).encode(),
+                mode=0o644, expected=record["units"][name])
             switched[name] = serving_before[name]
+        switched["grant"] = None
+        grant_owner_read(config_path.parent, reader_uid)
         info = config_path.stat()
         write_file(config_path, (json.dumps({**config, "jwks_file": str(snapshot)}, indent=2) + "\n").encode(),
             mode=info.st_mode & 0o777, uid=info.st_uid, gid=info.st_gid, expected=stage.digest(config_path))
@@ -240,6 +249,8 @@ def install(bundle, approved, *, dns_servers, host_ips):
         # Restore only what this attempt switched; keep the inert UID/directories
         # as a collision marker rather than deleting unknown partial state.
         for name, data in switched.items():
+            if name == "grant":
+                continue
             if name == "config":
                 info = config_path.stat()
                 write_file(config_path, data, mode=info.st_mode & 0o777, uid=info.st_uid, gid=info.st_gid,
@@ -248,6 +259,8 @@ def install(bundle, approved, *, dns_servers, host_ips):
                 (old.UNIT_DIR / name).unlink(missing_ok=True)
             else:
                 write_file(old.UNIT_DIR / name, data, mode=0o644, expected=stage.digest(old.UNIT_DIR / name))
+        if "grant" in switched:
+            revoke_owner_read(config_path.parent)  # After the config restore wrote into it.
         if trial.RECORD.exists() and json.loads(trial.RECORD.read_text())["units"] != record["units"]:
             trial.write_private(trial.RECORD, record)
         if "config" in switched and record_path().exists():
@@ -297,6 +310,7 @@ def finish_removal():
     """Retire the leftover key units and record once everything else is restored."""
     for name in KEY_UNITS:
         (old.UNIT_DIR / name).unlink(missing_ok=True)
+    revoke_owner_read(advisor_config_path().parent)
     record_path().rename(RUNTIME / ("removed-" + str(int(time.time())) + "-" + RECORD_NAME))
     old.run("systemctl", "daemon-reload")
     trial.installed()
