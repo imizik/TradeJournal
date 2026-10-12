@@ -784,3 +784,21 @@ test("Overview blocks are edged and foldable, Peers sit last and stay folded, an
   // Nothing pushes the dock sideways.
   expect(await info.evaluate((root) => root.scrollWidth <= root.clientWidth)).toBe(true);
 });
+
+test("a mouse wheel over the tab row scrolls it sideways, then hands back to the dock at the end", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.route("**/api/backend/charts/symbol/*/overview", (route) => route.fulfill({ json: overview("NVDA") }));
+  await page.goto("/charts");
+  const row = panel(page).getByRole("tablist", { name: "Symbol info tabs" });
+  await row.getByRole("tab", { name: "Overview", exact: true }).click();
+  const left = () => row.evaluate((list) => list.scrollLeft);
+  expect(await row.evaluate((list) => list.scrollWidth > list.clientWidth)).toBe(true); // the dock is narrower than the row
+  await row.hover();
+  await page.mouse.wheel(0, 100);
+  await expect.poll(left).toBeGreaterThan(0);
+  await page.mouse.wheel(0, 2000);
+  const end = await row.evaluate((list) => list.scrollWidth - list.clientWidth);
+  await expect.poll(left).toBeGreaterThanOrEqual(end - 1);
+  await page.mouse.wheel(0, -2000);
+  await expect.poll(left).toBe(0);
+});

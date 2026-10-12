@@ -46,6 +46,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
   const [retry, setRetry] = useState(0);
   // A news marker was clicked (T3.5): show the News tab, expanded, whatever was open before. A panel that mounts with the click keeps it.
   const focused = useRef(false);
+  const tabRow = useRef<HTMLDivElement>(null);
   const [lit, setLit] = useState<NewsFocus | null>(null);
 
   useEffect(() => {
@@ -107,6 +108,21 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     else if (tab.offsetLeft + tab.offsetWidth > list.scrollLeft + list.clientWidth) list.scrollLeft = tab.offsetLeft + tab.offsetWidth - list.clientWidth;
   }, [id, view.tab, view.expanded]);
 
+  // A mouse wheel only scrolls up and down, and the row has no scrollbar: turn the wheel sideways while the row has room to move.
+  useEffect(() => {
+    const list = tabRow.current;
+    if (!view.expanded || !list) return;
+    const onWheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return; // trackpads already scroll sideways
+      const room = list.scrollWidth - list.clientWidth;
+      if (room <= 0 || (event.deltaY < 0 && list.scrollLeft <= 0) || (event.deltaY > 0 && list.scrollLeft >= room - 1)) return; // let the dock scroll
+      event.preventDefault();
+      list.scrollLeft += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+    };
+    list.addEventListener("wheel", onWheel, { passive: false });
+    return () => list.removeEventListener("wheel", onWheel);
+  }, [view.expanded]);
+
   const news = useSymbolNews(symbol, view.ready && view.expanded && view.tab === "News");
   const shown = view.tab === "News" ? (news.data ? { key: `News|${symbol}`, data: news.data } : news.error ? { key: `News|${symbol}`, error: news.error } : null)
     : result?.key === `${view.tab}|${symbol}` ? result : null;
@@ -118,7 +134,7 @@ export default function SymbolInfo({ symbol, price, quote, quoteFetchedAt, onSel
     </button>
     {view.expanded && <div id={`${id}-content`}>
       {/* One row. Names never squeeze into each other: a narrow dock scrolls the row sideways, and the chosen tab is kept in view. */}
-      <div role="tablist" aria-label="Symbol info tabs" className="relative flex overflow-x-auto border-y border-slate-700/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div ref={tabRow} role="tablist" aria-label="Symbol info tabs" className="relative flex overflow-x-auto border-y border-slate-700/40 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {TABS.map((tab, index) => <button key={tab} role="tab" aria-selected={view.tab === tab} aria-controls={`${id}-panel`} id={`${id}-${tab}`} tabIndex={view.tab === tab ? 0 : -1}
           onClick={() => select(tab)} onKeyDown={(event) => {
             const next = event.key === "ArrowRight" ? (index + 1) % TABS.length : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : null;
