@@ -48,8 +48,14 @@ An unconfirmed unsubscribe or close remains distinct in the final diagnostic
 report. A cancelled session's report is not returned to the browser, so after
 Stop only the socket closure is observable, not the unsubscribe acknowledgment.
 
-The service retains one latest book, replacing it rather than storing a series.
-Book delivery is coalesced to at most four updates per second; the final summary
+The service retains one latest book per book kind (ARCA-labelled or other
+market-maker IDs), replacing it rather than storing a series, so the frequent
+book cannot starve the other. Book delivery is coalesced to at most four
+updates per second per kind. A quiet stream sends a `keepalive` line every 30
+seconds so the Next proxy's default five-minute body timeout never ends a live
+session; the browser ignores it. After Stop, the bridge holds the session until
+its unsubscribe finishes, so an immediate Connect is refused with "still
+closing" for a few seconds. The final summary
 contains bounded first/last diagnostic samples, total received counts and
 refresh counts. Reload starts without an active provider session. The lab's
 own heatmap uses invented replay data only.

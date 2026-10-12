@@ -185,7 +185,11 @@ export function useDepthSession({ active = true, stopWhenHidden = false, onBook 
         headers: { "Content-Type": "application/x-level2-start" },
         signal: controller.signal,
       });
-      if (!response.ok || !response.body) { setMessage("The local service could not start this session."); return; }
+      if (!response.ok || !response.body) {
+        // The bridge keeps the last session until its unsubscribe finishes (a few seconds after Stop).
+        setMessage(response.status === 409 ? "The previous session is still closing. Try Connect again in a few seconds." : "The local service could not start this session.");
+        return;
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";

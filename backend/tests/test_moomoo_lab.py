@@ -94,6 +94,31 @@ def test_session_coalesces_latest_no_archive_and_fixed_cap():
     assert result[-1] == {"event": "status", "phase": "closed"}
 
 
+def test_coalescing_keeps_the_latest_book_of_each_kind():
+    def book(i, mpid):
+        return {"event": "book", "symbol": "US.NVDA", "received_ms": i, "books": [
+            {"exchange": "", "bids": [{"price": 1, "volume": 1, "mpid": mpid}], "asks": []}]}
+    async def runner(appkey, key, seconds, observer, refresh_seconds):
+        for i in range(50):
+            observer(book(i, "ARCA"))
+        observer(book(50, "NSDQ"))
+        observer(book(51, "ARCA"))
+        return {"closed": True}
+    with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
+        result = [json.loads(line) for line in client.post("/session", headers=HEADERS).text.splitlines()]
+    assert sorted(event["received_ms"] for event in result if event["event"] == "book") == [50, 51]
+
+
+def test_quiet_stream_sends_keepalives(monkeypatch):
+    monkeypatch.setattr(lab, "KEEPALIVE_SECONDS", 0.3)
+    async def runner(appkey, key, seconds, observer, refresh_seconds):
+        await asyncio.sleep(1.2)
+        return {"closed": True}
+    with TestClient(lab.create_app(token=TOKEN, loader=lambda: ("fixture", None), runner=runner), client=("127.0.0.1", 50000)) as client:
+        result = [json.loads(line) for line in client.post("/session", headers=HEADERS).text.splitlines()]
+    assert result.count({"event": "keepalive"}) >= 2 and result[-1] == {"event": "status", "phase": "closed"}
+
+
 def test_single_session_gate_and_stop_closes_provider():
     async def scenario():
         from starlette.requests import Request

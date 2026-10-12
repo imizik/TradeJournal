@@ -47,7 +47,7 @@ export default function Level2Panel({ symbol, sheet, session, heatmap, heat, onH
         {(Object.keys(HEAT_BOOK_LABELS) as HeatBookKind[]).map((kind) => <option key={kind} value={kind}>{HEAT_BOOK_LABELS[kind]}</option>)}
       </select></label>
     <HeatStats heatmap={heatmap} kind={heat.kind} />
-    <p className="text-[10px] leading-4 text-slate-500">Displayed size from this provider&apos;s book, not consolidated or executable liquidity. Brightness is relative to the view. Blank means no usable update, not zero. Kept in this page only.</p>
+    <p className="text-[10px] leading-4 text-slate-500">Displayed size from this provider&apos;s book, sampled up to four times a second per book; not consolidated or executable liquidity. Brightness is relative to the view. Blank means no usable update, not zero. Kept in this page only.</p>
   </div>;
   const body = <>
     <div className="flex items-center justify-between border-b border-slate-700/40 py-1 pl-3 pr-1">

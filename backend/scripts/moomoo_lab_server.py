@@ -16,6 +16,7 @@ import re
 import secrets
 import stat
 import struct
+import time
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -29,6 +30,18 @@ from scripts import moomoo_diagnostic as diagnostic
 # inside the documented five-minute cycle, and ends by itself at this ceiling.
 SESSION_SECONDS = diagnostic.MAX_REFRESHED_SECONDS
 REFRESH_SECONDS = 240
+# Below the Next proxy's (undici) default five-minute body timeout.
+KEEPALIVE_SECONDS = 30
+
+
+def book_kind(event) -> str:
+    """ARCA-labelled or other market-maker book, as the Charts heatmap separates them."""
+    books = event.get("books") or []
+    mpids = {level.get("mpid") for book in books for side in ("bids", "asks") for level in book.get(side, [])} - {None}
+    if mpids:
+        return "arca" if mpids == {"ARCA"} else "mpid"
+    exchange = books[0].get("exchange") if books else None
+    return "arca" if exchange == "ARCA" else "mpid" if exchange == "NASDAQ" else "unknown"
 SYSTEMD_CREDENTIAL_DIR = Path("/run/credentials/tradejournal-moomoo.service")
 
 
@@ -133,13 +146,17 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
         except (OSError, ValueError, UnicodeError, diagnostic.DiagnosticError):
             raise HTTPException(503, "Local secured moomoo credentials unavailable") from None
 
-        control = asyncio.Queue(maxsize=16)
-        latest = None
+        # Status events only: a handful per session plus one per auth refresh,
+        # so the session ceiling bounds it; a full queue must never fail a session.
+        control = asyncio.Queue()
+        # The latest book per book kind. moomoo alternates an ARCA-labelled book
+        # and a book of other market-maker IDs on one subscription; coalescing
+        # them together would let the frequent one starve the other.
+        latest = {}
 
         def observe(event):
-            nonlocal latest
             if event["event"] == "book":
-                latest = event  # Replace, never append market-depth history.
+                latest[book_kind(event)] = event  # Replace, never append market-depth history.
             else:
                 control.put_nowait(event)
 
@@ -158,8 +175,11 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
         active = asyncio.create_task(run())
         task = active
 
+        def line(event):
+            return json.dumps(event, separators=(",", ":"), allow_nan=False) + "\n"
+
         async def events():
-            nonlocal latest
+            sent = time.monotonic()
             try:
                 while True:
                     if await request.is_disconnected():
@@ -167,14 +187,24 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
                     try:
                         event = await diagnostic.bounded_await(control.get(), 0.25)
                     except asyncio.TimeoutError:
-                        event = latest
-                        latest = None
-                        if event is None:
-                            continue
-                    if event.get("event") == "summary" and latest is not None:
-                        yield json.dumps(latest, separators=(",", ":"), allow_nan=False) + "\n"
-                        latest = None
-                    yield json.dumps(event, separators=(",", ":"), allow_nan=False) + "\n"
+                        if latest:
+                            books = list(latest.values())
+                            latest.clear()
+                            for book in books:
+                                yield line(book)
+                            sent = time.monotonic()
+                        elif time.monotonic() - sent >= KEEPALIVE_SECONDS:
+                            # A quiet book must not trip a proxy's idle body timeout.
+                            yield line({"event": "keepalive"})
+                            sent = time.monotonic()
+                        continue
+                    if event.get("event") == "summary" and latest:
+                        books = list(latest.values())
+                        latest.clear()
+                        for book in books:
+                            yield line(book)
+                    yield line(event)
+                    sent = time.monotonic()
                     if event.get("phase") == "closed":
                         break
             finally:
@@ -184,7 +214,7 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
                 # ownership until it finishes; a new session cannot overlap it.
                 with suppress(asyncio.CancelledError):
                     await asyncio.shield(task)
-                latest = None
+                latest.clear()
 
         return StreamingResponse(events(), media_type="application/x-ndjson", headers={
             "Cache-Control": "no-store", "X-Accel-Buffering": "no", "X-Content-Type-Options": "nosniff"})

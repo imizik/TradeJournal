@@ -78,6 +78,14 @@ export class DepthHeatmap {
     if (changed) this.changed();
   }
 
+  /** A price from the book's newest column, without building it: the draw's cache key needs only one. */
+  referencePrice(kind: HeatBookKind): number | null {
+    const forming = this.open[kind];
+    if (forming) for (const sizes of forming.sides) for (const key of sizes.keys()) return key / 10_000;
+    const done = this.done[kind];
+    return done.length && done[done.length - 1].cells.length ? done[done.length - 1].cells[0] : null;
+  }
+
   /** The book's columns, oldest first, including the forming one. */
   columns(kind: HeatBookKind): HeatColumn[] {
     const forming = this.open[kind];
@@ -194,26 +202,26 @@ export class DepthHeatLayer implements ISeriesPrimitive<Time> {
   private draw(target: Target) {
     const { chart, series, source } = this;
     if (!chart || !series || !source) return;
-    const columns = source.columns(this.kind);
-    if (!columns.length) return;
+    const reference = source.referencePrice(this.kind);
+    if (reference === null) return;
     const scale = chart.timeScale();
     target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
       const [x0, x1] = [scale.logicalToCoordinate(0 as Logical), scale.logicalToCoordinate(1 as Logical)];
-      const reference = columns[columns.length - 1].cells[0] || 1;
       const [y0, y1] = [series.priceToCoordinate(reference), series.priceToCoordinate(reference + 1)];
       if (x0 === null || x1 === null || y0 === null || y1 === null) return;
+      // Hover and streamed candles reuse the picture; only data, range, scale or size repaint it.
       const key = [this.shown, this.kind, bitmapSize.width, bitmapSize.height, x0.toFixed(2), x1.toFixed(2), y0.toFixed(2), y1.toFixed(2), this.timeline.count].join("|");
-      if (this.cache?.key !== key) this.cache = { key, canvas: this.paint(columns, bitmapSize.width, bitmapSize.height, h, v, Math.abs(y1 - y0) * TICK) };
+      if (this.cache?.key !== key) this.cache = { key, canvas: this.paint(source.columns(this.kind), bitmapSize.width, bitmapSize.height, h, v, { reference, y: y0, perDollar: y1 - y0 }) };
       context.drawImage(this.cache.canvas, 0, 0);
     });
   }
 
-  private paint(columns: HeatColumn[], width: number, height: number, h: number, v: number, tickHeight: number) {
+  /** The price scale is linear (Charts never sets a log scale), so a price's y is one multiply from a reference. */
+  private paint(columns: HeatColumn[], width: number, height: number, h: number, v: number, prices: { reference: number; y: number; perDollar: number }) {
     const canvas = this.cache?.canvas.width === width && this.cache.canvas.height === height ? this.cache.canvas : Object.assign(document.createElement("canvas"), { width, height });
     const context = canvas.getContext("2d")!;
     context.clearRect(0, 0, width, height);
     const scale = this.chart!.timeScale();
-    const series = this.series!;
     // The library converts whole indexes only; fractions are on the line through 0 and 1.
     const [zero, one] = [scale.logicalToCoordinate(0 as Logical)!, scale.logicalToCoordinate(1 as Logical)!];
     const x = (ms: number) => {
@@ -223,7 +231,7 @@ export class DepthHeatLayer implements ISeriesPrimitive<Time> {
     // Bin into screen pixels before drawing: every column that lands on the same
     // pixel column is averaged, and every price that lands on the same pixel row
     // is summed, so a zoomed-out view never stacks hundreds of translucent cells.
-    const cell = Math.max(1, Math.round(tickHeight * v));
+    const cell = Math.max(1, Math.round(Math.abs(prices.perDollar) * TICK * v));
     const bins: { left: number; right: number; rows: Map<number, number>; columns: number }[] = [];
     for (const column of columns) {
       const [left, right] = [x(column.start), x(column.start + HEAT_BUCKET_MS)];
@@ -235,8 +243,7 @@ export class DepthHeatLayer implements ISeriesPrimitive<Time> {
       bin.columns++;
       const cells = column.cells;
       for (let i = 0; i < cells.length; i += 2) {
-        const y = series.priceToCoordinate(cells[i]);
-        if (y === null) continue;
+        const y = prices.y + (cells[i] - prices.reference) * prices.perDollar;
         const top = Math.floor(y * v / cell) * cell;
         if (top + cell < 0 || top > height) continue;
         bin.rows.set(top, (bin.rows.get(top) ?? 0) + cells[i + 1]);
