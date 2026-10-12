@@ -177,23 +177,29 @@ def advisor_settings(config):
     return settings, advisor, {"state": keys["state"], "expires_at": stamp(keys["expires_at"])}
 
 
-def assignment_status(engine, binding, managed_mode):
-    """Selected assignment state/expiry and the latest saved Jo answer time."""
+def assignment_status(engine, binding):
+    """Selected assignment state/expiry and the latest saved Jo answer time.
+
+    The ledger itself says whether owner-managed questions exist, so a missing
+    or unreadable advisor config never reports the original question instead.
+    """
     with Session(engine) as db:
         db.connection().exec_driver_sql("BEGIN")
-        if managed_mode:
-            _, _, original, ledger = managed.anchor(db, binding)
-            entries = [managed.validate(entry, original) for entry in ledger["entries"]]
-            chosen = next((e for e in entries if e["request"]["assignment_id"] == ledger["selected"]), None)
-            saves = [e["receipt"]["received_at"] for e in entries if e["receipt"] is not None]
-            if chosen is None:
-                return {"state": "none", "expires_at": None}, max(saves, default=None)
-            return ({"state": managed.status(chosen), "expires_at": chosen["request"]["expires_at"]},
-                max(saves, default=None))
         call = db.get(PracticeAgentCall, uuid.UUID(binding.assignment_id))
         if call is None or str(call.run_id) != binding.run_id:
             raise ValueError("Assigned owner fixture unavailable")
         _, config, _ = service.assignment(db, call)
+        if managed.KEY in config:
+            _, _, original, ledger = managed.anchor(db, binding)
+            entries = [managed.validate(entry, original) for entry in ledger["entries"]]
+            chosen = next((e for e in entries if e["request"]["assignment_id"] == ledger["selected"]), None)
+            saves = [e["receipt"]["received_at"] for e in entries if e["receipt"] is not None]
+            if (config.get("advisor") or {}).get("receipt") is not None:
+                saves.append(config["advisor"]["received_at"])  # The original question's answer.
+            if chosen is None:
+                return {"state": "none", "expires_at": None}, max(saves, default=None)
+            return ({"state": managed.status(chosen), "expires_at": chosen["request"]["expires_at"]},
+                max(saves, default=None))
         advisor = config.get("advisor") or {}
         received = advisor.get("received_at") if advisor.get("receipt") is not None else None
         state = managed.status({"enabled": config["enabled"], "receipt": advisor.get("receipt"),
@@ -203,10 +209,9 @@ def assignment_status(engine, binding, managed_mode):
 
 def connection_status(engine, config):
     """States and timestamps only: no keys, tokens, subjects, config bodies or receipts."""
-    settings, advisor, keys = advisor_settings(config)
+    _, advisor, keys = advisor_settings(config)
     try:
-        assignment, last_save = assignment_status(engine, config.binding,
-            bool(settings and settings.assignment_management))
+        assignment, last_save = assignment_status(engine, config.binding)
     except Exception:
         assignment, last_save = {"state": "unreadable", "expires_at": None}, None
     return {"schema_version": "advisor-owner-status-v1", "checked_at": datetime.now(timezone.utc).isoformat(),

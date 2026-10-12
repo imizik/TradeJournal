@@ -109,7 +109,9 @@ configuration), `/var/lib/tradejournal-advisor-v2/fixture.db` (new invented
 ledger), and `/run/tradejournal-advisor{,-owner}-v2` (private sockets). The
 six existing-name advisor units are the backend, MCP and owner socket/service
 pairs. The new reader account `tj-advisor-owner` differs from the writer and
-frontend; its later approved named-UID ACL applies only to the **new** ledger.
+frontend; its later approved named-UID fixture ACL applies only to the **new**
+ledger. Optional key upkeep separately grants it read of the advisor config and
+public-key snapshot for the [owner status](#owner-connection-status) only.
 The owner socket's group is only `tj-advisor-web-owner`, never the general
 production `tradejournal` group. Actual UID and GID are recorded independently.
 
@@ -449,7 +451,9 @@ an independent read-only mount namespace, exposing only its reviewed runtime,
 owner config, isolated advisor state directory and inherited owner socket. All
 four mounts are read-only; there is no writable database directory, journal
 mount, IP family, OAuth/grant/key dependency or startup dependency on the MCP
-services. `tradejournal-advisor-owner.socket` grants its filesystem access to
+services. Installed key upkeep adds two more read-only mounts, the advisor
+config and snapshot directories, for the [owner status](#owner-connection-status);
+the status still never returns key material or config bodies. `tradejournal-advisor-owner.socket` grants its filesystem access to
 the reviewed owner frontend group (template `tradejournal`), while the process
 checks the exact configured frontend **UID** from the connected Unix socket.
 Root or another socket-group member is denied by that UID check. The distinct

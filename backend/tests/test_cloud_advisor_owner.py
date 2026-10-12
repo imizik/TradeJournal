@@ -417,3 +417,25 @@ def test_status_route_keeps_owner_peer_and_no_selector_rules(owner_fixture):
     assert read(app, os.getuid(), path=reader.STATUS_PATH + "?state=x").status_code == 404
     assert read(app, os.getuid(), path=reader.STATUS_PATH, method="POST").status_code == 404
     assert read(app, os.getuid(), path=reader.STATUS_PATH, headers={"cookie": "owner=forged"}).status_code == 400
+
+
+def test_status_follows_managed_questions_even_without_advisor_config(owner_fixture):
+    from sqlmodel import create_engine
+    from app.engine import advisor_assignments as managed
+    from cloud_mcp_advisor_common import AdvisorProfile
+
+    directory, value = owner_fixture
+    config = json.loads((directory / "owner.json").read_text())
+    del config["advisor_config_path"]  # Mode must come from the ledger, not the config.
+    (directory / "owner.json").write_text(json.dumps(config))
+    writer = create_engine("sqlite:///" + str(directory / "fixture.db"))
+    with Session(writer) as db:
+        managed.mutate(db, AdvisorProfile.model_validate(value["config"]["binding"]), {
+            "operation_id": str(uuid.uuid4()), "question": "Invented follow-up?", "user_plan": "Wait",
+            "invented_only": True}, lambda: None)
+    writer.dispose()
+    body = status(directory).json()
+    assert body["assignment"]["state"] == "pending" and body["assignment"]["expires_at"]
+    assert body["assignment"]["expires_at"] != value["request"]["expires_at"]
+    assert body["last_save_at"] == value["receipt"]["received_at"]  # The original answer is still the latest save.
+    assert "Invented follow-up" not in json.dumps(body)
