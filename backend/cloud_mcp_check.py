@@ -160,6 +160,7 @@ def clock_only_analysis(receipt_utc, missing):
         "data": {"market_state": state, "staleness": {"is_stale": True}, "missing": missing}}
 
 
+REVIEW_LIMIT = 50
 # Jo's own verdict is what gets graded against the rules later; ask for it on every answer.
 NEXT_STEP = ("Every time: call attach_model_verdict with this check_id, your own verdict and a one-to-three "
     "sentence summary of what you tell Isaac, then answer him. Skip it only if this check already has your verdict.")
@@ -371,18 +372,21 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         now = clock()
         try:
             target = date.fromisoformat(day) if day else now.astimezone(ET).date()
+            if not date(2020, 1, 1) <= target <= date(2100, 1, 1):
+                raise ValueError("day out of range")
         except ValueError:
             raise ToolError("day must be a real YYYY-MM-DD date") from None
         start = datetime.combine(target, datetime.min.time(), ET)
         span = (start.astimezone(timezone.utc).isoformat(), (start + timedelta(days=1)).astimezone(timezone.utc).isoformat())
         try:
-            saved = await asyncio.to_thread(ledger.between, checked.subject, *span)
+            saved = await asyncio.to_thread(ledger.between, checked.subject, *span, REVIEW_LIMIT + 1)
         except (ValueError, OSError):
             raise ToolError("Checks could not be read") from None
         features = await asyncio.to_thread(history, now)
         generated = datetime.fromisoformat(features["generated_at"]) if features["generated_at"] else None
         checks, counts = [], {}
-        for record, model in saved:
+        truncated = len(saved) > REVIEW_LIMIT
+        for record, model in saved[:REVIEW_LIMIT]:
             answer = record["answer"]
             outcome = check_outcome(record["idea"], answer, datetime.fromisoformat(record["received_at"]),
                 features["rows"], generated, now)
@@ -390,7 +394,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             counts[key] = counts.get(key, 0) + 1
             checks.append({"check_id": record["check_id"], "received_at": record["received_at"], "idea": record["idea"],
                 "verdict": answer["verdict"], "model_verdict": model, "outcome": outcome})
-        return {"schema_version": SCHEMA, "day": target.isoformat(), "checks": checks, "counts_by_verdict_and_outcome": counts,
+        return {"schema_version": SCHEMA, "day": target.isoformat(), "checks": checks, "truncated": truncated,
+            "counts_by_verdict_and_outcome": counts,
             "history": {key: features[key] for key in ("state", "generated_at")},
             "note": "Closed trades only; small counts are not evidence of an edge. Nothing here changes a check."}
 

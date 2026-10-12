@@ -393,4 +393,5 @@ def test_review_checks_links_outcomes_only_after_the_window_and_history_refresh(
     assert outcome["window"] == {"from_ny": "2026-10-09T10:20", "to_ny": window_end}
     assert review["counts_by_verdict_and_outcome"] == {f"{check['verdict']}:traded": 1}
     assert other_day["checks"] == [] and not read_only.get("isError")
+    assert review["truncated"] is False
     assert refused.status_code == 403 or refused.json()["result"].get("isError")
