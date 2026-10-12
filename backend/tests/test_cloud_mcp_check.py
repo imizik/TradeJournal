@@ -233,10 +233,12 @@ def test_provider_failure_is_insufficient_data_without_invented_prices(harness):
     assert "data.alpaca.markets" not in json.dumps(result) and "/v2/" not in json.dumps(result)
 
 
-def test_swing_and_closed_session_never_go(harness):
+def test_swing_is_scored_from_daily_bars(harness):
     with TestClient(harness.server().streamable_http_app()) as client:
         swing = call(client, "pre_trade_check", {**IDEA, "horizon": "swing"}, harness.token())["structuredContent"]
-    assert swing["verdict"] == "insufficient_data" and harness.requests == []
+    # Swing reads the recorded daily bars and gets a real rules verdict.
+    assert swing["verdict"] in ("go", "wait", "pass") and swing["receipt"]["rules_version"] == "pretrade-swing-v1"
+    assert swing["live"]["daily"]["sma_50"] is not None and harness.requests
 
 
 def test_history_missing_and_stale_are_caveats_not_fabrication(harness):

@@ -239,7 +239,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     resource = urlsplit(config.resource_url)
     server = CheckMCP("tradejournal-pretrade-check", json_response=True, stateless_http=True,
         streamable_http_path=RESOURCE_PATH,
-        instructions="Pre-trade check for Isaac's own intraday ideas. Call pre_trade_check once per idea; it "
+        instructions="Pre-trade check for Isaac's own ideas, intraday or swing (multi-day, scored from daily bars). "
+        "Call pre_trade_check once per idea; it "
         "returns a deterministic rules verdict (go/wait/pass/insufficient_data), reasons, what would change it, "
         "the stop check, live market context and how his own similar closed trades went, plus a saved check ID. "
         "Narrate on top, and for every check save your own verdict and short summary once with "
@@ -261,8 +262,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         return checked
 
     def live_context(idea, receipt):
-        if idea["horizon"] != "intraday":
-            return clock_only_analysis(receipt, []), []
+        # Swing ideas use the same packet; their verdict reads its completed daily bars.
         try:
             analysis = build_scalp_analysis(idea["ticker"], direction=idea["side"], instrument=idea["instrument"],
                 option_type=idea["option_type"], expiration=idea["expiration"], strike=idea["strike"])

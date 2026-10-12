@@ -64,8 +64,48 @@ def test_stale_or_closed_never_go_even_with_strong_history():
         assert check.run_check(IDEA, analysis(**kwargs), rows, RECEIPT)["verdict"] != "go"
 
 
-def test_swing_horizon_is_insufficient():
-    assert check.run_check({**IDEA, "horizon": "swing"}, analysis(), [], RECEIPT)["verdict"] == "insufficient_data"
+def daily(price=110.0, sma50=100.0, ema9=108.0, ema20=107.0, atr=3.0, rsi=58.0):
+    base = analysis(market_state="closed")
+    base["data"]["snapshot"] = {"price": price}
+    base["data"]["daily"] = {"as_of_date": "2026-10-08", "last_close": price, "ema_9": ema9, "ema_20": ema20,
+                             "sma_50": sma50, "sma_200": 90.0, "rsi_14": rsi, "atr_14": atr, "pct_vs_sma_50": 10.0,
+                             "pct_vs_sma_200": 22.2}
+    return base
+
+
+@pytest.mark.parametrize("side,kwargs,expected", [
+    ("long", {}, "go"),
+    ("long", {"price": 95.0}, "pass"),                      # below the 50-day: against the trend
+    ("long", {"rsi": 74.0}, "wait"),                       # RSI hot
+    ("long", {"price": 110.0, "ema20": 104.0, "atr": 2.0}, "wait"),  # 3 ATR past the 20-day EMA
+    ("long", {"ema9": 106.0}, "wait"),                      # pullback in progress
+    ("short", {"price": 95.0, "sma50": 100.0, "ema9": 96.0, "ema20": 97.0, "rsi": 42.0}, "go"),
+    ("short", {}, "pass"),
+    ("long", {"sma50": None}, "insufficient_data"),
+])
+def test_swing_verdict_from_daily_bars(side, kwargs, expected):
+    idea = {**IDEA, "horizon": "swing", "side": side, "option_type": "call" if side == "long" else "put", "stop": None}
+    answer = check.run_check(idea, daily(**kwargs), [], RECEIPT)
+    assert answer["verdict"] == expected and answer["rules_version"] == check.SWING_RULES_VERSION
+    if expected == "wait":
+        assert answer["wait_for"]["expires_at"] == "2026-10-12T16:00-04:00"  # Friday check: Monday's close.
+    if expected != "insufficient_data":
+        assert answer["live"]["daily"]["sma_50"] == kwargs.get("sma50", 100.0) and answer["would_change"]
+        assert "earnings date not checked (no calendar source yet)" in answer["caveats"]
+
+
+def test_swing_stop_in_atr_and_overnight_history():
+    idea = {**IDEA, "horizon": "swing", "stop": 104.0}
+    answer = check.run_check(idea, daily(), [], RECEIPT)
+    assert answer["risk_check"] | {} == {**answer["risk_check"], "distance_atr": 2.0, "distance_pct": 5.455}
+    assert check.run_check({**idea, "stop": 112.0}, daily(), [], RECEIPT)["verdict"] == "pass"
+    overnight = [{**r, "opened_at": r["closed_at"][:10] + "T10:00:00", "closed_at": "2026-09-2%dT11:00:00" % (i % 4)}
+                 for i, r in enumerate(cohort(10, -20.0))]
+    same_day = cohort(10, 50.0)
+    weak = check.run_check({**idea, "stop": None}, daily(), overnight + same_day, RECEIPT)
+    cohorts = {c["name"]: c for c in weak["history"]["cohorts"]}
+    assert cohorts["same_ticker_side_overnight"]["trades"] == 10 and cohorts["same_ticker_side"]["trades"] == 20
+    assert weak["verdict"] == "wait" and any(r["source"] == "history" for r in weak["reasons"])
 
 
 def test_wait_expiry_never_passes_session_close():
