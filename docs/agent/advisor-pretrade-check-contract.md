@@ -192,16 +192,21 @@ all of Isaac's trade data; still never credentials, account numbers, internal
 IDs, fill keys, raw emails, images or audio). The publisher also reads two
 additive views from [check_scope.py](../../deploy/check_scope.py)
 (`pretrade_position_source`: open non-Webull trades with size, entry, strike,
-expiration, account name/type; `pretrade_capture_source`: newest 200 captures
-with setup, wording, note, transcript, latest added note, linked/not-taken) and
+expiration, account name/type; `pretrade_capture_source`: newest 200 non-Webull captures
+with setup, wording, note, transcript, latest added note, linked/not-taken,
+account name/type but never the capture's account label, which embeds digits) and
 writes a content-addressed context file beside the history file. Jo's tools
 (`check:read`): `position_check(ticker?, stop?)` returns each open position
 with time held, live underlying, stop distance and how similar closed trades
 went after entry (win rate, median best/worst move, giveback, hold time), with
 no verdict and no invented option P&L; `get_notes(ticker?)` returns recent
-captures. `check_control.py upgrade --approve-sql <sha>` applies the reviewed
-`context-views.sql` once (skips when both views exist, refuses a half state)
-before swapping the runtime. Positions are as fresh as the 10-minute publish.
+captures. `check_control.py upgrade --approve-sql <sha>` (or `add-context-views` on a
+fresh install) applies the reviewed `context-views.sql` once and records its
+exact bytes; a rerun skips only when both views exist and the recorded SQL is
+identical, and refuses anything else. Positions are as fresh as the 10-minute
+publish and read as stale after 30 minutes; a stop applies only when one
+position matches; positions are treated as bought (sold options would read
+inverted).
 
 ## Acceptance
 

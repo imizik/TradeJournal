@@ -50,11 +50,14 @@ JOIN account a ON a.id = t.account_id
 WHERE t.status = 'open' AND lower(coalesce(a.broker, '')) NOT IN ({excluded})"""
 
 CAPTURES = """SELECT c.received_at, c.underlying, c.side, c.instrument, c.mode, c.setup_label, c.wording, c.note,
-       c.strike, c.expiration, c.quantity, c.transcript_text, c.not_taken_at, c.account_label,
+       c.strike, c.expiration, c.quantity, c.transcript_text, c.not_taken_at,
+       a.name AS account_name, a.type AS account_type,
        (SELECT n.text FROM trade_capture_note n WHERE n.capture_id = c.id
         ORDER BY n.created_at DESC LIMIT 1) AS latest_note,
        EXISTS (SELECT 1 FROM capture_link l WHERE l.capture_id = c.id AND l.unlinked_at IS NULL) AS linked
 FROM trade_capture c
+JOIN account a ON a.id = c.account_id
+WHERE lower(coalesce(a.broker, '')) NOT IN ({excluded})
 ORDER BY c.received_at DESC
 LIMIT {limit}"""
 
@@ -64,7 +67,8 @@ def position_sql() -> str:
 
 
 def capture_sql() -> str:
-    return CAPTURES.format(limit=CAPTURE_LIMIT)
+    # Never c.account_label: it embeds the account's last digits.
+    return CAPTURES.format(limit=CAPTURE_LIMIT, excluded=", ".join(f"'{name}'" for name in EXCLUDED_BROKERS))
 
 
 def context_view_sql() -> str:

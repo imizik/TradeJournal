@@ -56,11 +56,10 @@ def run(pointer_file: Path, database_url_file: Path) -> dict:
     try:
         positions = context_rows(read_view(url, POSITION_VIEW), POSITION_KEYS)
         captures = context_rows(read_view(url, CAPTURE_VIEW), CAPTURE_KEYS)
+        result["context"] = publish_context(positions, captures, pointer_file.parent / "context.json")
     except Exception:
         # Context views are applied separately; history still publishes without them.
         result["context"] = "unavailable"
-        return result
-    result["context"] = publish_context(positions, captures, pointer_file.parent / "context.json")
     return result
 
 

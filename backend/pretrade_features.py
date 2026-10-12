@@ -35,7 +35,8 @@ POSITION_KEYS = frozenset({
 })
 CAPTURE_KEYS = frozenset({
     "received_at", "underlying", "side", "instrument", "mode", "setup_label", "wording", "note", "strike",
-    "expiration", "quantity", "transcript_text", "not_taken_at", "account_label", "latest_note", "linked",
+    "expiration", "quantity", "transcript_text", "not_taken_at", "account_name", "account_type", "latest_note",
+    "linked",
 })
 
 

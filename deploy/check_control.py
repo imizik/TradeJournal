@@ -51,7 +51,7 @@ UNITS = ("tradejournal-check.socket", "tradejournal-check.service", "tradejourna
 RUNTIME_FILES = ("cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_common.py", "cloud_mcp_check_ledger.py", "cloud_mcp_d0.py",
     "cloud_mcp_d0_refresh.py", "pretrade_features.py", "pretrade_feature_publish.py",
     "journal_coach_publication.py", "journal_coach_snapshot.py", "journal_coach_refresh.py")
-SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "context-views.sql", "owner")
+SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
 # client) and enables owner/config.json; the network policy and view SQL stay pinned.
 PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql")
@@ -196,7 +196,6 @@ def install(bundle, approved, *, dns_servers, host_ips):
         private_file(CONFIG / "refresh-keys.json", (json.dumps(refresh, indent=2) + "\n").encode(), mode=0o644)
         private_file(CONFIG / "network.nft", policy, mode=0o644)
         private_file(CONFIG / "feature-view.sql", (bundle / "config/feature-view.sql").read_bytes(), mode=0o644)
-        private_file(CONFIG / "context-views.sql", (bundle / "config/context-views.sql").read_bytes(), mode=0o644)
         owner = {"enabled": False, "peer_uid": pwd.getpwnam(OWNER_WEB).pw_uid,
             "socket_path": str(OWNER_RUN / "owner.sock"), "ledger_path": config["ledger_file"]}
         # Its own directory, bound whole: a replaced (renamed) file still reaches the running reader.
@@ -215,7 +214,7 @@ def install(bundle, approved, *, dns_servers, host_ips):
             "source_commit": manifest["source_commit"], "enabled": False, "uids": uids,
             "gid": grp.getgrnam(GROUP).gr_gid,
             "units": {u: digest(UNIT_DIR / u) for u in UNITS},
-            "settings": {name: digest(CONFIG / name) for name in PINNED_SETTINGS},
+            "settings": {name: digest(CONFIG / name) for name in PINNED_SETTINGS if (CONFIG / name).exists()},
             "runtime_inventory": old.runtime_inventory(root=ROOT, roles=("backend",), python_roles=("backend",))}
         RECORD.write_text(json.dumps(record, indent=2) + "\n")
         RECORD.chmod(0o600)
@@ -275,14 +274,35 @@ def psql(sql_bytes):
 
 
 def apply_context_views(sql_bytes):
-    """Additive and re-runnable: apply when neither view exists, skip when both do, refuse a half state."""
+    """Additive and re-runnable. Apply when neither view exists and record the exact SQL beside the config;
+    when both exist, skip only if that recorded SQL is these exact bytes; refuse anything else."""
     names = (POSITION_VIEW, CAPTURE_VIEW)
+    applied = CONFIG / "context-views.sql"
     present = int(psql(("SELECT count(*) FROM pg_views WHERE schemaname = 'public' AND viewname IN ('%s', '%s');"
         % names).encode()))
     if present == 0:
+        if applied.exists() or applied.is_symlink():
+            raise RuntimeError("context-views.sql is recorded but its views are missing; review the database")
         psql(sql_bytes)
-    elif present != len(names):
-        raise RuntimeError("Only some context views exist; review the database before upgrading")
+        private_file(applied, sql_bytes, mode=0o644)
+    elif present != len(names) or not applied.is_file() or applied.read_bytes() != sql_bytes:
+        raise RuntimeError("Existing context views do not match this reviewed SQL; review the database before upgrading")
+
+
+def add_context_views(bundle, sql_approval):
+    """Apply the reviewed context views to an installed service (fresh installs and activation); nothing starts."""
+    record = installed()
+    validate(bundle)
+    sql = exact(bundle / "config/context-views.sql")
+    if digest(sql) != sql_approval:
+        raise ValueError("Approve the exact context-views.sql SHA-256 with --approve-sql")
+    apply_context_views(sql.read_bytes())
+    updated = {**record, "settings": {**record["settings"], "context-views.sql": digest(CONFIG / "context-views.sql")}}
+    temporary = ROOT / "installation.json.new"
+    temporary.write_text(json.dumps(updated, indent=2) + "\n")
+    temporary.chmod(0o600)
+    temporary.rename(RECORD)
+    return installed()
 
 
 def upgrade(bundle, approved, sql_approvals=()):
@@ -333,9 +353,7 @@ def upgrade(bundle, approved, sql_approvals=()):
         build_runtime(bundle, scratch)
         settings = dict(record["settings"])
         for name in additions:
-            if not (CONFIG / name).exists():
-                private_file(CONFIG / name, (bundle / "config" / name).read_bytes(), mode=0o644)
-            settings[name] = digest(CONFIG / name)
+            settings[name] = digest(CONFIG / name)  # Written only by apply_context_views, byte-equal to the bundle.
         updated = {**record, "manifest_sha256": approved, "settings": settings, "source_commit": manifest["source_commit"],
             "runtime_inventory": old.runtime_inventory(root=ROOT, roles=("backend",), python_roles=("backend",)),
             "previous_runtimes": [*record.get("previous_runtimes", []), {"path": str(previous),
@@ -407,7 +425,7 @@ def remove():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("stage", "install", "check", "stop", "upgrade", "remove"))
+    parser.add_argument("action", choices=("stage", "install", "check", "stop", "upgrade", "add-context-views", "remove"))
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--wheels", type=Path, help="Already verified release wheels; no downloading")
     parser.add_argument("--approve-install")
@@ -431,6 +449,11 @@ def main():
             parser.error("upgrade requires a reviewed --bundle")
         record = upgrade(args.bundle, args.approve_upgrade, tuple(args.approve_sql))
         print(json.dumps({"upgraded": True, "started": False, "source_commit": record["source_commit"]}))
+    elif args.action == "add-context-views":
+        if not args.bundle or len(args.approve_sql) != 1:
+            parser.error("add-context-views requires --bundle and one --approve-sql")
+        add_context_views(args.bundle, args.approve_sql[0])
+        print(json.dumps({"context_views": "applied", "started": False}))
     elif args.action == "check":
         print(json.dumps(check()))
     elif args.action == "stop":

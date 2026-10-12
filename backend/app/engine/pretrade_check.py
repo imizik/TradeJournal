@@ -369,7 +369,9 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
         stop_check = {"stop": stop, "underlying_price": price, "distance_pct": round(distance / price * 100, 3),
                       "breached": distance <= 0}
     expiration = position.get("expiration")
-    caveats = ["option premium marks are not available here; P&L is not computed"] if position["instrument_type"] == "option" else []
+    caveats = ["treated as a bought position (calls/puts/shares); a sold option or short would read inverted"]
+    if position["instrument_type"] == "option":
+        caveats.append("option premium marks are not available here; P&L is not computed")
     if (data.get("staleness") or {}).get("is_stale"):
         caveats.append("live quotes/bars are stale")
     return {

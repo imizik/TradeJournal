@@ -323,7 +323,7 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
         _trade(db, robinhood, closed=None, pnl=None, key="rh-open", status="open")
         _trade(db, webull, closed=None, pnl=None, key="wb-open", status="open")
         capture = TradeCapture(client_id="c1", received_at=datetime(2026, 10, 9, 14, 0), account_id=robinhood.id,
-            account_label="Roth", underlying="SPY", side="buy_calls", instrument="option", mode="discretionary",
+            account_label="Roth IRA ··1111", underlying="SPY", side="buy_calls", instrument="option", mode="discretionary",
             setup_label="ORB", wording="Break of the opening range", context_state="captured", image_state="unavailable")
         db.add(capture)
         db.flush()
@@ -358,7 +358,8 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
     assert held["state"] == "fresh" and [p["ticker"] for p in held["positions"]] == ["SPY"]  # Webull excluded.
     assert held["positions"][0]["account_name"] == "Roth" and held["positions"][0]["expiration"] == "2026-10-09"
     assert held["captures"][0]["latest_note"] == "sized down" and held["captures"][0]["linked"] in (0, False)
-    assert "1111" not in json.dumps(held) and "raw_email" not in json.dumps(held)
+    assert held["captures"][0]["account_name"] == "Roth" and "account_label" not in held["captures"][0]
+    assert "1111" not in json.dumps(held) and "··" not in json.dumps(held) and "raw_email" not in json.dumps(held)
     assert published["rows"] == sorted(expected, key=lambda r: (r["closed_at"], r["source_fill_key"]))
     text = json.dumps(published["rows"])
     assert "rh-1" not in text and "wb-1" not in text and "account" not in text

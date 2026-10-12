@@ -61,6 +61,7 @@ TOOL_ARGUMENTS = {
 }
 READ_ONLY_TOOLS = ("review_checks", "position_check", "get_notes")
 POSITION_LIMIT = 5
+CONTEXT_MAX_AGE = 30 * 60  # Positions change during a session; older than this is labelled stale.
 
 
 def scopes(name):
@@ -405,7 +406,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
 
     def context(now):
         return pretrade_features.read_context(Path(config.features_pointer).parent / "context.json",
-            max_age_seconds=config.max_feature_age_seconds, now=now)
+            max_age_seconds=CONTEXT_MAX_AGE, now=now)
 
     read_hints = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True, idempotentHint=True)
 
@@ -427,6 +428,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 "note": "Open positions are not published yet; nothing was invented."}
         positions = [p for p in held["positions"] if ticker is None or p["ticker"].upper() == ticker.upper()]
         features = await asyncio.to_thread(history, now)
+        # A stop is a price on one position's underlying; apply it only when exactly one position matches.
+        stop_applies = stop is not None and len(positions) == 1
 
         async def one(position):
             put = position.get("option_type") == "put"
@@ -437,15 +440,17 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 analysis, _ = await asyncio.wait_for(asyncio.to_thread(live_context, idea, now), CONTEXT_TIMEOUT)
             except asyncio.TimeoutError:
                 analysis = clock_only_analysis(now, ["live market data timed out"])
-            return position_view(position, features["rows"] or [], analysis, now,
-                stop if ticker is not None else None)
+            return position_view(position, features["rows"] or [], analysis, now, stop if stop_applies else None)
 
-        views = await asyncio.gather(*(one(p) for p in positions[:POSITION_LIMIT]))
+        if slots.locked():
+            raise ToolError("Check service busy; retry shortly")
+        async with slots:  # Same bound as pre_trade_check; lookups run one at a time.
+            views = [await one(p) for p in positions[:POSITION_LIMIT]]
         return {"schema_version": SCHEMA, "state": held["state"], "positions_as_of": held["generated_at"],
             "open_positions": len(positions), "shown": len(views), "positions": list(views),
             "history": {key: features[key] for key in ("state", "generated_at")},
             "note": "Decision support only; nothing here places, sizes or closes a position."
-                + ("" if ticker is not None or stop is None else " A stop applies only with a ticker; it was ignored.")}
+                + ("" if stop is None or stop_applies else " A stop applies only when exactly one position matches; it was ignored.")}
 
     @server.tool(title="Recent trade notes", annotations=ToolAnnotations(readOnlyHint=True, destructiveHint=False,
         openWorldHint=False, idempotentHint=True), structured_output=True,
