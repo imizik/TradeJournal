@@ -163,7 +163,13 @@ AppKey whitelist. Do not disable the whitelist or buy access to resolve a refusa
 One production dock session (release `f577105`, which includes the VPS
 connection and the null-side fix), 12:36–12:46 ET, NVDA, then three short
 lifecycle sessions. This was the 30-second build, before the refresh and
-heatmap changes above; a refreshed long session is not yet observed live.
+heatmap changes above.
+
+The same day, the refreshed `stream_probe` ran once on the VPS under the bridge's
+service account for 540 seconds with a 240-second refresh: both refreshes were
+acknowledged (correlated by id), delivery continued throughout (3,720 order_book,
+2,133 quote and 512 ticker messages), and unsubscribe succeeded with the socket
+closed. A multi-hour session through the deployed proxy is not yet observed.
 
 - Opening, restoring and reloading the dock made only GET status checks; the
   bridge held no provider socket until Connect.
