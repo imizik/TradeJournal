@@ -124,7 +124,8 @@ plan), which suits swing setups but not intraday ones.
 ## Build order (after Dots steps 3–5)
 
 1. Feasibility checks 1–3 above, with a disposable probe only.
-2. Scanner + candidate log + rules-only paper baseline (no model).
+2. Scanner + candidate log + rules-only paper baseline (no model) —
+   [setup scanner S1 contract](setup-scanner-contract.md).
 3. Co-pilot: scanner candidates feed the pre-trade check and alert Isaac.
 4. Shadow principal, toolset and commit-then-reveal; new intraday policy
    version; A2 watcher runs its paper book.
