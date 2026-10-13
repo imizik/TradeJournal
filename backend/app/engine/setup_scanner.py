@@ -29,6 +29,7 @@ from sqlmodel import Session, select
 
 from app.engine import scanner_rules as rules
 from app.engine import scanner_mail, tradier
+from app.engine import shadow_exchange
 from app.engine.chart_feed import ChartFeedError
 from app.engine.chart_math import ET, normalize_bars
 from app.engine.level_alerts import LATENESS
@@ -103,6 +104,23 @@ def status_of(candidate: ScannerCandidate, state: dict) -> str:
     return "pending_entry"
 
 
+def shadow_status_of(candidate: ScannerCandidate, state: dict, now: float | None = None) -> str:
+    if candidate.contract_json is None:
+        return "no_contract"
+    for kind in ("shadow_unresolved", "shadow_exit", "shadow_exit_intent", "shadow_entry"):
+        if kind in state:
+            return {"shadow_exit_intent": "exiting", "shadow_entry": "open"}.get(kind, "unresolved" if kind == "shadow_unresolved" else "exit")
+    decision = state.get("shadow_decision")
+    if decision is None:
+        now = datetime.now(UTC).timestamp() if now is None else now
+        return "no_response" if _epoch(candidate.expires_at) <= now else "awaiting_decision"
+    if decision.get("timing") == "late":
+        return "late"
+    if decision.get("decision") == "skip":
+        return "skipped"
+    return "pending_entry"
+
+
 def _fresh(quote, decided: float) -> bool:
     """Both sides of the quote were updated at or after the decision (Tradier's millisecond times)."""
     return all(isinstance(t, (int, float)) and t >= decided * 1000 for t in (quote.bid_date, quote.ask_date))
@@ -128,6 +146,11 @@ class SetupScanner:
         finally:
             if session is not None:
                 self.scan(today, session)
+            try:
+                self.shadow_exchange_pass(now, today, session)
+            except Exception:
+                log.exception("Shadow exchange failed this pass")
+            if session is not None:
                 try:
                     self.email(today)  # a setup saved on this pass goes out now, not 20 seconds later
                 except Exception:
@@ -258,6 +281,78 @@ class SetupScanner:
             except Exception:
                 log.exception("Scanner trade %s failed this pass", candidate.id)
 
+    def shadow_exchange_pass(self, now: float, today: date, session) -> None:
+        """Publish setups, import immutable decisions, and manage shadow trades."""
+        setups_dir = os.environ.get("SHADOW_SETUPS_DIR")
+        outbox_dir = os.environ.get("SHADOW_OUTBOX_DIR")
+        with Session(self.engine) as db:
+            rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == today)
+                           .where(ScannerCandidate.contract_json.is_not(None)).order_by(ScannerCandidate.bar_end)).all()
+            active = [(candidate, fold(self._events(db, candidate.id))) for candidate in rows]
+            prior_rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date < today)
+                                 .where(ScannerCandidate.session_date >= today - timedelta(days=7))
+                                 .where(ScannerCandidate.contract_json.is_not(None))).all()
+            prior_active = [(candidate, fold(self._events(db, candidate.id))) for candidate in prior_rows]
+
+        for candidate, state in active:
+            if setups_dir and "shadow_handoff" not in state:
+                if now >= _epoch(candidate.expires_at):
+                    self._store(candidate, "shadow_handoff", now, {"status": "expired"})
+                else:
+                    try:
+                        shadow_exchange.write_setup(setups_dir, candidate)
+                    except Exception as exc:
+                        log.warning("Shadow setup handoff for %s failed this pass: %s", candidate.id, exc)
+                    else:
+                        self._store(candidate, "shadow_handoff", self.clock(), {"status": "written"})
+
+        # Re-read state after handoff writes; decisions are processed only once.
+        with Session(self.engine) as db:
+            active = [(candidate, fold(self._events(db, candidate.id))) for candidate in rows]
+        if outbox_dir:
+            for candidate, state in active:
+                if "shadow_decision" in state or "shadow_unresolved" in state:
+                    continue
+                try:
+                    decision = shadow_exchange.read_decision(outbox_dir, candidate)
+                except shadow_exchange.ShadowExchangeError as exc:
+                    self._store(candidate, "shadow_unresolved", self.clock(), {"reason": str(exc)})
+                    continue
+                if decision is None:
+                    continue
+                stored_at = self.clock()
+                data = {**decision, "stored_at": shadow_exchange.utc_z(_utc(stored_at))}
+                self._store(candidate, "shadow_decision", stored_at, data)
+
+        # The decision's arrival at this backend is the entry decision time.
+        with Session(self.engine) as db:
+            active = [(candidate, fold(self._events(db, candidate.id))) for candidate in rows]
+        for candidate, state in active:
+            status = shadow_status_of(candidate, state)
+            if status not in ("pending_entry", "open", "exiting"):
+                continue
+            try:
+                if candidate.session_date != today or session is None:
+                    self._store(candidate, "shadow_unresolved", self.clock(), {"reason": "session ended before the trade finished"})
+                elif status == "pending_entry":
+                    decided = state["shadow_decision"]["at"]
+                    self._enter(candidate, now, prefix="shadow_", decided=decided)
+                elif status == "open":
+                    self._watch(candidate, state, session, prefix="shadow_")
+                else:
+                    self._exit(candidate, state, prefix="shadow_")
+            except (ChartFeedError, ValueError) as exc:
+                log.warning("Shadow scanner trade %s not judged this pass: %s", candidate.id, exc)
+            except Exception:
+                log.exception("Shadow scanner trade %s failed this pass", candidate.id)
+
+        # A restart after a session boundary must close yesterday's still-open
+        # shadow paper trade just as the rules-only watcher does.
+        for candidate, state in prior_active:
+            if shadow_status_of(candidate, state) in ("pending_entry", "open", "exiting"):
+                self._store(candidate, "shadow_unresolved", now,
+                            {"reason": "session ended before the trade finished"})
+
     def email(self, today: date) -> None:
         """Email each of today's setups with a contract once, while it is still fresh, up to the daily cap."""
         if not scanner_mail.configured():
@@ -285,18 +380,18 @@ class SetupScanner:
                 self._store(candidate, "email", self.clock(), {"status": "sent"})
                 sent += 1
 
-    def _enter(self, candidate: ScannerCandidate, now: float) -> None:
+    def _enter(self, candidate: ScannerCandidate, now: float, prefix: str = "", decided: float | None = None) -> None:
         contract = json.loads(candidate.contract_json)
-        decided = _epoch(candidate.detected_at)
+        decided = _epoch(candidate.detected_at) if decided is None else decided
         quote = self._read_quote(contract["symbol"])
         at = self.clock()
         if at - decided > rules.MAX_DELAY_SECONDS:
-            return self._store(candidate, "unresolved", at, {"reason": "no entry quote within two minutes"})
+            return self._store(candidate, f"{prefix}unresolved", at, {"reason": "no entry quote within two minutes"})
         if quote is not None and quote.ask and quote.ask > 0 and quote.bid is not None and _fresh(quote, decided):
-            self._store(candidate, "entry", at, {"ask": quote.ask, "bid": quote.bid, "ask_time": quote.ask_date, "bid_time": quote.bid_date})
+            self._store(candidate, f"{prefix}entry", at, {"ask": quote.ask, "bid": quote.bid, "ask_time": quote.ask_date, "bid_time": quote.bid_date})
 
-    def _watch(self, candidate: ScannerCandidate, state: dict, session) -> None:
-        entry_at = state["entry"]["at"]
+    def _watch(self, candidate: ScannerCandidate, state: dict, session, prefix: str = "") -> None:
+        entry_at = state[f"{prefix}entry"]["at"]
         contract = json.loads(candidate.contract_json)
         same_day = contract["expiration"] == candidate.session_date.isoformat()
         minutes = self._minutes(candidate.symbol, candidate.session_date)
@@ -307,23 +402,23 @@ class SetupScanner:
         if found is None:
             return
         if now - found["condition_at"] > rules.MAX_DELAY_SECONDS + LATENESS:
-            return self._store(candidate, "unresolved", now, {**found, "condition": found["reason"], "reason": "monitoring gap: exit condition noticed late"})
-        self._store(candidate, "exit_intent", now, found)
+            return self._store(candidate, f"{prefix}unresolved", now, {**found, "condition": found["reason"], "reason": "monitoring gap: exit condition noticed late"})
+        self._store(candidate, f"{prefix}exit_intent", now, found)
         state = self._state(candidate)
-        if "exit_intent" in state and "exit" not in state:
-            self._exit(candidate, state)
+        if f"{prefix}exit_intent" in state and f"{prefix}exit" not in state:
+            self._exit(candidate, state, prefix=prefix)
 
-    def _exit(self, candidate: ScannerCandidate, state: dict) -> None:
+    def _exit(self, candidate: ScannerCandidate, state: dict, prefix: str = "") -> None:
         contract = json.loads(candidate.contract_json)
-        decided = state["exit_intent"]["at"]
+        decided = state[f"{prefix}exit_intent"]["at"]
         quote = self._read_quote(contract["symbol"])
         at = self.clock()
         if at - decided > rules.MAX_DELAY_SECONDS:
-            return self._store(candidate, "unresolved", at, {"reason": "no exit quote within two minutes"})
+            return self._store(candidate, f"{prefix}unresolved", at, {"reason": "no exit quote within two minutes"})
         if quote is not None and quote.bid is not None and quote.ask and _fresh(quote, decided):
             exit_ = {"bid": quote.bid, "ask": quote.ask, "bid_time": quote.bid_date, "ask_time": quote.ask_date,
-                     "reason": state["exit_intent"]["reason"]}
-            self._store(candidate, "exit", at, {**exit_, **rules.result(state["entry"], exit_, contract["multiplier"])})
+                     "reason": state[f"{prefix}exit_intent"]["reason"]}
+            self._store(candidate, f"{prefix}exit", at, {**exit_, **rules.result(state[f"{prefix}entry"], exit_, contract["multiplier"])})
 
     def _read_quote(self, occ: str):
         try:
@@ -367,6 +462,7 @@ def day_view(db: Session, day: date, own_entries: list[datetime] | None = None) 
     for c in rows:
         state = fold(SetupScanner._events(db, c.id))
         status = status_of(c, state)
+        shadow_status = shadow_status_of(c, state)
         flags = json.loads(c.flags_json)
         if own_entries is not None:
             detected_et = c.detected_at.replace(tzinfo=UTC).astimezone(ET).replace(tzinfo=None)
@@ -390,8 +486,85 @@ def day_view(db: Session, day: date, own_entries: list[datetime] | None = None) 
             "bar_end": c.bar_end.isoformat() + "Z", "detected_at": c.detected_at.isoformat() + "Z",
             "stop": c.stop, "target": c.target, "flags": flags, "facts": json.loads(c.facts_json),
             "contract": json.loads(c.contract_json) if c.contract_json else None, "status": status,
+            "shadow": _shadow_view(state, shadow_status),
             "events": {k: {**v, "at": datetime.fromtimestamp(v["at"], UTC).isoformat().replace("+00:00", "Z")} for k, v in state.items()},
         })
     totals["pnl"], totals["pnl_2x_spread"] = round(totals["pnl"], 2), round(totals["pnl_2x_spread"], 2)
+    cumulative_rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date <= day)).all()
+    day_score = _shadow_scorecard([(c, fold(SetupScanner._events(db, c.id))) for c in rows])
+    cumulative_score = _shadow_scorecard([(c, fold(SetupScanner._events(db, c.id))) for c in cumulative_rows])
     return {"date": day.isoformat(), "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH,
-            "enabled": enabled(), "totals": totals, "candidates": items}
+            "enabled": enabled(), "totals": totals, "scorecard": {"day": day_score, "cumulative": cumulative_score}, "candidates": items}
+
+
+def _shadow_view(state: dict, status: str) -> dict:
+    decision = state.get("shadow_decision")
+    entry = state.get("shadow_entry")
+    exit_ = state.get("shadow_exit")
+    intent = state.get("shadow_exit_intent")
+    unresolved = state.get("shadow_unresolved")
+    labels = ["informed-by-history", "independence-unverified"]
+    if decision:
+        labels.extend(label for label in decision.get("labels", []) if label not in labels)
+    return {
+        "decision": decision.get("decision") if decision else None,
+        "reason": decision.get("reason") if decision else None,
+        "unresolved_reason": unresolved.get("reason") if unresolved else None,
+        "timing": decision.get("timing") if decision else None,
+        "clean_order": decision.get("clean_order") if decision else None,
+        "labels": labels,
+        "status": status,
+        "entry": _event_public(entry),
+        "exit": _event_public(exit_),
+        "exit_intent": _event_public(intent),
+        "result": {key: exit_[key] for key in ("pnl", "pnl_2x_spread", "return_on_premium") if key in exit_} if exit_ else None,
+    }
+
+
+def _event_public(value: dict | None) -> dict | None:
+    if value is None:
+        return None
+    return {**value, "at": datetime.fromtimestamp(value["at"], UTC).isoformat().replace("+00:00", "Z")}
+
+
+def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
+    score = {"setups": len(rows), "decisions": 0, "take": 0, "skip": 0, "late": 0, "no_response": 0, "unresolved": 0,
+             "rules_priced": 0, "shadow_priced": 0, "skipped_priced": 0,
+             "rules_pnl": 0.0, "shadow_pnl": 0.0, "skipped_rules_pnl": 0.0, "clean_order": 0}
+    for candidate, state in rows:
+        rules_exit = state.get("exit")
+        if rules_exit:
+            score["rules_pnl"] += rules_exit["pnl"]
+            score["rules_priced"] += 1
+        decision = state.get("shadow_decision")
+        shadow = shadow_status_of(candidate, state)
+        if decision:
+            score["decisions"] += 1
+            if decision.get("timing") == "late":
+                score["late"] += 1
+            elif decision.get("decision") == "take":
+                score["take"] += 1
+            elif decision.get("decision") == "skip":
+                score["skip"] += 1
+                if rules_exit:
+                    score["skipped_rules_pnl"] += rules_exit["pnl"]
+                    score["skipped_priced"] += 1
+            if decision.get("clean_order") is True:
+                score["clean_order"] += 1
+        elif shadow == "no_response":
+            score["no_response"] += 1
+        if shadow == "unresolved":
+            score["unresolved"] += 1
+        shadow_exit = state.get("shadow_exit")
+        if shadow_exit:
+            score["shadow_pnl"] += shadow_exit["pnl"]
+            score["shadow_priced"] += 1
+    for key in ("rules_pnl", "shadow_pnl", "skipped_rules_pnl"):
+        score[key] = round(score[key], 2)
+    score["evidence"] = "not enough" if score["decisions"] < 30 else "sufficient count"
+    score["group_evidence"] = {
+        "rules": "not enough" if score["setups"] < 30 else "sufficient count",
+        "takes": "not enough" if score["take"] < 30 else "sufficient count",
+        "skipped": "not enough" if score["skip"] < 30 else "sufficient count",
+    }
+    return score

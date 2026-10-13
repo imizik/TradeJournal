@@ -597,7 +597,44 @@ export type TradingViewVerdict =
   | "long_scalp"
   | "short_scalp";
 
-export type ScannerEventRow = Record<string, number | string | null> & { at: string };
+export type ScannerEventRow = Record<string, unknown> & { at: string };
+
+export type ScannerShadowRow = {
+  decision: "take" | "skip" | null;
+  reason: string | null;
+  unresolved_reason: string | null;
+  timing: "on_time" | "late" | null;
+  clean_order: boolean | null;
+  labels: string[];
+  status: "no_contract" | "awaiting_decision" | "no_response" | "skipped" | "late" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  entry: ScannerEventRow | null;
+  exit: ScannerEventRow | null;
+  exit_intent: ScannerEventRow | null;
+  result: { pnl: number; pnl_2x_spread: number; return_on_premium: number | null } | null;
+};
+
+export type ScannerScorecard = {
+  setups: number;
+  decisions: number;
+  take: number;
+  skip: number;
+  late: number;
+  no_response: number;
+  unresolved: number;
+  rules_priced: number;
+  shadow_priced: number;
+  skipped_priced: number;
+  rules_pnl: number;
+  shadow_pnl: number;
+  skipped_rules_pnl: number;
+  clean_order: number;
+  evidence: "not enough" | "sufficient count";
+  group_evidence: {
+    rules: "not enough" | "sufficient count";
+    takes: "not enough" | "sufficient count";
+    skipped: "not enough" | "sufficient count";
+  };
+};
 
 export type ScannerCandidateRow = {
   id: string;
@@ -620,6 +657,7 @@ export type ScannerCandidateRow = {
     ask: number;
   } | null;
   status: "no_contract" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  shadow: ScannerShadowRow;
   events: Record<string, ScannerEventRow>;
 };
 
@@ -638,6 +676,7 @@ export type ScannerDay = {
     pnl_2x_spread: number;
     wins: number;
   };
+  scorecard: { day: ScannerScorecard; cumulative: ScannerScorecard };
   candidates: ScannerCandidateRow[];
 };
 

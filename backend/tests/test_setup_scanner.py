@@ -1,7 +1,7 @@
 """Setup scanner S1: the pure rules, and the watcher's candidates, paper trades and restarts."""
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -13,6 +13,7 @@ from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.database import get_session
 from app.engine import scanner_rules as rules
+from app.engine import shadow_exchange
 from app.engine import setup_scanner
 from app.engine.options_models import OptionContract
 from app.models import Account, Fill, Trade, ScannerCandidate, ScannerEvent
@@ -419,6 +420,222 @@ def test_a_failed_send_is_retried_while_fresh(engine, monkeypatch):
     clock.now = at(9, 51)
     watch.run()
     assert len(calls) == 2 and rows(engine)[1]["email"]["status"] == "sent"
+
+
+def _decision_file(path, candidate, decision="take", timing="on_time", committed_at=None, **changes):
+    path.mkdir(parents=True, exist_ok=True)
+    setup_hash = shadow_exchange.setup_payload(candidate)["content_sha256"]
+    payload = {"format": "shadow-decision-v1", "decision_id": "shd_test", "candidate_id": str(candidate.id),
+               "actor": "fixture", "decision": decision, "reason": "fixture reason",
+               "committed_at": committed_at or shadow_exchange.utc_z(candidate.detected_at), "timing": timing,
+               "clean_order": True, "labels": ["informed-by-history", "independence-unverified"],
+               "setup_sha256": setup_hash}
+    payload.update(changes)
+    payload["content_sha256"] = shadow_exchange.digest(payload)
+    (path / f"decision-{candidate.id}.json").write_bytes(shadow_exchange.canonical(payload))
+    return payload
+
+
+def _candidate(engine):
+    return rows(engine)[0][0]
+
+
+def test_shadow_setup_round_trip_is_content_addressed(engine, tmp_path):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    payload = shadow_exchange.write_setup(tmp_path, candidate)
+    path = tmp_path / f"setup-{candidate.id}.json"
+    written = json.loads(path.read_text())
+    assert written == payload and written["content_sha256"] == shadow_exchange.digest({k: v for k, v in written.items() if k != "content_sha256"})
+    assert path.stat().st_mode & 0o777 == 0o640
+
+
+def test_expired_candidate_is_not_handed_off(engine, monkeypatch, tmp_path):
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    setups = tmp_path / "setups"
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(setups))
+    clock.now = int(candidate.expires_at.replace(tzinfo=ZoneInfo("UTC")).timestamp())
+    watch.shadow_exchange_pass(clock.now, DAY, None)
+    assert rows(engine)[1]["shadow_handoff"]["status"] == "expired"
+    assert not (setups / f"setup-{candidate.id}.json").exists()
+
+
+def test_open_shadow_trade_becomes_unresolved_after_next_session(engine):
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    watch._store(candidate, "shadow_decision", clock.now, {"decision": "take", "timing": "on_time"})
+    watch._store(candidate, "shadow_entry", clock.now, {"ask": 1.05, "bid": 1.0})
+
+    watch.shadow_exchange_pass(clock.now, DAY + timedelta(days=1), None)
+
+    assert rows(engine)[1]["shadow_unresolved"]["reason"] == "session ended before the trade finished"
+
+
+def test_no_response_starts_at_the_exact_expiry_time(engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    expiry = setup_scanner._epoch(candidate.expires_at)
+    assert setup_scanner.shadow_status_of(candidate, {}, now=expiry - 1) == "awaiting_decision"
+    assert setup_scanner.shadow_status_of(candidate, {}, now=expiry) == "no_response"
+
+
+def test_shadow_view_separates_decision_rationale_from_unresolved_reason():
+    labels = ["informed-by-history", "independence-unverified"]
+    mixed = setup_scanner._shadow_view({
+        "shadow_decision": {"decision": "take", "reason": "setup rationale", "labels": labels},
+        "shadow_unresolved": {"reason": "decision export failed"},
+    }, "unresolved")
+    assert mixed["reason"] == "setup rationale"
+    assert mixed["unresolved_reason"] == "decision export failed"
+    assert mixed["labels"] == labels
+
+    no_response = setup_scanner._shadow_view({}, "no_response")
+    assert no_response["reason"] is None and no_response["unresolved_reason"] is None
+    assert no_response["labels"] == labels
+
+    rejected = setup_scanner._shadow_view({"shadow_unresolved": {"reason": "invalid decision export"}}, "unresolved")
+    assert rejected["reason"] is None and rejected["unresolved_reason"] == "invalid decision export"
+    assert rejected["labels"] == labels
+
+
+def test_scorecard_counts_mixed_unresolved_and_uses_setup_baseline(engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    candidate.expires_at = datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+    take = {"shadow_decision": {"decision": "take", "timing": "on_time"}}
+    mixed = {**take, "shadow_unresolved": {"reason": "entry was not priced"}, "exit": {"pnl": 10.0}}
+
+    score = setup_scanner._shadow_scorecard([(candidate, mixed), *((candidate, take) for _ in range(28)), (candidate, {})])
+
+    assert score["setups"] == 30 and score["decisions"] == 29 and score["take"] == 29
+    assert score["unresolved"] == 1 and score["no_response"] == 1
+    assert score["rules_priced"] == 1 and score["rules_pnl"] == 10.0
+    assert score["group_evidence"] == {"rules": "sufficient count", "takes": "not enough", "skipped": "not enough"}
+
+
+def test_tampered_shadow_decision_is_unresolved(engine, monkeypatch, tmp_path):
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
+    monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    value = _decision_file(tmp_path / "outbox", candidate)
+    value["reason"] = "tampered after hashing"
+    (tmp_path / "outbox" / f"decision-{candidate.id}.json").write_bytes(shadow_exchange.canonical(value))
+    clock.now += 10
+    watch.run()
+    events = rows(engine)[1]
+    assert events["shadow_unresolved"]["reason"] == "decision content hash is invalid"
+    assert "shadow_entry" not in events
+
+
+def test_decision_with_another_setup_hash_is_unresolved(engine, monkeypatch, tmp_path):
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
+    monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    _decision_file(tmp_path / "outbox", candidate, setup_sha256="0" * 64)
+    clock.now += 10
+    watch.run()
+    assert rows(engine)[1]["shadow_unresolved"]["reason"] == "decision setup hash does not match the saved candidate"
+
+
+@pytest.mark.parametrize("decision,timing,expected", [("skip", "on_time", "skipped"), ("take", "late", "late")])
+def test_skip_and_late_take_never_price_shadow_trade(engine, monkeypatch, tmp_path, decision, timing, expected):
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
+    monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    _decision_file(tmp_path / "outbox", candidate, decision=decision, timing=timing)
+    clock.now += 10
+    watch.run()
+    events = rows(engine)[1]
+    assert "shadow_entry" not in events
+    with Session(engine) as db:
+        view = setup_scanner.day_view(db, DAY)
+    assert view["candidates"][0]["shadow"]["status"] == expected
+
+
+def test_shadow_take_uses_backend_decision_time_and_exits_independently(engine, monkeypatch, tmp_path):
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
+    monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))
+    quotes = Quotes()
+    watch, clock = scanner(engine, at(9, 50, 35), quotes=quotes)
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    _decision_file(tmp_path / "outbox", candidate, committed_at=shadow_exchange.utc_z(candidate.detected_at))
+    clock.now += 10
+    quotes.updated_ms = clock.now * 1000 - 1
+    watch.run()  # the quote predates backend storage, so it cannot price the shadow entry
+    assert "shadow_entry" not in rows(engine)[1]
+    quotes.updated_ms = (clock.now + 1) * 1000
+    clock.now += 1
+    watch.run()
+    events = rows(engine)[1]
+    assert events["entry"] and events["shadow_entry"]
+    stored_ms = int(datetime.fromisoformat(events["shadow_decision"]["stored_at"].replace("Z", "+00:00")).timestamp() * 1000)
+    assert events["shadow_entry"]["ask_time"] >= stored_ms
+    watch.run()  # a new monitor pass over the same rows must not create another entry
+    with Session(engine) as db:
+        entries = db.exec(select(ScannerEvent).where(ScannerEvent.candidate_id == candidate.id)
+                          .where(ScannerEvent.event_type == "shadow_entry")).all()
+    assert len(entries) == 1
+
+    watch.feed.add(at(9, 51), at(9, 52), 100.9, candidate.target + 0.1)
+    clock.now = at(9, 52, 40)
+    quotes.next = (1.5, 1.6)
+    quotes.updated_ms = 10**15
+    watch.run()
+    events = rows(engine)[1]
+    assert events.get("exit") and events.get("shadow_exit"), events
+    with Session(engine) as db:
+        view = setup_scanner.day_view(db, DAY)
+    score = view["scorecard"]["day"]
+    assert view["candidates"][0]["shadow"]["result"]["pnl"] == pytest.approx(43.7)
+    assert score["take"] == 1 and score["shadow_pnl"] == pytest.approx(43.7)
+    assert score["rules_priced"] == score["shadow_priced"] == 1
+    assert score["group_evidence"] == {"rules": "not enough", "takes": "not enough", "skipped": "not enough"}
+
+
+def test_shadow_no_response_and_cumulative_scorecard(engine, monkeypatch, tmp_path):
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    clock.now = at(10, 1)
+    watch.shadow_exchange_pass(clock.now, DAY, Calendar().hours(DAY))
+    with Session(engine) as db:
+        view = setup_scanner.day_view(db, DAY)
+    assert view["scorecard"]["day"]["no_response"] == 1
+    assert "shadow_entry" not in rows(engine)[1]
+    assert view["scorecard"]["cumulative"] == view["scorecard"]["day"]
+
+
+def test_shadow_status_remains_separate_from_rules_trade(engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    with Session(engine) as db:
+        view = setup_scanner.day_view(db, DAY)
+    item = view["candidates"][0]
+    assert item["status"] == "open" and item["shadow"]["status"] == "no_response"
 
 
 def test_mail_send_logs_in_with_the_app_password_and_addresses_the_owner(monkeypatch):
