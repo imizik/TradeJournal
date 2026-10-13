@@ -263,6 +263,15 @@ The answer carries the daily inputs and caveats that the rules are untested
 and that no earnings date was checked. Swing checks are not yet linked to
 outcomes or graded.
 
+Macro calendar (advisor step 9, first part): every check and the pre-open pass
+carry `macro`, the scheduled FOMC, CPI and jobs releases today and next trading
+day from the Daily Review's official calendar
+([macro_calendar.json](../../backend/app/data/macro_calendar.json), NYSE
+holidays skipped). A release still to come today is a caveat ("expect a
+volatility spike"); one already out today is noted; for swing ideas, next
+trading day's releases are flagged as inside the hold. A day the calendar does
+not cover is a caveat, never "no events". The verdict itself is unchanged.
+
 ## Next steps
 
 The advisor plan agreed with Isaac on October 12, 2026, in order. The end goal:
@@ -281,7 +290,7 @@ was, and what overriding cost.
 | 6 | Options-aware checks | Quote, IV, greeks, cost, decay and the at-stop estimate appear with timestamps on a live check | Live |
 | 7 | Pre-open watchlist pass (`preopen_watchlist`) | One real morning's pass matches the journal and the provider | Live (deployed Oct 12) |
 | 8 | **Price after the check** in `review_checks`: for every check (above all skip/wait), the underlying's move from the check price to the window end, with the best and worst move in between | A skipped idea shows what it would have done; numbers match recorded bars | Built (`price_after`; final results saved once) |
-| 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Not started; needs a source choice (new provider or key) |
+| 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Calendar built (FOMC/CPI/jobs); earnings dates and VIX next, from the Tradier key already on the server (no new keys; Oct 12 owner choice: option A) |
 | 10 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Built (`grade_checks`, `/advisor-review`); needs weeks of checks to mean much |
 | 11 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Built (`pretrade-swing-v1`); outcome linking for swings still open |
 

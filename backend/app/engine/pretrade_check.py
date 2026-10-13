@@ -366,6 +366,31 @@ def _caveats(analysis: dict, history: dict) -> list[str]:
     return caveats
 
 
+def macro_context(receipt_utc: datetime) -> dict:
+    """Scheduled FOMC, CPI and jobs releases today and next trading day (the Daily Review's official calendar)."""
+    from app.ai.review_context import macro_events
+
+    try:
+        return macro_events(receipt_utc.astimezone(NY).date())
+    except Exception as exc:  # A missing or uncovered calendar is a gap, never an invented "no events".
+        return {"events": None, "gap": f"macro calendar unavailable ({type(exc).__name__})"}
+
+
+def _macro_caveats(macro: dict, receipt_utc: datetime, swing: bool) -> list[str]:
+    if macro.get("events") is None:
+        return [macro.get("gap") or "macro calendar unavailable"]
+    now = receipt_utc.astimezone(NY).strftime("%H:%M")
+    notes = []
+    for event in macro["events"]:
+        if event["when"] == "today" and event["time_et"] >= now:
+            notes.append(f"{event['event']} at {event['time_et']} ET today: expect a volatility spike")
+        elif event["when"] == "today":
+            notes.append(f"{event['event']} came out at {event['time_et']} ET today")
+        elif swing:
+            notes.append(f"{event['event']} at {event['time_et']} ET {event['when']}: inside a swing hold")
+    return notes
+
+
 def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: datetime) -> dict:
     """The answer contract for one idea. Same inputs, same answer."""
     for key in ("ticker", "side", "instrument", "horizon"):
@@ -402,9 +427,11 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
         caveats += ["swing rules are textbook defaults, not yet tested on your trades",
                     "earnings date not checked (no calendar source yet)"]
     option = option_summary(data.get("option"), idea.get("stop"), intraday.get("price")) if idea["instrument"] == "option" else None
+    macro = macro_context(receipt_utc)
+    caveats = _macro_caveats(macro, receipt_utc, swing) + caveats
     answer = {"rules_version": SWING_RULES_VERSION if swing else RULES_VERSION, "receipt_utc": receipt_utc.astimezone(timezone.utc).isoformat(),
               "idea": idea, **rules, "would_change": would_change, "history": history, "live": live, "option": option,
-              "caveats": caveats}
+              "macro": macro, "caveats": caveats}
     answer["live_context_sha256"] = hashlib.sha256(
         json.dumps({"request": analysis.get("request"), "data": data}, sort_keys=True, default=str).encode()).hexdigest()
     return answer

@@ -367,3 +367,18 @@ def test_result_final_waits_for_history_and_open_positions():
     assert check.result_final(idea, answer, receipt, {**result, "move": {"state": "unavailable"}}, morning, []) is False
     late = datetime(2026, 10, 9, 21, 0, tzinfo=timezone.utc)  # Checked at 17:00, after the close.
     assert check.price_after({**idea, "stop": None}, answer, late, [], morning)["state"] == "no_window"
+
+
+def test_macro_calendar_flags_releases_today_and_inside_a_swing():
+    cpi_morning = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)  # 08:00 New York; CPI (Sep 2026) at 08:30.
+    answer = check.run_check(IDEA, analysis(market_state="premarket"), [], cpi_morning)
+    assert [e["event"] for e in answer["macro"]["events"]] == ["CPI (Sep 2026)"]
+    assert "CPI (Sep 2026) at 08:30 ET today: expect a volatility spike" in answer["caveats"]
+    later = check.run_check(IDEA, analysis(), [], datetime(2026, 10, 14, 15, 0, tzinfo=timezone.utc))
+    assert "CPI (Sep 2026) came out at 08:30 ET today" in later["caveats"]
+    eve = datetime(2026, 10, 27, 20, 0, tzinfo=timezone.utc)  # FOMC decision next day at 14:00.
+    assert not any("FOMC" in c for c in check.run_check(IDEA, analysis(), [], eve)["caveats"])
+    swing = check.run_check({**IDEA, "horizon": "swing"}, daily(), [], eve)
+    assert "FOMC decision at 14:00 ET next trading day: inside a swing hold" in swing["caveats"]
+    uncovered = check.run_check(IDEA, analysis(), [], datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc))
+    assert uncovered["macro"]["events"] is None and uncovered["caveats"][0].startswith("macro calendar unavailable")
