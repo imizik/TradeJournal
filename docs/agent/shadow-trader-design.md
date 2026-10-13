@@ -128,7 +128,8 @@ plan), which suits swing setups but not intraday ones.
    [setup scanner S1 contract](setup-scanner-contract.md).
 3. Co-pilot: scanner candidates feed the pre-trade check and alert Isaac.
 4. Shadow principal, toolset and commit-then-reveal; new intraday policy
-   version; A2 watcher runs its paper book.
+   version; A2 watcher runs its paper book — first slice:
+   [shadow S1](shadow-s1-contract.md) (selection only, scanner paper engine).
 5. Scorecard and comparison view.
 
 Each slice needs its own contract, approval and acceptance before activation.

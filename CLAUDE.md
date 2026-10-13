@@ -10,8 +10,9 @@ source of truth; fix relevant documentation when behavior changes.
 The owner selected **Dots functionality first on October 11, 2026**. Before
 selecting new roadmap work, read [the shared priorities](docs/product-roadmap.md#selected-priorities--october-11-2026)
 and [Dots delivery board](docs/agent/dots-integration.md#current-delivery-board).
-Finish the selected advisor connection, then make questions repeatable and
-connection upkeep dependable. Already-selected Research Studio work may close;
+On October 12, 2026 the owner declared the advisor done and moved the Dots
+priority to the shadow trader ([shadow S1](docs/agent/shadow-s1-contract.md)).
+Already-selected Research Studio work may close;
 new adjacent expansion follows Dots. Detailed feature contracts still own scope
 and acceptance; this priority does not activate services or broaden grants.
 
