@@ -272,6 +272,22 @@ volatility spike"); one already out today is noted; for swing ideas, next
 trading day's releases are flagged as inside the hold. A day the calendar does
 not cover is a caveat, never "no events". The verdict itself is unchanged.
 
+Earnings and VIX (advisor step 9, second part): the private backend's 15-minute
+job writes the next earnings date per tracked symbol and a live VIX quote to
+`market_context_item` (Tradier, [market_context.py](../../backend/app/engine/market_context.py)).
+The publisher reads it through the additive view `pretrade_market_source`
+([check_scope.py](../../deploy/check_scope.py), no row IDs, applied with its own
+`--approve-sql` like the context views) into a content-addressed
+market file. Checks carry `market` (earnings date/status/days away and VIX
+with their read times); `position_check` and each pre-open ticker carry it too,
+and the pre-open pass carries `vix`. Caveats: a report today or next day (gap
+and IV-crush risk), inside a swing hold (14 days), before an option's
+expiration, VIX 25 or higher, an earnings read older than 48 hours, VIX older
+than an hour (by the quote's own trade time when known). A ticker outside the
+tracked calendar (only held, recently traded and watched names are read), an
+unreadable row, a snapshot older than an hour or none at all is "not checked",
+never "no earnings"; funds and indices simply have none.
+
 ## Next steps
 
 The advisor plan agreed with Isaac on October 12, 2026, in order. The end goal:
@@ -290,7 +306,7 @@ was, and what overriding cost.
 | 6 | Options-aware checks | Quote, IV, greeks, cost, decay and the at-stop estimate appear with timestamps on a live check | Live |
 | 7 | Pre-open watchlist pass (`preopen_watchlist`) | One real morning's pass matches the journal and the provider | Live (deployed Oct 12) |
 | 8 | **Price after the check** in `review_checks`: for every check (above all skip/wait), the underlying's move from the check price to the window end, with the best and worst move in between | A skipped idea shows what it would have done; numbers match recorded bars | Built (`price_after`; final results saved once) |
-| 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Calendar live; earnings and VIX: main-app snapshot built (`market_context_item`), check-service side next |
+| 9 | **Macro and external context**: economic calendar (CPI, FOMC, jobs), VIX/rates, earnings dates, sector moves. Headlines are passed to Jo in `pre_trade_check` too, not only used for the event-risk flag | Each item names its source and timestamp; a missing feed is a caveat, never a guess; tested on recorded data | Built: calendar live; earnings + VIX via `market_context_item` → `pretrade_market_source` → market file. Sector moves not covered |
 | 10 | Grading view: results by verdict, followed versus overrode | Counts reconcile with saved checks and trades; small groups say "not enough evidence" | Built (`grade_checks`, `/advisor-review`); needs weeks of checks to mean much |
 | 11 | Swing scoring | Swing ideas get a real verdict, tested on recorded data | Built (`pretrade-swing-v1`); outcome linking for swings still open |
 

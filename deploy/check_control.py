@@ -27,7 +27,7 @@ import time
 import advisor_mcp_control as old
 from advisor_mcp_stage import SOURCE, digest, exact, inventory, reviewed_git
 from check_network import check_policy
-from check_scope import CAPTURE_VIEW, POSITION_VIEW, context_view_sql, view_sql
+from check_scope import CAPTURE_VIEW, MARKET_VIEW, POSITION_VIEW, context_view_sql, market_view_sql, view_sql
 
 FORMAT = "check-disabled-bundle-v1"
 ROOT = Path("/opt/tradejournal-check")
@@ -54,9 +54,9 @@ RUNTIME_FILES = ("cloud_check_owner.py", "cloud_mcp_check.py", "cloud_mcp_check_
 SETTINGS = ("config.json", "refresh-keys.json", "network.nft", "feature-view.sql", "owner")
 # Activation edits config.json and refresh-keys.json (real issuer, grant,
 # client) and enables owner/config.json; the network policy and view SQL stay pinned.
-PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql")
+PINNED_SETTINGS = ("network.nft", "feature-view.sql", "context-views.sql", "market-view.sql")
 # Database changes an upgrade may add, each applied only under its own SHA-256 approval.
-ADDITIVE_SQL = ("context-views.sql",)
+ADDITIVE_SQL = {"context-views.sql": (POSITION_VIEW, CAPTURE_VIEW), "market-view.sql": (MARKET_VIEW,)}
 
 
 def stage(destination, *, wheels):
@@ -88,7 +88,8 @@ def stage(destination, *, wheels):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(source.read_bytes())
         generated = {"config/config.json": json.dumps(config, indent=2) + "\n",
-            "config/feature-view.sql": view_sql(), "config/context-views.sql": context_view_sql()}
+            "config/feature-view.sql": view_sql(), "config/context-views.sql": context_view_sql(),
+            "config/market-view.sql": market_view_sql()}
         for relative, body in generated.items():
             target = destination / relative
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -273,20 +274,24 @@ def psql(sql_bytes):
     return result.stdout.decode().strip()
 
 
-def apply_context_views(sql_bytes):
-    """Additive and re-runnable. Apply when neither view exists and record the exact SQL beside the config;
-    when both exist, skip only if that recorded SQL is these exact bytes; refuse anything else."""
-    names = (POSITION_VIEW, CAPTURE_VIEW)
-    applied = CONFIG / "context-views.sql"
-    present = int(psql(("SELECT count(*) FROM pg_views WHERE schemaname = 'public' AND viewname IN ('%s', '%s');"
-        % names).encode()))
+def apply_additive(name, sql_bytes):
+    """Additive and re-runnable. Apply when none of the file's views exist and record the exact SQL beside the
+    config; when all exist, skip only if that recorded SQL is these exact bytes; refuse anything else."""
+    names = ADDITIVE_SQL[name]
+    applied = CONFIG / name
+    present = int(psql(("SELECT count(*) FROM pg_views WHERE schemaname = 'public' AND viewname IN (%s);"
+        % ", ".join(f"'{view}'" for view in names)).encode()))
     if present == 0:
         if applied.exists() or applied.is_symlink():
-            raise RuntimeError("context-views.sql is recorded but its views are missing; review the database")
+            raise RuntimeError(f"{name} is recorded but its views are missing; review the database")
         psql(sql_bytes)
         private_file(applied, sql_bytes, mode=0o644)
     elif present != len(names) or not applied.is_file() or applied.read_bytes() != sql_bytes:
-        raise RuntimeError("Existing context views do not match this reviewed SQL; review the database before upgrading")
+        raise RuntimeError(f"Existing views for {name} do not match this reviewed SQL; review the database before upgrading")
+
+
+def apply_context_views(sql_bytes):
+    apply_additive("context-views.sql", sql_bytes)
 
 
 def add_context_views(bundle, sql_approval):
@@ -340,7 +345,7 @@ def upgrade(bundle, approved, sql_approvals=()):
     if running:
         raise ValueError("Stop every check unit first (check_control.py stop): " + ", ".join(running))
     for name in additions:  # Additive database change first: on refusal nothing else has moved.
-        apply_context_views((bundle / "config" / name).read_bytes())
+        apply_additive(name, (bundle / "config" / name).read_bytes())
     previous = ROOT / "previous-runtime" / (time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + record["manifest_sha256"][:12])
     previous.mkdir(parents=True, mode=0o700)
     (ROOT / "backend").rename(previous / "backend")
@@ -353,7 +358,7 @@ def upgrade(bundle, approved, sql_approvals=()):
         build_runtime(bundle, scratch)
         settings = dict(record["settings"])
         for name in additions:
-            settings[name] = digest(CONFIG / name)  # Written only by apply_context_views, byte-equal to the bundle.
+            settings[name] = digest(CONFIG / name)  # Written only by apply_additive, byte-equal to the bundle.
         updated = {**record, "manifest_sha256": approved, "settings": settings, "source_commit": manifest["source_commit"],
             "runtime_inventory": old.runtime_inventory(root=ROOT, roles=("backend",), python_roles=("backend",)),
             "previous_runtimes": [*record.get("previous_runtimes", []), {"path": str(previous),

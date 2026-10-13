@@ -69,6 +69,7 @@ PREOPEN_BUDGET = 20.0  # Seconds for the whole pass; tickers left over are named
 SETTLE_BUDGET = 20.0  # Seconds of minute-bar reads per review/grade call; the rest stay unmeasured until next time.
 GRADE_LIMIT = 1000
 CONTEXT_MAX_AGE = 30 * 60  # Positions change during a session; older than this is labelled stale.
+MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour the snapshot itself is stale.
 
 
 def scopes(name):
@@ -189,6 +190,7 @@ def jo_view(record, *, replayed):
         "idea": record["idea"], "verdict": answer["verdict"], "wait_for": answer["wait_for"],
         "reasons": answer["reasons"], "would_change": answer["would_change"], "risk_check": answer["risk_check"],
         "history": history, "live": answer["live"], "option": answer.get("option"), "macro": answer.get("macro"),
+        "market": answer.get("market"),
         "caveats": answer["caveats"],
         "timings_ms": record["timings_ms"],
         "advice_only": "Rules verdict for one idea. Nothing places, sizes or arms an order.",
@@ -230,7 +232,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
     bind_provider(provider, feed=config.provider_feed, cache_dir=cache_dir)
     from app.engine.alpaca import ET
     from app.engine.alpaca import fetch_minute_bars_live
-    from app.engine.pretrade_check import (check_outcome, grade_results, macro_context, position_view, preopen_tickers, preopen_view,
+    from app.engine.pretrade_check import (check_outcome, grade_results, macro_context, market_facts, position_view,
+        preopen_tickers, preopen_view,
         price_after, result_final, run_check)
     from app.engine.scalper import build_scalp_analysis
 
@@ -286,8 +289,9 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             analysis = clock_only_analysis(receipt, errors)
         context_done = time.perf_counter()
         features = await asyncio.to_thread(history, receipt)
+        market = await asyncio.to_thread(market_items, receipt)
         history_done = time.perf_counter()
-        answer = run_check(idea, analysis, features["rows"] or [], receipt)
+        answer = run_check(idea, analysis, features["rows"] or [], receipt, market)
         if features["state"] == "missing":
             answer["history"]["available"] = False
             answer["caveats"].append("own-trade history file is missing or unreadable; no history was used")
@@ -492,6 +496,12 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             "pending": len(settled) - len(final), "truncated": len(saved) >= GRADE_LIMIT, "grade": grade,
             "history": {key: features[key] for key in ("state", "generated_at")}}
 
+    def market_items(now):
+        """Published earnings/VIX rows, or None when missing or stale (a stale snapshot is not used)."""
+        held = pretrade_features.read_market(Path(config.features_pointer).parent / "market.json",
+            max_age_seconds=MARKET_MAX_AGE, now=now)
+        return held["items"] if held["state"] == "fresh" else None
+
     def context(now):
         return pretrade_features.read_context(Path(config.features_pointer).parent / "context.json",
             max_age_seconds=CONTEXT_MAX_AGE, now=now)
@@ -528,8 +538,12 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                 analysis, _ = await asyncio.wait_for(asyncio.to_thread(live_context, idea, now), CONTEXT_TIMEOUT)
             except asyncio.TimeoutError:
                 analysis = clock_only_analysis(now, ["live market data timed out"])
-            return position_view(position, features["rows"] or [], analysis, now, stop if stop_applies else None)
+            view = position_view(position, features["rows"] or [], analysis, now, stop if stop_applies else None)
+            view["market"], notes = market_facts(position["ticker"], market, now, "swing", position.get("expiration"))
+            view["caveats"] = [*notes, *view["caveats"]]
+            return view
 
+        market = await asyncio.to_thread(market_items, now)
         if slots.locked():
             raise ToolError("Check service busy; retry shortly")
         async with slots:  # Same bound as pre_trade_check; lookups run one at a time.
@@ -547,8 +561,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         """Before the bell: for each ticker (default: what Isaac holds, then his most-traded tickers of the last
         30 days; up to 8), the price versus yesterday's close, gap, premarket high/low/volume, up to 5 headlines from
         the last 24 hours, whether he holds it, and how his own closed trades in it went by side and entry time;
-        plus SPY/QQQ change and VWAP side, and scheduled FOMC/CPI/jobs releases today and next trading day. No VIX
-        or earnings dates yet. Facts only, no verdict; run
+        plus SPY/QQQ change and VWAP side, scheduled FOMC/CPI/jobs releases today and next trading day, each
+        ticker's next earnings date (tracked names only) and the VIX. Facts only, no verdict; run
         pre_trade_check on an actual idea after the open.
         """
         await authenticated("preopen_watchlist")
@@ -560,7 +574,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         names = list(dict.fromkeys(t.upper() for t in tickers)) if tickers else preopen_tickers(positions, rows, now, PREOPEN_LIMIT)
         if slots.locked():
             raise ToolError("Check service busy; retry shortly")
-        views, skipped, market = [], [], None
+        views, skipped, market_tape = [], [], None
+        market = await asyncio.to_thread(market_items, now)
         deadline = time.monotonic() + PREOPEN_BUDGET
         async with slots:  # Same bound as pre_trade_check; lookups run one at a time.
             for name in names:
@@ -575,9 +590,13 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
                         min(CONTEXT_TIMEOUT, remaining))
                 except asyncio.TimeoutError:
                     analysis = clock_only_analysis(now, ["live market data timed out"])
-                views.append(preopen_view(name, rows, analysis, now, positions))
-                market = market or (analysis.get("data") or {}).get("market") or None
-        return {"schema_version": SCHEMA, "as_of": now.isoformat(), "tickers": names, "market": market,
+                view = preopen_view(name, rows, analysis, now, positions)
+                view["market"], notes = market_facts(name, market, now, "intraday")
+                view["caveats"] = [*notes, *view["caveats"]]
+                views.append(view)
+                market_tape = market_tape or (analysis.get("data") or {}).get("market") or None
+        return {"schema_version": SCHEMA, "as_of": now.isoformat(), "tickers": names, "market": market_tape,
+            "vix": market_facts("VIX", market, now, "intraday")[0]["vix"],
             "macro": macro_context(now), "watchlist": views,
             "skipped_for_time": skipped, "positions": {"state": held["state"], "as_of": held["generated_at"]},
             "history": {key: features[key] for key in ("state", "generated_at")},

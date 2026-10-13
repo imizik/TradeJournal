@@ -16,6 +16,7 @@ from zoneinfo import ZoneInfo
 
 from sqlmodel import Session, select
 
+from app.engine.market_context import NO_EARNINGS
 from app.models import Account, Fill, FillMarketContext, Trade, TradeFill, TradePathMetrics
 
 RULES_VERSION = "pretrade-rules-v1"
@@ -391,7 +392,69 @@ def _macro_caveats(macro: dict, receipt_utc: datetime, swing: bool) -> list[str]
     return notes
 
 
-def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: datetime) -> dict:
+SWING_HOLD_DAYS = 14  # Calendar days: the swing families hold 8-10 sessions.
+EARNINGS_STALE_HOURS = 48
+VIX_STALE_MINUTES = 60
+VIX_ELEVATED = 25.0
+
+
+def market_facts(ticker: str, items: Optional[list[dict]], receipt_utc: datetime, horizon: str,
+                 expiration: Optional[str] = None) -> tuple[dict, list[str]]:
+    """The ticker's next earnings date and the VIX, from the published Tradier snapshot, with caveats.
+
+    Missing data is said so, never read as "no earnings". Dates are New York calendar dates.
+    """
+    if items is None:
+        return {"earnings": None, "vix": None, "state": "missing"}, ["earnings date and VIX not checked (market data unavailable)"]
+    now = receipt_utc.astimezone(timezone.utc).replace(tzinfo=None)
+    today = receipt_utc.astimezone(NY).date()
+    caveats = []
+    earnings = next((row for row in items if row["kind"] == "earnings" and row["symbol"] == ticker.upper()), None)
+    vix = next((row for row in items if row["kind"] == "vix"), None)
+    facts = {"state": "fresh", "earnings": None, "vix": None}
+    try:
+        day = datetime.fromisoformat(str(earnings["event_date"])).date() if earnings else None
+    except (TypeError, ValueError):  # A malformed row is a gap, never a crash or a guess.
+        earnings, day = None, None
+        caveats.append(f"earnings date for {ticker.upper()} unreadable; not checked")
+    if earnings:
+        away = (day - today).days
+        facts["earnings"] = {"date": day.isoformat(), "status": earnings["status"], "quarter": earnings["label"],
+                             "days_away": away, "fetched_at": earnings["fetched_at"], "source": earnings["source"]}
+        when = f"{ticker.upper()} reports earnings {day.isoformat()} ({earnings['status'] or 'unconfirmed'})"
+        if 0 <= away <= 1:
+            caveats.append(f"{when}: gap and IV-crush risk around the report")
+        elif horizon == "swing" and 0 <= away <= SWING_HOLD_DAYS:
+            caveats.append(f"{when}: inside a swing hold")
+        if expiration and 0 <= away and day <= datetime.fromisoformat(expiration).date():
+            caveats.append(f"{when}: before this option expires")
+        if (now - datetime.fromisoformat(str(earnings["fetched_at"]))).total_seconds() > EARNINGS_STALE_HOURS * 3600:
+            caveats.append("earnings date is from an older calendar read")
+    elif ticker.upper() not in NO_EARNINGS:
+        # Only held, recently traded and watched names are tracked, and a failed read drops a row: absence is
+        # not "no earnings".
+        facts["earnings"] = {"date": None, "note": "no upcoming report in the tracked calendar"}
+        if not any(c.startswith("earnings date for") for c in caveats):
+            caveats.append(f"earnings date not checked for {ticker.upper()} (not in the tracked calendar)")
+    if vix and vix["value"] is not None:
+        try:  # The quote's own trade time when known (a pre-open read can carry yesterday's close).
+            seen = datetime.fromisoformat(str(vix["observed_at"] or vix["fetched_at"]))
+        except (TypeError, ValueError):
+            seen = datetime.min
+        age = (now - seen).total_seconds() / 60
+        facts["vix"] = {"value": vix["value"], "change_pct": vix["change_pct"], "observed_at": vix["observed_at"],
+                        "fetched_at": vix["fetched_at"], "source": vix["source"]}
+        if vix["value"] >= VIX_ELEVATED:
+            caveats.append(f"VIX {vix['value']:.1f}: elevated volatility")
+        if age > VIX_STALE_MINUTES:
+            caveats.append(f"VIX is {age / 60:.0f} h old")
+    else:
+        caveats.append("VIX unavailable")
+    return facts, caveats
+
+
+def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: datetime,
+              market: Optional[list[dict]] = None) -> dict:
     """The answer contract for one idea. Same inputs, same answer."""
     for key in ("ticker", "side", "instrument", "horizon"):
         if not idea.get(key):
@@ -424,14 +487,14 @@ def run_check(idea: dict, analysis: dict, rows: Iterable[dict], receipt_utc: dat
                         f"a daily close back {'above' if idea['side'] != 'short' else 'below'} the 50-day average {sma50}"
                         if sma50 else None)
         caveats = [c for c in caveats if c != "live quotes/bars are stale"]  # Daily bars decide a swing.
-        caveats += ["swing rules are textbook defaults, not yet tested on your trades",
-                    "earnings date not checked (no calendar source yet)"]
+        caveats += ["swing rules are textbook defaults, not yet tested on your trades"]
     option = option_summary(data.get("option"), idea.get("stop"), intraday.get("price")) if idea["instrument"] == "option" else None
     macro = macro_context(receipt_utc)
-    caveats = _macro_caveats(macro, receipt_utc, swing) + caveats
+    external, market_caveats = market_facts(idea["ticker"], market, receipt_utc, idea["horizon"], idea.get("expiration"))
+    caveats = _macro_caveats(macro, receipt_utc, swing) + market_caveats + caveats
     answer = {"rules_version": SWING_RULES_VERSION if swing else RULES_VERSION, "receipt_utc": receipt_utc.astimezone(timezone.utc).isoformat(),
               "idea": idea, **rules, "would_change": would_change, "history": history, "live": live, "option": option,
-              "macro": macro, "caveats": caveats}
+              "macro": macro, "market": external, "caveats": caveats}
     answer["live_context_sha256"] = hashlib.sha256(
         json.dumps({"request": analysis.get("request"), "data": data}, sort_keys=True, default=str).encode()).hexdigest()
     return answer

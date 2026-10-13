@@ -28,6 +28,7 @@ def _clean_environment():
 
 POSITION_VIEW = "pretrade_position_source"
 CAPTURE_VIEW = "pretrade_capture_source"
+MARKET_VIEW = "pretrade_market_source"
 
 
 def read_view(database_url: str, view: str = VIEW) -> list[dict]:
@@ -47,7 +48,8 @@ def read_view(database_url: str, view: str = VIEW) -> list[dict]:
 def run(pointer_file: Path, database_url_file: Path) -> dict:
     _clean_environment()
     from journal_coach_refresh import _regular_private_file
-    from pretrade_features import CAPTURE_KEYS, POSITION_KEYS, context_rows, publish, publish_context, rows_from_view
+    from pretrade_features import (CAPTURE_KEYS, MARKET_KEYS, POSITION_KEYS, context_rows, publish, publish_context,
+        publish_market, rows_from_view)
 
     url = _regular_private_file(database_url_file, _CREDENTIAL_LIMIT, "database credential").decode().strip()
     if not url or "\n" in url or "\r" in url:
@@ -60,6 +62,11 @@ def run(pointer_file: Path, database_url_file: Path) -> dict:
     except Exception:
         # Context views are applied separately; history still publishes without them.
         result["context"] = "unavailable"
+    try:
+        result["market"] = publish_market(context_rows(read_view(url, MARKET_VIEW), MARKET_KEYS),
+            pointer_file.parent / "market.json")
+    except Exception:
+        result["market"] = "unavailable"  # Applied separately like the context views.
     return result
 
 

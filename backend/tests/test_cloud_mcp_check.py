@@ -18,7 +18,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine
 
 from app.engine import pretrade_check, scalper
-from app.models import Account, TradeCapture, TradeCaptureNote
+from app.models import Account, MarketContextItem, TradeCapture, TradeCaptureNote
 import cloud_mcp_check as service
 from cloud_mcp_check_ledger import Conflict, Ledger
 import pretrade_features
@@ -330,6 +330,8 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
             setup_label="ORB", wording="Break of the opening range", context_state="captured", image_state="unavailable")
         db.add(capture)
         db.flush()
+        db.add(MarketContextItem(kind="earnings", symbol="SPY", event_date=datetime(2026, 10, 15).date(), status="confirmed",
+            label="Q3 2026", fetched_at=datetime(2026, 10, 9, 13), source="Tradier"))
         db.add_all([TradeCaptureNote(capture_id=capture.id, kind="note", text="first", created_at=datetime(2026, 10, 9, 15)),
             TradeCaptureNote(capture_id=capture.id, kind="note", text="sized down", created_at=datetime(2026, 10, 9, 16))])
         db.commit()
@@ -342,9 +344,10 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
     raw = sqlite3.connect(database)
     raw.create_function("tj_sha256", 1, lambda value: hashlib.sha256(value.encode()).hexdigest())
     raw.execute("CREATE TABLE pretrade_feature_source AS " + select_sql("tj_sha256(f.raw_email_id)"))
-    from check_scope import capture_sql, position_sql
+    from check_scope import MARKET, capture_sql, position_sql
     raw.execute("CREATE TABLE pretrade_position_source AS " + position_sql())
     raw.execute("CREATE TABLE pretrade_capture_source AS " + capture_sql())
+    raw.execute("CREATE TABLE pretrade_market_source AS " + MARKET)
     raw.commit()
     raw.close()
     credential = tmp_path / "database-url"
@@ -363,6 +366,9 @@ def test_publisher_view_rows_match_engine_rows_with_hashed_keys(tmp_path, monkey
     assert held["captures"][0]["latest_note"] == "sized down" and held["captures"][0]["linked"] in (0, False)
     assert held["captures"][0]["account_name"] == "Roth" and "account_label" not in held["captures"][0]
     assert "1111" not in json.dumps(held) and "··" not in json.dumps(held) and "raw_email" not in json.dumps(held)
+    market = pretrade_features.read_market(pointer.parent / "market.json", max_age_seconds=3600)
+    assert result["market"]["items"] == 1 and market["state"] == "fresh"
+    assert market["items"][0]["symbol"] == "SPY" and market["items"][0]["event_date"] == "2026-10-15" and "id" not in market["items"][0]
     assert published["rows"] == sorted(expected, key=lambda r: (r["closed_at"], r["source_fill_key"]))
     text = json.dumps(published["rows"])
     assert "rh-1" not in text and "wb-1" not in text and "account" not in text
@@ -516,3 +522,26 @@ def test_price_after_is_saved_once_final_and_graded(harness, monkeypatch):
         assert grade["overrode"]["skipped_a_go"]["checks"] == 1
     elif check["verdict"] in ("wait", "pass"):
         assert grade["followed"] == 1
+
+
+def market_row(kind, symbol, **values):
+    return {key: None for key in pretrade_features.MARKET_KEYS} | {"kind": kind, "symbol": symbol,
+        "fetched_at": "2026-10-09T14:10:00", "source": "Tradier"} | values
+
+
+def test_checks_positions_and_preopen_carry_earnings_and_vix(harness):
+    market_file = harness.pointer.parent / "market.json"
+    with TestClient(harness.server().streamable_http_app()) as client:
+        missing = call(client, "pre_trade_check", IDEA, harness.token())["structuredContent"]
+        pretrade_features.publish_market([market_row("earnings", "NBIS", event_date="2026-10-12", status="confirmed",
+            label="Q3 2026"), market_row("vix", "VIX", value=27.4, change_pct=8.1)], market_file, now=RECEIPT)
+        swing = call(client, "pre_trade_check", {**IDEA, "ticker": "nbis", "horizon": "swing"},
+            harness.token())["structuredContent"]
+        pre = call(client, "preopen_watchlist", {"tickers": ["NBIS", "SPY"]}, harness.token())["structuredContent"]
+    assert missing["market"]["state"] == "missing"
+    assert "earnings date and VIX not checked (market data unavailable)" in missing["caveats"]
+    assert swing["market"]["earnings"]["date"] == "2026-10-12" and swing["market"]["earnings"]["days_away"] == 3
+    assert "NBIS reports earnings 2026-10-12 (confirmed): inside a swing hold" in swing["caveats"]
+    assert "VIX 27.4: elevated volatility" in swing["caveats"] and swing["market"]["vix"]["value"] == 27.4
+    assert pre["vix"]["value"] == 27.4 and pre["watchlist"][0]["market"]["earnings"]["date"] == "2026-10-12"
+    assert pre["watchlist"][1]["market"]["earnings"] is None  # A fund: no earnings, not "missing".
