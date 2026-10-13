@@ -625,6 +625,8 @@ def position_view(position: dict, rows: Iterable[dict], analysis: dict, receipt_
 PREOPEN_VERSION = "pretrade-preopen-v1"
 PREOPEN_RECENT_DAYS = 30
 PREOPEN_HEADLINES = 5
+PREOPEN_STALE_SECONDS = 10 * 60  # Premarket is thin: an older print is flagged for confirmation.
+PREOPEN_NO_SESSION_SECONDS = 12 * 3600  # Older than this, the price is from the last session, not today.
 
 
 def preopen_tickers(positions: Iterable[dict], rows: Iterable[dict], receipt_utc: datetime, limit: int) -> list[str]:
@@ -660,14 +662,27 @@ def preopen_view(ticker: str, rows: Iterable[dict], analysis: dict, receipt_utc:
                             "total_pnl": round(sum(pnl), 2) if pnl else None})
         sides.append({"side": side, **_hold_summary(same), "by_entry_time": by_time})
     caveats = []
-    if (data.get("staleness") or {}).get("is_stale"):
+    staleness = data.get("staleness") or {}
+    if staleness.get("is_stale"):
         caveats.append("live quotes/bars are stale")
     caveats.extend(data.get("missing") or [])
+    age = staleness.get("last_trade_age_seconds")
+    change, gap, fresh = snapshot.get("change_pct"), snapshot.get("gap_pct"), True
+    if age is None or age > PREOPEN_NO_SESSION_SECONDS:
+        # The scalper judges staleness only in regular hours; before the open an old print is not today's price.
+        change, gap, fresh = None, None, False
+        caveats.append(f"no trade since the last session (last {snapshot.get('last_trade_time') or 'unknown'}); "
+                       "price is not today's and change is withheld")
+    elif age > PREOPEN_STALE_SECONDS:
+        fresh = False
+        caveats.append(f"last trade {age / 60:.0f} min old; premarket is thin, confirm on your broker")
     return {
         "preopen_version": PREOPEN_VERSION,
         "ticker": ticker,
         "live": {"price": snapshot.get("price") or intraday.get("price"), "prev_close": snapshot.get("prev_close"),
-                 "change_pct": snapshot.get("change_pct"), "gap_pct": snapshot.get("gap_pct"),
+                 "change_pct": change, "gap_pct": gap, "fresh": fresh,
+                 "last_trade_time": snapshot.get("last_trade_time"),
+                 "last_trade_age_minutes": round(age / 60, 1) if age is not None else None,
                  "premarket_high": intraday.get("premarket_high"), "premarket_low": intraday.get("premarket_low"),
                  "premarket_volume": intraday.get("premarket_volume"),
                  "market_state": (analysis.get("assessment") or {}).get("market_state") or data.get("market_state"),
