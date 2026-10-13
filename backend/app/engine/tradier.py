@@ -95,6 +95,19 @@ def get_quotes(symbols: list[str], greeks: bool = False) -> dict[str, TradierQuo
     same contract `fetch_option_snapshots` follows. Raises TradierError when the
     request itself fails, so a caller can fall back to another provider.
     """
+    return _get_quotes(symbols, greeks, MAX_ATTEMPTS)
+
+
+def get_quotes_once(symbols: list[str], greeks: bool = False) -> dict[str, TradierQuote]:
+    """One quote request, with no retry sleeps; the scanner retries on its next pass.
+
+    Uses the same parsing and request timeout as get_quotes. Raises TradierError
+    immediately after a rate-limit or transport failure.
+    """
+    return _get_quotes(symbols, greeks, 1)
+
+
+def _get_quotes(symbols: list[str], greeks: bool, attempts: int) -> dict[str, TradierQuote]:
     wanted = [s.strip().upper() for s in symbols if s and s.strip()]
     if not wanted:
         return {}
@@ -105,7 +118,7 @@ def get_quotes(symbols: list[str], greeks: bool = False) -> dict[str, TradierQuo
     if greeks:
         payload["greeks"] = "true"
 
-    data = _post("/v1/markets/quotes", payload)
+    data = _post("/v1/markets/quotes", payload, attempts=attempts)
     rows = _quote_rows(data)
 
     result: dict[str, TradierQuote] = {}
@@ -179,7 +192,7 @@ def _parse_quote(symbol: str, row: dict) -> TradierQuote:
 # transport
 # ---------------------------------------------------------------------------
 
-def _post(path: str, payload: dict[str, str]) -> dict:
+def _post(path: str, payload: dict[str, str], *, attempts: int = MAX_ATTEMPTS) -> dict:
     url = f"{TRADIER_BASE_URL}{path}"
     headers = {
         "Authorization": f"Bearer {TRADIER_API_KEY}",
@@ -187,13 +200,13 @@ def _post(path: str, payload: dict[str, str]) -> dict:
     }
 
     last_error: Optional[Exception] = None
-    for attempt in range(1, MAX_ATTEMPTS + 1):
+    for attempt in range(1, attempts + 1):
         try:
             response = httpx.post(url, data=payload, headers=headers, timeout=REQUEST_TIMEOUT_SECONDS)
         except httpx.HTTPError as exc:
             last_error = exc
             log.warning("Tradier transport error on %s (attempt %d): %s", path, attempt, exc)
-            if attempt < MAX_ATTEMPTS:
+            if attempt < attempts:
                 time.sleep(attempt)
             continue
 
@@ -202,9 +215,11 @@ def _post(path: str, payload: dict[str, str]) -> dict:
         if response.status_code == 429:
             wait = _retry_after_seconds(response.headers)
             last_error = TradierError(f"Tradier rate limited {path}")
-            log.warning("Tradier rate limited %s; waiting %.0fs", path, wait)
-            if attempt < MAX_ATTEMPTS:
+            if attempt < attempts:
+                log.warning("Tradier rate limited %s; waiting %.0fs", path, wait)
                 time.sleep(wait)
+            else:
+                log.warning("Tradier rate limited %s; no attempts remaining", path)
             continue
 
         if response.status_code in (401, 403):
@@ -222,7 +237,7 @@ def _post(path: str, payload: dict[str, str]) -> dict:
         except ValueError as exc:
             raise TradierError(f"Tradier {path} returned non-JSON: {response.text[:200]}") from exc
 
-    raise TradierError(f"Tradier {path} failed after {MAX_ATTEMPTS} attempts: {last_error}")
+    raise TradierError(f"Tradier {path} failed after {attempts} attempts: {last_error}")
 
 
 def _note_allowance(headers) -> None:

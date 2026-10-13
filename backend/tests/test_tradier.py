@@ -134,6 +134,21 @@ def test_empty_and_blank_symbol_lists_never_call_out(monkeypatch):
     assert tradier.get_quotes(["", "   "]) == {}
 
 
+def test_single_attempt_keeps_batch_normalization_and_greeks(monkeypatch):
+    record = []
+    _serve(monkeypatch, _Response(payload={"quotes": {"quote": [
+        {"symbol": "SPY", "bid": 1, "ask": 1.1},
+        {"symbol": "NVDA", "greeks": {"delta": 0.35, "updated_at": "2026-09-18T14:00:00Z"}},
+    ]}}), record=record)
+
+    quotes = tradier.get_quotes_once([" spy ", "nvda", ""], greeks=True)
+
+    assert len(record) == 1 and record[0]["data"] == {"symbols": "SPY,NVDA", "greeks": "true"}
+    assert quotes["SPY"].mid == 1.05
+    assert quotes["NVDA"].delta == 0.35
+    assert quotes["NVDA"].greeks_updated_at == "2026-09-18T14:00:00Z"
+
+
 def test_missing_key_is_an_error_not_a_silent_empty(monkeypatch):
     monkeypatch.setattr(tradier, "TRADIER_API_KEY", "")
     with pytest.raises(tradier.TradierError, match="TRADIER_API_KEY"):

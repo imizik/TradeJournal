@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
@@ -264,6 +265,45 @@ def test_no_quote_for_two_minutes_is_unresolved(engine):
     clock.now = at(9, 52, 40)
     watch.run()
     assert rows(engine)[1]["unresolved"]["reason"] == "no entry quote within two minutes"
+
+
+@pytest.mark.parametrize("failure", ["rate_limit", "transport"])
+def test_default_quote_does_not_sleep_and_recovers_on_next_pass(engine, monkeypatch, failure):
+    calls = []
+
+    def post(_url, *, data, headers, timeout):
+        calls.append(data["symbols"])
+        assert timeout == setup_scanner.tradier.REQUEST_TIMEOUT_SECONDS
+        if len(calls) == 1:
+            if failure == "transport":
+                raise httpx.ReadTimeout("quote timed out")
+            return httpx.Response(429, headers={"Retry-After": "120"})
+        return httpx.Response(200, json={"quotes": {"quote": {
+            "symbol": data["symbols"], "bid": 1.0, "ask": 1.05,
+            "bid_date": at(9, 51) * 1000, "ask_date": at(9, 51) * 1000,
+        }}})
+
+    def refuse_sleep(_seconds):
+        pytest.fail("Scanner quote reads must not sleep between attempts")
+
+    monkeypatch.setattr(setup_scanner.tradier, "TRADIER_API_KEY", "test-token")
+    monkeypatch.setattr(setup_scanner.tradier.httpx, "post", post)
+    monkeypatch.setattr(setup_scanner.tradier.time, "sleep", refuse_sleep)
+    clock = Clock(at(9, 50, 35))
+    watch = setup_scanner.SetupScanner(engine, Feed(), Calendar(), Options(), clock)
+    breakout_day(watch.feed)
+
+    watch.run()
+    assert len(calls) == 1
+    assert len(rows(engine)[0]) == 1
+    assert "entry" not in rows(engine)[1] and "unresolved" not in rows(engine)[1]
+
+    clock.now = at(9, 51, 5)
+    watch.run()
+    assert len(calls) == 2
+    entry = rows(engine)[1]["entry"]
+    assert entry["ask"] == 1.05 and entry["bid"] == 1.0
+    assert entry["ask_time"] == at(9, 51) * 1000
 
 
 def test_a_quote_that_arrives_after_the_window_is_never_used(engine):

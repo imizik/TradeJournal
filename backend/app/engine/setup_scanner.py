@@ -127,7 +127,7 @@ def _fresh(quote, decided: float) -> bool:
 
 
 def _quote(occ: str):
-    return tradier.get_quotes([occ]).get(occ)
+    return tradier.get_quotes_once([occ]).get(occ)
 
 
 class SetupScanner:
