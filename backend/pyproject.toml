@@ -44,6 +44,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
+    # Parallel workers for CI's backend suite. tests/conftest.py gives each
+    # worker process its own database, lock and capture directories.
+    "pytest-xdist>=3.6",
     # Static import graph for tests/test_import_boundaries.py.
     "grimp>=3.0",
     # Pinned exactly: a lint result is only reproducible if every machine and
