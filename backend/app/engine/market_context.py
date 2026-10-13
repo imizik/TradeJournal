@@ -53,25 +53,38 @@ def _earnings_rows(symbols: list[str], today: date, facts: Callable[[list[str], 
     wanted = [symbol for symbol in symbols if symbol not in NO_EARNINGS]
     if not wanted:
         return [], None
-    found = facts(wanted, today)
-    rows, problems = [], []
+    try:
+        found = facts(wanted, today)
+    except Exception as exc:  # A provider error keeps the older rows; it is reported, not raised.
+        return None, f"earnings calendar unavailable ({type(exc).__name__})"
+    rows, problems, stale = [], [], 0
     for symbol in wanted:
         earnings = (found.get(symbol) or {}).get("earnings") or {}
         if earnings.get("state") == "unavailable":
             problems.append(earnings.get("message") or "unavailable")
             continue
+        if earnings.get("message"):
+            stale += 1  # Served from an older cached calendar after a failed read.
+        read_at = earnings.get("fetched_at")
         upcoming = earnings.get("next")
         if upcoming:
             rows.append(MarketContextItem(kind="earnings", symbol=symbol, event_date=date.fromisoformat(upcoming["date"]),
                                           status=upcoming.get("status"), label=upcoming.get("label"),
-                                          fetched_at=fetched, source=SOURCE))
+                                          fetched_at=(datetime.fromtimestamp(read_at, timezone.utc).replace(tzinfo=None)
+                                                      if read_at else fetched), source=SOURCE))
     if problems and len(problems) == len(wanted):
         return None, f"earnings calendar unavailable ({problems[0]})"  # Keep the older rows.
-    return rows, (f"earnings missing for {len(problems)} of {len(wanted)} symbols" if problems else None)
+    notes = [f"earnings missing for {len(problems)} of {len(wanted)} symbols"] if problems else []
+    if stale:
+        notes.append(f"earnings for {stale} symbols from an older cached calendar (refresh failed)")
+    return rows, "; ".join(notes) or None
 
 
 def _vix_rows(quotes: Callable[[list[str]], dict], fetched: datetime) -> tuple[Optional[list[MarketContextItem]], Optional[str]]:
-    quote = quotes(["VIX"]).get("VIX")
+    try:
+        quote = quotes(["VIX"]).get("VIX")
+    except Exception as exc:  # One provider error must not discard the earnings read or fail the job.
+        return None, f"VIX quote unavailable ({type(exc).__name__})"
     last = getattr(quote, "last", None)
     if not last:
         return None, "VIX quote unavailable"

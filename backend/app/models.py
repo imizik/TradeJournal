@@ -1407,7 +1407,7 @@ class MarketContextItem(SQLModel, table=True):
 
     __tablename__ = "market_context_item"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
     kind: str = Field(index=True)            # "earnings" | "vix"
     symbol: str
     event_date: Optional[date] = None        # earnings: the next report date (New York)
@@ -1416,5 +1416,5 @@ class MarketContextItem(SQLModel, table=True):
     value: Optional[float] = None            # vix: last
     change_pct: Optional[float] = None       # vix: change since the prior close, percent
     observed_at: Optional[datetime] = None   # vix: provider trade time (UTC)
-    fetched_at: datetime                     # UTC
+    fetched_at: datetime                     # UTC, when the provider data was read (a cached calendar keeps its age)
     source: str

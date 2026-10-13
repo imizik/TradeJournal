@@ -71,3 +71,23 @@ def test_refresh_replaces_the_snapshot_and_keeps_rows_a_failed_read_could_not_re
     written, summary = market_context.refresh(session, facts=down, quotes=lambda s: {}, clock=lambda: NOW)
     assert written == 0 and "earnings calendar unavailable (rate limited)" in summary and "VIX quote unavailable" in summary
     assert len(session.exec(select(MarketContextItem)).all()) == 3
+
+
+def test_provider_errors_and_stale_calendars_are_reported_not_hidden():
+    session = seeded()
+
+    def broken_quotes(symbols):
+        raise RuntimeError("returned 502")
+
+    def stale_facts(symbols, today):
+        out = facts(symbols, today)
+        for value in out.values():
+            value["earnings"] |= {"message": "rate limited", "fetched_at": 1700000000}
+        return out
+
+    written, summary = market_context.refresh(session, facts=stale_facts, quotes=broken_quotes, clock=lambda: NOW)
+    rows = session.exec(select(MarketContextItem)).all()
+    assert written == 2 and {r.kind for r in rows} == {"earnings"}  # Earnings kept despite the VIX error.
+    assert "VIX quote unavailable (RuntimeError)" in summary and "older cached calendar" in summary
+    assert all(r.fetched_at == datetime(2023, 11, 14, 22, 13, 20) for r in rows)  # The calendar's own age.
+    assert all(isinstance(r.id, uuid.UUID) for r in rows)

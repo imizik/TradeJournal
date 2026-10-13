@@ -22,7 +22,7 @@ def upgrade() -> None:
         return
     op.create_table(
         "market_context_item",
-        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("kind", sa.String(), nullable=False),
         sa.Column("symbol", sa.String(), nullable=False),
         sa.Column("event_date", sa.Date(), nullable=True),
