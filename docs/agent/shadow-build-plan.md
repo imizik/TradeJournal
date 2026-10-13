@@ -47,7 +47,7 @@ send the evidence, not a retry.
 | SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
 | SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
 | SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
-| SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | In progress — VPS exchange activated October 13 at `23b7c6c`; owner connection/task steps and live acceptance pending |
+| SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | In progress — VPS exchange activated October 13 at `23b7c6c`; v3 reconnected and Gmail event task enabled; SMTP credential and live acceptance pending |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
 | S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Later |
 | SC-3 | 50-trade evaluation report | — | Sol, high | 0 | 50 resolved trades | Later |

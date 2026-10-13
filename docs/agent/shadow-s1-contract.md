@@ -139,7 +139,28 @@ API ledger access and parent listing, check setup-write and API membership
 in the check group are denied. Setup directories are 2750 and outbox is 0750.
 Root-private recovery backups are retained with the newest previous runtime.
 
-ChatGPT reconnect/tool access, Gmail task update and actual Jo session evidence
+The working Check v3 catalog exposes both shadow tools. After Jo encountered
+`oauth_refresh_token_missing`, the existing connection was reconnected and Jo
+reported successful verification. At Isaac's explicit request, the lead set up
+one enabled **TJ Setup → Jo shadow + co-pilot** task. Its saved Scheduled editor
+shows a Gmail new-email trigger, the owner's sender and subject filter
+`^TJ Setup:`. The saved prompt checks the owner's `+tjsetups` recipient before
+any TradeJournal call, preserves shadow-first ordering and both labels, uses
+v3, and sends only fresh co-pilot Go alerts. It does not continuously monitor
+candles or promise follow-up events that the scanner has not implemented.
+
+The API's three scanner SMTP settings are absent, so setup email delivery is
+not activated. A root-only hidden app-password entry helper is prepared;
+Isaac must enter the credential privately before the lead activates and tests
+delivery. The read-only Gmail connection does not supply the SMTP credential.
+Task creation and tool availability do not prove a delivered event or a live
+shadow decision.
+
+A read of a naturally published, already-expired AMD setup succeeded with
+`expired=true`; no decision was submitted. Its historical cohorts matched the
+published features filtered before that session's New York midnight: 1,584
+eligible rows, one same-day row excluded, seven same-setup rows and 38
+same-ticker/side rows. Actual Jo `clean_order` and post-decision entry evidence
 remain pending. Two scanner setups existed before activation and were never
 shadow-published; they are not live shadow acceptance evidence. No synthetic
 setup or operator decision was introduced into the live book for this proof.
