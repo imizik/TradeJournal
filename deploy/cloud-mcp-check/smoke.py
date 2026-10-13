@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -50,7 +51,7 @@ def guard():
             or os.environ.get("TJ_DISPOSABLE_RUNNER") != "1"):
         raise ValueError("Check native smoke only runs as root on explicitly disposable CI")
     for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN,
-            control.OWNER_RUN, DROPIN,
+            control.OWNER_RUN, control.SHADOW, DROPIN,
             *[control.UNIT_DIR / u for u in control.UNITS]):
         if path.exists() or path.is_symlink():
             raise ValueError("Refuse a pre-existing check native-smoke resource: " + str(path))
@@ -155,6 +156,14 @@ def exercise(archive, scratch):
     owned(control.CONFIG / "config.json", json.dumps(config).encode(), "root:tj-check")
     for name in ("alpaca-key-id", "alpaca-secret-key"):
         owned(control.CONFIG / name, b"invented-not-a-provider-key\n", "root:root", 0o600)
+    # Package smoke already created the private API user. Provision the optional
+    # exchange before the sandbox starts; the new empty SQLite file is valid.
+    owned(control.STATE / "ledger.db", b"", "tj-check:tj-check", 0o600)
+    assert control.shadow_exchange(True)["ledger_readable_by_api"] is False
+    assert control.shadow_exchange(True)["enabled"]  # Idempotent.
+    config.update(shadow_setups_dir=str(control.SHADOW / "setups"),
+        shadow_outbox_dir=str(control.STATE / "shadow-outbox"))
+    owned(control.CONFIG / "config.json", json.dumps(config).encode(), "root:tj-check")
     DROPIN.mkdir()
     (DROPIN / "smoke-no-ip.conf").write_text("[Service]\nIPAddressDeny=any\n")
     run("systemctl", "daemon-reload")
@@ -173,7 +182,7 @@ def exercise(archive, scratch):
         issued = int(time.time())
         # The staged config verifies the Auth0-style "azp" client claim.
         claims = {"iss": ISSUER, "aud": RESOURCE, "sub": SUBJECT, "azp": CLIENT,
-            "scope": "check:read check:run check:note", "iat": issued, "exp": issued + 300, **changes}
+            "scope": "check:read check:run check:note shadow:decide", "iat": issued, "exp": issued + 300, **changes}
         return jwt.encode(claims, key, algorithm="RS256", headers={"kid": "check-smoke"})
 
     def rpc(name, arguments, bearer, method="tools/call"):
@@ -195,7 +204,7 @@ def exercise(archive, scratch):
     tools = listing.json()["result"]["tools"]
     assert rpc("pre_trade_check", {}, token(azp="other-client")).status_code == 401
     assert {t["name"] for t in tools} == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
-        "preopen_watchlist", "grade_checks"}
+        "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide"}
     assert rpc("pre_trade_check", {}, token(aud="https://check.example.test/mcp")).status_code == 401
     assert rpc("pre_trade_check", {}, token(scope="journal:read")).status_code == 403
     operation = str(uuid.uuid4())
@@ -214,6 +223,34 @@ def exercise(archive, scratch):
     print("PASS: dedicated UID, LoadCredential provider key, own OAuth audience/scopes, provider failure ->"
         " insufficient_data, real feature history, immutable ledger replay across restart, verdict note once."
         f" Server timings {first['timings_ms']}")
+
+    # The actual kernel identities and default ACL, using only invented data.
+    from cloud_mcp_check_ledger import digest as body_digest
+    from zoneinfo import ZoneInfo
+    stamp = datetime.now(timezone.utc)
+    candidate_id = str(uuid.uuid4())
+    setup = {"format": "shadow-setup-v1", "candidate_id": candidate_id, "scanner_version": "s1-v1",
+        "params_hash": "a" * 64, "session_date": stamp.astimezone(ZoneInfo("America/New_York")).date().isoformat(),
+        "symbol": "SPY", "setup": "orb", "direction": "long", "bar_start": stamp.isoformat(),
+        "bar_end": stamp.isoformat(), "detected_at": stamp.isoformat(),
+        "expires_at": (stamp + timedelta(minutes=2)).isoformat(), "stop": 650, "target": 680,
+        "flags": [], "facts": {"close": 660},
+        "contract": {"option_type": "call", "expiration": stamp.date().isoformat(), "strike": 660}}
+    setup["content_sha256"] = body_digest(setup)
+    destination = control.SHADOW / "setups" / f"setup-{candidate_id}.json"
+    writer = ("import os,pathlib; p=pathlib.Path(" + repr(str(destination)) + "); "
+        "t=p.with_suffix('.tmp'); t.write_text(" + repr(json.dumps(setup)) + "); t.chmod(0o640); os.replace(t,p)")
+    run("sudo", "-u", control.API_USER, "/usr/bin/python3.12", "-c", writer)
+    frozen = call("shadow_setup", {"candidate_id": candidate_id})
+    assert frozen["candidate"] == setup
+    decision = call("shadow_decide", {"candidate_id": candidate_id, "decision": "skip", "reason": "fixture only"})
+    exported = control.STATE / "shadow-outbox" / f"decision-{candidate_id}.json"
+    assert json.loads(run("sudo", "-u", control.API_USER, "cat", exported).stdout) == decision
+    assert run("sudo", "-u", control.API_USER, "test", "-r", ledger, check=False).returncode != 0
+    assert run("sudo", "-u", control.API_USER, "test", "-r", control.STATE, check=False).returncode != 0
+    run("systemctl", "restart", "tradejournal-check.service")
+    assert call("shadow_decide", {"candidate_id": candidate_id, "decision": "skip", "reason": "fixture only"}) == decision
+    print("PASS: API-user atomic setup -> sandboxed check read/decision -> API-user outbox read; ledger denied; restart replay")
 
     owner = json.loads((control.CONFIG / "owner/config.json").read_text())
     owned(control.CONFIG / "owner/config.json", json.dumps({**owner, "enabled": True}).encode(), "root:tj-check")
@@ -235,6 +272,9 @@ def exercise(archive, scratch):
 
     control.stop()
     shutil.rmtree(DROPIN)
+    assert not control.shadow_exchange(False)["enabled"]
+    assert not control.shadow_exchange(False)["enabled"]
+    assert run("sudo", "-u", control.API_USER, "test", "-r", exported, check=False).returncode != 0
     removed = control.remove()
     assert ledger.exists() and (control.FEATURES / "current.json").exists()
     assert not any((control.UNIT_DIR / unit).exists() for unit in control.UNITS)
@@ -252,7 +292,7 @@ def cleanup():
     shutil.rmtree(DROPIN, ignore_errors=True)
     run("systemctl", "daemon-reload", check=False)
     for path in (control.ROOT, control.CONFIG, control.STATE, control.KEYS, control.FEATURES, control.RUN,
-            control.OWNER_RUN, Path("/var/cache/tradejournal-check")):
+            control.OWNER_RUN, control.SHADOW, Path("/var/cache/tradejournal-check")):
         shutil.rmtree(path, ignore_errors=True)
     for account in control.ACCOUNTS.values():
         run("userdel", account, check=False)

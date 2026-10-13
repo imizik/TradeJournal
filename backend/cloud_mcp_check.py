@@ -22,6 +22,8 @@ import asyncio
 import copy
 from datetime import date, datetime, timedelta, timezone
 import math
+import json
+import tempfile
 import sqlite3
 from pathlib import Path
 import stat
@@ -41,9 +43,9 @@ from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import Tool, ToolAnnotations
 from pydantic import AnyHttpUrl, Field
 
-from cloud_mcp_check_common import (CREDENTIAL_NAMES, NOTE_SCOPE, READ_SCOPE, RESOURCE_PATH, RUN_SCOPE, SCHEMA,
+from cloud_mcp_check_common import (CREDENTIAL_NAMES, NOTE_SCOPE, READ_SCOPE, RESOURCE_PATH, RUN_SCOPE, SCHEMA, SHADOW_SCOPE,
     CheckVerifier, read_config, reject_credentials)
-from cloud_mcp_check_ledger import FORMAT, Conflict, Ledger, NotFound, digest, new_check_id
+from cloud_mcp_check_ledger import FORMAT, SHADOW_LABELS, Conflict, Ledger, NotFound, digest, new_check_id
 from cloud_mcp_d0 import RequestLimits, activated_socket
 import pretrade_features
 
@@ -53,6 +55,8 @@ MAX_CONCURRENT = 4
 CACHE_TTL = 10.0
 MAX_PROVIDER_BYTES = 8 * 1024 * 1024
 TOOL_ARGUMENTS = {
+    "shadow_setup": ({"candidate_id"}, set()),
+    "shadow_decide": ({"candidate_id", "decision", "reason"}, set()),
     "pre_trade_check": ({"ticker", "side", "instrument", "horizon"},
         {"entry", "stop", "option_type", "expiration", "strike", "free_text", "operation_id"}),
     "attach_model_verdict": ({"check_id", "verdict", "summary"}, set()),
@@ -73,6 +77,8 @@ MARKET_MAX_AGE = 60 * 60  # The publisher runs every 10 minutes; past an hour th
 
 
 def scopes(name):
+    if name in ("shadow_setup", "shadow_decide"):
+        return [READ_SCOPE, SHADOW_SCOPE]
     if name in READ_ONLY_TOOLS:
         return [READ_SCOPE]
     return [READ_SCOPE, RUN_SCOPE if name == "pre_trade_check" else NOTE_SCOPE]
@@ -197,6 +203,71 @@ def jo_view(record, *, replayed):
         "next_step": NEXT_STEP}
 
 
+def read_shadow_setup(directory, candidate_id, now):
+    """Only a bounded regular, correctly named and hashed setup from today's handoff."""
+    if str(uuid.UUID(candidate_id)) != candidate_id:
+        raise ValueError("Require a canonical candidate UUID")
+    path = Path(directory) / f"setup-{candidate_id}.json"
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+            raise ValueError("Require a bounded regular setup file")
+        body = json.loads(os.read(fd, 1024 * 1024 + 1))
+    finally:
+        os.close(fd)
+    if not isinstance(body, dict) or body.get("format") != "shadow-setup-v1" or body.get("candidate_id") != candidate_id:
+        raise ValueError("Shadow setup identity or format mismatch")
+    if digest({k: v for k, v in body.items() if k != "content_sha256"}) != body.get("content_sha256"):
+        raise ValueError("Shadow setup hash mismatch")
+    from zoneinfo import ZoneInfo
+    if body.get("session_date") != now.astimezone(ZoneInfo("America/New_York")).date().isoformat():
+        raise ValueError("Shadow setup is not from today in New York")
+    for name in ("detected_at", "expires_at", "bar_start", "bar_end"):
+        if datetime.fromisoformat(body[name]).tzinfo is None:
+            raise ValueError("Setup timestamps require timezones")
+    if datetime.fromisoformat(body["detected_at"]) > now:
+        raise ValueError("Shadow setup is from the future")
+    return body
+
+
+def write_shadow_decision(directory, decision):
+    """Recover an absent export, never replace conflicting evidence."""
+    destination = Path(directory) / f"decision-{decision['candidate_id']}.json"
+    body = json.dumps(decision, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    # Serialize the existence check with other exporters, including another process.
+    import fcntl
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    temporary = None
+    try:
+        fcntl.flock(directory_fd, fcntl.LOCK_EX)
+        try:
+            fd = os.open(destination, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            fd = None
+        if fd is not None:
+            try:
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode) or info.st_size != len(body) or os.read(fd, len(body) + 1) != body:
+                    raise ValueError("Shadow ledger and outbox disagree")
+            finally:
+                os.close(fd)
+            return
+        fd, temporary = tempfile.mkstemp(prefix=".decision-", dir=directory)
+        with os.fdopen(fd, "wb") as handle:
+            # Preserve inherited default ACL; open up its mask for the API reader.
+            os.fchmod(handle.fileno(), 0o640)
+            handle.write(body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        os.fsync(directory_fd)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+        os.close(directory_fd)
+
+
 class CheckMCP(FastMCP):
     def streamable_http_app(self):
         app = super().streamable_http_app()
@@ -204,7 +275,7 @@ class CheckMCP(FastMCP):
             # offline_access makes the client request it, so Auth0 issues a refresh token and the
             # five-minute access token renews without a reconnect. The tools never require it.
             authorization_servers=[self.settings.auth.issuer_url],
-            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, "offline_access"])
+            scopes_supported=[READ_SCOPE, RUN_SCOPE, NOTE_SCOPE, SHADOW_SCOPE, "offline_access"])
         paths = {route.path for route in metadata}
         app.routes[:] = [route for route in app.routes if route.path not in paths] + metadata
         return RequestLimits(app)
@@ -216,8 +287,11 @@ class CheckMCP(FastMCP):
             "securitySchemes": [{"type": "oauth2", "scopes": scopes(tool.name)}]}) for tool in tools]
 
     async def call_tool(self, name, arguments):
-        if name not in TOOL_ARGUMENTS or not isinstance(arguments, dict):
+        if name not in TOOL_ARGUMENTS:
             raise ToolError("Use only " + ", ".join(TOOL_ARGUMENTS))
+        await self.audit_call(name)
+        if not isinstance(arguments, dict):
+            raise ToolError("Use a declared argument object")
         required, optional = TOOL_ARGUMENTS[name]
         if not required <= set(arguments) <= required | optional:
             raise ToolError("Use only the declared arguments")
@@ -257,12 +331,19 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         transport_security=TransportSecuritySettings(allowed_hosts=["127.0.0.1:*", "localhost:*", resource.netloc],
             allowed_origins=["http://127.0.0.1:*", "http://localhost:*", f"https://{resource.netloc}"]))
 
-    async def authenticated(name):
+    async def authenticated(name, *, log=False):
         token = get_access_token()
         checked = await verifier.verify_token(token.token) if token else None
         if checked is None or not set(scopes(name)) <= set(checked.scopes):
             raise ToolError(UNAVAILABLE)
+        if log:
+            try:
+                await asyncio.to_thread(ledger.log_call, checked.claims["profile_id"], name, clock())
+            except Exception:
+                raise ToolError("Tool call log unavailable; call refused") from None
         return checked
+
+    server.audit_call = lambda name: authenticated(name, log=True)
 
     def live_context(idea, receipt):
         # Swing ideas use the same packet; their verdict reads its completed daily bars.
@@ -310,6 +391,73 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
             "errors": errors}
 
     run_hints = ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=True, idempotentHint=True)
+
+    def setup_for(candidate_id, now):
+        if not config.shadow_setups_dir or not config.shadow_outbox_dir:
+            raise ToolError("shadow not enabled")
+        try:
+            return read_shadow_setup(config.shadow_setups_dir, candidate_id, now)
+        except (OSError, ValueError, KeyError, TypeError):
+            raise ToolError("Shadow setup unavailable or invalid") from None
+
+    @server.tool(title="Shadow setup", annotations=run_hints, structured_output=True,
+        meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("shadow_setup")}]})
+    async def shadow_setup(candidate_id: str) -> dict[str, Any]:
+        """First call shadow_setup, then shadow_decide, before ANY other check tool for this setup.
+
+        Returns the frozen setup, live packet and only history closed before today's New York midnight.
+        Expired setups remain readable and are explicitly marked expired. Both independence labels apply.
+        """
+        await authenticated("shadow_setup")
+        now = clock()
+        setup = await asyncio.to_thread(setup_for, candidate_id, now)
+        cutoff = datetime.combine(date.fromisoformat(setup["session_date"]), datetime.min.time(), ET)
+        contract = setup["contract"]
+        idea = {"ticker": setup["symbol"], "side": setup["direction"], "instrument": "option", "horizon": "intraday",
+            "entry": setup["facts"].get("close"), "stop": setup["stop"], "option_type": contract["option_type"],
+            "expiration": contract["expiration"], "strike": contract["strike"]}
+        async with slots:
+            try:
+                analysis, errors = await asyncio.wait_for(asyncio.to_thread(live_context, idea, now), CONTEXT_TIMEOUT)
+            except asyncio.TimeoutError:
+                errors = ["live market data timed out"]
+                analysis = clock_only_analysis(now, errors)
+            features = await asyncio.to_thread(history, now)
+            rows = []
+            for row in features["rows"] or []:
+                closed = datetime.fromisoformat(row["closed_at"])
+                closed = closed.replace(tzinfo=ET) if closed.tzinfo is None else closed.astimezone(ET)
+                if closed < cutoff:
+                    rows.append({**row, "closed_at": closed.replace(tzinfo=None).isoformat()})
+            answer = run_check(idea, analysis, rows, now)
+        card = {k: v for k, v in answer["history"].items() if k != "source_fill_keys"}
+        card.update({"as_of_ny": cutoff.isoformat(), "available": features["state"] != "missing",
+            "source_state": features["state"]})
+        return {"schema_version": "shadow-setup-v1", "candidate": setup,
+            "live": {**answer["live"], "option": answer.get("option")}, "history": card,
+            "history_cutoff": cutoff.isoformat(), "labels": list(SHADOW_LABELS),
+            "published_at": setup["detected_at"], "expired": now >= datetime.fromisoformat(setup["expires_at"])}
+
+    @server.tool(title="Shadow decide", annotations=run_hints, structured_output=True,
+        meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("shadow_decide")}]})
+    async def shadow_decide(candidate_id: str, decision: Literal["take", "skip"],
+            reason: Annotated[str, Field(min_length=1, max_length=1000)]) -> dict[str, Any]:
+        """Call shadow_setup then shadow_decide BEFORE any other check tool for this setup.
+
+        Commit one immutable TAKE or SKIP with a reason. Identical retries recover the same decision.
+        Late commits are recorded but never traded. All results retain both independence labels.
+        """
+        checked = await authenticated("shadow_decide")
+        now = clock()
+        setup = await asyncio.to_thread(setup_for, candidate_id, now)
+        try:
+            result = await asyncio.to_thread(ledger.decide, checked.claims["profile_id"], setup, decision, reason, clock)
+            await asyncio.to_thread(write_shadow_decision, config.shadow_outbox_dir, result)
+        except Conflict as exc:
+            raise ToolError(str(exc)) from None
+        except (ValueError, OSError, sqlite3.Error):
+            raise ToolError("Shadow decision/export failed; retry identical content to recover") from None
+        return result
 
     @server.tool(title="Pre-trade check", annotations=run_hints, structured_output=True,
         meta={"securitySchemes": [{"type": "oauth2", "scopes": scopes("pre_trade_check")}]})

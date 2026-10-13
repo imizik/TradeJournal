@@ -293,3 +293,115 @@ def test_upgrade_adds_context_views_only_with_their_own_approval(staged, host, m
     present["count"] = "0"
     with pytest.raises(RuntimeError, match="recorded but its views are missing"):
         control.apply_context_views(sql)
+
+
+@pytest.fixture
+def shadow_host(tmp_path, monkeypatch):
+    """Recorded ACL commands with explicit identity and ledger refusal probes."""
+    for name in ('ROOT', 'STATE', 'SHADOW'):
+        monkeypatch.setattr(control, name, tmp_path / name.lower())
+    control.ROOT.mkdir()
+    control.STATE.mkdir(mode=0o700)
+    ledger = control.STATE / 'ledger.db'
+    ledger.write_bytes(b'')
+    ledger.chmod(0o600)
+    uid, gid = os.getuid(), os.getgid()
+    monkeypatch.setattr(control, 'installed', lambda: {'uids': {'service': uid}, 'gid': gid})
+    monkeypatch.setattr(control.pwd, 'getpwnam', lambda n: SimpleNamespace(pw_uid=uid + 1, pw_gid=gid + 1))
+    monkeypatch.setattr(control.os, 'getgrouplist', lambda n, g: [g], raising=False)
+    calls, acls = [], {}
+    def run(*args, check=True):
+        calls.append(tuple(str(a) for a in args))
+        if args[0] == 'getfacl':
+            default = 'user::rwx\ngroup::---\nother::---\n' if args[-1] == control.STATE else 'user::rwx\ngroup::r-x\nother::---\n'
+            return SimpleNamespace(returncode=0, stdout=acls.get(str(args[-1]), default).encode())
+        if args[:4] == ('sudo', '-u', control.API_USER, 'test'):
+            return SimpleNamespace(returncode=1 if args[-1] == ledger else 0)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(old, 'run', run)
+    original_stat, original_chmod = Path.stat, Path.chmod
+    modes = {}
+    def chmod(path, mode, *args, **kwargs):
+        original_chmod(path, mode, *args, **kwargs)
+        modes[str(path)] = mode
+    monkeypatch.setattr(Path, "chmod", chmod)
+    def fake_stat(path, *args, **kwargs):
+        info = original_stat(path, *args, **kwargs)
+        if path == control.ROOT / 'shadow-exchange.json':
+            values = list(info)
+            values[4] = 0  # This fixture models the root-only operator.
+            return os.stat_result(values)
+        if path in (control.SHADOW, control.SHADOW / 'setups', control.STATE / 'shadow-outbox'):
+            values = list(info)
+            values[0] = (info.st_mode & ~0o7777) | modes.get(str(path), info.st_mode & 0o7777)
+            values[4] = uid if path.name == 'shadow-outbox' else uid + 1
+            values[5] = gid
+            return os.stat_result(values)
+        return info
+    monkeypatch.setattr(Path, 'stat', fake_stat)
+    return calls, acls, ledger
+
+
+def test_shadow_exchange_idempotence_and_disable(shadow_host):
+    calls, _, _ = shadow_host
+    assert control.shadow_exchange(True)['ledger_readable_by_api'] is False
+    assert control.shadow_exchange(True)['enabled']
+    assert ('setfacl', '-m', 'u:tradejournal:--x', str(control.STATE)) in calls
+    assert ('setfacl', '-m', 'u:tradejournal:r-x,d:u:tradejournal:r-x', str(control.STATE / 'shadow-outbox')) in calls
+    assert not control.shadow_exchange(False)['enabled']
+    assert not control.shadow_exchange(False)['enabled']
+    receipt = control.ROOT / 'shadow-exchange.json'
+    assert json.loads(receipt.read_text())['enabled'] is False
+    assert receipt.stat().st_mode & 0o777 == 0o600
+    assert not list(control.ROOT.glob('.shadow-exchange-*'))
+    assert not any(c[0] == 'systemctl' for c in calls)
+
+
+def test_shadow_exchange_unknown_acl_and_symlink_refused(shadow_host):
+    calls, acls, _ = shadow_host
+    acls[str(control.STATE)] = 'user::rwx\nuser:999:rwx\ngroup::---\nother::---\n'
+    with pytest.raises(ValueError, match='Unknown shadow exchange ACL'):
+        control.shadow_exchange(True)
+    assert not any(c[0] == 'setfacl' for c in calls)
+    acls.clear()
+    control.SHADOW.symlink_to(control.ROOT, target_is_directory=True)
+    with pytest.raises(ValueError, match='symlinks'):
+        control.shadow_exchange(True)
+
+
+def test_shadow_exchange_ledger_readable_refused(shadow_host, monkeypatch):
+    calls, _, ledger = shadow_host
+    original = old.run
+    monkeypatch.setattr(old, 'run', lambda *a, **kw: SimpleNamespace(returncode=0)
+        if a[0] == 'sudo' and a[-1] == ledger else original(*a, **kw))
+    with pytest.raises(ValueError, match='already read'):
+        control.shadow_exchange(True)
+    assert not any(c[0] == 'setfacl' for c in calls)
+
+
+def test_shadow_exchange_unknown_receipt_refused_before_acl_changes(shadow_host):
+    calls, _, _ = shadow_host
+    receipt = control.ROOT / 'shadow-exchange.json'
+    receipt.write_text('{"unknown":true}')
+    receipt.chmod(0o600)
+    with pytest.raises(ValueError, match='Unknown shadow exchange receipt'):
+        control.shadow_exchange(True)
+    assert not any(c[0] == 'setfacl' for c in calls)
+
+
+def test_shadow_disable_removes_only_existing_grants(shadow_host):
+    calls, acls, _ = shadow_host
+    control.shadow_exchange(True)
+    uid = control.pwd.getpwnam(control.API_USER).pw_uid
+    acls[str(control.STATE)] = f'user::rwx\nuser:{uid}:--x\ngroup::---\nmask::--x\nother::---\n'
+    outbox = control.STATE / 'shadow-outbox'
+    acls[str(outbox)] = (f'user::rwx\nuser:{uid}:r-x\ngroup::r-x\nmask::r-x\nother::---\n'
+        f'default:user::rwx\ndefault:user:{uid}:r-x\ndefault:group::r-x\ndefault:mask::r-x\ndefault:other::---\n')
+    calls.clear()
+    control.shadow_exchange(False)
+    assert ('setfacl', '-x', 'u:tradejournal', str(control.STATE)) in calls
+    assert ('setfacl', '-x', 'u:tradejournal,d:u:tradejournal', str(outbox)) in calls
+    acls.clear()  # The next observed ACL has no named grants after removal.
+    calls.clear()
+    control.shadow_exchange(False)
+    assert not any(c[0] == 'setfacl' for c in calls)
