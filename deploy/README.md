@@ -290,6 +290,10 @@ The release installs five timers:
   at the open. A stored session is never fetched again. If the job cannot be
   queued within ten minutes the run is skipped, not failed: RVol waits for the
   next slot.
+- `tradejournal-market-context.timer` queues the earnings and VIX refresh for
+  Jo's pre-trade check every 15 minutes, 06:00–16:45 New York on weekdays
+  ([market_context.py](../backend/app/engine/market_context.py), Tradier). A
+  busy lane skips that slot; the check shows older rows with their age.
 - `tradejournal-alerts.timer` checks every two minutes whether anything above,
   the API or real-time Gmail has stopped working, and sends a phone alert.
   Without `/etc/tradejournal/alerts.env` the check is skipped; see

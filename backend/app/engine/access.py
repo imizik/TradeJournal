@@ -473,7 +473,7 @@ def authorize(request, operation, params):
     if who.service:
         if operation not in SERVICE_PATHS.get(who.identifier.removeprefix("service:"), set()):
             raise HTTPException(403, "Operation not permitted")
-        if who.identifier == "service:automation" and operation == "POST /sync/jobs/{job_type}/run" and params.get("job_type") not in {"gmail_sync", "trade_rebuild", "options_snapshot", "rvol_history"}:
+        if who.identifier == "service:automation" and operation == "POST /sync/jobs/{job_type}/run" and params.get("job_type") not in {"gmail_sync", "trade_rebuild", "options_snapshot", "rvol_history", "market_context"}:
             raise HTTPException(403, "Job is outside the service grant")
         return
     if request.method not in {"GET", "HEAD"}:
