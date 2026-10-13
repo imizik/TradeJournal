@@ -561,8 +561,8 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         """Before the bell: for each ticker (default: what Isaac holds, then his most-traded tickers of the last
         30 days; up to 8), the price versus yesterday's close, gap, premarket high/low/volume, up to 5 headlines from
         the last 24 hours, whether he holds it, and how his own closed trades in it went by side and entry time;
-        plus SPY/QQQ change and VWAP side, and scheduled FOMC/CPI/jobs releases today and next trading day. No VIX
-        or earnings dates yet. Facts only, no verdict; run
+        plus SPY/QQQ change and VWAP side, scheduled FOMC/CPI/jobs releases today and next trading day, each
+        ticker's next earnings date (tracked names only) and the VIX. Facts only, no verdict; run
         pre_trade_check on an actual idea after the open.
         """
         await authenticated("preopen_watchlist")

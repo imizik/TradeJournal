@@ -396,5 +396,12 @@ def test_market_facts_flag_reports_near_the_trade_and_old_reads():
                      "APLD reports earnings 2026-10-15 (confirmed): before this option expires",
                      "earnings date is from an older calendar read"]
     quiet, notes = check.market_facts("MU", rows, receipt, "intraday")
-    assert quiet["earnings"]["date"] is None and notes == []
-    assert check.market_facts("MU", [rows[0]], receipt, "intraday")[1] == ["VIX unavailable"]
+    assert quiet["earnings"]["date"] is None
+    assert notes == ["earnings date not checked for MU (not in the tracked calendar)"]  # Absence is not "none".
+    assert check.market_facts("SPY", rows, receipt, "swing")[1] == []  # Funds have no earnings.
+    assert check.market_facts("SPY", [rows[0]], receipt, "intraday")[1] == ["VIX unavailable"]
+    broken = [{**rows[0], "event_date": None}, rows[1]]
+    facts, notes = check.market_facts("APLD", broken, receipt, "swing")  # A bad row never crashes the check.
+    assert facts["earnings"]["date"] is None and notes == ["earnings date for APLD unreadable; not checked"]
+    old_quote = [{**rows[1], "observed_at": "2026-10-13T20:15:00"}]  # Fetched just now, traded yesterday.
+    assert "VIX is 17 h old" in check.market_facts("SPY", old_quote, receipt, "intraday")[1]

@@ -283,8 +283,10 @@ with their read times); `position_check` and each pre-open ticker carry it too,
 and the pre-open pass carries `vix`. Caveats: a report today or next day (gap
 and IV-crush risk), inside a swing hold (14 days), before an option's
 expiration, VIX 25 or higher, an earnings read older than 48 hours, VIX older
-than an hour. A snapshot older than an hour, or none, is "not checked", never
-"no earnings".
+than an hour (by the quote's own trade time when known). A ticker outside the
+tracked calendar (only held, recently traded and watched names are read), an
+unreadable row, a snapshot older than an hour or none at all is "not checked",
+never "no earnings"; funds and indices simply have none.
 
 ## Next steps
 

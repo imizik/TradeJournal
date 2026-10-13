@@ -412,8 +412,12 @@ def market_facts(ticker: str, items: Optional[list[dict]], receipt_utc: datetime
     earnings = next((row for row in items if row["kind"] == "earnings" and row["symbol"] == ticker.upper()), None)
     vix = next((row for row in items if row["kind"] == "vix"), None)
     facts = {"state": "fresh", "earnings": None, "vix": None}
+    try:
+        day = datetime.fromisoformat(str(earnings["event_date"])).date() if earnings else None
+    except (TypeError, ValueError):  # A malformed row is a gap, never a crash or a guess.
+        earnings, day = None, None
+        caveats.append(f"earnings date for {ticker.upper()} unreadable; not checked")
     if earnings:
-        day = datetime.fromisoformat(str(earnings["event_date"])).date()
         away = (day - today).days
         facts["earnings"] = {"date": day.isoformat(), "status": earnings["status"], "quarter": earnings["label"],
                              "days_away": away, "fetched_at": earnings["fetched_at"], "source": earnings["source"]}
@@ -427,9 +431,17 @@ def market_facts(ticker: str, items: Optional[list[dict]], receipt_utc: datetime
         if (now - datetime.fromisoformat(str(earnings["fetched_at"]))).total_seconds() > EARNINGS_STALE_HOURS * 3600:
             caveats.append("earnings date is from an older calendar read")
     elif ticker.upper() not in NO_EARNINGS:
-        facts["earnings"] = {"date": None, "note": "no upcoming report in the calendar (or not tracked)"}
+        # Only held, recently traded and watched names are tracked, and a failed read drops a row: absence is
+        # not "no earnings".
+        facts["earnings"] = {"date": None, "note": "no upcoming report in the tracked calendar"}
+        if not any(c.startswith("earnings date for") for c in caveats):
+            caveats.append(f"earnings date not checked for {ticker.upper()} (not in the tracked calendar)")
     if vix and vix["value"] is not None:
-        age = (now - datetime.fromisoformat(str(vix["fetched_at"]))).total_seconds() / 60
+        try:  # The quote's own trade time when known (a pre-open read can carry yesterday's close).
+            seen = datetime.fromisoformat(str(vix["observed_at"] or vix["fetched_at"]))
+        except (TypeError, ValueError):
+            seen = datetime.min
+        age = (now - seen).total_seconds() / 60
         facts["vix"] = {"value": vix["value"], "change_pct": vix["change_pct"], "observed_at": vix["observed_at"],
                         "fetched_at": vix["fetched_at"], "source": vix["source"]}
         if vix["value"] >= VIX_ELEVATED:
