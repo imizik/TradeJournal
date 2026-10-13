@@ -43,6 +43,7 @@ class ChartFeed:
         self._cache: OrderedDict[tuple, CachedRead] = OrderedDict()
         self._calls: deque[float] = deque()
         self._retry_at = 0.0
+        self._failed: dict[tuple, float] = {}  # per-request backoff after a timeout or provider error
 
     def read(self, path: str, params: dict, ttl: int, keep: bool = True) -> tuple[dict, float, str | None]:
         """One budgeted Tradier GET. ``keep=False`` skips the response cache (and its stale fallback):
@@ -63,6 +64,8 @@ class ChartFeed:
             try:
                 if now < self._retry_at or len(self._calls) >= 60:
                     raise ChartFeedError("Chart requests are cooling down to stay within the data allowance.", "rate_limited")
+                if now < self._failed.get(key, 0):
+                    raise ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
                 self._calls.append(now)
                 response = httpx.get(
                     f"{tradier.TRADIER_BASE_URL}{path}", params=params,
@@ -80,6 +83,7 @@ class ChartFeed:
                 payload = response.json()
                 if not isinstance(payload, dict) or payload.get("fault") or payload.get("errors"):
                     raise ChartFeedError("Tradier returned an unexpected market-data response.")
+                self._failed.pop(key, None)
                 fresh = CachedRead(payload, time.time(), now + ttl)
                 if not keep:
                     return fresh.data, fresh.fetched_at, None
@@ -92,8 +96,12 @@ class ChartFeed:
                 error = exc if isinstance(exc, ChartFeedError) else ChartFeedError("The chart data connection is unavailable. Retrying shortly.")
                 # Failure cache prevents repeated misses during an outage; old
                 # data is explicitly marked, never silently represented as live.
-                if error.code != "rate_limited":
-                    self._retry_at = max(self._retry_at, now + 15)
+                # A timeout or provider error backs off only this request, so one slow
+                # symbol (Tradier intermittently times out on SPY's minutes) cannot
+                # freeze every chart; refusals and 429s above stay account-wide.
+                if error.code != "rate_limited" and now >= self._failed.get(key, 0):
+                    self._failed = {k: t for k, t in self._failed.items() if t > now}
+                    self._failed[key] = now + 15
                 if saved:
                     return saved.data, saved.fetched_at, str(error)
                 raise error from None
