@@ -97,13 +97,18 @@ jobs:
       # On a push to main the docs-freshness tripwire is left out: a green CI
       # run on main is what publishes a release, and overdue documentation must
       # not hold a working fix off the server. Pull requests still run it.
+      #
+      # Four workers match the runner's four cores; tests/conftest.py gives
+      # each worker its own database and scratch directories. Durations are
+      # very uneven (a few factory tests take 10-20 s each), so worksteal
+      # rebalances instead of leaving one worker with the long tail.
       - name: Tests
         working-directory: backend
         run: |
           if [ "${{ github.event_name }}" = push ]; then
-            pytest -q --deselect tests/test_docs_freshness.py::test_the_drift_pass_is_not_overdue
+            pytest -q -n 4 --dist worksteal --deselect tests/test_docs_freshness.py::test_the_drift_pass_is_not_overdue
           else
-            pytest -q
+            pytest -q -n 4 --dist worksteal
           fi
 
   frontend:
