@@ -139,15 +139,11 @@ API ledger access and parent listing, check setup-write and API membership
 in the check group are denied. Setup directories are 2750 and outbox is 0750.
 Root-private recovery backups are retained with the newest previous runtime.
 
-The working Check v3 catalog exposes both shadow tools. After Jo encountered
-`oauth_refresh_token_missing`, the existing connection was reconnected and Jo
-reported successful verification. At Isaac's explicit request, the lead set up
-one enabled **TJ Setup → Jo shadow + co-pilot** task. Its saved Scheduled editor
-shows a Gmail new-email trigger, the owner's sender and subject filter
-`^TJ Setup:`. The saved prompt checks the owner's `+tjsetups` recipient before
-any TradeJournal call, preserves shadow-first ordering and both labels, uses
-v3, and sends only fresh co-pilot Go alerts. It does not continuously monitor
-candles or promise follow-up events that the scanner has not implemented.
+The working Check catalog exposes both shadow tools. At Isaac's explicit
+request, the lead set up one enabled **TJ Setup → Jo shadow + co-pilot** task
+owned by Trader Jo. The saved prompt preserves shadow-first ordering, paper-only
+decisions, both labels and fresh co-pilot Go-only alerts. It does not continuously
+monitor candles or promise follow-up events that the scanner has not implemented.
 
 Isaac entered the Gmail app password through a root-only hidden terminal
 prompt. At 14:22 Eastern, the lead atomically added only the three scanner SMTP
@@ -160,15 +156,43 @@ does not match the task's subject filter. A natural NBIS setup detected at
 expired setups were marked expired rather than emailed. The read-only Gmail
 connection remains separate from the SMTP credential.
 
-The post-five-minute v3 readiness check again returned
-`oauth_refresh_token_missing`; task creation and an initial successful call
-therefore do not prove unattended operation. The latest Auth0 reconnect log
-identifies the existing advisor account, so changing between Google and that
-account does not explain this observed failure. Read-only inspection confirmed
-API offline access, the client's Refresh Token grant and 300-second access
-token lifetimes. Connection refresh repair and an actual event-task shadow
-decision remain unverified; no longer token lifetime or Auth0 grant change was
-used as a workaround.
+The v3 post-five-minute readiness check returned `oauth_refresh_token_missing`.
+Isaac subsequently created v4 in Jo's conversation; its read-only baseline at
+15:04:20 and six-minute check at 15:10:29 passed without reconnecting. The
+production task now uses that v4 connection. The owner's longer connection
+checks remain separate. Access-token lifetimes remain 300 seconds; no Auth0
+grant or longer token lifetime was used as a workaround.
+
+The initial natural NBIS, AAPL and AMD emails reached Gmail but produced no
+recorded task run or authenticated check call. The task was enabled; its native
+inventory initially reported no last run, and exposes no delivery/error log.
+Bounded delivery-only tests established a working distinction: self-sent
+Gmail messages carried both SENT and INBOX labels and produced no recorded run,
+while an independent incoming message from the owner's connected Outlook
+account automatically woke the task in 18 seconds. This is observed behavior,
+not a claim about undocumented Gmail event filtering rules.
+
+At Isaac's request to fix the route, the lead added one narrow Outlook rule:
+only the existing scanner sender **and** `TJ Setup:` in the subject forward to
+the original owner Gmail alias. Other rules were preserved; no delete/move or
+broad inbox forwarding was added. A VPS SMTP probe sent at 15:44:35 reached
+Gmail as an incoming `FW: TJ Setup:` message at 15:44:38; the automatic task
+acknowledgement at 15:44:53 identified that exact Gmail message. It used no
+candidate ID, financial tool or shadow decision. The lead then changed only
+the API's scanner email recipient to the owner's relay inbox, retained a
+private environment backup, restarted under the existing timing authorization,
+and verified API health, unchanged SMTP credentials/shadow paths and check health.
+
+The full production prompt was restored on the same task at 15:46:47. A fresh
+Scheduled editor read-back shows an enabled Gmail new-email trigger with the
+relay sender and `^FW: TJ Setup:` filter. Its source guard validates both the
+outer relay recipient and the original scanner sender/recipient/subject before
+extracting the original UUID, explicit stale time and JSON. Tests and expired
+setups remain ignored. A final test through the active API recipient arrived
+at 15:47:56; the native task inventory records its automatic production run at
+15:48:15. The task stayed silent, and a read-only ledger audit found zero
+authenticated check calls or decisions since the relay probe. Delivery proof
+is not actual Jo decision or first-session acceptance; that evidence remains pending.
 
 A read of a naturally published, already-expired AMD setup succeeded with
 `expired=true`; no decision was submitted. Its historical cohorts matched the
