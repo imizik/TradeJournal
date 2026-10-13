@@ -248,3 +248,35 @@ def test_no_historical_expiry_and_strict_choice_schema(linked):
     assert h.backend.post(path(first_id), json={"decision": "wait", "rationale": "Wait not supported"}).status_code == 422
     assert h.backend.post(path(first_id), json={"decision": "take", "rationale": "Cannot change exits", "plan": {}}).status_code == 422
     assert h.backend.post(path(first_id), json={"decision": "take", "rationale": "Historical clocks do not expire the run"}).status_code == 201
+
+
+def test_completed_batch_can_be_listed_without_nested_transactions(linked):
+    for run_id in linked.ids:
+        complete(linked, run_id)
+    response = linked.backend.get("/cloud-mcp/practice/runs")
+    assert response.status_code == 200, response.text
+    assert len(response.json()["runs"]) == 2
+    assert all(r["status"] == "committed" for r in response.json()["runs"])
+
+
+def test_abandon_stale_operator_read_cannot_overwrite_final_commit(boundary):
+    with Session(boundary.engine) as db:
+        run = replay.prepare_batch(db, [two_setup_bundle()], identifier="race-test", seed=1, exam_count=1)[0]
+        run_id = run.id
+    with Session(boundary.engine) as operator_db:
+        cached = operator_db.get(replay.PracticeRun, run_id)
+        assert cached.status == "prepared"
+        with Session(boundary.engine) as actor_db:
+            current = actor_db.get(replay.PracticeRun, run_id)
+            for entry in replay.entries(current):
+                replay.view(actor_db, current, "race-test", replay.market.rules.UNIVERSE)
+                replay.choose(actor_db, current, entry, "race-test", replay.market.rules.UNIVERSE,
+                              {"decision": "skip", "rationale": "Commit before operator obtains lock"})
+            assert current.status == "committed"
+        with access._LOCK:
+            access._serialized(operator_db)
+            replay.abandon(operator_db, cached)
+    with Session(boundary.engine) as db:
+        final = db.get(replay.PracticeRun, run_id)
+        assert final.status == "committed"
+        assert replay.reveal_allowed(db, final)

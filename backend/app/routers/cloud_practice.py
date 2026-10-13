@@ -27,7 +27,11 @@ def packet(request, db, run, *, details):
                 access._serialized(db)
                 db.expire_all()
                 db.refresh(run)
-                return scanner_replay.view(db, run, who.identifier, who.grants["symbols"], details=details)
+                result = scanner_replay.view(db, run, who.identifier, who.grants["symbols"], details=details)
+                # Summary-only/terminal views do not write first-served time.
+                # End this transaction before projecting the next listed run.
+                db.commit()
+                return result
         if historical_mode():
             require_historical(request)
             return historical_replay.view(db, run, who.identifier, who.grants["symbols"],

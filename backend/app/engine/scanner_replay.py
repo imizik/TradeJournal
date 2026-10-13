@@ -321,6 +321,9 @@ def score_results(db, run):
 
 def abandon(db, run):
     """Operator-only, terminal practice abandonment; exams stay sealed."""
+    # The operator acquires writer serialization before calling. Its earlier
+    # lookup may predate Jo's final commit; never transition a cached status.
+    db.refresh(run)
     metadata(run)
     if run.status == "prepared":
         state = json.loads(run.timings_json)
