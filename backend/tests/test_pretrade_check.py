@@ -91,7 +91,7 @@ def test_swing_verdict_from_daily_bars(side, kwargs, expected):
         assert answer["wait_for"]["expires_at"] == "2026-10-12T16:00-04:00"  # Friday check: Monday's close.
     if expected != "insufficient_data":
         assert answer["live"]["daily"]["sma_50"] == kwargs.get("sma50", 100.0) and answer["would_change"]
-        assert "earnings date not checked (no calendar source yet)" in answer["caveats"]
+        assert "earnings date and VIX not checked (market data unavailable)" in answer["caveats"]
 
 
 def test_swing_stop_in_atr_and_overnight_history():
@@ -382,3 +382,19 @@ def test_macro_calendar_flags_releases_today_and_inside_a_swing():
     assert "FOMC decision at 14:00 ET next trading day: inside a swing hold" in swing["caveats"]
     uncovered = check.run_check(IDEA, analysis(), [], datetime(2030, 1, 2, 15, 0, tzinfo=timezone.utc))
     assert uncovered["macro"]["events"] is None and uncovered["caveats"][0].startswith("macro calendar unavailable")
+
+
+def test_market_facts_flag_reports_near_the_trade_and_old_reads():
+    receipt = datetime(2026, 10, 14, 13, 0, tzinfo=timezone.utc)  # Wednesday 09:00 New York.
+    rows = [{"kind": "earnings", "symbol": "APLD", "event_date": "2026-10-15", "status": "confirmed", "label": "Q1 2027",
+             "value": None, "change_pct": None, "observed_at": None, "fetched_at": "2026-10-10T12:00:00", "source": "Tradier"},
+            {"kind": "vix", "symbol": "VIX", "event_date": None, "status": None, "label": None, "value": 15.2,
+             "change_pct": -1.0, "observed_at": None, "fetched_at": "2026-10-14T12:55:00", "source": "Tradier"}]
+    facts, notes = check.market_facts("apld", rows, receipt, "intraday", "2026-10-17")
+    assert facts["earnings"]["days_away"] == 1 and facts["vix"]["value"] == 15.2
+    assert notes == ["APLD reports earnings 2026-10-15 (confirmed): gap and IV-crush risk around the report",
+                     "APLD reports earnings 2026-10-15 (confirmed): before this option expires",
+                     "earnings date is from an older calendar read"]
+    quiet, notes = check.market_facts("MU", rows, receipt, "intraday")
+    assert quiet["earnings"]["date"] is None and notes == []
+    assert check.market_facts("MU", [rows[0]], receipt, "intraday")[1] == ["VIX unavailable"]

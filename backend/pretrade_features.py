@@ -33,6 +33,10 @@ POSITION_KEYS = frozenset({
     "ticker", "instrument_type", "option_type", "strike", "expiration", "contracts", "avg_entry_premium",
     "total_premium_paid", "opened_at", "entry_time_bucket", "account_name", "account_type",
 })
+MARKET_FORMAT = "pretrade-market-v1"
+MARKET_KEYS = frozenset({
+    "kind", "symbol", "event_date", "status", "label", "value", "change_pct", "observed_at", "fetched_at", "source",
+})
 CAPTURE_KEYS = frozenset({
     "received_at", "underlying", "side", "instrument", "mode", "setup_label", "wording", "note", "strike",
     "expiration", "quantity", "transcript_text", "not_taken_at", "account_name", "account_type", "latest_note",
@@ -134,23 +138,18 @@ def context_rows(records, keys) -> list[dict]:
     return rows
 
 
-def publish_context(positions: list[dict], captures: list[dict], pointer_file, *, now: datetime | None = None) -> dict:
-    """Open positions and recent captures: context-<sha>.json, then atomically repoint context.json."""
+def _publish_addressed(pointer_file, prefix: str, payload: bytes, limit: int) -> str:
+    """Write <prefix>-<sha>.json once, then atomically repoint the pointer file at it."""
     pointer = _safe_path(pointer_file)
     directory = pointer.parent
     if not stat.S_ISDIR(directory.lstat().st_mode):
         raise ValueError("Context directory must already exist")
-    if any(set(row) != POSITION_KEYS for row in positions) or any(set(row) != CAPTURE_KEYS for row in captures):
-        raise ValueError("Context rows must have the exact approved fields")
-    payload = json.dumps({"format": CONTEXT_FORMAT, "generated_at": (now or datetime.now(timezone.utc)).astimezone(
-        timezone.utc).isoformat(), "positions": positions, "captures": captures}, sort_keys=True,
-        separators=(",", ":"), allow_nan=False).encode()
-    if len(payload) > CONTEXT_MAX:
+    if len(payload) > limit:
         raise ValueError("Context file exceeds its bound")
     digest = hashlib.sha256(payload).hexdigest()
-    target = directory / f"context-{digest}.json"
+    target = directory / f"{prefix}-{digest}.json"
     if target.exists() or target.is_symlink():
-        if _read_regular(_safe_path(target), CONTEXT_MAX) != payload:
+        if _read_regular(_safe_path(target), limit) != payload:
             raise ValueError("Content-addressed context file differs from its name")
     else:
         temporary = _atomic_file(directory, payload, mode=0o640)
@@ -158,13 +157,47 @@ def publish_context(positions: list[dict], captures: list[dict], pointer_file, *
             os.link(temporary, target, follow_symlinks=False)
         finally:
             temporary.unlink(missing_ok=True)
-    temporary = _atomic_file(directory, json.dumps({"context_sha256": digest}).encode(), mode=0o640)
+    temporary = _atomic_file(directory, json.dumps({f"{prefix}_sha256": digest}).encode(), mode=0o640)
     try:
         os.replace(temporary, pointer)
     finally:
         temporary.unlink(missing_ok=True)
     _fsync_directory(directory)
-    _retain(directory, digest, prefix="context")
+    _retain(directory, digest, prefix=prefix)
+    return digest
+
+
+def _read_addressed(pointer_file, prefix: str, limit: int, fields: set, now: datetime) -> tuple[dict, float]:
+    """The document the pointer names, verified against its digest; raises on anything unexpected."""
+    pointer = _safe_path(pointer_file)
+    value = json.loads(_read_regular(pointer, POINTER_MAX))
+    key = f"{prefix}_sha256"
+    if not isinstance(value, dict) or set(value) != {key} or not _HEX.fullmatch(str(value[key])):
+        raise ValueError("Invalid context pointer")
+    digest = value[key]
+    raw = _read_regular(_safe_path(pointer.parent / f"{prefix}-{digest}.json"), limit)
+    if hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError("Context file does not match its digest")
+    document = json.loads(raw)
+    if not isinstance(document, dict) or set(document) != fields:
+        raise ValueError("Invalid context file")
+    generated = datetime.fromisoformat(document["generated_at"])
+    if generated.tzinfo is None or (now - generated).total_seconds() < -60:
+        raise ValueError("Invalid context time")
+    return document, (now - generated).total_seconds()
+
+
+_UNREADABLE = (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError, AttributeError)
+
+
+def publish_context(positions: list[dict], captures: list[dict], pointer_file, *, now: datetime | None = None) -> dict:
+    """Open positions and recent captures: context-<sha>.json, then atomically repoint context.json."""
+    if any(set(row) != POSITION_KEYS for row in positions) or any(set(row) != CAPTURE_KEYS for row in captures):
+        raise ValueError("Context rows must have the exact approved fields")
+    payload = json.dumps({"format": CONTEXT_FORMAT, "generated_at": (now or datetime.now(timezone.utc)).astimezone(
+        timezone.utc).isoformat(), "positions": positions, "captures": captures}, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode()
+    digest = _publish_addressed(pointer_file, "context", payload, CONTEXT_MAX)
     return {"context_sha256": digest, "positions": len(positions), "captures": len(captures)}
 
 
@@ -172,28 +205,39 @@ def read_context(pointer_file, *, max_age_seconds: int, now: datetime | None = N
     """Return {state, positions, captures, generated_at, age_seconds}; missing means none, never invented."""
     now = now or datetime.now(timezone.utc)
     try:
-        pointer = _safe_path(pointer_file)
-        value = json.loads(_read_regular(pointer, POINTER_MAX))
-        if not isinstance(value, dict) or set(value) != {"context_sha256"} or not _HEX.fullmatch(str(value["context_sha256"])):
-            raise ValueError("Invalid context pointer")
-        digest = value["context_sha256"]
-        raw = _read_regular(_safe_path(pointer.parent / f"context-{digest}.json"), CONTEXT_MAX)
-        if hashlib.sha256(raw).hexdigest() != digest:
-            raise ValueError("Context file does not match its digest")
-        document = json.loads(raw)
-        if (not isinstance(document, dict) or set(document) != {"format", "generated_at", "positions", "captures"}
-                or document["format"] != CONTEXT_FORMAT
+        document, age = _read_addressed(pointer_file, "context", CONTEXT_MAX,
+            {"format", "generated_at", "positions", "captures"}, now)
+        if (document["format"] != CONTEXT_FORMAT
                 or any(not isinstance(r, dict) or set(r) != POSITION_KEYS for r in document["positions"])
                 or any(not isinstance(r, dict) or set(r) != CAPTURE_KEYS for r in document["captures"])):
             raise ValueError("Invalid context file")
-        generated = datetime.fromisoformat(document["generated_at"])
-        if generated.tzinfo is None or (now - generated).total_seconds() < -60:
-            raise ValueError("Invalid context time")
-        age = (now - generated).total_seconds()
-    except (OSError, ValueError, TypeError, KeyError, UnicodeDecodeError, AttributeError):
+    except _UNREADABLE:
         return {"state": "missing", "positions": None, "captures": None, "generated_at": None, "age_seconds": None}
     return {"state": "stale" if age > max_age_seconds else "fresh", "positions": document["positions"],
         "captures": document["captures"], "generated_at": document["generated_at"], "age_seconds": max(0, int(age))}
+
+
+def publish_market(items: list[dict], pointer_file, *, now: datetime | None = None) -> dict:
+    """Earnings dates and VIX from the private backend's snapshot: market-<sha>.json, then repoint market.json."""
+    if any(set(row) != MARKET_KEYS for row in items):
+        raise ValueError("Market rows must have the exact approved fields")
+    payload = json.dumps({"format": MARKET_FORMAT, "generated_at": (now or datetime.now(timezone.utc)).astimezone(
+        timezone.utc).isoformat(), "items": items}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    return {"market_sha256": _publish_addressed(pointer_file, "market", payload, CONTEXT_MAX), "items": len(items)}
+
+
+def read_market(pointer_file, *, max_age_seconds: int, now: datetime | None = None) -> dict:
+    """Return {state, items, generated_at, age_seconds}; missing means none, never invented."""
+    now = now or datetime.now(timezone.utc)
+    try:
+        document, age = _read_addressed(pointer_file, "market", CONTEXT_MAX, {"format", "generated_at", "items"}, now)
+        if document["format"] != MARKET_FORMAT or any(not isinstance(r, dict) or set(r) != MARKET_KEYS
+                                                      for r in document["items"]):
+            raise ValueError("Invalid market file")
+    except _UNREADABLE:
+        return {"state": "missing", "items": None, "generated_at": None, "age_seconds": None}
+    return {"state": "stale" if age > max_age_seconds else "fresh", "items": document["items"],
+        "generated_at": document["generated_at"], "age_seconds": max(0, int(age))}
 
 
 def _retain(directory: Path, current: str, prefix: str = "features"):

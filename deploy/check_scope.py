@@ -9,6 +9,7 @@ import argparse
 VIEW = "pretrade_feature_source"
 POSITION_VIEW = "pretrade_position_source"
 CAPTURE_VIEW = "pretrade_capture_source"
+MARKET_VIEW = "pretrade_market_source"
 CAPTURE_LIMIT = 200
 ROLE = "tj_check_features"
 EXCLUDED_BROKERS = ("webull",)  # Matches app.engine.pretrade_check.EXCLUDED_BROKERS.
@@ -79,6 +80,22 @@ CREATE VIEW public.{POSITION_VIEW} WITH (security_barrier=true) AS
 CREATE VIEW public.{CAPTURE_VIEW} WITH (security_barrier=true) AS
 {capture_sql()};
 GRANT SELECT ON public.{POSITION_VIEW}, public.{CAPTURE_VIEW} TO {ROLE};
+COMMIT;
+"""
+
+
+# Earnings dates and VIX the private backend reads from Tradier (app/engine/market_context.py); no row IDs.
+MARKET = """SELECT m.kind, m.symbol, m.event_date, m.status, m.label, m.value, m.change_pct, m.observed_at,
+       m.fetched_at, m.source
+FROM market_context_item m"""
+
+
+def market_view_sql() -> str:
+    """The external market context for the same read-only role; a no-clobber view."""
+    return f"""BEGIN;
+CREATE VIEW public.{MARKET_VIEW} WITH (security_barrier=true) AS
+{MARKET};
+GRANT SELECT ON public.{MARKET_VIEW} TO {ROLE};
 COMMIT;
 """
 

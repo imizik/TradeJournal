@@ -215,9 +215,10 @@ def test_upgrade_swaps_only_the_stopped_runtime_and_keeps_the_previous(staged, h
     (staged / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
     newer_approval = control.digest(staged / "manifest.json")
     monkeypatch.setattr(old, "runtime_inventory", lambda **k: {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]})
-    (control.CONFIG / "context-views.sql").write_bytes((staged / "config/context-views.sql").read_bytes())
+    for name in control.ADDITIVE_SQL:
+        (control.CONFIG / name).write_bytes((staged / "config" / name).read_bytes())
     record = json.loads(control.RECORD.read_text())
-    record = {**record, "settings": {**record["settings"], "context-views.sql": control.digest(control.CONFIG / "context-views.sql")},
+    record = {**record, "settings": {**record["settings"], **{name: control.digest(control.CONFIG / name) for name in control.ADDITIVE_SQL}},
         "runtime_inventory": {"fixture": (control.ROOT / "backend/cloud_mcp_check.py").read_text()[-8:]}}
     control.RECORD.write_text(json.dumps(record))
     config_before = {p.name: p.read_bytes() for p in control.CONFIG.iterdir() if p.is_file()}
@@ -265,12 +266,17 @@ def test_upgrade_adds_context_views_only_with_their_own_approval(staged, host, m
         return present["count"] if sql.startswith(b"SELECT count(*)") else ""
     monkeypatch.setattr(control, "psql", fake_psql)
     sql_digest = control.digest(staged / "config/context-views.sql")
+    market_digest = control.digest(staged / "config/market-view.sql")
     with pytest.raises(ValueError, match="approve-sql"):
         control.upgrade(staged, approved)
+    with pytest.raises(ValueError, match="market-view.sql"):
+        control.upgrade(staged, approved, (sql_digest,))  # Each additive file needs its own approval.
     assert statements == []
-    upgraded = control.upgrade(staged, approved, (sql_digest,))
+    upgraded = control.upgrade(staged, approved, (sql_digest, market_digest))
     assert any("CREATE VIEW public.pretrade_position_source" in s for s in statements)
+    assert any("CREATE VIEW public.pretrade_market_source" in s and "m.id" not in s for s in statements)
     assert upgraded["settings"]["context-views.sql"] == sql_digest == control.digest(control.CONFIG / "context-views.sql")
+    assert upgraded["settings"]["market-view.sql"] == market_digest == control.digest(control.CONFIG / "market-view.sql")
     # Re-runs: the exact recorded SQL skips; different SQL over existing views or a half state refuses.
     statements.clear()
     present["count"] = "2"
