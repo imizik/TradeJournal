@@ -1,92 +1,128 @@
-# Shadow Isaac S1 — Jo decides on scanner setups for its own paper book
+# Shadow Isaac S1 — Jo takes or skips scanner setups for its own paper book
 
 Selected by Isaac on October 12, 2026, when he moved the Dots priority from
 the advisor to the shadow trader. Build step 4 of the
 [shadow trader design](shadow-trader-design.md#build-order-after-dots-steps-35),
 narrowed to the smallest version that produces a comparable record.
-**Contract only; nothing here is built, granted or activated.**
+Reworked October 13 with Isaac's go-ahead to use the recommended choices.
+**Contract only; nothing here is built, granted or activated.** The execution
+plan, work split and model guidance are in the [shadow build plan](shadow-build-plan.md).
+
+## Owner decisions (October 13, 2026)
+
+| Question | Decision |
+|---|---|
+| What Shadow Isaac decides | TAKE or SKIP only. The setup's contract, stop, target, time stop and flat time are fixed, so S1 measures selection skill alone |
+| History it may see | Isaac's closed-trade aggregates, cut off at the previous session's close |
+| Wake-up | The scanner's existing `TJ Setup:` email through Jo's Gmail task, with every result labelled as below |
 
 ## What happens
 
-1. The [scanner](setup-scanner-contract.md) saves a setup and emails it
-   (`TJ Setup:` subject).
-2. Jo's Gmail task wakes. **First**, as Shadow Isaac, it reads the setup through
-   `shadow_setup` and commits **TAKE** or **SKIP** with a reason through
-   `shadow_decide`. Only then does it run the co-pilot `pre_trade_check`.
+1. The [scanner](setup-scanner-contract.md) saves a setup, hands it to the
+   check service as a file at once and emails it (`TJ Setup:` subject).
+2. Jo's Gmail task wakes. **First**, as Shadow Isaac, Jo calls
+   `shadow_setup(candidate_id)` and then `shadow_decide(candidate_id,
+   decision, reason)`. Only after that may it call `pre_trade_check` or any
+   other check-service tool for the co-pilot rating.
 3. TradeJournal prices a TAKE as Shadow Isaac's own one-contract paper trade:
-   the setup's contract, stop, target, 60-minute time stop and flat-by time,
-   entered at the ask of the first fresh quote after the commit. A commit after
-   the setup's 10-minute expiry is recorded as **no response**, never entered.
-4. The Scanner page shows, per setup: the rules-only result, Shadow Isaac's
-   decision and result, and later Isaac's own trade if he took one.
+   the setup's contract and exits, entered at the ask of the first quote read
+   after TradeJournal sees the commit whose bid and ask were both updated at or
+   after the commit. A commit at or after the setup's `expires_at` is saved as
+   **late** and never entered; no commit by then is **no response**.
+4. The Scanner page shows the rules-only result, Shadow Isaac's decision and
+   result, and both labels for every setup.
 
-S1 measures one thing: **does Shadow Isaac's choice of which setups to take
-beat taking them all?** Same contract and same exits isolate selection skill.
-Choosing its own contract, size or exits is a later version.
+## What Shadow Isaac sees, and what can be proved
 
-## What Shadow Isaac may see
+`shadow_setup` returns only:
 
-`shadow_setup(candidate_id)` returns, and nothing else:
+- the frozen setup as saved (facts, rule stop/target, contract, `expires_at`);
+- the live packet the pre-trade check builds for that ticker (price, VWAP,
+  opening range, relative volume, levels, option quote), with source times;
+- Isaac's closed-trade aggregates from the published feature rows, computed
+  only over trades with `closed_at` before the setup day's 00:00 New York.
 
-- the frozen setup exactly as saved (market facts, rule stop/target, contract,
-  expiry);
-- the live market packet the pre-trade check already builds for that ticker
-  (price, VWAP, opening range, relative volume, levels, option quote), with
-  source times;
-- Isaac's closed-trade aggregates from the existing approved feature rows,
-  **cut off at the previous session's close**: nothing from the setup's own
-  day.
+It never returns open positions, today's trades or fills, saved checks, Jo's
+co-pilot verdicts, captures or notes.
 
-It never returns open positions, today's trades or fills, pre-trade checks, Jo's
-co-pilot verdicts or Isaac's notes. Backend authorization enforces this, not
-the prompt.
+**Same Dot, same connection.** Jo's check connection already carries tools
+that read open positions, captures and notes (Isaac approved that on October
+12; see `deploy/check_scope.py`). Neither tool scopes nor prompts can stop the same Dot from calling them.
+S1 therefore records evidence instead of claiming isolation:
 
-**Independence is unverified in S1, and every result says so.** Jo's Gmail
-access also reaches broker fill emails, and Jo's memory may hold today's
-conversation. S1 accepts that for speed. Results carry
-`informed-by-history` and `independence-unverified`. Removing the second label
-needs a wake-up path that is not Gmail (MCP Events) and a Dot or identity
-without same-day memory; that is a later slice.
+- **`clean_order`**: true only when the check service saw no call from this
+  actor to any other check tool between the setup's publication and the
+  commit. Every tool call (name, actor, time) goes into an append-only call
+  log in the check ledger to make this checkable.
+- **Labels on every result:** `informed-by-history`, plus
+  `independence-unverified`. Jo's Gmail can read broker fill emails, and its
+  memory may hold today's conversations; neither is observable here.
+- Removing `independence-unverified` needs a non-Gmail wake-up (MCP Events)
+  and a Dot or identity without same-day memory. That is
+  [shadow S3](shadow-build-plan.md#s3--independence-later-research-gated), not S1.
 
-## Where it runs
+## Interfaces
 
-- **Tools:** two new tools on the existing check service (`/check/mcp`) under
-  a new scope `shadow:decide`, granted only to the existing check connection.
-  `shadow_setup` reads; `shadow_decide(candidate_id, decision, reason)` writes
-  one immutable row per setup in the check service's own ledger. A second
-  commit with different content conflicts; an identical retry returns the
-  original.
-- **Setups in:** a finite publisher writes today's frozen setups (the
-  `scanner_candidate` rows only) to a file the check service reads, following
-  the feature publisher pattern. The check service still holds no database
-  credential and the private API stays private.
-- **Decisions out:** the scanner watcher in the private backend reads Shadow
-  Isaac's decisions read-only from the check ledger, the way the owner page
-  already does, and records the paper trade as `ScannerEvent` rows with
-  `shadow_` keys. No new table or migration.
+**Setup handoff (private backend → check service).** When the scanner saves a
+setup with a contract, the private backend writes it at once as a
+content-addressed `setup-<candidate_id>.json` (the frozen `scanner_candidate`
+fields only: ID, symbol, setup, direction, bar times, `detected_at`,
+`expires_at`, stop, target, flags, facts, contract, scanner version and
+params hash) into `/var/lib/tradejournal-shadow/setups/`, written by the API
+user and readable by `tj-check`. The check service already reads any path its
+unit does not hide, so this needs no database role, view or timer and adds no
+publication lag. The API unit gains `ReadWritePaths=/var/lib/tradejournal-shadow`.
 
-## Records and scorecard
+**Tools on `/check/mcp`, new scope `shadow:decide`:**
 
-Each setup gets: rules-only result (already built), Shadow Isaac decision
-(TAKE / SKIP / no response, reason, commit time, latency from the email),
-Shadow Isaac paper result for a TAKE, and the same two labels. The page
-totals: rules-only P&L over all setups versus Shadow Isaac P&L over its TAKEs,
-with counts. Groups under 30 decisions say "not enough evidence".
+- `shadow_setup(candidate_id)` → `{schema_version, candidate, live, history,
+  history_cutoff, labels, published_at}`. Read-only, logged.
+- `shadow_decide(candidate_id, decision: "take"|"skip", reason ≤ 1000 chars)`
+  → `{decision_id, candidate_id, decision, reason, committed_at, timing:
+  "on_time"|"late", clean_order, labels, content_sha256}`. One immutable row
+  per (actor, candidate); an identical retry returns the original, different
+  content conflicts. An unknown or non-today candidate is refused.
+
+**Decision export (check service → private backend).** On each commit the
+check service also writes the row as `decision-<candidate_id>.json` (atomic
+rename, fsynced) in `/var/lib/tradejournal-check/shadow-outbox/`, the only
+directory its unit may write. The API user gets read access to that one
+directory (traverse-only on its parent) through an operator step; the ledger
+and every other check file stay unreadable to it. The scanner watcher reads
+new decision files each pass. No socket, route or database credential is
+added in either direction, and the check service's units do not change.
+
+**Paper events (private backend).** `ScannerEvent` rows with keys
+`shadow_decision` (copied from the outbox, including timing and labels),
+`shadow_entry`, `shadow_exit_intent`, `shadow_exit`, `shadow_unresolved`.
+The same pricing rules as the rules-only trade apply: a two-minute window from
+decision to priced entry or exit, quotes updated at or after the decision, a
+late-noticed exit condition ends `shadow_unresolved`. No new table or migration.
+
+## Scorecard (S1 version)
+
+Per day and cumulative: setups; Shadow Isaac TAKE / SKIP / late / no response;
+rules-only P&L over all priced setups; Shadow Isaac P&L over its priced TAKEs;
+the P&L of the rules trades it skipped; counts with `clean_order` true. Any
+group under 30 decisions says "not enough evidence".
 
 ## Acceptance
 
-- One live session where every emailed setup has a shadow decision or a
-  recorded no response, and every TAKE has a priced entry after its commit or
-  is unresolved.
-- A forged or wrong-scope token cannot read a setup or commit; a commit for
-  another day's setup, or after expiry, is refused or recorded as no response.
-- `shadow_setup` for a setup on day D contains no trade closed on day D
-  (fixture test plus one live spot check).
-- Restart of either service leaves exactly one decision and at most one
-  entry and exit per setup.
+- One live session where every published setup has a decision, late or no
+  response, and every on-time TAKE has a priced entry after its commit or is
+  `shadow_unresolved`.
+- A token without `shadow:decide`, another actor, a forged candidate ID, a
+  non-today setup and a commit after expiry are each refused or recorded as
+  late, with tests.
+- A fixture where a trade closes on the setup day proves `history` excludes it;
+  one live spot check repeats this.
+- `clean_order` is false in a fixture where `position_check` is called before
+  the commit.
+- Restarting either service leaves one decision and at most one shadow entry
+  and exit per setup.
 
 ## Out of scope
 
-Shadow-chosen contracts, sizes or exits; WAIT; Isaac-versus-shadow reveal
-rules beyond showing both after the fact; MCP Events; a separate Dot; any
-change to the pre-trade check's own outputs or the journal export.
+Shadow-chosen contracts, sizes or exits; WAIT; MCP Events; a separate Dot;
+changes to `pre_trade_check` outputs, the journal export or the fixture
+advisor.
