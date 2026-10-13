@@ -42,11 +42,11 @@ send the evidence, not a retry.
 |---|---|---|---|---|---|---|
 | SC-0 | Daily scanner health check (ops, no code) | ops | Luna, low | — | live | Ready |
 | SC-1 | Quote reads off the monitor loop's critical path | B | Luna, medium | 1 | — | Ready |
-| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Implemented; review/CI pending (Lane A) |
-| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Implemented; review/CI pending (Lane A) |
-| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Implemented; native permissions proof/review pending (Lane A) |
-| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Implemented in Lane B; review/CI pending |
-| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | In progress in Lane B |
+| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Implemented — [PR #296](https://github.com/imizik/TradeJournal/pull/296), merge pending |
+| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Implemented — [PR #296](https://github.com/imizik/TradeJournal/pull/296), merge pending |
+| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Implemented — [PR #296](https://github.com/imizik/TradeJournal/pull/296), merge pending |
+| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Implemented — [PR #297](https://github.com/imizik/TradeJournal/pull/297), merge pending |
+| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Implemented — [PR #297](https://github.com/imizik/TradeJournal/pull/297), merge pending |
 | SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | Later |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
 | S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Later |

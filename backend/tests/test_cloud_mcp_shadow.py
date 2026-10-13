@@ -150,3 +150,34 @@ def test_concurrent_decisions_are_one_row(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(lambda _: ledger.decide('actor', candidate, 'take', 'x', RECEIPT), range(2)))
     assert results[0] == results[1]
+
+
+def test_decision_clock_and_clean_order_are_taken_under_commit_lock(harness, exchange, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    import cloud_mcp_check as service
+    candidate, _, _ = exchange
+    current = [RECEIPT]
+    original_server, original_read = service.create_server, service.read_shadow_setup
+    reading, resume = threading.Event(), threading.Event()
+    def create(*args, **kwargs):
+        return original_server(*args, **{**kwargs, 'clock': lambda: current[0]})
+    def read(*args):
+        reading.set()
+        assert resume.wait(10)
+        return original_read(*args)
+    monkeypatch.setattr(service, 'create_server', create)
+    monkeypatch.setattr(service, 'read_shadow_setup', read)
+    with TestClient(harness.server().streamable_http_app()) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        pending = pool.submit(call, client, 'shadow_decide', {'candidate_id': candidate['candidate_id'],
+            'decision': 'take', 'reason': 'interleaved'}, harness.token(scope='check:read shadow:decide'))
+        assert reading.wait(10)
+        try:
+            current[0] = RECEIPT + timedelta(minutes=2)
+            assert not call(client, 'position_check', {}, harness.token()).get('isError')
+        finally:
+            resume.set()
+        result = pending.result()['structuredContent']
+    assert result['timing'] == 'late'
+    assert not result['clean_order']
+    assert result['committed_at'] == '2026-10-09T14:22:00Z'

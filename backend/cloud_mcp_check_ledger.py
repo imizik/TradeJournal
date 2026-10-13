@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import sqlite3
 import uuid
+from zoneinfo import ZoneInfo
 
 FORMAT = "pretrade-check-record-v1"
 VERDICTS = ("go", "wait", "pass", "insufficient_data")
@@ -126,12 +127,17 @@ class Ledger:
     def decide(self, actor, setup, decision, reason, now):
         if decision not in ("take", "skip") or not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
             raise ValueError("Use take|skip and a non-empty reason of at most 1000 characters")
-        if now.tzinfo is None:
-            raise ValueError("Decision time must have a timezone")
         db = self._connect()
         db.row_factory = sqlite3.Row
         try:
             db.execute("BEGIN IMMEDIATE")
+            # The service passes its clock, sampled only after obtaining the writer
+            # lock. File I/O or a contended ledger must not backdate a commit.
+            now = now() if callable(now) else now
+            if now.tzinfo is None:
+                raise ValueError("Decision time must have a timezone")
+            if setup["session_date"] != now.astimezone(ZoneInfo("America/New_York")).date().isoformat():
+                raise ValueError("Shadow setup is not from today's session")
             row = db.execute("SELECT * FROM shadow_decision WHERE actor=? AND candidate_id=?",
                 (actor, setup["candidate_id"])).fetchone()
             if row is not None:

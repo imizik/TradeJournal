@@ -451,7 +451,7 @@ def create_server(config_path, *, provider, cache_dir, clock=None):
         now = clock()
         setup = await asyncio.to_thread(setup_for, candidate_id, now)
         try:
-            result = await asyncio.to_thread(ledger.decide, checked.claims["profile_id"], setup, decision, reason, now)
+            result = await asyncio.to_thread(ledger.decide, checked.claims["profile_id"], setup, decision, reason, clock)
             await asyncio.to_thread(write_shadow_decision, config.shadow_outbox_dir, result)
         except Conflict as exc:
             raise ToolError(str(exc)) from None
