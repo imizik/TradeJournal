@@ -52,6 +52,7 @@ import { useDepthSession } from "@/components/level2/useDepthSession";
 import { DepthHeatmap, heatBookKind, wallLines } from "@/lib/depthHeatmap";
 import type { DepthProfile } from "@/lib/depthHeatmap";
 import { useRecordedDepth } from "@/components/level2/useRecordedDepth";
+import type { RecordedDepth } from "@/components/level2/useRecordedDepth";
 
 const INDICATORS = Object.entries(INDICATOR_NAMES) as [keyof Indicators, string][];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
@@ -1298,6 +1299,15 @@ export default function ChartWorkspace() {
     return map ? { map, kind: flow.kind } : null;
   }, [owner, flow, heatAllowed, recorded.heatmap, liveHere, heatmaps, symbol]);
   const liveBook = depthSession.bookEvent;
+  // Walls change at most each poll and their tags by the minute: keep one array per content so the
+  // chart's price lines are rebuilt only when a wall, its age or the live state actually changes.
+  const wallStale = recorded.state === "ready" && !recorded.recording;
+  const wallsKey = flow.levels && recorded.state === "ready" ? JSON.stringify([recorded.walls, Math.floor(recorded.lastMs / 60_000) * 60_000, wallStale]) : "";
+  const walls = useMemo(() => {
+    if (!wallsKey) return [];
+    const [found, minute, stale] = JSON.parse(wallsKey) as [RecordedDepth["walls"], number, boolean];
+    return wallLines(found, minute, stale);
+  }, [wallsKey]);
   const liquidity = useMemo(() => {
     if (!owner) return null;
     let profile: DepthProfile | null = recorded.profile;
@@ -1305,10 +1315,9 @@ export default function ChartWorkspace() {
       const book = liveBook.books.find((entry) => heatBookKind(entry) === flow.kind);
       if (book) profile = { t: book.source_time_ms ?? liveBook.received_ms, bids: book.bids.map((level) => [level.price, level.volume]), asks: book.asks.map((level) => [level.price, level.volume]) };
     }
-    const walls = flow.levels && recorded.state === "ready" ? wallLines(recorded.walls, recorded.lastMs) : [];
     if (!walls.length && !(flow.profile && profile)) return null;
     return { walls, profile: flow.profile ? profile : null, stale: recorded.state === "ready" ? !recorded.recording : !depthSession.running };
-  }, [owner, flow, recorded, liveHere, liveBook, depthSession.running]);
+  }, [owner, flow.profile, flow.kind, walls, recorded.profile, recorded.state, recorded.recording, liveHere, liveBook, depthSession.running]);
   /**
    * Open the dock on a tab, or close it (null). A desktop remembers both on
    * this device. Full screen keeps its own choice of showing it, on this

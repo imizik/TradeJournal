@@ -90,6 +90,27 @@ def test_incremental_read_waits_for_a_complete_member(tmp_path):
     assert len(index.buckets["arca"]) == 2
 
 
+def test_concurrent_queries_never_double_count_the_file_offset(tmp_path):
+    import threading
+    path = tmp_path / "2026-10-12" / "NVDA.jsonl.gz"
+    for n in range(40):
+        write(path, [book(T0 + n * 10_000, *ladder(100.0))])
+    history = dh.History(tmp_path)
+    start = threading.Barrier(8)
+    def query():
+        start.wait()
+        history.query("NVDA", "2026-10-12", "arca", 0, 10_000)
+    threads = [threading.Thread(target=query) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    index = history.indexes[("NVDA", "2026-10-12")]
+    assert index.offset == path.stat().st_size and len(index.buckets["arca"]) == 40
+    write(path, [book(T0 + 400_000, *ladder(100.0))])
+    assert history.query("NVDA", "2026-10-12", "arca", 0, 10_000)["last_ms"] == T0 + 400_000
+
+
 def test_bridge_depth_endpoint_validates_and_reads_only_recorded_files(tmp_path):
     write(tmp_path / "2026-10-12" / "NVDA.jsonl.gz", [book(T0 + n * 10_000, *ladder(100.0, (99.9, 5000))) for n in range(30)])
     (tmp_path / "status.json").write_text(json.dumps({"state": "recording", "tickers": ["NVDA", "MU"], "last_book_ms": {"NVDA": T0 + 300_000}}))

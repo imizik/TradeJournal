@@ -352,18 +352,20 @@ export class DepthProfileLayer implements ISeriesPrimitive<Time> {
 }
 
 /** A liquidity level ready to draw: a dotted segment from when it appeared, with a short size tag. */
-export type WallLine = { price: number; side: "bid" | "ask"; since: number; lastSeen: number; pulled: boolean; label: string; title: string };
+export type WallLine = { price: number; side: "bid" | "ask"; since: number; lastSeen: number; pulled: boolean; label: string; title: string;
+  /** The recorder stopped receiving: drawn faint and ending at its last update, not at "now". */
+  stale: boolean };
 const compact = (size: number) => size >= 1000 ? `${(size / 1000).toFixed(size >= 10_000 ? 0 : 1)}k` : String(Math.round(size));
 export const WALL_COLORS = { bid: "#38bdf8", ask: "#fb923c", pulled: "#64748b" };
 
-/** Recorder walls as chart lines: label "9.0k · 11m"; a pulled one ends where it was last seen. */
-export function wallLines(walls: { bids: { price: number; size: number; since: number; last_seen: number; pulled: boolean }[]; asks: { price: number; size: number; since: number; last_seen: number; pulled: boolean }[] }, lastMs: number): WallLine[] {
+/** Recorder walls as chart lines: label "9.0k · 11m"; a pulled one ends where it was last seen; stale ones say so. */
+export function wallLines(walls: { bids: { price: number; size: number; since: number; last_seen: number; pulled: boolean }[]; asks: { price: number; size: number; since: number; last_seen: number; pulled: boolean }[] }, lastMs: number, stale = false): WallLine[] {
   const line = (side: "bid" | "ask") => (wall: { price: number; size: number; since: number; last_seen: number; pulled: boolean }): WallLine => {
     const minutes = Math.max(0, Math.round((lastMs - wall.since) / 60_000));
     const age = `${minutes < 1 ? "<1" : minutes}m`;
     const name = side === "bid" ? "Bid" : "Ask";
-    return { price: wall.price, side, since: wall.since, lastSeen: wall.last_seen, pulled: wall.pulled,
-      label: wall.pulled ? `${compact(wall.size)} pulled` : `${compact(wall.size)} · ${age}`,
+    return { price: wall.price, side, since: wall.since, lastSeen: stale ? lastMs : wall.last_seen, pulled: wall.pulled, stale,
+      label: wall.pulled ? `${compact(wall.size)} pulled` : `${compact(wall.size)} · ${age}${stale ? " · not live" : ""}`,
       title: wall.pulled ? `${name} wall of ${compact(wall.size)} pulled` : `${name} wall ${compact(wall.size)}, resting ${age}` };
   };
   return [...walls.bids.map(line("bid")), ...walls.asks.map(line("ask"))];
@@ -422,10 +424,11 @@ export class WallLayer implements ISeriesPrimitive<Time> {
         const y = series.priceToCoordinate(wall.price);
         const start = x(wall.since);
         if (y === null || start === null) continue;
-        const end = wall.pulled ? x(wall.lastSeen) ?? mediaSize.width : mediaSize.width;
+        const end = wall.pulled || wall.stale ? x(wall.lastSeen) ?? mediaSize.width : mediaSize.width;
         const left = Math.max(0, start);
         if (end <= left) continue;
         const color = wall.pulled ? WALL_COLORS.pulled : WALL_COLORS[wall.side];
+        context.globalAlpha = wall.stale ? 0.45 : 1;
         context.strokeStyle = color;
         context.lineWidth = wall.pulled ? 1 : 1.5;
         context.setLineDash([3, 3]);
@@ -434,6 +437,7 @@ export class WallLayer implements ISeriesPrimitive<Time> {
         context.lineTo(end, Math.round(y) + 0.5);
         context.stroke();
         context.setLineDash([]);
+        context.globalAlpha = 1;
         // The tag ends where the wall began, so it reads into the line and stays off the newest candles.
         const width = context.measureText(wall.label).width;
         const textX = left - width - 4 >= 0 ? left - width - 4 : Math.min(left + 3, end - width - 3);
@@ -441,7 +445,7 @@ export class WallLayer implements ISeriesPrimitive<Time> {
         if (tags.some(([l, t, r, b]) => box[0] < r && box[2] > l && box[1] < b && box[3] > t)) continue;
         tags.push(box);
         context.textBaseline = "middle";
-        context.globalAlpha = wall.pulled ? 0.7 : 1;
+        context.globalAlpha = wall.pulled || wall.stale ? 0.6 : 1;
         context.lineWidth = 3;
         context.strokeStyle = "#10151e";
         context.strokeText(wall.label, textX, y);

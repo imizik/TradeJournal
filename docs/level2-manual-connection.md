@@ -173,11 +173,16 @@ Three layers, chosen in the Level 2 dock and remembered on the device
   size and age tag ("9.0k · 11m") at the segment's start, away from the newest
   candles, and a colored price-axis tag. A wall whose size dropped below half the
   bar is shown grey as pulled for three minutes. Overlapping tags are left out.
+  When the recorder is not receiving (after 20:00, or a dropped feed), walls
+  stay faint, end at the last update and are tagged "not live".
 - **Depth profile** (on by default): the latest book as faint bars in the
   price-axis gutter, never over candles; dimmed when the recorder is not
   receiving.
 - **Heatmap** (opt-in): recorded 10-second columns from the last four hours,
-  then the newest two minutes each poll; drawn only on 1m–5m candles.
+  then everything since the newest column held (at least two minutes), so a
+  sleep or outage is backfilled; drawn only on 1m–5m candles. The bridge
+  serializes reads and queries of a day file, so overlapping requests never
+  double-count its read position.
 
 A ticker the recorder does not watch says so; its Connect session still drives
 the heatmap and profile, but liquidity levels need the recorder. Walls are

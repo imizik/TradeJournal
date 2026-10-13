@@ -6751,10 +6751,11 @@ test("recorded depth draws liquidity levels and a depth profile with no Connect,
   const columns: [number, number, number[]][] = [];
   for (let t = end - 3000; t < end; t += 10) columns.push([t * 1000, 10_000, Array.from({ length: 60 }, (_, n) => n < 30 ? [at(-1 - n), size(-1 - n)] : [at(n - 29), size(n - 29)]).flat()]);
   const requests: string[] = [];
+  let live = true;
   await page.route("**/api/level2-lab/depth**", (route) => {
     const url = new URL(route.request().url());
     requests.push(url.search);
-    return route.fulfill({ json: { symbol: "NVDA", recorded: true, recording: true, day: "2026-09-17", kind: "arca", bucket_ms: 10_000, last_ms: end * 1000,
+    return route.fulfill({ json: { symbol: "NVDA", recorded: true, recording: live, day: "2026-09-17", kind: "arca", bucket_ms: 10_000, last_ms: end * 1000,
       columns: url.searchParams.get("minutes") === "1" ? [] : columns,
       walls: { bids: [{ price: at(-40), size: 9040, mean: 9010, since: (end - 660) * 1000, last_seen: end * 1000, pulled: false, share: 0.31 },
         { price: at(-20), size: 3100, mean: 3000, since: (end - 900) * 1000, last_seen: (end - 60) * 1000, pulled: true, share: 0.1 }],
@@ -6785,6 +6786,11 @@ test("recorded depth draws liquidity levels and a depth profile with no Connect,
   await expect.poll(() => requests.some((search) => search.includes("minutes=240"))).toBe(true);
   await page.waitForTimeout(1_500);
   await main.screenshot({ path: test.info().outputPath("orderflow-heatmap-on.png") });
+  // When the recorder stops receiving, walls stay but are marked not live (and drawn faint, ending at the last update).
+  live = false;
+  await expect(canvas).toHaveAttribute("data-walls", /bid:\d+\.\d{2}:stale/, { timeout: 15_000 });
+  await expect(sidePanel(page).getByText("Recorded today · not receiving right now")).toBeVisible();
+  live = true;
   // Turning levels off removes the lines; the choice is remembered on this device.
   await sidePanel(page).getByLabel("Liquidity levels").uncheck();
   await expect(canvas).not.toHaveAttribute("data-walls", /.+/);

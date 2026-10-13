@@ -51,14 +51,15 @@ export function useRecordedDepth(symbol: string, { active, history, kind }: { ac
   useEffect(() => {
     if (!asked) return;
     let cancelled = false;
-    let loaded = false;
+    // The newest recorded column already held, so a poll after a gap (sleep, outage) asks for everything since.
+    let newest = 0;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const mapKey = `${symbol}:${kind}`;
     const map = maps.current.get(mapKey) ?? new DepthHeatmap();
     maps.current.set(mapKey, map);
     const poll = async () => {
       try {
-        const minutes = history ? (loaded ? 2 : HISTORY_MINUTES) : 1;
+        const minutes = !history ? 1 : newest ? Math.min(HISTORY_MINUTES, Math.max(2, Math.ceil((Date.now() - newest) / 60_000) + 1)) : HISTORY_MINUTES;
         const query = new URLSearchParams({ symbol, kind, minutes: String(minutes), bucket: "10" });
         const response = await fetch(`/api/level2-lab/depth?${query}`, { cache: "no-store" });
         if (cancelled) return;
@@ -70,7 +71,7 @@ export function useRecordedDepth(symbol: string, { active, history, kind }: { ac
           ? { bids: body.walls.bids.filter(validWall).slice(0, 3), asks: body.walls.asks.filter(validWall).slice(0, 3) } : { bids: [], asks: [] };
         if (history && validColumns(body.columns)) {
           map.load(kind, body.columns);
-          loaded = true;
+          if (body.columns.length) newest = Math.max(newest, body.columns[body.columns.length - 1][0]);
         }
         setDepth({ state: "ready", recording: body.recording === true, walls, profile: validProfile(body.profile) ? body.profile : null,
           lastMs: typeof body.last_ms === "number" ? body.last_ms : 0, heatmap: history ? map : null, key: requestKey });

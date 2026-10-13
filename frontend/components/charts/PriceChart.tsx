@@ -994,8 +994,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     wallRef.current?.set(walls);
     if (!current || !walls.length) return;
     const lines = walls.map((wall) => current.candles.createPriceLine({ id: `wall:${wall.side}:${wall.price}`, price: wall.price,
-      color: wall.pulled ? WALL_COLORS.pulled : WALL_COLORS[wall.side], lineVisible: false, axisLabelVisible: true, title: "" }));
-    if (element) element.dataset.walls = walls.map((wall) => `${wall.side}:${wall.price.toFixed(2)}${wall.pulled ? ":pulled" : ""}`).join(",");
+      color: wall.pulled || wall.stale ? WALL_COLORS.pulled : WALL_COLORS[wall.side], lineVisible: false, axisLabelVisible: true, title: "" }));
+    if (element) element.dataset.walls = walls.map((wall) => `${wall.side}:${wall.price.toFixed(2)}${wall.pulled ? ":pulled" : ""}${wall.stale ? ":stale" : ""}`).join(",");
     return () => { for (const line of lines) current.candles.removePriceLine(line); if (element) delete element.dataset.walls; };
   }, [liquidity?.walls, pending]);
   // Automatic levels: the nearest few above and below the latest price, moving with it, and option strikes with the layer on.

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from statistics import median
+import threading
 import zlib
 
 BASE_MS = 10_000
@@ -195,12 +196,26 @@ class DayIndex:
 
 
 class History:
-    """A few day indexes, most recently used kept, read from the recorder's state directory."""
+    """A few day indexes, most recently used kept, read from the recorder's state directory.
+
+    One lock serializes reading and querying: requests run in worker threads, and
+    two refreshes of one index at once would double-count its file offset.
+    """
 
     def __init__(self, root: Path, keep: int = 6):
         self.root = root
         self.keep = keep
         self.indexes: OrderedDict[tuple[str, str], DayIndex] = OrderedDict()
+        self.lock = threading.Lock()
+
+    def query(self, ticker: str, day: str, kind: str, since_ms: int, width_ms: int) -> dict | None:
+        """Refresh and read one ticker-day under the lock; None when nothing is recorded."""
+        with self.lock:
+            index = self.index(ticker, day)
+            if index is None:
+                return None
+            return {"last_ms": index.last_ms, "columns": index.columns(kind, since_ms, width_ms),
+                    "walls": index.walls(kind), "profile": index.profile(kind)}
 
     def index(self, ticker: str, day: str) -> DayIndex | None:
         path = self.root / day / f"{ticker}.jsonl.gz"

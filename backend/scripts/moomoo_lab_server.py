@@ -158,16 +158,13 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
             raise HTTPException(400, "Invalid depth request")
         now_ms = int(clock() * 1000)
         day = datetime.fromtimestamp(now_ms / 1000, NEW_YORK).date().isoformat()
-        index = await asyncio.to_thread(history.index, ticker, day)
+        found = await asyncio.to_thread(history.query, ticker, day, kind, now_ms - minutes * 60_000, bucket * 1000)
         recorder = history.status()
-        if index is None:
+        if found is None:
             return {"symbol": ticker, "recorded": False, "watched": ticker in recorder.get("tickers", [])}
         last_book = recorder.get("last_book_ms", {}).get(ticker, 0)
         return {"symbol": ticker, "recorded": True, "day": day, "kind": kind, "bucket_ms": bucket * 1000,
-                "recording": recorder.get("state") == "recording" and now_ms - last_book < 60_000,
-                "last_ms": index.last_ms,
-                "columns": index.columns(kind, now_ms - minutes * 60_000, bucket * 1000),
-                "walls": index.walls(kind), "profile": index.profile(kind)}
+                "recording": recorder.get("state") == "recording" and now_ms - last_book < 60_000, **found}
 
     @app.post("/session")
     async def session(request: Request):
