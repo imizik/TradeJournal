@@ -309,7 +309,6 @@ def shadow_host(tmp_path, monkeypatch):
     monkeypatch.setattr(control, 'installed', lambda: {'uids': {'service': uid}, 'gid': gid})
     monkeypatch.setattr(control.pwd, 'getpwnam', lambda n: SimpleNamespace(pw_uid=uid + 1, pw_gid=gid + 1))
     monkeypatch.setattr(control.os, 'getgrouplist', lambda n, g: [g], raising=False)
-    monkeypatch.setattr(control, 'private_file', lambda p, data, **kw: p.write_bytes(data))
     calls, acls = [], {}
     def run(*args, check=True):
         calls.append(tuple(str(a) for a in args))
@@ -328,6 +327,10 @@ def shadow_host(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "chmod", chmod)
     def fake_stat(path, *args, **kwargs):
         info = original_stat(path, *args, **kwargs)
+        if path == control.ROOT / 'shadow-exchange.json':
+            values = list(info)
+            values[4] = 0  # This fixture models the root-only operator.
+            return os.stat_result(values)
         if path in (control.SHADOW, control.SHADOW / 'setups', control.STATE / 'shadow-outbox'):
             values = list(info)
             values[0] = (info.st_mode & ~0o7777) | modes.get(str(path), info.st_mode & 0o7777)
@@ -347,6 +350,10 @@ def test_shadow_exchange_idempotence_and_disable(shadow_host):
     assert ('setfacl', '-m', 'u:tradejournal:r-x,d:u:tradejournal:r-x', str(control.STATE / 'shadow-outbox')) in calls
     assert not control.shadow_exchange(False)['enabled']
     assert not control.shadow_exchange(False)['enabled']
+    receipt = control.ROOT / 'shadow-exchange.json'
+    assert json.loads(receipt.read_text())['enabled'] is False
+    assert receipt.stat().st_mode & 0o777 == 0o600
+    assert not list(control.ROOT.glob('.shadow-exchange-*'))
     assert not any(c[0] == 'systemctl' for c in calls)
 
 
@@ -369,4 +376,32 @@ def test_shadow_exchange_ledger_readable_refused(shadow_host, monkeypatch):
         if a[0] == 'sudo' and a[-1] == ledger else original(*a, **kw))
     with pytest.raises(ValueError, match='already read'):
         control.shadow_exchange(True)
+    assert not any(c[0] == 'setfacl' for c in calls)
+
+
+def test_shadow_exchange_unknown_receipt_refused_before_acl_changes(shadow_host):
+    calls, _, _ = shadow_host
+    receipt = control.ROOT / 'shadow-exchange.json'
+    receipt.write_text('{"unknown":true}')
+    receipt.chmod(0o600)
+    with pytest.raises(ValueError, match='Unknown shadow exchange receipt'):
+        control.shadow_exchange(True)
+    assert not any(c[0] == 'setfacl' for c in calls)
+
+
+def test_shadow_disable_removes_only_existing_grants(shadow_host):
+    calls, acls, _ = shadow_host
+    control.shadow_exchange(True)
+    uid = control.pwd.getpwnam(control.API_USER).pw_uid
+    acls[str(control.STATE)] = f'user::rwx\nuser:{uid}:--x\ngroup::---\nmask::--x\nother::---\n'
+    outbox = control.STATE / 'shadow-outbox'
+    acls[str(outbox)] = (f'user::rwx\nuser:{uid}:r-x\ngroup::r-x\nmask::r-x\nother::---\n'
+        f'default:user::rwx\ndefault:user:{uid}:r-x\ndefault:group::r-x\ndefault:mask::r-x\ndefault:other::---\n')
+    calls.clear()
+    control.shadow_exchange(False)
+    assert ('setfacl', '-x', 'u:tradejournal', str(control.STATE)) in calls
+    assert ('setfacl', '-x', 'u:tradejournal,d:u:tradejournal', str(outbox)) in calls
+    acls.clear()  # The next observed ACL has no named grants after removal.
+    calls.clear()
+    control.shadow_exchange(False)
     assert not any(c[0] == 'setfacl' for c in calls)

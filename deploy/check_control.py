@@ -24,6 +24,7 @@ import pwd
 import shutil
 import signal
 import sys
+import tempfile
 import time
 
 import advisor_mcp_control as old
@@ -439,6 +440,7 @@ def _exchange_acl(path, allowed):
     entries = set(line.strip() for line in result.stdout.decode().splitlines() if line and not line.startswith("#"))
     if not entries <= allowed:
         raise ValueError("Unknown shadow exchange ACL: " + str(path))
+    return entries
 
 
 def shadow_exchange(enable):
@@ -449,6 +451,16 @@ def shadow_exchange(enable):
     if api.pw_uid == service_uid or api.pw_gid == gid or gid in os.getgrouplist(API_USER, api.pw_gid):
         raise ValueError("API identity must not belong to the check group")
     outbox, setups = STATE / "shadow-outbox", SHADOW / "setups"
+    receipt = exact(ROOT / "shadow-exchange.json", exists=False)
+    result = {"enabled": enable, "ledger_readable_by_api": False, "api_uid": api.pw_uid,
+        "setups": str(setups), "outbox": str(outbox)}
+    if receipt.exists():
+        info = receipt.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o600:
+            raise ValueError("Require a root-private shadow exchange receipt")
+        previous = json.loads(receipt.read_text())
+        if not isinstance(previous, dict) or type(previous.get("enabled")) is not bool or previous != {**result, "enabled": previous["enabled"]}:
+            raise ValueError("Unknown shadow exchange receipt")
     ledger = exact(STATE / "ledger.db")
     if not ledger.is_file() or ledger.stat().st_uid != service_uid or ledger.stat().st_mode & 0o077:
         raise ValueError("Require an existing private check ledger")
@@ -456,9 +468,10 @@ def shadow_exchange(enable):
     state_info = exact(STATE).stat()
     if not stat.S_ISDIR(state_info.st_mode) or state_info.st_uid != service_uid or state_info.st_gid != gid:
         raise ValueError("Unknown check state ownership")
-    _exchange_acl(STATE, {"user::rwx", "group::---", "other::---", reader + "--x", "mask::--x", "mask::---"})
+    state_acl = _exchange_acl(STATE, {"user::rwx", "group::---", "other::---", reader + "--x", "mask::--x", "mask::---"})
     directories = ((SHADOW, api.pw_uid, gid, 0o2750), (setups, api.pw_uid, gid, 0o2750),
         (outbox, service_uid, gid, 0o750))
+    outbox_acl = set()
     for path, uid, group, mode in directories:
         exact(path, exists=False)
         if path.exists():
@@ -469,7 +482,9 @@ def shadow_exchange(enable):
             if path == outbox:
                 base |= {reader + "r-x", "mask::r-x", "default:user::rwx", "default:group::r-x",
                     "default:other::---", "default:" + reader + "r-x", "default:mask::r-x"}
-            _exchange_acl(path, base)
+            entries = _exchange_acl(path, base)
+            if path == outbox:
+                outbox_acl = entries
     if old.run("sudo", "-u", API_USER, "test", "-r", ledger, check=False).returncode == 0:
         raise ValueError("API can already read the private ledger; refuse exchange")
     if enable:
@@ -491,12 +506,29 @@ def shadow_exchange(enable):
                 old.run("setfacl", "-x", f"u:{API_USER},d:u:{API_USER}", outbox, check=False)
             raise
     else:
-        old.run("setfacl", "-x", f"u:{API_USER}", STATE)
-        if outbox.exists():
-            old.run("setfacl", "-x", f"u:{API_USER},d:u:{API_USER}", outbox)
-    result = {"enabled": enable, "ledger_readable_by_api": False, "api_uid": api.pw_uid,
-        "setups": str(setups), "outbox": str(outbox)}
-    private_file(ROOT / "shadow-exchange.json", (json.dumps(result, indent=2) + "\n").encode(), mode=0o600)
+        if reader + "--x" in state_acl:
+            old.run("setfacl", "-x", f"u:{API_USER}", STATE)
+        remove = ([f"u:{API_USER}"] if reader + "r-x" in outbox_acl else [])
+        if "default:" + reader + "r-x" in outbox_acl:
+            remove.append(f"d:u:{API_USER}")
+        if remove:
+            old.run("setfacl", "-x", ",".join(remove), outbox)
+    # A receipt is replaced on enable/disable; private_file deliberately refuses
+    # collisions and is reserved for new installation files.
+    fd, temporary = tempfile.mkstemp(prefix=".shadow-exchange-", dir=ROOT)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write((json.dumps(result, indent=2) + "\n").encode())
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, receipt)
+        directory_fd = os.open(ROOT, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        Path(temporary).unlink(missing_ok=True)
     return result
 
 
