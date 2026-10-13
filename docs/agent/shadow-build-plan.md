@@ -392,9 +392,16 @@ live setup/decision or claim fixture evidence as live acceptance.
 Rollback deactivates only the shadow exchange: stop check units, restore the
 two backed-up configs, run `disable-shadow-exchange`, then restore healthy
 check/API operation outside market hours. Preserve the ledger and all setup,
-decision and scanner events. A runtime inventory/startup failure needs the
-controller's documented runtime recovery before restart; config rollback
-alone is not proof of runtime recovery.
+decision and scanner events. An interrupted, uncommitted runtime swap uses
+the controller's documented interruption recovery. If the upgrade completed
+but its runtime fails to start, stop all check units, retain the failed
+backend separately, and restore the previous backend **together with its
+backed-up installation record**. For this activation, no SQL is added or
+changed: verify the old record still matches the pinned SQL and units, then
+run `check` to prove the restored inventory before restarting. Restoring only
+the backend under a new installation record causes inventory drift. A later
+upgrade with SQL/unit changes needs its own recovery review; this rollback
+does not authorize reverting those changes.
 
 ## Later packages (outline only)
 
