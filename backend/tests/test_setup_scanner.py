@@ -1,7 +1,8 @@
 """Setup scanner S1: the pure rules, and the watcher's candidates, paper trades and restarts."""
 
 import json
-from datetime import date, datetime, timedelta
+import uuid
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -524,8 +525,8 @@ def test_no_response_starts_at_the_exact_expiry_time(engine):
     watch.run()
     candidate = _candidate(engine)
     expiry = setup_scanner._epoch(candidate.expires_at)
-    assert setup_scanner.shadow_status_of(candidate, {}, now=expiry - 1) == "awaiting_decision"
-    assert setup_scanner.shadow_status_of(candidate, {}, now=expiry) == "no_response"
+    assert setup_scanner.shadow_status_of(candidate, {"shadow_handoff": {"status": "written"}}, now=expiry - 1) == "awaiting_decision"
+    assert setup_scanner.shadow_status_of(candidate, {"shadow_handoff": {"status": "written"}}, now=expiry) == "no_response"
 
 
 def test_shadow_view_separates_decision_rationale_from_unresolved_reason():
@@ -553,10 +554,10 @@ def test_scorecard_counts_mixed_unresolved_and_uses_setup_baseline(engine):
     watch.run()
     candidate = _candidate(engine)
     candidate.expires_at = datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
-    take = {"shadow_decision": {"decision": "take", "timing": "on_time"}}
+    take = {"shadow_handoff": {"status": "written"}, "shadow_decision": {"decision": "take", "timing": "on_time"}}
     mixed = {**take, "shadow_unresolved": {"reason": "entry was not priced"}, "exit": {"pnl": 10.0}}
 
-    score = setup_scanner._shadow_scorecard([(candidate, mixed), *((candidate, take) for _ in range(28)), (candidate, {})])
+    score = setup_scanner._shadow_scorecard([(candidate, mixed), *((candidate, take) for _ in range(28)), (candidate, {"shadow_handoff": {"status": "written"}})])
 
     assert score["setups"] == 30 and score["decisions"] == 29 and score["take"] == 29
     assert score["unresolved"] == 1 and score["no_response"] == 1
@@ -675,7 +676,7 @@ def test_shadow_status_remains_separate_from_rules_trade(engine):
     with Session(engine) as db:
         view = setup_scanner.day_view(db, DAY)
     item = view["candidates"][0]
-    assert item["status"] == "open" and item["shadow"]["status"] == "no_response"
+    assert item["status"] == "open" and item["shadow"]["status"] == "not_published"
 
 
 def test_mail_send_logs_in_with_the_app_password_and_addresses_the_owner(monkeypatch):
@@ -706,3 +707,227 @@ def test_mail_send_logs_in_with_the_app_password_and_addresses_the_owner(monkeyp
     scanner_mail.send("TJ Setup: test", "body")
     assert seen["server"] == ("smtp.gmail.com", 465) and seen["login"] == ("owner@example.com", "abcdefghijklmnop")
     assert seen["message"]["To"] == "owner+tjsetups@example.com" and seen["message"]["Subject"] == "TJ Setup: test"
+
+# ------------------------------------------------------------------ S2 display-only trade links
+
+
+def s2_candidate(day=DAY, hour=9, minute=50, **changes):
+    detected = datetime(day.year, day.month, day.day, hour, minute, tzinfo=ET).astimezone(UTC).replace(tzinfo=None)
+    return ScannerCandidate(**{ "session_date": day, "symbol": "SPY", "setup": "orb", "direction": "long",
+        "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH, "bar_end": detected,
+        "bar_start": detected - timedelta(minutes=5), "source": setup_scanner.SOURCE,
+        "detected_at": detected, "expires_at": detected + timedelta(minutes=10), "stop": 100, "target": 102,
+        "flags_json": "[]", "facts_json": "{}", "contract_json": json.dumps({"symbol": "SPY261007C00101000", "option_type": "call", "strike": 101, "expiration": day.isoformat(), "delta": 0.35, "bid": 1, "ask": 1.05}),
+        **changes})
+
+
+def s2_trade(day=DAY, hour=9, minute=55, **changes):
+    return Trade(**{"account_id": uuid.uuid4(), "ticker": "SPY", "instrument_type": "option", "option_type": "call",
+        "strike": 101, "expiration": day, "contracts": 2, "avg_entry_premium": 1, "total_premium_paid": 200,
+        "opened_at": datetime(day.year, day.month, day.day, hour, minute), "status": "closed", "realized_pnl": 40,
+        **changes})
+
+
+@pytest.mark.parametrize("offset,expected", [(-1, False), (0, True), (1, True), (900, True), (901, False)])
+def test_isaac_link_window_includes_both_edges(offset, expected):
+    c = s2_candidate()
+    trade = s2_trade(opened_at=datetime(2026, 10, 7, 9, 50) + timedelta(seconds=offset))
+    assert bool(setup_scanner.link_isaac_trades([c], [trade])[c.id]) is expected
+
+
+@pytest.mark.parametrize("changes", [{"option_type": "put"}, {"ticker": "QQQ"}, {"instrument_type": "stock"}])
+def test_isaac_link_ignores_wrong_side_symbol_and_stock(changes):
+    c = s2_candidate()
+    assert setup_scanner.link_isaac_trades([c], [s2_trade(**changes)])[c.id] == []
+
+
+def test_isaac_link_put_matches_short():
+    c = s2_candidate(direction="short")
+    t = s2_trade(option_type="put")
+    assert setup_scanner.link_isaac_trades([c], [t])[c.id] == [t]
+
+
+def test_isaac_link_latest_candidate_wins_and_ties_use_lowest_id():
+    earlier = s2_candidate(minute=45)
+    c = s2_candidate(id=uuid.UUID(int=1))
+    tied = s2_candidate(id=uuid.UUID(int=2))
+    trade, later = s2_trade(), s2_trade(minute=56)
+    linked = setup_scanner.link_isaac_trades([tied, earlier, c], [later, trade])
+    assert linked[c.id] == [trade, later]
+    assert linked[earlier.id] == linked[tied.id] == []
+    view = setup_scanner._isaac_view(c, {}, linked[c.id])
+    assert view["trade_id"] == str(trade.id) and view["extra_trade_ids"] == [str(later.id)]
+
+
+@pytest.mark.parametrize("day,utc_hour", [(DAY, 13), (date(2026, 11, 1), 14), (date(2026, 10, 31), 13), (date(2026, 3, 8), 13)])
+def test_isaac_link_uses_ny_trade_clock_across_dst(day, utc_hour):
+    c, t = s2_candidate(day), s2_trade(day)
+    assert c.detected_at.hour == utc_hour
+    assert setup_scanner.link_isaac_trades([c], [t])[c.id] == [t]
+    assert setup_scanner._isaac_view(c, {}, [t])["opened_at"].endswith("-05:00" if utc_hour == 14 else "-04:00")
+
+
+@pytest.mark.parametrize("status,seconds,assisted", [("sent", -1, True), ("sent", 0, False), ("sent", 1, False),
+    ("expired", -1, False), ("skipped_daily_cap", -1, False), (None, -1, False)])
+def test_isaac_assisted_requires_sent_email_strictly_before_open(status, seconds, assisted):
+    c, t = s2_candidate(), s2_trade(strike=103, expiration=DAY + timedelta(days=7))
+    state = {"email": {"status": status, "at": t.opened_at.replace(tzinfo=ET).timestamp() + seconds}} if status else {}
+    view = setup_scanner._isaac_view(c, state, [t])
+    assert view["assisted"] is assisted and view["contract_differs"] is True
+    assert view["realized_pnl"] == 40 and view["pnl_per_contract"] == 20
+    assert not setup_scanner._isaac_view(c, {}, [s2_trade()])["contract_differs"]
+
+
+def s2_state(decision="take", rules_pnl=10, shadow_pnl=5):
+    state = {"shadow_handoff": {"status": "written"}, "shadow_decision": {"decision": decision, "timing": "on_time"},
+             "exit": {"pnl": rules_pnl, "pnl_2x_spread": rules_pnl - 5, "bid": 1.2, "reason": "target"}}
+    if decision == "take":
+        state["shadow_exit"] = {"pnl": shadow_pnl}
+    return state
+
+
+def test_isaac_scorecard_all_buckets_open_trades_and_independent_subset():
+    candidates = [s2_candidate() for _ in range(6)]
+    states = [s2_state("take"), s2_state("skip"), s2_state("take"), s2_state("skip"), s2_state("skip"), s2_state("take")]
+    assisted = s2_trade()
+    states[2]["email"] = {"status": "sent", "at": assisted.opened_at.replace(tzinfo=ET).timestamp() - 1}
+    trades = [[], [s2_trade()], [assisted, s2_trade(minute=56, status="expired", realized_pnl=-20)], [],
+              [s2_trade(status="open", realized_pnl=999)], [s2_trade(status="expired", realized_pnl=-10)]]
+    views = {c.id: setup_scanner._isaac_view(c, state, ts) for c, state, ts in zip(candidates, states, trades)}
+    score = setup_scanner._shadow_scorecard(list(zip(candidates, states)), views)
+    isaac = score["isaac"]
+    assert (isaac["traded"], isaac["assisted"], isaac["independent"], isaac["closed"]) == (4, 1, 3, 4)
+    assert isaac["pnl_per_contract"] == 25 and isaac["pnl_dollars"] == 50
+    groups = isaac["disagreements"]
+    assert {k: g["count"] for k, g in groups.items()} == {"shadow_only": 1, "isaac_only": 2, "both_took": 2, "both_passed": 1}
+    assert groups["shadow_only"]["shadow_pnl"] == 5 and groups["shadow_only"]["isaac_priced"] == 0
+    assert groups["isaac_only"]["isaac_pnl_per_contract"] == 20 and groups["isaac_only"]["shadow_priced"] == 0
+    assert groups["both_took"]["isaac_pnl_per_contract"] == 5 and groups["both_took"]["shadow_pnl"] == 10
+    assert groups["both_passed"]["rules_pnl"] == 10 and groups["both_passed"]["isaac_priced"] == groups["both_passed"]["shadow_priced"] == 0
+    subset = score["independent"]
+    assert subset["setups"] == 5 and subset["traded"] == 3 and subset["assisted"] == 0
+    assert subset["pnl_per_contract"] == 15 and subset["pnl_dollars"] == 30
+    assert subset["disagreements"]["both_took"]["count"] == 1
+    assert views[candidates[4].id]["pnl_per_contract"] is None
+    assert all(g["evidence"] == "not enough" for g in groups.values())
+
+
+def test_isaac_scorecard_evidence_boundary_and_missing_decisions():
+    c, t = s2_candidate(), s2_trade()
+    views = {c.id: setup_scanner._isaac_view(c, {}, [t])}
+    for count in (29, 30):
+        score = setup_scanner._shadow_scorecard([(c, s2_state())] * count, views)
+        expected = "not enough" if count == 29 else "sufficient count"
+        assert score["isaac"]["evidence"] == score["isaac"]["disagreements"]["both_took"]["evidence"] == expected
+    score = setup_scanner._shadow_scorecard([(c, {}), (c, {"shadow_handoff": {"status": "written"}}),
+                (c, {**s2_state(), "shadow_decision": {"decision": "take", "timing": "late"}})], views)
+    assert sum(g["count"] for g in score["isaac"]["disagreements"].values()) == 0
+
+
+def test_isaac_route_cumulative_multiple_days_and_dormant_account_scope(engine):
+    prior = s2_candidate(DAY - timedelta(days=1))
+    current = s2_candidate()
+    future = s2_candidate(DAY + timedelta(days=1))
+    roth = Account(name="Roth", type="roth_ira", last4="0001")
+    webull = Account(name="Webull", type="brokerage", last4="0002", broker="webull")
+    with Session(engine) as db:
+        db.add_all([roth, webull, prior, current, future])
+        db.add_all([s2_trade(DAY - timedelta(days=1), account_id=roth.id), s2_trade(account_id=roth.id),
+                    s2_trade(account_id=webull.id, realized_pnl=900), s2_trade(DAY + timedelta(days=1), account_id=roth.id)])
+        # Preserve six-entry scope: dormant account entries still count in the original S1 flag.
+        for i in range(5):
+            db.add(s2_trade(minute=31+i, account_id=webull.id))
+        for c in (prior, current, future):
+            for kind, data in s2_state().items():
+                db.add(ScannerEvent(candidate_id=c.id, key=kind, event_type=kind, effective_at=c.detected_at,
+                                    recorded_at=c.detected_at, data_json=json.dumps(data)))
+        db.commit()
+    app = FastAPI()
+    app.include_router(routes.router, prefix="/scanner")
+    app.dependency_overrides[get_session] = lambda: Session(engine)
+    body = TestClient(app).get("/scanner/day", params={"day": DAY.isoformat()}).json()
+    assert len(body["candidates"]) == 1 and body["candidates"][0]["flags"] == ["sixth_plus_entry"]
+    assert body["scorecard"]["day"]["isaac"]["traded"] == 1
+    assert body["scorecard"]["cumulative"]["isaac"]["traded"] == 2
+    assert body["scorecard"]["cumulative"]["isaac"]["pnl_dollars"] == 80
+    assert body["candidates"][0]["isaac"]["extra_trade_ids"] == []
+
+
+def test_unpublished_and_published_expired_shadow_candidates_are_distinct():
+    c = s2_candidate(day=date(2020, 1, 1))
+    unpublished, missed = {}, {"shadow_handoff": {"status": "written"}}
+    expired_handoff = {"shadow_handoff": {"status": "expired"}}
+    assert setup_scanner.shadow_status_of(c, unpublished) == "not_published"
+    assert setup_scanner.shadow_status_of(c, expired_handoff) == "not_published"
+    assert setup_scanner.shadow_status_of(c, missed) == "no_response"
+    view = setup_scanner._shadow_view(unpublished, setup_scanner.shadow_status_of(c, unpublished))
+    assert view["status"] == "not_published" and view["result"] is None
+    score = setup_scanner._shadow_scorecard([(c, unpublished), (c, missed), (c, expired_handoff)])
+    assert score["not_published"] == 2 and score["no_response"] == score["shadow_setups"] == 1
+    assert score["decisions"] == score["take"] == score["skip"] == 0
+
+
+def test_isaac_same_fractional_strike_is_not_a_contract_difference():
+    from decimal import Decimal
+    c = s2_candidate()
+    contract_ = json.loads(c.contract_json)
+    contract_["strike"] = 101.1
+    c.contract_json = json.dumps(contract_)
+    assert not setup_scanner._isaac_view(c, {}, [s2_trade(strike=Decimal("101.100000"))])["contract_differs"]
+
+
+def test_assisted_extra_trade_excludes_the_whole_setup_from_independent_comparison():
+    c, first, extra = s2_candidate(), s2_trade(), s2_trade(minute=56)
+    state = s2_state()
+    state["email"] = {"status": "sent", "at": first.opened_at.replace(tzinfo=ET).timestamp() + 30}
+    view = setup_scanner._isaac_view(c, state, [first, extra])
+    assert not view["assisted"] and view["trades"][1]["assisted"]
+    score = setup_scanner._shadow_scorecard([(c, state)], {c.id: view})
+    assert score["isaac"]["assisted"] == 1 and score["isaac"]["pnl_dollars"] == 80
+    assert score["independent"]["setups"] == score["independent"]["traded"] == 0
+
+
+@pytest.mark.parametrize("state,expected", [
+    ({"shadow_decision": {"decision": "take", "timing": "on_time"}}, "pending_entry"),
+    ({"shadow_entry": {"ask": 1}}, "open"),
+    ({"shadow_exit_intent": {"reason": "target"}}, "exiting"),
+    ({"shadow_exit": {"pnl": 5}}, "exit"),
+    ({"shadow_unresolved": {"reason": "entry was not priced"}}, "unresolved"),
+])
+def test_shadow_evaluation_survives_missing_or_expired_handoff_marker(state, expected):
+    c = s2_candidate()
+    for provenance in ({}, {"shadow_handoff": {"status": "expired"}}):
+        assert setup_scanner.shadow_status_of(c, {**provenance, **state}) == expected
+
+
+def test_shadow_scorecard_keeps_evaluated_trades_with_missing_marker():
+    c = s2_candidate()
+    state = s2_state()
+    del state["shadow_handoff"]
+    state["shadow_exit"]["at"] = setup_scanner._epoch(c.detected_at)
+    view = setup_scanner._shadow_view(state, setup_scanner.shadow_status_of(c, state))
+    assert view["decision"] == "take" and view["publication"] is None
+    score = setup_scanner._shadow_scorecard([(c, state)])
+    assert score["decisions"] == score["take"] == score["shadow_setups"] == 1
+    assert score["shadow_pnl"] == 5 and score["not_published"] == 0
+    assert score["isaac"]["disagreements"]["shadow_only"]["count"] == 1
+
+
+def test_shadow_recovery_after_file_write_without_handoff_event(engine, monkeypatch, tmp_path):
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    # File published and committed to, then backend crashed before recording the handoff.
+    shadow_exchange.write_setup(tmp_path / "setups", candidate)
+    _decision_file(tmp_path / "outbox", candidate)
+    monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
+    monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))
+    clock.now = setup_scanner._epoch(candidate.expires_at)
+    watch.shadow_exchange_pass(clock.now, DAY, Calendar().hours(DAY))
+    events = rows(engine)[1]
+    assert events["shadow_handoff"]["status"] == "expired" and events["shadow_decision"]["decision"] == "take"
+    assert "shadow_entry" in events and setup_scanner.shadow_status_of(candidate, events) == "open"
+    with Session(engine) as db:
+        score = setup_scanner.day_view(db, DAY)["scorecard"]["day"]
+    assert score["take"] == 1 and score["not_published"] == score["no_response"] == 0
