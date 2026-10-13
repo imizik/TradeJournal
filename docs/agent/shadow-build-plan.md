@@ -42,12 +42,12 @@ send the evidence, not a retry.
 |---|---|---|---|---|---|---|
 | SC-0 | Daily scanner health check (ops, no code) | ops | Luna, low | — | live | Ready |
 | SC-1 | Quote reads off the monitor loop's critical path | B | Luna, medium | 1 | — | Ready |
-| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Implemented — [PR #296](https://github.com/imizik/TradeJournal/pull/296), merge pending |
-| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Implemented — [PR #296](https://github.com/imizik/TradeJournal/pull/296), merge pending |
-| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Implemented — [PR #296](https://github.com/imizik/TradeJournal/pull/296), merge pending |
-| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Implemented — [PR #297](https://github.com/imizik/TradeJournal/pull/297), merge pending |
-| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Implemented — [PR #297](https://github.com/imizik/TradeJournal/pull/297), merge pending |
-| SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | Later |
+| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
+| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
+| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
+| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
+| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
+| SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | In progress — VPS exchange and SMTP active at `23b7c6c`; self-sent Gmail wake-up repaired with a tested owner-account relay; enabled v4 production task restored; actual Jo decision and first-session acceptance pending |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
 | S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Later |
 | SC-3 | 50-trade evaluation report | — | Sol, high | 0 | 50 resolved trades | Later |
@@ -317,6 +317,91 @@ Isaac-only steps are marked ⚑.
 5. First session: confirm every setup has a decision or no-response, at least
    one `clean_order=true`, shadow trades priced after their decisions, and the
    history spot check. Record the evidence in the S1 contract.
+
+### Operator sequence and owner handoffs
+
+Use the newest **successful** main `Deployment package` run whose commit
+contains both merged PRs; a newer cancelled or unfinished run is not a release.
+Verify `SHA256SUMS` and the archive's generated release-metadata commit, then extract only
+the offline wheels needed by `check_control.py stage`. Stage from that exact
+source commit, retain its manifest SHA-256, and copy the bundle plus
+`git archive <commit> deploy backend/advisor_key_state.py` to a new root-private
+`/root/deploy-<sha>/` directory. Run retained-host commands as
+`sudo bash -c 'cd /root && ...'`; the controller is under that directory's
+`src/deploy/`, and the installed Python is
+`/opt/tradejournal-check/backend/.venv/bin/python`.
+
+Before changing live state, run the retained `check_control.py check` and
+inspect `/opt/tradejournal-check/installation.json`. Compare the staged units
+and pinned SQL with that record. The existing `context-views.sql` and
+`market-view.sql` remain pinned; pass `--approve-sql` only for a reviewed new
+additive file, never to force a changed existing file. Preserve root-private
+backups of the installation record, check config and API environment, and
+record the current API release and active check-unit set without printing
+credentials. Check available disk and the existing `acl` package.
+
+Wait until outside the weekday 09:25–16:15 New York deployment hold. Let the
+merged application release autodeploy and verify that the running release
+contains both PRs and its API unit has the optional shadow writable path.
+If autodeploy is held for another reason, diagnose it before forcing a switch.
+Install `acl` if absent. Stop all check units with `check_control.py stop`,
+upgrade using `--bundle` and the exact `--approve-upgrade` manifest SHA-256,
+then run `enable-shadow-exchange`. No new database migration is needed by S1.
+
+Add these two fields to the existing check config, preserving all identity,
+credential and provider settings:
+
+```json
+"shadow_setups_dir": "/var/lib/tradejournal-shadow/setups",
+"shadow_outbox_dir": "/var/lib/tradejournal-check/shadow-outbox"
+```
+
+Add the matching API settings to `/etc/tradejournal/backend.env`:
+
+```dotenv
+SHADOW_SETUPS_DIR=/var/lib/tradejournal-shadow/setups
+SHADOW_OUTBOX_DIR=/var/lib/tradejournal-check/shadow-outbox
+```
+
+Validate the updated check config with the upgraded runtime. Restore the
+previously active check units, refresh keys before serving requests, restart
+the API, and rerun `check`. Verify service health, directory owners/modes/ACLs,
+API outbox readability and API ledger denial. Keep only the newest check
+`previous-runtime` directory and newest `/root/deploy-*` after a successful
+upgrade; never prune trial recovery directories or the v1 advisor.
+
+Only then stop for **⚑ 3**: reconnect the newest working **TradeJournal Check**
+plugin and Refresh tools. Preserve its User-Defined OAuth client, base scope
+`offline_access`, disabled OIDC and access-token lifetime at most 300 seconds.
+Use the refreshed plugin/@mention to confirm both shadow tools are available;
+issued scope and tool access remain unverified until the new connection works.
+Stop for **⚑ 4** to replace the Gmail task instructions with the text above.
+Do not recreate the connection or edit the owner's task as an operator shortcut.
+
+For the first full regular session after activation, compare the Scanner day
+view with the immutable setup/decision files and ledger. Check every published
+setup's disposition, both labels, at least one actual Jo decision with
+`clean_order=true`, and every on-time TAKE's entry timestamp/quote freshness or
+explicit unresolved reason. For one setup, compare the live `shadow_setup`
+history with the published features filtered strictly before that session's
+New York midnight; record eligible/excluded counts and cutoff, not raw fills.
+If no setups, no clean decision or no on-time TAKE occurs, retain partial
+evidence and carry the missing proof to the next session. Never manufacture a
+live setup/decision or claim fixture evidence as live acceptance.
+
+Rollback deactivates only the shadow exchange: stop check units, restore the
+two backed-up configs, run `disable-shadow-exchange`, then restore healthy
+check/API operation outside market hours. Preserve the ledger and all setup,
+decision and scanner events. An interrupted, uncommitted runtime swap uses
+the controller's documented interruption recovery. If the upgrade completed
+but its runtime fails to start, stop all check units, retain the failed
+backend separately, and restore the previous backend **together with its
+backed-up installation record**. For this activation, no SQL is added or
+changed: verify the old record still matches the pinned SQL and units, then
+run `check` to prove the restored inventory before restarting. Restoring only
+the backend under a new installation record causes inventory drift. A later
+upgrade with SQL/unit changes needs its own recovery review; this rollback
+does not authorize reverting those changes.
 
 ## Later packages (outline only)
 
