@@ -40,8 +40,8 @@ send the evidence, not a retry.
 
 | # | Package | Lane | Model | Tier | Depends on | Status |
 |---|---|---|---|---|---|---|
-| SC-0 | Daily scanner health check (ops, no code) | ops | Luna, low | — | live | Ready |
-| SC-1 | Quote reads off the monitor loop's critical path | B | Luna, medium | 1 | — | Ready |
+| SC-0 | Daily scanner health check (ops, no code) | ops | Lead chat (inherited) | — | live | Scheduled — weekday 16:30 America/New_York in this lead chat; October 13 baseline recorded; first full acceptance session October 14 |
+| SC-1 | Quote reads off the monitor loop's critical path | lead | Sol | 1 | — | Implemented — one-attempt scanner quote reads and failure/recovery tests; combined SC-0/SC-1 PR pending merge/deploy |
 | SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
 | SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
 | SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Merged — [PR #296](https://github.com/imizik/TradeJournal/pull/296) |
@@ -111,6 +111,21 @@ After each close for the first ten sessions, from a machine on the tailnet:
 Report: setups, trades, unresolved and why, emails sent, any `rate_limited`
 chart reads during the session. Read-only; never restart services for this.
 Append one dated line per session to the scanner contract's acceptance notes.
+
+The owner requested SC-0 and SC-1 together in one PR on October 13. The
+**Scanner daily health check** is an active local heartbeat in the lead chat,
+weekdays at 16:30 **America/New_York**. The Mac and Codex app must be running
+and the tailnet/SSH connection available. It checks API/scanner availability,
+setup and paper-trade counts, email dispositions/delivery, Jo's saved shadow
+decisions or no-response, and relevant provider/scanner failures. Go-only
+silence is not evidence of a failed task. It records a dated session receipt
+and stays quiet unless there is a new actionable failure, required owner action
+or completion of the ten-session evidence. Missing access is reported as missing
+proof, not as scanner failure. It never restarts/deploys, mutates production
+data, calls check MCP tools or submits decisions/orders. If source-note editing
+would touch `main` or conflict with another writer, retain the receipt privately
+for later reconciliation instead. October 13 is an activation baseline, not
+one of the ten full acceptance sessions; counting starts October 14.
 
 ## SC-1 — quotes off the critical path
 

@@ -170,8 +170,11 @@ Budget when enabled: each 5-minute bar reads 12 one-minute series from the
 chart feed's shared 60-per-minute allowance (plus 12 daily series once a
 day), and each open trade re-reads its symbol about three times a minute. A
 symbol whose read is refused is retried on later passes while the bar is
-still within two minutes. Option quotes use Tradier's quote endpoint, which
-waits out a rate limit inside the monitor pass. Watch for `rate_limited`
+still within two minutes. Scanner option quotes make one Tradier request per
+read, with no retry sleep on a rate limit or transport failure. The request
+still uses the existing 10-second timeout and runs synchronously; the scanner
+retries on later monitor passes within the same two-minute pricing window.
+Other callers retain their existing quote retries. Watch for `rate_limited`
 chart reads during the first live sessions.
 
 Fixture tests cover the rules, duplicate suppression across a restarted
@@ -208,6 +211,24 @@ Jo reads Isaac's history through the pre-trade check.
   or is `unresolved`.
 - One API restart with an open paper trade leaves exactly one entry and one exit.
 - The owner can see the day's candidates and paper results in the app.
+
+## Daily health acceptance notes
+
+SC-0 runs weekdays at 16:30 America/New_York in the lead Codex chat, checking
+service/scanner availability, setup/trade/email dispositions, actual saved Jo
+decisions and failures. Local scheduling requires the Mac/app and tailnet access.
+One dated receipt is recorded per regular session; ten full sessions start
+October 14. A zero-setup day is not automatically a failure, and an absent Go
+message is not automatically a missing decision. Delivery diagnostics do not
+count as live decision/entry evidence.
+
+- **2026-10-13 — activation baseline, excluded from ten-session count:**
+  scanner/API available; 14 candidates, four no-contract, ten rules entries,
+  nine resolved and one unresolved (`monitoring gap: exit condition noticed late`);
+  four setup emails sent and six expired before email activation; zero recorded
+  Jo decisions. Sent setups preceded the successful incoming-event relay repair.
+  No chart `rate_limited`, scanner quote or email/shadow failure matched the
+  session's inspected logs. Actual Jo decision/entry acceptance remains pending.
 
 ## Out of scope
 
