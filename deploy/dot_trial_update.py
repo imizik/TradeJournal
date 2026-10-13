@@ -28,6 +28,7 @@ SOURCE_FILES = frozenset({"backend/app/engine/decisions.py", "backend/app/engine
     "backend/cloud_mcp_d0.py", "backend/cloud_mcp_d1_common.py",
     "backend/app/engine/market_practice.py", "deploy/dot_market_capture.py", "deploy/dot_market_import.py",
     "backend/app/engine/historical_replay.py", "deploy/dot_historical_capture.py", "deploy/dot_historical_import.py",
+    "backend/app/engine/scanner_replay.py", "backend/app/engine/scanner_replay_market.py", "backend/app/engine/scanner_rules.py",
     "backend/dot_trial_app.py", "deploy/dot_trial_control.py", "deploy/dot_trial_seed.py"})
 FRONTEND_FILES = (".next", "server.js", "package.json", "public")
 SERVICES = tuple(f"tradejournal-dot-trial-{part}.service" for part in ("api", "assistant", "owner"))

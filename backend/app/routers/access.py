@@ -25,13 +25,14 @@ class Login(Strict):
 
 
 class Grant(Strict):
-    symbols: list[str] = Field(min_length=1, max_length=10)
+    symbols: list[str] = Field(min_length=1, max_length=12)
     run_ids: list[str] = Field(default_factory=list, max_length=30)
     journal_read: bool = False
     decision_write: bool = Field(default=False, strict=True)
     sample_replay: bool = Field(default=False, strict=True)
     market_decision_write: bool = Field(default=False, strict=True)
     historical_replay: bool = Field(default=False, strict=True)
+    scanner_replay: bool = Field(default=False, strict=True)
 
 
 class Assistant(Strict):

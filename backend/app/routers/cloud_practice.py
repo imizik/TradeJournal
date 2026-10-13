@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import decisions, sample_practice, historical_replay
-from app.engine.cloud_practice_access import require_sample, historical_mode, require_historical
+from app.engine import access, decisions, sample_practice, historical_replay, scanner_replay
+from app.engine.cloud_practice_access import require_sample, historical_mode, require_historical, scanner_mode, require_scanner
 from app.models import PracticeRun
 from cloud_mcp_d1_common import MAX_RESPONSE_BYTES
 
@@ -21,6 +21,13 @@ def packet(request, db, run, *, details):
     if str(run.id) not in who.grants["run_ids"]:
         raise HTTPException(404, "Sample run not found")
     try:
+        if scanner_mode():
+            require_scanner(request)
+            with access._LOCK:
+                access._serialized(db)
+                db.expire_all()
+                db.refresh(run)
+                return scanner_replay.view(db, run, who.identifier, who.grants["symbols"], details=details)
         if historical_mode():
             require_historical(request)
             return historical_replay.view(db, run, who.identifier, who.grants["symbols"],
@@ -32,23 +39,37 @@ def packet(request, db, run, *, details):
 
 def response(data, day):
     historical = historical_mode()
-    result = {"schema_version": "historical-demo-practice-v1" if historical else "d1-sample-practice-v1",
-        "sample_data": not historical, **({"historical_replay": True, "demo_only": True} if historical else {}),
+    scanner = scanner_mode()
+    result = {"schema_version": scanner_replay.SCHEMA if scanner else "historical-demo-practice-v1" if historical else "d1-sample-practice-v1",
+        "sample_data": not (historical or scanner), **({"historical_replay": True, "demo_only": True} if historical or scanner else {}),
         "read_at": datetime.now(timezone.utc).isoformat(), "time_zone": "America/New_York",
-        "ui_path": f"/daily/{day.isoformat()}", **data}
+        "ui_path": None if scanner else f"/daily/{day.isoformat()}", **data}
     if len(json.dumps(result).encode()) > MAX_RESPONSE_BYTES:
         raise HTTPException(503, "Sample read exceeds its response limit")
     return result
 
 
 @router.get("/runs")
-def runs(request: Request, day: date, db: Session = Depends(get_session)):
+def runs(request: Request, day: date | None = None, db: Session = Depends(get_session)):
     require_sample(request)
+    if scanner_mode() and day is None:
+        if request.query_params:
+            raise HTTPException(422, "Use no query or one historical session date")
+        allowed = [uuid.UUID(value) for value in request.state.access.grants["run_ids"]]
+        selected = db.exec(select(PracticeRun).where(PracticeRun.id.in_(allowed)).order_by(PracticeRun.day)).all()
+        selected = [r for r in selected if scanner_replay.eligible(r)]
+        next_run = next((r for phase in ("practice", "exam") for r in selected
+                         if r.status == "prepared" and scanner_replay.metadata(r)["phase"] == phase), None)
+        return response({"runs": [packet(request, db, r, details=False) for r in
+                                 ([next_run] if next_run else selected)]}, None)
+    if day is None:
+        raise HTTPException(422, "Use one New York date")
     if set(request.query_params) != {"day"} or len(request.query_params.getlist("day")) != 1 or request.query_params["day"] != day.isoformat():
         raise HTTPException(422, "Use one New York date in YYYY-MM-DD format")
     allowed = [uuid.UUID(value) for value in request.state.access.grants["run_ids"]]
     selected = db.exec(select(PracticeRun).where(PracticeRun.id.in_(allowed), PracticeRun.day == day).limit(1)).all()
-    return response({"runs": [packet(request, db, run, details=False) for run in selected if (historical_replay.eligible(run) if historical_mode() else sample_practice.eligible(run))]}, day)
+    eligible = scanner_replay.eligible if scanner_mode() else historical_replay.eligible if historical_mode() else sample_practice.eligible
+    return response({"runs": [packet(request, db, run, details=False) for run in selected if eligible(run)]}, day)
 
 
 @router.get("/runs/{run_id}")

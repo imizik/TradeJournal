@@ -298,9 +298,12 @@ def bootstrap(request):
 
 
 def grant_valid(grants):
-    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write", "historical_replay"}:
+    if not {"symbols", "run_ids", "journal_read"} <= set(grants) <= {"symbols", "run_ids", "journal_read", "decision_write", "sample_replay", "market_decision_write", "historical_replay", "scanner_replay"}:
         raise HTTPException(422, "Invalid permission grant")
-    if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > 10 or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
+    if type(grants.get("scanner_replay", False)) is not bool:
+        raise HTTPException(422, "Invalid scanner replay permission")
+    scanner = grants.get("scanner_replay") is True
+    if not isinstance(grants["symbols"], list) or len(grants["symbols"]) > (12 if scanner else 10) or not grants["symbols"] or any(not isinstance(s, str) or not re.fullmatch(r"[A-Z][A-Z0-9.-]{0,14}", s) for s in grants["symbols"]):
         raise HTTPException(422, "Choose one to ten market symbols")
     import uuid
     try:
@@ -325,13 +328,18 @@ def grant_valid(grants):
     if not isinstance(grants.get("market_decision_write", False), bool):
         raise HTTPException(422, "Invalid market decision permission")
     if grants.get("market_decision_write") and (not market_writes_enabled() or grants["journal_read"]
-            or grants.get("decision_write") or grants.get("sample_replay") or len(grants["run_ids"]) != 1
-            or not set(grants["symbols"]) <= {"MU", "NBIS"}):
+            or grants.get("decision_write") or grants.get("sample_replay")
+            or (not scanner and (len(grants["run_ids"]) != 1 or not set(grants["symbols"]) <= {"MU", "NBIS"}))):
         raise HTTPException(403, "Market writer requires one MU/NBIS session and no other write/journal grant")
     if not isinstance(grants.get("historical_replay", False), bool):
         raise HTTPException(422, "Invalid historical replay permission")
     if grants.get("historical_replay") and (not historical_replays_enabled() or grants.get("market_decision_write") is not True):
         raise HTTPException(403, "Historical replay requires its explicit isolated market writer grant")
+    if scanner:
+        from app.engine.scanner_rules import UNIVERSE
+        if (grants.get("historical_replay") is not True or grants.get("market_decision_write") is not True
+                or not grants["run_ids"] or not set(grants["symbols"]) <= set(UNIVERSE)):
+            raise HTTPException(403, "Scanner replay requires its explicit historical assignment")
 
 
 def sample_writes_enabled():
@@ -362,6 +370,7 @@ def market_writes_enabled():
 def market_writer(request):
     who = getattr(request.state, "access", None)
     return bool(who and not who.owner and not who.service and who.grants.get("market_decision_write") is True
+        and not who.grants.get("scanner_replay")
         and not any(who.grants.get(k) for k in ("journal_read", "decision_write", "sample_replay"))
         and len(who.grants.get("run_ids", [])) == 1 and set(who.grants.get("symbols", [])) <= {"MU", "NBIS"}
         and market_writes_enabled() and getattr(request.app.state, "market_decisions_isolated", False) is True)
@@ -374,6 +383,19 @@ def historical_replays_enabled():
 def historical_writer(request):
     return (market_writer(request) and request.state.access.grants.get("historical_replay") is True
         and historical_replays_enabled() and getattr(request.app.state, "historical_replay_isolated", False) is True)
+
+
+def scanner_replay_writer(request):
+    from app.engine.scanner_rules import UNIVERSE
+    who = getattr(request.state, "access", None)
+    return bool(who and not who.owner and not who.service and who.grants.get("scanner_replay") is True
+        and who.grants.get("market_decision_write") is True and who.grants.get("historical_replay") is True
+        and not any(who.grants.get(k) for k in ("journal_read", "decision_write", "sample_replay"))
+        and 1 <= len(who.grants.get("run_ids", [])) <= 30
+        and bool(who.grants.get("symbols")) and set(who.grants["symbols"]) <= set(UNIVERSE)
+        and historical_replays_enabled()
+        and getattr(request.app.state, "market_decisions_isolated", False) is True
+        and getattr(request.app.state, "historical_replay_isolated", False) is True)
 
 
 def create_assistant(db, identifier, grants):
@@ -394,10 +416,21 @@ def create_assistant(db, identifier, grants):
 def grant_targets_valid(db, identifier, grants):
     """The new market dataset is bound to one frozen actor, including read grants."""
     import uuid
-    from app.engine import market_practice, historical_replay
+    from app.engine import market_practice, historical_replay, scanner_replay
     from app.models import PracticeRun
     for value in grants["run_ids"]:
         run = db.get(PracticeRun, uuid.UUID(value))
+        if grants.get("scanner_replay"):
+            try:
+                scanner_replay.authorized(run, identifier, grants["symbols"])
+                manifest = scanner_replay.metadata(run)["manifest"]
+                if set(manifest["run_ids"].values()) != set(grants["run_ids"]):
+                    raise ValueError()
+            except (ValueError, TypeError, KeyError, AttributeError):
+                raise HTTPException(403, "Scanner grant must match its complete frozen batch") from None
+            continue
+        if scanner_replay.recognized(run):
+            raise HTTPException(403, "Scanner session requires its separate scanner replay grant")
         if run and market_practice.recognized(run):
             historical = historical_replay.eligible(run)
             if (not (market_practice.eligible(run) or historical) or not market_practice.visible_to(run, identifier)
@@ -482,6 +515,10 @@ def authorize(request, operation, params):
         return
     if operation in {"GET /access/me", "POST /access/logout"}:
         return
+    if who.grants.get("scanner_replay"):
+        # Scanner replay is exclusively a bearer-authenticated connector path.
+        # Never permit generic browser projections of its sealed run storage.
+        raise HTTPException(403, "Scanner replay is available only through its isolated connector")
     if who.grants.get("market_decision_write"):
         if not market_writer(request):
             raise HTTPException(403, "Market decision writing is disabled")

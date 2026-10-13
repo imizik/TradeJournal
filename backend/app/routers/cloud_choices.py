@@ -4,6 +4,7 @@ import json
 import math
 import os
 import uuid
+from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import ValidationError
@@ -11,11 +12,11 @@ from starlette.concurrency import run_in_threadpool
 from sqlmodel import Session, select
 
 from app.database import get_session
-from app.engine import cloud_practice_access, decisions, sample_practice, historical_replay, access
-from app.engine.cloud_practice_access import require_choice_write, require_sample, historical_mode, require_historical
+from app.engine import cloud_practice_access, decisions, sample_practice, historical_replay, access, scanner_replay
+from app.engine.cloud_practice_access import require_choice_write, require_sample, historical_mode, require_historical, scanner_mode, require_scanner
 from app.models import AccessPrincipal, DecisionContext, DecisionRecord, PracticeOpportunity, PracticeRun
 from cloud_mcp_d1_common import MAX_RESPONSE_BYTES
-from cloud_mcp_d2_common import MAX_CHOICE_BYTES, PracticeChoice
+from cloud_mcp_d2_common import MAX_CHOICE_BYTES, PracticeChoice, ScannerReplayChoice
 
 router = APIRouter()
 SCHEMA_VERSION = "d2-sample-choice-v1"
@@ -53,6 +54,20 @@ def _opportunity(request: Request, db: Session, raw_id: str):
     if str(opportunity_id) != raw_id:
         _bad(422, "Use a canonical opportunity UUID")
     run_ids = who.grants.get("run_ids", [])
+    if scanner_mode():
+        require_scanner(request)
+        try:
+            run, entry = scanner_replay.locate(db, run_ids, raw_id)
+            scanner_replay.authorized(run, who.identifier, who.grants["symbols"])
+            records = scanner_replay.own_records(db, run, who.identifier)
+            next_entry = next((e for e in scanner_replay.entries(run)
+                               if scanner_replay.operation(run, e) not in records), None)
+            if scanner_replay.operation(run, entry) not in records and (entry != next_entry or run.status != "prepared"):
+                raise ValueError()
+            context, packet = scanner_replay.context_packet(db, entry)
+            return who, run, SimpleNamespace(id=opportunity_id, entry=entry), context, packet
+        except (decisions.DecisionError, ValueError, TypeError, KeyError, AttributeError):
+            _bad(404, "Scanner opportunity not found")
     if not isinstance(run_ids, list) or len(run_ids) != 1:
         _bad(404, "Sample opportunity not found")
     try:
@@ -99,17 +114,18 @@ def _opportunity(request: Request, db: Session, raw_id: str):
 
 def _response(run: PracticeRun, opportunity: PracticeOpportunity, choice: DecisionRecord | None):
     historical = historical_mode()
+    scanner = scanner_mode()
     result = {
-        "schema_version": "historical-demo-choice-v1" if historical else SCHEMA_VERSION,
-        "sample_data": not historical,
-        **({"historical_replay": True, "demo_only": True} if historical else {}),
+        "schema_version": scanner_replay.SCHEMA + "-choice" if scanner else "historical-demo-choice-v1" if historical else SCHEMA_VERSION,
+        "sample_data": not (historical or scanner),
+        **({"historical_replay": True, "demo_only": True} if historical or scanner else {}),
         "read_at": datetime.now(timezone.utc).isoformat(),
         "time_zone": "America/New_York",
-        "ui_path": f"/daily/{run.day.isoformat()}",
+        "ui_path": None if scanner else f"/daily/{run.day.isoformat()}",
         "run_id": str(run.id),
         "opportunity_id": str(opportunity.id),
         "status": "recorded" if choice else "not_recorded",
-        "choice": decisions.row(choice) if choice else None,
+        "choice": (scanner_replay.receipt(choice) if scanner else decisions.row(choice)) if choice else None,
     }
     if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > MAX_RESPONSE_BYTES:
         _bad(503, "Sample choice response exceeds its size limit")
@@ -122,6 +138,10 @@ def _reject_query(request: Request):
 
 
 def _own_choice(db: Session, opportunity: PracticeOpportunity, principal_id: str):
+    if scanner_mode():
+        return db.exec(select(DecisionRecord).where(
+            DecisionRecord.opportunity_id == "scanner:" + str(opportunity.id),
+            DecisionRecord.actor == "agent:" + principal_id)).first()
     return db.exec(select(DecisionRecord).where(
         DecisionRecord.opportunity_id == f"a3:{opportunity.id}",
         DecisionRecord.actor == sample_practice.actor(str(principal_id)),
@@ -172,14 +192,14 @@ def _parse_choice(raw: bytes) -> PracticeChoice:
     try:
         data = json.loads(raw, parse_constant=_reject_nonfinite,
                           parse_float=_finite_float)
-        return PracticeChoice.model_validate(data)
+        return (ScannerReplayChoice if scanner_mode() else PracticeChoice).model_validate(data)
     except (ValidationError, ValueError, UnicodeDecodeError, TypeError):
         _bad(422, "Invalid sample choice")
 
 
 def _bound_selected_facts(evidence: dict, payload: PracticeChoice):
     """Bound every immutable fact copied into a TAKE receipt's plan sources."""
-    if payload.decision != "take" or not isinstance(payload.plan, dict):
+    if not isinstance(payload, PracticeChoice) or payload.decision != "take" or not isinstance(payload.plan, dict):
         return
     references = [payload.plan.get(key) for key in ("trigger_fact", "stop_fact", "target_fact")]
     if any(not isinstance(name, str) for name in references):
@@ -206,7 +226,7 @@ def _bound_selected_facts(evidence: dict, payload: PracticeChoice):
 def _save_choice(db: Session, request: Request, who, run: PracticeRun, opportunity: PracticeOpportunity,
                  payload: PracticeChoice):
     try:
-        if historical_mode():
+        if historical_mode() or scanner_mode():
             opportunity_id = str(opportunity.id)
             # Serialize with browser saves/revocation and recheck after body reception.
             with access._LOCK:
@@ -224,6 +244,9 @@ def _save_choice(db: Session, request: Request, who, run: PracticeRun, opportuni
                 who, run, opportunity, _context, evidence = _write_preflight(
                     request, db, opportunity_id)
                 _bound_selected_facts(evidence, payload)
+                if scanner_mode():
+                    return scanner_replay.choose(db, run, opportunity.entry, str(who.identifier),
+                                                 who.grants["symbols"], payload.model_dump())
                 return historical_replay.choose(db, run, opportunity, str(who.identifier), payload.model_dump())
         return sample_practice.choose(db, run, opportunity, str(who.identifier), payload.model_dump())
     except decisions.DecisionError as exc:

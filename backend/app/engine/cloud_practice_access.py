@@ -48,6 +48,14 @@ def historical_mode():
     return config.exercise_kind == "historical"
 
 
+def scanner_mode():
+    check = verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
+    config = check.active_config()
+    if config is None:
+        raise HTTPException(503, "Practice connector is unavailable")
+    return config.exercise_kind == "scanner_replay"
+
+
 def require_historical(request):
     require_sample(request)
     if (os.environ.get("TJ_CLOUD_MCP_HISTORICAL_ENABLED") != "true"
@@ -55,20 +63,30 @@ def require_historical(request):
         raise HTTPException(403, "Historical demo connector is unavailable")
 
 
+def require_scanner(request):
+    require_sample(request)
+    if (os.environ.get("TJ_CLOUD_MCP_HISTORICAL_ENABLED") != "true"
+            or not access.scanner_replay_writer(request)):
+        raise HTTPException(403, "Scanner replay connector is unavailable")
+
+
 def require_choice_write(request):
     require_sample(request)
     historical = historical_mode()
+    scanner = scanner_mode()
     if historical:
         require_historical(request)
+    if scanner:
+        require_scanner(request)
     if (os.environ.get("TJ_CLOUD_MCP_DECISION_WRITES") != "true"
-            or (not historical and os.environ.get("TJ_SAMPLE_DECISION_WRITES") != "true")):
+            or (not historical and not scanner and os.environ.get("TJ_SAMPLE_DECISION_WRITES") != "true")):
         raise HTTPException(503, "Sample choice writes are unavailable")
     check = verifier(os.environ.get("TJ_CLOUD_MCP_CONFIG", ""))
     config = check.active_config()
     if config is None or config.decision_writes is not True:
         raise HTTPException(503, "Sample choice writes are unavailable")
     who = getattr(request.state, "access", None)
-    if (who is None or who.owner or who.service or (not historical and who.grants.get("decision_write") is not True)
+    if (who is None or who.owner or who.service or (not historical and not scanner and who.grants.get("decision_write") is not True)
             or WRITE_SCOPE not in getattr(request.state, "cloud_mcp_scopes", ())):
         raise HTTPException(403, "Sample choice write permission required")
 
@@ -104,14 +122,22 @@ def identify(request, *, write=False):
         try:
             grants = json.loads(row.grants_json)
             # This first slice cannot turn an OAuth link into journal/live access.
+            scanner = config.exercise_kind == "scanner_replay"
+            from app.engine.scanner_rules import UNIVERSE
             if (not isinstance(grants, dict) or grants.get("journal_read") is not False
-                    or not isinstance(grants.get("run_ids"), list) or len(grants["run_ids"]) != 1
+                    or not isinstance(grants.get("run_ids"), list)
+                    or not 1 <= len(grants["run_ids"]) <= (30 if scanner else 1)
                     or not isinstance(grants.get("symbols"), list)
-                    or not 1 <= len(grants["symbols"]) <= 2 or not set(grants["symbols"]) <= {"MU", "NBIS"}):
+                    or not 1 <= len(grants["symbols"]) <= (12 if scanner else 2)
+                    or not set(grants["symbols"]) <= (set(UNIVERSE) if scanner else {"MU", "NBIS"})
+                    or bool(grants.get("scanner_replay")) != scanner):
                 raise ValueError()
             import uuid
-            if str(uuid.UUID(grants["run_ids"][0])) != grants["run_ids"][0]:
-                raise ValueError()
+            for run_id in grants["run_ids"]:
+                if str(uuid.UUID(run_id)) != run_id:
+                    raise ValueError()
+            if scanner:
+                access.grant_targets_valid(db, row.id, grants)
         except (ValueError, TypeError, KeyError, AttributeError):
             raise HTTPException(403, "Sample reader grant is unavailable") from None
         access.consume_request_budget(db, row.id)
@@ -120,7 +146,9 @@ def identify(request, *, write=False):
         request.state.cloud_mcp_scopes = frozenset(verified.scopes)
         request.state.cloud_mcp_token_expiry = verified.expires_at
         request.state.access = identity
-        if config.exercise_kind == "historical":
+        if config.exercise_kind == "scanner_replay":
+            require_scanner(request)
+        elif config.exercise_kind == "historical":
             require_historical(request)
         elif grants.get("historical_replay") or grants.get("market_decision_write"):
             raise HTTPException(403, "Synthetic exercise grant required")
