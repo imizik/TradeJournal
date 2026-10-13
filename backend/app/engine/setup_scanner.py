@@ -35,7 +35,7 @@ from app.engine.chart_math import ET, normalize_bars
 from app.engine.level_alerts import LATENESS
 from app.engine.options_chain import OptionsChainError
 from app.engine.paper import regular_session
-from app.models import ScannerCandidate, ScannerEvent
+from app.models import ScannerCandidate, ScannerEvent, Trade
 
 log = logging.getLogger(__name__)
 
@@ -112,6 +112,8 @@ def shadow_status_of(candidate: ScannerCandidate, state: dict, now: float | None
             return {"shadow_exit_intent": "exiting", "shadow_entry": "open"}.get(kind, "unresolved" if kind == "shadow_unresolved" else "exit")
     decision = state.get("shadow_decision")
     if decision is None:
+        if state.get("shadow_handoff", {}).get("status") != "written":
+            return "not_published"
         now = datetime.now(UTC).timestamp() if now is None else now
         return "no_response" if _epoch(candidate.expires_at) <= now else "awaiting_decision"
     if decision.get("timing") == "late":
@@ -450,17 +452,22 @@ class SetupScanner:
 # ------------------------------------------------------------------ reading
 
 
-def day_view(db: Session, day: date, own_entries: list[datetime] | None = None) -> dict:
-    """The day's candidates and rules-only results for the owner page.
+def day_view(db: Session, day: date, own_entries: list[datetime] | None = None,
+             own_trades: list[Trade] | None = None) -> dict:
+    """The owner-only three-way comparison for the day and cumulative history.
 
     ``own_entries`` are the open times of Isaac's option trades that day (New
     York wall clock); they fill the review-time ``sixth_plus_entry`` flag and are never
     read by the scanner itself."""
     rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == day).order_by(ScannerCandidate.bar_end)).all()
+    cumulative_rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date <= day)).all()
+    linked = link_isaac_trades(list(cumulative_rows), own_trades or [])
+    states = {c.id: fold(SetupScanner._events(db, c.id)) for c in cumulative_rows}
+    isaac = {c.id: _isaac_view(c, states[c.id], linked[c.id]) for c in cumulative_rows}
     items, totals = [], {"candidates": 0, "trades": 0, "resolved": 0, "unresolved": 0, "no_contract": 0,
                          "pnl": 0.0, "pnl_2x_spread": 0.0, "wins": 0}
     for c in rows:
-        state = fold(SetupScanner._events(db, c.id))
+        state = states[c.id]
         status = status_of(c, state)
         shadow_status = shadow_status_of(c, state)
         flags = json.loads(c.flags_json)
@@ -487,14 +494,121 @@ def day_view(db: Session, day: date, own_entries: list[datetime] | None = None) 
             "stop": c.stop, "target": c.target, "flags": flags, "facts": json.loads(c.facts_json),
             "contract": json.loads(c.contract_json) if c.contract_json else None, "status": status,
             "shadow": _shadow_view(state, shadow_status),
+            "isaac": isaac[c.id],
             "events": {k: {**v, "at": datetime.fromtimestamp(v["at"], UTC).isoformat().replace("+00:00", "Z")} for k, v in state.items()},
         })
     totals["pnl"], totals["pnl_2x_spread"] = round(totals["pnl"], 2), round(totals["pnl_2x_spread"], 2)
-    cumulative_rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date <= day)).all()
-    day_score = _shadow_scorecard([(c, fold(SetupScanner._events(db, c.id))) for c in rows])
-    cumulative_score = _shadow_scorecard([(c, fold(SetupScanner._events(db, c.id))) for c in cumulative_rows])
+    day_score = _shadow_scorecard([(c, states[c.id]) for c in rows], isaac)
+    cumulative_score = _shadow_scorecard([(c, states[c.id]) for c in cumulative_rows], isaac)
     return {"date": day.isoformat(), "scanner_version": rules.VERSION, "params_hash": rules.PARAMS_HASH,
             "enabled": enabled(), "totals": totals, "scorecard": {"day": day_score, "cumulative": cumulative_score}, "candidates": items}
+
+
+def link_isaac_trades(candidates: list[ScannerCandidate], trades: list[Trade]) -> dict:
+    """Pure, display-only links. Latest detection wins; equal times use lowest ID."""
+    linked = {c.id: [] for c in candidates}
+    for trade in trades:
+        if trade.instrument_type != "option" or trade.option_type not in ("call", "put"):
+            continue
+        # Trades store naive NY wall clock; candidates store naive UTC.
+        opened = trade.opened_at.replace(tzinfo=ET).astimezone(UTC).replace(tzinfo=None)
+        direction = "long" if trade.option_type == "call" else "short"
+        eligible = [c for c in candidates if c.symbol == trade.ticker and c.direction == direction
+                    and c.detected_at <= opened <= c.detected_at + timedelta(minutes=15)]
+        if eligible:
+            chosen = min(eligible, key=lambda c: (-_epoch(c.detected_at), str(c.id)))
+            linked[chosen.id].append(trade)
+    for trades_ in linked.values():
+        trades_.sort(key=lambda t: (t.opened_at, str(t.id)))
+    return linked
+
+
+def _isaac_view(candidate: ScannerCandidate, state: dict, trades: list[Trade]) -> dict:
+    contract = json.loads(candidate.contract_json) if candidate.contract_json else None
+    email = state.get("email", {})
+    details = []
+    for trade in trades:
+        opened = trade.opened_at.replace(tzinfo=ET)
+        pnl = float(trade.realized_pnl) if trade.status in ("closed", "expired") and trade.realized_pnl is not None else None
+        details.append({
+            "trade_id": str(trade.id), "account_id": str(trade.account_id),
+            "contract": {"ticker": trade.ticker, "option_type": trade.option_type,
+                         "strike": float(trade.strike) if trade.strike is not None else None,
+                         "expiration": trade.expiration.isoformat() if trade.expiration else None},
+            "contracts": float(trade.contracts), "avg_entry_premium": float(trade.avg_entry_premium),
+            "opened_at": opened.isoformat(), "closed_at": trade.closed_at.replace(tzinfo=ET).isoformat() if trade.closed_at else None,
+            "status": trade.status, "realized_pnl": pnl,
+            "pnl_per_contract": pnl / float(trade.contracts) if pnl is not None and trade.contracts > 0 else None,
+            "assisted": email.get("status") == "sent" and email.get("at", float("inf")) < opened.timestamp(),
+            "contract_differs": bool(contract and ((float(trade.strike) if trade.strike is not None else None) != contract["strike"] or
+                                     (trade.expiration.isoformat() if trade.expiration else None) != contract["expiration"])),
+        })
+    primary = details[0] if details else {"trade_id": None, "contract": None, "opened_at": None,
+                                          "status": None, "realized_pnl": None, "pnl_per_contract": None,
+                                          "assisted": False, "contract_differs": False}
+    return {**primary, "traded": bool(trades), "extra_trade_ids": [t["trade_id"] for t in details[1:]],
+            "trades": details}
+
+
+def _isaac_scorecard(rows: list[tuple[ScannerCandidate, dict]], views: dict, independent_only: bool) -> dict:
+    """Setup counts; results include every linked trade, each normalized separately.
+
+    The independent subset removes any setup with an assisted linked trade,
+    rather than turning that setup into a false Isaac pass.
+    """
+    score = {"setups": 0, "traded": 0, "assisted": 0, "independent": 0, "closed": 0,
+             "priced": 0, "pnl_per_contract": 0.0, "pnl_dollars": 0.0}
+    buckets = {key: {"count": 0, "rules_priced": 0, "rules_pnl": 0.0,
+                     "shadow_priced": 0, "shadow_pnl": 0.0, "isaac_priced": 0,
+                     "isaac_pnl_per_contract": 0.0, "isaac_pnl_dollars": 0.0}
+               for key in ("shadow_only", "isaac_only", "both_took", "both_passed")}
+    for candidate, state in rows:
+        trades = views.get(candidate.id, {}).get("trades", [])
+        assisted = any(t["assisted"] for t in trades)
+        if independent_only and assisted:
+            continue
+        score["setups"] += 1
+        traded = bool(trades)
+        closed = [t for t in trades if t["status"] in ("closed", "expired")]
+        priced = [t for t in closed if t["pnl_per_contract"] is not None]
+        per_contract = sum(t["pnl_per_contract"] for t in priced)
+        dollars = sum(t["realized_pnl"] for t in closed if t["realized_pnl"] is not None)
+        score["traded"] += traded
+        score["assisted"] += traded and assisted
+        score["independent"] += traded and not assisted
+        score["closed"] += len(closed)
+        score["priced"] += len(priced)
+        score["pnl_per_contract"] += per_contract
+        score["pnl_dollars"] += dollars
+        decision = state.get("shadow_decision", {})
+        # Late, unpublished and missing decisions are never shadow passes.
+        if shadow_status_of(candidate, state) in ("not_published", "no_contract") or decision.get("timing") != "on_time":
+            continue
+        if decision.get("decision") not in ("take", "skip"):
+            continue
+        take = decision["decision"] == "take"
+        key = ("both_took" if traded else "shadow_only") if take else ("isaac_only" if traded else "both_passed")
+        bucket = buckets[key]
+        bucket["count"] += 1
+        rules_exit, shadow_exit = state.get("exit"), state.get("shadow_exit")
+        if rules_exit:
+            bucket["rules_priced"] += 1
+            bucket["rules_pnl"] += rules_exit["pnl"]
+        if take and shadow_exit:
+            bucket["shadow_priced"] += 1
+            bucket["shadow_pnl"] += shadow_exit["pnl"]
+        bucket["isaac_priced"] += len(priced)
+        bucket["isaac_pnl_per_contract"] += per_contract
+        bucket["isaac_pnl_dollars"] += dollars
+    for group in [score, *buckets.values()]:
+        for key in group:
+            if "pnl" in key:
+                group[key] = round(group[key], 2)
+        count = group["traded"] if "traded" in group else group["count"]
+        group["evidence"] = "not enough" if count < 30 else "sufficient count"
+    score["group_evidence"] = {key: "not enough" if score[key] < 30 else "sufficient count"
+                               for key in ("assisted", "independent", "closed")}
+    return {**score, "disagreements": buckets}
 
 
 def _shadow_view(state: dict, status: str) -> dict:
@@ -507,6 +621,7 @@ def _shadow_view(state: dict, status: str) -> dict:
     if decision:
         labels.extend(label for label in decision.get("labels", []) if label not in labels)
     return {
+        "publication": state.get("shadow_handoff", {}).get("status"),
         "decision": decision.get("decision") if decision else None,
         "reason": decision.get("reason") if decision else None,
         "unresolved_reason": unresolved.get("reason") if unresolved else None,
@@ -527,10 +642,11 @@ def _event_public(value: dict | None) -> dict | None:
     return {**value, "at": datetime.fromtimestamp(value["at"], UTC).isoformat().replace("+00:00", "Z")}
 
 
-def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
+def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]], isaac: dict | None = None) -> dict:
     score = {"setups": len(rows), "decisions": 0, "take": 0, "skip": 0, "late": 0, "no_response": 0, "unresolved": 0,
              "rules_priced": 0, "shadow_priced": 0, "skipped_priced": 0,
-             "rules_pnl": 0.0, "shadow_pnl": 0.0, "skipped_rules_pnl": 0.0, "clean_order": 0}
+             "rules_pnl": 0.0, "shadow_pnl": 0.0, "skipped_rules_pnl": 0.0, "clean_order": 0,
+             "not_published": 0, "shadow_setups": 0}
     for candidate, state in rows:
         rules_exit = state.get("exit")
         if rules_exit:
@@ -538,6 +654,11 @@ def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
             score["rules_priced"] += 1
         decision = state.get("shadow_decision")
         shadow = shadow_status_of(candidate, state)
+        if shadow == "not_published":
+            score["not_published"] += 1
+        if shadow in ("not_published", "no_contract"):
+            continue
+        score["shadow_setups"] += 1
         if decision:
             score["decisions"] += 1
             if decision.get("timing") == "late":
@@ -567,4 +688,6 @@ def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
         "takes": "not enough" if score["take"] < 30 else "sufficient count",
         "skipped": "not enough" if score["skip"] < 30 else "sufficient count",
     }
+    score["isaac"] = _isaac_scorecard(rows, isaac or {}, independent_only=False)
+    score["independent"] = _isaac_scorecard(rows, isaac or {}, independent_only=True)
     return score

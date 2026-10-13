@@ -600,20 +600,76 @@ export type TradingViewVerdict =
 export type ScannerEventRow = Record<string, unknown> & { at: string };
 
 export type ScannerShadowRow = {
+  publication: "written" | "expired" | null;
   decision: "take" | "skip" | null;
   reason: string | null;
   unresolved_reason: string | null;
   timing: "on_time" | "late" | null;
   clean_order: boolean | null;
   labels: string[];
-  status: "no_contract" | "awaiting_decision" | "no_response" | "skipped" | "late" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
+  status: "not_published" | "no_contract" | "awaiting_decision" | "no_response" | "skipped" | "late" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
   entry: ScannerEventRow | null;
   exit: ScannerEventRow | null;
   exit_intent: ScannerEventRow | null;
   result: { pnl: number; pnl_2x_spread: number; return_on_premium: number | null } | null;
 };
 
+export type ScannerIsaacTrade = {
+  trade_id: string;
+  contract: { ticker: string; option_type: string | null; strike: number | null; expiration: string | null };
+  opened_at: string;
+  status: string;
+  realized_pnl: number | null;
+  pnl_per_contract: number | null;
+  assisted: boolean;
+  contract_differs: boolean;
+};
+
+export type ScannerIsaacRow = {
+  traded: boolean;
+  trade_id: string | null;
+  contract: ScannerIsaacTrade["contract"] | null;
+  opened_at: string | null;
+  status: string | null;
+  realized_pnl: number | null;
+  pnl_per_contract: number | null;
+  assisted: boolean;
+  contract_differs: boolean;
+  extra_trade_ids: string[];
+  trades: ScannerIsaacTrade[];
+};
+
+type Evidence = "not enough" | "sufficient count";
+export type ScannerDisagreement = {
+  count: number;
+  rules_priced: number;
+  rules_pnl: number;
+  shadow_priced: number;
+  shadow_pnl: number;
+  isaac_priced: number;
+  isaac_pnl_per_contract: number;
+  isaac_pnl_dollars: number;
+  evidence: Evidence;
+};
+export type ScannerIsaacScore = {
+  setups: number;
+  traded: number;
+  assisted: number;
+  independent: number;
+  closed: number;
+  priced: number;
+  pnl_per_contract: number;
+  pnl_dollars: number;
+  evidence: Evidence;
+  group_evidence: { assisted: Evidence; independent: Evidence; closed: Evidence };
+  disagreements: Record<"shadow_only" | "isaac_only" | "both_took" | "both_passed", ScannerDisagreement>;
+};
+
 export type ScannerScorecard = {
+  not_published: number;
+  shadow_setups: number;
+  isaac: ScannerIsaacScore;
+  independent: ScannerIsaacScore;
   setups: number;
   decisions: number;
   take: number;
@@ -658,6 +714,7 @@ export type ScannerCandidateRow = {
   } | null;
   status: "no_contract" | "pending_entry" | "open" | "exiting" | "exit" | "unresolved";
   shadow: ScannerShadowRow;
+  isaac: ScannerIsaacRow;
   events: Record<string, ScannerEventRow>;
 };
 

@@ -49,7 +49,7 @@ send the evidence, not a retry.
 | SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | Merged — [PR #297](https://github.com/imizik/TradeJournal/pull/297) |
 | SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | In progress — VPS exchange and SMTP active at `23b7c6c`; self-sent Gmail wake-up repaired with a tested owner-account relay; enabled v4 production task restored; actual Jo decision and first-session acceptance pending |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
-| S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Later |
+| S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Built — display-only links and day/cumulative comparisons |
 | SC-3 | 50-trade evaluation report | — | Sol, high | 0 | 50 resolved trades | Later |
 | S3 | Independence research (MCP Events, separate Dot) | — | Sol, high | 2 | S1 live | Research-gated |
 | S4 | Shadow chooses contract and exits | — | Sol, high | 1 | S2 evidence | Later |
@@ -420,12 +420,35 @@ does not authorize reverting those changes.
 
 ## Later packages (outline only)
 
-### S2 — Isaac in the scorecard
-Link each of Isaac's option trades to a setup when same underlying, same
-direction (call ↔ long), opened within 15 minutes after the setup's
-`detected_at`. Show the three-way comparison and mark Isaac's trades on
-emailed setups as assisted. Sol, medium for the linking rule and tests; Luna,
-medium for the page.
+### S2 — built: Isaac in the scorecard
+
+The owner Scanner page links active-account option trades by underlying,
+call/long or put/short direction and an inclusive 15-minute window after
+UTC detection, interpreting trade timestamps as New York wall clock. A trade
+belongs to the latest eligible candidate (lowest candidate ID breaks ties);
+the earliest linked trade is primary and extra trades remain listed. Webull
+is excluded using the existing dormant broker convention; S1's sixth-entry
+flag retains its original account scope. Strike/expiration differences are
+informational. These reads never reach Shadow's inputs or mutate journal data.
+
+Day and cumulative scorecards show rules, Shadow and Isaac, plus on-time
+TAKE/SKIP disagreements. Missing, late and unpublished decisions are not
+passes. All linked closed/expired trades contribute their realized dollars
+and separately normalized `realized_pnl / contracts`; open trades count as
+traded but contribute no P&L. Setups with any sent email strictly before a
+linked entry count as assisted. The independent-only comparison excludes
+those setups altogether, rather than inventing a pass. This label means no
+prior setup email, not proven independence or proof that an email was read.
+Every group retains the 30-count evidence warning, with priced counts shown.
+Different actual contracts and exits limit the comparison.
+
+A durable `shadow_handoff` event with status `written` proves publication;
+absent/expired handoffs with no evaluation are `not_published`, counted
+separately and excluded from Shadow denominators. Actual decisions and paper
+events remain authoritative when a marker is missing, preserving management
+and evaluated results; the handoff provenance is disclosed separately. A published setup that expires without a decision
+is `no_response`. Publication and email-send status do not prove Jo received
+or read the setup. Groups without priced outcomes show “No evaluated trades”.
 
 ### SC-3 — 50-trade evaluation
 Report per setup type and direction: count, win rate, mean and median per

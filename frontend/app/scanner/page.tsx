@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { api } from "@/lib/serverApi";
-import type { ScannerCandidateRow, ScannerScorecard } from "@/lib/api";
+import type { ScannerCandidateRow, ScannerScorecard, ScannerIsaacScore } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -49,8 +49,8 @@ function Card({ label, value, hint }: { label: string; value: string; hint?: str
 function Scorecard({ label, score }: { label: string; score: ScannerScorecard }) {
   const rows = [
     { label: "Rules · all setups", count: score.setups, priced: score.rules_priced, pnl: score.rules_pnl, hint: "all setups", evidence: score.group_evidence.rules },
-    { label: "Shadow · TAKEs", count: score.take, priced: score.shadow_priced, pnl: score.shadow_pnl, hint: "on-time TAKE decisions", evidence: score.group_evidence.takes },
-    { label: "Rules · skipped", count: score.skip, priced: score.skipped_priced, pnl: score.skipped_rules_pnl, hint: "on-time SKIP decisions", evidence: score.group_evidence.skipped },
+    { label: "Shadow · TAKEs", count: score.take, priced: score.shadow_priced, pnl: score.shadow_priced ? score.shadow_pnl : null, hint: "on-time TAKE decisions", evidence: score.group_evidence.takes },
+    { label: "Rules · skipped", count: score.skip, priced: score.skipped_priced, pnl: score.skipped_priced ? score.skipped_rules_pnl : null, hint: "on-time SKIP decisions", evidence: score.group_evidence.skipped },
   ];
   return (
     <section className="min-w-0 rounded-lg border bg-card p-4" aria-label={`${label} scorecard`}>
@@ -80,8 +80,8 @@ function Scorecard({ label, score }: { label: string; score: ScannerScorecard })
                   </div>
                 </td>
                 <td className="px-2 py-2 text-right tabular-nums text-foreground">{row.count}</td>
-                <td className={`py-2 pl-2 text-right tabular-nums ${row.pnl > 0 ? "text-emerald-400" : row.pnl < 0 ? "text-red-400" : "text-foreground"}`}>
-                  <div>{money(row.pnl)}</div>
+                <td className={`py-2 pl-2 text-right tabular-nums ${(row.pnl ?? 0) > 0 ? "text-emerald-400" : (row.pnl ?? 0) < 0 ? "text-red-400" : "text-foreground"}`}>
+                  <div>{row.pnl === null ? "No evaluated trades" : money(row.pnl)}</div>
                   <div className="text-[11px] font-normal text-muted-foreground">{row.priced} priced</div>
                 </td>
               </tr>
@@ -90,11 +90,73 @@ function Scorecard({ label, score }: { label: string; score: ScannerScorecard })
         </table>
       </div>
       <p className="mt-3 text-xs leading-5 text-muted-foreground">
-        TAKE {score.take} · SKIP {score.skip} · late {score.late} · no response {score.no_response} · unresolved {score.unresolved} · clean order {score.clean_order}
+        TAKE {score.take} · SKIP {score.skip} · late {score.late} · no response {score.no_response} · unresolved {score.unresolved} · not published {score.not_published} · published/evaluated {score.shadow_setups} · clean order {score.clean_order}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">P&L is per contract after commission; each amount includes the priced count shown beside it.</p>
+      <p className="mt-1 text-xs text-muted-foreground">No response means published without a decision; email send status does not prove receipt. P&L is per contract after commission; each amount includes the priced count shown beside it.</p>
+      <IsaacComparison label="All linked trades" score={score.isaac} />
+      <details className="mt-3 border-t pt-3">
+        <summary className="min-h-11 cursor-pointer text-sm font-medium">No prior setup email comparison</summary>
+        <p className="text-xs text-muted-foreground">Excludes every setup with an assisted linked trade. Missing, late and unpublished shadow decisions are excluded from disagreements.</p>
+        <IsaacComparison label="No prior setup email" score={score.independent} />
+      </details>
     </section>
   );
+}
+
+function IsaacComparison({ label, score }: { label: string; score: ScannerIsaacScore }) {
+  const labels = { shadow_only: "Shadow TAKE · no linked trade", isaac_only: "Isaac traded · Shadow SKIP", both_took: "Shadow TAKE · linked trade", both_passed: "Shadow SKIP · no linked trade" };
+  return (
+    <div className="mt-3 border-t pt-3" aria-label={label}>
+      <h3 className="text-sm font-semibold">Isaac · {label}</h3>
+      <p className="mt-1 text-xs text-muted-foreground">{score.traded} / {score.setups} setups linked · {score.assisted} with email before entry · {score.independent} without prior setup email · {score.closed} closed trades</p>
+      <p className="mt-1 text-sm tabular-nums">{score.priced ? `${money(score.pnl_per_contract)} / contract · ${money(score.pnl_dollars)} actual dollars` : "No evaluated trades"}</p>
+      <p className="mt-1 text-[11px] text-amber-300">
+        {score.evidence === "not enough" ? "Not enough evidence" : "30+ traded setups"}
+        {(["assisted", "independent", "closed"] as const).map((key) => score.group_evidence[key] === "not enough" ? ` · ${key === "assisted" ? "email before entry" : key === "independent" ? "no prior email" : "closed"}: <30` : ` · ${key === "assisted" ? "email before entry" : key === "independent" ? "no prior email" : "closed"}: 30+`)}
+      </p>
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-full min-w-[480px] text-xs" aria-label={`${label} disagreements`}>
+          <thead className="text-muted-foreground"><tr>
+            <th className="py-2 text-left font-medium">Disagreements</th>
+            <th className="p-2 text-right font-medium">Count</th>
+            <th className="p-2 text-right font-medium">Rules / ct</th>
+            <th className="p-2 text-right font-medium">Shadow / ct</th>
+            <th className="py-2 pl-2 text-right font-medium">Isaac / ct</th>
+          </tr></thead>
+          <tbody>{(Object.keys(labels) as Array<keyof typeof labels>).map((key) => {
+            const group = score.disagreements[key];
+            return <tr key={key} className="border-t align-top">
+              <td className="py-2 pr-2"><div>{labels[key]}</div><div className="mt-1 text-[11px] text-amber-300">{group.evidence === "not enough" ? "Not enough evidence" : "30+ in group"}</div></td>
+              <td className="p-2 text-right tabular-nums">{group.count}</td>
+              <td className="p-2 text-right tabular-nums">{money(group.rules_priced ? group.rules_pnl : null)}<div className="text-muted-foreground">{group.rules_priced} priced</div></td>
+              <td className="p-2 text-right tabular-nums">{money(group.shadow_priced ? group.shadow_pnl : null)}<div className="text-muted-foreground">{group.shadow_priced} priced</div></td>
+              <td className="py-2 pl-2 text-right tabular-nums">{money(group.isaac_priced ? group.isaac_pnl_per_contract : null)}<div className="text-muted-foreground">{group.isaac_priced} priced</div>{group.isaac_priced > 0 && <div className="mt-1 text-muted-foreground">{money(group.isaac_pnl_dollars)} actual $</div>}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">Counts are setups; results sum priced trades per contract. Shadow SKIP with no linked trade shows rules results only. Assisted means an email was sent before entry; it does not prove the email was read or followed. No prior email does not establish independence.</p>
+    </div>
+  );
+}
+
+function IsaacTrade({ c }: { c: ScannerCandidateRow }) {
+  if (!c.isaac.traded) return <span className="text-xs text-muted-foreground">No linked trade</span>;
+  return <details className="min-w-36">
+    <summary className="min-h-11 cursor-pointer">
+      <span className="font-medium">Traded</span>
+      {c.isaac.assisted && <span className="ml-2 rounded bg-amber-500/15 px-1.5 py-0.5 text-[11px] text-amber-300">Assisted</span>}
+      <div className="mt-1 whitespace-nowrap text-xs tabular-nums">{c.isaac.status === "open" ? "Open" : c.isaac.pnl_per_contract === null ? "Unpriced" : `${money(c.isaac.pnl_per_contract)} / ct`}</div>
+      {c.isaac.extra_trade_ids.length > 0 && <div className="text-xs text-muted-foreground">+{c.isaac.extra_trade_ids.length} more trades</div>}
+    </summary>
+    <div className="mt-2 space-y-3 text-xs">{c.isaac.trades.map((trade) => <div key={trade.trade_id}>
+      <div className="break-all font-medium">Trade {trade.trade_id}</div>
+      <div>{trade.contract.expiration} {trade.contract.strike}{trade.contract.option_type === "call" ? "C" : "P"}</div>
+      <div>{nyTime(trade.opened_at)} ET · {trade.status} · {trade.assisted ? "Email before entry" : "No prior setup email"}</div>
+      <div>{trade.status === "open" ? "Open" : `${money(trade.pnl_per_contract)} / ct · ${money(trade.realized_pnl)} actual $`}</div>
+      {trade.contract_differs && <div className="text-muted-foreground">Different strike or expiration</div>}
+    </div>)}</div>
+  </details>;
 }
 
 function setupLabel(c: ScannerCandidateRow) {
@@ -134,6 +196,7 @@ function emailLabel(c: ScannerCandidateRow) {
 function shadowDecisionLabel(c: ScannerCandidateRow) {
   if (c.shadow.decision) return c.shadow.decision === "take" ? "TAKE" : "SKIP";
   const labels: Record<ScannerCandidateRow["shadow"]["status"], string> = {
+    not_published: "Not published",
     no_contract: "No contract",
     awaiting_decision: "Awaiting",
     no_response: "No response",
@@ -156,6 +219,7 @@ function ShadowDecision({ c }: { c: ScannerCandidateRow }) {
         {shadowDecisionLabel(c)}
       </summary>
       <div className="mt-1 w-56 max-w-[calc(100vw-2rem)] space-y-1 rounded border bg-background p-2 text-xs shadow-lg">
+        <p className="text-muted-foreground">Publication: {c.shadow.publication === "written" ? "Recorded" : c.shadow.publication === "expired" ? "Expired before handoff" : "No handoff record"}</p>
         {detail && <p className="whitespace-normal text-foreground">{detail}</p>}
         {c.shadow.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
@@ -191,7 +255,7 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
           Setups found by the rules (VWAP fade and opening-range break) and what each would have done as a
           one-contract paper trade: buy at the ask, sell at the bid, 60-minute time stop. Shadow Isaac takes or
-          skips those setups for a separate paper book with the same contract and exits. Nothing here places
+          skips those setups for a separate paper book with the same contract and exits. Isaac’s matched real trades appear alongside them. Matching does not prove a setup was followed; actual contracts and exits may differ. Nothing here places
           real orders or changes your fills or trades.
         </p>
         {!data.enabled && (
@@ -243,6 +307,7 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
                   <th className="px-4 py-2 text-left font-medium">Timing</th>
                   <th className="px-4 py-2 text-left font-medium">Clean order</th>
                   <th className="px-4 py-2 text-left font-medium">Shadow result</th>
+                  <th className="px-4 py-2 text-left font-medium">Isaac</th>
                 </tr>
               </thead>
               <tbody>
@@ -292,6 +357,7 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
                         {c.shadow.clean_order === true ? <span className="text-emerald-300">Yes</span> : c.shadow.clean_order === false ? <span className="text-amber-300">No</span> : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="whitespace-nowrap px-4 py-2 tabular-nums">{shadowResult(c)}</td>
+                      <td className="px-4 py-2"><IsaacTrade c={c} /></td>
                     </tr>
                   );
                 })}

@@ -106,6 +106,7 @@ Per day and cumulative: setups; Shadow Isaac TAKE / SKIP / late / no response;
 rules-only P&L over all priced setups; Shadow Isaac P&L over its priced TAKEs;
 the P&L of the rules trades it skipped; counts with `clean_order` true. Any
 group under 30 decisions says "not enough evidence".
+S2 extends this display with [Isaac trade links and disagreements](shadow-build-plan.md#s2--built-isaac-in-the-scorecard).
 
 ## Acceptance
 
