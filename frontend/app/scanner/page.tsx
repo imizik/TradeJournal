@@ -190,8 +190,9 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         <h1 className="text-xl font-semibold text-foreground">Scanner</h1>
         <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
           Setups found by the rules (VWAP fade and opening-range break) and what each would have done as a
-          one-contract paper trade: buy at the ask, sell at the bid, 60-minute time stop. No AI, no alerts and no
-          real orders; nothing here touches your fills or trades.
+          one-contract paper trade: buy at the ask, sell at the bid, 60-minute time stop. Shadow Isaac takes or
+          skips those setups for a separate paper book with the same contract and exits. Nothing here places
+          real orders or changes your fills or trades.
         </p>
         {!data.enabled && (
           <p className="mt-2 text-sm text-amber-300">The scanner is switched off on this server, so no new setups are being recorded.</p>
