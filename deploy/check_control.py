@@ -69,6 +69,8 @@ def stage(destination, *, wheels):
     for relative in filter(None, reviewed_git("ls-files", "-z", "backend/app").decode().split("\0")):
         if relative.endswith(".py"):
             originals[relative] = SOURCE / relative
+    # The one data file the checks read: the official FOMC/CPI/jobs calendar (no personal data).
+    originals["backend/app/data/macro_calendar.json"] = SOURCE / "backend/app/data/macro_calendar.json"
     originals.update({f"units/{name}": TEMPLATES / name for name in UNITS})
     originals["proxy/Caddyfile.example"] = TEMPLATES / "Caddyfile.example"
     wheels = exact(wheels)

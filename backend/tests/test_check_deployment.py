@@ -106,6 +106,8 @@ def test_stage_is_private_disabled_and_complete(staged):
     manifest = control.validate(staged)
     assert manifest["enabled"] is False and "backend/app/engine/pretrade_check.py" in manifest["inventory"]
     assert not any(name.endswith((".env", ".db")) or "/tests/" in name for name in manifest["inventory"])
+    # The calendar the checks read ships; no other data file does.
+    assert [n for n in manifest["inventory"] if n.startswith("backend/app/data/")] == ["backend/app/data/macro_calendar.json"]
     assert json.loads((staged / "config/config.json").read_text())["enabled"] is False
     (staged / "config/config.json").write_text(json.dumps({"enabled": True, "profiles": []}))
     with pytest.raises(ValueError):

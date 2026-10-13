@@ -296,6 +296,7 @@ def test_preopen_defaults_and_premarket_facts_without_verdict():
              "expiration": "2026-11-20", "contracts": 2.0, "total_premium_paid": 420.0, "opened_at": "2026-10-01T10:00:00"}]
     assert check.preopen_tickers(held, [*rows, old], receipt, 8) == ["APLD", "SPY", "NVDA"]
     analysis = {"assessment": {"market_state": "premarket"}, "data": {"market_state": "premarket", "missing": [],
+        "staleness": {"is_stale": False, "last_trade_age_seconds": 40},
         "snapshot": {"price": 583.1, "prev_close": 580.0, "change_pct": 0.53, "gap_pct": None},
         "intraday": {"premarket_high": 583.5, "premarket_low": 579.2, "premarket_volume": 120000}}}
     view = check.preopen_view("spy", rows, analysis, receipt, held)
@@ -405,3 +406,22 @@ def test_market_facts_flag_reports_near_the_trade_and_old_reads():
     assert facts["earnings"]["date"] is None and notes == ["earnings date for APLD unreadable; not checked"]
     old_quote = [{**rows[1], "observed_at": "2026-10-13T20:15:00"}]  # Fetched just now, traded yesterday.
     assert "VIX is 17 h old" in check.market_facts("SPY", old_quote, receipt, "intraday")[1]
+
+
+def test_preopen_flags_old_premarket_prints_and_withholds_last_sessions_change():
+    receipt = datetime(2026, 10, 13, 13, 22, tzinfo=timezone.utc)  # 09:22 New York.
+
+    def read(age):
+        return {"assessment": {"market_state": "premarket"}, "data": {"market_state": "premarket", "missing": [],
+            "staleness": {"is_stale": False, "last_trade_age_seconds": age},
+            "snapshot": {"price": 210.83, "prev_close": 210.14, "change_pct": 0.33, "gap_pct": 0.1,
+                         "last_trade_time": "2026-10-12T19:59:58Z"}, "intraday": {}}}
+    fresh = check.preopen_view("QQQ", [], read(37), receipt)
+    assert fresh["live"]["fresh"] is True and fresh["live"]["change_pct"] == 0.33 and fresh["caveats"] == []
+    old = check.preopen_view("MU", [], read(17 * 60), receipt)
+    assert old["live"]["fresh"] is False and old["live"]["change_pct"] == 0.33
+    assert "last trade 17 min old; premarket is thin, confirm on your broker" in old["caveats"]
+    overnight = check.preopen_view("NBIS", [], read(17 * 3600), receipt)
+    assert overnight["live"]["change_pct"] is None and overnight["live"]["gap_pct"] is None
+    assert overnight["caveats"][0].startswith("no trade since the last session (last 2026-10-12T19:59:58Z)")
+    assert check.preopen_view("NBIS", [], read(None), receipt)["live"]["fresh"] is False
