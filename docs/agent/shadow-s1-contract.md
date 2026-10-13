@@ -158,8 +158,8 @@ connection remains separate from the SMTP credential.
 
 The v3 post-five-minute readiness check returned `oauth_refresh_token_missing`.
 Isaac subsequently created v4 in Jo's conversation; its read-only baseline at
-15:04:20 and six-minute check at 15:10:29 passed without reconnecting. The
-production task now uses that v4 connection. The owner's longer connection
+15:04:20, six-minute check at 15:10:29 and 60-minute check at 16:04:29 passed
+without reconnecting. The production task now uses that v4 connection. The owner's longer connection
 checks remain separate. Access-token lifetimes remain 300 seconds; no Auth0
 grant or longer token lifetime was used as a workaround.
 
@@ -174,9 +174,9 @@ not a claim about undocumented Gmail event filtering rules.
 
 At Isaac's request to fix the route, the lead added one narrow Outlook rule:
 only the existing scanner sender **and** `TJ Setup:` in the subject forward to
-the original owner Gmail alias. Other rules were preserved; no delete/move or
-broad inbox forwarding was added. A VPS SMTP probe sent at 15:44:35 reached
-Gmail as an incoming `FW: TJ Setup:` message at 15:44:38; the automatic task
+the original owner Gmail alias. Other rules were preserved; the initial relay
+added no delete/move or broad inbox forwarding. A VPS SMTP probe sent at
+15:44:35 reached Gmail as an incoming `FW: TJ Setup:` message at 15:44:38; the automatic task
 acknowledgement at 15:44:53 identified that exact Gmail message. It used no
 candidate ID, financial tool or shadow decision. The lead then changed only
 the API's scanner email recipient to the owner's relay inbox, retained a
@@ -193,6 +193,15 @@ at 15:47:56; the native task inventory records its automatic production run at
 15:48:15. The task stayed silent, and a read-only ledger audit found zero
 authenticated check calls or decisions since the relay probe. Delivery proof
 is not actual Jo decision or first-session acceptance; that evidence remains pending.
+
+At Isaac's subsequent request to keep the inboxes clear, the Outlook rule gained
+a move action to **TradeJournal Setups** after forwarding. A narrow Gmail filter
+labels matching owner-relay/scanner messages to the setup alias as
+**TradeJournal/Setups** and skips the inbox; existing matching conversations
+were filed as well. Nothing was deleted or marked read. A fresh SMTP probe at
+16:03:01 reached the Outlook folder and Gmail label at 16:03:08 without an
+INBOX label; native task inventory records an automatic run at 16:03:34.
+Thus the tested filing configuration preserves the incoming-event wake-up.
 
 A read of a naturally published, already-expired AMD setup succeeded with
 `expired=true`; no decision was submitted. Its historical cohorts matched the
