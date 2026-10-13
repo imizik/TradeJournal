@@ -312,6 +312,57 @@ was, and what overriding cost.
 
 Shadow Isaac ([design](shadow-trader-design.md)) follows the advisor.
 
+## Manual advice recording and candle evidence (October 13, 2026)
+
+The owner approved a prompt-first improvement after the October 13 session:
+specific actionable advice in Jo's conversation should use the existing
+`pre_trade_check` → `attach_model_verdict` sequence before the final verdict.
+The returned check ID identifies the saved record. Broad market discussion
+and pre-open watchlists do not become invented trade ideas. Missing required
+idea details need clarification; missing data is not a deliberate bearish
+`pass`. Failed saves must be disclosed as unrecorded advice.
+
+The short saved narrative should include the evidence/candle cutoff, trigger,
+invalidation, expiry or recheck condition and material gaps when known. These
+are narrative contents, not new structured fields. A materially changed idea
+or fresh reassessment uses a new `operation_id`; only an uncertain retry of
+the same request reuses its ID. Do not backfill old conversations as decisions
+made before the outcome. Measure actual check/verdict completeness on future
+sessions; acknowledging instructions is not evidence of adherence.
+
+For manual chart analysis through Jo's separate Alpaca connector:
+
+- Set explicit timezone-aware start/end, feed, timeframe, sort and limit.
+  Read one symbol at a time, at most 60 recent one-minute bars with descending
+  sort, then interpret them chronologically. Use the already authorized IEX
+  route and disclose that it is not consolidated full-market data; do not
+  silently switch feeds or change credentials/subscriptions.
+- Record actual first/last timestamps, gaps and whether the requested interval
+  was covered. A fresh quote does not make old candles fresh. Exclude bars
+  whose start plus timeframe exceeds the analysis cutoff; an inclusive end
+  can return the still-forming bar. A limit-sized response is not proof that
+  a larger interval is complete.
+- After a transport timeout, make at most one shorter-window retry. Stop on
+  authentication or rate-limit errors. If candle evidence is still missing,
+  report that limitation rather than infer structure from isolated prices.
+
+Read-only diagnosis on October 13: an explicit IEX NVDA one-minute request
+from 10:00 through 10:13 Eastern returned 14 bars including the 10:13 bar;
+only bars through 10:12 would have been complete at a 10:13 cutoff. A second
+request with the same start, ascending sort, limit 20 and no end returned the
+first 20 bars through 10:19. Both succeeded after hours. This confirms boundary
+and truncation handling, **not** the cause or resolution of the earlier live
+timeouts. Intraday reliability still needs a natural market-hours observation.
+Alpaca documents an [inclusive end and a total response limit](https://docs.alpaca.markets/us/reference/stockbars);
+the provider's default end also depends on feed access.
+
+These instructions apply to manual advice, not pre-commit shadow evidence.
+The existing Gmail task retains `shadow_setup` → `shadow_decide` before its
+co-pilot calls, both independence labels and its source/freshness guards.
+No extra candle reads may be inserted before that shadow commit. Scanner
+rules, universe and task schedule are unchanged. Natural SH-6 acceptance
+remains governed by the [S1 contract](shadow-s1-contract.md#acceptance).
+
 ## Acceptance
 
 During a regular session, Isaac asks Jo for at least three real checks from his
