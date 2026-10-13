@@ -5,7 +5,7 @@ the advisor to the shadow trader. Build step 4 of the
 [shadow trader design](shadow-trader-design.md#build-order-after-dots-steps-35),
 narrowed to the smallest version that produces a comparable record.
 Reworked October 13 with Isaac's go-ahead to use the recommended choices.
-**Contract only; nothing here is built, granted or activated.** The execution
+**Implementation is tracked by the build plan; S1 is not granted or activated.** The execution
 plan, work split and model guidance are in the [shadow build plan](shadow-build-plan.md).
 
 ## Owner decisions (October 13, 2026)
@@ -71,7 +71,7 @@ fields only: ID, symbol, setup, direction, bar times, `detected_at`,
 params hash) into `/var/lib/tradejournal-shadow/setups/`, written by the API
 user and readable by `tj-check`. The check service already reads any path its
 unit does not hide, so this needs no database role, view or timer and adds no
-publication lag. The API unit gains `ReadWritePaths=/var/lib/tradejournal-shadow`.
+publication lag. The API unit gains `ReadWritePaths=-/var/lib/tradejournal-shadow` (optional until activation).
 
 **Tools on `/check/mcp`, new scope `shadow:decide`:**
 

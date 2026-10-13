@@ -19,7 +19,26 @@ FORMAT = "pretrade-check-record-v1"
 VERDICTS = ("go", "wait", "pass", "insufficient_data")
 MAX_SUMMARY = 2000
 
+SHADOW_LABELS = ["informed-by-history", "independence-unverified"]
+
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS tool_call (
+    id INTEGER PRIMARY KEY, actor TEXT NOT NULL, tool TEXT NOT NULL, called_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS shadow_decision (
+    decision_id TEXT PRIMARY KEY, actor TEXT NOT NULL, candidate_id TEXT NOT NULL,
+    decision TEXT NOT NULL, reason TEXT NOT NULL, committed_at TEXT NOT NULL,
+    timing TEXT NOT NULL, clean_order INTEGER NOT NULL, setup_sha256 TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL, UNIQUE(actor, candidate_id)
+);
+CREATE TRIGGER IF NOT EXISTS tool_call_no_update BEFORE UPDATE ON tool_call
+BEGIN SELECT RAISE(ABORT, 'tool calls are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS tool_call_no_delete BEFORE DELETE ON tool_call
+BEGIN SELECT RAISE(ABORT, 'tool calls are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS shadow_decision_no_update BEFORE UPDATE ON shadow_decision
+BEGIN SELECT RAISE(ABORT, 'shadow decisions are immutable'); END;
+CREATE TRIGGER IF NOT EXISTS shadow_decision_no_delete BEFORE DELETE ON shadow_decision
+BEGIN SELECT RAISE(ABORT, 'shadow decisions are immutable'); END;
 CREATE TABLE IF NOT EXISTS check_record (
     check_id TEXT PRIMARY KEY,
     actor TEXT NOT NULL,
@@ -95,6 +114,58 @@ class Ledger:
         db.execute("PRAGMA journal_mode = WAL")
         db.execute("PRAGMA synchronous = FULL")
         return db
+
+    def log_call(self, actor: str, tool: str, now=None):
+        db = self._connect()
+        try:
+            db.execute("INSERT INTO tool_call(actor, tool, called_at) VALUES (?, ?, ?)",
+                (actor, tool, now.isoformat() if now is not None else now_utc()))
+        finally:
+            db.close()
+
+    def decide(self, actor, setup, decision, reason, now):
+        if decision not in ("take", "skip") or not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
+            raise ValueError("Use take|skip and a non-empty reason of at most 1000 characters")
+        if now.tzinfo is None:
+            raise ValueError("Decision time must have a timezone")
+        db = self._connect()
+        db.row_factory = sqlite3.Row
+        try:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM shadow_decision WHERE actor=? AND candidate_id=?",
+                (actor, setup["candidate_id"])).fetchone()
+            if row is not None:
+                result = {"format": "shadow-decision-v1", **dict(row), "clean_order": bool(row["clean_order"]),
+                    "labels": list(SHADOW_LABELS)}
+                if any(result[key] != value for key, value in
+                        (("decision", decision), ("reason", reason), ("setup_sha256", setup["content_sha256"]))):
+                    raise Conflict("A different shadow decision is already committed")
+                if digest({k: v for k, v in result.items() if k != "content_sha256"}) != result["content_sha256"]:
+                    raise ValueError("Shadow decision integrity failed")
+            else:
+                detected = datetime.fromisoformat(setup["detected_at"])
+                expires = datetime.fromisoformat(setup["expires_at"])
+                calls = db.execute("SELECT called_at FROM tool_call WHERE actor=? AND tool NOT IN (?, ?)",
+                    (actor, "shadow_setup", "shadow_decide")).fetchall()
+                clean = not any(detected <= datetime.fromisoformat(call[0]) <= now for call in calls)
+                result = {"format": "shadow-decision-v1", "decision_id": "shd_" + str(uuid.uuid4()),
+                    "actor": actor, "candidate_id": setup["candidate_id"], "decision": decision, "reason": reason,
+                    "committed_at": now.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "timing": "late" if now >= expires else "on_time", "clean_order": clean,
+                    "setup_sha256": setup["content_sha256"], "labels": list(SHADOW_LABELS)}
+                result["content_sha256"] = digest(result)
+                keys = ("decision_id", "actor", "candidate_id", "decision", "reason", "committed_at", "timing",
+                    "clean_order", "setup_sha256", "content_sha256")
+                db.execute("INSERT INTO shadow_decision VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    tuple(result[key] for key in keys))
+            db.execute("COMMIT")
+            return result
+        except BaseException:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            raise
+        finally:
+            db.close()
 
     def find(self, actor: str, operation_id: str, request_sha256: str):
         """Original record for an identical retry; Conflict for different content."""

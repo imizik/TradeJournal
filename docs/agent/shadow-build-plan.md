@@ -42,11 +42,11 @@ send the evidence, not a retry.
 |---|---|---|---|---|---|---|
 | SC-0 | Daily scanner health check (ops, no code) | ops | Luna, low | — | live | Ready |
 | SC-1 | Quote reads off the monitor loop's critical path | B | Luna, medium | 1 | — | Ready |
-| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Ready |
-| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Ready after SH-1 |
-| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Ready after SH-2 |
-| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Ready |
-| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | After SH-4 |
+| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Implemented; review/CI pending (Lane A) |
+| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Implemented; review/CI pending (Lane A) |
+| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Implemented; native permissions proof/review pending (Lane A) |
+| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Implemented in Lane B; review/CI pending |
+| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | In progress in Lane B |
 | SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | Later |
 | SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
 | S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Later |
@@ -217,7 +217,8 @@ includes `/var/lib/tradejournal` but not `/var/lib/tradejournal-shadow`.
 bundle that changes check units, so the plan keeps the check units unchanged.
 
 **Do.**
-1. API unit: add `ReadWritePaths=/var/lib/tradejournal-shadow`. This ships
+1. API unit: add `ReadWritePaths=-/var/lib/tradejournal-shadow` (optional until activation,
+   so ordinary releases still start before the operator creates the directory). This ships
    with the normal release (autodeploy). Update `backend/tests/test_deployment.py`
    expectations.
 2. A new `check_control.py enable-shadow-exchange` command (root, idempotent,
@@ -227,7 +228,10 @@ bundle that changes check units, so the plan keeps the check units unchanged.
    traverse-only (`--x`) on `/var/lib/tradejournal-check` and read on the
    outbox (plus a default ACL so new files are readable). Verify afterwards that
    `tradejournal` cannot read the ledger file (`sudo -u tradejournal test -r` must
-   fail) and record the result. `disable-shadow-exchange` removes the ACLs.
+   fail) and record the result. `disable-shadow-exchange` removes the ACLs. The host needs the Ubuntu `acl`
+   package; commands require the existing private check ledger and refuse unknown
+   identities, symlinks, directory ownership/modes or ACL grants. The permission
+   receipt is `/opt/tradejournal-check/shadow-exchange.json`.
 3. Config: the operator adds `shadow_setups_dir` and `shadow_outbox_dir` to
    `/etc/tradejournal-check/config.json`; the backend reads
    `SHADOW_SETUPS_DIR` and `SHADOW_OUTBOX_DIR` from

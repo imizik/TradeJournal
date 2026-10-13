@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import grp
 import json
+import os
+import stat
 from pathlib import Path
 import platform
 import pwd
@@ -33,6 +35,8 @@ FORMAT = "check-disabled-bundle-v1"
 ROOT = Path("/opt/tradejournal-check")
 CONFIG = Path("/etc/tradejournal-check")
 STATE = Path("/var/lib/tradejournal-check")
+SHADOW = Path("/var/lib/tradejournal-shadow")
+API_USER = "tradejournal"
 KEYS = Path("/var/lib/tradejournal-check-keys")
 FEATURES = Path("/var/lib/tradejournal-check-features")
 RUN = Path("/run/tradejournal-check")
@@ -430,9 +434,76 @@ def remove():
     return {"removed_units": sorted(record["units"]), "preserved": [str(STATE), str(KEYS), str(FEATURES), str(CONFIG)]}
 
 
+def _exchange_acl(path, allowed):
+    result = old.run("getfacl", "-cpn", path)
+    entries = set(line.strip() for line in result.stdout.decode().splitlines() if line and not line.startswith("#"))
+    if not entries <= allowed:
+        raise ValueError("Unknown shadow exchange ACL: " + str(path))
+
+
+def shadow_exchange(enable):
+    """Operator-only filesystem handoff. No service, config, grant or unit changes."""
+    record = installed()
+    api = pwd.getpwnam(API_USER)
+    service_uid, gid = record["uids"]["service"], record["gid"]
+    if api.pw_uid == service_uid or api.pw_gid == gid or gid in os.getgrouplist(API_USER, api.pw_gid):
+        raise ValueError("API identity must not belong to the check group")
+    outbox, setups = STATE / "shadow-outbox", SHADOW / "setups"
+    ledger = exact(STATE / "ledger.db")
+    if not ledger.is_file() or ledger.stat().st_uid != service_uid or ledger.stat().st_mode & 0o077:
+        raise ValueError("Require an existing private check ledger")
+    reader = f"user:{api.pw_uid}:"
+    state_info = exact(STATE).stat()
+    if not stat.S_ISDIR(state_info.st_mode) or state_info.st_uid != service_uid or state_info.st_gid != gid:
+        raise ValueError("Unknown check state ownership")
+    _exchange_acl(STATE, {"user::rwx", "group::---", "other::---", reader + "--x", "mask::--x", "mask::---"})
+    directories = ((SHADOW, api.pw_uid, gid, 0o2750), (setups, api.pw_uid, gid, 0o2750),
+        (outbox, service_uid, gid, 0o750))
+    for path, uid, group, mode in directories:
+        exact(path, exists=False)
+        if path.exists():
+            info = path.stat()
+            if not stat.S_ISDIR(info.st_mode) or (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (uid, group, mode):
+                raise ValueError("Unknown shadow exchange directory: " + str(path))
+            base = {"user::rwx", "group::r-x", "other::---"}
+            if path == outbox:
+                base |= {reader + "r-x", "mask::r-x", "default:user::rwx", "default:group::r-x",
+                    "default:other::---", "default:" + reader + "r-x", "default:mask::r-x"}
+            _exchange_acl(path, base)
+    if old.run("sudo", "-u", API_USER, "test", "-r", ledger, check=False).returncode == 0:
+        raise ValueError("API can already read the private ledger; refuse exchange")
+    if enable:
+        try:
+            for path, uid, group, mode in directories:
+                if not path.exists():
+                    path.mkdir(mode=mode)
+                    old.run("chown", f"{uid}:{group}", path)
+                    path.chmod(mode)
+            old.run("setfacl", "-m", f"u:{API_USER}:--x", STATE)
+            old.run("setfacl", "-m", f"u:{API_USER}:r-x,d:u:{API_USER}:r-x", outbox)
+            if old.run("sudo", "-u", API_USER, "test", "-r", ledger, check=False).returncode == 0:
+                raise ValueError("API ledger isolation failed")
+            if old.run("sudo", "-u", API_USER, "test", "-r", outbox, check=False).returncode != 0:
+                raise ValueError("API outbox read verification failed")
+        except BaseException:
+            old.run("setfacl", "-x", f"u:{API_USER}", STATE, check=False)
+            if outbox.exists():
+                old.run("setfacl", "-x", f"u:{API_USER},d:u:{API_USER}", outbox, check=False)
+            raise
+    else:
+        old.run("setfacl", "-x", f"u:{API_USER}", STATE)
+        if outbox.exists():
+            old.run("setfacl", "-x", f"u:{API_USER},d:u:{API_USER}", outbox)
+    result = {"enabled": enable, "ledger_readable_by_api": False, "api_uid": api.pw_uid,
+        "setups": str(setups), "outbox": str(outbox)}
+    private_file(ROOT / "shadow-exchange.json", (json.dumps(result, indent=2) + "\n").encode(), mode=0o600)
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=("stage", "install", "check", "stop", "upgrade", "add-context-views", "remove"))
+    parser.add_argument("action", choices=("stage", "install", "check", "stop", "upgrade", "add-context-views", "remove",
+        "enable-shadow-exchange", "disable-shadow-exchange"))
     parser.add_argument("--bundle", type=Path)
     parser.add_argument("--wheels", type=Path, help="Already verified release wheels; no downloading")
     parser.add_argument("--approve-install")
@@ -461,6 +532,8 @@ def main():
             parser.error("add-context-views requires --bundle and one --approve-sql")
         add_context_views(args.bundle, args.approve_sql[0])
         print(json.dumps({"context_views": "applied", "started": False}))
+    elif args.action in ("enable-shadow-exchange", "disable-shadow-exchange"):
+        print(json.dumps(shadow_exchange(args.action == "enable-shadow-exchange")))
     elif args.action == "check":
         print(json.dumps(check()))
     elif args.action == "stop":

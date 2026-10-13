@@ -855,6 +855,7 @@ def test_plan_reviews_are_packaged_opt_in_with_a_pinned_claude_code_and_the_toke
     timer = (systemd / "tradejournal-plan-reviews.timer").read_text()
     assert "20:10:00 America/New_York" in timer and "Persistent=true" in timer
     api = (systemd / "tradejournal-api.service").read_text()
+    assert "ReadWritePaths=-/var/lib/tradejournal-shadow" in api
     assert "EnvironmentFile=-/etc/tradejournal/claude-plan.env" in api  # optional for the API
     pinned = json.loads((root / "deploy/claude-code/package.json").read_text())["dependencies"]["@anthropic-ai/claude-code"]
     assert re.fullmatch(r"\d+\.\d+\.\d+", pinned)

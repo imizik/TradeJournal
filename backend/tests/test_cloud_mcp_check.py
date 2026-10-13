@@ -130,10 +130,10 @@ IDEA = {"ticker": "spy", "side": "long", "instrument": "stock", "horizon": "intr
 def test_catalog_metadata_and_scopes(harness):
     with TestClient(harness.server().streamable_http_app()) as client:
         metadata = client.get("/.well-known/oauth-protected-resource/check/mcp").json()
-        assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == [*SCOPES.split(), "offline_access"]
+        assert metadata["resource"] == RESOURCE and metadata["scopes_supported"] == [*SCOPES.split(), "shadow:decide", "offline_access"]
         tools = {t["name"]: t for t in rpc(client, "", {}, harness.token(), "tools/list").json()["result"]["tools"]}
         assert set(tools) == {"pre_trade_check", "attach_model_verdict", "review_checks", "position_check", "get_notes",
-        "preopen_watchlist", "grade_checks"}
+        "preopen_watchlist", "grade_checks", "shadow_setup", "shadow_decide"}
         assert tools["review_checks"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read"]}]
         assert tools["pre_trade_check"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:run"]}]
         assert tools["attach_model_verdict"]["securitySchemes"] == [{"type": "oauth2", "scopes": ["check:read", "check:note"]}]
@@ -210,6 +210,7 @@ def test_recorded_live_check_saves_immutable_record_and_replays(harness):
     for statement in ("UPDATE check_record SET actor = 'x'", "DELETE FROM check_record"):
         with pytest.raises(sqlite3.DatabaseError):
             db.execute(statement)
+    db.close()  # Release the failed-update transaction before the required call-log write.
     # A restarted service reopens the same record unchanged.
     with TestClient(harness.server().streamable_http_app()) as client:
         reopened = call(client, "pre_trade_check", {**IDEA, "stop": round(SPY_LAST * 0.99, 2), "operation_id": operation,
