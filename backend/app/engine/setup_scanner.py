@@ -503,12 +503,16 @@ def _shadow_view(state: dict, status: str) -> dict:
     exit_ = state.get("shadow_exit")
     intent = state.get("shadow_exit_intent")
     unresolved = state.get("shadow_unresolved")
+    labels = ["informed-by-history", "independence-unverified"]
+    if decision:
+        labels.extend(label for label in decision.get("labels", []) if label not in labels)
     return {
         "decision": decision.get("decision") if decision else None,
-        "reason": decision.get("reason") if decision else (unresolved.get("reason") if unresolved else None),
+        "reason": decision.get("reason") if decision else None,
+        "unresolved_reason": unresolved.get("reason") if unresolved else None,
         "timing": decision.get("timing") if decision else None,
         "clean_order": decision.get("clean_order") if decision else None,
-        "labels": decision.get("labels", []) if decision else [],
+        "labels": labels,
         "status": status,
         "entry": _event_public(entry),
         "exit": _event_public(exit_),
@@ -549,7 +553,7 @@ def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
                 score["clean_order"] += 1
         elif shadow == "no_response":
             score["no_response"] += 1
-        elif shadow == "unresolved":
+        if shadow == "unresolved":
             score["unresolved"] += 1
         shadow_exit = state.get("shadow_exit")
         if shadow_exit:
@@ -559,7 +563,7 @@ def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
         score[key] = round(score[key], 2)
     score["evidence"] = "not enough" if score["decisions"] < 30 else "sufficient count"
     score["group_evidence"] = {
-        "rules": "not enough" if score["decisions"] < 30 else "sufficient count",
+        "rules": "not enough" if score["setups"] < 30 else "sufficient count",
         "takes": "not enough" if score["take"] < 30 else "sufficient count",
         "skipped": "not enough" if score["skip"] < 30 else "sufficient count",
     }

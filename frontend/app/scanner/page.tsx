@@ -48,7 +48,7 @@ function Card({ label, value, hint }: { label: string; value: string; hint?: str
 
 function Scorecard({ label, score }: { label: string; score: ScannerScorecard }) {
   const rows = [
-    { label: "Rules · all setups", count: score.decisions, priced: score.rules_priced, pnl: score.rules_pnl, hint: "all setup decisions", evidence: score.group_evidence.rules },
+    { label: "Rules · all setups", count: score.setups, priced: score.rules_priced, pnl: score.rules_pnl, hint: "all setups", evidence: score.group_evidence.rules },
     { label: "Shadow · TAKEs", count: score.take, priced: score.shadow_priced, pnl: score.shadow_pnl, hint: "on-time TAKE decisions", evidence: score.group_evidence.takes },
     { label: "Rules · skipped", count: score.skip, priced: score.skipped_priced, pnl: score.skipped_rules_pnl, hint: "on-time SKIP decisions", evidence: score.group_evidence.skipped },
   ];
@@ -65,7 +65,7 @@ function Scorecard({ label, score }: { label: string; score: ScannerScorecard })
           <thead className="text-xs text-muted-foreground">
             <tr>
               <th className="pb-2 text-left font-medium">Group</th>
-              <th className="pb-2 text-right font-medium">Decisions</th>
+              <th className="pb-2 text-right font-medium">Count</th>
               <th className="pb-2 text-right font-medium">P&L</th>
             </tr>
           </thead>
@@ -155,8 +155,8 @@ function ShadowDecision({ c }: { c: ScannerCandidateRow }) {
       <summary className="list-none cursor-pointer whitespace-nowrap rounded px-1 py-1 font-medium text-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
         {shadowDecisionLabel(c)}
       </summary>
-      <div className="absolute right-0 top-full z-20 mt-1 w-56 max-w-[calc(100vw-2rem)] space-y-1 rounded border bg-background p-2 text-xs shadow-lg">
-        <p className="whitespace-normal text-foreground">{detail || "No reason recorded."}</p>
+      <div className="mt-1 w-56 max-w-[calc(100vw-2rem)] space-y-1 rounded border bg-background p-2 text-xs shadow-lg">
+        {detail && <p className="whitespace-normal text-foreground">{detail}</p>}
         {c.shadow.labels.length > 0 && (
           <div className="flex flex-wrap gap-1 pt-1">
             {c.shadow.labels.map((label) => (
@@ -173,7 +173,7 @@ function shadowResult(c: ScannerCandidateRow) {
   if (c.shadow.result) {
     return <span className={c.shadow.result.pnl > 0 ? "text-emerald-400" : c.shadow.result.pnl < 0 ? "text-red-400" : "text-foreground"}>{money(c.shadow.result.pnl)}</span>;
   }
-  if (c.shadow.status === "unresolved") return <span className="text-xs text-amber-300">{c.shadow.reason || "Unresolved"}</span>;
+  if (c.shadow.status === "unresolved") return <span className="text-xs text-amber-300">{c.shadow.unresolved_reason || "Unresolved"}</span>;
   if (c.shadow.entry) return <span className="text-xs text-muted-foreground">Open</span>;
   return <span className="text-xs text-muted-foreground">—</span>;
 }

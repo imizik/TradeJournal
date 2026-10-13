@@ -488,6 +488,42 @@ def test_no_response_starts_at_the_exact_expiry_time(engine):
     assert setup_scanner.shadow_status_of(candidate, {}, now=expiry) == "no_response"
 
 
+def test_shadow_view_separates_decision_rationale_from_unresolved_reason():
+    labels = ["informed-by-history", "independence-unverified"]
+    mixed = setup_scanner._shadow_view({
+        "shadow_decision": {"decision": "take", "reason": "setup rationale", "labels": labels},
+        "shadow_unresolved": {"reason": "decision export failed"},
+    }, "unresolved")
+    assert mixed["reason"] == "setup rationale"
+    assert mixed["unresolved_reason"] == "decision export failed"
+    assert mixed["labels"] == labels
+
+    no_response = setup_scanner._shadow_view({}, "no_response")
+    assert no_response["reason"] is None and no_response["unresolved_reason"] is None
+    assert no_response["labels"] == labels
+
+    rejected = setup_scanner._shadow_view({"shadow_unresolved": {"reason": "invalid decision export"}}, "unresolved")
+    assert rejected["reason"] is None and rejected["unresolved_reason"] == "invalid decision export"
+    assert rejected["labels"] == labels
+
+
+def test_scorecard_counts_mixed_unresolved_and_uses_setup_baseline(engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    candidate.expires_at = datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+    take = {"shadow_decision": {"decision": "take", "timing": "on_time"}}
+    mixed = {**take, "shadow_unresolved": {"reason": "entry was not priced"}, "exit": {"pnl": 10.0}}
+
+    score = setup_scanner._shadow_scorecard([(candidate, mixed), *((candidate, take) for _ in range(28)), (candidate, {})])
+
+    assert score["setups"] == 30 and score["decisions"] == 29 and score["take"] == 29
+    assert score["unresolved"] == 1 and score["no_response"] == 1
+    assert score["rules_priced"] == 1 and score["rules_pnl"] == 10.0
+    assert score["group_evidence"] == {"rules": "sufficient count", "takes": "not enough", "skipped": "not enough"}
+
+
 def test_tampered_shadow_decision_is_unresolved(engine, monkeypatch, tmp_path):
     monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
     monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))

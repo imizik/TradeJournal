@@ -602,6 +602,7 @@ export type ScannerEventRow = Record<string, unknown> & { at: string };
 export type ScannerShadowRow = {
   decision: "take" | "skip" | null;
   reason: string | null;
+  unresolved_reason: string | null;
   timing: "on_time" | "late" | null;
   clean_order: boolean | null;
   labels: string[];
