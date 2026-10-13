@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { api } from "@/lib/serverApi";
-import type { ScannerCandidateRow } from "@/lib/api";
+import type { ScannerCandidateRow, ScannerScorecard } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +46,57 @@ function Card({ label, value, hint }: { label: string; value: string; hint?: str
   );
 }
 
+function Scorecard({ label, score }: { label: string; score: ScannerScorecard }) {
+  const rows = [
+    { label: "Rules · all setups", count: score.decisions, priced: score.rules_priced, pnl: score.rules_pnl, hint: "all setup decisions", evidence: score.group_evidence.rules },
+    { label: "Shadow · TAKEs", count: score.take, priced: score.shadow_priced, pnl: score.shadow_pnl, hint: "on-time TAKE decisions", evidence: score.group_evidence.takes },
+    { label: "Rules · skipped", count: score.skip, priced: score.skipped_priced, pnl: score.skipped_rules_pnl, hint: "on-time SKIP decisions", evidence: score.group_evidence.skipped },
+  ];
+  return (
+    <section className="min-w-0 rounded-lg border bg-card p-4" aria-label={`${label} scorecard`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-foreground">{label}</h2>
+        <span className={`text-xs ${score.evidence === "not enough" ? "text-amber-300" : "text-muted-foreground"}`}>
+          {score.evidence === "not enough" ? "Not enough evidence" : "30+ decisions"} · {score.decisions} decisions
+        </span>
+      </div>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-xs text-muted-foreground">
+            <tr>
+              <th className="pb-2 text-left font-medium">Group</th>
+              <th className="pb-2 text-right font-medium">Decisions</th>
+              <th className="pb-2 text-right font-medium">P&L</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.label} className="border-t">
+                <td className="py-2 pr-2">
+                  <div className="font-medium text-foreground">{row.label}</div>
+                  <div className="text-xs text-muted-foreground">{row.hint}</div>
+                  <div className={`text-[11px] ${row.evidence === "not enough" ? "text-amber-300" : "text-muted-foreground"}`}>
+                    {row.evidence === "not enough" ? "Not enough evidence" : "30+ in group"}
+                  </div>
+                </td>
+                <td className="px-2 py-2 text-right tabular-nums text-foreground">{row.count}</td>
+                <td className={`py-2 pl-2 text-right tabular-nums ${row.pnl > 0 ? "text-emerald-400" : row.pnl < 0 ? "text-red-400" : "text-foreground"}`}>
+                  <div>{money(row.pnl)}</div>
+                  <div className="text-[11px] font-normal text-muted-foreground">{row.priced} priced</div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-3 text-xs leading-5 text-muted-foreground">
+        TAKE {score.take} · SKIP {score.skip} · late {score.late} · no response {score.no_response} · unresolved {score.unresolved} · clean order {score.clean_order}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">P&L is per contract after commission; each amount includes the priced count shown beside it.</p>
+    </section>
+  );
+}
+
 function setupLabel(c: ScannerCandidateRow) {
   if (c.setup === "orb") return "Opening-range break";
   return c.direction === "long" ? "VWAP fade (long)" : "VWAP fade (short)";
@@ -72,6 +123,61 @@ function Outcome({ c }: { c: ScannerCandidateRow }) {
   return <span className="text-xs text-muted-foreground">{reason ? String(reason) : "—"}</span>;
 }
 
+function emailLabel(c: ScannerCandidateRow) {
+  const status = String(c.events.email?.status ?? "");
+  if (status === "sent") return { label: "Sent", className: "text-emerald-300" };
+  if (status === "expired") return { label: "Expired", className: "text-amber-300" };
+  if (status === "skipped_daily_cap") return { label: "Capped", className: "text-amber-300" };
+  return { label: "—", className: "text-muted-foreground" };
+}
+
+function shadowDecisionLabel(c: ScannerCandidateRow) {
+  if (c.shadow.decision) return c.shadow.decision === "take" ? "TAKE" : "SKIP";
+  const labels: Record<ScannerCandidateRow["shadow"]["status"], string> = {
+    no_contract: "No contract",
+    awaiting_decision: "Awaiting",
+    no_response: "No response",
+    skipped: "SKIP",
+    late: "Late",
+    pending_entry: "TAKE · pending",
+    open: "TAKE · open",
+    exiting: "TAKE · exiting",
+    exit: "TAKE · closed",
+    unresolved: "Unresolved",
+  };
+  return labels[c.shadow.status];
+}
+
+function ShadowDecision({ c }: { c: ScannerCandidateRow }) {
+  const detail = c.shadow.reason;
+  return (
+    <details className="relative max-w-56">
+      <summary className="list-none cursor-pointer whitespace-nowrap rounded px-1 py-1 font-medium text-foreground hover:bg-secondary focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+        {shadowDecisionLabel(c)}
+      </summary>
+      <div className="absolute right-0 top-full z-20 mt-1 w-56 max-w-[calc(100vw-2rem)] space-y-1 rounded border bg-background p-2 text-xs shadow-lg">
+        <p className="whitespace-normal text-foreground">{detail || "No reason recorded."}</p>
+        {c.shadow.labels.length > 0 && (
+          <div className="flex flex-wrap gap-1 pt-1">
+            {c.shadow.labels.map((label) => (
+              <span key={label} className="rounded bg-muted px-1.5 py-0.5 text-muted-foreground">{label}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function shadowResult(c: ScannerCandidateRow) {
+  if (c.shadow.result) {
+    return <span className={c.shadow.result.pnl > 0 ? "text-emerald-400" : c.shadow.result.pnl < 0 ? "text-red-400" : "text-foreground"}>{money(c.shadow.result.pnl)}</span>;
+  }
+  if (c.shadow.status === "unresolved") return <span className="text-xs text-amber-300">{c.shadow.reason || "Unresolved"}</span>;
+  if (c.shadow.entry) return <span className="text-xs text-muted-foreground">Open</span>;
+  return <span className="text-xs text-muted-foreground">—</span>;
+}
+
 export default async function ScannerPage({ searchParams }: { searchParams: Promise<{ day?: string }> }) {
   const { day } = await searchParams;
   const data = await api.scannerDay(day);
@@ -92,12 +198,12 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         )}
       </div>
 
-      <div className="flex items-center gap-3 text-sm">
-        <Link href={`/scanner?day=${shiftDay(data.date, -1)}`} className="rounded border px-3 py-1.5 hover:bg-secondary">
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        <Link href={`/scanner?day=${shiftDay(data.date, -1)}`} className="inline-flex min-h-11 items-center rounded border px-3 hover:bg-secondary">
           ← Previous day
         </Link>
-        <span className="font-medium text-foreground">{data.date}</span>
-        <Link href={`/scanner?day=${shiftDay(data.date, 1)}`} className="rounded border px-3 py-1.5 hover:bg-secondary">
+        <span className="px-1 font-medium text-foreground">{data.date}</span>
+        <Link href={`/scanner?day=${shiftDay(data.date, 1)}`} className="inline-flex min-h-11 items-center rounded border px-3 hover:bg-secondary">
           Next day →
         </Link>
       </div>
@@ -108,6 +214,11 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
         <Card label="Win rate" value={winRate} hint={`${t.resolved} closed`} />
         <Card label="Paper P&L" value={money(t.pnl)} hint="per contract, after commission" />
         <Card label="At 2× spread" value={money(t.pnl_2x_spread)} hint="pessimistic fills" />
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        <Scorecard label="Day scorecard" score={data.scorecard.day} />
+        <Scorecard label="Cumulative scorecard" score={data.scorecard.cumulative} />
       </div>
 
       <section className="overflow-hidden rounded-lg border bg-card">
@@ -126,6 +237,11 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
                   <th className="px-4 py-2 text-left font-medium">In / out</th>
                   <th className="px-4 py-2 text-left font-medium">Status</th>
                   <th className="px-4 py-2 text-left font-medium">Result</th>
+                  <th className="px-4 py-2 text-left font-medium">Email</th>
+                  <th className="px-4 py-2 text-left font-medium">Shadow Isaac</th>
+                  <th className="px-4 py-2 text-left font-medium">Timing</th>
+                  <th className="px-4 py-2 text-left font-medium">Clean order</th>
+                  <th className="px-4 py-2 text-left font-medium">Shadow result</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,6 +249,7 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
                   const status = STATUS[c.status];
                   const entry = c.events.entry;
                   const exit = c.events.exit;
+                  const email = emailLabel(c);
                   return (
                     <tr key={c.id} className="border-t align-top">
                       <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">{nyTime(c.bar_end)}</td>
@@ -163,6 +280,17 @@ export default async function ScannerPage({ searchParams }: { searchParams: Prom
                       <td className="px-4 py-2">
                         <Outcome c={c} />
                       </td>
+                      <td className={`whitespace-nowrap px-4 py-2 text-xs ${email.className}`}>{email.label}</td>
+                      <td className="px-4 py-2">
+                        <ShadowDecision c={c} />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2 text-xs text-muted-foreground">
+                        {c.shadow.timing === "on_time" ? "On time" : c.shadow.timing === "late" ? "Late" : c.shadow.status === "no_response" ? "No response" : "—"}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2 text-xs">
+                        {c.shadow.clean_order === true ? <span className="text-emerald-300">Yes</span> : c.shadow.clean_order === false ? <span className="text-amber-300">No</span> : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-2 tabular-nums">{shadowResult(c)}</td>
                     </tr>
                   );
                 })}

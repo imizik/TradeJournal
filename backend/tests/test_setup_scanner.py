@@ -1,7 +1,7 @@
 """Setup scanner S1: the pure rules, and the watcher's candidates, paper trades and restarts."""
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -465,6 +465,29 @@ def test_expired_candidate_is_not_handed_off(engine, monkeypatch, tmp_path):
     assert not (setups / f"setup-{candidate.id}.json").exists()
 
 
+def test_open_shadow_trade_becomes_unresolved_after_next_session(engine):
+    watch, clock = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    watch._store(candidate, "shadow_decision", clock.now, {"decision": "take", "timing": "on_time"})
+    watch._store(candidate, "shadow_entry", clock.now, {"ask": 1.05, "bid": 1.0})
+
+    watch.shadow_exchange_pass(clock.now, DAY + timedelta(days=1), None)
+
+    assert rows(engine)[1]["shadow_unresolved"]["reason"] == "session ended before the trade finished"
+
+
+def test_no_response_starts_at_the_exact_expiry_time(engine):
+    watch, _ = scanner(engine, at(9, 50, 35))
+    breakout_day(watch.feed)
+    watch.run()
+    candidate = _candidate(engine)
+    expiry = setup_scanner._epoch(candidate.expires_at)
+    assert setup_scanner.shadow_status_of(candidate, {}, now=expiry - 1) == "awaiting_decision"
+    assert setup_scanner.shadow_status_of(candidate, {}, now=expiry) == "no_response"
+
+
 def test_tampered_shadow_decision_is_unresolved(engine, monkeypatch, tmp_path):
     monkeypatch.setenv("SHADOW_SETUPS_DIR", str(tmp_path / "setups"))
     monkeypatch.setenv("SHADOW_OUTBOX_DIR", str(tmp_path / "outbox"))
@@ -551,6 +574,8 @@ def test_shadow_take_uses_backend_decision_time_and_exits_independently(engine, 
     score = view["scorecard"]["day"]
     assert view["candidates"][0]["shadow"]["result"]["pnl"] == pytest.approx(43.7)
     assert score["take"] == 1 and score["shadow_pnl"] == pytest.approx(43.7)
+    assert score["rules_priced"] == score["shadow_priced"] == 1
+    assert score["group_evidence"] == {"rules": "not enough", "takes": "not enough", "skipped": "not enough"}
 
 
 def test_shadow_no_response_and_cumulative_scorecard(engine, monkeypatch, tmp_path):

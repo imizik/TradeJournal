@@ -104,7 +104,7 @@ def status_of(candidate: ScannerCandidate, state: dict) -> str:
     return "pending_entry"
 
 
-def shadow_status_of(candidate: ScannerCandidate, state: dict) -> str:
+def shadow_status_of(candidate: ScannerCandidate, state: dict, now: float | None = None) -> str:
     if candidate.contract_json is None:
         return "no_contract"
     for kind in ("shadow_unresolved", "shadow_exit", "shadow_exit_intent", "shadow_entry"):
@@ -112,7 +112,8 @@ def shadow_status_of(candidate: ScannerCandidate, state: dict) -> str:
             return {"shadow_exit_intent": "exiting", "shadow_entry": "open"}.get(kind, "unresolved" if kind == "shadow_unresolved" else "exit")
     decision = state.get("shadow_decision")
     if decision is None:
-        return "no_response" if _epoch(candidate.expires_at) < datetime.now(UTC).timestamp() else "awaiting_decision"
+        now = datetime.now(UTC).timestamp() if now is None else now
+        return "no_response" if _epoch(candidate.expires_at) <= now else "awaiting_decision"
     if decision.get("timing") == "late":
         return "late"
     if decision.get("decision") == "skip":
@@ -288,6 +289,10 @@ class SetupScanner:
             rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date == today)
                            .where(ScannerCandidate.contract_json.is_not(None)).order_by(ScannerCandidate.bar_end)).all()
             active = [(candidate, fold(self._events(db, candidate.id))) for candidate in rows]
+            prior_rows = db.exec(select(ScannerCandidate).where(ScannerCandidate.session_date < today)
+                                 .where(ScannerCandidate.session_date >= today - timedelta(days=7))
+                                 .where(ScannerCandidate.contract_json.is_not(None))).all()
+            prior_active = [(candidate, fold(self._events(db, candidate.id))) for candidate in prior_rows]
 
         for candidate, state in active:
             if setups_dir and "shadow_handoff" not in state:
@@ -340,6 +345,13 @@ class SetupScanner:
                 log.warning("Shadow scanner trade %s not judged this pass: %s", candidate.id, exc)
             except Exception:
                 log.exception("Shadow scanner trade %s failed this pass", candidate.id)
+
+        # A restart after a session boundary must close yesterday's still-open
+        # shadow paper trade just as the rules-only watcher does.
+        for candidate, state in prior_active:
+            if shadow_status_of(candidate, state) in ("pending_entry", "open", "exiting"):
+                self._store(candidate, "shadow_unresolved", now,
+                            {"reason": "session ended before the trade finished"})
 
     def email(self, today: date) -> None:
         """Email each of today's setups with a contract once, while it is still fresh, up to the daily cap."""
@@ -513,11 +525,13 @@ def _event_public(value: dict | None) -> dict | None:
 
 def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
     score = {"setups": len(rows), "decisions": 0, "take": 0, "skip": 0, "late": 0, "no_response": 0, "unresolved": 0,
+             "rules_priced": 0, "shadow_priced": 0, "skipped_priced": 0,
              "rules_pnl": 0.0, "shadow_pnl": 0.0, "skipped_rules_pnl": 0.0, "clean_order": 0}
     for candidate, state in rows:
         rules_exit = state.get("exit")
         if rules_exit:
             score["rules_pnl"] += rules_exit["pnl"]
+            score["rules_priced"] += 1
         decision = state.get("shadow_decision")
         shadow = shadow_status_of(candidate, state)
         if decision:
@@ -530,6 +544,7 @@ def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
                 score["skip"] += 1
                 if rules_exit:
                     score["skipped_rules_pnl"] += rules_exit["pnl"]
+                    score["skipped_priced"] += 1
             if decision.get("clean_order") is True:
                 score["clean_order"] += 1
         elif shadow == "no_response":
@@ -539,7 +554,13 @@ def _shadow_scorecard(rows: list[tuple[ScannerCandidate, dict]]) -> dict:
         shadow_exit = state.get("shadow_exit")
         if shadow_exit:
             score["shadow_pnl"] += shadow_exit["pnl"]
+            score["shadow_priced"] += 1
     for key in ("rules_pnl", "shadow_pnl", "skipped_rules_pnl"):
         score[key] = round(score[key], 2)
     score["evidence"] = "not enough" if score["decisions"] < 30 else "sufficient count"
+    score["group_evidence"] = {
+        "rules": "not enough" if score["decisions"] < 30 else "sufficient count",
+        "takes": "not enough" if score["take"] < 30 else "sufficient count",
+        "skipped": "not enough" if score["skip"] < 30 else "sufficient count",
+    }
     return score
