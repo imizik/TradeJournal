@@ -31,8 +31,8 @@ export function heatBookKind(book: HeatBook): HeatBookKind | null {
   return book.exchange === "NASDAQ" ? "mpid" : null;
 }
 
-/** A finished or forming column: [price, mean size, …] over the samples where that side was present. */
-export type HeatColumn = { start: number; cells: Float64Array };
+/** A finished or forming column of `width` ms: [price, mean size, …] over the samples where that side was present. */
+export type HeatColumn = { start: number; width: number; cells: Float64Array };
 
 type Building = { start: number; sides: [Map<number, number>, Map<number, number>]; samples: [number, number] };
 
@@ -86,6 +86,21 @@ export class DepthHeatmap {
     return done.length && done[done.length - 1].cells.length ? done[done.length - 1].cells[0] : null;
   }
 
+  /**
+   * Replace or extend `kind` with recorded columns from the depth recorder
+   * ([start, width, [price, size, …]]), keyed by start: a newer copy of a
+   * column replaces the older one. Recorded maps never mix with live updates.
+   */
+  load(kind: HeatBookKind, columns: [number, number, number[]][]) {
+    if (!columns.length) return;
+    const first = columns[0][0];
+    const kept = this.done[kind].filter((column) => column.start < first);
+    this.done[kind] = [...kept, ...columns.map(([start, width, cells]) => ({ start, width, cells: Float64Array.from(cells) }))];
+    const oldest = this.done[kind][this.done[kind].length - 1].start - HEAT_RETAIN_MS;
+    this.done[kind] = this.done[kind].filter((column) => column.start >= oldest);
+    this.changed();
+  }
+
   /** The book's columns, oldest first, including the forming one. */
   columns(kind: HeatBookKind): HeatColumn[] {
     const forming = this.open[kind];
@@ -124,7 +139,7 @@ export class DepthHeatmap {
       const samples = column.samples[side];
       if (samples) for (const [key, total] of sizes) cells.push(key / 10_000, total / samples);
     });
-    return { start: column.start, cells: Float64Array.from(cells) };
+    return { start: column.start, width: HEAT_BUCKET_MS, cells: Float64Array.from(cells) };
   }
 }
 
@@ -234,7 +249,7 @@ export class DepthHeatLayer implements ISeriesPrimitive<Time> {
     const cell = Math.max(1, Math.round(Math.abs(prices.perDollar) * TICK * v));
     const bins: { left: number; right: number; rows: Map<number, number>; columns: number }[] = [];
     for (const column of columns) {
-      const [left, right] = [x(column.start), x(column.start + HEAT_BUCKET_MS)];
+      const [left, right] = [x(column.start), x(column.start + column.width)];
       if (left === null || right === null || right <= 0 || left >= width || right - left <= 0) continue;
       const l = Math.floor(left);
       let bin = bins[bins.length - 1];
@@ -268,5 +283,176 @@ export class DepthHeatLayer implements ISeriesPrimitive<Time> {
       for (const [l, t, w] of rects) context.fillRect(l, t, w, cell);
     });
     return canvas;
+  }
+}
+
+/** The latest book per price: [price, size] pairs, sides as received (a missing side stays empty). */
+export type DepthProfile = { t: number; bids: [number, number][]; asks: [number, number][] };
+
+const PROFILE_WIDTH = 56;
+const PROFILE_COLORS = { bids: "rgba(56,189,248,0.35)", asks: "rgba(251,146,60,0.35)" };
+
+/**
+ * The live depth profile: one thin bar per price in the price-axis gutter, so it
+ * never covers candles; length relative to the largest size in the book, bids
+ * blue and asks orange, faint enough that the axis labels drawn over it stay
+ * readable. It shows the latest displayed book only (dimmed when stale).
+ */
+export class DepthProfileLayer implements ISeriesPrimitive<Time> {
+  private series: ISeriesApi<SeriesType> | null = null;
+  private requestUpdate: (() => void) | null = null;
+  private profile: DepthProfile | null = null;
+  private stale = false;
+  private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
+  private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "bottom", renderer: () => this.renderer }];
+
+  attached({ series, requestUpdate }: SeriesAttachedParameter<Time>) {
+    this.series = series;
+    this.requestUpdate = requestUpdate;
+  }
+
+  detached() {
+    this.series = this.requestUpdate = null;
+  }
+
+  set(profile: DepthProfile | null, stale: boolean) {
+    if (profile === this.profile && stale === this.stale) return;
+    this.profile = profile;
+    this.stale = stale;
+    this.requestUpdate?.();
+  }
+
+  updateAllViews() {}
+
+  paneViews() { return []; }
+
+  priceAxisPaneViews() { return this.views; }
+
+  private draw(target: Target) {
+    const { series, profile } = this;
+    if (!series || !profile) return;
+    const levels = [...profile.bids.map((level) => ["bids", ...level] as const), ...profile.asks.map((level) => ["asks", ...level] as const)];
+    const largest = Math.max(0, ...levels.map(([, , size]) => size));
+    if (!largest) return;
+    target.useBitmapCoordinateSpace(({ context, bitmapSize, horizontalPixelRatio: h, verticalPixelRatio: v }) => {
+      const [y0, y1] = [series.priceToCoordinate(levels[0][1]), series.priceToCoordinate(levels[0][1] + TICK)];
+      if (y0 === null || y1 === null) return;
+      const cell = Math.max(1, Math.round(Math.abs(y1 - y0) * v));
+      context.globalAlpha = this.stale ? 0.35 : 1;
+      for (const [side, price, size] of levels) {
+        const y = series.priceToCoordinate(price);
+        if (y === null) continue;
+        const length = Math.max(1, Math.round(Math.sqrt(size / largest) * Math.min(PROFILE_WIDTH * h, bitmapSize.width)));
+        context.fillStyle = PROFILE_COLORS[side];
+        context.fillRect(0, Math.round(y * v - cell / 2), length, cell);
+      }
+      context.globalAlpha = 1;
+    });
+  }
+}
+
+/** A liquidity level ready to draw: a dotted segment from when it appeared, with a short size tag. */
+export type WallLine = { price: number; side: "bid" | "ask"; since: number; lastSeen: number; pulled: boolean; label: string; title: string;
+  /** The recorder stopped receiving: drawn faint and ending at its last update, not at "now". */
+  stale: boolean };
+const compact = (size: number) => size >= 1000 ? `${(size / 1000).toFixed(size >= 10_000 ? 0 : 1)}k` : String(Math.round(size));
+export const WALL_COLORS = { bid: "#38bdf8", ask: "#fb923c", pulled: "#64748b" };
+
+/** Recorder walls as chart lines: label "9.0k · 11m"; a pulled one ends where it was last seen; stale ones say so. */
+export function wallLines(walls: { bids: { price: number; size: number; since: number; last_seen: number; pulled: boolean }[]; asks: { price: number; size: number; since: number; last_seen: number; pulled: boolean }[] }, lastMs: number, stale = false): WallLine[] {
+  const line = (side: "bid" | "ask") => (wall: { price: number; size: number; since: number; last_seen: number; pulled: boolean }): WallLine => {
+    const minutes = Math.max(0, Math.round((lastMs - wall.since) / 60_000));
+    const age = `${minutes < 1 ? "<1" : minutes}m`;
+    const name = side === "bid" ? "Bid" : "Ask";
+    return { price: wall.price, side, since: wall.since, lastSeen: stale ? lastMs : wall.last_seen, pulled: wall.pulled, stale,
+      label: wall.pulled ? `${compact(wall.size)} pulled` : `${compact(wall.size)} · ${age}${stale ? " · not live" : ""}`,
+      title: wall.pulled ? `${name} wall of ${compact(wall.size)} pulled` : `${name} wall ${compact(wall.size)}, resting ${age}` };
+  };
+  return [...walls.bids.map(line("bid")), ...walls.asks.map(line("ask"))];
+}
+
+/**
+ * Liquidity levels on the chart: each wall is a dotted segment from the time it
+ * started resting to now (or to when it was last seen, if pulled), so its
+ * length shows how long it held; its size tag sits at the segment's start, away
+ * from the newest candles. The price axis tag comes from a line-less price line.
+ */
+export class WallLayer implements ISeriesPrimitive<Time> {
+  private chart: IChartApi | null = null;
+  private series: ISeriesApi<SeriesType> | null = null;
+  private requestUpdate: (() => void) | null = null;
+  private walls: WallLine[] = [];
+  private readonly renderer: IPrimitivePaneRenderer = { draw: (target) => this.draw(target) };
+  private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "normal", renderer: () => this.renderer }];
+
+  constructor(private readonly timeline: Timeline) {}
+
+  attached({ chart, series, requestUpdate }: SeriesAttachedParameter<Time>) {
+    this.chart = chart;
+    this.series = series;
+    this.requestUpdate = requestUpdate;
+  }
+
+  detached() {
+    this.chart = this.series = this.requestUpdate = null;
+  }
+
+  set(walls: WallLine[]) {
+    this.walls = walls;
+    this.requestUpdate?.();
+  }
+
+  updateAllViews() {}
+
+  paneViews() { return this.views; }
+
+  private draw(target: Target) {
+    const { chart, series, walls } = this;
+    if (!chart || !series || !walls.length) return;
+    const scale = chart.timeScale();
+    const [zero, one] = [scale.logicalToCoordinate(0 as Logical), scale.logicalToCoordinate(1 as Logical)];
+    if (zero === null || one === null) return;
+    const x = (ms: number) => {
+      const logical = this.timeline.toLogical(ms / 1000);
+      return logical === null ? null : zero + logical * (one - zero);
+    };
+    target.useMediaCoordinateSpace(({ context, mediaSize }) => {
+      context.font = "10px ui-sans-serif, system-ui, sans-serif";
+      // Current walls label first; a tag that would overlap one already drawn is left out (its line and axis tag remain).
+      const tags: [number, number, number, number][] = [];
+      for (const wall of [...walls].sort((a, b) => Number(a.pulled) - Number(b.pulled))) {
+        const y = series.priceToCoordinate(wall.price);
+        const start = x(wall.since);
+        if (y === null || start === null) continue;
+        const end = wall.pulled || wall.stale ? x(wall.lastSeen) ?? mediaSize.width : mediaSize.width;
+        const left = Math.max(0, start);
+        if (end <= left) continue;
+        const color = wall.pulled ? WALL_COLORS.pulled : WALL_COLORS[wall.side];
+        context.globalAlpha = wall.stale ? 0.45 : 1;
+        context.strokeStyle = color;
+        context.lineWidth = wall.pulled ? 1 : 1.5;
+        context.setLineDash([3, 3]);
+        context.beginPath();
+        context.moveTo(left, Math.round(y) + 0.5);
+        context.lineTo(end, Math.round(y) + 0.5);
+        context.stroke();
+        context.setLineDash([]);
+        context.globalAlpha = 1;
+        // The tag ends where the wall began, so it reads into the line and stays off the newest candles.
+        const width = context.measureText(wall.label).width;
+        const textX = left - width - 4 >= 0 ? left - width - 4 : Math.min(left + 3, end - width - 3);
+        const box: [number, number, number, number] = [textX - 2, y - 7, textX + width + 2, y + 7];
+        if (tags.some(([l, t, r, b]) => box[0] < r && box[2] > l && box[1] < b && box[3] > t)) continue;
+        tags.push(box);
+        context.textBaseline = "middle";
+        context.globalAlpha = wall.pulled || wall.stale ? 0.6 : 1;
+        context.lineWidth = 3;
+        context.strokeStyle = "#10151e";
+        context.strokeText(wall.label, textX, y);
+        context.fillStyle = color;
+        context.fillText(wall.label, textX, y);
+        context.globalAlpha = 1;
+      }
+    });
   }
 }

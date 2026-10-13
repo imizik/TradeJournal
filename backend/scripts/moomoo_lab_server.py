@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime
 import json
 import os
 from pathlib import Path
@@ -17,6 +18,7 @@ import secrets
 import stat
 import struct
 import time
+from zoneinfo import ZoneInfo
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -24,6 +26,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 import uvicorn
 
+from scripts import depth_history
 from scripts import moomoo_diagnostic as diagnostic
 
 # A manual session runs until the browser stops it, refreshing auth in place
@@ -104,7 +107,11 @@ def check_credentials():
         raise SystemExit("Secured moomoo credentials unavailable; details withheld.") from None
 
 
-def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials) -> FastAPI:
+DEPTH_DIR = Path(os.environ.get("TJ_DEPTH_DIR", "/var/lib/tradejournal-depth"))
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials, depth_root: Path = DEPTH_DIR, clock=time.time) -> FastAPI:
     if not re.fullmatch(r"[A-Za-z0-9_-]{32,128}", token):
         raise ValueError("Local lab token must contain 32..128 URL-safe characters.")
     active = None
@@ -130,6 +137,34 @@ def create_app(*, token: str, runner=diagnostic.stream_probe, loader=credentials
         authorize(request)
         # Capability only: deliberately never open credential files here.
         return {"enabled": True}
+
+    history = depth_history.History(depth_root)
+
+    @app.get("/depth")
+    async def depth(request: Request):
+        """The depth recorder's data for one recorded ticker today: heatmap columns, walls and the latest profile.
+
+        Reads only the recorder's local day files; never credentials or the provider.
+        """
+        authorize(request)
+        params = request.query_params
+        ticker, kind = params.get("symbol", ""), params.get("kind", "arca")
+        try:
+            minutes, bucket = int(params.get("minutes", "120")), int(params.get("bucket", "10"))
+        except ValueError:
+            raise HTTPException(400, "Invalid depth request") from None
+        if (set(params) - {"symbol", "kind", "minutes", "bucket"} or not diagnostic.STREAM_SYMBOL.fullmatch("US." + ticker)
+                or kind not in depth_history.KINDS or not 1 <= minutes <= 960 or bucket not in (10, 30, 60)):
+            raise HTTPException(400, "Invalid depth request")
+        now_ms = int(clock() * 1000)
+        day = datetime.fromtimestamp(now_ms / 1000, NEW_YORK).date().isoformat()
+        found = await asyncio.to_thread(history.query, ticker, day, kind, now_ms - minutes * 60_000, bucket * 1000)
+        recorder = history.status()
+        if found is None:
+            return {"symbol": ticker, "recorded": False, "watched": ticker in recorder.get("tickers", [])}
+        last_book = recorder.get("last_book_ms", {}).get(ticker, 0)
+        return {"symbol": ticker, "recorded": True, "day": day, "kind": kind, "bucket_ms": bucket * 1000,
+                "recording": recorder.get("state") == "recording" and now_ms - last_book < 60_000, **found}
 
     @app.post("/session")
     async def session(request: Request):

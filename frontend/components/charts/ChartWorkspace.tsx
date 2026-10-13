@@ -14,7 +14,8 @@ import HotkeySheet from "./HotkeySheet";
 import LayersPanel from "./LayersPanel";
 import type { ItemGroup, LayerGroup, LayerItem } from "./LayersPanel";
 import LayoutMenu from "./LayoutMenu";
-import Level2Panel from "./Level2Panel";
+import Level2Panel, { cleanFlow, DEFAULT_FLOW, FLOW_KEY } from "./Level2Panel";
+import type { OrderFlow } from "./Level2Panel";
 import OptionsLadder from "./OptionsLadder";
 import PlanSheet from "./PlanSheet";
 import type { ChartSnapshot } from "./PlanSheet";
@@ -29,7 +30,7 @@ import SymbolInfo from "./SymbolInfo";
 import type { NewsFocus } from "./SymbolInfo";
 import { useSymbolNews } from "@/lib/newsFeed";
 import ToolbarMenu from "./ToolbarMenu";
-import { cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
+import { cleanIndicatorColors, cleanFillLabels, INDICATOR_COLORS, INTERVAL_SECONDS, indicatorColors, activeLayout, applyLayout, applyPreset, arrangementOf, chartStreamUrl, cleanLevel, cleanOptionsLayer, cleanProportions, COLUMN_MIN, COLUMN_MIN_PX, columnMinPx, createChartCommands, createCrosshairLink, createRangeLink, DEFAULT_PROPORTIONS, DOCK_WIDTH, earlyClose, etTime, fetchChartData, fetchChartHistory, focusPanel, GRID_MIN_PX, heldSymbols, INTERVALS, intradayInterval, layoutWithSizes, INDICATOR_NAMES, levelOnBasis, liveTick, LOWER_SHARE, lowerLimits, marketSessionAt, MAX_HELD_SYMBOLS, MAX_LAYOUTS, mergeBars, nameTaken, OPENING_BARS, optionsQuery, PANEL_OPENING_BARS, parseChartTick, price, quoteChange, retainHistory, sessionChange, shownIndicators, shownPrice, sizesOf, SMALL_HEIGHTS, splitsKey, staleCandles, storeLayout, STUDIES, todayNewYork, validSymbol } from "@/lib/charts";
 import { ZOOM_SPEED_NAMES, readZoomSpeed, writeZoomSpeed } from "@/lib/zoomSpeed";
 import type { ZoomSpeed } from "@/lib/zoomSpeed";
 import type { ColorKey, ChartBar, ChartData, ChartPanelData, ChartQuote, ChartSettings, ChartStreamTick, FillLabels, HiddenGroups, Indicators, Interval, LayoutPreset, MarketDay, OptionsLayer, PanelStudies, PriceLevel, Proportions, SmallChartSize, SplitRecord, SymbolPanels } from "@/lib/charts";
@@ -48,8 +49,10 @@ import LinkReview from "./LinkReview";
 import type { Capture, CaptureNote, CaptureReview, CaptureSetup, OutboxItem } from "@/lib/captures";
 import { summary } from "./SelectionBar";
 import { useDepthSession } from "@/components/level2/useDepthSession";
-import { DepthHeatmap } from "@/lib/depthHeatmap";
-import type { HeatBookKind } from "@/lib/depthHeatmap";
+import { DepthHeatmap, heatBookKind, wallLines } from "@/lib/depthHeatmap";
+import type { DepthProfile } from "@/lib/depthHeatmap";
+import { useRecordedDepth } from "@/components/level2/useRecordedDepth";
+import type { RecordedDepth } from "@/components/level2/useRecordedDepth";
 
 const INDICATORS = Object.entries(INDICATOR_NAMES) as [keyof Indicators, string][];
 const SYNC_TEXT = { loading: "Loading saved settings", saving: "Saving…", saved: "Saved", offline: "Saved in this browser · server unavailable" };
@@ -1234,7 +1237,7 @@ export default function ChartWorkspace() {
   const ladderPanel = (sheet: boolean) => <OptionsLadder key={symbol} symbol={symbol} layer={settings.optionsLayer} spot={() => referenceFor(symbol)}
     highlight={strike?.symbol === symbol ? strike.price : null} sheet={sheet} onStrike={chooseStrike} onLayer={setOptions} onClose={() => showDock(null)} />;
   // Level 2 is the owner's: an assistant with a saved Level 2 tab sees the watchlist and starts no request.
-  const level2Panel = (sheet: boolean) => <Level2Panel symbol={symbol} sheet={sheet} session={depthSession} onConnect={connectDepth} heatmap={heatmaps.get(symbol) ?? null} heat={heat} onHeat={setHeat} onClose={() => showDock(null)} />;
+  const level2Panel = (sheet: boolean) => <Level2Panel symbol={symbol} sheet={sheet} session={depthSession} onConnect={connectDepth} heatmap={recorded.heatmap ?? heatmaps.get(symbol) ?? null} flow={flow} onFlow={setFlow} recorded={recorded.state} recording={recorded.recording} heatAllowed={heatAllowed} onClose={() => showDock(null)} />;
   const layersPanel = (sheet: boolean) => <LayersPanel groups={layerGroups} sheet={sheet} onClose={() => showDock(null)}
     onGroupHidden={(key) => { if (key === "journal") toggleIndicator("fills"); else if (key === "indicators") toggleStudies(); else if (key === "auto") toggleAuto(); else if (key === "options") toggleOptions(); else if (key === "ranges") toggleRanges(); else if (key === "news") toggleNews(); else toggleGroup(key); }} onGroupLock={lockGroup} onOptions={setOptions} onLabels={setFillLabels} onNewsSmall={setNewsSmall}
     onGroupDelete={(layer) => editGroup(layer, new Set((layer === "levels" ? levelItems : drawingItems).map((item) => item.id)), "delete")}
@@ -1264,7 +1267,18 @@ export default function ChartWorkspace() {
   // One heatmap per ticker, created on its first Connect, so looking at another
   // symbol never discards what an earlier one collected on this visit.
   const [heatmaps] = useState(() => new Map<string, DepthHeatmap>());
-  const [heat, setHeat] = useState<{ shown: boolean; kind: HeatBookKind }>({ shown: true, kind: "arca" });
+  // Order flow (owner): which layers draw on the main chart, remembered on this device only.
+  const [flow, setFlowState] = useState<OrderFlow>(DEFAULT_FLOW);
+  useEffect(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(FLOW_KEY) ?? "null");
+      if (saved && typeof saved === "object") setFlowState(cleanFlow(saved as Partial<OrderFlow>));
+    } catch { /* defaults */ }
+  }, []);
+  const setFlow = useCallback((next: OrderFlow) => {
+    setFlowState(next);
+    try { localStorage.setItem(FLOW_KEY, JSON.stringify(next)); } catch { /* remembered for this visit only */ }
+  }, []);
   const addBook = useCallback((event: { symbol: string; books: Parameters<DepthHeatmap["add"]>[0] }) => heatmaps.get(event.symbol.slice(3))?.add(event.books), [heatmaps]);
   const depthSession = useDepthSession({ active: owner && level2Seen, onBook: addBook });
   const { connect: startDepth } = depthSession;
@@ -1274,10 +1288,36 @@ export default function ChartWorkspace() {
   }, [heatmaps, startDepth]);
   // The session's ticker joins the inputs so the main chart picks up a heatmap created on Connect.
   const depthTicker = depthSession.symbol;
+  // The heatmap is drawn only on 1m-5m candles; wider candles turn it into a smear.
+  const heatAllowed = (INTERVAL_SECONDS[slots[0]?.interval] ?? Infinity) <= 300;
+  // Recorded tickers need no Connect: the recorder's data, about five seconds behind.
+  const recorded = useRecordedDepth(symbol, { active: owner && (flow.levels || flow.profile || flow.heatmap), history: flow.heatmap && heatAllowed, kind: flow.kind });
+  const liveHere = depthTicker === symbol && depthSession.started;
   const depth = useMemo(() => {
-    const map = owner && heat.shown && depthTicker !== null ? heatmaps.get(symbol) : undefined;
-    return map ? { map, kind: heat.kind } : null;
-  }, [owner, heat, heatmaps, symbol, depthTicker]);
+    if (!owner || !flow.heatmap || !heatAllowed) return null;
+    const map = recorded.heatmap ?? (liveHere ? heatmaps.get(symbol) : undefined);
+    return map ? { map, kind: flow.kind } : null;
+  }, [owner, flow, heatAllowed, recorded.heatmap, liveHere, heatmaps, symbol]);
+  const liveBook = depthSession.bookEvent;
+  // Walls change at most each poll and their tags by the minute: keep one array per content so the
+  // chart's price lines are rebuilt only when a wall, its age or the live state actually changes.
+  const wallStale = recorded.state === "ready" && !recorded.recording;
+  const wallsKey = flow.levels && recorded.state === "ready" ? JSON.stringify([recorded.walls, Math.floor(recorded.lastMs / 60_000) * 60_000, wallStale]) : "";
+  const walls = useMemo(() => {
+    if (!wallsKey) return [];
+    const [found, minute, stale] = JSON.parse(wallsKey) as [RecordedDepth["walls"], number, boolean];
+    return wallLines(found, minute, stale);
+  }, [wallsKey]);
+  const liquidity = useMemo(() => {
+    if (!owner) return null;
+    let profile: DepthProfile | null = recorded.profile;
+    if (!profile && liveHere && liveBook) {
+      const book = liveBook.books.find((entry) => heatBookKind(entry) === flow.kind);
+      if (book) profile = { t: book.source_time_ms ?? liveBook.received_ms, bids: book.bids.map((level) => [level.price, level.volume]), asks: book.asks.map((level) => [level.price, level.volume]) };
+    }
+    if (!walls.length && !(flow.profile && profile)) return null;
+    return { walls, profile: flow.profile ? profile : null, stale: recorded.state === "ready" ? !recorded.recording : !depthSession.running };
+  }, [owner, flow.profile, flow.kind, walls, recorded.profile, recorded.state, recorded.recording, liveHere, liveBook, depthSession.running]);
   /**
    * Open the dock on a tab, or close it (null). A desktop remembers both on
    * this device. Full screen keeps its own choice of showing it, on this
@@ -1694,7 +1734,7 @@ export default function ChartWorkspace() {
             {slots.slice(0, 1).map((slot) => <div key={slot.index} ref={mainBox} style={sized ? { flexGrow: grow(1 - sizes.lower), flexBasis: 0 } : undefined}
               className={`${fill ? `flex flex-col ${narrow ? "h-full shrink-0" : multi ? "min-h-[320px]" : "min-h-0 flex-1"}` : ""} ${slotHidden(0)}`}>
               <div className={slotInner(0, fill)}>
-              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} fillLabels={settings.fillLabels} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} depth={slot.symbol === symbol ? depth : null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
+              <PriceChart id="main" main symbol={slot.symbol} interval={slot.interval} session={session} panel={panels.get(frameKey(slot))} pending={pendingFor(slot)} live={lives.get(slot.symbol)!} indicators={indicators} colors={colors} levels={visibleLevels.get(slot.symbol) ?? NO_LEVELS} drawings={visibleDrawings.get(slot.symbol) ?? NO_DRAWINGS} autoLevels={autoFor(slot.symbol)} levelEvents={feedFor(slot.symbol)?.panels[slot.interval]?.level_events} optionsNearest={optionsOn ? settings.optionsLayer.nearest : null} rangeBands={rangesOn} highlight={strike?.symbol === slot.symbol ? strike.price : null} rvol={feedFor(slot.symbol)?.rvol ?? null} earnings={feedFor(slot.symbol)?.earnings ?? null} news={newsMarkers} onNews={openNews} fillLabels={settings.fillLabels} alerts={alertMarks.get(slot.symbol) ?? NO_MARKS} positions={positionsFor(slot.symbol)} onFill={openFill} depth={slot.symbol === symbol ? depth : null} liquidity={slot.symbol === symbol ? liquidity : null} link={link} rangeLink={rangeLink} commands={commands} linkRange={settings.linkRange && multi} clock={clockFor(slot.symbol)} height={fill ? undefined : 410}
                 tool={tool} magnet={settings.magnet} toolStyle={tool && tool !== "level" ? settings.toolStyles[tool] : undefined} onDraw={addLevel} onPlace={(kind, points) => placeDrawing(slot.symbol, kind, points, "main")} onInterval={(i) => setIntervalAt(0, i)}
                 selected={picked?.symbol === slot.symbol ? picked.id : null} showSelection={picked?.panel === "main"} fresh={fresh} onSelect={select(slot.symbol, "main")}
                 onMove={(id, value) => moveLevel(slot.symbol, id, value)} onEditDrawing={(id, patch) => editDrawing(slot.symbol, id, patch)} onDelete={(id) => deleteItem(slot.symbol, id)}
