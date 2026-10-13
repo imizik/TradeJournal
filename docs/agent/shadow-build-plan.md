@@ -1,0 +1,343 @@
+# Scanner and shadow build plan (for Codex)
+
+Written October 13, 2026 by the Claude session that built scanner S1, for
+Codex to execute. It turns the [setup scanner contract](setup-scanner-contract.md),
+[shadow S1 contract](shadow-s1-contract.md) and [shadow trader design](shadow-trader-design.md)
+into ordered work packages with owners, model choices, parallel lanes, exact
+files, tests and traps. The contracts own scope and acceptance; this file owns
+sequencing. Update the status column as packages land.
+
+## How to use this plan
+
+- Read [CLAUDE.md](../../CLAUDE.md), then this file, then only the contract and
+  files the package names. Do not read the whole docs tree.
+- One accountable lead session (Sol). It owns decisions, interfaces,
+  integration, PRs and the final word. Workers get one package each, a frozen
+  interface and a file list; one writer per file.
+- `.codex/config.toml` allows two concurrent threads: the lead plus one
+  worker. Lanes below are designed for exactly that.
+- The owner merges. Push and open PRs; never merge or enable auto-merge
+  unless Isaac says so in the chat.
+
+## Model guide
+
+Names as configured in `.codex/` and [review policy](pr-review.md).
+
+| Use | Model, effort | Why |
+|---|---|---|
+| Lead for security, auth, deployment, cross-service or anything touching the check service | **Sol, high** | Isolation rules, OAuth scopes and install tooling are easy to get subtly wrong; this is where depth pays |
+| Lead for ordinary backend integration in the private app | Sol, medium | Bounded logic in a well-tested area |
+| Worker: pure functions, tests from a written spec, UI against a frozen API shape | **Luna, medium** | The default worker; give it the exact interface and test list |
+| Worker: mechanical edits (docs links, renames, fixture data) | Luna, low | No judgement required |
+| Tier 2 general review (anything in the check service, deploy, scopes) | **Astra, high** (`risk-reviewer`) | Required by review policy |
+| Tier 1 review, or a focused tier 2 recheck | Sol, medium (`reviewer`) | Required by review policy |
+| Statistics or evaluation reports | Sol, high | Honest small-sample handling matters more than code volume |
+
+Escalate a Luna worker to Sol only when it fails twice on the same issue;
+send the evidence, not a retry.
+
+## Status and order
+
+| # | Package | Lane | Model | Tier | Depends on | Status |
+|---|---|---|---|---|---|---|
+| SC-0 | Daily scanner health check (ops, no code) | ops | Luna, low | — | live | Ready |
+| SC-1 | Quote reads off the monitor loop's critical path | B | Luna, medium | 1 | — | Ready |
+| SH-1 | Check ledger: call log and shadow decisions | A | Sol, high | 2 | — | Ready |
+| SH-2 | Check tools `shadow_setup`, `shadow_decide` | A | Sol, high | 2 | SH-1 | Ready after SH-1 |
+| SH-3 | Setup handoff and decision outbox wiring (deploy) | A | Sol, high | 2 | SH-2 | Ready after SH-2 |
+| SH-4 | Backend: write setups, read decisions, shadow paper trade | B | Luna, high (Sol, medium reviews) | 1 | interface below | Ready |
+| SH-5 | Scanner page: email status, shadow columns, scorecard | B | Luna, medium | 1 | SH-4 | After SH-4 |
+| SH-6 | Activation runbook and first live session | lead + Isaac | Sol, high | 2 | SH-1…5 merged | Later |
+| SC-2 | Ten-session scanner acceptance write-up | lead | Sol, medium | 0 | 10 sessions | Oct 27 earliest |
+| S2 | Isaac's trades linked to setups; three-way scorecard | — | Sol, medium + Luna, medium | 1 | S1 live | Later |
+| SC-3 | 50-trade evaluation report | — | Sol, high | 0 | 50 resolved trades | Later |
+| S3 | Independence research (MCP Events, separate Dot) | — | Sol, high | 2 | S1 live | Research-gated |
+| S4 | Shadow chooses contract and exits | — | Sol, high | 1 | S2 evidence | Later |
+
+**Parallel lanes for shadow S1** (two PRs):
+
+- **Lane A, lead (Sol, high): SH-1 → SH-2 → SH-3** in `backend/cloud_mcp_check*.py`,
+  `deploy/check_control.py`, `deploy/systemd/tradejournal-api.service`, and their
+  tests. Tier 2 PR: one Astra/high general review, then a Sol/medium focused
+  recheck on the fixes.
+- **Lane B, worker (Luna, high for SH-4, then medium for SH-5): SH-4 → SH-5** in
+  `backend/app/engine/setup_scanner.py`, a new module backend/app/engine/shadow_exchange.py
+  (new), `backend/app/routers/scanner.py`, `frontend/app/scanner/page.tsx`,
+  `frontend/lib/api.ts` and their tests. Tier 1 PR, Sol/medium review. It codes
+  against the frozen file formats below using fixture files, so it never waits
+  on Lane A.
+- SC-1 is a small separate Lane B PR before or after SH-4; it touches
+  `setup_scanner.py`, so do not run it at the same time as SH-4.
+
+## Frozen interfaces (both lanes code against these)
+
+**Setup file** `/var/lib/tradejournal-shadow/setups/setup-<candidate_id>.json`,
+written by the API with an atomic rename, mode 0640, group `tj-check`:
+
+```json
+{"format": "shadow-setup-v1", "candidate_id": "<uuid>", "scanner_version": "s1-v1",
+ "params_hash": "<64 hex>", "session_date": "YYYY-MM-DD", "symbol": "SPY",
+ "setup": "orb|fade", "direction": "long|short", "bar_start": "<ISO UTC Z>",
+ "bar_end": "<ISO UTC Z>", "detected_at": "<ISO UTC Z>", "expires_at": "<ISO UTC Z>",
+ "stop": 0.0, "target": 0.0, "flags": [], "facts": {}, "contract": {},
+ "content_sha256": "<sha256 of the canonical JSON without this field>"}
+```
+
+`facts` and `contract` are copied unchanged from `scanner_candidate`. The check
+service rejects a file whose hash, name or `format` disagree.
+
+**Decision file** `/var/lib/tradejournal-check/shadow-outbox/decision-<candidate_id>.json`,
+written by the check service with an atomic rename:
+
+```json
+{"format": "shadow-decision-v1", "decision_id": "shd_<uuid>", "candidate_id": "<uuid>",
+ "actor": "<check profile id>", "decision": "take|skip", "reason": "...",
+ "committed_at": "<ISO UTC Z>", "timing": "on_time|late", "clean_order": true,
+ "labels": ["informed-by-history", "independence-unverified"],
+ "setup_sha256": "<the setup file's content_sha256>", "content_sha256": "<sha256>"}
+```
+
+The backend ignores a decision whose `setup_sha256` differs from the saved
+candidate's, and records it as `shadow_unresolved` with that reason.
+
+Canonical JSON everywhere: `json.dumps(value, sort_keys=True, separators=(",", ":"))`,
+matching `cloud_mcp_check_ledger.digest`.
+
+## SC-0 — daily scanner health check (ops)
+
+After each close for the first ten sessions, from a machine on the tailnet:
+`ssh ubuntu@100.121.251.15 'curl -s localhost:8080/scanner/day'` and
+`sudo journalctl -u tradejournal-api --since today | grep -iE "rate_limited|Setup scanner|Scanner trade"`.
+Report: setups, trades, unresolved and why, emails sent, any `rate_limited`
+chart reads during the session. Read-only; never restart services for this.
+Append one dated line per session to the scanner contract's acceptance notes.
+
+## SC-1 — quotes off the critical path
+
+**Problem.** `tradier.get_quotes` → `tradier._post` sleeps on a 429 (Retry-After,
+default 20 s) up to three times inside the level alert monitor pass, delaying
+level-alert delivery and Practice paper judging.
+
+**Do.** Give `setup_scanner._quote` a non-sleeping read: a small function in
+`app/engine/tradier.py` that makes one attempt and raises `TradierError` on 429
+or transport failure (no retry). The scanner's two-minute window already
+retries on later passes. Do not change `get_quotes` behaviour for its other
+callers.
+
+**Tests.** `tests/test_setup_scanner.py`: a 429 produces no event and no sleep
+(patch `time.sleep` to fail the test if called); the next pass inside the
+window prices it. Check: `pytest tests/test_setup_scanner.py tests/test_level_alerts.py`.
+
+## SH-1 — check ledger: call log and shadow decisions (Sol, high)
+
+**Files.** `backend/cloud_mcp_check_ledger.py`, `backend/tests/test_cloud_mcp_check.py`
+(or a new test module beside it).
+
+**Do.**
+1. Add two tables to the ledger `SCHEMA` (created idempotently, like the
+   existing ones, with `BEFORE UPDATE/DELETE` abort triggers):
+   `tool_call(id INTEGER PRIMARY KEY, actor, tool, called_at)` and
+   `shadow_decision(decision_id PRIMARY KEY, actor, candidate_id, decision,
+   reason, committed_at, timing, clean_order, setup_sha256, content_sha256,
+   UNIQUE(actor, candidate_id))`.
+2. `Ledger.log_call(actor, tool)`; `Ledger.decide(actor, setup, decision,
+   reason, now)` that, inside one `BEGIN IMMEDIATE` transaction, returns the
+   existing row for an identical retry, raises `Conflict` for different
+   content, computes `timing` (`late` when `now >= expires_at`) and
+   `clean_order` (no `tool_call` row for this actor with a tool other than
+   `shadow_setup`/`shadow_decide` and `called_at` in `[detected_at, now]`), and
+   inserts.
+3. Existing databases must upgrade in place: the schema is applied on open,
+   so new `CREATE TABLE IF NOT EXISTS` statements suffice. Do not alter the
+   existing tables or triggers.
+
+**Tests.** Identical retry returns the same row; changed reason conflicts;
+late at exactly `expires_at`; `clean_order` false when `position_check` was
+logged after `detected_at`, true when it was logged before; update/delete
+refused; an existing ledger file created by the current code opens and gains
+the tables without touching existing rows (compare row hashes).
+
+**Trap.** `received_at` strings in this ledger are ISO UTC from `now_utc()`;
+compare datetimes, not strings with different offsets.
+
+## SH-2 — tools `shadow_setup` and `shadow_decide` (Sol, high)
+
+**Files.** `backend/cloud_mcp_check.py`, `backend/cloud_mcp_check_common.py`,
+`backend/app/engine/pretrade_check.py` only if a cutoff parameter is needed,
+tests.
+
+**Do.**
+1. Scope `SHADOW_SCOPE = "shadow:decide"` in `_common`. Extend `scopes(name)`
+   so both shadow tools need `check:read` + `shadow:decide`; add both to
+   `TOOL_ARGUMENTS`; they must not be in `READ_ONLY_TOOLS`.
+2. Log every tool call (all tools, including the existing ones) with
+   `ledger.log_call` right after authentication succeeds, before the tool
+   does any work. If that insert fails, refuse the call: a missing log row
+   must never let `clean_order` read true.
+3. `CheckConfig` gains optional `shadow_setups_dir` and `shadow_outbox_dir`
+   (absolute, distinct, default `None`: shadow tools then answer "shadow not
+   enabled"). Add them to `CheckVerifier.active_config`'s fixed keys.
+4. `shadow_setup(candidate_id)`: read and verify the setup file (format, name,
+   hash, and `session_date` is today in New York). Reading after `expires_at`
+   is allowed but the answer says `expired: true`. Build `live` with the same
+   packet code `pre_trade_check` uses for that ticker, option and contract.
+   Build `history` from the feature rows **filtered to `closed_at` before the
+   setup day's 00:00 New York** before any aggregation. Return labels and
+   `history_cutoff`.
+5. `shadow_decide(candidate_id, decision, reason)`: verify the setup file the
+   same way, call `ledger.decide`, then write the decision file atomically
+   (temp file, fsync, rename, fsync dir) into `shadow_outbox_dir`. Writing the
+   file is idempotent: rewrite only if absent; if present with different
+   content, refuse loudly (that would mean ledger and outbox disagree).
+6. Tool descriptions must tell Jo the order: call `shadow_setup`, then
+   `shadow_decide`, before any other check tool for that setup.
+
+**Tests** (extend the existing generated-token fixtures): missing
+`shadow:decide` refused for both tools; another profile's token refused;
+forged candidate ID, tampered hash, yesterday's setup refused; after expiry the
+decision is saved `late`; a feature row closed on the setup day is absent from
+`history` while one closed the previous day is present; a `position_check`
+before the commit gives `clean_order=false`; the outbox file matches the
+ledger row; a restart (new server object on the same files) returns the same
+decision.
+
+**Traps.** The service re-execs with a cleaned environment and refuses
+ambient provider or database credentials: never add environment variables;
+everything comes through the config file. It must still never import journal
+storage or call the private API.
+
+## SH-3 — setup handoff and decision outbox wiring (Sol, high)
+
+**Facts this relies on** (verified October 13 in the repository):
+`deploy/cloud-mcp-check/tradejournal-check.service` has `ProtectSystem=strict`,
+`ReadWritePaths=/var/lib/tradejournal-check` and an `InaccessiblePaths` list that
+includes `/var/lib/tradejournal` but not `/var/lib/tradejournal-shadow`.
+`deploy/systemd/tradejournal-api.service` runs as `tradejournal` with
+`ReadWritePaths=/var/lib/tradejournal`. `check_control.py upgrade` refuses a
+bundle that changes check units, so the plan keeps the check units unchanged.
+
+**Do.**
+1. API unit: add `ReadWritePaths=/var/lib/tradejournal-shadow`. This ships
+   with the normal release (autodeploy). Update `backend/tests/test_deployment.py`
+   expectations.
+2. A new `check_control.py enable-shadow-exchange` command (root, idempotent,
+   refuses unknown state): creates `/var/lib/tradejournal-shadow/setups`
+   (`tradejournal:tj-check`, 2750) and `/var/lib/tradejournal-check/shadow-outbox`
+   (`tj-check:tj-check`, 0750) and grants the `tradejournal` user ACL
+   traverse-only (`--x`) on `/var/lib/tradejournal-check` and read on the
+   outbox (plus a default ACL so new files are readable). Verify afterwards that
+   `tradejournal` cannot read the ledger file (`sudo -u tradejournal test -r` must
+   fail) and record the result. `disable-shadow-exchange` removes the ACLs.
+3. Config: the operator adds `shadow_setups_dir` and `shadow_outbox_dir` to
+   `/etc/tradejournal-check/config.json`; the backend reads
+   `SHADOW_SETUPS_DIR` and `SHADOW_OUTBOX_DIR` from
+   `/etc/tradejournal/backend.env`. Both are off when unset.
+4. Ship the check-service code with `check_control.py upgrade` (exact manifest
+   approval), never by hand-copying files. Extend
+   `deploy/cloud-mcp-check/smoke.py` to run the exchange end to end on the
+   disposable Ubuntu job: API-user write → check read → decision → API-user
+   read, and `tradejournal` refused on the ledger.
+
+**Tests.** `backend/tests/test_check_deployment.py` for the command's
+idempotence and refusals; the Ubuntu smoke for real permissions.
+
+## SH-4 — backend: setups out, decisions in, shadow paper trade (Luna, high)
+
+**Files.** A new module backend/app/engine/shadow_exchange.py (write setup files, read
+decision files; pure I/O with the formats above), `backend/app/engine/setup_scanner.py`,
+`backend/app/routers/scanner.py` (`day_view` additions), `backend/tests/test_setup_scanner.py`
+(or a new test module beside it).
+
+**Do.**
+1. After a candidate with a contract is committed, write its setup file when
+   `SHADOW_SETUPS_DIR` is set (atomic rename; never block or fail the scan on
+   a write error: log it and retry on the next pass while fresh, the same way
+   setup emails do; record a `shadow_handoff` event with `written` or
+   `expired`).
+2. Each pass, when `SHADOW_OUTBOX_DIR` is set, read decision files for today's
+   candidates that lack a `shadow_decision` event; validate format, hash and
+   `setup_sha256`; store `shadow_decision`.
+3. Shadow paper trade for `take` + `on_time`: generalise `_enter`, `_watch`
+   and `_exit` with an event-key prefix (`""` for rules-only, `"shadow_"` for
+   shadow) instead of copying them. The decision time for the entry window is
+   when the backend stored `shadow_decision` (it cannot see Jo's commit any
+   sooner), and the quote must be updated at or after that. Same exits as the
+   rules trade, computed independently. `status_of` stays rules-only; add
+   `shadow_status_of`.
+4. `day_view`: per candidate `shadow` = decision, timing, clean_order, labels,
+   status, entry/exit, result; totals for the S1 scorecard in the contract,
+   with `evidence: "not enough"` under 30 decisions.
+
+**Tests** (fixture files written by the test, no check service): the setup
+file round-trips and its hash verifies; a tampered decision is
+`shadow_unresolved`; `skip`, `late` and no-decision cases price nothing; a
+`take` entry uses a quote updated after the stored decision; the shadow trade
+exits independently of the rules trade; restart idempotence; all existing
+scanner tests still pass unchanged.
+
+**Trap.** Keep the rules-only trade's behaviour byte-for-byte: the refactor in
+step 3 must not change any existing event key or field.
+
+## SH-5 — Scanner page (Luna, medium)
+
+Add, from `day_view` only: email status per setup (sent, expired, capped),
+the shadow columns (decision with reason on hover or expand, timing,
+`clean_order`, result) and a scorecard row (rules-only all setups vs Shadow
+Isaac TAKEs vs rules trades it skipped, with counts and "not enough
+evidence"). Keep the page usable at 375 px: the table already scrolls in its
+container; do not let the page scroll sideways. Verify in a running app with a
+seeded database: a separate SQLite file migrated with `alembic upgrade head`,
+the API started with that `DATABASE_URL`, `LEVEL_ALERTS_AUTOSTART=false` and an
+empty `TRADIER_API_KEY` on a spare port, and the frontend pointed at it with
+`API_INTERNAL_URL` and `NEXT_PUBLIC_API_URL`. Client-side navigation did not
+work in that setup during PR #279 on any page; open day links by URL. Run the
+frontend typecheck and lint.
+
+## SH-6 — activation and first live session (lead with Isaac)
+
+Isaac-only steps are marked ⚑.
+
+1. ⚑ Auth0: add `shadow:decide` to the check API's permissions and to the
+   check client's grant.
+2. Merge Lane B, let it autodeploy. Merge Lane A, then on the VPS: `check_control.py
+   upgrade` with the exact manifest approval; `enable-shadow-exchange`; add the
+   two config paths on both sides; restart the check service and API outside
+   market hours.
+3. ⚑ In ChatGPT: reconnect the check connection to grant the new scope and
+   press **Refresh tools**.
+4. ⚑ Replace Jo's Gmail task instructions with: "For each `TJ Setup:` email
+   still before its stale time: first call `shadow_setup` with the setup ID,
+   then `shadow_decide` with take or skip and one reason. Do not call any other
+   tool before that. Then run `pre_trade_check` with the JSON inputs and
+   `attach_model_verdict`. Message me only when your co-pilot verdict is Go."
+5. First session: confirm every setup has a decision or no-response, at least
+   one `clean_order=true`, shadow trades priced after their decisions, and the
+   history spot check. Record the evidence in the S1 contract.
+
+## Later packages (outline only)
+
+### S2 — Isaac in the scorecard
+Link each of Isaac's option trades to a setup when same underlying, same
+direction (call ↔ long), opened within 15 minutes after the setup's
+`detected_at`. Show the three-way comparison and mark Isaac's trades on
+emailed setups as assisted. Sol, medium for the linking rule and tests; Luna,
+medium for the page.
+
+### SC-3 — 50-trade evaluation
+Report per setup type and direction: count, win rate, mean and median per
+contract, the 2× spread view, by exit reason; then the holdout comparison
+(the September 14 → October holdout was never examined). No tuning on the
+evaluation period. Sol, high; small groups say "not enough evidence".
+
+### S3 — independence, later, research-gated
+1. Probe MCP Events on a disposable connector: `mcp` 2.x serves protocol
+   `2026-07-28` but has no event helpers, so `events/list`, `events/subscribe`,
+   `events/unsubscribe`, callback verification and Standard Webhooks signing
+   are custom. Observe one delivered event start a Dot task.
+2. Establish whether a second Dot or identity without same-day memory exists
+   on Isaac's plan.
+Only with both can a shadow result drop `independence-unverified`. Sol, high.
+
+### S4 — shadow chooses contract and exits
+A new versioned policy where `shadow_decide` may pick strike/expiration within
+the contract rule's limits and its own stop/target. Needs S2 evidence first.

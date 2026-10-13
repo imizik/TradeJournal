@@ -123,6 +123,9 @@ plan), which suits swing setups but not intraday ones.
 
 ## Build order (after Dots steps 3–5)
 
+The package-level plan, with models and lanes for Codex, is the
+[shadow build plan](shadow-build-plan.md).
+
 1. Feasibility checks 1–3 above, with a disposable probe only.
 2. Scanner + candidate log + rules-only paper baseline (no model) —
    [setup scanner S1 contract](setup-scanner-contract.md).
