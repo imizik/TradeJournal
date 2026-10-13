@@ -113,9 +113,24 @@ def rvol_history(retry_seconds: float = 600, pause: float = 15) -> None:
         time.sleep(pause)
 
 
+def market_context(retry_seconds: float = 120, pause: float = 15) -> None:
+    """Queue the earnings and VIX refresh for Jo's pre-trade check. It runs every 15 minutes, so a busy slot
+    is a skip, not a unit failure: the check marks older rows with their age."""
+    deadline = time.monotonic() + retry_seconds
+    while True:
+        status, response = request("/sync/jobs/market_context/run", "POST")
+        if status != 409:
+            print(f"Earnings and VIX refresh queued: {response['run_id']}")
+            return
+        if time.monotonic() >= deadline:
+            print("Earnings and VIX refresh skipped: another sync or enrichment job stayed active")
+            return
+        time.sleep(pause)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline", "options-snapshot", "rvol-history"])
+    parser.add_argument("action", choices=["gmail-sync", "sync-pipeline", "options-snapshot", "rvol-history", "market-context"])
     args = parser.parse_args()
     if args.action == "gmail-sync":
         gmail_sync()
@@ -125,6 +140,8 @@ def main() -> None:
         options_snapshot()
     elif args.action == "rvol-history":
         rvol_history()
+    elif args.action == "market-context":
+        market_context()
 
 
 if __name__ == "__main__":

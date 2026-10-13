@@ -508,7 +508,7 @@ def test_partial_earlier_migration_is_refused_not_recorded(prepared, tmp_path, m
     control.upgrade(newer, approved)
     ledger = control.STATE / "fixture.db"
     connection = sqlite3.connect(ledger)
-    connection.execute("CREATE TABLE scanner_candidate (id CHAR(32) NOT NULL, PRIMARY KEY (id))")
+    connection.execute("CREATE TABLE market_context_item (id CHAR(32) NOT NULL, PRIMARY KEY (id))")
     connection.commit()
     connection.close()
     partial = ledger.read_bytes()

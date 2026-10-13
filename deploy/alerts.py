@@ -52,6 +52,9 @@ SERVICES = {
     "tradejournal-rvol-history.service": (
         "Relative volume history", "The morning relative-volume history couldn't be started, so chart RVol may be missing today."
     ),
+    "tradejournal-market-context.service": (
+        "Earnings and VIX for Jo", "The earnings and VIX refresh couldn't be started; Jo's checks show the older values with their age."
+    ),
     "tradejournal-plan-reviews.service": (
         "Nightly AI reviews", "Tonight's daily reviews on the Claude plan didn't run; the Daily page says why."
     ),
@@ -69,6 +72,7 @@ TIMERS = {
     "tradejournal-gmail-sync.timer": "Five-minute Gmail check",
     "tradejournal-options-snapshot.timer": "After-close options snapshot",
     "tradejournal-rvol-history.timer": "Morning relative volume history",
+    "tradejournal-market-context.timer": "Earnings and VIX for Jo",
 }
 # Opt-in schedules: only one the owner enabled can be "switched off".
 OPT_IN_TIMERS = {

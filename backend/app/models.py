@@ -1395,3 +1395,26 @@ class ScannerEvent(SQLModel, table=True):
     effective_at: datetime  # UTC: the quote or market moment the event is about
     recorded_at: datetime  # UTC: when this server stored it
     data_json: str = Field(sa_column=Column(Text, nullable=False))
+
+
+class MarketContextItem(SQLModel, table=True):
+    """External market context for the pre-trade check (advisor step 9): each
+    tracked symbol's next earnings date and a live VIX quote, from Tradier.
+
+    A current snapshot, not history: each refresh replaces the rows of the kinds
+    it read, in one transaction. A kind whose read failed keeps its older rows,
+    which carry their own ``fetched_at`` so a reader can tell their age."""
+
+    __tablename__ = "market_context_item"
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)  # UUID: the app role has no sequence grants.
+    kind: str = Field(index=True)            # "earnings" | "vix"
+    symbol: str
+    event_date: Optional[date] = None        # earnings: the next report date (New York)
+    status: Optional[str] = None             # earnings: "confirmed" | "estimated"
+    label: Optional[str] = None              # earnings: the quarter, e.g. "Q3 2026"
+    value: Optional[float] = None            # vix: last
+    change_pct: Optional[float] = None       # vix: change since the prior close, percent
+    observed_at: Optional[datetime] = None   # vix: provider trade time (UTC)
+    fetched_at: datetime                     # UTC, when the provider data was read (a cached calendar keeps its age)
+    source: str

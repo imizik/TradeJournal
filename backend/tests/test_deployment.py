@@ -436,6 +436,24 @@ def test_rvol_history_is_queued_before_the_open_and_skips_when_the_lane_stays_bu
     assert "tradejournal-rvol-history.timer" in alerts.TIMERS
 
 
+def test_market_context_is_queued_every_15_minutes_and_skips_when_busy(monkeypatch, capsys):
+    automation = load("automation")
+    responses = [(409, {"detail": "busy"}), (200, {"run_id": "run-1"})]
+    calls = []
+    monkeypatch.setattr(automation, "request", lambda path, method="GET": calls.append((path, method)) or responses.pop(0))
+    monkeypatch.setattr(automation.time, "sleep", lambda _seconds: None)
+    automation.market_context()
+    assert calls == [("/sync/jobs/market_context/run", "POST")] * 2 and "queued: run-1" in capsys.readouterr().out
+    monkeypatch.setattr(automation, "request", lambda *_args, **_kwargs: (409, {"detail": "busy"}))
+    automation.market_context(retry_seconds=0)
+    assert "skipped" in capsys.readouterr().out
+    timer = (Path(__file__).resolve().parents[2] / "deploy/systemd/tradejournal-market-context.timer").read_text()
+    assert "OnCalendar=Mon..Fri *-*-* 06..16:00/15:00 America/New_York" in timer
+    assert "tradejournal-market-context.timer" in load("control").TIMERS
+    alerts = load("alerts")
+    assert "tradejournal-market-context.service" in alerts.SERVICES and "tradejournal-market-context.timer" in alerts.TIMERS
+
+
 @pytest.fixture
 def alerts(tmp_path, monkeypatch):
     module = load("alerts")
