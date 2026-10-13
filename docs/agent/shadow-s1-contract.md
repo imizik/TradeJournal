@@ -5,7 +5,8 @@ the advisor to the shadow trader. Build step 4 of the
 [shadow trader design](shadow-trader-design.md#build-order-after-dots-steps-35),
 narrowed to the smallest version that produces a comparable record.
 Reworked October 13 with Isaac's go-ahead to use the recommended choices.
-**Implementation is tracked by the build plan; S1 is not granted or activated.** The execution
+**SH-1 through SH-5 are merged; the VPS file exchange is activated. Actual Jo
+tool access and the first qualifying live session remain unverified.** The execution
 plan, work split and model guidance are in the [shadow build plan](shadow-build-plan.md).
 
 ## Owner decisions (October 13, 2026)
@@ -120,6 +121,28 @@ group under 30 decisions says "not enough evidence".
   the commit.
 - Restarting either service leaves one decision and at most one shadow entry
   and exit per setup.
+
+### Activation evidence — October 13, 2026
+
+The application and check runtime are running main `23b7c6c2035516542e5bdd208ab09e4983e073b6`
+from successful Deployment package run `38422300117`. Artifact hashes and the
+disabled check bundle inventory were verified; upgrade used exact manifest
+`88a09855598606549a1bae0f802b382882cea08839fe94cae8af926fc2582377`.
+All three existing SQL pins and nine check units matched; no SQL was applied.
+Isaac confirmed the Auth0 permission/client grant and explicitly authorized
+this activation's market-hours restarts.
+
+The exchange and both config paths are enabled. Fresh keys/features, service
+health and the UID network policy passed. Checks inside the actual service
+mount namespaces proved API setup-write/outbox-read and check setup-read;
+API ledger access and parent listing, check setup-write and API membership
+in the check group are denied. Setup directories are 2750 and outbox is 0750.
+Root-private recovery backups are retained with the newest previous runtime.
+
+ChatGPT reconnect/tool access, Gmail task update and actual Jo session evidence
+remain pending. Two scanner setups existed before activation and were never
+shadow-published; they are not live shadow acceptance evidence. No synthetic
+setup or operator decision was introduced into the live book for this proof.
 
 ## Out of scope
 
