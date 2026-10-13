@@ -18,8 +18,8 @@ import type { Anchor, Drawing, DrawingKind, DrawingPatch, Shown, Tool, ToolStyle
 import { AutoLevelLayer, chartLabel, isOption, isRange, shownZones } from "@/lib/autoLevels";
 import { AlertLayer } from "@/lib/alerts";
 import { SessionShade } from "@/lib/sessionShade";
-import { DepthHeatLayer } from "@/lib/depthHeatmap";
-import type { DepthHeatmap, HeatBookKind } from "@/lib/depthHeatmap";
+import { DepthHeatLayer, DepthProfileLayer, WALL_COLORS, WallLayer } from "@/lib/depthHeatmap";
+import type { DepthHeatmap, DepthProfile, HeatBookKind, WallLine } from "@/lib/depthHeatmap";
 import type { AlertMark } from "@/lib/alerts";
 import EarningsBadge from "./EarningsBadge";
 import LevelCard from "./LevelCard";
@@ -156,7 +156,7 @@ type Bundle = {
   frame: string;
 };
 
-export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null }: {
+export default function PriceChart({ id, symbol, follows, onPickSymbol, interval, session, panel: rest, pending, notice, live, indicators: given, colors = INDICATOR_COLORS, ownStudies = null, onStudies, studiesHidden = false, levels, drawings = NO_DRAWINGS, autoLevels = null, levelEvents, optionsNearest = null, rangeBands = false, highlight = null, rvol = null, earnings = null, news = null, newsSmall = false, fillLabels = "off", onNews, alerts = NO_ALERTS, link, rangeLink, commands, linkRange = false, clock, height, main = false, tool = null, magnet = false, toolStyle, maximized, history, selected = null, showSelection = false, fresh = null, onNeedHistory, onRetryHistory, onVisibleRange, onDraw, onPlace, onSelect, onMove, onEditDrawing, onDelete, onMenu, onUnlock, onInterval, onFocus, onMaximize, onPlan, positions = NO_POSITIONS, onFill, depth = null, liquidity = null }: {
   id: string; symbol: string; interval: Interval; session: string; panel?: ChartPanelData; live: LiveFeed; indicators: Indicators; levels: PriceLevel[];
   /** The studies' line colors (the user's choices over the defaults). */
   colors?: Record<ColorKey, string>;
@@ -236,6 +236,8 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   onFill?(id: string): void;
   /** A Level 2 heatmap drawn behind the candles (owner, NVDA); memory only. */
   depth?: { map: DepthHeatmap; kind: HeatBookKind } | null;
+  /** Order flow from the depth recorder or a live session: wall lines and the latest book profile (owner). */
+  liquidity?: { walls: WallLine[]; profile: DepthProfile | null; stale: boolean } | null;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const colorsRef = useRef(colors);
@@ -289,6 +291,10 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
   const heatRef = useRef<DepthHeatLayer | null>(null);
   const depthRef = useRef(depth);
   useEffect(() => { depthRef.current = depth; heatRef.current?.set(depth?.map ?? null, depth?.kind ?? "arca"); }, [depth]);
+  const profileRef = useRef<DepthProfileLayer | null>(null);
+  const wallRef = useRef<WallLayer | null>(null);
+  const liquidityRef = useRef(liquidity);
+  useEffect(() => { liquidityRef.current = liquidity; profileRef.current?.set(liquidity?.profile ?? null, !!liquidity?.stale); }, [liquidity]);
   const [hover, setHover] = useState<ChartBar | null>(null);
   const [card, setCard] = useState<Card | null>(null);
   // A new frame dismisses cards until the next pointer input, while its crosshair readout still updates.
@@ -342,6 +348,14 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     candles.attachPrimitive(heat);
     heat.set(depthRef.current?.map ?? null, depthRef.current?.kind ?? "arca");
     heatRef.current = heat;
+    const profile = new DepthProfileLayer();
+    candles.attachPrimitive(profile);
+    profile.set(liquidityRef.current?.profile ?? null, !!liquidityRef.current?.stale);
+    profileRef.current = profile;
+    const wallLayer = new WallLayer(timeline);
+    candles.attachPrimitive(wallLayer);
+    wallLayer.set(liquidityRef.current?.walls ?? []);
+    wallRef.current = wallLayer;
     const layer = new DrawingLayer(timeline);
     candles.attachPrimitive(layer);
     const autoLayer = new AutoLevelLayer();
@@ -800,7 +814,7 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
       element.removeEventListener("touchend", onTouchEnd, true); element.removeEventListener("touchcancel", onTouchEnd, true);
       for (const type of ["mousedown", "touchstart", "wheel"]) element.removeEventListener(type, unpin, true);
       element.removeEventListener("wheel", onWheel, true);
-      candles.detachPrimitive(marks); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); candles.detachPrimitive(heat); heatRef.current = null; chart.remove(); bundle.current = null; barsRef.current = [];
+      candles.detachPrimitive(marks); candles.detachPrimitive(layer); candles.detachPrimitive(autoLayer); candles.detachPrimitive(bells); candles.detachPrimitive(shade); candles.detachPrimitive(heat); heatRef.current = null; candles.detachPrimitive(profile); profileRef.current = null; candles.detachPrimitive(wallLayer); wallRef.current = null; chart.remove(); bundle.current = null; barsRef.current = [];
     };
   }, [id, link, rangeLink, commands, main]); // eslint-disable-line react-hooks/exhaustive-deps -- `openingBars` reads `main` and a ref
 
@@ -971,6 +985,19 @@ export default function PriceChart({ id, symbol, follows, onPickSymbol, interval
     if (container.current) container.current.dataset.positions = drawn.map((position) => `${position.instrument}:${position.line!.toFixed(2)}`).join(",");
     return () => { for (const line of lines) current.candles.removePriceLine(line); };
   }, [positions, pending, main]);
+  // Liquidity levels (order flow): time-anchored dotted segments (WallLayer) plus a colored price-axis tag
+  // from a line-less price line; bids blue, asks orange, a pulled wall grey. Hidden while candles load.
+  useEffect(() => {
+    const current = bundle.current;
+    const element = container.current;
+    const walls = pending ? [] : liquidity?.walls ?? [];
+    wallRef.current?.set(walls);
+    if (!current || !walls.length) return;
+    const lines = walls.map((wall) => current.candles.createPriceLine({ id: `wall:${wall.side}:${wall.price}`, price: wall.price,
+      color: wall.pulled ? WALL_COLORS.pulled : WALL_COLORS[wall.side], lineVisible: false, axisLabelVisible: true, title: "" }));
+    if (element) element.dataset.walls = walls.map((wall) => `${wall.side}:${wall.price.toFixed(2)}${wall.pulled ? ":pulled" : ""}`).join(",");
+    return () => { for (const line of lines) current.candles.removePriceLine(line); if (element) delete element.dataset.walls; };
+  }, [liquidity?.walls, pending]);
   // Automatic levels: the nearest few above and below the latest price, moving with it, and option strikes with the layer on.
   const lastClose = panel?.bars.at(-1)?.close;
   const zones = useMemo(() => shownZones(autoLevels?.zones ?? [], lastClose, optionsNearest, rangeBands), [autoLevels, lastClose, optionsNearest, rangeBands]);

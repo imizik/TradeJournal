@@ -151,6 +151,42 @@ per ticker: 60/60-entry books in both kinds (SPY asks 31–34 after hours) and
 ticker per trading day until a full regular session is measured. Nothing here
 draws the recorded data yet; reading it into Charts is the next step.
 
+## Order flow on Charts: liquidity levels, depth profile, heatmap
+
+For a ticker the recorder watches, the owner's main chart reads the recorder's
+data with no Connect, about five seconds behind live (the recorder appends every
+five seconds), through `GET /api/level2-lab/depth` and the bridge's loopback
+`/depth`. The bridge reads only today's local day files
+(`backend/scripts/depth_history.py`, one complete gzip member at a time, so a
+poll costs only what was appended) and never credentials or the provider. The
+browser polls every 10 seconds (`frontend/components/level2/useRecordedDepth.ts`).
+
+Three layers, chosen in the Level 2 dock and remembered on the device
+(`tradejournal.charts.orderflow.v1`); the book kind is ARCA-labelled by default:
+
+- **Liquidity levels** (on by default): at most three per side. Over the last
+  15 minutes of 10-second buckets, a price is a wall when its mean displayed size
+  is at least 8% of that side's mean total depth and 4x its median level, it
+  showed in 60% of the buckets whose displayed range covered it, and it lies
+  inside the latest book (a level price has traded through is history, not a
+  wall). Each draws as a dotted segment from when it began resting to now, with a
+  size and age tag ("9.0k · 11m") at the segment's start, away from the newest
+  candles, and a colored price-axis tag. A wall whose size dropped below half the
+  bar is shown grey as pulled for three minutes. Overlapping tags are left out.
+- **Depth profile** (on by default): the latest book as faint bars in the
+  price-axis gutter, never over candles; dimmed when the recorder is not
+  receiving.
+- **Heatmap** (opt-in): recorded 10-second columns from the last four hours,
+  then the newest two minutes each poll; drawn only on 1m–5m candles.
+
+A ticker the recorder does not watch says so; its Connect session still drives
+the heatmap and profile, but liquidity levels need the recorder. Walls are
+provider-displayed size in one book kind, not consolidated or executable
+liquidity, and not predictions. On 2026-10-12 after hours the rules found, for
+example, NVDA bid walls at 224.00 and 224.25 and SNDK at 1450.00, all inside the
+book; the "other market-maker" SNDK book was crossed at times, one reason ARCA
+is the default.
+
 ## Fields and clocks
 
 - Price and volume retain provider numeric precision. Volume is labeled provider

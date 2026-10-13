@@ -156,7 +156,10 @@ heatmap behind the main chart's candles for one US ticker at a time (`frontend/l
 `frontend/components/charts/PriceChart.tsx`); its browser checks are in
 `frontend/e2e/charts.spec.ts`. The opt-in depth recorder and its R2 upload are
 `backend/scripts/moomoo_depth_recorder.py` and `backend/scripts/depth_upload.py`,
-tested in `backend/tests/test_moomoo_depth_recorder.py`. It changes no chart feed or saved metrics;
+tested in `backend/tests/test_moomoo_depth_recorder.py`. Charts reads it as liquidity levels, a depth
+profile and an opt-in heatmap through `backend/scripts/depth_history.py`,
+`frontend/app/api/level2-lab/depth/route.ts` and
+`frontend/components/level2/useRecordedDepth.ts` (`backend/tests/test_depth_history.py`). It changes no chart feed or saved metrics;
 see the [prototype notes](../level2-synthetic-prototype.md) and
 [manual connection contract](../level2-manual-connection.md).
 

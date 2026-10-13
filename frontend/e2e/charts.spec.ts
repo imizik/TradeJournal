@@ -6625,7 +6625,8 @@ test("Level 2 opens in the dock without starting a session, shows a replaced lat
   await expect(panel.getByText("123.4567")).toBeVisible();
   await expect(panel.getByText("Subscription: success · code 0").first()).toBeVisible();
   expect(calls.post).toBe(1);
-  // The heatmap leaves out an update with no usable source time rather than guessing one.
+  // The heatmap (opt-in) leaves out an update with no usable source time rather than guessing one.
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).check();
   await expect(sidePanel(page).getByText("Nothing collected for this book yet · 1 updates without a usable source time left out")).toBeVisible({ timeout: 3_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.screenshot({ path: test.info().outputPath("level2-dock-book-desktop.png") });
@@ -6637,7 +6638,7 @@ test("Level 2 opens in the dock without starting a session, shows a replaced lat
   expect(calls.post).toBe(1);
   // Another ticker gets its own Connect and never shows NVDA's finished book under its name.
   await setSymbol(page, "MRVL");
-  await expect(sidePanel(page).getByText("Heatmap behind the MRVL candles")).toBeVisible();
+  await expect(sidePanel(page).getByText("MRVL Level 2")).toBeVisible();
   await expect(l2Connect(page)).toBeEnabled();
   await expect(panel.getByText("123.4567")).toHaveCount(0);
   expect(calls.post).toBe(1);
@@ -6722,6 +6723,7 @@ test("Level 2 heatmap fills behind the NVDA candles from synthetic books placed 
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/charts?symbol=NVDA");
   await l2Tab(page).click();
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).check();
   await l2Connect(page).click();
   await expect(sidePanel(page).getByText("50 min of ARCA-labelled book collected")).toBeVisible({ timeout: 5_000 });
   await page.waitForTimeout(1_500); // the layer repaints at most once a second
@@ -6733,9 +6735,66 @@ test("Level 2 heatmap fills behind the NVDA candles from synthetic books placed 
   for (let n = 0; n < 12; n++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(50); }
   await page.waitForTimeout(1_200);
   await chart.screenshot({ path: test.info().outputPath("level2-heatmap-zoomed.png") });
-  await sidePanel(page).getByLabel("Heatmap behind the NVDA candles").uncheck();
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).uncheck();
   await page.waitForTimeout(300);
   await page.getByRole("region", { name: /NVDA .* chart/ }).first().screenshot({ path: test.info().outputPath("level2-heatmap-off.png") });
+});
+
+test("recorded depth draws liquidity levels and a depth profile with no Connect, and the heatmap stays opt-in", async ({ page }) => {
+  await stub(page);
+  // Synthetic recorder answer around the fixture's last 5m candle: two bid walls (one pulled), one ask wall,
+  // a 30-level profile per side and 10-second heatmap columns over the last ten candles.
+  const end = 1789392600 + 3 * 86400 + 6 * 300;
+  const mid = Math.round((245 + 239 * 0.06 + Math.sin(239 / 8) * 2) * 100) / 100;
+  const at = (k: number) => Math.round((mid + k * 0.01) * 100) / 100;
+  const size = (k: number) => 40 + Math.abs((k * 37) % 90) + (k === -40 ? 9000 : k === 35 ? 2600 : 0);
+  const columns: [number, number, number[]][] = [];
+  for (let t = end - 3000; t < end; t += 10) columns.push([t * 1000, 10_000, Array.from({ length: 60 }, (_, n) => n < 30 ? [at(-1 - n), size(-1 - n)] : [at(n - 29), size(n - 29)]).flat()]);
+  const requests: string[] = [];
+  await page.route("**/api/level2-lab/depth**", (route) => {
+    const url = new URL(route.request().url());
+    requests.push(url.search);
+    return route.fulfill({ json: { symbol: "NVDA", recorded: true, recording: true, day: "2026-09-17", kind: "arca", bucket_ms: 10_000, last_ms: end * 1000,
+      columns: url.searchParams.get("minutes") === "1" ? [] : columns,
+      walls: { bids: [{ price: at(-40), size: 9040, mean: 9010, since: (end - 660) * 1000, last_seen: end * 1000, pulled: false, share: 0.31 },
+        { price: at(-20), size: 3100, mean: 3000, since: (end - 900) * 1000, last_seen: (end - 60) * 1000, pulled: true, share: 0.1 }],
+      asks: [{ price: at(35), size: 2640, mean: 2600, since: (end - 300) * 1000, last_seen: end * 1000, pulled: false, share: 0.2 }] },
+      profile: { t: end * 1000, bids: Array.from({ length: 30 }, (_, n) => [at(-30 + n), size(-30 + n)]), asks: Array.from({ length: 30 }, (_, n) => [at(n + 1), size(n + 1)]) } } });
+  });
+  const calls = await level2Service(page);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/charts?symbol=NVDA");
+  const main = page.getByRole("region", { name: /NVDA .* chart/ }).first();
+  const canvas = page.getByTestId("canvas-main");
+  // Levels and the profile are the quiet default: drawn from the recorder with no Connect and no provider session.
+  await expect(canvas).toHaveAttribute("data-walls", `bid:${at(-40).toFixed(2)},bid:${at(-20).toFixed(2)}:pulled,ask:${at(35).toFixed(2)}`, { timeout: 15_000 });
+  expect(calls.post).toBe(0);
+  expect(requests.every((search) => search.includes("minutes=1"))).toBe(true); // no heatmap history unless asked for
+  await page.waitForTimeout(500);
+  await main.screenshot({ path: test.info().outputPath("orderflow-levels-profile.png") });
+  const box = (await main.boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.85, box.y + box.height * 0.4);
+  for (let n = 0; n < 14; n++) { await page.mouse.wheel(0, -300); await page.waitForTimeout(40); }
+  await page.keyboard.press("End"); // back to the latest candles at this zoom
+  await page.waitForTimeout(600);
+  await main.screenshot({ path: test.info().outputPath("orderflow-levels-zoomed.png") });
+  await l2Tab(page).click();
+  await expect(sidePanel(page).getByText("Recorded · about 5 seconds behind live, back to 4 AM")).toBeVisible();
+  await expect(sidePanel(page).getByLabel("Heatmap", { exact: true })).not.toBeChecked();
+  await sidePanel(page).getByLabel("Heatmap", { exact: true }).check();
+  await expect.poll(() => requests.some((search) => search.includes("minutes=240"))).toBe(true);
+  await page.waitForTimeout(1_500);
+  await main.screenshot({ path: test.info().outputPath("orderflow-heatmap-on.png") });
+  // Turning levels off removes the lines; the choice is remembered on this device.
+  await sidePanel(page).getByLabel("Liquidity levels").uncheck();
+  await expect(canvas).not.toHaveAttribute("data-walls", /.+/);
+  await page.reload();
+  await expect(canvas).not.toHaveAttribute("data-walls", /.+/, { timeout: 5_000 });
+  // The dock restores open on Level 2 with the remembered choices.
+  await expect(sidePanel(page).getByLabel("Heatmap", { exact: true })).toBeChecked();
+  // Wider candles keep the heatmap off and say why.
+  await page.getByRole("button", { name: "15m", exact: true }).first().click();
+  await expect(sidePanel(page).getByText("· 1m–5m candles only")).toBeVisible();
 });
 
 test("on a phone Level 2 is in the More menu as a sheet, with no page overflow", async ({ page }) => {

@@ -156,3 +156,35 @@ test("private HTTPS transport pins its configured owner origin and denies assist
     names.forEach((name, index) => { if (prior[index] === undefined) delete process.env[name]; else process.env[name] = prior[index]; });
   }
 });
+
+test("recorded depth proxy forwards only fixed GET parameters to the loopback bridge", async () => {
+  const source = readFileSync(path.join(__dirname, "../app/api/level2-lab/depth/route.ts"), "utf8");
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
+  let profile = "private_legacy";
+  const output: { GET?: (request: Request) => Promise<Response> } = {};
+  new Function("require", "exports", compiled)(() => ({ accessConfig: () => ({ profile }) }), output);
+  const originalFetch = globalThis.fetch;
+  const priorEnabled = process.env.TJ_MOOMOO_LAB_ENABLED, priorToken = process.env.TJ_MOOMOO_LAB_TOKEN;
+  const calls: { target: string; init?: RequestInit }[] = [];
+  globalThis.fetch = async (target, init) => { calls.push({ target: String(target), init }); return Response.json({ recorded: false }); };
+  const get = (query: string) => output.GET!(new Request(`http://127.0.0.1:3197/api/level2-lab/depth${query}`, { headers: { Host: "127.0.0.1:3197", Cookie: "DO-NOT-FORWARD" } }));
+  try {
+    delete process.env.TJ_MOOMOO_LAB_ENABLED;
+    expect((await get("?symbol=NVDA")).status).toBe(503);
+    process.env.TJ_MOOMOO_LAB_ENABLED = "true";
+    process.env.TJ_MOOMOO_LAB_TOKEN = "invented-loopback-token-00000000000000";
+    profile = "assistant";
+    expect((await get("?symbol=NVDA")).status).toBe(403);
+    profile = "private_legacy";
+    for (const query of ["?symbol=nvda", "?symbol=NVDA&kind=x", "?symbol=NVDA&minutes=0", "?symbol=NVDA&bucket=5", "?symbol=NVDA&x=1", "?symbol=NVDA&symbol=MU", "?symbol=../x"])
+      expect((await get(query)).status).toBe(400);
+    expect(calls).toHaveLength(0);
+    expect(await (await get("?symbol=BRK.B&kind=mpid&minutes=240&bucket=30")).json()).toEqual({ recorded: false });
+    expect(calls[0].target).toBe("http://127.0.0.1:8196/depth?symbol=BRK.B&kind=mpid&minutes=240&bucket=30");
+    expect(JSON.stringify(calls[0].init?.headers)).not.toContain("DO-NOT-FORWARD");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (priorEnabled === undefined) delete process.env.TJ_MOOMOO_LAB_ENABLED; else process.env.TJ_MOOMOO_LAB_ENABLED = priorEnabled;
+    if (priorToken === undefined) delete process.env.TJ_MOOMOO_LAB_TOKEN; else process.env.TJ_MOOMOO_LAB_TOKEN = priorToken;
+  }
+});
