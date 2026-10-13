@@ -61,7 +61,7 @@ send the evidence, not a retry.
   tests. Tier 2 PR: one Astra/high general review, then a Sol/medium focused
   recheck on the fixes.
 - **Lane B, worker (Luna, high for SH-4, then medium for SH-5): SH-4 → SH-5** in
-  `backend/app/engine/setup_scanner.py`, `backend/app/engine/shadow_exchange.py`
+  `backend/app/engine/setup_scanner.py`, a new module backend/app/engine/shadow_exchange.py
   (new), `backend/app/routers/scanner.py`, `frontend/app/scanner/page.tsx`,
   `frontend/lib/api.ts` and their tests. Tier 1 PR, Sol/medium review. It codes
   against the frozen file formats below using fixture files, so it never waits
@@ -131,7 +131,7 @@ window prices it. Check: `pytest tests/test_setup_scanner.py tests/test_level_al
 ## SH-1 — check ledger: call log and shadow decisions (Sol, high)
 
 **Files.** `backend/cloud_mcp_check_ledger.py`, `backend/tests/test_cloud_mcp_check.py`
-(or a new `test_cloud_mcp_check_shadow.py`).
+(or a new test module beside it).
 
 **Do.**
 1. Add two tables to the ledger `SCHEMA` (created idempotently, like the
@@ -226,7 +226,7 @@ bundle that changes check units, so the plan keeps the check units unchanged.
    (`tj-check:tj-check`, 0750) and grants the `tradejournal` user ACL
    traverse-only (`--x`) on `/var/lib/tradejournal-check` and read on the
    outbox (plus a default ACL so new files are readable). Verify afterwards that
-   `tradejournal` cannot read `ledger.db` (`sudo -u tradejournal test -r` must
+   `tradejournal` cannot read the ledger file (`sudo -u tradejournal test -r` must
    fail) and record the result. `disable-shadow-exchange` removes the ACLs.
 3. Config: the operator adds `shadow_setups_dir` and `shadow_outbox_dir` to
    `/etc/tradejournal-check/config.json`; the backend reads
@@ -243,10 +243,10 @@ idempotence and refusals; the Ubuntu smoke for real permissions.
 
 ## SH-4 — backend: setups out, decisions in, shadow paper trade (Luna, high)
 
-**Files.** New `backend/app/engine/shadow_exchange.py` (write setup files, read
+**Files.** A new module backend/app/engine/shadow_exchange.py (write setup files, read
 decision files; pure I/O with the formats above), `backend/app/engine/setup_scanner.py`,
 `backend/app/routers/scanner.py` (`day_view` additions), `backend/tests/test_setup_scanner.py`
-(or a new `test_shadow_paper.py`).
+(or a new test module beside it).
 
 **Do.**
 1. After a candidate with a contract is committed, write its setup file when
