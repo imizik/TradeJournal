@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 import uuid
 
+from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 from fastapi.routing import APIRoute
 import pytest
@@ -20,6 +21,11 @@ from app.routers import charts, quotes, symbol_info
 
 OWNER_KEY, PUBLIC_KEY = "o" * 43, "p" * 43
 OWNER_ORIGIN, PUBLIC_ORIGIN = "http://127.0.0.1:3100", "http://127.0.0.1:3101"
+# Production Argon2 costs about 0.1 s per hash or verify, and this fixture (shared by
+# the sample, replay and cloud MCP suites) hashes and verifies on every test. Keys
+# are still hashed and verified with Argon2id, only at the cheapest parameters;
+# test_production_key_hashing_parameters_are_unchanged pins the real ones.
+FIXTURE_HASHER = PasswordHasher(time_cost=1, memory_cost=8, parallelism=1)
 
 
 @pytest.fixture
@@ -32,6 +38,7 @@ def boundary(tmp_path, monkeypatch):
         monkeypatch.setenv(name, value)
     monkeypatch.setattr(access, "engine", engine)
     monkeypatch.setattr(access_middleware, "engine", engine)
+    monkeypatch.setattr(access, "HASHER", FIXTURE_HASHER)
     def session():
         with Session(engine) as db:
             yield db
@@ -48,6 +55,13 @@ def boundary(tmp_path, monkeypatch):
     owner.close()
     public.close()
     engine.dispose()
+
+
+def test_production_key_hashing_parameters_are_unchanged():
+    key = "k" * 43
+    hashed = access.HASHER.hash(key)
+    assert hashed.startswith("$argon2id$v=19$m=65536,t=3,p=1$")
+    assert access.HASHER.verify(hashed, key)
 
 
 def signin(b, *, identifier="dot", key=None):
