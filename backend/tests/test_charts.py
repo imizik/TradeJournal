@@ -290,6 +290,23 @@ def test_provider_failure_retains_previous_data_with_original_timestamp(provider
     assert len(calls) == 3  # cooldown reads cannot extend the original deadline
 
 
+def test_provider_timeout_backs_off_only_that_request(provider):
+    feed, calls, clock, status = provider
+    path = "/v1/markets/quotes"
+    status[0] = 504
+    with pytest.raises(ChartFeedError, match="could not load"):
+        feed.read(path, {"symbols": "SPY"}, 15)
+    status[0] = 200
+    feed.read(path, {"symbols": "NBIS"}, 15)  # other symbols keep loading
+    clock[0] += 10
+    with pytest.raises(ChartFeedError, match="unavailable"):
+        feed.read(path, {"symbols": "SPY"}, 15)
+    assert len(calls) == 2
+    clock[0] += 6
+    feed.read(path, {"symbols": "SPY"}, 15)  # retried attempts cannot extend the backoff
+    assert len(calls) == 3
+
+
 def test_chart_budget_bounds_rapid_symbol_changes_and_recovers(provider):
     feed, calls, clock, _ = provider
     for index in range(60):
