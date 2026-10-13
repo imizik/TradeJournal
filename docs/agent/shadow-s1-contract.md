@@ -149,12 +149,26 @@ any TradeJournal call, preserves shadow-first ordering and both labels, uses
 v3, and sends only fresh co-pilot Go alerts. It does not continuously monitor
 candles or promise follow-up events that the scanner has not implemented.
 
-The API's three scanner SMTP settings are absent, so setup email delivery is
-not activated. A root-only hidden app-password entry helper is prepared;
-Isaac must enter the credential privately before the lead activates and tests
-delivery. The read-only Gmail connection does not supply the SMTP credential.
-Task creation and tool availability do not prove a delivered event or a live
-shadow decision.
+Isaac entered the Gmail app password through a root-only hidden terminal
+prompt. At 14:22 Eastern, the lead atomically added only the three scanner SMTP
+settings, preserving the current environment and shadow paths with a private
+backup, and restarted the API under Isaac's activation timing authorization.
+The API health check and loaded settings passed; the check service remained
+healthy. The separate `TJ Setup delivery test` reached the owner's inbox and
+does not match the task's subject filter. A natural NBIS setup detected at
+14:20:49 was emailed at 14:22:35 and reached that same inbox. Previously
+expired setups were marked expired rather than emailed. The read-only Gmail
+connection remains separate from the SMTP credential.
+
+The post-five-minute v3 readiness check again returned
+`oauth_refresh_token_missing`; task creation and an initial successful call
+therefore do not prove unattended operation. The latest Auth0 reconnect log
+identifies the existing advisor account, so changing between Google and that
+account does not explain this observed failure. Read-only inspection confirmed
+API offline access, the client's Refresh Token grant and 300-second access
+token lifetimes. Connection refresh repair and an actual event-task shadow
+decision remain unverified; no longer token lifetime or Auth0 grant change was
+used as a workaround.
 
 A read of a naturally published, already-expired AMD setup succeeded with
 `expired=true`; no decision was submitted. Its historical cohorts matched the
