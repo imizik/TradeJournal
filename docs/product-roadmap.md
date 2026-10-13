@@ -26,6 +26,9 @@ slice; the detailed contracts continue to own implementation and acceptance.
    assignments, dependable connection upkeep and approved real-data advice.
    Bring the existing coach into the same workspace and expand independent
    shadow only after the advisor foundation is useful and dependable.
+   **Update October 12, 2026:** Isaac declared the advisor done and moved the
+   priority to the shadow trader ([shadow S1](agent/shadow-s1-contract.md));
+   coach-in-workspace waits behind it.
 2. **Close the selected Research Studio work:** finish the existing event/period
    comparison and prospective MU slice ([PR #252](https://github.com/imizik/TradeJournal/pull/252),
    now merged), close its remaining activation/operational gates, and observe one
