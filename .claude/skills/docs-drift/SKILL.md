@@ -57,6 +57,14 @@ These recur. Grep for them across `docs/`, `README.md`, `AGENTS.md` and
 - **Counts of things the reader can recount.** "two parallel jobs", "seven
   entries", "three processes". Count them.
 - **Module and symbol names** in prose, where a rename would not break a link.
+- **Dated status boards and headers.** `Checkpoint:`, "as of", "Plan only",
+  "Design only", "built, not activated", "not yet observed live". Grep for
+  them; every one older than the range is suspect. The
+  [Dots delivery board](../../../docs/agent/dots-integration.md#current-delivery-board)
+  is the single status answer for Dots: bring its rows and checkpoint up to
+  date, and make a contract's header agree with its own later evidence
+  sections (activation notes are usually appended below a header that still
+  says "nothing is built").
 
 ### 3. Read the code behind each claim, not the previous text
 
@@ -89,7 +97,11 @@ Then record what you reconciled to, which is what clears the freshness test:
 {"commit": "<the full 40-character sha you read up to>", "date": "<YYYY-MM-DD>", "note": "..."}
 ```
 
-in `docs/agent/last-reconciled.json`. Write it after the pass, not before —
+in `docs/agent/last-reconciled.json`. The sha must be a commit on `main`
+(`git rev-parse origin/main`), not your branch's own commit: pull requests are
+often squash-merged, and a branch commit never reaches `main`. The test now
+falls back to the commit that wrote the marker in that case, but the range it
+prints is only exact when the sha is on `main`. Write it after the pass, not before —
 nothing detects a marker bumped on its own, so it is the one shortcut that
 quietly disables the whole mechanism.
 

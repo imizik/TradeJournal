@@ -2,8 +2,9 @@
 
 Selected by Isaac on October 12, 2026 as the direction for Dots step 6
 (bounded independent shadow) on the [delivery board](dots-integration.md#functionality-sequence).
-**Design only.** Nothing here is built, installed, granted or activated, and it
-does not reorder the board: steps 3–5 come first. It replaces the narrow
+This is the design. Build steps 2 (scanner) and 4 (shadow S1) are built and
+activated; the [delivery board](dots-integration.md#current-delivery-board)
+holds current status. It replaces the narrow
 four-tool `shadow_agent_v1` idea in the
 [Dots integration notes](dots-integration.md#proposed-restricted-shadow-agent-profile-design-only)
 as the target. The P0 premarket form in the [practice policy](practice-policy.md)

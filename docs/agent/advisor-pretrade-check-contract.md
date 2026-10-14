@@ -1,8 +1,9 @@
 # Jo pre-trade check — Dots step 4, slice 1
 
 Selected by Isaac on October 11, 2026 (evening ET) as the first real-data
-advisor slice: the moment he would use most during a session. Plan only;
-nothing here is built, installed or activated. It reconciles Dots step 4 on the
+advisor slice: the moment he would use most during a session. **Built and
+activated on the VPS October 12, 2026**; current per-step status is in
+[Next steps](#next-steps). It reconciles Dots step 4 on the
 [delivery board](dots-integration.md#functionality-sequence) with the
 [pre-trade advisor roadmap](../advisor-roadmap.md) (AV0 rules, AV2 records and
 AV5 phone access, narrowed to one call). Later slices (after-close review,
@@ -115,7 +116,7 @@ coach export or the fixture advisor.
 
 ## Build status
 
-Step 2 is **built, not installed or activated** (October 11, 2026):
+Step 2 was built October 11, 2026 and activated with step 3 on October 12 (below):
 
 - Service: [cloud_mcp_check.py](../../backend/cloud_mcp_check.py) with
   [identity/config](../../backend/cloud_mcp_check_common.py) and the
@@ -150,7 +151,7 @@ Step 2 is **built, not installed or activated** (October 11, 2026):
   [smoke](../../deploy/cloud-mcp-check/smoke.py) in the deployment workflow.
   Speed against the live provider is not yet observed.
 
-Step 3 (owner view) is **built, not installed or activated** (October 11, 2026):
+Step 3 (owner view) was built October 11, 2026:
 
 - Reader: [cloud_check_owner.py](../../backend/cloud_check_owner.py) serves
   `GET /owner/checks` (newest 50: idea, rules verdict, Jo's verdict, timing)
@@ -298,7 +299,7 @@ was, and what overriding cost.
 
 | # | Step | Done when | Status |
 |---|---|---|---|
-| 1 | Stay signed in: Auth0 Allow Offline Access on the check API, and the server advertises `offline_access` so ChatGPT requests a refresh token | A check more than an hour after connecting works without reconnecting | Toggle done Oct 12; scope fix pending deploy, then one reconnect |
+| 1 | Stay signed in: Auth0 Allow Offline Access on the check API, and the server advertises `offline_access` so ChatGPT requests a refresh token | A check more than an hour after connecting works without reconnecting | Done: offline access deployed Oct 12; plugin v4 passed the 6- and 60-minute checks Oct 13 ([shadow S1 evidence](shadow-s1-contract.md#activation-evidence--october-13-2026)) |
 | 2 | Jo saves its own verdict on every check (`next_step`) | At least 9 of 10 saved checks carry Jo's verdict and summary | Live; confirm on real days |
 | 3 | Checks visible on `/advisor-review` | Every saved check reopens identical to the server copy, including after a restart | Live |
 | 4 | Link each check to what happened (`review_checks`) | One day's links agree with a hand check of that day's fills | Live |
