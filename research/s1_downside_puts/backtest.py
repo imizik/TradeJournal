@@ -85,8 +85,8 @@ def session_bounds(day: date) -> tuple[int, int]:
     return int(o.timestamp()), int(o.timestamp()) + 390 * 60
 
 
-def daily_by_symbol() -> dict[str, list[dict]]:
-    bars = alpaca.fetch_daily_bars(list(UNIVERSE), date(2025, 12, 1), END)
+def daily_by_symbol(end: date | None = None) -> dict[str, list[dict]]:
+    bars = alpaca.fetch_daily_bars(list(UNIVERSE), date(2025, 12, 1), end or END)
     out = {}
     for sym, rows in bars.items():
         out[sym] = [{"date": r["t"][:10], "high": r["h"], "low": r["l"], "close": r["c"], "open": r["o"]} for r in rows]
@@ -111,21 +111,25 @@ def listed_contracts(symbol: str, day: date, kind: str, spot: float) -> list[dic
     key = CONTRACT_CACHE / f"{symbol}_{day}_{kind}.json"
     if key.exists():
         return json.loads(key.read_text())
-    rows, token = [], None
-    while True:
-        params = {"underlying_symbols": symbol, "expiration_date_gte": day.isoformat(),
-                  "expiration_date_lte": (day + timedelta(days=7)).isoformat(), "type": kind,
-                  "status": "inactive", "strike_price_gte": f"{spot * 0.9:.2f}",
-                  "strike_price_lte": f"{spot * 1.1:.2f}", "limit": 10000}
-        if token:
-            params["page_token"] = token
-        data = _paper_get("/v2/options/contracts", params)
-        rows += [{"symbol": c["symbol"], "expiration": c["expiration_date"], "strike": float(c["strike_price"]),
-                  "multiplier": int(float(c.get("multiplier") or 100)), "root": c.get("root_symbol")}
-                 for c in data.get("option_contracts", [])]
-        token = data.get("next_page_token")
-        if not token:
-            break
+    rows = []
+    # Expirations still in the future at run time are listed as active, not inactive.
+    statuses = ("inactive", "active") if day + timedelta(days=7) >= date.today() else ("inactive",)
+    for status in statuses:
+        token = None
+        while True:
+            params = {"underlying_symbols": symbol, "expiration_date_gte": day.isoformat(),
+                      "expiration_date_lte": (day + timedelta(days=7)).isoformat(), "type": kind,
+                      "status": status, "strike_price_gte": f"{spot * 0.9:.2f}",
+                      "strike_price_lte": f"{spot * 1.1:.2f}", "limit": 10000}
+            if token:
+                params["page_token"] = token
+            data = _paper_get("/v2/options/contracts", params)
+            rows += [{"symbol": c["symbol"], "expiration": c["expiration_date"], "strike": float(c["strike_price"]),
+                      "multiplier": int(float(c.get("multiplier") or 100)), "root": c.get("root_symbol")}
+                     for c in data.get("option_contracts", [])]
+            token = data.get("next_page_token")
+            if not token:
+                break
     key.write_text(json.dumps(rows))
     return rows
 
