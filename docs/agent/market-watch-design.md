@@ -1,6 +1,6 @@
 # Jo's market watch — design (proposed October 14, 2026)
 
-**Status: proposed design, not selected for build.** Written at Isaac's request
+**Status: MW-1 implementation selected October 14, 2026; activation remains disabled.** Written at Isaac's request
 after the October 14 CPI session. It extends the
 [shadow trader design](shadow-trader-design.md) and reuses rules already
 written in the [agentic trading roadmap](../agentic-trading-roadmap.md)
@@ -172,8 +172,8 @@ private addresses or account identifiers are copied into this design.
 
 ## Records and outcomes come first (MW-1)
 
-**Bounded proposed contract; implementation and activation are not authorized
-by this document update.** Build a snapshot/read/score foundation beside S1,
+**Bounded MW-1 contract; implementation authorized October 14, 2026. Activation
+requires separate authorization.** Build a snapshot/read/score foundation beside S1,
 with no trades, autonomous wake-ups, delivery, UI or paid model calls. MW-0
 found existing calendar, index and news inputs but no retained market read;
 reuse those sources and make the exact returned evidence durable. MW-2 owns
@@ -182,7 +182,7 @@ acceptance, shadow-first ordering and all independence labels.
 
 ### Storage and immutable records
 
-Names below are proposed records, not claims that tables/tools already exist.
+The records below define the MW-1 storage and tool boundary.
 Every record carries `schema_version`, a server-generated ID, UTC server
 `created_at`, and `content_sha256` over canonical JSON excluding that hash.
 Numbers must be finite; timestamps must include an offset and are stored in
@@ -265,7 +265,7 @@ with typed gaps. Freeze the manifest and protocol before any read is accepted.
 
 ### Jo tools and submit contract
 
-Proposed catalog additions to the existing check service:
+Opt-in catalog additions to the existing check service:
 
 - `market_watch_snapshot()` → `{input_id, served_at, snapshot_id,
   snapshot_sha256, snapshot, quality_flags}`. Returns the newest published
@@ -416,14 +416,81 @@ MW-1 is accepted as a foundation when fixture-based end-to-end proof covers:
    and owner ratings append without manufacturing delivery. The acceptance
    report reproduces scores and unavailable counts from frozen fixtures.
 
-**Review:** this proposed documentation update is ordinary documentation;
-implementing the records, migrations, scorer and check-service tools is
+**Review:** implementing the records, storage initialization, scorer and check-service tools is
 **tier 2** under [review policy](pr-review.md): fresh `risk-reviewer` (Astra,
 high) plus focused `reviewer` (Sol, medium), focusing on append-only provenance,
 auth boundaries and no-lookahead scoring; focused failure/recovery tests and
 full applicable final-head CI via the CI-backed path. A separate authorized
 activation proves the installed paths/grants and real Jo tool access. MW-1
 fixture acceptance does not complete MW-2's 20-session trial or either S1 gate.
+
+## MW-1 implementation and activation boundary
+
+The implementation adds the manual snapshot producer in
+`backend/app/engine/market_watch_snapshot.py`, frozen protocol helpers in
+`backend/market_watch_common.py`, the opt-in check ledger in
+`backend/market_watch_ledger.py`, and the offline evaluator in
+`backend/app/engine/market_watch_evaluation.py`. `backend/market_watch_owner.py`
+provides explicit owner snapshot/export commands. No scheduler, detector,
+notification sender, rating UI or autonomous Jo run is included.
+
+Storage adjustment: app-owned evaluation/import records use an explicitly
+selected, single-actor local SQLite sidecar, not an automatically migrated journal table.
+The check records use additive tables in the existing isolated check ledger,
+initialized only when `market_watch_snapshots_dir` is explicitly configured.
+This keeps installation and schema activation separate from merging code and
+preserves the private journal database boundary. Neither default configuration
+nor issuer grants are changed. Snapshot publication is public-market-only;
+owner export selects only one actor's market-watch tables through read-only
+SQLite access. Continuations never pass through the Jo tools.
+
+Existing-source limits are explicit: the current macro-calendar file has no
+publication/observation timestamp, so its covered events remain visible with
+`observation_time_unknown`; it is not labelled fresh. There is no durable
+publication of the existing fetched headlines with the required provenance.
+The default producer therefore records `no_published_headline_cache` and does
+not call the news collector. Supplied published-headline fixtures exercise the
+retention boundary; adding a durable publication later is a separate decision.
+Unknown exchange-calendar bounds also remain unavailable instead of inventing
+regular hours.
+
+The implementation retains `manual_partial` session coverage and
+`independence-unverified`. Fixture acceptance is evidence about records and
+math, not live access, delivery, performance, or completion of the later
+20-session trial or either S1 acceptance gate. MW-0's unresolved external wake
+origins and actual messages remain unresolved; screenshots are not a build gate.
+
+Separately authorized activation must name the release, actor and paths, then:
+
+1. Install the reviewed app/check code and explicitly create the app-owned
+   outcome sidecar and a dedicated public snapshot publication directory.
+   Confirm backups and rollback before opt-in check-ledger schema initialization;
+   existing tables and rows must remain unchanged.
+2. Give the check-service identity read-only access to that publication
+   directory only. Set `market_watch_snapshots_dir` to that exact absolute path;
+   keep it disjoint from keys, ledger, feature files and shadow exchanges.
+   Approve any service sandbox/path allowance and the required restart explicitly.
+3. Grant the selected check actor `check:read` plus `market-watch:read`, and
+   `market-watch:submit` only for submission. Verify issuer consent, refreshed
+   tokens, scope refusal and the installed catalog with that actor. Do not widen
+   other actors' grants or expose the private API.
+4. In the private app environment, manually invoke
+   `python market_watch_owner.py snapshot --directory ABSOLUTE_PUBLIC_DIRECTORY`
+   from `backend/`, using existing permitted sources. Inspect timestamps, gaps,
+   feed, manifest and protocol hash before a manually authorized Jo read/submit.
+   A missing source remains missing; activation does not authorize a new collector.
+5. As the owner, run `python market_watch_owner.py export --ledger ABSOLUTE_LEDGER
+   --actor CHECK_PROFILE_ID` and transfer only that narrow export to the app-side
+   evaluator. Supply explicitly frozen IEX continuation/history bars and the
+   exchange-calendar roster there (missing prior sessions/roster leave ATR and
+   session diagnostics unavailable),
+   verify/import the export, run the finite evaluator, and retain the report and
+   original-versus-corrected cohorts. No outcome continuation is mounted into
+   the check process.
+
+None of these activation actions was performed by this implementation task.
+MW-2 scheduling, event detection and message transport need their own scope and
+review; merging this foundation does not authorize them.
 
 ## Wake-ups and messages (MW-2)
 
@@ -506,7 +573,7 @@ descriptive. Only a measured advantage justifies the idea book.
 
 ## Choices for Isaac
 
-- Whether to select this as the next shadow/co-pilot slice, and who builds it.
+- Whether to authorize the MW-1 activation steps above, then select an MW-2 slice.
 - Message channel and budget (email, phone push via the existing ntfy alerts).
 - Whether Jo's market reads may see his open positions (useful advice, but
   reads then cannot feed an independent shadow).
